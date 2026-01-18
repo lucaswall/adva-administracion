@@ -38,57 +38,24 @@ npm install
 
 ### 2. Create Environment File
 
-Create a `.env` file in the project root (this file is gitignored):
+Create a `.env` file in the project root (gitignored). See [Environment Variables Reference](#environment-variables-reference) below for details.
 
 ```env
-# ===================
-# Server Configuration
-# ===================
 PORT=3000
 NODE_ENV=development
 LOG_LEVEL=DEBUG
 
-# ===================
-# Google Authentication (Required for full functionality)
-# ===================
-# Option 1: Base64-encoded service account JSON
 GOOGLE_SERVICE_ACCOUNT_KEY=<base64-encoded-json>
+GEMINI_API_KEY=your_gemini_api_key
+DRIVE_WATCH_FOLDER_ID=your_folder_id
 
-# To encode your service account file:
-#   cat service-account.json | base64
-
-# Option 2: For local dev, you can leave this empty and the server
-# will start but Google API calls will fail
-
-# ===================
-# Gemini AI (Required for document processing)
-# ===================
-# Get your key from: https://aistudio.google.com/apikey
-GEMINI_API_KEY=your_gemini_api_key_here
-
-# ===================
-# Google Drive Configuration
-# ===================
-# The folder ID to watch for new documents
-# Get this from the folder URL: https://drive.google.com/drive/folders/<FOLDER_ID>
-DRIVE_WATCH_FOLDER_ID=your_folder_id_here
-
-# ===================
-# Google Sheets Configuration (Optional)
-# ===================
-# Spreadsheet IDs for storing processed documents
-# Get from URL: https://docs.google.com/spreadsheets/d/<SPREADSHEET_ID>/edit
+# Optional
 COBROS_SPREADSHEET_ID=
 GASTOS_SPREADSHEET_ID=
 BANK_SPREADSHEET_IDS=
-
-# ===================
-# Matching Configuration (Optional - defaults shown)
-# ===================
-MATCH_DAYS_BEFORE=10
-MATCH_DAYS_AFTER=60
-USD_ARS_TOLERANCE_PERCENT=5
 ```
+
+To encode your service account: `cat service-account.json | base64`
 
 ### 3. Run in Development Mode
 
@@ -119,10 +86,10 @@ curl -X POST http://localhost:3000/api/scan
 ### 5. Run Tests
 
 ```bash
-npm test               # Run all 525 tests
+npm test               # Run all tests
 npm run test:watch     # TDD mode with watch
-npm run test:coverage  # Generate coverage report
-npm run lint           # TypeScript type checking
+npm run test:coverage  # Coverage report
+npm run lint           # Type checking
 ```
 
 ---
@@ -161,17 +128,7 @@ npm run lint           # TypeScript type checking
 
 ## Production Deployment (Railway.app)
 
-### Railway Pricing
-
-> **Note:** Railway does NOT have a permanent free tier. The free trial is 30 days only.
-
-| Plan | Cost | Included Credits | Best For |
-|------|------|------------------|----------|
-| **Free Trial** | $0 | $5 (expires in 30 days) | Testing deployment |
-| **Hobby** | $5/month | $5/month | Personal projects, this app |
-| **Pro** | $20/month | $20/month | Teams, higher traffic |
-
-**For this app:** The Hobby plan ($5/month) is sufficient. Expected usage is $2-5/month, which is covered by the included credits.
+> **Pricing:** Railway Hobby plan ($5/month) is sufficient for this app.
 
 ### Deployment Steps
 
@@ -306,17 +263,6 @@ tests/
 1. Go to [Google AI Studio](https://aistudio.google.com/apikey)
 2. Create a new API key
 3. Copy the key to your environment variables
-
----
-
-## Cost Estimate
-
-| Service | Monthly Cost |
-|---------|-------------|
-| Railway.app (Hobby) | $5 (includes $5 credits) |
-| Gemini API (free tier) | $0 |
-| Google Cloud APIs | $0 (within free quotas) |
-| **Total** | **~$5/month** |
 
 ---
 

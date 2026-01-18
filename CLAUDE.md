@@ -37,8 +37,10 @@ src/
 │   ├── prompts.ts         # Extraction prompts
 │   ├── parser.ts          # Response parsing
 │   └── errors.ts          # Error classification
-├── utils/                 # Pure utilities
-└── bank/                  # Bank matching logic
+├── utils/                 # Pure utilities (date, currency, validation, etc.)
+└── bank/
+    ├── matcher.ts         # Bank movement matching
+    └── subdiario-matcher.ts # Subdiario matching
 ```
 
 ## COMMANDS
