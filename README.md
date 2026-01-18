@@ -279,7 +279,9 @@ tests/
 
 ## License
 
-MIT License - Internal ADVA use
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+Copyright (c) 2024-2026 ADVA - Asociación de Desarrolladores de Videojuegos Argentina
 
 ---
 
