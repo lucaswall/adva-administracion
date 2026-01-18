@@ -50,6 +50,8 @@ export async function listFilesInFolder(
         fields: 'nextPageToken, files(id, name, mimeType, modifiedTime)',
         pageSize: 100,
         pageToken,
+        supportsAllDrives: true,
+        includeItemsFromAllDrives: true,
       });
 
       const items = response.data.files || [];
@@ -115,6 +117,7 @@ export async function downloadFile(fileId: string): Promise<Result<Buffer, Error
       {
         fileId,
         alt: 'media',
+        supportsAllDrives: true,
       },
       {
         responseType: 'arraybuffer',
@@ -189,6 +192,7 @@ export async function watchFolder(
 
     const response = await drive.files.watch({
       fileId: folderId,
+      supportsAllDrives: true,
       requestBody: {
         id: channelId,
         type: 'web_hook',
@@ -283,6 +287,8 @@ export async function findByName(
       q: query,
       fields: 'files(id, name, mimeType)',
       pageSize: 1,
+      supportsAllDrives: true,
+      includeItemsFromAllDrives: true,
     });
 
     const files = response.data.files || [];
@@ -333,6 +339,8 @@ export async function listByMimeType(
         fields: 'nextPageToken, files(id, name, mimeType)',
         pageSize: 100,
         pageToken,
+        supportsAllDrives: true,
+        includeItemsFromAllDrives: true,
       });
 
       const items = response.data.files || [];
@@ -380,6 +388,7 @@ export async function createFolder(
         parents: [parentId],
       },
       fields: 'id, name, mimeType',
+      supportsAllDrives: true,
     });
 
     const file = response.data;
@@ -427,6 +436,7 @@ export async function moveFile(
       addParents: toFolderId,
       removeParents: fromFolderId,
       fields: 'id, parents',
+      supportsAllDrives: true,
     });
 
     return { ok: true, value: undefined };
@@ -451,6 +461,7 @@ export async function getParents(fileId: string): Promise<Result<string[], Error
     const response = await drive.files.get({
       fileId,
       fields: 'parents',
+      supportsAllDrives: true,
     });
 
     return { ok: true, value: response.data.parents || [] };

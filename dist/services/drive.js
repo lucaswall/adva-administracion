@@ -38,6 +38,8 @@ export async function listFilesInFolder(folderId, folderPath = '') {
                 fields: 'nextPageToken, files(id, name, mimeType, modifiedTime)',
                 pageSize: 100,
                 pageToken,
+                supportsAllDrives: true,
+                includeItemsFromAllDrives: true,
             });
             const items = response.data.files || [];
             for (const item of items) {
@@ -94,6 +96,7 @@ export async function downloadFile(fileId) {
         const response = await drive.files.get({
             fileId,
             alt: 'media',
+            supportsAllDrives: true,
         }, {
             responseType: 'arraybuffer',
         });
@@ -150,6 +153,7 @@ export async function watchFolder(folderId, webhookUrl, channelId, expirationMs 
         const expiration = Date.now() + expirationMs;
         const response = await drive.files.watch({
             fileId: folderId,
+            supportsAllDrives: true,
             requestBody: {
                 id: channelId,
                 type: 'web_hook',
@@ -222,6 +226,8 @@ export async function findByName(parentId, name, mimeType) {
             q: query,
             fields: 'files(id, name, mimeType)',
             pageSize: 1,
+            supportsAllDrives: true,
+            includeItemsFromAllDrives: true,
         });
         const files = response.data.files || [];
         if (files.length === 0) {
@@ -265,6 +271,8 @@ export async function listByMimeType(folderId, mimeType) {
                 fields: 'nextPageToken, files(id, name, mimeType)',
                 pageSize: 100,
                 pageToken,
+                supportsAllDrives: true,
+                includeItemsFromAllDrives: true,
             });
             const items = response.data.files || [];
             for (const item of items) {
@@ -304,6 +312,7 @@ export async function createFolder(parentId, name) {
                 parents: [parentId],
             },
             fields: 'id, name, mimeType',
+            supportsAllDrives: true,
         });
         const file = response.data;
         if (!file.id) {
@@ -344,6 +353,7 @@ export async function moveFile(fileId, fromFolderId, toFolderId) {
             addParents: toFolderId,
             removeParents: fromFolderId,
             fields: 'id, parents',
+            supportsAllDrives: true,
         });
         return { ok: true, value: undefined };
     }
@@ -366,6 +376,7 @@ export async function getParents(fileId) {
         const response = await drive.files.get({
             fileId,
             fields: 'parents',
+            supportsAllDrives: true,
         });
         return { ok: true, value: response.data.parents || [] };
     }

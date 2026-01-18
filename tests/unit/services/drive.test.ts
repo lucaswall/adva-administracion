@@ -85,6 +85,8 @@ describe('Drive folder operations', () => {
         q: "'parentId' in parents and name = 'test.pdf' and trashed = false",
         fields: 'files(id, name, mimeType)',
         pageSize: 1,
+        supportsAllDrives: true,
+        includeItemsFromAllDrives: true,
       });
     });
 
@@ -112,6 +114,8 @@ describe('Drive folder operations', () => {
         q: "'parentId' in parents and name = 'Cobros' and trashed = false and mimeType = 'application/vnd.google-apps.folder'",
         fields: 'files(id, name, mimeType)',
         pageSize: 1,
+        supportsAllDrives: true,
+        includeItemsFromAllDrives: true,
       });
     });
 
@@ -150,6 +154,8 @@ describe('Drive folder operations', () => {
         q: "'parentId' in parents and name = 'file\\'s name.pdf' and trashed = false",
         fields: 'files(id, name, mimeType)',
         pageSize: 1,
+        supportsAllDrives: true,
+        includeItemsFromAllDrives: true,
       });
     });
   });
@@ -253,6 +259,7 @@ describe('Drive folder operations', () => {
           parents: ['parentId'],
         },
         fields: 'id, name, mimeType',
+        supportsAllDrives: true,
       });
     });
 
@@ -296,6 +303,7 @@ describe('Drive folder operations', () => {
         addParents: 'toFolderId',
         removeParents: 'fromFolderId',
         fields: 'id, parents',
+        supportsAllDrives: true,
       });
     });
 
@@ -327,6 +335,7 @@ describe('Drive folder operations', () => {
       expect(mockDriveFiles.get).toHaveBeenCalledWith({
         fileId: 'fileId',
         fields: 'parents',
+        supportsAllDrives: true,
       });
     });
 
