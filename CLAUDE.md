@@ -43,6 +43,7 @@
 ## SUBAGENTS
 - Build: `builder` (haiku) - report warnings/errors only
 - Tests: `test-runner` (haiku) - report failures only
+- Commit: `commit-bot` (haiku) - stage changes, analyze diff, create commit
 
 ## REPO
 - Node.js + Fastify server for Railway.app deployment
