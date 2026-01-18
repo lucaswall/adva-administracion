@@ -278,7 +278,11 @@ tests/
 4. Create Service Account:
    - IAM & Admin → Service Accounts → Create
    - Download JSON key file
-5. Share your Drive folder and Spreadsheets with the service account email
+5. Share your Drive folder with the service account email:
+   - Open your root Drive folder in Google Drive
+   - Click "Share" and add the service account email (e.g., `your-service@project-id.iam.gserviceaccount.com`)
+   - Grant **Editor** access (required for moving files between folders)
+   - The service account email is in your downloaded JSON key file under `client_email`
 
 ### 2. Get Gemini API Key
 
