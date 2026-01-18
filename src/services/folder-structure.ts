@@ -4,7 +4,7 @@
  */
 
 import { getConfig } from '../config.js';
-import { findByName, listByMimeType, createFolder } from './drive.js';
+import { findByName, listByMimeType, createFolder, createSpreadsheet } from './drive.js';
 import { formatMonthFolder } from '../utils/spanish-date.js';
 import type { FolderStructure, Result, SortDestination } from '../types/index.js';
 
@@ -79,12 +79,12 @@ async function findOrCreateFolder(
 }
 
 /**
- * Finds a required spreadsheet in the root
+ * Finds or creates a spreadsheet in the root
  * @param rootId - Root folder ID
  * @param name - Spreadsheet name
- * @returns Spreadsheet ID or error if not found
+ * @returns Spreadsheet ID
  */
-async function findRequiredSpreadsheet(
+async function findOrCreateSpreadsheet(
   rootId: string,
   name: string
 ): Promise<Result<string, Error>> {
@@ -94,14 +94,18 @@ async function findRequiredSpreadsheet(
     return findResult;
   }
 
-  if (!findResult.value) {
-    return {
-      ok: false,
-      error: new Error(`Required spreadsheet '${name}' not found in root folder`),
-    };
+  if (findResult.value) {
+    return { ok: true, value: findResult.value.id };
   }
 
-  return { ok: true, value: findResult.value.id };
+  // Spreadsheet doesn't exist, create it
+  const createResult = await createSpreadsheet(rootId, name);
+
+  if (!createResult.ok) {
+    return createResult;
+  }
+
+  return { ok: true, value: createResult.value.id };
 }
 
 /**
@@ -130,11 +134,11 @@ export async function discoverFolderStructure(): Promise<Result<FolderStructure,
   const bancosResult = await findOrCreateFolder(rootId, FOLDER_NAMES.bancos);
   if (!bancosResult.ok) return bancosResult;
 
-  // Find required spreadsheets (these must exist, not created)
-  const controlCobrosResult = await findRequiredSpreadsheet(rootId, SPREADSHEET_NAMES.controlCobros);
+  // Find or create control spreadsheets
+  const controlCobrosResult = await findOrCreateSpreadsheet(rootId, SPREADSHEET_NAMES.controlCobros);
   if (!controlCobrosResult.ok) return controlCobrosResult;
 
-  const controlPagosResult = await findRequiredSpreadsheet(rootId, SPREADSHEET_NAMES.controlPagos);
+  const controlPagosResult = await findOrCreateSpreadsheet(rootId, SPREADSHEET_NAMES.controlPagos);
   if (!controlPagosResult.ok) return controlPagosResult;
 
   // Discover bank spreadsheets in Bancos folder

@@ -10,11 +10,13 @@ import type { Result } from '../../../src/types/index.js';
 const mockFindByName = vi.fn();
 const mockListByMimeType = vi.fn();
 const mockCreateFolder = vi.fn();
+const mockCreateSpreadsheet = vi.fn();
 
 vi.mock('../../../src/services/drive.js', () => ({
   findByName: (...args: unknown[]) => mockFindByName(...args),
   listByMimeType: (...args: unknown[]) => mockListByMimeType(...args),
   createFolder: (...args: unknown[]) => mockCreateFolder(...args),
+  createSpreadsheet: (...args: unknown[]) => mockCreateSpreadsheet(...args),
   clearDriveCache: vi.fn(),
 }));
 
@@ -115,7 +117,7 @@ describe('FolderStructure service', () => {
       expect(mockCreateFolder).toHaveBeenCalledWith('root-folder-id', 'Sin Procesar');
     });
 
-    it('returns error when required spreadsheet is missing', async () => {
+    it('creates missing spreadsheets when they do not exist', async () => {
       mockFindByName
         .mockResolvedValueOnce({ ok: true, value: { id: 'entrada-id', name: 'Entrada', mimeType: 'application/vnd.google-apps.folder' } })
         .mockResolvedValueOnce({ ok: true, value: { id: 'cobros-id', name: 'Cobros', mimeType: 'application/vnd.google-apps.folder' } })
@@ -123,14 +125,25 @@ describe('FolderStructure service', () => {
         .mockResolvedValueOnce({ ok: true, value: { id: 'sin-procesar-id', name: 'Sin Procesar', mimeType: 'application/vnd.google-apps.folder' } })
         .mockResolvedValueOnce({ ok: true, value: { id: 'bancos-id', name: 'Bancos', mimeType: 'application/vnd.google-apps.folder' } })
         .mockResolvedValueOnce({ ok: true, value: null }) // Control de Cobros not found
-        .mockResolvedValueOnce({ ok: true, value: { id: 'control-pagos-id', name: 'Control de Pagos', mimeType: 'application/vnd.google-apps.spreadsheet' } });
+        .mockResolvedValueOnce({ ok: true, value: null }); // Control de Pagos not found
+
+      mockCreateSpreadsheet
+        .mockResolvedValueOnce({ ok: true, value: { id: 'new-control-cobros-id', name: 'Control de Cobros', mimeType: 'application/vnd.google-apps.spreadsheet' } })
+        .mockResolvedValueOnce({ ok: true, value: { id: 'new-control-pagos-id', name: 'Control de Pagos', mimeType: 'application/vnd.google-apps.spreadsheet' } });
+
+      mockListByMimeType.mockResolvedValue({ ok: true, value: [] });
 
       const result = await discoverFolderStructure();
 
-      expect(result.ok).toBe(false);
-      if (!result.ok) {
-        expect(result.error.message).toContain('Control de Cobros');
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value.controlCobrosId).toBe('new-control-cobros-id');
+        expect(result.value.controlPagosId).toBe('new-control-pagos-id');
       }
+
+      expect(mockCreateSpreadsheet).toHaveBeenCalledTimes(2);
+      expect(mockCreateSpreadsheet).toHaveBeenCalledWith('root-folder-id', 'Control de Cobros');
+      expect(mockCreateSpreadsheet).toHaveBeenCalledWith('root-folder-id', 'Control de Pagos');
     });
 
     it('returns error on Drive API failure', async () => {

@@ -102,4 +102,12 @@ export declare function moveFile(fileId: string, fromFolderId: string, toFolderI
  * @returns Array of parent folder IDs
  */
 export declare function getParents(fileId: string): Promise<Result<string[], Error>>;
+/**
+ * Creates a new Google Spreadsheet within a parent folder
+ *
+ * @param parentId - Parent folder ID
+ * @param name - Name of the new spreadsheet
+ * @returns Created spreadsheet info
+ */
+export declare function createSpreadsheet(parentId: string, name: string): Promise<Result<DriveFileInfo, Error>>;
 export {};

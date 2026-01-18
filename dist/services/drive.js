@@ -387,3 +387,45 @@ export async function getParents(fileId) {
         };
     }
 }
+/**
+ * Creates a new Google Spreadsheet within a parent folder
+ *
+ * @param parentId - Parent folder ID
+ * @param name - Name of the new spreadsheet
+ * @returns Created spreadsheet info
+ */
+export async function createSpreadsheet(parentId, name) {
+    try {
+        const drive = getDriveService();
+        const response = await drive.files.create({
+            requestBody: {
+                name,
+                mimeType: 'application/vnd.google-apps.spreadsheet',
+                parents: [parentId],
+            },
+            fields: 'id, name, mimeType',
+            supportsAllDrives: true,
+        });
+        const file = response.data;
+        if (!file.id) {
+            return {
+                ok: false,
+                error: new Error('Failed to create spreadsheet: no ID returned'),
+            };
+        }
+        return {
+            ok: true,
+            value: {
+                id: file.id,
+                name: file.name || name,
+                mimeType: file.mimeType || 'application/vnd.google-apps.spreadsheet',
+            },
+        };
+    }
+    catch (error) {
+        return {
+            ok: false,
+            error: error instanceof Error ? error : new Error(String(error)),
+        };
+    }
+}

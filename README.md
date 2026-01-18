@@ -126,8 +126,7 @@ ADVA Root Folder/
 ```
 
 **Notes:**
-- The `Control de Cobros` and `Control de Pagos` spreadsheets must exist before starting the server
-- Folders (`Entrada`, `Cobros`, `Pagos`, `Sin Procesar`, `Bancos`) are created automatically if missing
+- All folders and spreadsheets are created automatically if missing
 - Month subfolders are created on demand when documents are sorted
 - Bank spreadsheets in `Bancos/` folder are auto-discovered
 
