@@ -47,7 +47,7 @@ LOG_LEVEL=DEBUG
 
 GOOGLE_SERVICE_ACCOUNT_KEY=<base64-encoded-json>
 GEMINI_API_KEY=your_gemini_api_key
-DRIVE_WATCH_FOLDER_ID=your_folder_id
+DRIVE_ROOT_FOLDER_ID=your_folder_id
 
 # Optional
 COBROS_SPREADSHEET_ID=
@@ -103,13 +103,41 @@ npm run lint           # Type checking
 | `LOG_LEVEL` | No | `INFO` | `DEBUG`, `INFO`, `WARN`, `ERROR` |
 | `GOOGLE_SERVICE_ACCOUNT_KEY` | Prod | - | Base64-encoded service account JSON |
 | `GEMINI_API_KEY` | Prod | - | Gemini API key |
-| `DRIVE_WATCH_FOLDER_ID` | Prod | - | Google Drive folder ID to watch |
-| `COBROS_SPREADSHEET_ID` | No | - | Spreadsheet for incoming invoices |
-| `GASTOS_SPREADSHEET_ID` | No | - | Spreadsheet for outgoing payments |
-| `BANK_SPREADSHEET_IDS` | No | - | Comma-separated bank spreadsheet IDs |
+| `DRIVE_ROOT_FOLDER_ID` | Prod | - | Google Drive root folder ID (see folder structure below) |
+| `COBROS_SPREADSHEET_ID` | No | - | (Deprecated) Spreadsheet for incoming invoices |
+| `GASTOS_SPREADSHEET_ID` | No | - | (Deprecated) Spreadsheet for outgoing payments |
+| `BANK_SPREADSHEET_IDS` | No | - | (Deprecated) Comma-separated bank spreadsheet IDs |
 | `MATCH_DAYS_BEFORE` | No | `10` | Days before invoice date to match payments |
 | `MATCH_DAYS_AFTER` | No | `60` | Days after invoice date to match payments |
 | `USD_ARS_TOLERANCE_PERCENT` | No | `5` | Tolerance % for USD/ARS exchange matching |
+
+---
+
+## Google Drive Folder Structure
+
+The server expects a specific folder structure in the root Drive folder (`DRIVE_ROOT_FOLDER_ID`):
+
+```
+ADVA Root Folder/
+├── Control de Cobros.gsheet       # Required: Collections tracking spreadsheet
+├── Control de Pagos.gsheet        # Required: Payments tracking spreadsheet
+├── Entrada/                        # Incoming documents (scan source)
+├── Bancos/                         # Bank movement spreadsheets (auto-discovered)
+├── Cobros/                         # Sorted: matched collections
+│   ├── 01 - Enero/                 # Created on demand
+│   ├── 02 - Febrero/
+│   └── ... (12 months)
+├── Pagos/                          # Sorted: matched payments
+│   ├── 01 - Enero/
+│   └── ... (12 months)
+└── Sin Procesar/                   # Failed or unmatched documents
+```
+
+**Notes:**
+- The `Control de Cobros` and `Control de Pagos` spreadsheets must exist before starting the server
+- Folders (`Entrada`, `Cobros`, `Pagos`, `Sin Procesar`, `Bancos`) are created automatically if missing
+- Month subfolders are created on demand when documents are sorted
+- Bank spreadsheets in `Bancos/` folder are auto-discovered
 
 ---
 
@@ -152,7 +180,7 @@ npm run lint           # Type checking
    LOG_LEVEL=INFO
    GEMINI_API_KEY=your_gemini_api_key
    GOOGLE_SERVICE_ACCOUNT_KEY=<base64-encoded-service-account-json>
-   DRIVE_WATCH_FOLDER_ID=your_folder_id
+   DRIVE_ROOT_FOLDER_ID=your_folder_id
    ```
 
    To encode your service account for Railway:
@@ -184,7 +212,7 @@ railway link
 railway variables set NODE_ENV=production
 railway variables set LOG_LEVEL=INFO
 railway variables set GEMINI_API_KEY=your_key_here
-railway variables set DRIVE_WATCH_FOLDER_ID=your_folder_id
+railway variables set DRIVE_ROOT_FOLDER_ID=your_folder_id
 
 # For the service account, encode and set:
 railway variables set GOOGLE_SERVICE_ACCOUNT_KEY=$(cat service-account.json | base64 | tr -d '\n')
@@ -229,9 +257,11 @@ src/
 │   ├── scan.ts       # POST /api/scan, /rematch, /autofill-bank
 │   └── webhooks.ts   # POST /webhooks/drive
 ├── services/         # Google API wrappers
-│   ├── google-auth.ts
-│   ├── drive.ts
-│   └── sheets.ts
+│   ├── google-auth.ts     # Service account auth
+│   ├── drive.ts           # Drive API wrapper
+│   ├── sheets.ts          # Sheets API wrapper
+│   ├── folder-structure.ts # Folder discovery/caching
+│   └── document-sorter.ts  # Document file movement
 ├── processing/       # Queue management
 ├── types/            # TypeScript definitions
 ├── gemini/           # Gemini API client

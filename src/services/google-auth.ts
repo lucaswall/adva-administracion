@@ -79,10 +79,11 @@ export function getGoogleAuth(scopes: string[]): Auth.GoogleAuth {
 
 /**
  * Gets the default scopes for Drive and Sheets access
+ * Uses full Drive access for folder creation and file movement
  */
 export function getDefaultScopes(): string[] {
   return [
-    'https://www.googleapis.com/auth/drive.readonly',
+    'https://www.googleapis.com/auth/drive',
     'https://www.googleapis.com/auth/spreadsheets',
   ];
 }

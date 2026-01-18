@@ -12,6 +12,7 @@ import { Auth } from 'googleapis';
 export declare function getGoogleAuth(scopes: string[]): Auth.GoogleAuth;
 /**
  * Gets the default scopes for Drive and Sheets access
+ * Uses full Drive access for folder creation and file movement
  */
 export declare function getDefaultScopes(): string[];
 /**

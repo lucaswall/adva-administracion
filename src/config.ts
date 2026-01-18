@@ -39,7 +39,7 @@ export interface Config {
   geminiApiKey: string;
 
   // Drive
-  driveWatchFolderId: string;
+  driveRootFolderId: string;
 
   // Sheets
   cobrosSpreadsheetId: string;
@@ -74,9 +74,9 @@ export function loadConfig(): Config {
   }
 
   // Drive - required for production
-  const driveWatchFolderId = process.env.DRIVE_WATCH_FOLDER_ID || '';
-  if (!driveWatchFolderId && nodeEnv === 'production') {
-    throw new Error('DRIVE_WATCH_FOLDER_ID is required');
+  const driveRootFolderId = process.env.DRIVE_ROOT_FOLDER_ID || '';
+  if (!driveRootFolderId && nodeEnv === 'production') {
+    throw new Error('DRIVE_ROOT_FOLDER_ID is required');
   }
 
   // Sheets - optional, can be configured later
@@ -97,7 +97,7 @@ export function loadConfig(): Config {
     logLevel,
     googleServiceAccountKey,
     geminiApiKey,
-    driveWatchFolderId,
+    driveRootFolderId,
     cobrosSpreadsheetId,
     gastosSpreadsheetId,
     bankSpreadsheetIds,

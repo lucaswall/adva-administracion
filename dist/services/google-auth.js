@@ -55,10 +55,11 @@ export function getGoogleAuth(scopes) {
 }
 /**
  * Gets the default scopes for Drive and Sheets access
+ * Uses full Drive access for folder creation and file movement
  */
 export function getDefaultScopes() {
     return [
-        'https://www.googleapis.com/auth/drive.readonly',
+        'https://www.googleapis.com/auth/drive',
         'https://www.googleapis.com/auth/spreadsheets',
     ];
 }

@@ -24,7 +24,7 @@ export interface Config {
     logLevel: LogLevel;
     googleServiceAccountKey: string;
     geminiApiKey: string;
-    driveWatchFolderId: string;
+    driveRootFolderId: string;
     cobrosSpreadsheetId: string;
     gastosSpreadsheetId: string;
     bankSpreadsheetIds: string[];

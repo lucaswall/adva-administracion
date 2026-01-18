@@ -79,7 +79,7 @@ Migration from Google Apps Script to Node.js server on Railway.app.
 
 ---
 
-## Phase 1.5: Folder Structure Infrastructure ⏳ IN PROGRESS
+## Phase 1.5: Folder Structure Infrastructure ✅ COMPLETE
 
 ### Target Structure
 ```
@@ -111,13 +111,19 @@ ADVA Root Folder (env: DRIVE_ROOT_FOLDER_ID)
   - `FolderStructure` interface
   - `SortDestination` type
   - `SortResult` interface
-
-### Pending
-- [ ] Create `src/services/folder-structure.ts` (discovery/caching)
-- [ ] Create `src/services/document-sorter.ts` (file movement)
-- [ ] Update `src/config.ts` to single `DRIVE_ROOT_FOLDER_ID`
-- [ ] Update `src/services/google-auth.ts` scopes for Drive write access
-- [ ] Initialize folder structure on server startup
+- [x] Create `src/services/folder-structure.ts` (discovery/caching)
+  - `discoverFolderStructure()` - Discover and cache folder hierarchy
+  - `getOrCreateMonthFolder()` - Get/create month folders for sorting
+  - `getCachedFolderStructure()` - Access cached structure
+  - `clearFolderStructureCache()` - Clear cache for testing
+- [x] Create `src/services/document-sorter.ts` (file movement)
+  - `sortDocument()` - Sort document to destination folder
+  - `sortToSinProcesar()` - Move failed/unrecognized files
+- [x] Update `src/config.ts` to single `DRIVE_ROOT_FOLDER_ID`
+- [x] Update `src/services/google-auth.ts` scopes for Drive write access
+- [x] Initialize folder structure on server startup
+- [x] All 575 tests passing
+- [x] Build with zero warnings
 
 ### Notes
 - Breaking change: existing deployments need folder restructure
@@ -203,13 +209,13 @@ ADVA Root Folder (env: DRIVE_ROOT_FOLDER_ID)
 |-------|--------|----------|
 | Phase 0: Cleanup | ✅ Complete | 100% |
 | Phase 1: Server Foundation | ✅ Complete | 100% |
-| Phase 1.5: Folder Structure | ⏳ In Progress | 50% |
+| Phase 1.5: Folder Structure | ✅ Complete | 100% |
 | Phase 2: Core Processing | ❌ Not Started | 0% |
 | Phase 3: Real-time Monitoring | ❌ Not Started | 0% |
 | Phase 4: Extended Classification | ❌ Not Started | 0% |
 | Phase 5: Multi-Spreadsheet | ❌ Not Started | 0% |
 
-**Overall Progress: ~38%** (infrastructure complete, folder structure in progress)
+**Overall Progress: ~45%** (infrastructure complete, ready for core processing)
 
 ---
 
@@ -226,13 +232,16 @@ src/
 ├── services/
 │   ├── google-auth.ts     # NEW
 │   ├── drive.ts           # NEW
-│   └── sheets.ts          # NEW
+│   ├── sheets.ts          # NEW
+│   ├── folder-structure.ts # NEW - folder discovery/caching
+│   └── document-sorter.ts # NEW - file movement
 ├── processing/
 │   └── queue.ts           # NEW
 ├── gemini/
 │   └── client.ts          # REWRITTEN - native fetch
 └── utils/
-    └── exchange-rate.ts   # REWRITTEN - native fetch
+    ├── exchange-rate.ts   # REWRITTEN - native fetch
+    └── spanish-date.ts    # NEW - month folder names
 ```
 
 ---
@@ -243,6 +252,7 @@ src/
    - This is the main business logic that ties everything together
    - Start with basic scan → classify → extract → store flow
    - Add matching as second step
+   - Use `document-sorter.ts` to move files after processing
 
 2. **Testing**: Add integration tests for the scanner
    - Mock Google API responses
@@ -252,3 +262,4 @@ src/
    - Create project
    - Configure environment variables
    - Deploy and test endpoints
+   - Ensure `DRIVE_ROOT_FOLDER_ID` is set with proper folder structure

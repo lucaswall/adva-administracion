@@ -27,7 +27,9 @@ src/
 ├── services/
 │   ├── google-auth.ts     # Service account auth
 │   ├── drive.ts           # googleapis Drive wrapper
-│   └── sheets.ts          # googleapis Sheets wrapper
+│   ├── sheets.ts          # googleapis Sheets wrapper
+│   ├── folder-structure.ts # Drive folder discovery/caching
+│   └── document-sorter.ts # Document file movement
 ├── processing/
 │   └── queue.ts           # p-queue processing
 ├── types/index.ts         # TypeScript interfaces
@@ -67,7 +69,7 @@ GOOGLE_SERVICE_ACCOUNT_KEY=<base64 encoded JSON>
 GEMINI_API_KEY=<key>
 
 # Drive
-DRIVE_WATCH_FOLDER_ID=<folder id>
+DRIVE_ROOT_FOLDER_ID=<folder id>
 
 # Sheets
 COBROS_SPREADSHEET_ID=<id>

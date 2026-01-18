@@ -38,9 +38,9 @@ export function loadConfig() {
         throw new Error('GEMINI_API_KEY is required');
     }
     // Drive - required for production
-    const driveWatchFolderId = process.env.DRIVE_WATCH_FOLDER_ID || '';
-    if (!driveWatchFolderId && nodeEnv === 'production') {
-        throw new Error('DRIVE_WATCH_FOLDER_ID is required');
+    const driveRootFolderId = process.env.DRIVE_ROOT_FOLDER_ID || '';
+    if (!driveRootFolderId && nodeEnv === 'production') {
+        throw new Error('DRIVE_ROOT_FOLDER_ID is required');
     }
     // Sheets - optional, can be configured later
     const cobrosSpreadsheetId = process.env.COBROS_SPREADSHEET_ID || '';
@@ -58,7 +58,7 @@ export function loadConfig() {
         logLevel,
         googleServiceAccountKey,
         geminiApiKey,
-        driveWatchFolderId,
+        driveRootFolderId,
         cobrosSpreadsheetId,
         gastosSpreadsheetId,
         bankSpreadsheetIds,
