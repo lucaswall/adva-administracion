@@ -1,5 +1,12 @@
 # ADVA Administración Server
 
+## STATUS: DEVELOPMENT MODE
+- This project is in active development - NOT production ready
+- No backward compatibility required - breaking changes are OK
+- No deprecation warnings or migration paths needed
+- Delete unused code immediately - do not keep "for compatibility"
+- When changing APIs/configs: update all references, remove old ones
+
 ## RULES
 - SYNC: update this file if architecture/build/structure/features change
 - TDD: write tests before implementation; >=80% coverage; happy+edge+error paths
@@ -68,13 +75,8 @@ GOOGLE_SERVICE_ACCOUNT_KEY=<base64 encoded JSON>
 # Gemini (required)
 GEMINI_API_KEY=<key>
 
-# Drive
+# Drive (required) - root folder containing the folder structure
 DRIVE_ROOT_FOLDER_ID=<folder id>
-
-# Sheets
-COBROS_SPREADSHEET_ID=<id>
-GASTOS_SPREADSHEET_ID=<id>
-BANK_SPREADSHEET_IDS=<comma-separated ids>
 
 # Matching
 MATCH_DAYS_BEFORE=10

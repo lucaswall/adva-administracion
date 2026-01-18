@@ -48,11 +48,6 @@ LOG_LEVEL=DEBUG
 GOOGLE_SERVICE_ACCOUNT_KEY=<base64-encoded-json>
 GEMINI_API_KEY=your_gemini_api_key
 DRIVE_ROOT_FOLDER_ID=your_folder_id
-
-# Optional
-COBROS_SPREADSHEET_ID=
-GASTOS_SPREADSHEET_ID=
-BANK_SPREADSHEET_IDS=
 ```
 
 To encode your service account: `cat service-account.json | base64`
@@ -104,9 +99,6 @@ npm run lint           # Type checking
 | `GOOGLE_SERVICE_ACCOUNT_KEY` | Prod | - | Base64-encoded service account JSON |
 | `GEMINI_API_KEY` | Prod | - | Gemini API key |
 | `DRIVE_ROOT_FOLDER_ID` | Prod | - | Google Drive root folder ID (see folder structure below) |
-| `COBROS_SPREADSHEET_ID` | No | - | (Deprecated) Spreadsheet for incoming invoices |
-| `GASTOS_SPREADSHEET_ID` | No | - | (Deprecated) Spreadsheet for outgoing payments |
-| `BANK_SPREADSHEET_IDS` | No | - | (Deprecated) Comma-separated bank spreadsheet IDs |
 | `MATCH_DAYS_BEFORE` | No | `10` | Days before invoice date to match payments |
 | `MATCH_DAYS_AFTER` | No | `60` | Days after invoice date to match payments |
 | `USD_ARS_TOLERANCE_PERCENT` | No | `5` | Tolerance % for USD/ARS exchange matching |

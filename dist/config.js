@@ -42,12 +42,6 @@ export function loadConfig() {
     if (!driveRootFolderId && nodeEnv === 'production') {
         throw new Error('DRIVE_ROOT_FOLDER_ID is required');
     }
-    // Sheets - optional, can be configured later
-    const cobrosSpreadsheetId = process.env.COBROS_SPREADSHEET_ID || '';
-    const gastosSpreadsheetId = process.env.GASTOS_SPREADSHEET_ID || '';
-    const bankSpreadsheetIds = process.env.BANK_SPREADSHEET_IDS
-        ? process.env.BANK_SPREADSHEET_IDS.split(',').map(s => s.trim())
-        : [];
     // Matching configuration
     const matchDaysBefore = parseInt(process.env.MATCH_DAYS_BEFORE || '10', 10);
     const matchDaysAfter = parseInt(process.env.MATCH_DAYS_AFTER || '60', 10);
@@ -59,9 +53,6 @@ export function loadConfig() {
         googleServiceAccountKey,
         geminiApiKey,
         driveRootFolderId,
-        cobrosSpreadsheetId,
-        gastosSpreadsheetId,
-        bankSpreadsheetIds,
         matchDaysBefore,
         matchDaysAfter,
         usdArsTolerancePercent,

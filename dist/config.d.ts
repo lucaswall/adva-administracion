@@ -25,9 +25,6 @@ export interface Config {
     googleServiceAccountKey: string;
     geminiApiKey: string;
     driveRootFolderId: string;
-    cobrosSpreadsheetId: string;
-    gastosSpreadsheetId: string;
-    bankSpreadsheetIds: string[];
     matchDaysBefore: number;
     matchDaysAfter: number;
     usdArsTolerancePercent: number;
