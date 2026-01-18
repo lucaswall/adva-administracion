@@ -55,12 +55,7 @@ To encode your service account: `cat service-account.json | base64`
 ### 3. Run in Development Mode
 
 ```bash
-# With hot reload (recommended for development)
 npm run dev
-
-# Or build and run
-npm run build
-npm start
 ```
 
 ### 4. Test the Server
