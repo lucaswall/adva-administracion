@@ -9,9 +9,36 @@
 
 ## RULES
 - SYNC: update this file if architecture/build/structure/features change
-- TDD: write tests before implementation; >=80% coverage; happy+edge+error paths
+- **TDD: ALWAYS write tests FIRST, before any implementation code** (see TDD section below)
 - VERIFY: after code changes → build → test (via subagents); fix before proceeding
 - BUILD: zero-warning policy
+
+## TDD WORKFLOW (MANDATORY)
+**Every feature or bug fix MUST follow this sequence:**
+
+1. **WRITE FAILING TEST FIRST**
+   - Create/update test file before touching implementation
+   - Test should fail (red) - verifies test is actually testing something
+   - Cover happy path, edge cases, and error conditions
+
+2. **IMPLEMENT MINIMUM CODE**
+   - Write only enough code to make the test pass
+   - No extra features, no "while I'm here" changes
+
+3. **VERIFY TEST PASSES**
+   - Run `test-runner` subagent to confirm green
+   - If test fails, fix implementation (not the test, unless test was wrong)
+
+4. **REFACTOR IF NEEDED**
+   - Clean up code while keeping tests green
+   - Run tests again after refactoring
+
+**Coverage requirement: >=80%** for happy paths, edge cases, and error paths
+
+**NEVER:**
+- Write implementation code before its test exists
+- Skip tests for "simple" changes
+- Write tests after implementation is complete
 
 ## SUBAGENTS
 - Build: `builder` (haiku) - report warnings/errors only
