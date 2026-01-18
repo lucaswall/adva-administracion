@@ -1,0 +1,47 @@
+{
+  "permissions": {
+    "allow": [
+      "Edit",
+      "MultiEdit",
+      "Write",
+      "WebSearch",
+      "Bash(npm:*)",
+      "Bash(npx:*)",
+      "Bash(node:*)",
+      "Bash(clasp:*)",
+      "Bash(cat:*)",
+      "Bash(ls:*)",
+      "Bash(mkdir:*)",
+      "Bash(touch:*)",
+      "Bash(cp:*)",
+      "Bash(mv:*)",
+      "Bash(head:*)",
+      "Bash(tail:*)",
+      "Bash(grep:*)",
+      "Bash(find:*)",
+      "Bash(echo:*)",
+      "Bash(tree:*)",
+      "Bash(pwd)",
+      "Bash(which:*)",
+      "Bash(git:*)",
+      "Bash(tsc:*)",
+      "Bash(rollup:*)",
+      "Bash(esbuild:*)",
+      "Bash(gh:*)",
+      "WebFetch(domain:developers.google.com)",
+      "Bash(done)",
+      "Bash(python3:*)",
+      "Bash(xargs:*)"
+    ],
+    "deny": [
+      "Bash(rm -rf *)",
+      "Bash(sudo:*)",
+      "Bash(curl:*)",
+      "Bash(wget:*)",
+      "Bash(chmod 777 *)",
+      "Bash(> /etc/*)",
+      "Bash(dd:*)"
+    ]
+  },
+  "model": "sonnet"
+}
