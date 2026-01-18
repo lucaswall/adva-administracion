@@ -10,7 +10,7 @@ Node.js server for automated invoice and payment processing for ADVA using Googl
 - Google Sheets for structured data storage
 - Automatic invoice-payment matching
 - Built-in validation for Argentine CUIT and CAE
-- Comprehensive test suite (525+ tests)
+- Comprehensive test suite
 
 ## Supported Documents
 
@@ -237,9 +237,9 @@ src/
 ├── gemini/           # Gemini API client
 ├── matching/         # Invoice-payment matching
 ├── bank/             # Bank movement matching
-└── utils/            # Validation, dates, etc.
+└── utils/            # Validation, dates, currency, Spanish dates
 tests/
-└── unit/             # Unit tests (525+)
+└── unit/             # Unit tests
 ```
 
 ---

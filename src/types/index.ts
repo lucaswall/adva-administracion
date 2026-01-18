@@ -637,3 +637,51 @@ export interface SubdiarioMatchResult {
   /** Generated Detalle text */
   detalle: string;
 }
+
+/**
+ * Sort destination types for document sorting
+ */
+export type SortDestination = 'cobros' | 'pagos' | 'sin_procesar';
+
+/**
+ * Cached folder structure for Drive operations
+ * Represents the discovered folder hierarchy
+ */
+export interface FolderStructure {
+  /** Root folder ID */
+  rootId: string;
+  /** Entrada (incoming) folder ID */
+  entradaId: string;
+  /** Cobros (collections) folder ID */
+  cobrosId: string;
+  /** Pagos (payments) folder ID */
+  pagosId: string;
+  /** Sin Procesar (unprocessed) folder ID */
+  sinProcesarId: string;
+  /** Bancos (banks) folder ID */
+  bancosId: string;
+  /** Control de Cobros spreadsheet ID */
+  controlCobrosId: string;
+  /** Control de Pagos spreadsheet ID */
+  controlPagosId: string;
+  /** Map of bank spreadsheet names to IDs */
+  bankSpreadsheets: Map<string, string>;
+  /** Cache of month folders by destination and month key (e.g., "cobros:2024-01") */
+  monthFolders: Map<string, string>;
+  /** When the structure was last refreshed */
+  lastRefreshed: Date;
+}
+
+/**
+ * Result of sorting a document into the folder structure
+ */
+export interface SortResult {
+  /** Whether the sort was successful */
+  success: boolean;
+  /** Target folder ID where file was moved */
+  targetFolderId?: string;
+  /** Target folder path (human-readable) */
+  targetPath?: string;
+  /** Error message if unsuccessful */
+  error?: string;
+}

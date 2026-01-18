@@ -202,3 +202,177 @@ export async function stopWatching(channelId, resourceId) {
 export function clearDriveCache() {
     driveService = null;
 }
+/**
+ * Finds a file or folder by name within a parent folder
+ *
+ * @param parentId - Parent folder ID to search in
+ * @param name - Name of the file/folder to find
+ * @param mimeType - Optional MIME type filter
+ * @returns File info if found, null if not found
+ */
+export async function findByName(parentId, name, mimeType) {
+    try {
+        const drive = getDriveService();
+        const escapedName = name.replace(/'/g, "\\'");
+        let query = `'${parentId}' in parents and name = '${escapedName}' and trashed = false`;
+        if (mimeType) {
+            query += ` and mimeType = '${mimeType}'`;
+        }
+        const response = await drive.files.list({
+            q: query,
+            fields: 'files(id, name, mimeType)',
+            pageSize: 1,
+        });
+        const files = response.data.files || [];
+        if (files.length === 0) {
+            return { ok: true, value: null };
+        }
+        const file = files[0];
+        if (!file.id || !file.name || !file.mimeType) {
+            return { ok: true, value: null };
+        }
+        return {
+            ok: true,
+            value: {
+                id: file.id,
+                name: file.name,
+                mimeType: file.mimeType,
+            },
+        };
+    }
+    catch (error) {
+        return {
+            ok: false,
+            error: error instanceof Error ? error : new Error(String(error)),
+        };
+    }
+}
+/**
+ * Lists all items of a specific MIME type within a folder
+ *
+ * @param folderId - Folder ID to search in
+ * @param mimeType - MIME type to filter by
+ * @returns Array of file info
+ */
+export async function listByMimeType(folderId, mimeType) {
+    try {
+        const drive = getDriveService();
+        const files = [];
+        let pageToken;
+        do {
+            const response = await drive.files.list({
+                q: `'${folderId}' in parents and mimeType = '${mimeType}' and trashed = false`,
+                fields: 'nextPageToken, files(id, name, mimeType)',
+                pageSize: 100,
+                pageToken,
+            });
+            const items = response.data.files || [];
+            for (const item of items) {
+                if (item.id && item.name && item.mimeType) {
+                    files.push({
+                        id: item.id,
+                        name: item.name,
+                        mimeType: item.mimeType,
+                    });
+                }
+            }
+            pageToken = response.data.nextPageToken || undefined;
+        } while (pageToken);
+        return { ok: true, value: files };
+    }
+    catch (error) {
+        return {
+            ok: false,
+            error: error instanceof Error ? error : new Error(String(error)),
+        };
+    }
+}
+/**
+ * Creates a new folder within a parent folder
+ *
+ * @param parentId - Parent folder ID
+ * @param name - Name of the new folder
+ * @returns Created folder info
+ */
+export async function createFolder(parentId, name) {
+    try {
+        const drive = getDriveService();
+        const response = await drive.files.create({
+            requestBody: {
+                name,
+                mimeType: 'application/vnd.google-apps.folder',
+                parents: [parentId],
+            },
+            fields: 'id, name, mimeType',
+        });
+        const file = response.data;
+        if (!file.id) {
+            return {
+                ok: false,
+                error: new Error('Failed to create folder: no ID returned'),
+            };
+        }
+        return {
+            ok: true,
+            value: {
+                id: file.id,
+                name: file.name || name,
+                mimeType: file.mimeType || 'application/vnd.google-apps.folder',
+            },
+        };
+    }
+    catch (error) {
+        return {
+            ok: false,
+            error: error instanceof Error ? error : new Error(String(error)),
+        };
+    }
+}
+/**
+ * Moves a file from one folder to another
+ *
+ * @param fileId - File ID to move
+ * @param fromFolderId - Current parent folder ID
+ * @param toFolderId - Target parent folder ID
+ * @returns Success or error
+ */
+export async function moveFile(fileId, fromFolderId, toFolderId) {
+    try {
+        const drive = getDriveService();
+        await drive.files.update({
+            fileId,
+            addParents: toFolderId,
+            removeParents: fromFolderId,
+            fields: 'id, parents',
+        });
+        return { ok: true, value: undefined };
+    }
+    catch (error) {
+        return {
+            ok: false,
+            error: error instanceof Error ? error : new Error(String(error)),
+        };
+    }
+}
+/**
+ * Gets the parent folder IDs of a file
+ *
+ * @param fileId - File ID to get parents for
+ * @returns Array of parent folder IDs
+ */
+export async function getParents(fileId) {
+    try {
+        const drive = getDriveService();
+        const response = await drive.files.get({
+            fileId,
+            fields: 'parents',
+        });
+        return { ok: true, value: response.data.parents || [] };
+    }
+    catch (error) {
+        return {
+            ok: false,
+            error: error instanceof Error ? error : new Error(String(error)),
+        };
+    }
+}

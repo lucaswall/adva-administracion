@@ -79,6 +79,52 @@ Migration from Google Apps Script to Node.js server on Railway.app.
 
 ---
 
+## Phase 1.5: Folder Structure Infrastructure ⏳ IN PROGRESS
+
+### Target Structure
+```
+ADVA Root Folder (env: DRIVE_ROOT_FOLDER_ID)
+├── Control de Cobros.gsheet       # Collections tracking
+├── Control de Pagos.gsheet        # Payments tracking
+├── Entrada/                        # Incoming documents (scan source)
+├── Bancos/                         # Bank movement spreadsheets (auto-discovered)
+├── Cobros/                         # Sorted: matched collections
+│   ├── 01 - Enero/
+│   └── ... (12 months, created on demand)
+├── Pagos/                          # Sorted: matched payments
+│   ├── 01 - Enero/
+│   └── ... (12 months, created on demand)
+└── Sin Procesar/                   # Failed or unmatched documents
+```
+
+### Completed
+- [x] Add Drive folder operations to `src/services/drive.ts`
+  - `findByName()` - Find item by name in folder
+  - `listByMimeType()` - List items by MIME type
+  - `createFolder()` - Create folder
+  - `moveFile()` - Move file between folders
+  - `getParents()` - Get parent folder IDs
+- [x] Create `src/utils/spanish-date.ts` utility
+  - `SPANISH_MONTHS` constant
+  - `formatMonthFolder()` - Format date as "MM - MonthName"
+- [x] Add folder structure types to `src/types/index.ts`
+  - `FolderStructure` interface
+  - `SortDestination` type
+  - `SortResult` interface
+
+### Pending
+- [ ] Create `src/services/folder-structure.ts` (discovery/caching)
+- [ ] Create `src/services/document-sorter.ts` (file movement)
+- [ ] Update `src/config.ts` to single `DRIVE_ROOT_FOLDER_ID`
+- [ ] Update `src/services/google-auth.ts` scopes for Drive write access
+- [ ] Initialize folder structure on server startup
+
+### Notes
+- Breaking change: existing deployments need folder restructure
+- Prerequisite for Phase 2 (Core Processing)
+
+---
+
 ## Phase 2: Core Processing ❌ NOT STARTED
 
 ### Tasks
@@ -157,12 +203,13 @@ Migration from Google Apps Script to Node.js server on Railway.app.
 |-------|--------|----------|
 | Phase 0: Cleanup | ✅ Complete | 100% |
 | Phase 1: Server Foundation | ✅ Complete | 100% |
+| Phase 1.5: Folder Structure | ⏳ In Progress | 50% |
 | Phase 2: Core Processing | ❌ Not Started | 0% |
 | Phase 3: Real-time Monitoring | ❌ Not Started | 0% |
 | Phase 4: Extended Classification | ❌ Not Started | 0% |
 | Phase 5: Multi-Spreadsheet | ❌ Not Started | 0% |
 
-**Overall Progress: ~35%** (infrastructure complete, processing logic pending)
+**Overall Progress: ~38%** (infrastructure complete, folder structure in progress)
 
 ---
 

@@ -53,3 +53,53 @@ export declare function stopWatching(channelId: string, resourceId: string): Pro
  * Clears the cached Drive service (for testing)
  */
 export declare function clearDriveCache(): void;
+/**
+ * Basic file metadata from Drive
+ */
+interface DriveFileInfo {
+    id: string;
+    name: string;
+    mimeType: string;
+}
+/**
+ * Finds a file or folder by name within a parent folder
+ *
+ * @param parentId - Parent folder ID to search in
+ * @param name - Name of the file/folder to find
+ * @param mimeType - Optional MIME type filter
+ * @returns File info if found, null if not found
+ */
+export declare function findByName(parentId: string, name: string, mimeType?: string): Promise<Result<DriveFileInfo | null, Error>>;
+/**
+ * Lists all items of a specific MIME type within a folder
+ *
+ * @param folderId - Folder ID to search in
+ * @param mimeType - MIME type to filter by
+ * @returns Array of file info
+ */
+export declare function listByMimeType(folderId: string, mimeType: string): Promise<Result<DriveFileInfo[], Error>>;
+/**
+ * Creates a new folder within a parent folder
+ *
+ * @param parentId - Parent folder ID
+ * @param name - Name of the new folder
+ * @returns Created folder info
+ */
+export declare function createFolder(parentId: string, name: string): Promise<Result<DriveFileInfo, Error>>;
+/**
+ * Moves a file from one folder to another
+ *
+ * @param fileId - File ID to move
+ * @param fromFolderId - Current parent folder ID
+ * @param toFolderId - Target parent folder ID
+ * @returns Success or error
+ */
+export declare function moveFile(fileId: string, fromFolderId: string, toFolderId: string): Promise<Result<void, Error>>;
+/**
+ * Gets the parent folder IDs of a file
+ *
+ * @param fileId - File ID to get parents for
+ * @returns Array of parent folder IDs
+ */
+export declare function getParents(fileId: string): Promise<Result<string[], Error>>;
+export {};
