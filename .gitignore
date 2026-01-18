@@ -2,11 +2,12 @@
 node_modules/
 
 # Build output
-build/
+dist/
 
-# CLASP credentials
-.clasprc.json
-.clasp.json
+# Environment variables (contains secrets)
+.env
+.env.local
+.env.*.local
 
 # IDE
 .vscode/
@@ -23,8 +24,10 @@ Thumbs.db
 *.log
 npm-debug.log*
 
-# Sample files
-_samples/
-
 # Test coverage
 coverage/
+
+# Service account keys (never commit these!)
+service-account.json
+*-service-account.json
+*.pem
