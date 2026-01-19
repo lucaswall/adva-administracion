@@ -685,3 +685,38 @@ export interface SortResult {
   /** Error message if unsuccessful */
   error?: string;
 }
+
+/**
+ * Watch channel information for Drive push notifications
+ */
+export interface WatchChannel {
+  /** Unique channel identifier (UUID) */
+  channelId: string;
+  /** Resource ID from Drive API */
+  resourceId: string;
+  /** Folder being watched */
+  folderId: string;
+  /** Channel expiration timestamp */
+  expiration: Date;
+  /** When the channel was created */
+  createdAt: Date;
+}
+
+/**
+ * Watch manager status for health checks
+ */
+export interface WatchManagerStatus {
+  /** Whether the watch manager is enabled */
+  enabled: boolean;
+  /** Number of active watch channels */
+  activeChannels: number;
+  /** Channels and their expiration times */
+  channels: Array<{
+    folderId: string;
+    expiresIn: number; // milliseconds
+  }>;
+  /** Last notification received timestamp */
+  lastNotification: Date | null;
+  /** Last scan triggered timestamp */
+  lastScan: Date | null;
+}

@@ -11,6 +11,7 @@ This server processes Argentine invoices and payment documents using AI, automat
 ## What It Does
 
 - Scans PDF documents in Google Drive's "Entrada" folder
+- **Real-time monitoring** with Drive push notifications (automatic processing when files are added)
 - Extracts structured data using Gemini AI
 - Writes data to Google Sheets (Control de Cobros, Control de Pagos, Bancos)
 - Matches payments to invoices automatically
@@ -84,7 +85,10 @@ LOG_LEVEL=INFO
 GEMINI_API_KEY=your_key_here
 DRIVE_ROOT_FOLDER_ID=your_folder_id
 GOOGLE_SERVICE_ACCOUNT_KEY=<base64-encoded-service-account-json>
+WEBHOOK_URL=https://your-app.up.railway.app/webhooks/drive
 ```
+
+**Note:** Set `WEBHOOK_URL` after generating your Railway domain in step 6. Use your actual Railway URL + `/webhooks/drive`.
 
 To encode your service account key:
 ```bash
@@ -200,6 +204,9 @@ railway variables --set LOG_LEVEL=INFO
 railway variables --set GEMINI_API_KEY=your_key_here
 railway variables --set DRIVE_ROOT_FOLDER_ID=your_folder_id
 railway variables --set GOOGLE_SERVICE_ACCOUNT_KEY=$(cat service-account.json | base64 | tr -d '\n')
+
+# Optional: Set after generating domain in step 5 for real-time monitoring
+# railway variables --set WEBHOOK_URL=https://your-app.up.railway.app/webhooks/drive
 ```
 
 #### 4. Deploy
@@ -256,6 +263,7 @@ Set these in Railway dashboard (Variables tab) or via CLI:
 | `GOOGLE_SERVICE_ACCOUNT_KEY` | Yes | - | Base64-encoded service account JSON |
 | `GEMINI_API_KEY` | Yes | - | Gemini API key |
 | `DRIVE_ROOT_FOLDER_ID` | Yes | - | Google Drive root folder ID |
+| `WEBHOOK_URL` | No | - | Public URL for Drive push notifications (e.g., `https://your-app.up.railway.app/webhooks/drive`) - enables real-time monitoring when set |
 | `MATCH_DAYS_BEFORE` | No | `10` | Days before invoice date to match payments |
 | `MATCH_DAYS_AFTER` | No | `60` | Days after invoice date to match payments |
 | `USD_ARS_TOLERANCE_PERCENT` | No | `5` | Tolerance % for USD/ARS exchange matching |
@@ -362,6 +370,56 @@ curl -X POST https://your-app.up.railway.app/api/rematch
 
 # Auto-fill bank movements
 curl -X POST https://your-app.up.railway.app/api/autofill-bank
+```
+
+---
+
+## Real-time Monitoring
+
+The server supports real-time document processing through Google Drive Push Notifications. When enabled, documents are automatically processed as soon as they're added to the Entrada folder.
+
+### How It Works
+
+1. **Push Notifications**: Google Drive sends HTTP notifications to your server when files change
+2. **Automatic Processing**: Server receives notification and queues a scan automatically
+3. **Channel Renewal**: Watch channels are automatically renewed every 30 minutes to prevent expiration
+4. **Fallback Polling**: Scans every 5 minutes as backup if notifications fail
+
+### Setup
+
+Real-time monitoring is **optional** and requires the `WEBHOOK_URL` environment variable:
+
+```bash
+# Set after deploying and generating your Railway domain
+railway variables --set WEBHOOK_URL=https://your-app.up.railway.app/webhooks/drive
+```
+
+**Requirements:**
+- Must be a public HTTPS URL (Railway provides this automatically)
+- URL must end with `/webhooks/drive`
+- Server will validate incoming notifications from Google
+
+### Without Real-time Monitoring
+
+If `WEBHOOK_URL` is not set:
+- Real-time monitoring is disabled
+- Fallback polling still runs every 5 minutes
+- Manual scans via `/api/scan` still work
+- Startup scan still processes pending documents
+
+### Verification
+
+After enabling, check logs for:
+```
+Real-time monitoring active for Entrada folder
+Started watching folder [folder-id], expires at [timestamp]
+```
+
+When a file is added to Entrada, you'll see:
+```
+Drive notification received
+Change detected, queueing scan
+Triggering scan for folder [folder-id]...
 ```
 
 ---
