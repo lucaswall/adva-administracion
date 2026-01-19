@@ -602,12 +602,13 @@ export async function scanFolder(folderId?: string): Promise<Result<ScanResult, 
 
       if (processed.documentType === 'factura_emitida') {
         // Factura issued BY ADVA -> goes to Control de Creditos
-        console.log(`Storing factura emitida from ${fileInfo.name} in Control de Creditos`);
+        console.log(`Storing factura emitida from ${fileInfo.name} in Control de Creditos (${controlCreditosId})`);
+        console.log(`  Factura data: CUIT=${(doc as Factura).cuitEmisor}, Total=${(doc as Factura).importeTotal}, Date=${(doc as Factura).fechaEmision}`);
         const storeResult = await storeFactura(doc as Factura, controlCreditosId, 'Facturas Emitidas');
         if (storeResult.ok) {
           result.facturasAdded++;
           processedDocs.push({ type: 'factura_emitida', doc: doc as Factura });
-          console.log(`Factura emitida stored successfully, moving to Creditos folder`);
+          console.log(`✓ Factura emitida stored successfully in spreadsheet, moving to Creditos folder`);
           const sortResult = await sortAndRenameDocument(doc, 'creditos', 'factura_emitida');
           if (!sortResult.success) {
             console.error(`Failed to move factura ${fileInfo.name} to Creditos:`, sortResult.error);
@@ -621,12 +622,13 @@ export async function scanFolder(folderId?: string): Promise<Result<ScanResult, 
         }
       } else if (processed.documentType === 'factura_recibida') {
         // Factura received BY ADVA -> goes to Control de Debitos
-        console.log(`Storing factura recibida from ${fileInfo.name} in Control de Debitos`);
+        console.log(`Storing factura recibida from ${fileInfo.name} in Control de Debitos (${controlDebitosId})`);
+        console.log(`  Factura data: CUIT=${(doc as Factura).cuitEmisor}, Total=${(doc as Factura).importeTotal}, Date=${(doc as Factura).fechaEmision}`);
         const storeResult = await storeFactura(doc as Factura, controlDebitosId, 'Facturas Recibidas');
         if (storeResult.ok) {
           result.facturasAdded++;
           processedDocs.push({ type: 'factura_recibida', doc: doc as Factura });
-          console.log(`Factura recibida stored successfully, moving to Debitos folder`);
+          console.log(`✓ Factura recibida stored successfully in spreadsheet, moving to Debitos folder`);
           const sortResult = await sortAndRenameDocument(doc, 'debitos', 'factura_recibida');
           if (!sortResult.success) {
             console.error(`Failed to move factura ${fileInfo.name} to Debitos:`, sortResult.error);
@@ -640,12 +642,13 @@ export async function scanFolder(folderId?: string): Promise<Result<ScanResult, 
         }
       } else if (processed.documentType === 'pago_recibido') {
         // Payment received BY ADVA -> goes to Control de Creditos
-        console.log(`Storing pago recibido from ${fileInfo.name} in Control de Creditos`);
+        console.log(`Storing pago recibido from ${fileInfo.name} in Control de Creditos (${controlCreditosId})`);
+        console.log(`  Pago data: Banco=${(doc as Pago).banco}, Amount=${(doc as Pago).importePagado}, Date=${(doc as Pago).fechaPago}`);
         const storeResult = await storePago(doc as Pago, controlCreditosId, 'Pagos Recibidos');
         if (storeResult.ok) {
           result.pagosAdded++;
           processedDocs.push({ type: 'pago_recibido', doc: doc as Pago });
-          console.log(`Pago recibido stored successfully, moving to Creditos folder`);
+          console.log(`✓ Pago recibido stored successfully in spreadsheet, moving to Creditos folder`);
           const sortResult = await sortAndRenameDocument(doc, 'creditos', 'pago_recibido');
           if (!sortResult.success) {
             console.error(`Failed to move pago ${fileInfo.name} to Creditos:`, sortResult.error);
@@ -659,12 +662,13 @@ export async function scanFolder(folderId?: string): Promise<Result<ScanResult, 
         }
       } else if (processed.documentType === 'pago_enviado') {
         // Payment sent BY ADVA -> goes to Control de Debitos
-        console.log(`Storing pago enviado from ${fileInfo.name} in Control de Debitos`);
+        console.log(`Storing pago enviado from ${fileInfo.name} in Control de Debitos (${controlDebitosId})`);
+        console.log(`  Pago data: Banco=${(doc as Pago).banco}, Amount=${(doc as Pago).importePagado}, Date=${(doc as Pago).fechaPago}`);
         const storeResult = await storePago(doc as Pago, controlDebitosId, 'Pagos Enviados');
         if (storeResult.ok) {
           result.pagosAdded++;
           processedDocs.push({ type: 'pago_enviado', doc: doc as Pago });
-          console.log(`Pago enviado stored successfully, moving to Debitos folder`);
+          console.log(`✓ Pago enviado stored successfully in spreadsheet, moving to Debitos folder`);
           const sortResult = await sortAndRenameDocument(doc, 'debitos', 'pago_enviado');
           if (!sortResult.success) {
             console.error(`Failed to move pago ${fileInfo.name} to Debitos:`, sortResult.error);
@@ -678,12 +682,13 @@ export async function scanFolder(folderId?: string): Promise<Result<ScanResult, 
         }
       } else if (processed.documentType === 'recibo') {
         // Salary receipt -> goes to Control de Debitos
-        console.log(`Storing recibo from ${fileInfo.name} in Control de Debitos`);
+        console.log(`Storing recibo from ${fileInfo.name} in Control de Debitos (${controlDebitosId})`);
+        console.log(`  Recibo data: Employee=${(doc as Recibo).nombreEmpleado}, Total=${(doc as Recibo).totalNeto}, Date=${(doc as Recibo).fechaPago}`);
         const storeResult = await storeRecibo(doc as Recibo, controlDebitosId);
         if (storeResult.ok) {
           result.recibosAdded++;
           processedDocs.push({ type: 'recibo', doc: doc as Recibo });
-          console.log(`Recibo stored successfully, moving to Debitos folder`);
+          console.log(`✓ Recibo stored successfully in spreadsheet, moving to Debitos folder`);
           const sortResult = await sortAndRenameDocument(doc, 'debitos', 'recibo');
           if (!sortResult.success) {
             console.error(`Failed to move recibo ${fileInfo.name} to Debitos:`, sortResult.error);

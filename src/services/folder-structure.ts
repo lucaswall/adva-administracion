@@ -140,10 +140,23 @@ async function ensureSheetsExist(
   // Create missing sheets with headers and apply formatting
   for (const config of sheetConfigs) {
     let sheetId: number;
+    let needsHeaders = false;
 
     if (existingSheets.has(config.title)) {
       // Sheet already exists, get its ID
       sheetId = existingSheets.get(config.title)!;
+
+      // Check if the sheet has headers by reading the first row
+      const firstRowResult = await getValues(spreadsheetId, `${config.title}!A1:ZZ1`);
+      if (!firstRowResult.ok) {
+        return firstRowResult;
+      }
+
+      // If first row is empty or doesn't match expected headers, add headers
+      const firstRow = firstRowResult.value[0] || [];
+      if (firstRow.length === 0 || firstRow[0] !== config.headers[0]) {
+        needsHeaders = true;
+      }
     } else {
       // Create the sheet
       const createResult = await createSheet(spreadsheetId, config.title);
@@ -151,8 +164,11 @@ async function ensureSheetsExist(
         return createResult;
       }
       sheetId = createResult.value;
+      needsHeaders = true;
+    }
 
-      // Add header row
+    // Add header row if needed
+    if (needsHeaders) {
       const setResult = await setValues(
         spreadsheetId,
         `${config.title}!A1`,
@@ -163,15 +179,13 @@ async function ensureSheetsExist(
       }
     }
 
-    // Apply formatting (bold headers, frozen rows, number format for monetary columns)
-    if (config.monetaryColumns && config.monetaryColumns.length > 0) {
-      const formatResult = await formatSheet(spreadsheetId, sheetId, {
-        monetaryColumns: config.monetaryColumns,
-        frozenRows: 1,
-      });
-      if (!formatResult.ok) {
-        return formatResult;
-      }
+    // Always apply formatting (bold headers, frozen rows, and monetary columns if specified)
+    const formatResult = await formatSheet(spreadsheetId, sheetId, {
+      monetaryColumns: config.monetaryColumns || [],
+      frozenRows: 1,
+    });
+    if (!formatResult.ok) {
+      return formatResult;
     }
   }
 
