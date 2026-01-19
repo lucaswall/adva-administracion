@@ -179,6 +179,122 @@ describe('webhook routes', () => {
       expect(watchManager.triggerScan).toHaveBeenCalledWith('folder123');
     });
 
+    it('queues scan for add notification (file created/shared)', async () => {
+      vi.mocked(watchManager.getActiveChannels).mockReturnValue([
+        {
+          channelId: 'test-channel',
+          resourceId: 'resource123',
+          folderId: 'folder123',
+          expiration: new Date(Date.now() + 3600000),
+          createdAt: new Date(),
+        },
+      ]);
+      vi.mocked(watchManager.isNotificationDuplicate).mockReturnValue(false);
+
+      const response = await server.inject({
+        method: 'POST',
+        url: '/webhooks/drive',
+        headers: {
+          'x-goog-channel-id': 'test-channel',
+          'x-goog-resource-id': 'resource123',
+          'x-goog-resource-state': 'add',
+          'x-goog-message-number': '1000',
+        },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(JSON.parse(response.payload)).toEqual({ status: 'queued' });
+      expect(watchManager.markNotificationProcessed).toHaveBeenCalledWith('1000', 'test-channel');
+      expect(watchManager.triggerScan).toHaveBeenCalledWith('folder123');
+    });
+
+    it('queues scan for update notification with children changes', async () => {
+      vi.mocked(watchManager.getActiveChannels).mockReturnValue([
+        {
+          channelId: 'test-channel',
+          resourceId: 'resource123',
+          folderId: 'folder123',
+          expiration: new Date(Date.now() + 3600000),
+          createdAt: new Date(),
+        },
+      ]);
+      vi.mocked(watchManager.isNotificationDuplicate).mockReturnValue(false);
+
+      const response = await server.inject({
+        method: 'POST',
+        url: '/webhooks/drive',
+        headers: {
+          'x-goog-channel-id': 'test-channel',
+          'x-goog-resource-id': 'resource123',
+          'x-goog-resource-state': 'update',
+          'x-goog-changed': 'children',
+          'x-goog-message-number': '1426892',
+        },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(JSON.parse(response.payload)).toEqual({ status: 'queued' });
+      expect(watchManager.markNotificationProcessed).toHaveBeenCalledWith('1426892', 'test-channel');
+      expect(watchManager.triggerScan).toHaveBeenCalledWith('folder123');
+    });
+
+    it('queues scan for update notification with content changes', async () => {
+      vi.mocked(watchManager.getActiveChannels).mockReturnValue([
+        {
+          channelId: 'test-channel',
+          resourceId: 'resource123',
+          folderId: 'folder123',
+          expiration: new Date(Date.now() + 3600000),
+          createdAt: new Date(),
+        },
+      ]);
+      vi.mocked(watchManager.isNotificationDuplicate).mockReturnValue(false);
+
+      const response = await server.inject({
+        method: 'POST',
+        url: '/webhooks/drive',
+        headers: {
+          'x-goog-channel-id': 'test-channel',
+          'x-goog-resource-id': 'resource123',
+          'x-goog-resource-state': 'update',
+          'x-goog-changed': 'content',
+          'x-goog-message-number': '2000',
+        },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(JSON.parse(response.payload)).toEqual({ status: 'queued' });
+      expect(watchManager.markNotificationProcessed).toHaveBeenCalledWith('2000', 'test-channel');
+      expect(watchManager.triggerScan).toHaveBeenCalledWith('folder123');
+    });
+
+    it('ignores update notification without children changes', async () => {
+      vi.mocked(watchManager.getActiveChannels).mockReturnValue([
+        {
+          channelId: 'test-channel',
+          resourceId: 'resource123',
+          folderId: 'folder123',
+          expiration: new Date(Date.now() + 3600000),
+          createdAt: new Date(),
+        },
+      ]);
+
+      const response = await server.inject({
+        method: 'POST',
+        url: '/webhooks/drive',
+        headers: {
+          'x-goog-channel-id': 'test-channel',
+          'x-goog-resource-id': 'resource123',
+          'x-goog-resource-state': 'update',
+          'x-goog-changed': 'properties',
+        },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(JSON.parse(response.payload)).toEqual({ status: 'received' });
+      expect(watchManager.triggerScan).not.toHaveBeenCalled();
+    });
+
     it('returns 200 for unhandled resource state', async () => {
       vi.mocked(watchManager.getActiveChannels).mockReturnValue([
         {

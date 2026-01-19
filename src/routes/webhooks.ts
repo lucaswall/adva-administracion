@@ -34,9 +34,11 @@ export async function webhookRoutes(server: FastifyInstance) {
    * Headers include:
    * - X-Goog-Channel-ID: Our channel ID
    * - X-Goog-Resource-ID: Resource being watched
-   * - X-Goog-Resource-State: 'sync' (initial), 'change', 'remove', etc.
-   * - X-Goog-Changed: Comma-separated list of changed aspects
+   * - X-Goog-Resource-State: 'sync', 'add', 'update', 'remove', 'trash', 'untrash', 'change'
+   * - X-Goog-Changed: Comma-separated list (only with 'update'): 'content', 'properties', 'parents', 'children', 'permissions'
    * - X-Goog-Message-Number: Sequence number
+   *
+   * See: https://developers.google.com/workspace/drive/api/guides/push
    */
   server.post('/drive', async (request: FastifyRequest<{ Headers: DriveNotificationHeaders }>, reply) => {
     const headers = request.headers;
@@ -81,7 +83,45 @@ export async function webhookRoutes(server: FastifyInstance) {
       return reply.code(200).send({ status: 'synced' });
     }
 
-    // Handle change notifications
+    // Handle add notifications (file created or shared)
+    if (resourceState === 'add') {
+      // Mark notification as processed
+      if (messageNumber) {
+        markNotificationProcessed(messageNumber, channelId);
+      }
+
+      // Queue scan for the watched folder
+      server.log.info({ channelId }, 'File added, queueing scan');
+      triggerScan(channel.folderId);
+
+      return reply.code(200).send({ status: 'queued' });
+    }
+
+    // Handle update notifications
+    if (resourceState === 'update') {
+      // Process if children changed (files added/removed) or content changed (file modified)
+      // Ignore other updates like property/permission changes
+      const shouldProcess = changed?.includes('children') || changed?.includes('content');
+
+      if (shouldProcess) {
+        // Mark notification as processed
+        if (messageNumber) {
+          markNotificationProcessed(messageNumber, channelId);
+        }
+
+        // Queue scan for the watched folder
+        server.log.info({ channelId, changed }, 'Update detected, queueing scan');
+        triggerScan(channel.folderId);
+
+        return reply.code(200).send({ status: 'queued' });
+      }
+
+      // Acknowledge other update types without processing
+      server.log.debug({ channelId, changed }, 'Non-actionable update ignored');
+      return reply.code(200).send({ status: 'received' });
+    }
+
+    // Handle change notifications (changes API - legacy)
     if (resourceState === 'change') {
       // Mark notification as processed
       if (messageNumber) {
@@ -95,8 +135,9 @@ export async function webhookRoutes(server: FastifyInstance) {
       return reply.code(200).send({ status: 'queued' });
     }
 
-    // Handle other states (remove, update, etc.)
-    server.log.debug({ channelId, resourceState }, 'Unhandled resource state');
+    // Handle other states (remove, trash, untrash, etc.)
+    // These are acknowledged but don't trigger processing
+    server.log.debug({ channelId, resourceState }, 'Non-actionable resource state');
     return reply.code(200).send({ status: 'received' });
   });
 }
