@@ -198,6 +198,93 @@ export async function createSheet(spreadsheetId, title) {
     }
 }
 /**
+ * Formats a sheet with bold headers, frozen rows, and number formatting
+ *
+ * @param spreadsheetId - Spreadsheet ID
+ * @param sheetId - Sheet ID (not the name, the numeric ID)
+ * @param options - Formatting options
+ * @param options.monetaryColumns - 0-indexed columns to format as currency (e.g., [12, 13, 14])
+ * @param options.frozenRows - Number of rows to freeze at top (default: 1)
+ * @returns Success or error
+ */
+export async function formatSheet(spreadsheetId, sheetId, options = {}) {
+    try {
+        const sheets = getSheetsService();
+        const { monetaryColumns = [], frozenRows = 1 } = options;
+        const requests = [];
+        // 1. Freeze header rows
+        if (frozenRows > 0) {
+            requests.push({
+                updateSheetProperties: {
+                    properties: {
+                        sheetId,
+                        gridProperties: {
+                            frozenRowCount: frozenRows,
+                        },
+                    },
+                    fields: 'gridProperties.frozenRowCount',
+                },
+            });
+        }
+        // 2. Bold the header row (row 0)
+        requests.push({
+            repeatCell: {
+                range: {
+                    sheetId,
+                    startRowIndex: 0,
+                    endRowIndex: 1,
+                },
+                cell: {
+                    userEnteredFormat: {
+                        textFormat: {
+                            bold: true,
+                        },
+                    },
+                },
+                fields: 'userEnteredFormat.textFormat.bold',
+            },
+        });
+        // 3. Apply number formatting to monetary columns
+        if (monetaryColumns.length > 0) {
+            for (const columnIndex of monetaryColumns) {
+                requests.push({
+                    repeatCell: {
+                        range: {
+                            sheetId,
+                            startColumnIndex: columnIndex,
+                            endColumnIndex: columnIndex + 1,
+                            startRowIndex: 1, // Skip header row
+                        },
+                        cell: {
+                            userEnteredFormat: {
+                                numberFormat: {
+                                    type: 'NUMBER',
+                                    pattern: '#,##0.00',
+                                },
+                            },
+                        },
+                        fields: 'userEnteredFormat.numberFormat',
+                    },
+                });
+            }
+        }
+        // Execute all formatting requests in a single batch
+        await sheets.spreadsheets.batchUpdate({
+            spreadsheetId,
+            requestBody: {
+                requests,
+            },
+        });
+        return { ok: true, value: undefined };
+    }
+    catch (error) {
+        return {
+            ok: false,
+            error: error instanceof Error ? error : new Error(String(error)),
+        };
+    }
+}
+/**
  * Clears the cached Sheets service (for testing)
  */
 export function clearSheetsCache() {

@@ -63,6 +63,20 @@ export declare function getSheetMetadata(spreadsheetId: string): Promise<Result<
  */
 export declare function createSheet(spreadsheetId: string, title: string): Promise<Result<number, Error>>;
 /**
+ * Formats a sheet with bold headers, frozen rows, and number formatting
+ *
+ * @param spreadsheetId - Spreadsheet ID
+ * @param sheetId - Sheet ID (not the name, the numeric ID)
+ * @param options - Formatting options
+ * @param options.monetaryColumns - 0-indexed columns to format as currency (e.g., [12, 13, 14])
+ * @param options.frozenRows - Number of rows to freeze at top (default: 1)
+ * @returns Success or error
+ */
+export declare function formatSheet(spreadsheetId: string, sheetId: number, options?: {
+    monetaryColumns?: number[];
+    frozenRows?: number;
+}): Promise<Result<void, Error>>;
+/**
  * Clears the cached Sheets service (for testing)
  */
 export declare function clearSheetsCache(): void;
