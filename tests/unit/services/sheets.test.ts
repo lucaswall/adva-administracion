@@ -69,13 +69,14 @@ describe('formatSheet', () => {
               fields: 'gridProperties.frozenRowCount',
             },
           }),
-          // Bold headers request
+          // Bold headers request - should only apply to row 0, all columns
           expect.objectContaining({
             repeatCell: {
               range: {
                 sheetId: 456,
                 startRowIndex: 0,
                 endRowIndex: 1,
+                startColumnIndex: 0,  // Explicitly start from first column
               },
               cell: {
                 userEnteredFormat: {

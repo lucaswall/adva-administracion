@@ -281,13 +281,14 @@ export async function formatSheet(
       });
     }
 
-    // 2. Bold the header row (row 0)
+    // 2. Bold the header row (row 0) - explicitly specify column start
     requests.push({
       repeatCell: {
         range: {
           sheetId,
           startRowIndex: 0,
           endRowIndex: 1,
+          startColumnIndex: 0,  // Start from first column
         },
         cell: {
           userEnteredFormat: {
