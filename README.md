@@ -1,224 +1,77 @@
 # ADVA Administración Server
 
-Node.js server for automated invoice and payment processing for ADVA using Google APIs and Gemini AI.
+Automated invoice and payment processing server for ADVA (Asociación de Desarrolladores de Videojuegos Argentina).
 
-## Features
+This server processes Argentine invoices and payment documents using AI, automatically extracts data to Google Sheets, matches payments to invoices, and organizes documents in Google Drive.
 
-- REST API for document scanning and processing
-- AI-powered data extraction using Gemini 2.5 Flash
-- Google Drive integration with push notifications
-- Google Sheets for structured data storage
-- Automatic invoice-payment matching
-- Built-in validation for Argentine CUIT and CAE
-- Comprehensive test suite
+**For development:** See [DEVELOPMENT.md](DEVELOPMENT.md)
 
-## Supported Documents
+---
+
+## What It Does
+
+- Scans PDF documents in Google Drive's "Entrada" folder
+- Extracts structured data using Gemini AI
+- Writes data to Google Sheets (Control de Cobros, Control de Pagos, Bancos)
+- Matches payments to invoices automatically
+- Auto-fills bank movement descriptions
+- Sorts processed documents into month folders
+- Provides REST API for manual triggers and monitoring
+
+### Supported Documents
 
 - **Facturas**: Argentine ARCA invoices (A, B, C, E, NC, ND)
 - **Pagos**: Bank payment slips (BBVA and others)
 - **Recibos**: Employee salary receipts (sueldo, liquidación final)
 
+---
+
 ## Prerequisites
 
-1. **Node.js** v20+
-2. **Google Cloud Service Account** with Drive and Sheets API access
-3. **Gemini API Key** from https://aistudio.google.com/apikey
+1. **Railway Account** - https://railway.app (Hobby plan $5/month recommended)
+2. **Google Cloud Service Account** - With Drive and Sheets API access
+3. **Gemini API Key** - From https://aistudio.google.com/apikey
+4. **Google Drive Folder Structure** - See [folder structure](#google-drive-folder-structure) below
 
 ---
 
-## Local Development Setup
+## Deployment to Production
 
-### 1. Install Dependencies
+### 1. Create Railway Project
 
-```bash
-git clone <repository-url>
-cd adva-administracion
-npm install
-```
+1. Go to https://railway.app
+2. Sign up or log in
+3. Click "New Project"
+4. Select "Empty Project"
+5. Name it `adva-administracion`
 
-### 2. Create Environment File
-
-Create a `.env` file in the project root (gitignored). See [Environment Variables Reference](#environment-variables-reference) below for details.
-
-```env
-PORT=3000
-NODE_ENV=development
-LOG_LEVEL=DEBUG
-
-GOOGLE_SERVICE_ACCOUNT_KEY=<base64-encoded-json>
-GEMINI_API_KEY=your_gemini_api_key
-DRIVE_ROOT_FOLDER_ID=your_folder_id
-```
-
-To encode your service account: `cat service-account.json | base64`
-
-### 3. Run in Development Mode
+### 2. Deploy via Railway CLI
 
 ```bash
-npm run dev
-```
-
-### 4. Test the Server
-
-```bash
-# Health check
-curl http://localhost:3000/health
-# Response: {"status":"ok"}
-
-# Status endpoint
-curl http://localhost:3000/api/status
-# Response: {"status":"ok","timestamp":"...","version":"2.0.0","environment":"development",...}
-
-# Trigger a scan (currently returns stub response)
-curl -X POST http://localhost:3000/api/scan
-```
-
-### 5. Run Tests
-
-```bash
-npm test               # Run all tests
-npm run test:watch     # TDD mode with watch
-npm run test:coverage  # Coverage report
-npm run lint           # Type checking
-```
-
----
-
-## Environment Variables Reference
-
-| Variable | Required | Default | Description |
-|----------|----------|---------|-------------|
-| `PORT` | No | `3000` | Server port |
-| `NODE_ENV` | No | `development` | `development`, `production`, or `test` |
-| `LOG_LEVEL` | No | `INFO` | `DEBUG`, `INFO`, `WARN`, `ERROR` |
-| `GOOGLE_SERVICE_ACCOUNT_KEY` | Prod | - | Base64-encoded service account JSON |
-| `GEMINI_API_KEY` | Prod | - | Gemini API key |
-| `DRIVE_ROOT_FOLDER_ID` | Prod | - | Google Drive root folder ID (see folder structure below) |
-| `MATCH_DAYS_BEFORE` | No | `10` | Days before invoice date to match payments |
-| `MATCH_DAYS_AFTER` | No | `60` | Days after invoice date to match payments |
-| `USD_ARS_TOLERANCE_PERCENT` | No | `5` | Tolerance % for USD/ARS exchange matching |
-
----
-
-## Google Drive Folder Structure
-
-The server expects a specific folder structure in the root Drive folder (`DRIVE_ROOT_FOLDER_ID`):
-
-```
-ADVA Root Folder/
-├── Control de Cobros.gsheet       # Required: Collections tracking spreadsheet
-├── Control de Pagos.gsheet        # Required: Payments tracking spreadsheet
-├── Entrada/                        # Incoming documents (scan source)
-├── Bancos/                         # Bank movement spreadsheets (auto-discovered)
-├── Cobros/                         # Sorted: matched collections
-│   ├── 01 - Enero/                 # Created on demand
-│   ├── 02 - Febrero/
-│   └── ... (12 months)
-├── Pagos/                          # Sorted: matched payments
-│   ├── 01 - Enero/
-│   └── ... (12 months)
-└── Sin Procesar/                   # Failed or unmatched documents
-```
-
-**Notes:**
-- All folders and spreadsheets are created automatically if missing
-- Month subfolders are created on demand when documents are sorted
-- Bank spreadsheets in `Bancos/` folder are auto-discovered
-
----
-
-## API Endpoints
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/health` | Simple health check for load balancers |
-| GET | `/api/status` | Detailed status with queue info and version |
-| POST | `/api/scan` | Trigger manual document scan |
-| POST | `/api/rematch` | Re-run matching on unmatched documents |
-| POST | `/api/autofill-bank` | Auto-fill bank movement descriptions |
-| POST | `/webhooks/drive` | Receive Google Drive push notifications |
-
----
-
-## Production Deployment (Railway.app)
-
-> **Pricing:** Railway Hobby plan ($5/month) is sufficient for this app.
-
-### Deployment Steps
-
-#### Option A: Deploy via Railway Dashboard (Recommended)
-
-1. **Create Railway Account**
-   - Go to [railway.app](https://railway.app) and sign up
-   - Connect your GitHub account
-
-2. **Create New Project**
-   - Click "New Project"
-   - Select "Deploy from GitHub repo"
-   - Choose your `adva-administracion` repository
-
-3. **Configure Environment Variables**
-
-   In the Railway dashboard, go to your service → Variables → Add the following:
-
-   ```
-   NODE_ENV=production
-   LOG_LEVEL=INFO
-   GEMINI_API_KEY=your_gemini_api_key
-   GOOGLE_SERVICE_ACCOUNT_KEY=<base64-encoded-service-account-json>
-   DRIVE_ROOT_FOLDER_ID=your_folder_id
-   ```
-
-   To encode your service account for Railway:
-   ```bash
-   cat service-account.json | base64 | tr -d '\n'
-   ```
-
-4. **Deploy**
-   - Railway auto-deploys on git push
-   - Check the deployment logs for any errors
-   - Your app will be available at `https://<project-name>.up.railway.app`
-
-#### Option B: Deploy via Railway CLI
-
-**Prerequisites:** Create a project in Railway dashboard first (see Option A, steps 1-2), then link it via CLI.
-
-```bash
-# 1. Install Railway CLI
+# Install Railway CLI
 npm install -g @railway/cli@latest
 
-# 2. Login to Railway
+# Login to Railway
 railway login
 
-# 3. Link to your existing Railway project
-# This will prompt you to select team, project, and environment
+# Link to your Railway project
 railway link
 
-# 4. Set environment variables
+# Set environment variables (see next section)
 railway variables set NODE_ENV=production
 railway variables set LOG_LEVEL=INFO
 railway variables set GEMINI_API_KEY=your_key_here
 railway variables set DRIVE_ROOT_FOLDER_ID=your_folder_id
-
-# For the service account, encode and set:
 railway variables set GOOGLE_SERVICE_ACCOUNT_KEY=$(cat service-account.json | base64 | tr -d '\n')
 
-# 5. Deploy
+# Deploy
 railway up
 
-# 6. Get your deployment URL
+# Get deployment URL
 railway domain
-
-# Optional: View logs
-railway logs
-
-# Optional: Open deployed app in browser
-railway open
 ```
 
-**Note:** Always use `railway link` to connect to an existing project. The `railway init` command creates a new project and should only be used if you want to create a project via CLI instead of the dashboard.
-
-### Verify Deployment
+### 3. Verify Deployment
 
 ```bash
 # Replace with your Railway URL
@@ -229,38 +82,38 @@ curl https://your-app.up.railway.app/api/status
 # Response: {"status":"ok","version":"2.0.0","environment":"production",...}
 ```
 
-### Custom Domain (Optional)
+### 4. Configure Custom Domain (Optional)
 
-1. In Railway dashboard, go to Settings → Domains
+1. In Railway dashboard: Settings → Domains
 2. Add your custom domain
-3. Configure DNS with the provided CNAME record
+3. Configure DNS with provided CNAME record
 
 ---
 
-## Project Structure
+## Environment Variables
 
-```
-src/
-├── server.ts         # Fastify entry point
-├── config.ts         # Environment configuration
-├── routes/           # HTTP route handlers
-│   ├── status.ts     # GET /health, /api/status
-│   ├── scan.ts       # POST /api/scan, /rematch, /autofill-bank
-│   └── webhooks.ts   # POST /webhooks/drive
-├── services/         # Google API wrappers
-│   ├── google-auth.ts     # Service account auth
-│   ├── drive.ts           # Drive API wrapper
-│   ├── sheets.ts          # Sheets API wrapper
-│   ├── folder-structure.ts # Folder discovery/caching
-│   └── document-sorter.ts  # Document file movement
-├── processing/       # Queue management
-├── types/            # TypeScript definitions
-├── gemini/           # Gemini API client
-├── matching/         # Invoice-payment matching
-├── bank/             # Bank movement matching
-└── utils/            # Validation, dates, currency, Spanish dates
-tests/
-└── unit/             # Unit tests
+Set these in Railway dashboard (Variables tab) or via CLI:
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `NODE_ENV` | Yes | - | Set to `production` |
+| `LOG_LEVEL` | No | `INFO` | `DEBUG`, `INFO`, `WARN`, `ERROR` |
+| `PORT` | No | `3000` | Server port (Railway sets automatically) |
+| `GOOGLE_SERVICE_ACCOUNT_KEY` | Yes | - | Base64-encoded service account JSON |
+| `GEMINI_API_KEY` | Yes | - | Gemini API key |
+| `DRIVE_ROOT_FOLDER_ID` | Yes | - | Google Drive root folder ID |
+| `MATCH_DAYS_BEFORE` | No | `10` | Days before invoice date to match payments |
+| `MATCH_DAYS_AFTER` | No | `60` | Days after invoice date to match payments |
+| `USD_ARS_TOLERANCE_PERCENT` | No | `5` | Tolerance % for USD/ARS exchange matching |
+
+### Encoding Service Account Key
+
+```bash
+# macOS/Linux
+cat service-account.json | base64 | tr -d '\n'
+
+# Windows PowerShell
+[Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes((Get-Content service-account.json -Raw)))
 ```
 
 ---
@@ -269,25 +122,173 @@ tests/
 
 ### 1. Create Service Account
 
-1. Go to [Google Cloud Console](https://console.cloud.google.com)
+1. Go to https://console.cloud.google.com
 2. Create a new project or select existing
 3. Enable APIs:
-   - Google Drive API
-   - Google Sheets API
+   - **Google Drive API**
+   - **Google Sheets API**
 4. Create Service Account:
-   - IAM & Admin → Service Accounts → Create
-   - Download JSON key file
-5. Share your Drive folder with the service account email:
-   - Open your root Drive folder in Google Drive
-   - Click "Share" and add the service account email (e.g., `your-service@project-id.iam.gserviceaccount.com`)
-   - Grant **Editor** access (required for moving files between folders)
-   - The service account email is in your downloaded JSON key file under `client_email`
+   - Navigate to: IAM & Admin → Service Accounts → Create
+   - Name: `adva-administracion`
+   - Role: None needed (access via Drive sharing)
+5. Create and download JSON key:
+   - Click on the service account → Keys → Add Key → JSON
+   - Download and save securely
 
-### 2. Get Gemini API Key
+### 2. Share Drive Folder
 
-1. Go to [Google AI Studio](https://aistudio.google.com/apikey)
-2. Create a new API key
-3. Copy the key to your environment variables
+1. Open your ADVA root folder in Google Drive
+2. Click "Share"
+3. Add the service account email (from `client_email` in JSON key)
+   - Format: `your-service@project-id.iam.gserviceaccount.com`
+4. Grant **Editor** access (required for file operations)
+
+### 3. Get Gemini API Key
+
+1. Go to https://aistudio.google.com/apikey
+2. Create API key
+3. Copy to `GEMINI_API_KEY` environment variable
+
+---
+
+## Google Drive Folder Structure
+
+The server expects this structure in `DRIVE_ROOT_FOLDER_ID`:
+
+```
+ADVA Root Folder/
+├── Control de Cobros.gsheet       # Collections tracking spreadsheet
+├── Control de Pagos.gsheet        # Payments tracking spreadsheet
+├── Entrada/                        # Incoming documents (scan source)
+├── Bancos/                         # Bank movement spreadsheets
+│   ├── Banco BBVA.gsheet
+│   └── ... (other banks)
+├── Cobros/                         # Sorted matched collections
+│   ├── 01 - Enero/
+│   ├── 02 - Febrero/
+│   └── ... (12 months)
+├── Pagos/                          # Sorted matched payments
+│   ├── 01 - Enero/
+│   └── ... (12 months)
+└── Sin Procesar/                   # Failed or unmatched documents
+```
+
+**Notes:**
+- All folders and spreadsheets are created automatically if missing
+- Month subfolders are created on demand
+- Bank spreadsheets in `Bancos/` are auto-discovered
+
+---
+
+## API Endpoints
+
+| Method | Endpoint | Description | Use Case |
+|--------|----------|-------------|----------|
+| GET | `/health` | Simple health check | Load balancer probes |
+| GET | `/api/status` | Detailed status + queue info | Monitoring, debugging |
+| POST | `/api/scan` | Trigger manual document scan | Force scan outside schedule |
+| POST | `/api/rematch` | Re-run matching on unmatched docs | After correcting data |
+| POST | `/api/autofill-bank` | Auto-fill bank descriptions | Monthly maintenance |
+| POST | `/webhooks/drive` | Drive push notifications | Automated by Google |
+
+### Example API Calls
+
+```bash
+# Health check
+curl https://your-app.up.railway.app/health
+
+# Full status
+curl https://your-app.up.railway.app/api/status
+
+# Trigger scan
+curl -X POST https://your-app.up.railway.app/api/scan
+
+# Rematch unmatched documents
+curl -X POST https://your-app.up.railway.app/api/rematch
+
+# Auto-fill bank movements
+curl -X POST https://your-app.up.railway.app/api/autofill-bank
+```
+
+---
+
+## Monitoring and Health Checks
+
+### Railway Health Checks
+
+Railway automatically monitors the `/health` endpoint. If it returns non-200 status, Railway will restart the service.
+
+### Status Endpoint
+
+The `/api/status` endpoint provides:
+- Server status
+- Version
+- Environment
+- Queue status (active/pending tasks)
+- Timestamp
+
+### Logs
+
+View logs via Railway CLI:
+```bash
+railway logs
+```
+
+Or in Railway dashboard: Deployments → [Select deployment] → Logs
+
+### Key Metrics to Monitor
+
+- `/health` response time and status
+- Queue depth in `/api/status`
+- Error rates in logs
+- Google API quota usage
+
+---
+
+## Maintenance Tasks
+
+### Monthly Tasks
+
+1. **Review unmatched documents**
+   - Check `Sin Procesar/` folder in Drive
+   - Manually match or correct data
+   - Run rematch: `curl -X POST .../api/rematch`
+
+2. **Auto-fill bank movements**
+   - Run: `curl -X POST .../api/autofill-bank`
+   - Fills descriptions for matched movements
+
+### Quarterly Tasks
+
+1. **Review Google API quotas**
+   - Check usage in Google Cloud Console
+   - Drive API: 20,000 requests/100 seconds (default)
+   - Sheets API: 500 requests/100 seconds (default)
+
+2. **Review Gemini API usage**
+   - Check usage in Google AI Studio
+   - Monitor costs
+
+### Environment Updates
+
+When environment variables change:
+```bash
+railway variables set VARIABLE_NAME=new_value
+railway up  # Redeploy
+```
+
+### Redeployment
+
+To redeploy current version:
+```bash
+railway up
+```
+
+To deploy specific commit:
+```bash
+git checkout <commit-hash>
+railway up
+```
 
 ---
 
@@ -295,18 +296,59 @@ tests/
 
 | Issue | Solution |
 |-------|----------|
-| Server won't start | Check `NODE_ENV` and required env vars |
-| Google API errors | Verify service account key is base64-encoded correctly |
-| "Permission denied" on Drive | Share folder with service account email |
-| Railway deploy fails | Check build logs, ensure `npm run build` works locally |
+| Server won't start | Check Railway logs for errors. Verify all required env vars are set. |
+| "Permission denied" on Drive | Verify service account email has Editor access to root folder. |
+| Google API quota exceeded | Wait for quota reset or request increase in Cloud Console. |
+| Documents not being processed | Check `/api/status` for queue status. Check logs for errors. |
+| Gemini API errors | Verify API key is valid. Check quota in AI Studio. |
+| Railway deploy fails | Check build logs. Ensure `npm run build` works locally. |
+| Wrong data extracted | Review Gemini prompts in `src/gemini/prompts.ts`. May need tuning. |
+
+### Getting Help
+
+1. Check Railway logs: `railway logs`
+2. Check `/api/status` endpoint for queue status
+3. Review error messages in logs
+4. Verify Google Cloud permissions
+5. Check Gemini API quotas
+
+---
+
+## Updating the Software
+
+### For Developers
+
+See [DEVELOPMENT.md](DEVELOPMENT.md) for local development setup and contribution guidelines.
+
+### For Operators
+
+When updates are pushed to the repository:
+
+```bash
+# Pull latest changes
+git pull origin main
+
+# Redeploy to Railway
+railway up
+```
+
+Railway can also be configured for automatic deployments on git push via GitHub integration.
+
+---
+
+## Security Notes
+
+- **Never commit** `service-account.json` or `.env` files
+- Service account key should only exist in Railway environment variables
+- Rotate API keys periodically
+- Limit service account permissions to only required Drive folders
+- Use custom domain with HTTPS for production
 
 ---
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-Copyright (c) 2024-2026 ADVA - Asociación de Desarrolladores de Videojuegos Argentina
+MIT License - Copyright (c) 2024-2026 ADVA - Asociación de Desarrolladores de Videojuegos Argentina
 
 ---
 
