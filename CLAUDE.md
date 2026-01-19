@@ -57,23 +57,13 @@
 3. **`commit-bot`** (haiku) - Stage changes, analyze diff, create commit
    - **When to use:** After tests and build pass, ready to commit
    - **Never use:** `git add`, `git commit` directly
-   - **Note:** Creates commit with proper message and co-author
+   - **Note:** Creates commit with proper message
 
 ### Creating Pull Requests
 
-**CRITICAL:** When user asks to create a PR, follow this workflow:
-
-1. **Create branch:** `git checkout -b <type>/<description>`
-   - Types: `feat/`, `fix/`, `refactor/`, `chore/`, `docs/`
-
-2. **Commit changes:** Use `commit-bot` subagent
-   - NEVER use `git commit` directly
-
-3. **Push branch:** `git push -u origin <branch-name>`
-
-4. **Create PR:** Use `gh pr create`
-   - Include summary, changes, test plan
-   - Add "🤖 Generated with [Claude Code](https://claude.com/claude-code)" footer
+**CRITICAL:** When user asks to create a PR, use the `pr-creator` subagent.
+- NEVER use `git commit` or `gh pr create` directly
+- The subagent handles: branch, commit, push, PR creation
 
 ### Usage Workflow
 
@@ -118,7 +108,8 @@ src/
 │   ├── document-sorter.ts # Document file movement
 │   └── watch-manager.ts   # Real-time monitoring
 ├── processing/
-│   └── queue.ts           # p-queue processing
+│   ├── queue.ts           # p-queue processing
+│   └── scanner.ts         # Core document processing orchestration
 ├── types/index.ts         # TypeScript interfaces
 ├── matching/matcher.ts    # Pure matching algorithms
 ├── gemini/
@@ -126,10 +117,18 @@ src/
 │   ├── prompts.ts         # Extraction prompts
 │   ├── parser.ts          # Response parsing
 │   └── errors.ts          # Error classification
-├── utils/                 # Pure utilities (date, currency, validation, file-naming, etc.)
-│   └── file-naming.ts     # Standardized document file naming
+├── utils/                 # Pure utilities
+│   ├── date.ts            # Date parsing
+│   ├── numbers.ts         # Number parsing (Argentine/US formats)
+│   ├── currency.ts        # Currency helpers (re-exports from numbers)
+│   ├── validation.ts      # CUIT validation
+│   ├── file-naming.ts     # Document file naming
+│   ├── spanish-date.ts    # Spanish month formatting
+│   ├── exchange-rate.ts   # Exchange rate utilities
+│   └── drive-parser.ts    # Drive URL parsing
 └── bank/
     ├── matcher.ts         # Bank movement matching
+    ├── autofill.ts        # Bank auto-fill functionality
     └── subdiario-matcher.ts # Subdiario matching
 ```
 

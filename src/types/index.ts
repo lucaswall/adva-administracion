@@ -325,23 +325,6 @@ export interface ErrorRecord {
   rawResponse?: string;
 }
 
-/**
- * Application configuration
- */
-export interface AppConfig {
-  /** Google Drive folder ID to scan */
-  sourceFolderId: string;
-  /** Gemini API key */
-  geminiApiKey: string;
-  /** Days before invoice date to accept payment */
-  matchDaysBefore: number;
-  /** Days after invoice date to accept payment */
-  matchDaysAfter: number;
-  /** Minimum log level */
-  logLevel: LogLevel;
-  /** Tolerance percentage for USD→ARS cross-currency matching */
-  usdArsTolerancePercent: number;
-}
 
 /**
  * Gemini API response structure

@@ -844,26 +844,3 @@ export async function rematch(): Promise<Result<RematchResult, Error>> {
   };
 }
 
-/**
- * Scanner interface for custom configurations
- */
-export interface Scanner {
-  processFile: typeof processFile;
-  scanFolder: typeof scanFolder;
-  rematch: typeof rematch;
-}
-
-/**
- * Creates a scanner instance with custom configuration
- *
- * @param config - Scanner configuration options
- * @returns Scanner instance
- */
-export function createScanner(_config?: ScannerConfig): Scanner {
-  // Note: config is reserved for future use when we need custom matchers, etc.
-  return {
-    processFile,
-    scanFolder,
-    rematch,
-  };
-}
