@@ -181,20 +181,20 @@ ADVA Root Folder/
 
 #### Option B: Deploy via Railway CLI
 
-```bash
-# Install Railway CLI
-npm install -g @railway/cli
+**Prerequisites:** Create a project in Railway dashboard first (see Option A, steps 1-2), then link it via CLI.
 
-# Login to Railway
+```bash
+# 1. Install Railway CLI
+npm install -g @railway/cli@latest
+
+# 2. Login to Railway
 railway login
 
-# Initialize project (run in your repo directory)
-railway init
-
-# Link to existing project (if already created in dashboard)
+# 3. Link to your existing Railway project
+# This will prompt you to select team, project, and environment
 railway link
 
-# Set environment variables
+# 4. Set environment variables
 railway variables set NODE_ENV=production
 railway variables set LOG_LEVEL=INFO
 railway variables set GEMINI_API_KEY=your_key_here
@@ -203,15 +203,20 @@ railway variables set DRIVE_ROOT_FOLDER_ID=your_folder_id
 # For the service account, encode and set:
 railway variables set GOOGLE_SERVICE_ACCOUNT_KEY=$(cat service-account.json | base64 | tr -d '\n')
 
-# Deploy
+# 5. Deploy
 railway up
 
-# View logs
+# 6. Get your deployment URL
+railway domain
+
+# Optional: View logs
 railway logs
 
-# Open deployed app
+# Optional: Open deployed app in browser
 railway open
 ```
+
+**Note:** Always use `railway link` to connect to an existing project. The `railway init` command creates a new project and should only be used if you want to create a project via CLI instead of the dashboard.
 
 ### Verify Deployment
 
