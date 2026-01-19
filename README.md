@@ -37,41 +37,94 @@ This server processes Argentine invoices and payment documents using AI, automat
 
 ## Deployment to Production
 
-### 1. Install and Login to Railway CLI
+This project is configured for automatic deployment from GitHub. When you push to the `main` branch, Railway automatically builds and deploys the latest code.
+
+### 1. Create Project from GitHub Repository
+
+1. **Go to Railway Dashboard**
+   - Visit https://railway.app/new
+   - Sign up or log in
+   - Click "New Project"
+
+2. **Select "Deploy from GitHub repo"**
+   - If prompted, authorize Railway to access your GitHub account
+   - Search for `adva-administracion` repository
+   - Select the repository
+
+3. **Choose "Add variables"** (don't deploy yet)
+   - This allows you to configure environment variables before first deployment
+
+### 2. Configure Environment Variables
+
+In the Railway dashboard, add these variables (see [Environment Variables](#environment-variables) section for details):
+
+```
+NODE_ENV=production
+LOG_LEVEL=INFO
+GEMINI_API_KEY=your_key_here
+DRIVE_ROOT_FOLDER_ID=your_folder_id
+GOOGLE_SERVICE_ACCOUNT_KEY=<base64-encoded-service-account-json>
+```
+
+To encode your service account key:
+```bash
+cat service-account.json | base64 | tr -d '\n'
+```
+
+Copy the output and paste it as the value for `GOOGLE_SERVICE_ACCOUNT_KEY`.
+
+### 3. Deploy
+
+After setting all environment variables, click **"Deploy"** in the Railway dashboard. Railway will:
+- Build the application
+- Run it automatically
+- Generate a deployment URL
+
+### 4. Configure Auto-Deployment Settings
+
+In Railway dashboard:
+1. Go to your service **Settings**
+2. Under **Source**, verify:
+   - **Branch**: `main` (or your preferred branch)
+   - **Auto-deploy**: Enabled (default)
+
+Now, every push to `main` will automatically trigger a new deployment.
+
+### 5. Optional: Link Railway CLI for Management
+
+To manage your project via CLI:
 
 ```bash
 # Install Railway CLI
 npm install -g @railway/cli@latest
 
-# Login to Railway (opens browser for authentication)
+# Login to Railway
 railway login
+
+# Link to your existing GitHub-connected project
+railway link
+
+# Now you can use CLI commands:
+railway logs              # View logs
+railway domain            # Get deployment URL
+railway variables set ... # Update environment variables
 ```
 
-### 2. Create Project and Deploy
+**Important:** When using CLI with a GitHub-linked project, use CLI commands only for management (logs, variables, etc.). Deployments should happen automatically via GitHub push, not `railway up`.
+
+### 6. Generate Public Domain
+
+Railway deployments need a public domain to be accessible:
+
+1. In Railway dashboard, go to your service
+2. Click **Settings** → **Networking**
+3. Under **Public Networking**, click **Generate Domain**
+4. Railway will create a URL like `https://your-app.up.railway.app`
+
+### 7. Verify Deployment
 
 ```bash
-# Initialize new Railway project
-# This will prompt you to name the project and select a team
-railway init
-
-# Set environment variables (see next section for details)
-railway variables set NODE_ENV=production
-railway variables set LOG_LEVEL=INFO
-railway variables set GEMINI_API_KEY=your_key_here
-railway variables set DRIVE_ROOT_FOLDER_ID=your_folder_id
-railway variables set GOOGLE_SERVICE_ACCOUNT_KEY=$(cat service-account.json | base64 | tr -d '\n')
-
-# Deploy
-railway up
-
-# Get deployment URL
-railway domain
-```
-
-### 3. Verify Deployment
-
-```bash
-# Replace with your Railway URL
+# Replace with your Railway URL from step 6
 curl https://your-app.up.railway.app/health
 # Response: {"status":"ok"}
 
@@ -79,11 +132,14 @@ curl https://your-app.up.railway.app/api/status
 # Response: {"status":"ok","version":"2.0.0","environment":"production",...}
 ```
 
-### 4. Configure Custom Domain (Optional)
+### 8. Configure Custom Domain (Optional)
 
-1. In Railway dashboard: Settings → Domains
-2. Add your custom domain
-3. Configure DNS with provided CNAME record
+For a custom domain (e.g., `api.adva.org`):
+
+1. In Railway dashboard: Settings → Networking
+2. Click **Custom Domain**
+3. Enter your domain name
+4. Configure DNS with the provided CNAME record
 
 ---
 
@@ -269,23 +325,35 @@ Or in Railway dashboard: Deployments → [Select deployment] → Logs
 ### Environment Updates
 
 When environment variables change:
+
+**Via Railway Dashboard:**
+1. Go to your service → Variables
+2. Update or add the variable
+3. Railway automatically redeploys
+
+**Via Railway CLI:**
 ```bash
 railway variables set VARIABLE_NAME=new_value
-railway up  # Redeploy
+# Railway automatically redeploys after variable changes
 ```
 
 ### Redeployment
 
-To redeploy current version:
+**Automatic (Recommended):**
+Push to the `main` branch and Railway auto-deploys:
 ```bash
-railway up
+git push origin main
 ```
 
-To deploy specific commit:
-```bash
-git checkout <commit-hash>
-railway up
-```
+**Manual Redeploy:**
+In Railway dashboard:
+- Use Command Palette (⌘K or Ctrl+K)
+- Select "Deploy Latest Commit"
+
+**Deploy Specific Commit:**
+1. In Railway dashboard, go to Deployments
+2. Find the desired deployment
+3. Click "Redeploy"
 
 ---
 
@@ -300,6 +368,7 @@ railway up
 | Gemini API errors | Verify API key is valid. Check quota in AI Studio. |
 | Railway deploy fails | Check build logs. Ensure `npm run build` works locally. |
 | Wrong data extracted | Review Gemini prompts in `src/gemini/prompts.ts`. May need tuning. |
+| Auto-deploy not triggering | Verify Settings → Source shows correct branch and Auto-deploy is enabled. Check GitHub connection in Railway dashboard. |
 
 ### Getting Help
 
@@ -319,17 +388,35 @@ See [DEVELOPMENT.md](DEVELOPMENT.md) for local development setup and contributio
 
 ### For Operators
 
-When updates are pushed to the repository:
+**Automatic Deployment (Default):**
 
-```bash
-# Pull latest changes
-git pull origin main
+The project is configured for automatic deployment from GitHub. When developers push updates to the `main` branch, Railway automatically:
+1. Detects the new commit
+2. Builds the application
+3. Deploys to production
+4. Provides deployment status in the dashboard
 
-# Redeploy to Railway
-railway up
-```
+You don't need to do anything - deployments happen automatically on push.
 
-Railway can also be configured for automatic deployments on git push via GitHub integration.
+**Monitoring Deployments:**
+
+1. **Via Railway Dashboard:**
+   - Go to https://railway.app
+   - Select your project
+   - View Deployments tab for status and logs
+
+2. **Via Railway CLI:**
+   ```bash
+   railway logs          # View live logs
+   railway status        # Check deployment status
+   ```
+
+**Manual Deployment (if needed):**
+
+If you need to manually trigger a deployment:
+1. Open Railway dashboard
+2. Press ⌘K (Mac) or Ctrl+K (Windows/Linux)
+3. Select "Deploy Latest Commit"
 
 ---
 
