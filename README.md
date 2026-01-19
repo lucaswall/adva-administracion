@@ -12,18 +12,21 @@ This server processes Argentine invoices and payment documents using AI, automat
 
 - Scans PDF documents in Google Drive's "Entrada" folder
 - **Real-time monitoring** with Drive push notifications (automatic processing when files are added)
-- Extracts structured data using Gemini AI
-- Writes data to Google Sheets (Control de Cobros, Control de Pagos, Bancos)
+- Extracts structured data using Gemini AI with **direction-aware classification**
+- Writes data to Google Sheets (Control de Creditos, Control de Debitos)
 - Matches payments to invoices automatically
 - Auto-fills bank movement descriptions
-- Sorts processed documents into month folders
+- Sorts processed documents into month folders (Creditos/, Debitos/, Bancos/)
 - Provides REST API for manual triggers and monitoring
 
-### Supported Documents
+### Supported Documents (Direction-Aware)
 
-- **Facturas**: Argentine ARCA invoices (A, B, C, E, NC, ND)
-- **Pagos**: Bank payment slips (BBVA and others)
-- **Recibos**: Employee salary receipts (sueldo, liquidación final)
+- **Facturas Emitidas**: Invoices FROM ADVA (ADVA is emisor) → Creditos
+- **Facturas Recibidas**: Invoices TO ADVA (ADVA is receptor) → Debitos
+- **Pagos Enviados**: Payments BY ADVA (ADVA is ordenante) → Debitos
+- **Pagos Recibidos**: Payments TO ADVA (ADVA is beneficiario) → Creditos
+- **Resumenes Bancarios**: Bank statements → Bancos
+- **Recibos**: Employee salary receipts → Debitos
 
 ---
 
@@ -319,26 +322,24 @@ The server expects this structure in `DRIVE_ROOT_FOLDER_ID`:
 
 ```
 ADVA Root Folder/
-├── Control de Cobros.gsheet       # Collections tracking spreadsheet
-├── Control de Pagos.gsheet        # Payments tracking spreadsheet
+├── Control de Creditos.gsheet     # Money IN tracking (Facturas Emitidas, Pagos Recibidos)
+├── Control de Debitos.gsheet      # Money OUT tracking (Facturas Recibidas, Pagos Enviados, Recibos)
 ├── Entrada/                        # Incoming documents (scan source)
-├── Bancos/                         # Bank movement spreadsheets
-│   ├── Banco BBVA.gsheet
-│   └── ... (other banks)
-├── Cobros/                         # Sorted matched collections
+├── Creditos/                       # Money IN documents (sorted by month)
 │   ├── 01 - Enero/
 │   ├── 02 - Febrero/
-│   └── ... (12 months)
-├── Pagos/                          # Sorted matched payments
+│   └── ... (12 months, auto-created)
+├── Debitos/                        # Money OUT documents (sorted by month)
 │   ├── 01 - Enero/
-│   └── ... (12 months)
+│   └── ... (12 months, auto-created)
+├── Bancos/                         # Bank statements
 └── Sin Procesar/                   # Failed or unmatched documents
 ```
 
 **Notes:**
 - All folders and spreadsheets are created automatically if missing
-- Month subfolders are created on demand
-- Bank spreadsheets in `Bancos/` are auto-discovered
+- Month subfolders in Creditos/ and Debitos/ are created on demand
+- Direction-aware classification routes documents based on ADVA's role (emisor/receptor/ordenante/beneficiario)
 
 ---
 

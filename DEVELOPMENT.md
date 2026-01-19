@@ -115,6 +115,8 @@ npm start      # Run production build
 src/
 ├── server.ts              # Fastify entry point
 ├── config.ts              # Environment-based configuration
+├── constants/
+│   └── spreadsheet-headers.ts # Spreadsheet header definitions
 ├── routes/
 │   ├── status.ts          # GET /health, /api/status
 │   ├── scan.ts            # POST /api/scan, /rematch, /autofill-bank
@@ -123,20 +125,23 @@ src/
 │   ├── google-auth.ts     # Service account authentication
 │   ├── drive.ts           # Drive API wrapper
 │   ├── sheets.ts          # Sheets API wrapper
-│   ├── folder-structure.ts # Folder discovery/caching
-│   └── document-sorter.ts  # Document file movement
+│   ├── folder-structure.ts # Folder discovery/caching (dual spreadsheets)
+│   ├── document-sorter.ts  # Document file movement (Creditos/Debitos routing)
+│   └── watch-manager.ts   # Real-time monitoring
 ├── processing/
-│   └── queue.ts           # p-queue processing
+│   ├── queue.ts           # p-queue processing
+│   └── scanner.ts         # Document scanning and classification
 ├── types/
-│   └── index.ts           # TypeScript interfaces
+│   └── index.ts           # TypeScript interfaces (direction-aware types)
 ├── matching/
 │   └── matcher.ts         # Invoice-payment matching algorithms
 ├── gemini/
 │   ├── client.ts          # Gemini API client (native fetch)
-│   ├── prompts.ts         # Extraction prompts
-│   ├── parser.ts          # Response parsing
+│   ├── prompts.ts         # Direction-aware extraction prompts
+│   ├── parser.ts          # Response parsing (includes ResumenBancario)
 │   └── errors.ts          # Error classification
-├── utils/                 # Pure utilities (date, currency, validation)
+├── utils/                 # Pure utilities (date, currency, validation, file-naming)
+│   └── file-naming.ts     # Standardized document file naming
 └── bank/
     ├── matcher.ts         # Bank movement matching
     └── subdiario-matcher.ts # Subdiario matching
@@ -147,14 +152,15 @@ tests/
 
 ### Module Responsibilities
 
-- **types/**: TypeScript interfaces
-- **gemini/**: PDF to structured data extraction
-- **services/**: Google APIs integration
+- **types/**: TypeScript interfaces (DocumentType with direction awareness)
+- **constants/**: Spreadsheet header definitions (Creditos/Debitos split)
+- **gemini/**: PDF to structured data extraction (direction-aware classification)
+- **services/**: Google APIs integration (dual spreadsheet support)
 - **matching/**: Invoice-payment matching and scoring
 - **bank/**: Bank movements and auto-fill
-- **utils/**: Date, CUIT, currency utilities
+- **utils/**: Date, CUIT, currency, file-naming utilities
 - **routes/**: HTTP endpoint handlers
-- **processing/**: Queue management
+- **processing/**: Queue management and document scanning
 
 ---
 

@@ -126,7 +126,8 @@ src/
 │   ├── prompts.ts         # Extraction prompts
 │   ├── parser.ts          # Response parsing
 │   └── errors.ts          # Error classification
-├── utils/                 # Pure utilities (date, currency, validation, etc.)
+├── utils/                 # Pure utilities (date, currency, validation, file-naming, etc.)
+│   └── file-naming.ts     # Standardized document file naming
 └── bank/
     ├── matcher.ts         # Bank movement matching
     └── subdiario-matcher.ts # Subdiario matching
@@ -190,4 +191,36 @@ POST /webhooks/drive     - Drive push notifications
   - Use fictional names: "TEST SA", "EMPRESA UNO SA", "Juan Pérez"
 
 ## MODULES
-types/:interfaces | constants/:spreadsheet headers | gemini/:PDF→parse | services/:Google APIs | matching/:match+score | bank/:movements+autofill | utils/:date,cuit,currency | routes/:HTTP endpoints | processing/:queue
+types/:interfaces (DocumentType, FacturaEmitida, FacturaRecibida, PagoEnviado, PagoRecibido, ResumenBancario) | constants/:spreadsheet headers (Creditos/Debitos split) | gemini/:PDF→parse (direction-aware classification) | services/:Google APIs | matching/:match+score | bank/:movements+autofill | utils/:date,cuit,currency,file-naming | routes/:HTTP endpoints | processing/:queue
+
+## FEATURES
+
+### Document Classification (Direction-Aware)
+Documents are classified based on money flow direction relative to ADVA (CUIT 30709076783):
+
+**Document Types:**
+- `factura_emitida` - Invoice FROM ADVA (ADVA is emisor) → Creditos
+- `factura_recibida` - Invoice TO ADVA (ADVA is receptor) → Debitos
+- `pago_enviado` - Payment BY ADVA (ADVA is ordenante) → Debitos
+- `pago_recibido` - Payment TO ADVA (ADVA is beneficiario) → Creditos
+- `resumen_bancario` - Bank statement → Bancos
+
+### Folder Structure (Auto-Created)
+```
+DRIVE_ROOT_FOLDER_ID/
+├── Control de Creditos.gsheet  # Money IN tracking
+├── Control de Debitos.gsheet   # Money OUT tracking
+├── Entrada/                     # Incoming documents (scan source)
+├── Creditos/                    # Money IN documents
+│   ├── 01 - Enero/
+│   └── ... (12 months, auto-created)
+├── Debitos/                     # Money OUT documents
+│   ├── 01 - Enero/
+│   └── ... (12 months, auto-created)
+├── Bancos/                      # Bank statements
+└── Sin Procesar/                # Failed/unmatched documents
+```
+
+### Spreadsheet Structure
+- **Control de Creditos**: Facturas Emitidas, Pagos Recibidos
+- **Control de Debitos**: Facturas Recibidas, Pagos Enviados, Recibos
