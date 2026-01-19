@@ -32,6 +32,7 @@ import {
   createFolder,
   moveFile,
   getParents,
+  renameFile,
   clearDriveCache,
 } from '../../../src/services/drive.js';
 
@@ -361,6 +362,52 @@ describe('Drive folder operations', () => {
       if (!result.ok) {
         expect(result.error.message).toBe('Get failed');
       }
+    });
+  });
+
+  describe('renameFile', () => {
+    it('renames a file successfully', async () => {
+      mockDriveFiles.update.mockResolvedValue({
+        data: { id: 'fileId', name: 'new-name.pdf' },
+      });
+
+      const result = await renameFile('fileId', 'new-name.pdf');
+
+      expect(result.ok).toBe(true);
+
+      expect(mockDriveFiles.update).toHaveBeenCalledWith({
+        fileId: 'fileId',
+        requestBody: { name: 'new-name.pdf' },
+        fields: 'id, name',
+        supportsAllDrives: true,
+      });
+    });
+
+    it('returns error on API failure', async () => {
+      mockDriveFiles.update.mockRejectedValue(new Error('Rename failed'));
+
+      const result = await renameFile('fileId', 'new-name.pdf');
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.error.message).toBe('Rename failed');
+      }
+    });
+
+    it('handles special characters in file name', async () => {
+      mockDriveFiles.update.mockResolvedValue({
+        data: { id: 'fileId', name: 'Factura_00001-00001234_20123456786_2024-01-15.pdf' },
+      });
+
+      const result = await renameFile('fileId', 'Factura_00001-00001234_20123456786_2024-01-15.pdf');
+
+      expect(result.ok).toBe(true);
+      expect(mockDriveFiles.update).toHaveBeenCalledWith({
+        fileId: 'fileId',
+        requestBody: { name: 'Factura_00001-00001234_20123456786_2024-01-15.pdf' },
+        fields: 'id, name',
+        supportsAllDrives: true,
+      });
     });
   });
 });

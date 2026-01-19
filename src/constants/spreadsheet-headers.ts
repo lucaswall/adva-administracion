@@ -74,15 +74,44 @@ export const RECIBO_HEADERS = [
   'matchConfidence',
 ];
 
+/** Headers for Resumenes Bancarios sheet */
+export const RESUMEN_BANCARIO_HEADERS = [
+  'fileId',
+  'fileName',
+  'folderPath',
+  'banco',
+  'fechaDesde',
+  'fechaHasta',
+  'saldoInicial',
+  'saldoFinal',
+  'moneda',
+  'cantidadMovimientos',
+  'processedAt',
+  'confidence',
+  'needsReview',
+];
+
 /** Sheet configuration */
 export interface SheetConfig {
   title: string;
   headers: string[];
 }
 
-/** Required sheets for Control de Pagos spreadsheet */
-export const CONTROL_PAGOS_SHEETS: SheetConfig[] = [
-  { title: 'Facturas', headers: FACTURA_HEADERS },
-  { title: 'Pagos', headers: PAGO_HEADERS },
+/**
+ * Required sheets for Control de Creditos spreadsheet
+ * Creditos = money coming IN to ADVA (facturas emitidas, pagos recibidos)
+ */
+export const CONTROL_CREDITOS_SHEETS: SheetConfig[] = [
+  { title: 'Facturas Emitidas', headers: FACTURA_HEADERS },
+  { title: 'Pagos Recibidos', headers: PAGO_HEADERS },
+];
+
+/**
+ * Required sheets for Control de Debitos spreadsheet
+ * Debitos = money going OUT from ADVA (facturas recibidas, pagos enviados, recibos)
+ */
+export const CONTROL_DEBITOS_SHEETS: SheetConfig[] = [
+  { title: 'Facturas Recibidas', headers: FACTURA_HEADERS },
+  { title: 'Pagos Enviados', headers: PAGO_HEADERS },
   { title: 'Recibos', headers: RECIBO_HEADERS },
 ];

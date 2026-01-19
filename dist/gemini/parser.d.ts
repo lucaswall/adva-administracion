@@ -1,7 +1,7 @@
 /**
  * Gemini response parsing and validation
  */
-import type { Factura, Pago, Recibo, ParseResult, Result, ClassificationResult } from '../types/index.js';
+import type { Factura, Pago, Recibo, ResumenBancario, ParseResult, Result, ClassificationResult } from '../types/index.js';
 import { ParseError } from '../types/index.js';
 /**
  * Extracts JSON from a response that might be wrapped in markdown
@@ -31,6 +31,13 @@ export declare function parsePagoResponse(response: string): Result<ParseResult<
  * @returns Parse result with recibo data or error
  */
 export declare function parseReciboResponse(response: string): Result<ParseResult<Partial<Recibo>>, ParseError>;
+/**
+ * Parses a Gemini response for resumen bancario data
+ *
+ * @param response - Raw Gemini response
+ * @returns Parse result with resumen bancario data or error
+ */
+export declare function parseResumenBancarioResponse(response: string): Result<ParseResult<Partial<ResumenBancario>>, ParseError>;
 /**
  * Parses a Gemini response for document classification
  *

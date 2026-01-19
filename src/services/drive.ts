@@ -449,6 +449,36 @@ export async function moveFile(
 }
 
 /**
+ * Renames a file in Google Drive
+ *
+ * @param fileId - File ID to rename
+ * @param newName - New file name
+ * @returns Success or error
+ */
+export async function renameFile(
+  fileId: string,
+  newName: string
+): Promise<Result<void, Error>> {
+  try {
+    const drive = getDriveService();
+
+    await drive.files.update({
+      fileId,
+      requestBody: { name: newName },
+      fields: 'id, name',
+      supportsAllDrives: true,
+    });
+
+    return { ok: true, value: undefined };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error : new Error(String(error)),
+    };
+  }
+}
+
+/**
  * Gets the parent folder IDs of a file
  *
  * @param fileId - File ID to get parents for

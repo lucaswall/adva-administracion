@@ -7,7 +7,7 @@ import { getConfig } from '../config.js';
 import { findByName, listByMimeType, createFolder, createSpreadsheet } from './drive.js';
 import { getSheetMetadata, createSheet, setValues } from './sheets.js';
 import { formatMonthFolder } from '../utils/spanish-date.js';
-import { CONTROL_PAGOS_SHEETS } from '../constants/spreadsheet-headers.js';
+import { CONTROL_CREDITOS_SHEETS, CONTROL_DEBITOS_SHEETS } from '../constants/spreadsheet-headers.js';
 import type { FolderStructure, Result, SortDestination } from '../types/index.js';
 
 /** MIME type for Google Drive folders */
@@ -19,16 +19,16 @@ const SPREADSHEET_MIME = 'application/vnd.google-apps.spreadsheet';
 /** Required folder names */
 const FOLDER_NAMES = {
   entrada: 'Entrada',
-  cobros: 'Cobros',
-  pagos: 'Pagos',
+  creditos: 'Creditos',
+  debitos: 'Debitos',
   sinProcesar: 'Sin Procesar',
   bancos: 'Bancos',
 } as const;
 
 /** Required spreadsheet names */
 const SPREADSHEET_NAMES = {
-  controlCobros: 'Control de Cobros',
-  controlPagos: 'Control de Pagos',
+  controlCreditos: 'Control de Creditos',
+  controlDebitos: 'Control de Debitos',
 } as const;
 
 /** Cached folder structure */
@@ -111,13 +111,17 @@ async function findOrCreateSpreadsheet(
 }
 
 /**
- * Ensures required sheets exist in Control de Pagos spreadsheet
+ * Ensures required sheets exist in a spreadsheet
  * Creates missing sheets with headers
  *
- * @param spreadsheetId - Control de Pagos spreadsheet ID
+ * @param spreadsheetId - Spreadsheet ID
+ * @param sheetConfigs - Array of sheet configurations to ensure exist
  * @returns Success or error
  */
-async function ensureSheetsExist(spreadsheetId: string): Promise<Result<void, Error>> {
+async function ensureSheetsExist(
+  spreadsheetId: string,
+  sheetConfigs: Array<{ title: string; headers: string[] }>
+): Promise<Result<void, Error>> {
   // Get existing sheets
   const metadataResult = await getSheetMetadata(spreadsheetId);
   if (!metadataResult.ok) {
@@ -127,7 +131,7 @@ async function ensureSheetsExist(spreadsheetId: string): Promise<Result<void, Er
   const existingSheets = new Set(metadataResult.value.map(s => s.title));
 
   // Create missing sheets with headers
-  for (const config of CONTROL_PAGOS_SHEETS) {
+  for (const config of sheetConfigs) {
     if (existingSheets.has(config.title)) {
       continue; // Sheet already exists
     }
@@ -166,11 +170,11 @@ export async function discoverFolderStructure(): Promise<Result<FolderStructure,
   const entradaResult = await findOrCreateFolder(rootId, FOLDER_NAMES.entrada);
   if (!entradaResult.ok) return entradaResult;
 
-  const cobrosResult = await findOrCreateFolder(rootId, FOLDER_NAMES.cobros);
-  if (!cobrosResult.ok) return cobrosResult;
+  const creditosResult = await findOrCreateFolder(rootId, FOLDER_NAMES.creditos);
+  if (!creditosResult.ok) return creditosResult;
 
-  const pagosResult = await findOrCreateFolder(rootId, FOLDER_NAMES.pagos);
-  if (!pagosResult.ok) return pagosResult;
+  const debitosResult = await findOrCreateFolder(rootId, FOLDER_NAMES.debitos);
+  if (!debitosResult.ok) return debitosResult;
 
   const sinProcesarResult = await findOrCreateFolder(rootId, FOLDER_NAMES.sinProcesar);
   if (!sinProcesarResult.ok) return sinProcesarResult;
@@ -179,15 +183,18 @@ export async function discoverFolderStructure(): Promise<Result<FolderStructure,
   if (!bancosResult.ok) return bancosResult;
 
   // Find or create control spreadsheets
-  const controlCobrosResult = await findOrCreateSpreadsheet(rootId, SPREADSHEET_NAMES.controlCobros);
-  if (!controlCobrosResult.ok) return controlCobrosResult;
+  const controlCreditosResult = await findOrCreateSpreadsheet(rootId, SPREADSHEET_NAMES.controlCreditos);
+  if (!controlCreditosResult.ok) return controlCreditosResult;
 
-  const controlPagosResult = await findOrCreateSpreadsheet(rootId, SPREADSHEET_NAMES.controlPagos);
-  if (!controlPagosResult.ok) return controlPagosResult;
+  const controlDebitosResult = await findOrCreateSpreadsheet(rootId, SPREADSHEET_NAMES.controlDebitos);
+  if (!controlDebitosResult.ok) return controlDebitosResult;
 
-  // Ensure required sheets exist in Control de Pagos
-  const ensureSheetsResult = await ensureSheetsExist(controlPagosResult.value);
-  if (!ensureSheetsResult.ok) return ensureSheetsResult;
+  // Ensure required sheets exist in both control spreadsheets
+  const ensureCreditosSheetsResult = await ensureSheetsExist(controlCreditosResult.value, CONTROL_CREDITOS_SHEETS);
+  if (!ensureCreditosSheetsResult.ok) return ensureCreditosSheetsResult;
+
+  const ensureDebitosSheetsResult = await ensureSheetsExist(controlDebitosResult.value, CONTROL_DEBITOS_SHEETS);
+  if (!ensureDebitosSheetsResult.ok) return ensureDebitosSheetsResult;
 
   // Discover bank spreadsheets in Bancos folder
   const bankSpreadsheetsResult = await listByMimeType(bancosResult.value, SPREADSHEET_MIME);
@@ -202,12 +209,12 @@ export async function discoverFolderStructure(): Promise<Result<FolderStructure,
   const structure: FolderStructure = {
     rootId,
     entradaId: entradaResult.value,
-    cobrosId: cobrosResult.value,
-    pagosId: pagosResult.value,
+    creditosId: creditosResult.value,
+    debitosId: debitosResult.value,
     sinProcesarId: sinProcesarResult.value,
     bancosId: bancosResult.value,
-    controlCobrosId: controlCobrosResult.value,
-    controlPagosId: controlPagosResult.value,
+    controlCreditosId: controlCreditosResult.value,
+    controlDebitosId: controlDebitosResult.value,
     bankSpreadsheets,
     monthFolders: new Map(),
     lastRefreshed: new Date(),
@@ -220,7 +227,7 @@ export async function discoverFolderStructure(): Promise<Result<FolderStructure,
 /**
  * Gets or creates a month folder for a destination
  *
- * @param destination - Sort destination ('cobros' or 'pagos')
+ * @param destination - Sort destination ('creditos' or 'debitos')
  * @param date - Date to determine the month
  * @returns Folder ID for the month
  */
@@ -235,9 +242,12 @@ export async function getOrCreateMonthFolder(
     };
   }
 
-  // sin_procesar doesn't use month folders
+  // sin_procesar and bancos don't use month folders
   if (destination === 'sin_procesar') {
     return { ok: true, value: cachedStructure.sinProcesarId };
+  }
+  if (destination === 'bancos') {
+    return { ok: true, value: cachedStructure.bancosId };
   }
 
   const monthName = formatMonthFolder(date);
@@ -250,9 +260,9 @@ export async function getOrCreateMonthFolder(
   }
 
   // Determine parent folder
-  const parentId = destination === 'cobros'
-    ? cachedStructure.cobrosId
-    : cachedStructure.pagosId;
+  const parentId = destination === 'creditos'
+    ? cachedStructure.creditosId
+    : cachedStructure.debitosId;
 
   // Try to find existing folder
   const findResult = await findByName(parentId, monthName, FOLDER_MIME);

@@ -35,12 +35,12 @@ describe('DocumentSorter service', () => {
   const mockFolderStructure = {
     rootId: 'root-id',
     entradaId: 'entrada-id',
-    cobrosId: 'cobros-id',
-    pagosId: 'pagos-id',
+    creditosId: 'creditos-id',
+    debitosId: 'debitos-id',
     sinProcesarId: 'sin-procesar-id',
     bancosId: 'bancos-id',
-    controlCobrosId: 'control-cobros-id',
-    controlPagosId: 'control-pagos-id',
+    controlCreditosId: 'control-creditos-id',
+    controlDebitosId: 'control-debitos-id',
     bankSpreadsheets: new Map(),
     monthFolders: new Map(),
     lastRefreshed: new Date(),
@@ -56,7 +56,7 @@ describe('DocumentSorter service', () => {
   });
 
   describe('sortDocument', () => {
-    it('moves factura to cobros month folder', async () => {
+    it('moves factura to creditos month folder', async () => {
       const factura: Factura = {
         fileId: 'file-123',
         fileName: 'factura.pdf',
@@ -82,17 +82,17 @@ describe('DocumentSorter service', () => {
       mockGetOrCreateMonthFolder.mockResolvedValue({ ok: true, value: 'enero-folder-id' });
       mockMoveFile.mockResolvedValue({ ok: true, value: undefined });
 
-      const result = await sortDocument(factura, 'cobros');
+      const result = await sortDocument(factura, 'creditos');
 
       expect(result.success).toBe(true);
       expect(result.targetFolderId).toBe('enero-folder-id');
-      expect(result.targetPath).toBe('Cobros/01 - Enero');
+      expect(result.targetPath).toBe('Creditos/01 - Enero');
 
-      expect(mockGetOrCreateMonthFolder).toHaveBeenCalledWith('cobros', expect.any(Date));
+      expect(mockGetOrCreateMonthFolder).toHaveBeenCalledWith('creditos', expect.any(Date));
       expect(mockMoveFile).toHaveBeenCalledWith('file-123', 'entrada-id', 'enero-folder-id');
     });
 
-    it('moves pago to pagos month folder', async () => {
+    it('moves pago to debitos month folder', async () => {
       const pago: Pago = {
         fileId: 'pago-123',
         fileName: 'pago.pdf',
@@ -109,13 +109,13 @@ describe('DocumentSorter service', () => {
       mockGetOrCreateMonthFolder.mockResolvedValue({ ok: true, value: 'junio-folder-id' });
       mockMoveFile.mockResolvedValue({ ok: true, value: undefined });
 
-      const result = await sortDocument(pago, 'pagos');
+      const result = await sortDocument(pago, 'debitos');
 
       expect(result.success).toBe(true);
       expect(result.targetFolderId).toBe('junio-folder-id');
-      expect(result.targetPath).toBe('Pagos/06 - Junio');
+      expect(result.targetPath).toBe('Debitos/06 - Junio');
 
-      expect(mockGetOrCreateMonthFolder).toHaveBeenCalledWith('pagos', expect.any(Date));
+      expect(mockGetOrCreateMonthFolder).toHaveBeenCalledWith('debitos', expect.any(Date));
       expect(mockMoveFile).toHaveBeenCalledWith('pago-123', 'entrada-id', 'junio-folder-id');
     });
 
@@ -178,7 +178,7 @@ describe('DocumentSorter service', () => {
         needsReview: false,
       };
 
-      const result = await sortDocument(factura, 'cobros');
+      const result = await sortDocument(factura, 'creditos');
 
       expect(result.success).toBe(false);
       expect(result.error).toContain('Folder structure not initialized');
@@ -208,7 +208,7 @@ describe('DocumentSorter service', () => {
         needsReview: false,
       };
 
-      const result = await sortDocument(factura, 'cobros');
+      const result = await sortDocument(factura, 'creditos');
 
       expect(result.success).toBe(false);
       expect(result.error).toBe('Failed to get parents');
@@ -239,7 +239,7 @@ describe('DocumentSorter service', () => {
         needsReview: false,
       };
 
-      const result = await sortDocument(factura, 'cobros');
+      const result = await sortDocument(factura, 'creditos');
 
       expect(result.success).toBe(false);
       expect(result.error).toBe('Folder creation failed');
@@ -271,7 +271,7 @@ describe('DocumentSorter service', () => {
         needsReview: false,
       };
 
-      const result = await sortDocument(factura, 'cobros');
+      const result = await sortDocument(factura, 'creditos');
 
       expect(result.success).toBe(false);
       expect(result.error).toBe('Move failed');
@@ -304,7 +304,7 @@ describe('DocumentSorter service', () => {
       mockGetOrCreateMonthFolder.mockResolvedValue({ ok: true, value: 'enero-folder-id' });
       mockMoveFile.mockResolvedValue({ ok: true, value: undefined });
 
-      const result = await sortDocument(factura, 'cobros');
+      const result = await sortDocument(factura, 'creditos');
 
       expect(result.success).toBe(true);
       // Should use first parent
@@ -335,7 +335,7 @@ describe('DocumentSorter service', () => {
 
       mockGetParents.mockResolvedValue({ ok: true, value: [] });
 
-      const result = await sortDocument(factura, 'cobros');
+      const result = await sortDocument(factura, 'creditos');
 
       expect(result.success).toBe(false);
       expect(result.error).toContain('no parent folder');

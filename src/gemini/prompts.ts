@@ -2,62 +2,115 @@
  * Gemini API prompt templates for document extraction
  */
 
+/** ADVA's CUIT - used for direction detection in prompts */
+const ADVA_CUIT = '30709076783';
+
 /**
  * Prompt for classifying document type before extraction
  * Returns classification to determine which extraction prompt to use
+ *
+ * IMPORTANT: This prompt must classify documents by DIRECTION relative to ADVA:
+ * - Creditos (money IN): factura_emitida, pago_recibido
+ * - Debitos (money OUT): factura_recibida, pago_enviado, recibo
  */
-export const CLASSIFICATION_PROMPT = `Analyze this document and classify it as one of the following types:
+export const CLASSIFICATION_PROMPT = `Analyze this document and classify it as one of the following types.
 
-1. "factura" - Argentine ARCA electronic invoice (Factura Electrónica)
-   Key indicators:
-   - Contains text: "FACTURA" with type code (A, B, C, E)
-   - Has CAE number (14-digit authorization code) with text "CAE" or "CAE N°"
-   - Contains "ARCA", "AFIP", or "Comprobante Autorizado"
-   - Has "Punto de Venta" and "Comp. Nro" or "Número de Comprobante"
-   - Shows multiple tax amounts (Subtotal, IVA, Total)
-   - Contains two CUIT sections (issuer and buyer)
-   - Typically multi-page PDF (larger file)
-   - May show QR code for ARCA verification
+CRITICAL: ADVA (CUIT ${ADVA_CUIT} - "ASOCIACION CIVIL DE DESARROLLADORES") is the organization using this system.
+You MUST determine the DIRECTION of money flow relative to ADVA.
 
-2. "pago" - Bank payment slip/transfer receipt (Comprobante de Pago/Transferencia)
-   Key indicators:
-   - Contains bank names: "BBVA", "Santander", "Galicia", "Macro", etc.
-   - Has text like "Transferencia", "Comprobante de Transferencia", "Transferencias Inmediatas"
-   - Shows "N° de Referencia" or "Número de Operación"
-   - Contains "Datos Ordenante" and "Datos Beneficiario" sections
-   - Shows single "Importe" amount (not multiple tax breakdowns)
-   - May contain CBU/CVU account numbers
-   - Typically single-page PDF (smaller file)
+## Document Types:
 
-3. "recibo" - Salary payment slip (Recibo de Sueldo/Liquidación de Haberes)
+### INVOICES (Facturas) - Look for CAE, ARCA, and CUIT positions
+
+1. "factura_emitida" - Invoice ISSUED BY ADVA (ADVA sells/bills others)
+   ADVA is the ISSUER (emisor) - money flows IN to ADVA
    Key indicators:
-   - Contains text: "RECIBO DE HABERES", "RECIBO DE SUELDO", "LIQUIDACIÓN DE SUELDOS", or "LIQUIDACIÓN FINAL"
+   - CUIT ${ADVA_CUIT} appears at the TOP as the ISSUER
+   - "ASOCIACION CIVIL DE DESARROLLADORES" in the header/issuer section
+   - ADVA's address and business details in the header
+   - Another company/person in the "Razón Social" or client section below
+
+2. "factura_recibida" - Invoice RECEIVED BY ADVA (ADVA is billed by others)
+   ADVA is the RECEPTOR (client) - money flows OUT from ADVA
+   Key indicators:
+   - Another company's CUIT at the TOP as the ISSUER
+   - CUIT ${ADVA_CUIT} or "ASOCIACION CIVIL DE DESARROLLADORES" in the client/receptor section
+   - ADVA appears in "Razón Social", "Cliente", or "Señor/es" section below the header
+
+Common factura indicators (both types):
+- Contains "FACTURA" with type code (A, B, C, E)
+- Has CAE number (14-digit authorization code)
+- Contains "ARCA", "AFIP", or "Comprobante Autorizado"
+- Has "Punto de Venta" and "Comp. Nro"
+- Shows multiple tax amounts (Subtotal, IVA, Total)
+
+### PAYMENTS (Pagos) - Look for Ordenante/Beneficiario sections
+
+3. "pago_enviado" - Payment SENT BY ADVA (ADVA pays others)
+   ADVA is the PAYER (ordenante) - money flows OUT from ADVA
+   Key indicators:
+   - CUIT ${ADVA_CUIT} or "ASOCIACION CIVIL DE DESARROLLADORES" in the "Ordenante" or "Datos del Ordenante" section
+   - Another company/person in the "Beneficiario" or "Destinatario" section
+
+4. "pago_recibido" - Payment RECEIVED BY ADVA (others pay ADVA)
+   ADVA is the BENEFICIARY (beneficiario) - money flows IN to ADVA
+   Key indicators:
+   - Another company/person in the "Ordenante" section
+   - CUIT ${ADVA_CUIT} or "ASOCIACION CIVIL DE DESARROLLADORES" in the "Beneficiario" or "Destinatario" section
+
+Common payment indicators (both types):
+- Contains bank names: "BBVA", "Santander", "Galicia", "Macro", etc.
+- Has "Transferencia", "Comprobante de Transferencia", "Transferencias Inmediatas"
+- Shows "N° de Referencia" or "Número de Operación"
+- Shows single "Importe" amount
+- May contain CBU/CVU account numbers
+
+### BANK STATEMENTS
+
+5. "resumen_bancario" - Bank statement (Resumen/Extracto Bancario)
+   Key indicators:
+   - Contains "Extracto Bancario", "Resumen de Cuenta", "Estado de Cuenta"
+   - Shows a DATE RANGE (período, desde/hasta, fechas)
+   - Has "Saldo Inicial" and "Saldo Final" (opening/closing balance)
+   - Lists multiple transactions/movements
+   - Bank name prominent in header
+   - May show "Total Débitos" and "Total Créditos"
+
+### SALARY RECEIPTS
+
+6. "recibo" - Salary payment slip (Recibo de Sueldo)
+   Money flows OUT from ADVA (ADVA pays employee salaries)
+   Key indicators:
+   - Contains "RECIBO DE HABERES", "RECIBO DE SUELDO", "LIQUIDACIÓN DE SUELDOS"
    - Has "CUIL" (employee tax ID, starts with 20-, 23-, 24-, or 27-)
-   - Shows "Legajo" or "Nº Legajo" or "Legajo N°" (employee number)
-   - Contains sections like "Haberes", "Remuneraciones" and "Descuentos" or "Deducciones"
+   - Shows "Legajo" (employee number)
+   - Contains "Haberes/Remuneraciones" and "Descuentos"
    - Shows "Total Neto" or "Neto a Cobrar"
-   - Has "Período" or "Período Abonado" (payment period like "diciembre/2024", "mayo/2025")
-   - May show employer CUIT at the top with company name
-   - Contains "Tarea Desempeñada" or job title
-   - Typically has employee signature line ("Recibí conforme")
-   - Two copies: one for employer ("Original para el Empleador") and one for employee ("Original para el Empleado")
+   - Has "Período Abonado" (payment period)
+   - CUIT ${ADVA_CUIT} typically at top as employer
 
-4. "unrecognized" - Document is neither a factura, payment slip, nor salary receipt
-   Examples: contracts, reports, images, receipts without bank/ARCA info
+### FALLBACK
+
+7. "unrecognized" - Document does not match any of the above types
+   Examples: contracts, reports, images, receipts without clear structure
+
+## Response Format
 
 Return ONLY valid JSON in this exact format:
 {
-  "documentType": "factura" | "pago" | "recibo" | "unrecognized",
+  "documentType": "factura_emitida" | "factura_recibida" | "pago_enviado" | "pago_recibido" | "resumen_bancario" | "recibo" | "unrecognized",
   "confidence": 0.95,
-  "reason": "Brief explanation of why this classification was chosen",
-  "indicators": ["CAE found", "ARCA logo visible", "Multiple CUIT fields"]
+  "reason": "Brief explanation including who is the emisor/ordenante and who is receptor/beneficiario",
+  "indicators": ["ADVA CUIT in receptor section", "CAE found", "Other company at top"]
 }
 
-Important:
+CRITICAL RULES:
 - Return ONLY the JSON object, no additional text
 - confidence should be 0.0 to 1.0
-- indicators should list 2-5 specific elements found in the document
-- If uncertain between types, use "unrecognized" with lower confidence`;
+- indicators should list 2-5 specific elements found
+- ALWAYS identify ADVA's position (emisor/receptor, ordenante/beneficiario) in your reason
+- If uncertain about direction but document type is clear, use lower confidence
+- If completely uncertain, use "unrecognized"`;
 
 /**
  * Prompt for extracting data from Argentine ARCA facturas
@@ -222,3 +275,46 @@ Important:
   Example: "2.346.822,36" means 2346822.36 (two million)
 - Convert all amounts to standard numeric format
 - For liquidación final documents, still extract the same fields (the totals may include severance pay)`;
+
+/**
+ * Prompt for extracting data from bank statements (resumen/extracto bancario)
+ */
+export const RESUMEN_BANCARIO_PROMPT = `You are analyzing an Argentine bank statement (Resumen/Extracto Bancario). Extract all available data and return it as JSON.
+
+DOCUMENT STRUCTURE:
+Bank statements typically contain:
+1. BANK: The bank issuing the statement
+2. PERIOD: Date range covered by the statement
+3. BALANCES: Opening and closing balances
+4. MOVEMENTS: List of transactions (we only count them, not extract details)
+
+Required fields to extract:
+- banco: Bank name (e.g., "BBVA", "Santander", "Galicia", "Macro", "HSBC", "ICBC", "Banco Nación")
+- fechaDesde: Start date of the statement period (format as YYYY-MM-DD)
+- fechaHasta: End date of the statement period (format as YYYY-MM-DD)
+- saldoInicial: Opening balance at the start of the period (number)
+- saldoFinal: Closing balance at the end of the period (number)
+- moneda: Currency (ARS or USD)
+- cantidadMovimientos: Count of transaction entries in the statement (number)
+
+Return ONLY valid JSON in this exact format:
+{
+  "banco": "BBVA",
+  "fechaDesde": "2024-01-01",
+  "fechaHasta": "2024-01-31",
+  "saldoInicial": 150000.00,
+  "saldoFinal": 185000.00,
+  "moneda": "ARS",
+  "cantidadMovimientos": 47
+}
+
+Important:
+- Return ONLY the JSON object, no additional text
+- If a field is not visible, omit it from the JSON
+- Ensure dates are in YYYY-MM-DD format
+- CRITICAL: Argentine number format uses DOTS (.) as thousand separators and COMMA (,) as decimal separator
+  Example: "2.917.310,00" means 2917310.00
+  Example: "-439.200,00" means -439200.00 (negative balance)
+- Convert all amounts to standard numeric format (remove thousand separators, convert comma to decimal point)
+- Ensure numeric fields are numbers, not strings
+- cantidadMovimientos should be a count of individual transaction rows/lines in the statement`;

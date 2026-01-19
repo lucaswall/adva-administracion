@@ -10,8 +10,9 @@ import type { Factura, Pago, Recibo, SortDestination, SortResult } from '../type
 
 /** Destination folder names for path building */
 const DESTINATION_NAMES: Record<SortDestination, string> = {
-  cobros: 'Cobros',
-  pagos: 'Pagos',
+  creditos: 'Creditos',
+  debitos: 'Debitos',
+  bancos: 'Bancos',
   sin_procesar: 'Sin Procesar',
 };
 
@@ -39,8 +40,8 @@ function getDocumentDate(doc: SortableDocument): Date {
  * Builds a human-readable path for the sort result
  */
 function buildTargetPath(destination: SortDestination, date?: Date): string {
-  if (destination === 'sin_procesar') {
-    return DESTINATION_NAMES.sin_procesar;
+  if (destination === 'sin_procesar' || destination === 'bancos') {
+    return DESTINATION_NAMES[destination];
   }
 
   const monthFolder = date ? formatMonthFolder(date) : '';
@@ -50,8 +51,8 @@ function buildTargetPath(destination: SortDestination, date?: Date): string {
 /**
  * Sorts a document into the appropriate folder based on destination and date
  *
- * @param doc - The document to sort (Factura, Pago, or Recibo)
- * @param destination - Target destination ('cobros', 'pagos', or 'sin_procesar')
+ * @param doc - The document to sort (Factura, Pago, Recibo, or ResumenBancario)
+ * @param destination - Target destination ('creditos', 'debitos', 'bancos', or 'sin_procesar')
  * @returns Sort result with success status and target info
  */
 export async function sortDocument(
@@ -91,7 +92,11 @@ export async function sortDocument(
 
   if (destination === 'sin_procesar') {
     targetFolderId = structure.sinProcesarId;
+  } else if (destination === 'bancos') {
+    // Bank statements go directly to Bancos folder (no month subfolders)
+    targetFolderId = structure.bancosId;
   } else {
+    // Creditos and Debitos use month subfolders
     const monthFolderResult = await getOrCreateMonthFolder(destination, docDate);
     if (!monthFolderResult.ok) {
       return {
@@ -111,10 +116,11 @@ export async function sortDocument(
     };
   }
 
+  const usesMonthFolder = destination !== 'sin_procesar' && destination !== 'bancos';
   return {
     success: true,
     targetFolderId,
-    targetPath: buildTargetPath(destination, destination !== 'sin_procesar' ? docDate : undefined),
+    targetPath: buildTargetPath(destination, usesMonthFolder ? docDate : undefined),
   };
 }
 
