@@ -1,0 +1,20 @@
+{
+  "name": "mcp-gdrive-service-account",
+  "version": "1.0.0",
+  "description": "MCP server for Google Drive with service account auth",
+  "type": "module",
+  "main": "index.ts",
+  "scripts": {
+    "start": "npx tsx index.ts"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.25.2",
+    "dotenv": "^16.5.0",
+    "googleapis": "^144.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.9.3",
+    "tsx": "^4.7.0",
+    "typescript": "^5.6.2"
+  }
+}
