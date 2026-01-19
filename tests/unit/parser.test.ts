@@ -8,6 +8,7 @@ import {
   parseFacturaResponse,
   parsePagoResponse,
   parseReciboResponse,
+  parseResumenBancarioResponse,
   parseClassificationResponse,
   extractJSON
 } from '../../src/gemini/parser';
@@ -204,37 +205,85 @@ describe('parsePagoResponse', () => {
 });
 
 describe('parseClassificationResponse', () => {
-  it('parses valid factura classification', () => {
+  it('parses valid factura_emitida classification', () => {
     const json = JSON.stringify({
-      documentType: 'factura',
+      documentType: 'factura_emitida',
       confidence: 0.95,
-      reason: 'CAE and ARCA text found',
-      indicators: ['CAE number', 'ARCA logo', 'Multiple CUITs']
+      reason: 'CAE and ARCA text found, ADVA is emisor',
+      indicators: ['CAE number', 'ARCA logo', 'ADVA as emisor']
     });
 
     const result = parseClassificationResponse(json);
     expect(result.ok).toBe(true);
     if (result.ok) {
-      expect(result.value.documentType).toBe('factura');
+      expect(result.value.documentType).toBe('factura_emitida');
       expect(result.value.confidence).toBe(0.95);
-      expect(result.value.reason).toBe('CAE and ARCA text found');
+      expect(result.value.reason).toBe('CAE and ARCA text found, ADVA is emisor');
       expect(result.value.indicators.length).toBe(3);
     }
   });
 
-  it('parses valid pago classification', () => {
+  it('parses valid factura_recibida classification', () => {
     const json = JSON.stringify({
-      documentType: 'pago',
-      confidence: 0.88,
-      reason: 'BBVA transfer receipt',
-      indicators: ['BBVA logo', 'Reference number', 'Single amount']
+      documentType: 'factura_recibida',
+      confidence: 0.92,
+      reason: 'CAE and ARCA text found, ADVA is receptor',
+      indicators: ['CAE number', 'ARCA logo', 'ADVA as receptor']
     });
 
     const result = parseClassificationResponse(json);
     expect(result.ok).toBe(true);
     if (result.ok) {
-      expect(result.value.documentType).toBe('pago');
+      expect(result.value.documentType).toBe('factura_recibida');
+      expect(result.value.confidence).toBe(0.92);
+    }
+  });
+
+  it('parses valid pago_enviado classification', () => {
+    const json = JSON.stringify({
+      documentType: 'pago_enviado',
+      confidence: 0.88,
+      reason: 'BBVA transfer receipt, ADVA is ordenante',
+      indicators: ['BBVA logo', 'Reference number', 'ADVA as payer']
+    });
+
+    const result = parseClassificationResponse(json);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.documentType).toBe('pago_enviado');
       expect(result.value.confidence).toBe(0.88);
+    }
+  });
+
+  it('parses valid pago_recibido classification', () => {
+    const json = JSON.stringify({
+      documentType: 'pago_recibido',
+      confidence: 0.85,
+      reason: 'Payment receipt, ADVA is beneficiario',
+      indicators: ['Bank transfer', 'ADVA as beneficiary']
+    });
+
+    const result = parseClassificationResponse(json);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.documentType).toBe('pago_recibido');
+      expect(result.value.confidence).toBe(0.85);
+    }
+  });
+
+  it('parses valid resumen_bancario classification', () => {
+    const json = JSON.stringify({
+      documentType: 'resumen_bancario',
+      confidence: 0.90,
+      reason: 'Bank statement with date range and balances',
+      indicators: ['Date range', 'Opening balance', 'Closing balance']
+    });
+
+    const result = parseClassificationResponse(json);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.documentType).toBe('resumen_bancario');
+      expect(result.value.confidence).toBe(0.90);
     }
   });
 
@@ -255,11 +304,11 @@ describe('parseClassificationResponse', () => {
   });
 
   it('handles markdown-wrapped JSON', () => {
-    const json = '```json\n{"documentType": "factura", "confidence": 0.9, "reason": "Test", "indicators": []}\n```';
+    const json = '```json\n{"documentType": "factura_recibida", "confidence": 0.9, "reason": "Test", "indicators": []}\n```';
     const result = parseClassificationResponse(json);
     expect(result.ok).toBe(true);
     if (result.ok) {
-      expect(result.value.documentType).toBe('factura');
+      expect(result.value.documentType).toBe('factura_recibida');
     }
   });
 
@@ -274,9 +323,31 @@ describe('parseClassificationResponse', () => {
     expect(result.ok).toBe(false);
   });
 
-  it('clamps confidence to valid range', () => {
+  it('returns error for old documentType factura', () => {
     const json = JSON.stringify({
       documentType: 'factura',
+      confidence: 0.5,
+      reason: 'Test',
+      indicators: []
+    });
+    const result = parseClassificationResponse(json);
+    expect(result.ok).toBe(false);
+  });
+
+  it('returns error for old documentType pago', () => {
+    const json = JSON.stringify({
+      documentType: 'pago',
+      confidence: 0.5,
+      reason: 'Test',
+      indicators: []
+    });
+    const result = parseClassificationResponse(json);
+    expect(result.ok).toBe(false);
+  });
+
+  it('clamps confidence to valid range', () => {
+    const json = JSON.stringify({
+      documentType: 'factura_emitida',
       confidence: 1.5, // Out of range
       reason: 'Test',
       indicators: []
@@ -291,7 +362,7 @@ describe('parseClassificationResponse', () => {
 
   it('uses default confidence if not provided', () => {
     const json = JSON.stringify({
-      documentType: 'factura',
+      documentType: 'factura_recibida',
       reason: 'Test',
       indicators: []
     });
@@ -305,7 +376,7 @@ describe('parseClassificationResponse', () => {
 
   it('handles missing optional fields gracefully', () => {
     const json = JSON.stringify({
-      documentType: 'pago',
+      documentType: 'pago_enviado',
       confidence: 0.7
       // Missing reason and indicators
     });
@@ -544,6 +615,188 @@ describe('parseReciboResponse', () => {
       expect(result.value.data.subtotalDescuentos).toBe(0);
       expect(result.value.data.totalNeto).toBe(0);
       expect(result.value.needsReview).toBe(false); // All required fields present
+    }
+  });
+});
+
+describe('parseResumenBancarioResponse', () => {
+  it('parses valid resumen bancario JSON', () => {
+    const json = JSON.stringify({
+      banco: 'BBVA',
+      fechaDesde: '2024-01-01',
+      fechaHasta: '2024-01-31',
+      saldoInicial: 150000,
+      saldoFinal: 185000,
+      moneda: 'ARS',
+      cantidadMovimientos: 47
+    });
+
+    const result = parseResumenBancarioResponse(json);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.data.banco).toBe('BBVA');
+      expect(result.value.data.fechaDesde).toBe('2024-01-01');
+      expect(result.value.data.fechaHasta).toBe('2024-01-31');
+      expect(result.value.data.saldoInicial).toBe(150000);
+      expect(result.value.data.saldoFinal).toBe(185000);
+      expect(result.value.data.moneda).toBe('ARS');
+      expect(result.value.data.cantidadMovimientos).toBe(47);
+      expect(result.value.needsReview).toBe(false);
+      expect(result.value.confidence).toBe(1.0);
+    }
+  });
+
+  it('handles markdown-wrapped JSON', () => {
+    const json = '```json\n{"banco": "Galicia", "fechaDesde": "2024-02-01", "fechaHasta": "2024-02-29", "saldoInicial": 50000, "saldoFinal": 75000, "moneda": "ARS", "cantidadMovimientos": 23}\n```';
+
+    const result = parseResumenBancarioResponse(json);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.data.banco).toBe('Galicia');
+    }
+  });
+
+  it('returns error for invalid JSON', () => {
+    const result = parseResumenBancarioResponse('not json');
+    expect(result.ok).toBe(false);
+  });
+
+  it('marks as needs review when missing required fields', () => {
+    const json = JSON.stringify({
+      banco: 'BBVA',
+      fechaDesde: '2024-01-01'
+      // Missing many required fields
+    });
+
+    const result = parseResumenBancarioResponse(json);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.needsReview).toBe(true);
+      expect(result.value.missingFields!.length).toBe(5); // 5 missing required fields
+    }
+  });
+
+  it('handles negative balances', () => {
+    const json = JSON.stringify({
+      banco: 'Santander',
+      fechaDesde: '2024-03-01',
+      fechaHasta: '2024-03-31',
+      saldoInicial: -50000,
+      saldoFinal: -25000,
+      moneda: 'ARS',
+      cantidadMovimientos: 15
+    });
+
+    const result = parseResumenBancarioResponse(json);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.data.saldoInicial).toBe(-50000);
+      expect(result.value.data.saldoFinal).toBe(-25000);
+    }
+  });
+
+  it('handles USD currency', () => {
+    const json = JSON.stringify({
+      banco: 'HSBC',
+      fechaDesde: '2024-01-01',
+      fechaHasta: '2024-01-31',
+      saldoInicial: 10000,
+      saldoFinal: 12500,
+      moneda: 'USD',
+      cantidadMovimientos: 5
+    });
+
+    const result = parseResumenBancarioResponse(json);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.data.moneda).toBe('USD');
+    }
+  });
+
+  it('handles zero movements', () => {
+    const json = JSON.stringify({
+      banco: 'Macro',
+      fechaDesde: '2024-04-01',
+      fechaHasta: '2024-04-30',
+      saldoInicial: 100000,
+      saldoFinal: 100000,
+      moneda: 'ARS',
+      cantidadMovimientos: 0
+    });
+
+    const result = parseResumenBancarioResponse(json);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.data.cantidadMovimientos).toBe(0);
+      expect(result.value.needsReview).toBe(false);
+    }
+  });
+
+  it('calculates confidence based on completeness', () => {
+    // All 7 required fields present
+    const completeJson = JSON.stringify({
+      banco: 'BBVA',
+      fechaDesde: '2024-01-01',
+      fechaHasta: '2024-01-31',
+      saldoInicial: 150000,
+      saldoFinal: 185000,
+      moneda: 'ARS',
+      cantidadMovimientos: 47
+    });
+
+    const completeResult = parseResumenBancarioResponse(completeJson);
+    expect(completeResult.ok).toBe(true);
+    if (completeResult.ok) {
+      expect(completeResult.value.confidence).toBe(1.0); // 7/7 = 1.0
+    }
+
+    // Only 2 required fields present out of 7
+    const partialJson = JSON.stringify({
+      banco: 'BBVA',
+      fechaDesde: '2024-01-01'
+      // Missing 5 fields
+    });
+
+    const partialResult = parseResumenBancarioResponse(partialJson);
+    expect(partialResult.ok).toBe(true);
+    if (partialResult.ok) {
+      // 2/7 = 0.286, but minimum is 0.5
+      expect(partialResult.value.confidence).toBe(0.5);
+    }
+  });
+
+  it('sets needsReview to false for high confidence (>0.9)', () => {
+    const json = JSON.stringify({
+      banco: 'BBVA',
+      fechaDesde: '2024-01-01',
+      fechaHasta: '2024-01-31',
+      saldoInicial: 150000,
+      saldoFinal: 185000,
+      moneda: 'ARS',
+      cantidadMovimientos: 47
+    });
+
+    const result = parseResumenBancarioResponse(json);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.confidence).toBeGreaterThan(0.9);
+      expect(result.value.needsReview).toBe(false);
+    }
+  });
+
+  it('sets needsReview to true for low confidence (<=0.9)', () => {
+    const json = JSON.stringify({
+      banco: 'BBVA',
+      fechaDesde: '2024-01-01',
+      fechaHasta: '2024-01-31'
+      // Missing 4 fields -> confidence = 3/7 = 0.43, clamped to 0.5
+    });
+
+    const result = parseResumenBancarioResponse(json);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.confidence).toBeLessThanOrEqual(0.9);
+      expect(result.value.needsReview).toBe(true);
     }
   });
 });

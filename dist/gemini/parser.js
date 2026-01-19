@@ -281,6 +281,71 @@ export function parseReciboResponse(response) {
     }
 }
 /**
+ * Parses a Gemini response for resumen bancario data
+ *
+ * @param response - Raw Gemini response
+ * @returns Parse result with resumen bancario data or error
+ */
+export function parseResumenBancarioResponse(response) {
+    try {
+        // Extract JSON
+        const jsonStr = extractJSON(response);
+        if (!jsonStr) {
+            return {
+                ok: false,
+                error: new ParseError('No JSON found in response', response)
+            };
+        }
+        // Parse JSON
+        const data = JSON.parse(jsonStr);
+        // Check for required fields
+        const requiredFields = [
+            'banco',
+            'fechaDesde',
+            'fechaHasta',
+            'saldoInicial',
+            'saldoFinal',
+            'moneda',
+            'cantidadMovimientos'
+        ];
+        // Check for missing or empty fields (empty strings are suspicious)
+        const missingFields = requiredFields.filter(field => {
+            const value = data[field];
+            return value === undefined || value === null || value === '';
+        });
+        // Calculate confidence based on completeness
+        const completeness = (requiredFields.length - missingFields.length) / requiredFields.length;
+        const confidence = Math.max(0.5, completeness);
+        // If confidence > 0.9, no review needed; otherwise check for issues
+        const needsReview = confidence <= 0.9 && missingFields.length > 0;
+        return {
+            ok: true,
+            value: {
+                data,
+                confidence,
+                needsReview,
+                missingFields: missingFields.length > 0 ? missingFields : undefined
+            }
+        };
+    }
+    catch (error) {
+        return {
+            ok: false,
+            error: new ParseError(error instanceof Error ? error.message : 'Unknown parse error', response)
+        };
+    }
+}
+/** Valid document types for classification */
+const VALID_DOCUMENT_TYPES = [
+    'factura_emitida',
+    'factura_recibida',
+    'pago_enviado',
+    'pago_recibido',
+    'resumen_bancario',
+    'recibo',
+    'unrecognized',
+];
+/**
  * Parses a Gemini response for document classification
  *
  * @param response - Raw Gemini response
@@ -297,7 +362,7 @@ export function parseClassificationResponse(response) {
         }
         const data = JSON.parse(jsonStr);
         // Validate required fields
-        if (!data.documentType || !['factura', 'pago', 'recibo', 'unrecognized'].includes(data.documentType)) {
+        if (!data.documentType || !VALID_DOCUMENT_TYPES.includes(data.documentType)) {
             return {
                 ok: false,
                 error: new ParseError('Invalid or missing documentType in classification', response)

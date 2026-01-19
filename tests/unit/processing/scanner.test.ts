@@ -105,12 +105,12 @@ describe('Scanner module', () => {
   const mockFolderStructure = {
     rootId: 'root-id',
     entradaId: 'entrada-id',
-    cobrosId: 'cobros-id',
-    pagosId: 'pagos-id',
+    creditosId: 'creditos-id',
+    debitosId: 'debitos-id',
     sinProcesarId: 'sin-procesar-id',
     bancosId: 'bancos-id',
-    controlCobrosId: 'control-cobros-id',
-    controlPagosId: 'control-pagos-id',
+    controlCreditosId: 'control-creditos-id',
+    controlDebitosId: 'control-debitos-id',
     bankSpreadsheets: new Map(),
     monthFolders: new Map(),
     lastRefreshed: new Date(),
@@ -134,25 +134,25 @@ describe('Scanner module', () => {
       folderPath: '',
     };
 
-    it('processes a factura file successfully', async () => {
+    it('processes a factura_recibida file successfully', async () => {
       // Mock file download
       mockDownloadFile.mockResolvedValue({
         ok: true,
         value: Buffer.from('pdf content'),
       });
 
-      // Mock classification
+      // Mock classification - factura received by ADVA (ADVA is receptor)
       mockAnalyzeDocument.mockResolvedValueOnce({
         ok: true,
-        value: '{"documentType": "factura", "confidence": 0.95, "reason": "ARCA invoice", "indicators": ["CAE", "CUIT"]}',
+        value: '{"documentType": "factura_recibida", "confidence": 0.95, "reason": "ARCA invoice, ADVA is receptor", "indicators": ["CAE", "ADVA CUIT as receptor"]}',
       });
       mockParseClassificationResponse.mockReturnValue({
         ok: true,
         value: {
-          documentType: 'factura',
+          documentType: 'factura_recibida',
           confidence: 0.95,
-          reason: 'ARCA invoice',
-          indicators: ['CAE', 'CUIT'],
+          reason: 'ARCA invoice, ADVA is receptor',
+          indicators: ['CAE', 'ADVA CUIT as receptor'],
         },
       });
 
@@ -190,7 +190,7 @@ describe('Scanner module', () => {
 
       expect(result.ok).toBe(true);
       if (result.ok) {
-        expect(result.value.documentType).toBe('factura');
+        expect(result.value.documentType).toBe('factura_recibida');
         expect(result.value.document).toBeDefined();
         expect((result.value.document as Factura).tipoComprobante).toBe('A');
       }
@@ -199,7 +199,7 @@ describe('Scanner module', () => {
       expect(mockAnalyzeDocument).toHaveBeenCalledTimes(2);
     });
 
-    it('processes a pago file successfully', async () => {
+    it('processes a pago_enviado file successfully', async () => {
       mockDownloadFile.mockResolvedValue({
         ok: true,
         value: Buffer.from('pdf content'),
@@ -207,15 +207,15 @@ describe('Scanner module', () => {
 
       mockAnalyzeDocument.mockResolvedValueOnce({
         ok: true,
-        value: '{"documentType": "pago", ...}',
+        value: '{"documentType": "pago_enviado", ...}',
       });
       mockParseClassificationResponse.mockReturnValue({
         ok: true,
         value: {
-          documentType: 'pago',
+          documentType: 'pago_enviado',
           confidence: 0.9,
-          reason: 'Bank payment slip',
-          indicators: ['BBVA', 'Transferencia'],
+          reason: 'Bank payment slip, ADVA is ordenante',
+          indicators: ['BBVA', 'Transferencia', 'ADVA as payer'],
         },
       });
 
@@ -242,7 +242,7 @@ describe('Scanner module', () => {
 
       expect(result.ok).toBe(true);
       if (result.ok) {
-        expect(result.value.documentType).toBe('pago');
+        expect(result.value.documentType).toBe('pago_enviado');
         expect((result.value.document as Pago).banco).toBe('BBVA');
       }
     });
@@ -418,7 +418,7 @@ describe('Scanner module', () => {
       mockAnalyzeDocument
         .mockResolvedValueOnce({
           ok: true,
-          value: '{"documentType": "factura", ...}',
+          value: '{"documentType": "factura_recibida", ...}',
         })
         .mockResolvedValueOnce({
           ok: true,
@@ -426,7 +426,7 @@ describe('Scanner module', () => {
         });
       mockParseClassificationResponse.mockReturnValueOnce({
         ok: true,
-        value: { documentType: 'factura', confidence: 0.95, reason: '', indicators: [] },
+        value: { documentType: 'factura_recibida', confidence: 0.95, reason: '', indicators: [] },
       });
       mockParseFacturaResponse.mockReturnValueOnce({
         ok: true,
@@ -454,7 +454,7 @@ describe('Scanner module', () => {
       mockAnalyzeDocument
         .mockResolvedValueOnce({
           ok: true,
-          value: '{"documentType": "pago", ...}',
+          value: '{"documentType": "pago_enviado", ...}',
         })
         .mockResolvedValueOnce({
           ok: true,
@@ -462,7 +462,7 @@ describe('Scanner module', () => {
         });
       mockParseClassificationResponse.mockReturnValueOnce({
         ok: true,
-        value: { documentType: 'pago', confidence: 0.9, reason: '', indicators: [] },
+        value: { documentType: 'pago_enviado', confidence: 0.9, reason: '', indicators: [] },
       });
       mockParsePagoResponse.mockReturnValueOnce({
         ok: true,
@@ -538,7 +538,7 @@ describe('Scanner module', () => {
       mockAnalyzeDocument
         .mockResolvedValueOnce({
           ok: true,
-          value: '{"documentType": "factura", ...}',
+          value: '{"documentType": "factura_recibida", ...}',
         })
         .mockResolvedValueOnce({
           ok: true,
@@ -546,7 +546,7 @@ describe('Scanner module', () => {
         });
       mockParseClassificationResponse.mockReturnValueOnce({
         ok: true,
-        value: { documentType: 'factura', confidence: 0.95, reason: '', indicators: [] },
+        value: { documentType: 'factura_recibida', confidence: 0.95, reason: '', indicators: [] },
       });
       mockParseFacturaResponse.mockReturnValueOnce({
         ok: true,
@@ -642,11 +642,11 @@ describe('Scanner module', () => {
         .mockResolvedValueOnce({ ok: false, error: new Error('Download failed') });
 
       mockAnalyzeDocument
-        .mockResolvedValueOnce({ ok: true, value: '{"documentType": "factura"}' })
+        .mockResolvedValueOnce({ ok: true, value: '{"documentType": "factura_recibida"}' })
         .mockResolvedValueOnce({ ok: true, value: '{}' });
       mockParseClassificationResponse.mockReturnValueOnce({
         ok: true,
-        value: { documentType: 'factura', confidence: 0.9, reason: '', indicators: [] },
+        value: { documentType: 'factura_recibida', confidence: 0.9, reason: '', indicators: [] },
       });
       mockParseFacturaResponse.mockReturnValueOnce({
         ok: true,

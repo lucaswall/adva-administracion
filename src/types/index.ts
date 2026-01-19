@@ -18,8 +18,24 @@ export type LogLevel = 'DEBUG' | 'INFO' | 'WARN' | 'ERROR';
 
 /**
  * Document types that can be processed
+ *
+ * Extended classification (Phase 4):
+ * - factura_emitida: Invoice FROM ADVA (ADVA is emisor) → goes to Creditos
+ * - factura_recibida: Invoice TO ADVA (ADVA is receptor) → goes to Debitos
+ * - pago_enviado: Payment BY ADVA → goes to Debitos
+ * - pago_recibido: Payment TO ADVA → goes to Creditos
+ * - resumen_bancario: Bank statement → goes to Bancos
+ * - recibo: Salary receipt → goes to Debitos
  */
-export type DocumentType = 'factura' | 'pago' | 'recibo' | 'unrecognized' | 'unknown';
+export type DocumentType =
+  | 'factura_emitida'    // Invoice FROM ADVA (ADVA is emisor)
+  | 'factura_recibida'   // Invoice TO ADVA (ADVA is receptor)
+  | 'pago_enviado'       // Payment BY ADVA
+  | 'pago_recibido'      // Payment TO ADVA
+  | 'resumen_bancario'   // Bank statement
+  | 'recibo'             // Salary receipt
+  | 'unrecognized'
+  | 'unknown';
 
 /**
  * Processing status for files
@@ -228,6 +244,50 @@ export interface Recibo {
 }
 
 /**
+ * Bank Statement (Resumen Bancario)
+ * Represents a monthly bank statement document
+ */
+export interface ResumenBancario {
+  // File tracking
+  /** Google Drive file ID */
+  fileId: string;
+  /** Original filename */
+  fileName: string;
+  /** Relative folder path where file was found */
+  folderPath: string;
+
+  // Bank info
+  /** Bank name (e.g., "BBVA", "Santander", "Galicia") */
+  banco: string;
+
+  // Period
+  /** Statement start date (ISO format: YYYY-MM-DD) */
+  fechaDesde: string;
+  /** Statement end date (ISO format: YYYY-MM-DD) */
+  fechaHasta: string;
+
+  // Balances
+  /** Opening balance at start of period */
+  saldoInicial: number;
+  /** Closing balance at end of period */
+  saldoFinal: number;
+  /** Currency */
+  moneda: Moneda;
+
+  // Summary
+  /** Number of movements in the period */
+  cantidadMovimientos: number;
+
+  // Processing metadata
+  /** When this record was processed (ISO timestamp) */
+  processedAt: string;
+  /** Extraction confidence (0.0 to 1.0) */
+  confidence: number;
+  /** Whether manual review is needed */
+  needsReview: boolean;
+}
+
+/**
  * Processed file tracking record
  */
 export interface ProcessedFile {
@@ -325,10 +385,23 @@ export interface ParseResult<T> {
 
 /**
  * Classification result from Gemini
+ *
+ * Extended classification (Phase 4) now includes direction:
+ * - factura_emitida/factura_recibida: Invoice direction based on ADVA CUIT position
+ * - pago_enviado/pago_recibido: Payment direction based on payer/beneficiary
+ * - resumen_bancario: Bank statement
+ * - recibo: Salary receipt (unchanged)
  */
 export interface ClassificationResult {
-  /** Detected document type */
-  documentType: 'factura' | 'pago' | 'recibo' | 'unrecognized';
+  /** Detected document type with direction */
+  documentType:
+    | 'factura_emitida'
+    | 'factura_recibida'
+    | 'pago_enviado'
+    | 'pago_recibido'
+    | 'resumen_bancario'
+    | 'recibo'
+    | 'unrecognized';
   /** Classification confidence (0.0 to 1.0) */
   confidence: number;
   /** Brief reason for classification */
@@ -640,33 +713,43 @@ export interface SubdiarioMatchResult {
 
 /**
  * Sort destination types for document sorting
+ *
+ * Renamed from Cobros/Pagos to Creditos/Debitos (Phase 5):
+ * - creditos: Money coming IN to ADVA (facturas emitidas, pagos recibidos)
+ * - debitos: Money going OUT from ADVA (facturas recibidas, pagos enviados, recibos)
+ * - bancos: Bank statements (resumenes bancarios)
+ * - sin_procesar: Unprocessed/unrecognized documents
  */
-export type SortDestination = 'cobros' | 'pagos' | 'sin_procesar';
+export type SortDestination = 'creditos' | 'debitos' | 'bancos' | 'sin_procesar';
 
 /**
  * Cached folder structure for Drive operations
  * Represents the discovered folder hierarchy
+ *
+ * Renamed from Cobros/Pagos to Creditos/Debitos (Phase 5):
+ * - Creditos: Money coming IN to ADVA
+ * - Debitos: Money going OUT from ADVA
  */
 export interface FolderStructure {
   /** Root folder ID */
   rootId: string;
   /** Entrada (incoming) folder ID */
   entradaId: string;
-  /** Cobros (collections) folder ID */
-  cobrosId: string;
-  /** Pagos (payments) folder ID */
-  pagosId: string;
+  /** Creditos (credits/income) folder ID - formerly Cobros */
+  creditosId: string;
+  /** Debitos (debits/expenses) folder ID - formerly Pagos */
+  debitosId: string;
   /** Sin Procesar (unprocessed) folder ID */
   sinProcesarId: string;
   /** Bancos (banks) folder ID */
   bancosId: string;
-  /** Control de Cobros spreadsheet ID */
-  controlCobrosId: string;
-  /** Control de Pagos spreadsheet ID */
-  controlPagosId: string;
+  /** Control de Creditos spreadsheet ID - formerly Control de Cobros */
+  controlCreditosId: string;
+  /** Control de Debitos spreadsheet ID - formerly Control de Pagos */
+  controlDebitosId: string;
   /** Map of bank spreadsheet names to IDs */
   bankSpreadsheets: Map<string, string>;
-  /** Cache of month folders by destination and month key (e.g., "cobros:2024-01") */
+  /** Cache of month folders by destination and month key (e.g., "creditos:2024-01") */
   monthFolders: Map<string, string>;
   /** When the structure was last refreshed */
   lastRefreshed: Date;

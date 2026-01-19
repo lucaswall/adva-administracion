@@ -96,6 +96,14 @@ export declare function createFolder(parentId: string, name: string): Promise<Re
  */
 export declare function moveFile(fileId: string, fromFolderId: string, toFolderId: string): Promise<Result<void, Error>>;
 /**
+ * Renames a file in Google Drive
+ *
+ * @param fileId - File ID to rename
+ * @param newName - New file name
+ * @returns Success or error
+ */
+export declare function renameFile(fileId: string, newName: string): Promise<Result<void, Error>>;
+/**
  * Gets the parent folder IDs of a file
  *
  * @param fileId - File ID to get parents for

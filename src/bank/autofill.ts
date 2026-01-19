@@ -173,20 +173,37 @@ export async function autoFillBankMovements(
 
   const config = getConfig();
   const matcher = new BankMovementMatcher(config.usdArsTolerancePercent);
-  const controlPagosId = folderStructure.controlPagosId;
+  const controlCreditosId = folderStructure.controlCreditosId;
+  const controlDebitosId = folderStructure.controlDebitosId;
 
-  // Get all document data
-  const facturasResult = await getValues(controlPagosId, 'Facturas!A:W');
-  if (!facturasResult.ok) return facturasResult;
+  // Get all document data from both control spreadsheets
+  // Control de Creditos: Facturas Emitidas (issued by ADVA), Pagos Recibidos (received by ADVA)
+  // Control de Debitos: Facturas Recibidas (received by ADVA), Pagos Enviados (sent by ADVA), Recibos
+  const facturasEmitidasResult = await getValues(controlCreditosId, 'Facturas Emitidas!A:W');
+  if (!facturasEmitidasResult.ok) return facturasEmitidasResult;
 
-  const pagosResult = await getValues(controlPagosId, 'Pagos!A:Q');
-  if (!pagosResult.ok) return pagosResult;
+  const facturasRecibidasResult = await getValues(controlDebitosId, 'Facturas Recibidas!A:W');
+  if (!facturasRecibidasResult.ok) return facturasRecibidasResult;
 
-  const recibosResult = await getValues(controlPagosId, 'Recibos!A:S');
+  const pagosRecibidosResult = await getValues(controlCreditosId, 'Pagos Recibidos!A:Q');
+  if (!pagosRecibidosResult.ok) return pagosRecibidosResult;
+
+  const pagosEnviadosResult = await getValues(controlDebitosId, 'Pagos Enviados!A:Q');
+  if (!pagosEnviadosResult.ok) return pagosEnviadosResult;
+
+  const recibosResult = await getValues(controlDebitosId, 'Recibos!A:S');
   if (!recibosResult.ok) return recibosResult;
 
-  const facturas = parseFacturas(facturasResult.value);
-  const pagos = parsePagos(pagosResult.value);
+  // Combine facturas from both spreadsheets for matching
+  const facturasEmitidas = parseFacturas(facturasEmitidasResult.value);
+  const facturasRecibidas = parseFacturas(facturasRecibidasResult.value);
+  const facturas = [...facturasEmitidas, ...facturasRecibidas];
+
+  // Combine pagos from both spreadsheets for matching
+  const pagosRecibidos = parsePagos(pagosRecibidosResult.value);
+  const pagosEnviados = parsePagos(pagosEnviadosResult.value);
+  const pagos = [...pagosRecibidos, ...pagosEnviados];
+
   const recibos = parseRecibos(recibosResult.value);
 
   const result: BankAutoFillResult = {

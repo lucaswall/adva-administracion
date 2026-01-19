@@ -121,15 +121,26 @@ export async function processFile(
   // Step 2: Extract data based on document type
   let extractPrompt: string;
   switch (classification.documentType) {
-    case 'factura':
+    case 'factura_emitida':
+    case 'factura_recibida':
       extractPrompt = FACTURA_PROMPT;
       break;
-    case 'pago':
+    case 'pago_enviado':
+    case 'pago_recibido':
       extractPrompt = PAGO_BBVA_PROMPT;
       break;
     case 'recibo':
       extractPrompt = RECIBO_PROMPT;
       break;
+    case 'resumen_bancario':
+      // TODO: Add RESUMEN_BANCARIO_PROMPT extraction in Phase 4
+      return {
+        ok: true,
+        value: {
+          documentType: 'resumen_bancario',
+          classification,
+        },
+      };
     default:
       return {
         ok: true,
@@ -156,7 +167,7 @@ export async function processFile(
   // Step 3: Parse the extraction result
   const now = new Date().toISOString();
 
-  if (classification.documentType === 'factura') {
+  if (classification.documentType === 'factura_emitida' || classification.documentType === 'factura_recibida') {
     const parseResult = parseFacturaResponse(extractResult.value);
     if (!parseResult.ok) {
       return { ok: false, error: parseResult.error };
@@ -188,14 +199,14 @@ export async function processFile(
     return {
       ok: true,
       value: {
-        documentType: 'factura',
+        documentType: classification.documentType,
         document: factura,
         classification,
       },
     };
   }
 
-  if (classification.documentType === 'pago') {
+  if (classification.documentType === 'pago_enviado' || classification.documentType === 'pago_recibido') {
     const parseResult = parsePagoResponse(extractResult.value);
     if (!parseResult.ok) {
       return { ok: false, error: parseResult.error };
@@ -222,7 +233,7 @@ export async function processFile(
     return {
       ok: true,
       value: {
-        documentType: 'pago',
+        documentType: classification.documentType,
         document: pago,
         classification,
       },
@@ -275,9 +286,13 @@ export async function processFile(
 }
 
 /**
- * Stores a factura in the Control de Pagos sheet
+ * Stores a factura in the appropriate Control spreadsheet
+ *
+ * @param factura - The factura to store
+ * @param spreadsheetId - The spreadsheet ID (Control de Creditos or Control de Debitos)
+ * @param sheetName - The sheet name ('Facturas Emitidas' or 'Facturas Recibidas')
  */
-async function storeFactura(factura: Factura, spreadsheetId: string): Promise<Result<void, Error>> {
+async function storeFactura(factura: Factura, spreadsheetId: string, sheetName: string): Promise<Result<void, Error>> {
   const row = [
     factura.fileId,
     factura.fileName,
@@ -304,7 +319,7 @@ async function storeFactura(factura: Factura, spreadsheetId: string): Promise<Re
     factura.hasCuitMatch ? 'YES' : 'NO',
   ];
 
-  const result = await appendRows(spreadsheetId, 'Facturas!A:W', [row]);
+  const result = await appendRows(spreadsheetId, `${sheetName}!A:W`, [row]);
   if (!result.ok) {
     return result;
   }
@@ -313,9 +328,13 @@ async function storeFactura(factura: Factura, spreadsheetId: string): Promise<Re
 }
 
 /**
- * Stores a pago in the Control de Pagos sheet
+ * Stores a pago in the appropriate Control spreadsheet
+ *
+ * @param pago - The pago to store
+ * @param spreadsheetId - The spreadsheet ID (Control de Creditos or Control de Debitos)
+ * @param sheetName - The sheet name ('Pagos Recibidos' or 'Pagos Enviados')
  */
-async function storePago(pago: Pago, spreadsheetId: string): Promise<Result<void, Error>> {
+async function storePago(pago: Pago, spreadsheetId: string, sheetName: string): Promise<Result<void, Error>> {
   const row = [
     pago.fileId,
     pago.fileName,
@@ -336,7 +355,7 @@ async function storePago(pago: Pago, spreadsheetId: string): Promise<Result<void
     pago.matchConfidence || '',
   ];
 
-  const result = await appendRows(spreadsheetId, 'Pagos!A:Q', [row]);
+  const result = await appendRows(spreadsheetId, `${sheetName}!A:Q`, [row]);
   if (!result.ok) {
     return result;
   }
@@ -345,7 +364,7 @@ async function storePago(pago: Pago, spreadsheetId: string): Promise<Result<void
 }
 
 /**
- * Stores a recibo in the Control de Pagos sheet
+ * Stores a recibo in the Control de Debitos spreadsheet
  */
 async function storeRecibo(recibo: Recibo, spreadsheetId: string): Promise<Result<void, Error>> {
   const row = [
@@ -379,43 +398,40 @@ async function storeRecibo(recibo: Recibo, spreadsheetId: string): Promise<Resul
 }
 
 /**
- * Gets list of already processed file IDs
+ * Gets list of already processed file IDs from both control spreadsheets
+ *
+ * @param controlCreditosId - Control de Creditos spreadsheet ID
+ * @param controlDebitosId - Control de Debitos spreadsheet ID
  */
-async function getProcessedFileIds(spreadsheetId: string): Promise<Set<string>> {
+async function getProcessedFileIds(
+  controlCreditosId: string,
+  controlDebitosId: string
+): Promise<Set<string>> {
   const processedIds = new Set<string>();
 
-  // Get facturas
-  const facturas = await getValues(spreadsheetId, 'Facturas!A:A');
-  if (facturas.ok && facturas.value.length > 1) {
-    for (let i = 1; i < facturas.value.length; i++) {
-      const row = facturas.value[i];
-      if (row && row[0]) {
-        processedIds.add(String(row[0]));
+  /**
+   * Helper to extract file IDs from a sheet's first column
+   */
+  const extractFileIds = async (spreadsheetId: string, sheetName: string) => {
+    const result = await getValues(spreadsheetId, `${sheetName}!A:A`);
+    if (result.ok && result.value.length > 1) {
+      for (let i = 1; i < result.value.length; i++) {
+        const row = result.value[i];
+        if (row && row[0]) {
+          processedIds.add(String(row[0]));
+        }
       }
     }
-  }
+  };
 
-  // Get pagos
-  const pagos = await getValues(spreadsheetId, 'Pagos!A:A');
-  if (pagos.ok && pagos.value.length > 1) {
-    for (let i = 1; i < pagos.value.length; i++) {
-      const row = pagos.value[i];
-      if (row && row[0]) {
-        processedIds.add(String(row[0]));
-      }
-    }
-  }
+  // Get from Control de Creditos
+  await extractFileIds(controlCreditosId, 'Facturas Emitidas');
+  await extractFileIds(controlCreditosId, 'Pagos Recibidos');
 
-  // Get recibos
-  const recibos = await getValues(spreadsheetId, 'Recibos!A:A');
-  if (recibos.ok && recibos.value.length > 1) {
-    for (let i = 1; i < recibos.value.length; i++) {
-      const row = recibos.value[i];
-      if (row && row[0]) {
-        processedIds.add(String(row[0]));
-      }
-    }
-  }
+  // Get from Control de Debitos
+  await extractFileIds(controlDebitosId, 'Facturas Recibidas');
+  await extractFileIds(controlDebitosId, 'Pagos Enviados');
+  await extractFileIds(controlDebitosId, 'Recibos');
 
   return processedIds;
 }
@@ -442,10 +458,12 @@ export async function scanFolder(folderId?: string): Promise<Result<ScanResult, 
   }
 
   const targetFolderId = folderId || folderStructure.entradaId;
-  const spreadsheetId = folderStructure.controlPagosId;
+  const controlCreditosId = folderStructure.controlCreditosId;
+  const controlDebitosId = folderStructure.controlDebitosId;
 
   console.log(`Scanning folder: ${targetFolderId}`);
-  console.log(`Using spreadsheet: ${spreadsheetId}`);
+  console.log(`Using Control de Creditos: ${controlCreditosId}`);
+  console.log(`Using Control de Debitos: ${controlDebitosId}`);
 
   // List files in folder
   const listResult = await listFilesInFolder(targetFolderId, '');
@@ -457,8 +475,8 @@ export async function scanFolder(folderId?: string): Promise<Result<ScanResult, 
   const allFiles = listResult.value;
   console.log(`Found ${allFiles.length} total files in folder`);
 
-  // Get already processed file IDs
-  const processedIds = await getProcessedFileIds(spreadsheetId);
+  // Get already processed file IDs from both spreadsheets
+  const processedIds = await getProcessedFileIds(controlCreditosId, controlDebitosId);
   console.log(`${processedIds.size} files already processed`);
 
   // Filter to only new files
@@ -517,18 +535,21 @@ export async function scanFolder(folderId?: string): Promise<Result<ScanResult, 
       const doc = processed.document;
       if (!doc) return;
 
-      // Store in appropriate sheet
-      if (processed.documentType === 'factura') {
-        console.log(`Storing factura from ${fileInfo.name} in spreadsheet`);
-        const storeResult = await storeFactura(doc as Factura, spreadsheetId);
+      // Store in appropriate sheet based on document type
+      // Creditos (money IN): factura_emitida, pago_recibido -> Control de Creditos -> Creditos folder
+      // Debitos (money OUT): factura_recibida, pago_enviado, recibo -> Control de Debitos -> Debitos folder
+
+      if (processed.documentType === 'factura_emitida') {
+        // Factura issued BY ADVA -> goes to Control de Creditos
+        console.log(`Storing factura emitida from ${fileInfo.name} in Control de Creditos`);
+        const storeResult = await storeFactura(doc as Factura, controlCreditosId, 'Facturas Emitidas');
         if (storeResult.ok) {
           result.facturasAdded++;
-          processedDocs.push({ type: 'factura', doc });
-          console.log(`Factura stored successfully, moving to Cobros folder`);
-          // Sort to Cobros folder
-          const sortResult = await sortDocument(doc, 'cobros');
+          processedDocs.push({ type: 'factura_emitida', doc });
+          console.log(`Factura emitida stored successfully, moving to Creditos folder`);
+          const sortResult = await sortDocument(doc, 'creditos');
           if (!sortResult.success) {
-            console.error(`Failed to move factura ${fileInfo.name} to Cobros:`, sortResult.error);
+            console.error(`Failed to move factura ${fileInfo.name} to Creditos:`, sortResult.error);
             result.errors++;
           } else {
             console.log(`Moved factura ${fileInfo.name} to ${sortResult.targetPath}`);
@@ -537,17 +558,55 @@ export async function scanFolder(folderId?: string): Promise<Result<ScanResult, 
           console.error(`Failed to store factura ${fileInfo.name}:`, storeResult.error.message);
           result.errors++;
         }
-      } else if (processed.documentType === 'pago') {
-        console.log(`Storing pago from ${fileInfo.name} in spreadsheet`);
-        const storeResult = await storePago(doc as Pago, spreadsheetId);
+      } else if (processed.documentType === 'factura_recibida') {
+        // Factura received BY ADVA -> goes to Control de Debitos
+        console.log(`Storing factura recibida from ${fileInfo.name} in Control de Debitos`);
+        const storeResult = await storeFactura(doc as Factura, controlDebitosId, 'Facturas Recibidas');
+        if (storeResult.ok) {
+          result.facturasAdded++;
+          processedDocs.push({ type: 'factura_recibida', doc });
+          console.log(`Factura recibida stored successfully, moving to Debitos folder`);
+          const sortResult = await sortDocument(doc, 'debitos');
+          if (!sortResult.success) {
+            console.error(`Failed to move factura ${fileInfo.name} to Debitos:`, sortResult.error);
+            result.errors++;
+          } else {
+            console.log(`Moved factura ${fileInfo.name} to ${sortResult.targetPath}`);
+          }
+        } else {
+          console.error(`Failed to store factura ${fileInfo.name}:`, storeResult.error.message);
+          result.errors++;
+        }
+      } else if (processed.documentType === 'pago_recibido') {
+        // Payment received BY ADVA -> goes to Control de Creditos
+        console.log(`Storing pago recibido from ${fileInfo.name} in Control de Creditos`);
+        const storeResult = await storePago(doc as Pago, controlCreditosId, 'Pagos Recibidos');
         if (storeResult.ok) {
           result.pagosAdded++;
-          processedDocs.push({ type: 'pago', doc });
-          console.log(`Pago stored successfully, moving to Pagos folder`);
-          // Sort to Pagos folder
-          const sortResult = await sortDocument(doc, 'pagos');
+          processedDocs.push({ type: 'pago_recibido', doc });
+          console.log(`Pago recibido stored successfully, moving to Creditos folder`);
+          const sortResult = await sortDocument(doc, 'creditos');
           if (!sortResult.success) {
-            console.error(`Failed to move pago ${fileInfo.name} to Pagos:`, sortResult.error);
+            console.error(`Failed to move pago ${fileInfo.name} to Creditos:`, sortResult.error);
+            result.errors++;
+          } else {
+            console.log(`Moved pago ${fileInfo.name} to ${sortResult.targetPath}`);
+          }
+        } else {
+          console.error(`Failed to store pago ${fileInfo.name}:`, storeResult.error.message);
+          result.errors++;
+        }
+      } else if (processed.documentType === 'pago_enviado') {
+        // Payment sent BY ADVA -> goes to Control de Debitos
+        console.log(`Storing pago enviado from ${fileInfo.name} in Control de Debitos`);
+        const storeResult = await storePago(doc as Pago, controlDebitosId, 'Pagos Enviados');
+        if (storeResult.ok) {
+          result.pagosAdded++;
+          processedDocs.push({ type: 'pago_enviado', doc });
+          console.log(`Pago enviado stored successfully, moving to Debitos folder`);
+          const sortResult = await sortDocument(doc, 'debitos');
+          if (!sortResult.success) {
+            console.error(`Failed to move pago ${fileInfo.name} to Debitos:`, sortResult.error);
             result.errors++;
           } else {
             console.log(`Moved pago ${fileInfo.name} to ${sortResult.targetPath}`);
@@ -557,16 +616,16 @@ export async function scanFolder(folderId?: string): Promise<Result<ScanResult, 
           result.errors++;
         }
       } else if (processed.documentType === 'recibo') {
-        console.log(`Storing recibo from ${fileInfo.name} in spreadsheet`);
-        const storeResult = await storeRecibo(doc as Recibo, spreadsheetId);
+        // Salary receipt -> goes to Control de Debitos
+        console.log(`Storing recibo from ${fileInfo.name} in Control de Debitos`);
+        const storeResult = await storeRecibo(doc as Recibo, controlDebitosId);
         if (storeResult.ok) {
           result.recibosAdded++;
           processedDocs.push({ type: 'recibo', doc });
-          console.log(`Recibo stored successfully, moving to Pagos folder`);
-          // Sort to Pagos folder (recibos are salary payments)
-          const sortResult = await sortDocument(doc, 'pagos');
+          console.log(`Recibo stored successfully, moving to Debitos folder`);
+          const sortResult = await sortDocument(doc, 'debitos');
           if (!sortResult.success) {
-            console.error(`Failed to move recibo ${fileInfo.name} to Pagos:`, sortResult.error);
+            console.error(`Failed to move recibo ${fileInfo.name} to Debitos:`, sortResult.error);
             result.errors++;
           } else {
             console.log(`Moved recibo ${fileInfo.name} to ${sortResult.targetPath}`);
@@ -574,6 +633,16 @@ export async function scanFolder(folderId?: string): Promise<Result<ScanResult, 
         } else {
           console.error(`Failed to store recibo ${fileInfo.name}:`, storeResult.error.message);
           result.errors++;
+        }
+      } else if (processed.documentType === 'resumen_bancario') {
+        // Bank statement -> goes to Bancos folder (TODO: store in bank spreadsheet)
+        console.log(`Moving resumen bancario ${fileInfo.name} to Bancos folder`);
+        const sortResult = await sortDocument(doc, 'bancos');
+        if (!sortResult.success) {
+          console.error(`Failed to move resumen ${fileInfo.name} to Bancos:`, sortResult.error);
+          result.errors++;
+        } else {
+          console.log(`Moved resumen ${fileInfo.name} to ${sortResult.targetPath}`);
         }
       }
     });
@@ -612,17 +681,20 @@ export async function rematch(): Promise<Result<RematchResult, Error>> {
     };
   }
 
-  const spreadsheetId = folderStructure.controlPagosId;
+  // TODO: Update rematch to handle two-spreadsheet structure
+  // For now, rematch only works with facturas recibidas and pagos enviados (debitos)
+  // Full implementation would also match facturas emitidas with pagos recibidos (creditos)
+  const controlDebitosId = folderStructure.controlDebitosId;
   const config = getConfig();
 
-  // Get all facturas
-  const facturasResult = await getValues(spreadsheetId, 'Facturas!A:W');
+  // Get all facturas recibidas (invoices we need to pay)
+  const facturasResult = await getValues(controlDebitosId, 'Facturas Recibidas!A:W');
   if (!facturasResult.ok) {
     return facturasResult;
   }
 
-  // Get all pagos
-  const pagosResult = await getValues(spreadsheetId, 'Pagos!A:Q');
+  // Get all pagos enviados (payments we made)
+  const pagosResult = await getValues(controlDebitosId, 'Pagos Enviados!A:Q');
   if (!pagosResult.ok) {
     return pagosResult;
   }
@@ -729,7 +801,7 @@ export async function rematch(): Promise<Result<RematchResult, Error>> {
 
         // Update factura with match info
         updates.push({
-          range: `Facturas!U${bestMatch.facturaRow}:W${bestMatch.facturaRow}`,
+          range: `'Facturas Recibidas'!U${bestMatch.facturaRow}:W${bestMatch.facturaRow}`,
           values: [[
             pago.fileId,
             bestMatch.confidence,
@@ -739,7 +811,7 @@ export async function rematch(): Promise<Result<RematchResult, Error>> {
 
         // Update pago with match info
         updates.push({
-          range: `Pagos!P${pago.row}:Q${pago.row}`,
+          range: `'Pagos Enviados'!P${pago.row}:Q${pago.row}`,
           values: [[
             bestMatch.facturaFileId,
             bestMatch.confidence,
@@ -757,7 +829,7 @@ export async function rematch(): Promise<Result<RematchResult, Error>> {
 
   // Apply updates
   if (updates.length > 0) {
-    const updateResult = await batchUpdate(spreadsheetId, updates);
+    const updateResult = await batchUpdate(controlDebitosId, updates);
     if (!updateResult.ok) {
       return updateResult;
     }
