@@ -7,7 +7,6 @@ import * as cron from 'node-cron';
 import { randomUUID } from 'crypto';
 import { watchFolder, stopWatching as driveStopWatching } from './drive.js';
 import { scanFolder } from '../processing/scanner.js';
-import { getProcessingQueue } from '../processing/queue.js';
 import type { WatchChannel, WatchManagerStatus, Result } from '../types/index.js';
 
 /**
@@ -20,6 +19,7 @@ let lastNotificationTime: Date | null = null;
 let lastScanTime: Date | null = null;
 let renewalJob: cron.ScheduledTask | null = null;
 let pollingJob: cron.ScheduledTask | null = null;
+let runningScan: Promise<void> | null = null;
 
 // Configuration
 const CHANNEL_EXPIRATION_MS = 3600000; // 1 hour
@@ -214,28 +214,38 @@ export function markNotificationProcessed(
 
 /**
  * Trigger a scan of the folder
- * Queues the scan via the processing queue
+ * Runs scan directly (NOT queued) to avoid deadlock
+ * The scan internally uses the processing queue for individual files
+ * Prevents concurrent scans - if a scan is already running, skip
  *
  * @param folderId - Optional folder ID to scan (defaults to all)
  */
 export function triggerScan(folderId?: string): void {
-  const queue = getProcessingQueue();
+  // Skip if a scan is already running
+  if (runningScan) {
+    console.log(`Scan already in progress, skipping duplicate scan${folderId ? ` for folder ${folderId}` : ''}`);
+    return;
+  }
 
-  console.log(`Queueing scan${folderId ? ` for folder ${folderId}` : ''}...`);
+  console.log(`Starting folder scan${folderId ? ` for folder ${folderId}` : ''}...`);
 
-  queue.add(async () => {
-    console.log(`Executing queued scan${folderId ? ` for folder ${folderId}` : ''}...`);
-    const result = await scanFolder(folderId);
-
-    if (result.ok) {
-      lastScanTime = new Date();
-      console.log(`Scan complete: ${result.value.filesProcessed} files processed, ${result.value.errors} errors`);
-    } else {
-      console.error('Scan failed:', result.error.message);
-    }
-  }).catch(err => {
-    console.error('Failed to queue scan:', err);
-  });
+  // Run scan directly (not in queue) to avoid deadlock
+  // The scanFolder function will use the queue for individual file processing
+  runningScan = scanFolder(folderId)
+    .then(result => {
+      if (result.ok) {
+        lastScanTime = new Date();
+        console.log(`Scan complete: ${result.value.filesProcessed} files processed, ${result.value.errors} errors`);
+      } else {
+        console.error('Scan failed:', result.error.message);
+      }
+    })
+    .catch(err => {
+      console.error('Scan execution failed:', err);
+    })
+    .finally(() => {
+      runningScan = null;
+    });
 }
 
 /**
@@ -334,6 +344,7 @@ export async function shutdownWatchManager(): Promise<void> {
   webhookUrl = null;
   lastNotificationTime = null;
   lastScanTime = null;
+  runningScan = null;
 
   console.log('Watch manager shutdown complete');
 }
