@@ -37,9 +37,29 @@ This server processes Argentine invoices and payment documents using AI, automat
 
 ## Deployment to Production
 
-This project is configured for automatic deployment from GitHub. When you push to the `main` branch, Railway automatically builds and deploys the latest code.
+There are two deployment methods:
 
-### 1. Create Project from GitHub Repository
+1. **GitHub Integration (Recommended)** - Auto-deploys on every push to `main`. Requires dashboard setup.
+2. **CLI-only Deployment** - Deploy manually via `railway up`. No GitHub integration.
+
+> **Understanding Railway's Dashboard:**
+>
+> Railway has two levels of settings - this is a common source of confusion:
+> - **Project** - Contains one or more services. Has its own settings (environments, members, tokens).
+> - **Service** - Your actual app. Has deployment source, domains, and variables.
+>
+> To access **Service Settings**: Click on the service box on the canvas (not the sidebar).
+> To access **Project Settings**: Click "Settings" in the sidebar or project dropdown.
+>
+> Most deployment configuration (GitHub repo, domains, env vars) is in **Service Settings**.
+
+---
+
+### Option A: GitHub Integration (Recommended)
+
+This method auto-deploys when you push to the `main` branch. GitHub integration **must be configured via the Railway dashboard** (CLI cannot set up GitHub OAuth).
+
+#### 1. Create Project from GitHub Repository
 
 1. **Go to Railway Dashboard**
    - Visit https://railway.app/new
@@ -54,7 +74,7 @@ This project is configured for automatic deployment from GitHub. When you push t
 3. **Choose "Add variables"** (don't deploy yet)
    - This allows you to configure environment variables before first deployment
 
-### 2. Configure Environment Variables
+#### 2. Configure Environment Variables
 
 In the Railway dashboard, add these variables (see [Environment Variables](#environment-variables) section for details):
 
@@ -73,26 +93,28 @@ cat service-account.json | base64 | tr -d '\n'
 
 Copy the output and paste it as the value for `GOOGLE_SERVICE_ACCOUNT_KEY`.
 
-### 3. Deploy
+#### 3. Deploy
 
 After setting all environment variables, click **"Deploy"** in the Railway dashboard. Railway will:
 - Build the application
 - Run it automatically
 - Generate a deployment URL
 
-### 4. Configure Auto-Deployment Settings
+#### 4. Configure Auto-Deployment Settings
 
 In Railway dashboard:
-1. Go to your service **Settings**
-2. Under **Source**, verify:
+1. Click on the **service** (the box on the canvas representing your app)
+   - **Important:** This is different from "Project Settings" in the sidebar
+2. Go to the **Settings** tab for that service
+3. Under **Source**, verify:
    - **Branch**: `main` (or your preferred branch)
    - **Auto-deploy**: Enabled (default)
 
 Now, every push to `main` will automatically trigger a new deployment.
 
-### 5. Optional: Link Railway CLI for Management
+#### 5. Optional: Link CLI for Management
 
-To manage your project via CLI:
+To manage your GitHub-linked project via CLI:
 
 ```bash
 # Install Railway CLI
@@ -105,23 +127,25 @@ railway login
 railway link
 
 # Now you can use CLI commands:
-railway logs              # View logs
-railway domain            # Get deployment URL
-railway variables set ... # Update environment variables
+railway logs                      # View logs
+railway status                    # Show project status
+railway open                      # Open dashboard in browser
+railway variables --set KEY=VALUE # Update environment variables
 ```
 
-**Important:** When using CLI with a GitHub-linked project, use CLI commands only for management (logs, variables, etc.). Deployments should happen automatically via GitHub push, not `railway up`.
+**Important:** With GitHub integration, deployments happen automatically via git push. Use CLI only for management (logs, variables, etc.), not `railway up`.
 
-### 6. Generate Public Domain
+#### 6. Generate Public Domain
 
 Railway deployments need a public domain to be accessible:
 
-1. In Railway dashboard, go to your service
-2. Click **Settings** → **Networking**
-3. Under **Public Networking**, click **Generate Domain**
-4. Railway will create a URL like `https://your-app.up.railway.app`
+1. In Railway dashboard, click on the **service** (the box on the canvas)
+2. Go to the **Settings** tab for that service
+3. Scroll to **Networking** section
+4. Under **Public Networking**, click **Generate Domain**
+5. Railway will create a URL like `https://your-app.up.railway.app`
 
-### 7. Verify Deployment
+#### 7. Verify Deployment
 
 ```bash
 # Replace with your Railway URL from step 6
@@ -132,14 +156,91 @@ curl https://your-app.up.railway.app/api/status
 # Response: {"status":"ok","version":"2.0.0","environment":"production",...}
 ```
 
-### 8. Configure Custom Domain (Optional)
+#### 8. Configure Custom Domain (Optional)
 
 For a custom domain (e.g., `api.adva.org`):
 
-1. In Railway dashboard: Settings → Networking
-2. Click **Custom Domain**
-3. Enter your domain name
-4. Configure DNS with the provided CNAME record
+1. Click on the **service** in the Railway dashboard
+2. Go to **Settings** → **Networking**
+3. Click **Custom Domain**
+4. Enter your domain name
+5. Configure DNS with the provided CNAME record
+
+---
+
+### Option B: CLI-only Deployment
+
+Use this method if you prefer deploying via CLI without GitHub integration. You'll need to run `railway up` manually for each deployment.
+
+#### 1. Install and Login
+
+```bash
+# Install Railway CLI
+npm install -g @railway/cli@latest
+
+# Login (opens browser for authentication)
+railway login
+```
+
+#### 2. Create Project and Service
+
+```bash
+# Create a new Railway project
+railway init
+
+# Follow prompts to name your project and select team
+```
+
+#### 3. Configure Environment Variables
+
+```bash
+# Set required environment variables
+railway variables --set NODE_ENV=production
+railway variables --set LOG_LEVEL=INFO
+railway variables --set GEMINI_API_KEY=your_key_here
+railway variables --set DRIVE_ROOT_FOLDER_ID=your_folder_id
+railway variables --set GOOGLE_SERVICE_ACCOUNT_KEY=$(cat service-account.json | base64 | tr -d '\n')
+```
+
+#### 4. Deploy
+
+```bash
+# Deploy current directory
+railway up
+
+# Or deploy in detached mode (returns immediately)
+railway up --detach
+```
+
+#### 5. Generate Domain and Verify
+
+```bash
+# Open dashboard to configure domain
+railway open
+
+# Or add domain via CLI
+railway domain
+
+# View deployment logs
+railway logs
+```
+
+**Note:** With CLI-only deployment, you must run `railway up` each time you want to deploy changes. There's no automatic deployment on git push.
+
+**Upgrade to GitHub Integration:** You can add GitHub auto-deploy to an existing CLI project later:
+
+1. Open your project in the Railway dashboard
+2. Click on the **service** (the box on the canvas representing your app)
+   - **Important:** Click the service itself, not "Project Settings" in the sidebar
+3. Go to the **Settings** tab for that service
+4. Under **Source**, click **"Connect Repo"**
+5. Select your GitHub repository and branch
+
+> **Note:** Railway has two settings levels:
+> - **Project Settings** (sidebar) - environments, members, tokens, integrations
+> - **Service Settings** (click on service box) - deployment source, domains, variables
+>
+> GitHub repo connection is in **Service Settings**, not Project Settings.
 
 ---
 
@@ -333,7 +434,7 @@ When environment variables change:
 
 **Via Railway CLI:**
 ```bash
-railway variables set VARIABLE_NAME=new_value
+railway variables --set VARIABLE_NAME=new_value
 # Railway automatically redeploys after variable changes
 ```
 
