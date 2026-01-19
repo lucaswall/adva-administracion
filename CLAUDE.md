@@ -104,6 +104,8 @@ Assistant:
 src/
 ├── server.ts              # Fastify entry point
 ├── config.ts              # Environment-based config
+├── constants/
+│   └── spreadsheet-headers.ts # Spreadsheet header definitions
 ├── routes/
 │   ├── status.ts          # GET /api/status, GET /health
 │   ├── scan.ts            # POST /api/scan, /rematch, /autofill-bank
@@ -188,4 +190,4 @@ POST /webhooks/drive     - Drive push notifications
   - Use fictional names: "TEST SA", "EMPRESA UNO SA", "Juan Pérez"
 
 ## MODULES
-types/:interfaces | gemini/:PDF→parse | services/:Google APIs | matching/:match+score | bank/:movements+autofill | utils/:date,cuit,currency | routes/:HTTP endpoints | processing/:queue
+types/:interfaces | constants/:spreadsheet headers | gemini/:PDF→parse | services/:Google APIs | matching/:match+score | bank/:movements+autofill | utils/:date,cuit,currency | routes/:HTTP endpoints | processing/:queue
