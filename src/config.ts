@@ -41,6 +41,9 @@ export interface Config {
   // Drive
   driveRootFolderId: string;
 
+  // Webhooks
+  webhookUrl: string | null;
+
   // Matching
   matchDaysBefore: number;
   matchDaysAfter: number;
@@ -74,6 +77,9 @@ export function loadConfig(): Config {
     throw new Error('DRIVE_ROOT_FOLDER_ID is required');
   }
 
+  // Webhooks - optional
+  const webhookUrl = process.env.WEBHOOK_URL || null;
+
   // Matching configuration
   const matchDaysBefore = parseInt(process.env.MATCH_DAYS_BEFORE || '10', 10);
   const matchDaysAfter = parseInt(process.env.MATCH_DAYS_AFTER || '60', 10);
@@ -86,6 +92,7 @@ export function loadConfig(): Config {
     googleServiceAccountKey,
     geminiApiKey,
     driveRootFolderId,
+    webhookUrl,
     matchDaysBefore,
     matchDaysAfter,
     usdArsTolerancePercent,

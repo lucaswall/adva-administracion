@@ -25,6 +25,7 @@ export interface Config {
     googleServiceAccountKey: string;
     geminiApiKey: string;
     driveRootFolderId: string;
+    webhookUrl: string | null;
     matchDaysBefore: number;
     matchDaysAfter: number;
     usdArsTolerancePercent: number;

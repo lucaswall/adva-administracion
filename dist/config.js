@@ -42,6 +42,8 @@ export function loadConfig() {
     if (!driveRootFolderId && nodeEnv === 'production') {
         throw new Error('DRIVE_ROOT_FOLDER_ID is required');
     }
+    // Webhooks - optional
+    const webhookUrl = process.env.WEBHOOK_URL || null;
     // Matching configuration
     const matchDaysBefore = parseInt(process.env.MATCH_DAYS_BEFORE || '10', 10);
     const matchDaysAfter = parseInt(process.env.MATCH_DAYS_AFTER || '60', 10);
@@ -53,6 +55,7 @@ export function loadConfig() {
         googleServiceAccountKey,
         geminiApiKey,
         driveRootFolderId,
+        webhookUrl,
         matchDaysBefore,
         matchDaysAfter,
         usdArsTolerancePercent,
