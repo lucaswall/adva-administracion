@@ -46,9 +46,14 @@
 
 ### Available Subagents
 
-1. **`test-runner`** (haiku) - Run tests and report complete error information
+1. **`test-runner`** (haiku) - Run tests and report summary status only
    - **When to use:** After any code change, before committing
-   - **What it does:** Provides full test output including stack traces, diffs, and all error details
+   - **What it does:** Runs tests with minimal output and reports:
+     - Pass/fail status
+     - Test counts (passed/failed/total)
+     - List of test FILES with failures (not error details)
+   - **Token-efficient strategy:** If tests fail, main agent runs only failing test files for detailed errors
+   - **Implementation:** Use silent/minimal reporters to reduce token usage
    - **Never use:** `npm test` directly
 
 2. **`builder`** (haiku) - Build and report warnings/errors only
