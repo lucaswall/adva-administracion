@@ -5,7 +5,7 @@
 
 import { getConfig } from '../config.js';
 import { findByName, listByMimeType, createFolder, createSpreadsheet } from './drive.js';
-import { getSheetMetadata, createSheet, setValues } from './sheets.js';
+import { getSheetMetadata, createSheet, setValues, formatSheet } from './sheets.js';
 import { formatMonthFolder } from '../utils/spanish-date.js';
 import { CONTROL_CREDITOS_SHEETS, CONTROL_DEBITOS_SHEETS } from '../constants/spreadsheet-headers.js';
 import type { FolderStructure, Result, SortDestination } from '../types/index.js';
@@ -112,7 +112,7 @@ async function findOrCreateSpreadsheet(
 
 /**
  * Ensures required sheets exist in a spreadsheet
- * Creates missing sheets with headers
+ * Creates missing sheets with headers and applies formatting
  *
  * @param spreadsheetId - Spreadsheet ID
  * @param sheetConfigs - Array of sheet configurations to ensure exist
@@ -120,7 +120,7 @@ async function findOrCreateSpreadsheet(
  */
 async function ensureSheetsExist(
   spreadsheetId: string,
-  sheetConfigs: Array<{ title: string; headers: string[] }>
+  sheetConfigs: Array<{ title: string; headers: string[]; monetaryColumns?: number[] }>
 ): Promise<Result<void, Error>> {
   // Get existing sheets
   const metadataResult = await getSheetMetadata(spreadsheetId);
@@ -128,28 +128,43 @@ async function ensureSheetsExist(
     return metadataResult;
   }
 
-  const existingSheets = new Set(metadataResult.value.map(s => s.title));
+  const existingSheets = new Map(metadataResult.value.map(s => [s.title, s.sheetId]));
 
-  // Create missing sheets with headers
+  // Create missing sheets with headers and apply formatting
   for (const config of sheetConfigs) {
+    let sheetId: number;
+
     if (existingSheets.has(config.title)) {
-      continue; // Sheet already exists
+      // Sheet already exists, get its ID
+      sheetId = existingSheets.get(config.title)!;
+    } else {
+      // Create the sheet
+      const createResult = await createSheet(spreadsheetId, config.title);
+      if (!createResult.ok) {
+        return createResult;
+      }
+      sheetId = createResult.value;
+
+      // Add header row
+      const setResult = await setValues(
+        spreadsheetId,
+        `${config.title}!A1`,
+        [config.headers]
+      );
+      if (!setResult.ok) {
+        return setResult;
+      }
     }
 
-    // Create the sheet
-    const createResult = await createSheet(spreadsheetId, config.title);
-    if (!createResult.ok) {
-      return createResult;
-    }
-
-    // Add header row
-    const setResult = await setValues(
-      spreadsheetId,
-      `${config.title}!A1`,
-      [config.headers]
-    );
-    if (!setResult.ok) {
-      return setResult;
+    // Apply formatting (bold headers, frozen rows, number format for monetary columns)
+    if (config.monetaryColumns && config.monetaryColumns.length > 0) {
+      const formatResult = await formatSheet(spreadsheetId, sheetId, {
+        monetaryColumns: config.monetaryColumns,
+        frozenRows: 1,
+      });
+      if (!formatResult.ok) {
+        return formatResult;
+      }
     }
   }
 

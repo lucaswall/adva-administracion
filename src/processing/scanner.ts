@@ -35,6 +35,7 @@ import { sortToSinProcesar, sortAndRenameDocument } from '../services/document-s
 import { getProcessingQueue } from './queue.js';
 import { getConfig } from '../config.js';
 import { FacturaPagoMatcher } from '../matching/matcher.js';
+import { createDriveHyperlink } from '../utils/spreadsheet.js';
 
 /**
  * Result of processing a single file
@@ -315,7 +316,7 @@ export async function processFile(
 async function storeFactura(factura: Factura, spreadsheetId: string, sheetName: string): Promise<Result<void, Error>> {
   const row = [
     factura.fileId,
-    factura.fileName,
+    createDriveHyperlink(factura.fileId, factura.fileName),
     factura.folderPath,
     factura.tipoComprobante,
     factura.puntoVenta,
@@ -357,7 +358,7 @@ async function storeFactura(factura: Factura, spreadsheetId: string, sheetName: 
 async function storePago(pago: Pago, spreadsheetId: string, sheetName: string): Promise<Result<void, Error>> {
   const row = [
     pago.fileId,
-    pago.fileName,
+    createDriveHyperlink(pago.fileId, pago.fileName),
     pago.folderPath,
     pago.banco,
     pago.fechaPago,
@@ -389,7 +390,7 @@ async function storePago(pago: Pago, spreadsheetId: string, sheetName: string): 
 async function storeRecibo(recibo: Recibo, spreadsheetId: string): Promise<Result<void, Error>> {
   const row = [
     recibo.fileId,
-    recibo.fileName,
+    createDriveHyperlink(recibo.fileId, recibo.fileName),
     recibo.folderPath,
     recibo.tipoRecibo,
     recibo.nombreEmpleado,
