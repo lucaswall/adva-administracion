@@ -53,9 +53,8 @@ export function sanitizeFileName(name: string): string {
 /**
  * Generates a standardized file name for a factura
  *
- * Format: FacturaEmitida_00001-00001234_20123456786_2024-01-15.pdf
- * For NC: NotaCreditoEmitida_...
- * For ND: NotaDebitoEmitida_...
+ * Format: YYYY-MM-DD - <Tipo> - PPPPP-NNNNNNNN - Entity Name - Concepto.pdf
+ * Example: 2024-01-15 - Factura Emitida - 00001-00001234 - CLIENTE SA - Desarrollo de software.pdf
  *
  * @param factura - Factura data
  * @param tipo - Document type (factura_emitida or factura_recibida)
@@ -65,32 +64,53 @@ export function generateFacturaFileName(
   factura: Factura,
   tipo: 'factura_emitida' | 'factura_recibida'
 ): string {
-  const direction = tipo === 'factura_emitida' ? 'Emitida' : 'Recibida';
-
-  let prefix: string;
-  switch (factura.tipoComprobante) {
-    case 'NC':
-      prefix = `NotaCredito${direction}`;
-      break;
-    case 'ND':
-      prefix = `NotaDebito${direction}`;
-      break;
-    default:
-      prefix = `Factura${direction}`;
-  }
-
-  const puntoVenta = factura.puntoVenta;
-  const numeroComprobante = factura.numeroComprobante;
-  const cuit = factura.cuitEmisor;
+  // Date (YYYY-MM-DD)
   const fecha = factura.fechaEmision;
 
-  return `${prefix}_${puntoVenta}-${numeroComprobante}_${cuit}_${fecha}.pdf`;
+  // Type label based on tipoComprobante and direction
+  const direction = tipo === 'factura_emitida' ? 'Emitida' : 'Recibida';
+  let typeLabel: string;
+  switch (factura.tipoComprobante) {
+    case 'NC':
+      typeLabel = `Nota de Credito ${direction}`;
+      break;
+    case 'ND':
+      typeLabel = `Nota de Debito ${direction}`;
+      break;
+    default:
+      typeLabel = `Factura ${direction}`;
+  }
+
+  // Invoice number (PPPPP-NNNNNNNN)
+  const numero = `${factura.puntoVenta}-${factura.numeroComprobante}`;
+
+  // Entity name based on direction
+  let entityName: string;
+  if (tipo === 'factura_emitida') {
+    // For emitida, use receptor name or fallback to CUIT
+    entityName = factura.razonSocialReceptor || factura.cuitReceptor || 'Desconocido';
+  } else {
+    // For recibida, use emisor name
+    entityName = factura.razonSocialEmisor;
+  }
+  const sanitizedEntity = sanitizeFileName(entityName);
+
+  // Build parts array
+  const parts = [fecha, typeLabel, numero, sanitizedEntity];
+
+  // Add concepto if present
+  if (factura.concepto) {
+    parts.push(sanitizeFileName(factura.concepto));
+  }
+
+  return `${parts.join(' - ')}.pdf`;
 }
 
 /**
  * Generates a standardized file name for a pago
  *
- * Format: PagoEnviado_BBVA_2024-01-18_1210.00.pdf
+ * Format: YYYY-MM-DD - <Tipo> - Entity Name - Concepto.pdf
+ * Example: 2024-01-18 - Pago Recibido - Juan Perez - Pago de factura.pdf
  *
  * @param pago - Pago data
  * @param tipo - Document type (pago_enviado or pago_recibido)
@@ -100,52 +120,79 @@ export function generatePagoFileName(
   pago: Pago,
   tipo: 'pago_enviado' | 'pago_recibido'
 ): string {
-  const prefix = tipo === 'pago_enviado' ? 'PagoEnviado' : 'PagoRecibido';
-  const banco = sanitizeFileName(pago.banco);
+  // Date (YYYY-MM-DD)
   const fecha = pago.fechaPago;
-  const importe = pago.importePagado.toFixed(2);
 
-  return `${prefix}_${banco}_${fecha}_${importe}.pdf`;
+  // Type label
+  const typeLabel = tipo === 'pago_enviado' ? 'Pago Enviado' : 'Pago Recibido';
+
+  // Entity name based on direction
+  let entityName: string;
+  if (tipo === 'pago_recibido') {
+    // For recibido, use pagador name or fallback to CUIT or "Desconocido"
+    entityName = pago.nombrePagador || pago.cuitPagador || 'Desconocido';
+  } else {
+    // For enviado, use beneficiario name or fallback to CUIT or "Desconocido"
+    entityName = pago.nombreBeneficiario || pago.cuitBeneficiario || 'Desconocido';
+  }
+  const sanitizedEntity = sanitizeFileName(entityName);
+
+  // Build parts array
+  const parts = [fecha, typeLabel, sanitizedEntity];
+
+  // Add concepto if present
+  if (pago.concepto) {
+    parts.push(sanitizeFileName(pago.concepto));
+  }
+
+  return `${parts.join(' - ')}.pdf`;
 }
 
 /**
  * Generates a standardized file name for a recibo
  *
- * Format: Recibo_JuanPerez_diciembre2024.pdf
- * For liquidacion_final: LiquidacionFinal_JuanPerez_diciembre2024.pdf
+ * Format: YYYY-MM - <Tipo> - Employee Name.pdf
+ * Example: 2024-12 - Recibo de Sueldo - Juan Perez.pdf
  *
  * @param recibo - Recibo data
  * @returns Standardized file name
  */
 export function generateReciboFileName(recibo: Recibo): string {
-  const prefix = recibo.tipoRecibo === 'liquidacion_final' ? 'LiquidacionFinal' : 'Recibo';
+  // Extract YYYY-MM from fechaPago
+  const yearMonth = recibo.fechaPago.substring(0, 7); // YYYY-MM-DD -> YYYY-MM
 
-  // Remove spaces and special characters from employee name
-  const nombreLimpio = sanitizeFileName(recibo.nombreEmpleado)
-    .replace(/[,\s]/g, '');
+  // Type label
+  const typeLabel = recibo.tipoRecibo === 'liquidacion_final'
+    ? 'Liquidacion Final'
+    : 'Recibo de Sueldo';
 
-  // Clean up period format (remove slash)
-  const periodo = recibo.periodoAbonado.replace('/', '');
+  // Employee name (sanitized)
+  const employeeName = sanitizeFileName(recibo.nombreEmpleado);
 
-  return `${prefix}_${nombreLimpio}_${periodo}.pdf`;
+  return `${yearMonth} - ${typeLabel} - ${employeeName}.pdf`;
 }
 
 /**
  * Generates a standardized file name for a resumen bancario
  *
- * Format: Resumen_BBVA_2024-01-01_a_2024-01-31.pdf
- * For USD: Resumen_BBVA_2024-01-01_a_2024-01-31_USD.pdf
+ * Format: YYYY-MM - Resumen Bancario [USD] - Bank Name.pdf
+ * Example ARS: 2024-01 - Resumen Bancario - BBVA.pdf
+ * Example USD: 2024-01 - Resumen Bancario USD - BBVA.pdf
  *
  * @param resumen - Resumen bancario data
  * @returns Standardized file name
  */
 export function generateResumenFileName(resumen: ResumenBancario): string {
-  const banco = sanitizeFileName(resumen.banco);
-  const desde = resumen.fechaDesde;
-  const hasta = resumen.fechaHasta;
+  // Extract YYYY-MM from fechaDesde
+  const yearMonth = resumen.fechaDesde.substring(0, 7); // YYYY-MM-DD -> YYYY-MM
 
-  // Add currency suffix for USD
-  const currencySuffix = resumen.moneda === 'USD' ? '_USD' : '';
+  // Type label with USD suffix if applicable
+  const typeLabel = resumen.moneda === 'USD'
+    ? 'Resumen Bancario USD'
+    : 'Resumen Bancario';
 
-  return `Resumen_${banco}_${desde}_a_${hasta}${currencySuffix}.pdf`;
+  // Bank name (sanitized)
+  const bankName = sanitizeFileName(resumen.banco);
+
+  return `${yearMonth} - ${typeLabel} - ${bankName}.pdf`;
 }

@@ -75,6 +75,8 @@ export interface Factura {
     razonSocialEmisor: string;
     /** Receptor CUIT (optional, may be ADVA's or client's) */
     cuitReceptor?: string;
+    /** Receptor business name (optional) */
+    razonSocialReceptor?: string;
     /** CAE (Código de Autorización Electrónico) - 14 digits */
     cae: string;
     /** Net amount before tax */

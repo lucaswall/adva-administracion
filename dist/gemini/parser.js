@@ -2,7 +2,6 @@
  * Gemini response parsing and validation
  */
 import { ParseError } from '../types/index.js';
-import { isAdvaCuit } from '../config.js';
 /**
  * Extracts JSON from a response that might be wrapped in markdown
  *
@@ -47,36 +46,6 @@ export function extractJSON(response) {
     return '';
 }
 /**
- * Corrects emisor/receptor swap if ADVA is detected as emisor
- * ADVA is always the receptor (client), never the emisor (issuer)
- *
- * When Gemini swaps them, the pattern is:
- * - cuitEmisor = ADVA's CUIT (wrong!)
- * - razonSocialEmisor = Real issuer's name (correct!)
- * - cuitReceptor = Real issuer's CUIT (correct!)
- *
- * We need to swap the CUITs but keep razonSocialEmisor as is.
- *
- * @param data - Partial factura data
- * @returns Corrected data
- */
-function correctEmisorReceptorSwap(data) {
-    // If ADVA's CUIT is in cuitEmisor, swap with cuitReceptor
-    if (data.cuitEmisor && isAdvaCuit(data.cuitEmisor)) {
-        // Swap CUITs
-        const tempCuit = data.cuitEmisor;
-        data.cuitEmisor = data.cuitReceptor;
-        data.cuitReceptor = tempCuit;
-        // razonSocialEmisor usually already has the correct name, so keep it
-        // Only clear it if it contains ADVA's name
-        if (data.razonSocialEmisor?.includes('ADVA') ||
-            data.razonSocialEmisor?.includes('ASOCIACION CIVIL DE DESARROLLADORES')) {
-            data.razonSocialEmisor = undefined;
-        }
-    }
-    return data;
-}
-/**
  * Parses a Gemini response for factura data
  *
  * @param response - Raw Gemini response
@@ -93,9 +62,7 @@ export function parseFacturaResponse(response) {
             };
         }
         // Parse JSON
-        let data = JSON.parse(jsonStr);
-        // Correct emisor/receptor swap if ADVA is emisor
-        data = correctEmisorReceptorSwap(data);
+        const data = JSON.parse(jsonStr);
         // Check for required fields
         const requiredFields = [
             'tipoComprobante',
@@ -117,7 +84,7 @@ export function parseFacturaResponse(response) {
             return value === undefined || value === null || value === '';
         });
         // Check for suspicious empty optional fields
-        const optionalFields = ['cuitReceptor', 'concepto'];
+        const optionalFields = ['cuitReceptor', 'razonSocialReceptor', 'concepto'];
         let hasSuspiciousEmptyFields = false;
         for (const field of optionalFields) {
             const value = data[field];

@@ -142,6 +142,7 @@ Required fields to extract:
 
 Optional fields:
 - cuitReceptor: Receptor CUIT - the CUIT in the "Razón Social" or client section (11 digits, no dashes). May be formatted as XX-XXXXXXXX-X or XXXXXXXXXXX.
+- razonSocialReceptor: Receptor business name - the company/person name in the "Razón Social" or client section
 - concepto: Brief one-line summary describing what the invoice is for. Analyze the line items/services listed in the invoice and summarize them (e.g., "Desarrollo de software para pagina web de ADVA", "Alojamiento y comidas para viaje a Tierra del Fuego", "Servicios de hosting y dominio para portal institucional"). IMPORTANT: Do NOT use tax category labels like "EXENTO", "GRAVADO", "NO GRAVADO" as the concepto - these are tax classifications, not descriptions.
 
 Return ONLY valid JSON in this exact format:
@@ -153,6 +154,7 @@ Return ONLY valid JSON in this exact format:
   "cuitEmisor": "20123456786",
   "razonSocialEmisor": "EMPRESA SA",
   "cuitReceptor": "30712345678",
+  "razonSocialReceptor": "CLIENTE SA",
   "cae": "12345678901234",
   "fechaVtoCae": "2024-01-25",
   "importeNeto": 1000.00,

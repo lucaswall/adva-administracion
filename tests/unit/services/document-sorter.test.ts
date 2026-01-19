@@ -390,8 +390,10 @@ describe('DocumentSorter service', () => {
         numeroComprobante: '00001234',
         fechaEmision: '2024-01-15',
         fechaVtoCae: '2024-01-25',
-        cuitEmisor: '20123456786',
-        razonSocialEmisor: 'TEST SA',
+        cuitEmisor: '30709076783', // ADVA
+        razonSocialEmisor: 'ADVA SA',
+        cuitReceptor: '20123456786',
+        razonSocialReceptor: 'CLIENTE SA',
         cae: '12345678901234',
         importeNeto: 1000,
         importeIva: 210,
@@ -413,7 +415,7 @@ describe('DocumentSorter service', () => {
       expect(mockMoveFile).toHaveBeenCalledWith('file-123', 'entrada-id', 'enero-folder-id');
       expect(mockRenameFile).toHaveBeenCalledWith(
         'file-123',
-        'FacturaEmitida_00001-00001234_20123456786_2024-01-15.pdf'
+        '2024-01-15 - Factura Emitida - 00001-00001234 - CLIENTE SA.pdf'
       );
     });
 
@@ -429,6 +431,7 @@ describe('DocumentSorter service', () => {
         fechaVtoCae: '2024-06-30',
         cuitEmisor: '27234567891',
         razonSocialEmisor: 'EMPRESA UNO SA',
+        cuitReceptor: '30709076783', // ADVA
         cae: '98765432109876',
         importeNeto: 2000,
         importeIva: 420,
@@ -449,7 +452,7 @@ describe('DocumentSorter service', () => {
       expect(result.success).toBe(true);
       expect(mockRenameFile).toHaveBeenCalledWith(
         'file-456',
-        'FacturaRecibida_00002-00005678_27234567891_2024-06-20.pdf'
+        '2024-06-20 - Factura Recibida - 00002-00005678 - EMPRESA UNO SA.pdf'
       );
     });
 
@@ -461,6 +464,7 @@ describe('DocumentSorter service', () => {
         banco: 'BBVA',
         fechaPago: '2024-06-20',
         importePagado: 5000.50,
+        nombreBeneficiario: 'PROVEEDOR SA',
         processedAt: new Date().toISOString(),
         confidence: 0.9,
         needsReview: false,
@@ -476,7 +480,7 @@ describe('DocumentSorter service', () => {
       expect(result.success).toBe(true);
       expect(mockRenameFile).toHaveBeenCalledWith(
         'pago-123',
-        'PagoEnviado_BBVA_2024-06-20_5000.50.pdf'
+        '2024-06-20 - Pago Enviado - PROVEEDOR SA.pdf'
       );
     });
 
@@ -488,6 +492,7 @@ describe('DocumentSorter service', () => {
         banco: 'Santander Rio',
         fechaPago: '2024-03-15',
         importePagado: 12345.67,
+        nombrePagador: 'CLIENTE SA',
         processedAt: new Date().toISOString(),
         confidence: 0.88,
         needsReview: false,
@@ -503,7 +508,7 @@ describe('DocumentSorter service', () => {
       expect(result.success).toBe(true);
       expect(mockRenameFile).toHaveBeenCalledWith(
         'pago-456',
-        'PagoRecibido_Santander Rio_2024-03-15_12345.67.pdf'
+        '2024-03-15 - Pago Recibido - CLIENTE SA.pdf'
       );
     });
 
@@ -537,7 +542,7 @@ describe('DocumentSorter service', () => {
       expect(result.success).toBe(true);
       expect(mockRenameFile).toHaveBeenCalledWith(
         'recibo-123',
-        'Recibo_JuanPerez_diciembre2024.pdf'
+        '2024-12 - Recibo de Sueldo - Juan Perez.pdf'
       );
     });
 
@@ -564,7 +569,7 @@ describe('DocumentSorter service', () => {
       expect(result.success).toBe(true);
       expect(mockRenameFile).toHaveBeenCalledWith(
         'resumen-123',
-        'Resumen_BBVA_2024-01-01_a_2024-01-31.pdf'
+        '2024-01 - Resumen Bancario - BBVA.pdf'
       );
     });
 
@@ -591,7 +596,7 @@ describe('DocumentSorter service', () => {
       expect(result.success).toBe(true);
       expect(mockRenameFile).toHaveBeenCalledWith(
         'resumen-456',
-        'Resumen_BBVA_2024-02-01_a_2024-02-29_USD.pdf'
+        '2024-02 - Resumen Bancario USD - BBVA.pdf'
       );
     });
 

@@ -66,6 +66,32 @@ export interface RematchResult {
 }
 
 /**
+ * Validates that a document has the required date field
+ * Documents without valid dates MUST be moved to Sin Procesar
+ *
+ * @param doc - Document to validate
+ * @param documentType - Type of document
+ * @returns true if document has valid date, false otherwise
+ */
+function hasValidDate(doc: any, documentType: DocumentType): boolean {
+  switch (documentType) {
+    case 'factura_emitida':
+    case 'factura_recibida':
+      return !!doc.fechaEmision && doc.fechaEmision !== '';
+    case 'pago_enviado':
+    case 'pago_recibido':
+      return !!doc.fechaPago && doc.fechaPago !== '';
+    case 'recibo':
+      return !!doc.fechaPago && doc.fechaPago !== '';
+    case 'resumen_bancario':
+      // Skip validation for resumen_bancario until extraction is implemented (TODO)
+      return true;
+    default:
+      return false;
+  }
+}
+
+/**
  * Processes a single file - classifies and extracts data
  *
  * @param fileInfo - File metadata (without content)
@@ -555,6 +581,20 @@ export async function scanFolder(folderId?: string): Promise<Result<ScanResult, 
 
       const doc = processed.document;
       if (!doc) return;
+
+      // CRITICAL: Validate that document has required date field
+      // Documents without dates MUST NOT be written to spreadsheets
+      if (!hasValidDate(doc, processed.documentType)) {
+        console.warn(`No date extracted from ${fileInfo.name}, moving to Sin Procesar`);
+        const sortResult = await sortToSinProcesar(fileInfo.id, fileInfo.name);
+        if (!sortResult.success) {
+          console.error(`Failed to move file ${fileInfo.name} to Sin Procesar:`, sortResult.error);
+          result.errors++;
+        } else {
+          console.log(`Moved file without date ${fileInfo.name} to ${sortResult.targetPath}`);
+        }
+        return; // STOP processing - do NOT write to spreadsheet or move to destination folder
+      }
 
       // Store in appropriate sheet based on document type
       // Creditos (money IN): factura_emitida, pago_recibido -> Control de Creditos -> Creditos folder

@@ -120,6 +120,8 @@ describe('Scanner module', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockGetCachedFolderStructure.mockReturnValue(mockFolderStructure);
+    // Default mock for sortToSinProcesar
+    mockSortToSinProcesar.mockResolvedValue({ success: true, targetPath: 'Sin Procesar' });
   });
 
   afterEach(() => {

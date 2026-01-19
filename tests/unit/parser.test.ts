@@ -98,35 +98,6 @@ describe('parseFacturaResponse', () => {
     }
   });
 
-  it('corrects emisor/receptor swap when ADVA is emisor', () => {
-    // Simulate case where Gemini incorrectly identifies ADVA as emisor
-    const json = JSON.stringify({
-      tipoComprobante: 'B',
-      puntoVenta: '00004',
-      numeroComprobante: '00000024',
-      fechaEmision: '2025-11-17',
-      cuitEmisor: '30709076783', // ADVA's CUIT (wrong!)
-      razonSocialEmisor: 'TEST VENDOR SA', // Correct emisor name
-      cuitReceptor: '20444444443', // Real emisor CUIT (swapped)
-      cae: '75465275861546',
-      fechaVtoCae: '2025-11-27',
-      importeNeto: 5750000,
-      importeIva: 0,
-      importeTotal: 5750000,
-      moneda: 'ARS'
-    });
-
-    const result = parseFacturaResponse(json);
-    expect(result.ok).toBe(true);
-    if (result.ok) {
-      // Should swap the CUITs
-      expect(result.value.data.cuitEmisor).toBe('20444444443'); // Real emisor
-      expect(result.value.data.cuitReceptor).toBe('30709076783'); // ADVA
-      // Should keep the emisor name (it was already correct)
-      expect(result.value.data.razonSocialEmisor).toBe('TEST VENDOR SA');
-    }
-  });
-
   it('does not swap when ADVA is correctly identified as receptor', () => {
     const json = JSON.stringify({
       tipoComprobante: 'B',

@@ -55,48 +55,84 @@ describe('generateFacturaFileName', () => {
     numeroComprobante: '00001234',
     fechaEmision: '2024-01-15',
     fechaVtoCae: '2024-01-25',
-    cuitEmisor: '20123456786',
-    razonSocialEmisor: 'TEST SA',
+    cuitEmisor: '30709076783', // ADVA's CUIT (for emitida)
+    razonSocialEmisor: 'ADVA SA',
+    cuitReceptor: '20123456786',
+    razonSocialReceptor: 'CLIENTE SA',
     cae: '12345678901234',
     importeNeto: 1000,
     importeIva: 210,
     importeTotal: 1210,
     moneda: 'ARS',
+    concepto: 'Desarrollo de software',
     processedAt: new Date().toISOString(),
     confidence: 0.95,
     needsReview: false,
   };
 
-  it('generates factura_emitida file name', () => {
+  it('generates factura_emitida with all fields', () => {
     const result = generateFacturaFileName(baseFactura, 'factura_emitida');
-    expect(result).toBe('FacturaEmitida_00001-00001234_20123456786_2024-01-15.pdf');
+    expect(result).toBe('2024-01-15 - Factura Emitida - 00001-00001234 - CLIENTE SA - Desarrollo de software.pdf');
   });
 
-  it('generates factura_recibida file name', () => {
-    const result = generateFacturaFileName(baseFactura, 'factura_recibida');
-    expect(result).toBe('FacturaRecibida_00001-00001234_20123456786_2024-01-15.pdf');
+  it('generates factura_emitida without concepto', () => {
+    const factura: Factura = { ...baseFactura, concepto: undefined };
+    const result = generateFacturaFileName(factura, 'factura_emitida');
+    expect(result).toBe('2024-01-15 - Factura Emitida - 00001-00001234 - CLIENTE SA.pdf');
   });
 
-  it('handles nota de credito type', () => {
+  it('generates factura_emitida without razonSocialReceptor (fallback to CUIT)', () => {
+    const factura: Factura = { ...baseFactura, razonSocialReceptor: undefined };
+    const result = generateFacturaFileName(factura, 'factura_emitida');
+    expect(result).toBe('2024-01-15 - Factura Emitida - 00001-00001234 - 20123456786 - Desarrollo de software.pdf');
+  });
+
+  it('generates factura_recibida with all fields', () => {
+    const factura: Factura = {
+      ...baseFactura,
+      cuitEmisor: '20123456786',
+      razonSocialEmisor: 'PROVEEDOR SA',
+      cuitReceptor: '30709076783', // ADVA's CUIT
+      concepto: 'Servicios de hosting',
+    };
+    const result = generateFacturaFileName(factura, 'factura_recibida');
+    expect(result).toBe('2024-01-15 - Factura Recibida - 00001-00001234 - PROVEEDOR SA - Servicios de hosting.pdf');
+  });
+
+  it('generates factura_recibida without concepto', () => {
+    const factura: Factura = {
+      ...baseFactura,
+      cuitEmisor: '20123456786',
+      razonSocialEmisor: 'PROVEEDOR SA',
+      cuitReceptor: '30709076783',
+      concepto: undefined,
+    };
+    const result = generateFacturaFileName(factura, 'factura_recibida');
+    expect(result).toBe('2024-01-15 - Factura Recibida - 00001-00001234 - PROVEEDOR SA.pdf');
+  });
+
+  it('generates Nota de Credito Emitida', () => {
     const notaCredito: Factura = { ...baseFactura, tipoComprobante: 'NC' };
-    const result = generateFacturaFileName(notaCredito, 'factura_recibida');
-    expect(result).toBe('NotaCreditoRecibida_00001-00001234_20123456786_2024-01-15.pdf');
+    const result = generateFacturaFileName(notaCredito, 'factura_emitida');
+    expect(result).toBe('2024-01-15 - Nota de Credito Emitida - 00001-00001234 - CLIENTE SA - Desarrollo de software.pdf');
   });
 
-  it('handles nota de debito type', () => {
+  it('generates Nota de Debito Emitida', () => {
     const notaDebito: Factura = { ...baseFactura, tipoComprobante: 'ND' };
     const result = generateFacturaFileName(notaDebito, 'factura_emitida');
-    expect(result).toBe('NotaDebitoEmitida_00001-00001234_20123456786_2024-01-15.pdf');
+    expect(result).toBe('2024-01-15 - Nota de Debito Emitida - 00001-00001234 - CLIENTE SA - Desarrollo de software.pdf');
   });
 
-  it('handles different comprobante types (B, C)', () => {
-    const facturaB: Factura = { ...baseFactura, tipoComprobante: 'B' };
-    expect(generateFacturaFileName(facturaB, 'factura_recibida'))
-      .toBe('FacturaRecibida_00001-00001234_20123456786_2024-01-15.pdf');
-
-    const facturaC: Factura = { ...baseFactura, tipoComprobante: 'C' };
-    expect(generateFacturaFileName(facturaC, 'factura_emitida'))
-      .toBe('FacturaEmitida_00001-00001234_20123456786_2024-01-15.pdf');
+  it('generates Nota de Credito Recibida', () => {
+    const notaCredito: Factura = {
+      ...baseFactura,
+      tipoComprobante: 'NC',
+      cuitEmisor: '20123456786',
+      razonSocialEmisor: 'PROVEEDOR SA',
+      cuitReceptor: '30709076783',
+    };
+    const result = generateFacturaFileName(notaCredito, 'factura_recibida');
+    expect(result).toBe('2024-01-15 - Nota de Credito Recibida - 00001-00001234 - PROVEEDOR SA - Desarrollo de software.pdf');
   });
 });
 
@@ -108,41 +144,54 @@ describe('generatePagoFileName', () => {
     banco: 'BBVA',
     fechaPago: '2024-01-18',
     importePagado: 1210.50,
+    nombrePagador: 'Juan Perez',
+    cuitPagador: '20111111119',
+    nombreBeneficiario: 'EMPRESA SA',
+    cuitBeneficiario: '30709076783',
+    concepto: 'Pago de factura',
     processedAt: new Date().toISOString(),
     confidence: 0.9,
     needsReview: false,
   };
 
-  it('generates pago_enviado file name', () => {
-    const result = generatePagoFileName(basePago, 'pago_enviado');
-    expect(result).toBe('PagoEnviado_BBVA_2024-01-18_1210.50.pdf');
-  });
-
-  it('generates pago_recibido file name', () => {
+  it('generates pago_recibido with all fields', () => {
     const result = generatePagoFileName(basePago, 'pago_recibido');
-    expect(result).toBe('PagoRecibido_BBVA_2024-01-18_1210.50.pdf');
+    expect(result).toBe('2024-01-18 - Pago Recibido - Juan Perez - Pago de factura.pdf');
   });
 
-  it('handles whole number amounts', () => {
-    const pago: Pago = { ...basePago, importePagado: 5000 };
+  it('generates pago_recibido without concepto', () => {
+    const pago: Pago = { ...basePago, concepto: undefined };
+    const result = generatePagoFileName(pago, 'pago_recibido');
+    expect(result).toBe('2024-01-18 - Pago Recibido - Juan Perez.pdf');
+  });
+
+  it('generates pago_recibido without nombrePagador (fallback to CUIT)', () => {
+    const pago: Pago = { ...basePago, nombrePagador: undefined };
+    const result = generatePagoFileName(pago, 'pago_recibido');
+    expect(result).toBe('2024-01-18 - Pago Recibido - 20111111119 - Pago de factura.pdf');
+  });
+
+  it('generates pago_recibido without both name and CUIT', () => {
+    const pago: Pago = { ...basePago, nombrePagador: undefined, cuitPagador: undefined };
+    const result = generatePagoFileName(pago, 'pago_recibido');
+    expect(result).toBe('2024-01-18 - Pago Recibido - Desconocido - Pago de factura.pdf');
+  });
+
+  it('generates pago_enviado with all fields', () => {
+    const result = generatePagoFileName(basePago, 'pago_enviado');
+    expect(result).toBe('2024-01-18 - Pago Enviado - EMPRESA SA - Pago de factura.pdf');
+  });
+
+  it('generates pago_enviado without nombreBeneficiario (fallback to CUIT)', () => {
+    const pago: Pago = { ...basePago, nombreBeneficiario: undefined };
     const result = generatePagoFileName(pago, 'pago_enviado');
-    expect(result).toBe('PagoEnviado_BBVA_2024-01-18_5000.00.pdf');
+    expect(result).toBe('2024-01-18 - Pago Enviado - 30709076783 - Pago de factura.pdf');
   });
 
-  it('handles large amounts', () => {
-    const pago: Pago = { ...basePago, importePagado: 2917310.00 };
+  it('generates pago_enviado without concepto', () => {
+    const pago: Pago = { ...basePago, concepto: undefined };
     const result = generatePagoFileName(pago, 'pago_enviado');
-    expect(result).toBe('PagoEnviado_BBVA_2024-01-18_2917310.00.pdf');
-  });
-
-  it('handles different banks', () => {
-    const pagoGalicia: Pago = { ...basePago, banco: 'Galicia' };
-    expect(generatePagoFileName(pagoGalicia, 'pago_enviado'))
-      .toBe('PagoEnviado_Galicia_2024-01-18_1210.50.pdf');
-
-    const pagoSantander: Pago = { ...basePago, banco: 'Santander' };
-    expect(generatePagoFileName(pagoSantander, 'pago_recibido'))
-      .toBe('PagoRecibido_Santander_2024-01-18_1210.50.pdf');
+    expect(result).toBe('2024-01-18 - Pago Enviado - EMPRESA SA.pdf');
   });
 });
 
@@ -152,12 +201,12 @@ describe('generateReciboFileName', () => {
     fileName: 'original.pdf',
     folderPath: '',
     tipoRecibo: 'sueldo',
-    nombreEmpleado: 'Juan Pérez',
+    nombreEmpleado: 'Juan Perez',
     cuilEmpleado: '20123456786',
     legajo: '001',
     cuitEmpleador: '30709076783',
     periodoAbonado: 'diciembre/2024',
-    fechaPago: '2025-01-05',
+    fechaPago: '2024-12-05',
     subtotalRemuneraciones: 500000,
     subtotalDescuentos: 85000,
     totalNeto: 415000,
@@ -166,33 +215,27 @@ describe('generateReciboFileName', () => {
     needsReview: false,
   };
 
-  it('generates recibo file name with sanitized employee name', () => {
+  it('generates regular recibo de sueldo', () => {
     const result = generateReciboFileName(baseRecibo);
-    expect(result).toBe('Recibo_JuanPerez_diciembre2024.pdf');
+    expect(result).toBe('2024-12 - Recibo de Sueldo - Juan Perez.pdf');
   });
 
-  it('handles employee name with multiple parts', () => {
-    const recibo: Recibo = { ...baseRecibo, nombreEmpleado: 'MARTIN, Miguel Angel' };
-    const result = generateReciboFileName(recibo);
-    expect(result).toBe('Recibo_MARTINMiguelAngel_diciembre2024.pdf');
-  });
-
-  it('handles period with slash format', () => {
-    const recibo: Recibo = { ...baseRecibo, periodoAbonado: 'noviembre/2024' };
-    const result = generateReciboFileName(recibo);
-    expect(result).toBe('Recibo_JuanPerez_noviembre2024.pdf');
-  });
-
-  it('handles period with different format', () => {
-    const recibo: Recibo = { ...baseRecibo, periodoAbonado: '12/2024' };
-    const result = generateReciboFileName(recibo);
-    expect(result).toBe('Recibo_JuanPerez_122024.pdf');
-  });
-
-  it('handles liquidacion final type', () => {
+  it('generates liquidacion final', () => {
     const recibo: Recibo = { ...baseRecibo, tipoRecibo: 'liquidacion_final' };
     const result = generateReciboFileName(recibo);
-    expect(result).toBe('LiquidacionFinal_JuanPerez_diciembre2024.pdf');
+    expect(result).toBe('2024-12 - Liquidacion Final - Juan Perez.pdf');
+  });
+
+  it('handles name with accents', () => {
+    const recibo: Recibo = { ...baseRecibo, nombreEmpleado: 'José García' };
+    const result = generateReciboFileName(recibo);
+    expect(result).toBe('2024-12 - Recibo de Sueldo - Jose Garcia.pdf');
+  });
+
+  it('handles name with special characters', () => {
+    const recibo: Recibo = { ...baseRecibo, nombreEmpleado: 'María Pérez-González' };
+    const result = generateReciboFileName(recibo);
+    expect(result).toBe('2024-12 - Recibo de Sueldo - Maria Perez-Gonzalez.pdf');
   });
 });
 
@@ -213,30 +256,20 @@ describe('generateResumenFileName', () => {
     needsReview: false,
   };
 
-  it('generates resumen file name', () => {
+  it('generates ARS currency resumen', () => {
     const result = generateResumenFileName(baseResumen);
-    expect(result).toBe('Resumen_BBVA_2024-01-01_a_2024-01-31.pdf');
+    expect(result).toBe('2024-01 - Resumen Bancario - BBVA.pdf');
   });
 
-  it('handles different banks', () => {
-    const resumenGalicia: ResumenBancario = { ...baseResumen, banco: 'Galicia' };
-    expect(generateResumenFileName(resumenGalicia))
-      .toBe('Resumen_Galicia_2024-01-01_a_2024-01-31.pdf');
-  });
-
-  it('handles different date ranges', () => {
-    const resumen: ResumenBancario = {
-      ...baseResumen,
-      fechaDesde: '2024-06-01',
-      fechaHasta: '2024-06-30',
-    };
-    expect(generateResumenFileName(resumen))
-      .toBe('Resumen_BBVA_2024-06-01_a_2024-06-30.pdf');
-  });
-
-  it('handles USD currency', () => {
+  it('generates USD currency resumen', () => {
     const resumenUSD: ResumenBancario = { ...baseResumen, moneda: 'USD' };
-    expect(generateResumenFileName(resumenUSD))
-      .toBe('Resumen_BBVA_2024-01-01_a_2024-01-31_USD.pdf');
+    const result = generateResumenFileName(resumenUSD);
+    expect(result).toBe('2024-01 - Resumen Bancario USD - BBVA.pdf');
+  });
+
+  it('handles bank name with accents', () => {
+    const resumen: ResumenBancario = { ...baseResumen, banco: 'Río de la Plata' };
+    const result = generateResumenFileName(resumen);
+    expect(result).toBe('2024-01 - Resumen Bancario - Rio de la Plata.pdf');
   });
 });
