@@ -24,11 +24,13 @@ vi.mock('../../../src/services/drive.js', () => ({
 const mockGetSheetMetadata = vi.fn();
 const mockCreateSheet = vi.fn();
 const mockSetValues = vi.fn();
+const mockFormatSheet = vi.fn();
 
 vi.mock('../../../src/services/sheets.js', () => ({
   getSheetMetadata: (...args: unknown[]) => mockGetSheetMetadata(...args),
   createSheet: (...args: unknown[]) => mockCreateSheet(...args),
   setValues: (...args: unknown[]) => mockSetValues(...args),
+  formatSheet: (...args: unknown[]) => mockFormatSheet(...args),
   clearSheetsCache: vi.fn(),
 }));
 
@@ -50,6 +52,8 @@ describe('FolderStructure service', () => {
   beforeEach(() => {
     clearFolderStructureCache();
     vi.clearAllMocks();
+    // Mock formatSheet to always succeed by default
+    mockFormatSheet.mockResolvedValue({ ok: true, value: undefined });
   });
 
   afterEach(() => {
