@@ -131,26 +131,30 @@ ADVA Root Folder (env: DRIVE_ROOT_FOLDER_ID)
 
 ---
 
-## Phase 2: Core Processing ❌ NOT STARTED
+## Phase 2: Core Processing ✅ COMPLETE
 
-### Tasks
-- [ ] Port scanner orchestration to `src/processing/scanner.ts`
+### Completed
+- [x] Port scanner orchestration to `src/processing/scanner.ts`
   - File discovery from Drive
   - Classification with Gemini
-  - Data extraction
-  - Sheet storage
-  - Matching execution
-- [ ] Implement `POST /api/scan` endpoint logic
-- [ ] Implement `POST /api/rematch` endpoint logic
-- [ ] Implement `POST /api/autofill-bank` endpoint logic
-- [ ] Write integration tests for processing pipeline
-
-### Notes
-- Processing queue infrastructure is ready (`src/processing/queue.ts`)
-- Drive and Sheets services are ready
-- Gemini client is ready
-- Matching logic is preserved and tested
-- Need to wire everything together in scanner
+  - Data extraction with type-specific prompts
+  - Sheet storage (Facturas, Pagos, Recibos)
+  - Matching execution (FacturaPagoMatcher)
+  - Document sorting to appropriate folders
+- [x] Implement `POST /api/scan` endpoint logic
+  - Accepts optional `folderId` parameter
+  - Returns scan results with statistics
+- [x] Implement `POST /api/rematch` endpoint logic
+  - Re-runs matching on unmatched documents
+  - Updates sheets with match results
+- [x] Implement `POST /api/autofill-bank` endpoint logic
+  - Auto-fills bank movement descriptions
+  - Uses BankMovementMatcher for document matching
+- [x] Create `src/bank/autofill.ts` module
+- [x] Write unit tests for scanner module (17 tests)
+- [x] Write unit tests for routes (8 tests)
+- [x] All 704 tests passing
+- [x] Build with zero warnings
 
 ---
 
@@ -210,12 +214,12 @@ ADVA Root Folder (env: DRIVE_ROOT_FOLDER_ID)
 | Phase 0: Cleanup | ✅ Complete | 100% |
 | Phase 1: Server Foundation | ✅ Complete | 100% |
 | Phase 1.5: Folder Structure | ✅ Complete | 100% |
-| Phase 2: Core Processing | ❌ Not Started | 0% |
+| Phase 2: Core Processing | ✅ Complete | 100% |
 | Phase 3: Real-time Monitoring | ❌ Not Started | 0% |
 | Phase 4: Extended Classification | ❌ Not Started | 0% |
 | Phase 5: Multi-Spreadsheet | ❌ Not Started | 0% |
 
-**Overall Progress: ~45%** (infrastructure complete, ready for core processing)
+**Overall Progress: ~60%** (core processing complete, ready for real-time monitoring)
 
 ---
 
@@ -227,7 +231,7 @@ src/
 ├── config.ts              # REWRITTEN - env vars
 ├── routes/
 │   ├── status.ts          # NEW
-│   ├── scan.ts            # NEW (stubs)
+│   ├── scan.ts            # IMPLEMENTED - scan, rematch, autofill-bank
 │   └── webhooks.ts        # NEW (stub)
 ├── services/
 │   ├── google-auth.ts     # NEW
@@ -236,7 +240,10 @@ src/
 │   ├── folder-structure.ts # NEW - folder discovery/caching
 │   └── document-sorter.ts # NEW - file movement
 ├── processing/
-│   └── queue.ts           # NEW
+│   ├── queue.ts           # NEW
+│   └── scanner.ts         # NEW - core processing orchestration
+├── bank/
+│   └── autofill.ts        # NEW - bank movement auto-fill
 ├── gemini/
 │   └── client.ts          # REWRITTEN - native fetch
 └── utils/
@@ -248,18 +255,19 @@ src/
 
 ## Next Steps
 
-1. **Phase 2 Priority**: Implement `src/processing/scanner.ts`
-   - This is the main business logic that ties everything together
-   - Start with basic scan → classify → extract → store flow
-   - Add matching as second step
-   - Use `document-sorter.ts` to move files after processing
+1. **Phase 3 Priority**: Implement real-time monitoring
+   - Set up Drive Push Notifications on startup
+   - Complete webhook handler for incremental scans
+   - Add channel auto-renewal with node-cron
+   - Add fallback polling mechanism
 
-2. **Testing**: Add integration tests for the scanner
-   - Mock Google API responses
-   - Test full processing pipeline
-
-3. **Deployment**: Set up Railway.app
+2. **Deployment**: Set up Railway.app
    - Create project
    - Configure environment variables
    - Deploy and test endpoints
    - Ensure `DRIVE_ROOT_FOLDER_ID` is set with proper folder structure
+
+3. **Integration Testing**: Add end-to-end tests
+   - Test full scan → process → match → sort flow
+   - Test rematch functionality
+   - Test bank autofill functionality

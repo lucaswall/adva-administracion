@@ -3,7 +3,9 @@
  */
 
 import type { FastifyInstance } from 'fastify';
-import type { ScanResult } from '../types/index.js';
+import type { ScanResult, BankAutoFillResult } from '../types/index.js';
+import { scanFolder, rematch, RematchResult } from '../processing/scanner.js';
+import { autoFillBankMovements } from '../bank/autofill.js';
 
 /**
  * Scan request body
@@ -21,61 +23,81 @@ interface RematchRequest {
 }
 
 /**
+ * Autofill request body
+ */
+interface AutofillRequest {
+  bankName?: string;
+}
+
+/**
+ * Error response
+ */
+interface ErrorResponse {
+  error: string;
+  details?: string;
+}
+
+/**
  * Register scan routes
  */
 export async function scanRoutes(server: FastifyInstance) {
   /**
    * POST /api/scan - Trigger a manual scan of the Drive folder
    */
-  server.post<{ Body: ScanRequest }>('/scan', async (request, _reply): Promise<ScanResult> => {
-    const { folderId, force } = request.body || {};
+  server.post<{ Body: ScanRequest }>('/scan', async (request, reply): Promise<ScanResult | ErrorResponse> => {
+    const { folderId } = request.body || {};
 
-    server.log.info({ folderId, force }, 'Starting manual scan');
+    server.log.info({ folderId }, 'Starting manual scan');
 
-    // TODO: Implement actual scanning logic
-    // This will be implemented in Phase 2
+    const result = await scanFolder(folderId);
 
-    return {
-      filesProcessed: 0,
-      facturasAdded: 0,
-      pagosAdded: 0,
-      recibosAdded: 0,
-      matchesFound: 0,
-      errors: 0,
-      duration: 0
-    };
+    if (!result.ok) {
+      reply.status(500);
+      return {
+        error: result.error.message,
+      };
+    }
+
+    return result.value;
   });
 
   /**
    * POST /api/rematch - Re-run matching on unmatched documents
    */
-  server.post<{ Body: RematchRequest }>('/rematch', async (request, _reply) => {
+  server.post<{ Body: RematchRequest }>('/rematch', async (request, reply): Promise<RematchResult | ErrorResponse> => {
     const { documentType = 'all' } = request.body || {};
 
     server.log.info({ documentType }, 'Starting rematch');
 
-    // TODO: Implement rematch logic
-    // This will be implemented in Phase 2
+    const result = await rematch();
 
-    return {
-      matchesFound: 0,
-      duration: 0
-    };
+    if (!result.ok) {
+      reply.status(500);
+      return {
+        error: result.error.message,
+      };
+    }
+
+    return result.value;
   });
 
   /**
    * POST /api/autofill-bank - Auto-fill bank movement descriptions
    */
-  server.post('/autofill-bank', async (_request, _reply) => {
-    server.log.info('Starting bank autofill');
+  server.post<{ Body: AutofillRequest }>('/autofill-bank', async (request, reply): Promise<BankAutoFillResult | ErrorResponse> => {
+    const { bankName } = request.body || {};
 
-    // TODO: Implement bank autofill logic
-    // This will be implemented in Phase 2
+    server.log.info({ bankName }, 'Starting bank autofill');
 
-    return {
-      rowsProcessed: 0,
-      rowsFilled: 0,
-      duration: 0
-    };
+    const result = await autoFillBankMovements(bankName);
+
+    if (!result.ok) {
+      reply.status(500);
+      return {
+        error: result.error.message,
+      };
+    }
+
+    return result.value;
   });
 }
