@@ -343,6 +343,42 @@ export async function formatSheet(
 }
 
 /**
+ * Deletes a sheet from a spreadsheet
+ *
+ * @param spreadsheetId - Spreadsheet ID
+ * @param sheetId - Sheet ID (not the name, the numeric ID)
+ * @returns Success or error
+ */
+export async function deleteSheet(
+  spreadsheetId: string,
+  sheetId: number
+): Promise<Result<void, Error>> {
+  try {
+    const sheets = getSheetsService();
+
+    await sheets.spreadsheets.batchUpdate({
+      spreadsheetId,
+      requestBody: {
+        requests: [
+          {
+            deleteSheet: {
+              sheetId,
+            },
+          },
+        ],
+      },
+    });
+
+    return { ok: true, value: undefined };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error : new Error(String(error)),
+    };
+  }
+}
+
+/**
  * Clears the cached Sheets service (for testing)
  */
 export function clearSheetsCache(): void {

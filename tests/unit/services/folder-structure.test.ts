@@ -25,12 +25,16 @@ const mockGetSheetMetadata = vi.fn();
 const mockCreateSheet = vi.fn();
 const mockSetValues = vi.fn();
 const mockFormatSheet = vi.fn();
+const mockDeleteSheet = vi.fn();
+const mockGetValues = vi.fn();
 
 vi.mock('../../../src/services/sheets.js', () => ({
   getSheetMetadata: (...args: unknown[]) => mockGetSheetMetadata(...args),
   createSheet: (...args: unknown[]) => mockCreateSheet(...args),
   setValues: (...args: unknown[]) => mockSetValues(...args),
   formatSheet: (...args: unknown[]) => mockFormatSheet(...args),
+  deleteSheet: (...args: unknown[]) => mockDeleteSheet(...args),
+  getValues: (...args: unknown[]) => mockGetValues(...args),
   clearSheetsCache: vi.fn(),
 }));
 
@@ -54,6 +58,14 @@ describe('FolderStructure service', () => {
     vi.clearAllMocks();
     // Mock formatSheet to always succeed by default
     mockFormatSheet.mockResolvedValue({ ok: true, value: undefined });
+    // Mock getValues to return empty by default (no headers)
+    mockGetValues.mockResolvedValue({ ok: true, value: [[]] });
+    // Mock deleteSheet to always succeed by default
+    mockDeleteSheet.mockResolvedValue({ ok: true, value: undefined });
+    // Mock setValues to always succeed by default
+    mockSetValues.mockResolvedValue({ ok: true, value: 0 });
+    // Mock createSheet to always succeed by default
+    mockCreateSheet.mockResolvedValue({ ok: true, value: 0 });
   });
 
   afterEach(() => {
@@ -99,6 +111,9 @@ describe('FolderStructure service', () => {
             { title: 'Recibos', sheetId: 3 },
           ],
         });
+
+      // Mock getValues for existing sheets with correct headers (starting with 'fileId')
+      mockGetValues.mockResolvedValue({ ok: true, value: [['fileId', 'fileName', 'folderPath']] });
 
       const result = await discoverFolderStructure();
 
@@ -351,6 +366,9 @@ describe('FolderStructure service', () => {
           ],
         });
 
+      // Mock getValues for existing sheets with correct headers (starting with 'fileId')
+      mockGetValues.mockResolvedValue({ ok: true, value: [['fileId', 'fileName', 'folderPath']] });
+
       const result = await discoverFolderStructure();
 
       expect(result.ok).toBe(true);
@@ -386,6 +404,9 @@ describe('FolderStructure service', () => {
           ok: true,
           value: [{ title: 'Facturas Recibidas', sheetId: 1 }],
         });
+
+      // Mock getValues for existing sheets with correct headers (starting with 'fileId')
+      mockGetValues.mockResolvedValue({ ok: true, value: [['fileId', 'fileName', 'folderPath']] });
 
       // Mock creating missing sheets (1 for Creditos + 2 for Debitos = 3)
       mockCreateSheet
@@ -436,6 +457,102 @@ describe('FolderStructure service', () => {
       if (!result.ok) {
         expect(result.error.message).toBe('Failed to create sheet');
       }
+    });
+
+    it('deletes initial Sheet1 when creating new spreadsheet with custom sheets', async () => {
+      // Mock finding all required folders and spreadsheets
+      mockFindByName
+        .mockResolvedValueOnce({ ok: true, value: { id: 'entrada-id', name: 'Entrada', mimeType: 'application/vnd.google-apps.folder' } })
+        .mockResolvedValueOnce({ ok: true, value: { id: 'creditos-id', name: 'Creditos', mimeType: 'application/vnd.google-apps.folder' } })
+        .mockResolvedValueOnce({ ok: true, value: { id: 'debitos-id', name: 'Debitos', mimeType: 'application/vnd.google-apps.folder' } })
+        .mockResolvedValueOnce({ ok: true, value: { id: 'sin-procesar-id', name: 'Sin Procesar', mimeType: 'application/vnd.google-apps.folder' } })
+        .mockResolvedValueOnce({ ok: true, value: { id: 'bancos-id', name: 'Bancos', mimeType: 'application/vnd.google-apps.folder' } })
+        .mockResolvedValueOnce({ ok: true, value: { id: 'control-creditos-id', name: 'Control de Creditos', mimeType: 'application/vnd.google-apps.spreadsheet' } })
+        .mockResolvedValueOnce({ ok: true, value: { id: 'control-debitos-id', name: 'Control de Debitos', mimeType: 'application/vnd.google-apps.spreadsheet' } });
+
+      mockListByMimeType.mockResolvedValue({ ok: true, value: [] });
+
+      // Mock sheet metadata - newly created spreadsheet has only Sheet1
+      mockGetSheetMetadata
+        .mockResolvedValueOnce({
+          ok: true,
+          value: [{ title: 'Sheet1', sheetId: 0 }],
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          value: [{ title: 'Sheet1', sheetId: 0 }],
+        });
+
+      // Mock creating sheets (2 for Creditos + 3 for Debitos = 5 total)
+      mockCreateSheet
+        .mockResolvedValueOnce({ ok: true, value: 1 }) // Facturas Emitidas
+        .mockResolvedValueOnce({ ok: true, value: 2 }) // Pagos Recibidos
+        .mockResolvedValueOnce({ ok: true, value: 3 }) // Facturas Recibidas
+        .mockResolvedValueOnce({ ok: true, value: 4 }) // Pagos Enviados
+        .mockResolvedValueOnce({ ok: true, value: 5 }); // Recibos
+
+      // Mock setting header values
+      mockSetValues.mockResolvedValue({ ok: true, value: 23 });
+
+      // Mock getValues to return empty for Sheet1 (no headers)
+      mockGetValues.mockResolvedValue({ ok: true, value: [[]] });
+
+      // Mock deleteSheet to succeed
+      mockDeleteSheet.mockResolvedValue({ ok: true, value: undefined });
+
+      const result = await discoverFolderStructure();
+
+      expect(result.ok).toBe(true);
+
+      // Verify sheets were created for both spreadsheets
+      expect(mockCreateSheet).toHaveBeenCalledTimes(5);
+
+      // Verify Sheet1 was deleted from both spreadsheets
+      expect(mockDeleteSheet).toHaveBeenCalledTimes(2);
+      expect(mockDeleteSheet).toHaveBeenCalledWith('control-creditos-id', 0);
+      expect(mockDeleteSheet).toHaveBeenCalledWith('control-debitos-id', 0);
+    });
+
+    it('does not delete Sheet1 if it has been converted to a custom sheet', async () => {
+      // Mock finding all required folders and spreadsheets
+      mockFindByName
+        .mockResolvedValueOnce({ ok: true, value: { id: 'entrada-id', name: 'Entrada', mimeType: 'application/vnd.google-apps.folder' } })
+        .mockResolvedValueOnce({ ok: true, value: { id: 'creditos-id', name: 'Creditos', mimeType: 'application/vnd.google-apps.folder' } })
+        .mockResolvedValueOnce({ ok: true, value: { id: 'debitos-id', name: 'Debitos', mimeType: 'application/vnd.google-apps.folder' } })
+        .mockResolvedValueOnce({ ok: true, value: { id: 'sin-procesar-id', name: 'Sin Procesar', mimeType: 'application/vnd.google-apps.folder' } })
+        .mockResolvedValueOnce({ ok: true, value: { id: 'bancos-id', name: 'Bancos', mimeType: 'application/vnd.google-apps.folder' } })
+        .mockResolvedValueOnce({ ok: true, value: { id: 'control-creditos-id', name: 'Control de Creditos', mimeType: 'application/vnd.google-apps.spreadsheet' } })
+        .mockResolvedValueOnce({ ok: true, value: { id: 'control-debitos-id', name: 'Control de Debitos', mimeType: 'application/vnd.google-apps.spreadsheet' } });
+
+      mockListByMimeType.mockResolvedValue({ ok: true, value: [] });
+
+      // Mock sheet metadata - all custom sheets already exist, no Sheet1
+      mockGetSheetMetadata
+        .mockResolvedValueOnce({
+          ok: true,
+          value: [
+            { title: 'Facturas Emitidas', sheetId: 1 },
+            { title: 'Pagos Recibidos', sheetId: 2 },
+          ],
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          value: [
+            { title: 'Facturas Recibidas', sheetId: 1 },
+            { title: 'Pagos Enviados', sheetId: 2 },
+            { title: 'Recibos', sheetId: 3 },
+          ],
+        });
+
+      // Mock getValues for existing sheets with correct headers (starting with 'fileId')
+      mockGetValues.mockResolvedValue({ ok: true, value: [['fileId', 'fileName', 'folderPath']] });
+
+      const result = await discoverFolderStructure();
+
+      expect(result.ok).toBe(true);
+
+      // Verify Sheet1 was NOT deleted (it doesn't exist)
+      expect(mockDeleteSheet).not.toHaveBeenCalled();
     });
   });
 

@@ -77,6 +77,14 @@ export declare function formatSheet(spreadsheetId: string, sheetId: number, opti
     frozenRows?: number;
 }): Promise<Result<void, Error>>;
 /**
+ * Deletes a sheet from a spreadsheet
+ *
+ * @param spreadsheetId - Spreadsheet ID
+ * @param sheetId - Sheet ID (not the name, the numeric ID)
+ * @returns Success or error
+ */
+export declare function deleteSheet(spreadsheetId: string, sheetId: number): Promise<Result<void, Error>>;
+/**
  * Clears the cached Sheets service (for testing)
  */
 export declare function clearSheetsCache(): void;

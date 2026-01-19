@@ -5,7 +5,7 @@
 
 import { getConfig } from '../config.js';
 import { findByName, listByMimeType, createFolder, createSpreadsheet } from './drive.js';
-import { getSheetMetadata, createSheet, setValues, getValues, formatSheet } from './sheets.js';
+import { getSheetMetadata, createSheet, setValues, getValues, formatSheet, deleteSheet } from './sheets.js';
 import { formatMonthFolder } from '../utils/spanish-date.js';
 import { CONTROL_CREDITOS_SHEETS, CONTROL_DEBITOS_SHEETS } from '../constants/spreadsheet-headers.js';
 import type { FolderStructure, Result, SortDestination } from '../types/index.js';
@@ -120,6 +120,7 @@ async function findOrCreateSpreadsheet(
 /**
  * Ensures required sheets exist in a spreadsheet
  * Creates missing sheets with headers and applies formatting
+ * Deletes the default "Sheet1" if it exists after adding custom sheets
  *
  * @param spreadsheetId - Spreadsheet ID
  * @param sheetConfigs - Array of sheet configurations to ensure exist
@@ -186,6 +187,15 @@ async function ensureSheetsExist(
     });
     if (!formatResult.ok) {
       return formatResult;
+    }
+  }
+
+  // Delete the default "Sheet1" if it exists and hasn't been converted to a custom sheet
+  if (existingSheets.has('Sheet1')) {
+    const sheet1Id = existingSheets.get('Sheet1')!;
+    const deleteResult = await deleteSheet(spreadsheetId, sheet1Id);
+    if (!deleteResult.ok) {
+      return deleteResult;
     }
   }
 
