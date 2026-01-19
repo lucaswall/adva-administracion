@@ -41,9 +41,44 @@
 - Write tests after implementation is complete
 
 ## SUBAGENTS
-- Build: `builder` (haiku) - report warnings/errors only
-- Tests: `test-runner` (haiku) - report failures only
-- Commit: `commit-bot` (haiku) - stage changes, analyze diff, create commit
+
+**IMPORTANT:** ALWAYS use these subagents instead of running commands directly.
+
+### Available Subagents
+
+1. **`test-runner`** (haiku) - Run tests and report failures only
+   - **When to use:** After any code change, before committing
+   - **Never use:** `npm test` directly
+
+2. **`builder`** (haiku) - Build and report warnings/errors only
+   - **When to use:** After code changes, before committing
+   - **Never use:** `npm run build` directly
+
+3. **`commit-bot`** (haiku) - Stage changes, analyze diff, create commit
+   - **When to use:** After tests and build pass, ready to commit
+   - **Never use:** `git add`, `git commit` directly
+   - **Note:** Creates commit with proper message and co-author
+
+4. **`pr-creator`** (haiku) - Branch, commit (via commit-bot), push, create PR
+   - **When to use:** When user asks to create a pull request
+   - **Never use:** Manual git branching/pushing/PR creation
+   - **Workflow:** Creates branch → calls commit-bot → pushes → creates PR
+
+### Usage Workflow
+
+```
+Code changes → test-runner → builder → commit-bot → (optional) pr-creator
+```
+
+**Example:**
+```
+User: "Fix the webhook bug and create a PR"
+Assistant:
+  1. Fix code (write tests first per TDD)
+  2. Use test-runner subagent
+  3. Use builder subagent
+  4. Use pr-creator subagent (which will call commit-bot internally)
+```
 
 ## REPO
 - Node.js + Fastify server for Railway.app deployment
@@ -64,7 +99,8 @@ src/
 │   ├── drive.ts           # googleapis Drive wrapper
 │   ├── sheets.ts          # googleapis Sheets wrapper
 │   ├── folder-structure.ts # Drive folder discovery/caching
-│   └── document-sorter.ts # Document file movement
+│   ├── document-sorter.ts # Document file movement
+│   └── watch-manager.ts   # Real-time monitoring
 ├── processing/
 │   └── queue.ts           # p-queue processing
 ├── types/index.ts         # TypeScript interfaces
@@ -105,6 +141,9 @@ GEMINI_API_KEY=<key>
 
 # Drive (required) - root folder containing the folder structure
 DRIVE_ROOT_FOLDER_ID=<folder id>
+
+# Webhooks (optional) - for real-time Drive notifications
+WEBHOOK_URL=<webhook url>
 
 # Matching
 MATCH_DAYS_BEFORE=10
