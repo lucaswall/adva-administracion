@@ -92,7 +92,7 @@ export async function startWatching(folderId: string): Promise<Result<WatchChann
     channelId,
     resourceId: result.value.resourceId,
     folderId,
-    expiration: new Date(result.value.expiration),
+    expiration: new Date(Number(result.value.expiration)),
     createdAt: new Date(),
   };
 

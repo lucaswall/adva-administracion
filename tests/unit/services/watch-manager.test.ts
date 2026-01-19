@@ -95,7 +95,7 @@ describe('watch-manager', () => {
         ok: true,
         value: {
           resourceId: 'resource123',
-          expiration: new Date(Date.now() + 3600000).toISOString(),
+          expiration: String(Date.now() + 3600000),
         },
       };
       vi.mocked(drive.watchFolder).mockResolvedValue(mockWatchResult);
@@ -116,7 +116,7 @@ describe('watch-manager', () => {
         ok: true,
         value: {
           resourceId: 'resource123',
-          expiration: new Date(Date.now() + 3600000).toISOString(),
+          expiration: String(Date.now() + 3600000),
         },
       };
       vi.mocked(drive.watchFolder).mockResolvedValue(mockWatchResult);
@@ -155,7 +155,7 @@ describe('watch-manager', () => {
         ok: true,
         value: {
           resourceId: 'resource123',
-          expiration: new Date(Date.now() + 3600000).toISOString(),
+          expiration: String(Date.now() + 3600000),
         },
       };
       vi.mocked(drive.watchFolder).mockResolvedValue(mockWatchResult);
@@ -205,7 +205,7 @@ describe('watch-manager', () => {
         ok: true,
         value: {
           resourceId: 'resource123',
-          expiration: new Date(Date.now() + 3600000).toISOString(),
+          expiration: String(Date.now() + 3600000),
         },
       };
       vi.mocked(drive.watchFolder).mockResolvedValue(mockWatchResult);
@@ -386,7 +386,7 @@ describe('watch-manager', () => {
         ok: true,
         value: {
           resourceId: 'resource123',
-          expiration: new Date(Date.now() + 3600000).toISOString(),
+          expiration: String(Date.now() + 3600000),
         },
       };
       vi.mocked(drive.watchFolder).mockResolvedValue(mockWatchResult);
@@ -428,7 +428,7 @@ describe('watch-manager', () => {
         ok: true,
         value: {
           resourceId: 'resource123',
-          expiration: new Date(Date.now() + 3600000).toISOString(),
+          expiration: String(Date.now() + 3600000),
         },
       };
       vi.mocked(drive.watchFolder).mockResolvedValue(mockWatchResult);
