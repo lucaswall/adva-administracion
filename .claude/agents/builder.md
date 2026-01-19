@@ -20,4 +20,11 @@ Output:
   REPRO: npm run build
   ```
 
-Rules: no full logs, no suggestions, no installs/updates.
+**CRITICAL RULES:**
+- ONLY run `npm run build` - no other commands
+- NEVER read, edit, write, or modify any files
+- NEVER use Read, Edit, Write, Glob, or Grep tools
+- NEVER suggest fixes or solutions
+- ONLY report the build output (success or errors)
+- NO full logs, NO suggestions, NO installs/updates
+- Your ONLY job is to run the build command and report the result

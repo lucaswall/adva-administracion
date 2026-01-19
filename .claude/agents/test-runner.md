@@ -23,4 +23,11 @@ Output:
   REPRO: npm test
   ```
 
-Rules: no full logs, no suggestions, no installs/updates.
+**CRITICAL RULES:**
+- ONLY run `npm test --silent` - no other commands
+- NEVER read, edit, write, or modify any files
+- NEVER use Read, Edit, Write, Glob, or Grep tools
+- NEVER suggest fixes or solutions
+- ONLY report the test output (pass or failures)
+- NO full logs, NO suggestions, NO installs/updates
+- Your ONLY job is to run the test command and report the result

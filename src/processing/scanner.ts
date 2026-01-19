@@ -9,6 +9,7 @@ import type {
   Factura,
   Pago,
   Recibo,
+  ResumenBancario,
   ScanResult,
   DocumentType,
   ClassificationResult,
@@ -30,7 +31,7 @@ import {
 import { listFilesInFolder, downloadFile } from '../services/drive.js';
 import { getValues, appendRows, batchUpdate } from '../services/sheets.js';
 import { getCachedFolderStructure } from '../services/folder-structure.js';
-import { sortDocument, sortToSinProcesar } from '../services/document-sorter.js';
+import { sortToSinProcesar, sortAndRenameDocument } from '../services/document-sorter.js';
 import { getProcessingQueue } from './queue.js';
 import { getConfig } from '../config.js';
 import { FacturaPagoMatcher } from '../matching/matcher.js';
@@ -40,7 +41,7 @@ import { FacturaPagoMatcher } from '../matching/matcher.js';
  */
 export interface ProcessFileResult {
   documentType: DocumentType;
-  document?: Factura | Pago | Recibo;
+  document?: Factura | Pago | Recibo | ResumenBancario;
   classification?: ClassificationResult;
   error?: string;
 }
@@ -107,6 +108,9 @@ export async function processFile(
 
   const classification = classificationParse.value;
 
+  // Prepare timestamp for all documents
+  const now = new Date().toISOString();
+
   // If unrecognized, return early
   if (classification.documentType === 'unrecognized') {
     return {
@@ -133,11 +137,28 @@ export async function processFile(
       extractPrompt = RECIBO_PROMPT;
       break;
     case 'resumen_bancario':
-      // TODO: Add RESUMEN_BANCARIO_PROMPT extraction in Phase 4
+      // TODO: Add RESUMEN_BANCARIO_PROMPT extraction in a future phase
+      // For now, create a minimal document to enable sorting and renaming
+      const resumen: import('../types/index.js').ResumenBancario = {
+        fileId: fileInfo.id,
+        fileName: fileInfo.name,
+        folderPath: fileInfo.folderPath,
+        banco: 'Desconocido', // Will be extracted in future
+        fechaDesde: '',
+        fechaHasta: '',
+        saldoInicial: 0,
+        saldoFinal: 0,
+        moneda: 'ARS',
+        cantidadMovimientos: 0,
+        processedAt: now,
+        confidence: classification.confidence,
+        needsReview: true, // Always needs review until extraction is implemented
+      };
       return {
         ok: true,
         value: {
           documentType: 'resumen_bancario',
+          document: resumen,
           classification,
         },
       };
@@ -165,7 +186,6 @@ export async function processFile(
   }
 
   // Step 3: Parse the extraction result
-  const now = new Date().toISOString();
 
   if (classification.documentType === 'factura_emitida' || classification.documentType === 'factura_recibida') {
     const parseResult = parseFacturaResponse(extractResult.value);
@@ -545,9 +565,9 @@ export async function scanFolder(folderId?: string): Promise<Result<ScanResult, 
         const storeResult = await storeFactura(doc as Factura, controlCreditosId, 'Facturas Emitidas');
         if (storeResult.ok) {
           result.facturasAdded++;
-          processedDocs.push({ type: 'factura_emitida', doc });
+          processedDocs.push({ type: 'factura_emitida', doc: doc as Factura });
           console.log(`Factura emitida stored successfully, moving to Creditos folder`);
-          const sortResult = await sortDocument(doc, 'creditos');
+          const sortResult = await sortAndRenameDocument(doc, 'creditos', 'factura_emitida');
           if (!sortResult.success) {
             console.error(`Failed to move factura ${fileInfo.name} to Creditos:`, sortResult.error);
             result.errors++;
@@ -564,9 +584,9 @@ export async function scanFolder(folderId?: string): Promise<Result<ScanResult, 
         const storeResult = await storeFactura(doc as Factura, controlDebitosId, 'Facturas Recibidas');
         if (storeResult.ok) {
           result.facturasAdded++;
-          processedDocs.push({ type: 'factura_recibida', doc });
+          processedDocs.push({ type: 'factura_recibida', doc: doc as Factura });
           console.log(`Factura recibida stored successfully, moving to Debitos folder`);
-          const sortResult = await sortDocument(doc, 'debitos');
+          const sortResult = await sortAndRenameDocument(doc, 'debitos', 'factura_recibida');
           if (!sortResult.success) {
             console.error(`Failed to move factura ${fileInfo.name} to Debitos:`, sortResult.error);
             result.errors++;
@@ -583,9 +603,9 @@ export async function scanFolder(folderId?: string): Promise<Result<ScanResult, 
         const storeResult = await storePago(doc as Pago, controlCreditosId, 'Pagos Recibidos');
         if (storeResult.ok) {
           result.pagosAdded++;
-          processedDocs.push({ type: 'pago_recibido', doc });
+          processedDocs.push({ type: 'pago_recibido', doc: doc as Pago });
           console.log(`Pago recibido stored successfully, moving to Creditos folder`);
-          const sortResult = await sortDocument(doc, 'creditos');
+          const sortResult = await sortAndRenameDocument(doc, 'creditos', 'pago_recibido');
           if (!sortResult.success) {
             console.error(`Failed to move pago ${fileInfo.name} to Creditos:`, sortResult.error);
             result.errors++;
@@ -602,9 +622,9 @@ export async function scanFolder(folderId?: string): Promise<Result<ScanResult, 
         const storeResult = await storePago(doc as Pago, controlDebitosId, 'Pagos Enviados');
         if (storeResult.ok) {
           result.pagosAdded++;
-          processedDocs.push({ type: 'pago_enviado', doc });
+          processedDocs.push({ type: 'pago_enviado', doc: doc as Pago });
           console.log(`Pago enviado stored successfully, moving to Debitos folder`);
-          const sortResult = await sortDocument(doc, 'debitos');
+          const sortResult = await sortAndRenameDocument(doc, 'debitos', 'pago_enviado');
           if (!sortResult.success) {
             console.error(`Failed to move pago ${fileInfo.name} to Debitos:`, sortResult.error);
             result.errors++;
@@ -621,9 +641,9 @@ export async function scanFolder(folderId?: string): Promise<Result<ScanResult, 
         const storeResult = await storeRecibo(doc as Recibo, controlDebitosId);
         if (storeResult.ok) {
           result.recibosAdded++;
-          processedDocs.push({ type: 'recibo', doc });
+          processedDocs.push({ type: 'recibo', doc: doc as Recibo });
           console.log(`Recibo stored successfully, moving to Debitos folder`);
-          const sortResult = await sortDocument(doc, 'debitos');
+          const sortResult = await sortAndRenameDocument(doc, 'debitos', 'recibo');
           if (!sortResult.success) {
             console.error(`Failed to move recibo ${fileInfo.name} to Debitos:`, sortResult.error);
             result.errors++;
@@ -637,7 +657,7 @@ export async function scanFolder(folderId?: string): Promise<Result<ScanResult, 
       } else if (processed.documentType === 'resumen_bancario') {
         // Bank statement -> goes to Bancos folder (TODO: store in bank spreadsheet)
         console.log(`Moving resumen bancario ${fileInfo.name} to Bancos folder`);
-        const sortResult = await sortDocument(doc, 'bancos');
+        const sortResult = await sortAndRenameDocument(doc, 'bancos', 'resumen_bancario');
         if (!sortResult.success) {
           console.error(`Failed to move resumen ${fileInfo.name} to Bancos:`, sortResult.error);
           result.errors++;

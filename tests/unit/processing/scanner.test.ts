@@ -42,10 +42,12 @@ vi.mock('../../../src/services/folder-structure.js', () => ({
 
 const mockSortDocument = vi.fn();
 const mockSortToSinProcesar = vi.fn();
+const mockSortAndRenameDocument = vi.fn();
 
 vi.mock('../../../src/services/document-sorter.js', () => ({
   sortDocument: (...args: unknown[]) => mockSortDocument(...args),
   sortToSinProcesar: (...args: unknown[]) => mockSortToSinProcesar(...args),
+  sortAndRenameDocument: (...args: unknown[]) => mockSortAndRenameDocument(...args),
 }));
 
 // Mock GeminiClient
@@ -301,6 +303,37 @@ describe('Scanner module', () => {
       }
     });
 
+    it('processes a resumen_bancario file and returns early', async () => {
+      mockDownloadFile.mockResolvedValue({
+        ok: true,
+        value: Buffer.from('pdf content'),
+      });
+
+      mockAnalyzeDocument.mockResolvedValueOnce({
+        ok: true,
+        value: '{"documentType": "resumen_bancario", "confidence": 0.9, "reason": "Bank statement", "indicators": ["BBVA", "Resumen"]}',
+      });
+      mockParseClassificationResponse.mockReturnValue({
+        ok: true,
+        value: {
+          documentType: 'resumen_bancario',
+          confidence: 0.9,
+          reason: 'Bank statement',
+          indicators: ['BBVA', 'Resumen'],
+        },
+      });
+
+      const result = await processFile(mockFileInfo);
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value.documentType).toBe('resumen_bancario');
+        expect(result.value.classification).toBeDefined();
+        // Should not call extraction for resumen_bancario (not implemented yet)
+        expect(mockAnalyzeDocument).toHaveBeenCalledTimes(1);
+      }
+    });
+
     it('handles unrecognized documents', async () => {
       mockDownloadFile.mockResolvedValue({
         ok: true,
@@ -477,7 +510,7 @@ describe('Scanner module', () => {
       });
 
       mockAppendRows.mockResolvedValue({ ok: true, value: 1 });
-      mockSortDocument.mockResolvedValue({ success: true });
+      mockSortAndRenameDocument.mockResolvedValue({ success: true });
 
       const result = await scanFolder();
 
@@ -570,7 +603,7 @@ describe('Scanner module', () => {
       });
 
       mockAppendRows.mockResolvedValue({ ok: true, value: 1 });
-      mockSortDocument.mockResolvedValue({ success: true });
+      mockSortAndRenameDocument.mockResolvedValue({ success: true });
 
       const result = await scanFolder();
 
@@ -597,6 +630,67 @@ describe('Scanner module', () => {
         expect(result.value.facturasAdded).toBe(0);
         expect(result.value.pagosAdded).toBe(0);
       }
+    });
+
+    it('moves resumen_bancario files to Bancos folder', async () => {
+      mockListFilesInFolder.mockResolvedValue({
+        ok: true,
+        value: [
+          {
+            id: 'resumen-1',
+            name: 'resumen_banco.pdf',
+            mimeType: 'application/pdf',
+            lastUpdated: new Date('2024-01-31'),
+            folderPath: '',
+          },
+        ],
+      });
+
+      // Mock empty processed files list
+      mockGetValues.mockResolvedValue({ ok: true, value: [] });
+
+      mockDownloadFile.mockResolvedValue({
+        ok: true,
+        value: Buffer.from('pdf content'),
+      });
+
+      // Classification returns resumen_bancario
+      mockAnalyzeDocument.mockResolvedValueOnce({
+        ok: true,
+        value: '{"documentType": "resumen_bancario", "confidence": 0.9, "reason": "Bank statement", "indicators": ["BBVA", "Resumen"]}',
+      });
+      mockParseClassificationResponse.mockReturnValueOnce({
+        ok: true,
+        value: {
+          documentType: 'resumen_bancario',
+          confidence: 0.9,
+          reason: 'Bank statement',
+          indicators: ['BBVA', 'Resumen'],
+        },
+      });
+
+      mockSortAndRenameDocument.mockResolvedValue({ success: true, targetPath: 'Bancos' });
+
+      const result = await scanFolder();
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value.filesProcessed).toBe(1);
+        // Resumen bancario should be moved but not added to facturas/pagos/recibos counts
+        expect(result.value.facturasAdded).toBe(0);
+        expect(result.value.pagosAdded).toBe(0);
+        expect(result.value.recibosAdded).toBe(0);
+      }
+
+      // Should call sortAndRenameDocument with a document that has at least fileId and fileName, plus bancos destination and resumen_bancario type
+      expect(mockSortAndRenameDocument).toHaveBeenCalledWith(
+        expect.objectContaining({
+          fileId: 'resumen-1',
+          fileName: 'resumen_banco.pdf',
+        }),
+        'bancos',
+        'resumen_bancario'
+      );
     });
 
     it('returns error when folder structure is not initialized', async () => {

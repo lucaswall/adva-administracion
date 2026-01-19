@@ -3,10 +3,16 @@
  * Moves processed documents to appropriate folders based on type and date
  */
 
-import { moveFile, getParents } from './drive.js';
+import { moveFile, getParents, renameFile } from './drive.js';
 import { getOrCreateMonthFolder, getCachedFolderStructure } from './folder-structure.js';
 import { formatMonthFolder } from '../utils/spanish-date.js';
-import type { Factura, Pago, Recibo, SortDestination, SortResult } from '../types/index.js';
+import {
+  generateFacturaFileName,
+  generatePagoFileName,
+  generateReciboFileName,
+  generateResumenFileName,
+} from '../utils/file-naming.js';
+import type { Factura, Pago, Recibo, ResumenBancario, SortDestination, SortResult, DocumentType } from '../types/index.js';
 
 /** Destination folder names for path building */
 const DESTINATION_NAMES: Record<SortDestination, string> = {
@@ -19,7 +25,7 @@ const DESTINATION_NAMES: Record<SortDestination, string> = {
 /**
  * Document with file info needed for sorting
  */
-type SortableDocument = Factura | Pago | Recibo;
+type SortableDocument = Factura | Pago | Recibo | ResumenBancario;
 
 /**
  * Extracts the relevant date from a document for sorting
@@ -31,6 +37,9 @@ function getDocumentDate(doc: SortableDocument): Date {
   } else if ('fechaPago' in doc) {
     // Pago or Recibo - use payment date
     return new Date(doc.fechaPago);
+  } else if ('fechaHasta' in doc) {
+    // ResumenBancario - use end date
+    return new Date(doc.fechaHasta);
   }
   // Fallback to current date
   return new Date();
@@ -177,4 +186,71 @@ export async function sortToSinProcesar(
     targetFolderId: structure.sinProcesarId,
     targetPath: 'Sin Procesar',
   };
+}
+
+/**
+ * Document with file info needed for sorting and renaming
+ */
+type SortableDocumentWithType = Factura | Pago | Recibo | ResumenBancario;
+
+/**
+ * Sorts a document and renames it with a standardized name
+ *
+ * @param doc - The document to sort and rename
+ * @param destination - Target destination ('creditos', 'debitos', 'bancos', or 'sin_procesar')
+ * @param documentType - The type of document for proper naming
+ * @returns Sort result with success status and target info
+ */
+export async function sortAndRenameDocument(
+  doc: SortableDocumentWithType,
+  destination: SortDestination,
+  documentType: DocumentType
+): Promise<SortResult> {
+  // First, sort the document (move it to the right folder)
+  const sortResult = await sortDocument(doc, destination);
+  if (!sortResult.success) {
+    return sortResult;
+  }
+
+  // Don't rename files moved to sin_procesar - keep original name for debugging
+  if (destination === 'sin_procesar') {
+    return sortResult;
+  }
+
+  // Generate the new file name based on document type
+  let newFileName: string;
+  switch (documentType) {
+    case 'factura_emitida':
+      newFileName = generateFacturaFileName(doc as Factura, 'factura_emitida');
+      break;
+    case 'factura_recibida':
+      newFileName = generateFacturaFileName(doc as Factura, 'factura_recibida');
+      break;
+    case 'pago_enviado':
+      newFileName = generatePagoFileName(doc as Pago, 'pago_enviado');
+      break;
+    case 'pago_recibido':
+      newFileName = generatePagoFileName(doc as Pago, 'pago_recibido');
+      break;
+    case 'recibo':
+      newFileName = generateReciboFileName(doc as Recibo);
+      break;
+    case 'resumen_bancario':
+      newFileName = generateResumenFileName(doc as ResumenBancario);
+      break;
+    default:
+      // For unrecognized or unknown types, keep the original name
+      return sortResult;
+  }
+
+  // Rename the file
+  const renameResult = await renameFile(doc.fileId, newFileName);
+  if (!renameResult.ok) {
+    return {
+      success: false,
+      error: renameResult.error.message,
+    };
+  }
+
+  return sortResult;
 }

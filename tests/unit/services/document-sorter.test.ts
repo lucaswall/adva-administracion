@@ -8,10 +8,12 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 // Mock the drive module
 const mockMoveFile = vi.fn();
 const mockGetParents = vi.fn();
+const mockRenameFile = vi.fn();
 
 vi.mock('../../../src/services/drive.js', () => ({
   moveFile: (...args: unknown[]) => mockMoveFile(...args),
   getParents: (...args: unknown[]) => mockGetParents(...args),
+  renameFile: (...args: unknown[]) => mockRenameFile(...args),
   clearDriveCache: vi.fn(),
 }));
 
@@ -28,8 +30,9 @@ vi.mock('../../../src/services/folder-structure.js', () => ({
 import {
   sortDocument,
   sortToSinProcesar,
+  sortAndRenameDocument,
 } from '../../../src/services/document-sorter.js';
-import type { Factura, Pago, SortDestination } from '../../../src/types/index.js';
+import type { Factura, Pago, Recibo, ResumenBancario, SortDestination, DocumentType } from '../../../src/types/index.js';
 
 describe('DocumentSorter service', () => {
   const mockFolderStructure = {
@@ -373,6 +376,288 @@ describe('DocumentSorter service', () => {
 
       expect(result.success).toBe(false);
       expect(result.error).toBe('Move failed');
+    });
+  });
+
+  describe('sortAndRenameDocument', () => {
+    it('renames factura emitida with proper format after moving', async () => {
+      const factura: Factura = {
+        fileId: 'file-123',
+        fileName: 'factura.pdf',
+        folderPath: '',
+        tipoComprobante: 'A',
+        puntoVenta: '00001',
+        numeroComprobante: '00001234',
+        fechaEmision: '2024-01-15',
+        fechaVtoCae: '2024-01-25',
+        cuitEmisor: '20123456786',
+        razonSocialEmisor: 'TEST SA',
+        cae: '12345678901234',
+        importeNeto: 1000,
+        importeIva: 210,
+        importeTotal: 1210,
+        moneda: 'ARS',
+        processedAt: new Date().toISOString(),
+        confidence: 0.95,
+        needsReview: false,
+      };
+
+      mockGetParents.mockResolvedValue({ ok: true, value: ['entrada-id'] });
+      mockGetOrCreateMonthFolder.mockResolvedValue({ ok: true, value: 'enero-folder-id' });
+      mockMoveFile.mockResolvedValue({ ok: true, value: undefined });
+      mockRenameFile.mockResolvedValue({ ok: true, value: undefined });
+
+      const result = await sortAndRenameDocument(factura, 'creditos', 'factura_emitida');
+
+      expect(result.success).toBe(true);
+      expect(mockMoveFile).toHaveBeenCalledWith('file-123', 'entrada-id', 'enero-folder-id');
+      expect(mockRenameFile).toHaveBeenCalledWith(
+        'file-123',
+        'FacturaEmitida_00001-00001234_20123456786_2024-01-15.pdf'
+      );
+    });
+
+    it('renames factura recibida with proper format after moving', async () => {
+      const factura: Factura = {
+        fileId: 'file-456',
+        fileName: 'factura.pdf',
+        folderPath: '',
+        tipoComprobante: 'A',
+        puntoVenta: '00002',
+        numeroComprobante: '00005678',
+        fechaEmision: '2024-06-20',
+        fechaVtoCae: '2024-06-30',
+        cuitEmisor: '27234567891',
+        razonSocialEmisor: 'EMPRESA UNO SA',
+        cae: '98765432109876',
+        importeNeto: 2000,
+        importeIva: 420,
+        importeTotal: 2420,
+        moneda: 'ARS',
+        processedAt: new Date().toISOString(),
+        confidence: 0.92,
+        needsReview: false,
+      };
+
+      mockGetParents.mockResolvedValue({ ok: true, value: ['entrada-id'] });
+      mockGetOrCreateMonthFolder.mockResolvedValue({ ok: true, value: 'junio-folder-id' });
+      mockMoveFile.mockResolvedValue({ ok: true, value: undefined });
+      mockRenameFile.mockResolvedValue({ ok: true, value: undefined });
+
+      const result = await sortAndRenameDocument(factura, 'debitos', 'factura_recibida');
+
+      expect(result.success).toBe(true);
+      expect(mockRenameFile).toHaveBeenCalledWith(
+        'file-456',
+        'FacturaRecibida_00002-00005678_27234567891_2024-06-20.pdf'
+      );
+    });
+
+    it('renames pago enviado with proper format after moving', async () => {
+      const pago: Pago = {
+        fileId: 'pago-123',
+        fileName: 'pago.pdf',
+        folderPath: '',
+        banco: 'BBVA',
+        fechaPago: '2024-06-20',
+        importePagado: 5000.50,
+        processedAt: new Date().toISOString(),
+        confidence: 0.9,
+        needsReview: false,
+      };
+
+      mockGetParents.mockResolvedValue({ ok: true, value: ['entrada-id'] });
+      mockGetOrCreateMonthFolder.mockResolvedValue({ ok: true, value: 'junio-folder-id' });
+      mockMoveFile.mockResolvedValue({ ok: true, value: undefined });
+      mockRenameFile.mockResolvedValue({ ok: true, value: undefined });
+
+      const result = await sortAndRenameDocument(pago, 'debitos', 'pago_enviado');
+
+      expect(result.success).toBe(true);
+      expect(mockRenameFile).toHaveBeenCalledWith(
+        'pago-123',
+        'PagoEnviado_BBVA_2024-06-20_5000.50.pdf'
+      );
+    });
+
+    it('renames pago recibido with proper format after moving', async () => {
+      const pago: Pago = {
+        fileId: 'pago-456',
+        fileName: 'pago.pdf',
+        folderPath: '',
+        banco: 'Santander Rio',
+        fechaPago: '2024-03-15',
+        importePagado: 12345.67,
+        processedAt: new Date().toISOString(),
+        confidence: 0.88,
+        needsReview: false,
+      };
+
+      mockGetParents.mockResolvedValue({ ok: true, value: ['entrada-id'] });
+      mockGetOrCreateMonthFolder.mockResolvedValue({ ok: true, value: 'marzo-folder-id' });
+      mockMoveFile.mockResolvedValue({ ok: true, value: undefined });
+      mockRenameFile.mockResolvedValue({ ok: true, value: undefined });
+
+      const result = await sortAndRenameDocument(pago, 'creditos', 'pago_recibido');
+
+      expect(result.success).toBe(true);
+      expect(mockRenameFile).toHaveBeenCalledWith(
+        'pago-456',
+        'PagoRecibido_Santander Rio_2024-03-15_12345.67.pdf'
+      );
+    });
+
+    it('renames recibo with proper format after moving', async () => {
+      const recibo: Recibo = {
+        fileId: 'recibo-123',
+        fileName: 'recibo.pdf',
+        folderPath: '',
+        tipoRecibo: 'sueldo',
+        nombreEmpleado: 'Juan Perez',
+        cuilEmpleado: '20111111119',
+        legajo: '001',
+        cuitEmpleador: '30709076783',
+        periodoAbonado: 'diciembre/2024',
+        fechaPago: '2024-12-05',
+        subtotalRemuneraciones: 150000,
+        subtotalDescuentos: 30000,
+        totalNeto: 120000,
+        processedAt: new Date().toISOString(),
+        confidence: 0.95,
+        needsReview: false,
+      };
+
+      mockGetParents.mockResolvedValue({ ok: true, value: ['entrada-id'] });
+      mockGetOrCreateMonthFolder.mockResolvedValue({ ok: true, value: 'diciembre-folder-id' });
+      mockMoveFile.mockResolvedValue({ ok: true, value: undefined });
+      mockRenameFile.mockResolvedValue({ ok: true, value: undefined });
+
+      const result = await sortAndRenameDocument(recibo, 'debitos', 'recibo');
+
+      expect(result.success).toBe(true);
+      expect(mockRenameFile).toHaveBeenCalledWith(
+        'recibo-123',
+        'Recibo_JuanPerez_diciembre2024.pdf'
+      );
+    });
+
+    it('renames resumen bancario with proper format after moving', async () => {
+      const resumen: ResumenBancario = {
+        fileId: 'resumen-123',
+        fileName: 'resumen.pdf',
+        folderPath: '',
+        banco: 'BBVA',
+        fechaDesde: '2024-01-01',
+        fechaHasta: '2024-01-31',
+        moneda: 'ARS',
+        processedAt: new Date().toISOString(),
+        confidence: 0.9,
+        needsReview: false,
+      };
+
+      mockGetParents.mockResolvedValue({ ok: true, value: ['entrada-id'] });
+      mockMoveFile.mockResolvedValue({ ok: true, value: undefined });
+      mockRenameFile.mockResolvedValue({ ok: true, value: undefined });
+
+      const result = await sortAndRenameDocument(resumen, 'bancos', 'resumen_bancario');
+
+      expect(result.success).toBe(true);
+      expect(mockRenameFile).toHaveBeenCalledWith(
+        'resumen-123',
+        'Resumen_BBVA_2024-01-01_a_2024-01-31.pdf'
+      );
+    });
+
+    it('renames resumen bancario USD with proper format', async () => {
+      const resumen: ResumenBancario = {
+        fileId: 'resumen-456',
+        fileName: 'resumen.pdf',
+        folderPath: '',
+        banco: 'BBVA',
+        fechaDesde: '2024-02-01',
+        fechaHasta: '2024-02-29',
+        moneda: 'USD',
+        processedAt: new Date().toISOString(),
+        confidence: 0.9,
+        needsReview: false,
+      };
+
+      mockGetParents.mockResolvedValue({ ok: true, value: ['entrada-id'] });
+      mockMoveFile.mockResolvedValue({ ok: true, value: undefined });
+      mockRenameFile.mockResolvedValue({ ok: true, value: undefined });
+
+      const result = await sortAndRenameDocument(resumen, 'bancos', 'resumen_bancario');
+
+      expect(result.success).toBe(true);
+      expect(mockRenameFile).toHaveBeenCalledWith(
+        'resumen-456',
+        'Resumen_BBVA_2024-02-01_a_2024-02-29_USD.pdf'
+      );
+    });
+
+    it('returns error when renaming fails', async () => {
+      const factura: Factura = {
+        fileId: 'file-123',
+        fileName: 'factura.pdf',
+        folderPath: '',
+        tipoComprobante: 'A',
+        puntoVenta: '00001',
+        numeroComprobante: '00001234',
+        fechaEmision: '2024-01-15',
+        fechaVtoCae: '2024-01-25',
+        cuitEmisor: '20123456786',
+        razonSocialEmisor: 'TEST SA',
+        cae: '12345678901234',
+        importeNeto: 1000,
+        importeIva: 210,
+        importeTotal: 1210,
+        moneda: 'ARS',
+        processedAt: new Date().toISOString(),
+        confidence: 0.95,
+        needsReview: false,
+      };
+
+      mockGetParents.mockResolvedValue({ ok: true, value: ['entrada-id'] });
+      mockGetOrCreateMonthFolder.mockResolvedValue({ ok: true, value: 'enero-folder-id' });
+      mockMoveFile.mockResolvedValue({ ok: true, value: undefined });
+      mockRenameFile.mockResolvedValue({ ok: false, error: new Error('Rename failed') });
+
+      const result = await sortAndRenameDocument(factura, 'creditos', 'factura_emitida');
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBe('Rename failed');
+    });
+
+    it('does not rename files moved to sin_procesar', async () => {
+      const factura: Factura = {
+        fileId: 'file-123',
+        fileName: 'factura.pdf',
+        folderPath: '',
+        tipoComprobante: 'A',
+        puntoVenta: '00001',
+        numeroComprobante: '00001234',
+        fechaEmision: '2024-01-15',
+        fechaVtoCae: '2024-01-25',
+        cuitEmisor: '20123456786',
+        razonSocialEmisor: 'TEST SA',
+        cae: '12345678901234',
+        importeNeto: 1000,
+        importeIva: 210,
+        importeTotal: 1210,
+        moneda: 'ARS',
+        processedAt: new Date().toISOString(),
+        confidence: 0.95,
+        needsReview: false,
+      };
+
+      mockGetParents.mockResolvedValue({ ok: true, value: ['entrada-id'] });
+      mockMoveFile.mockResolvedValue({ ok: true, value: undefined });
+
+      const result = await sortAndRenameDocument(factura, 'sin_procesar', 'factura_emitida');
+
+      expect(result.success).toBe(true);
+      expect(mockMoveFile).toHaveBeenCalled();
+      expect(mockRenameFile).not.toHaveBeenCalled(); // Should not rename in sin_procesar
     });
   });
 });
