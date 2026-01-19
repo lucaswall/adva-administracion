@@ -5,7 +5,9 @@
 
 import { getConfig } from '../config.js';
 import { findByName, listByMimeType, createFolder, createSpreadsheet } from './drive.js';
+import { getSheetMetadata, createSheet, setValues } from './sheets.js';
 import { formatMonthFolder } from '../utils/spanish-date.js';
+import { CONTROL_PAGOS_SHEETS } from '../constants/spreadsheet-headers.js';
 import type { FolderStructure, Result, SortDestination } from '../types/index.js';
 
 /** MIME type for Google Drive folders */
@@ -109,6 +111,48 @@ async function findOrCreateSpreadsheet(
 }
 
 /**
+ * Ensures required sheets exist in Control de Pagos spreadsheet
+ * Creates missing sheets with headers
+ *
+ * @param spreadsheetId - Control de Pagos spreadsheet ID
+ * @returns Success or error
+ */
+async function ensureSheetsExist(spreadsheetId: string): Promise<Result<void, Error>> {
+  // Get existing sheets
+  const metadataResult = await getSheetMetadata(spreadsheetId);
+  if (!metadataResult.ok) {
+    return metadataResult;
+  }
+
+  const existingSheets = new Set(metadataResult.value.map(s => s.title));
+
+  // Create missing sheets with headers
+  for (const config of CONTROL_PAGOS_SHEETS) {
+    if (existingSheets.has(config.title)) {
+      continue; // Sheet already exists
+    }
+
+    // Create the sheet
+    const createResult = await createSheet(spreadsheetId, config.title);
+    if (!createResult.ok) {
+      return createResult;
+    }
+
+    // Add header row
+    const setResult = await setValues(
+      spreadsheetId,
+      `${config.title}!A1`,
+      [config.headers]
+    );
+    if (!setResult.ok) {
+      return setResult;
+    }
+  }
+
+  return { ok: true, value: undefined };
+}
+
+/**
  * Discovers and caches the folder structure from Drive
  * Creates missing folders as needed
  *
@@ -140,6 +184,10 @@ export async function discoverFolderStructure(): Promise<Result<FolderStructure,
 
   const controlPagosResult = await findOrCreateSpreadsheet(rootId, SPREADSHEET_NAMES.controlPagos);
   if (!controlPagosResult.ok) return controlPagosResult;
+
+  // Ensure required sheets exist in Control de Pagos
+  const ensureSheetsResult = await ensureSheetsExist(controlPagosResult.value);
+  if (!ensureSheetsResult.ok) return ensureSheetsResult;
 
   // Discover bank spreadsheets in Bancos folder
   const bankSpreadsheetsResult = await listByMimeType(bancosResult.value, SPREADSHEET_MIME);
