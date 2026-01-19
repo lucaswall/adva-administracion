@@ -33,7 +33,9 @@
       "Bash(python3:*)",
       "Bash(xargs:*)",
       "WebFetch(domain:docs.railway.com)",
-      "Bash(curl:*)"
+      "Bash(curl:*)",
+      "mcp__Railway__check-railway-status",
+      "mcp__Railway__get-logs"
     ],
     "deny": [
       "Bash(rm -rf *)",
@@ -44,5 +46,9 @@
       "Bash(dd:*)"
     ]
   },
-  "model": "sonnet"
+  "model": "sonnet",
+  "enableAllProjectMcpServers": true,
+  "enabledMcpjsonServers": [
+    "Railway"
+  ]
 }
