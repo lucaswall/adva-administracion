@@ -60,23 +60,30 @@ async function findOrCreateFolder(
   rootId: string,
   name: string
 ): Promise<Result<string, Error>> {
+  console.log(`[Folder Discovery] Finding or creating folder "${name}" in parent ${rootId}`);
+
   const findResult = await findByName(rootId, name, FOLDER_MIME);
 
   if (!findResult.ok) {
+    console.error(`[Folder Discovery] Error searching for folder "${name}":`, findResult.error.message);
     return findResult;
   }
 
   if (findResult.value) {
+    console.log(`[Folder Discovery] Folder "${name}" exists with ID: ${findResult.value.id}`);
     return { ok: true, value: findResult.value.id };
   }
 
   // Folder doesn't exist, create it
+  console.log(`[Folder Discovery] Folder "${name}" not found, creating new folder...`);
   const createResult = await createFolder(rootId, name);
 
   if (!createResult.ok) {
+    console.error(`[Folder Discovery] Error creating folder "${name}":`, createResult.error.message);
     return createResult;
   }
 
+  console.log(`[Folder Discovery] Created folder "${name}" with ID: ${createResult.value.id}`);
   return { ok: true, value: createResult.value.id };
 }
 
@@ -181,6 +188,8 @@ export async function discoverFolderStructure(): Promise<Result<FolderStructure,
   const config = getConfig();
   const rootId = config.driveRootFolderId;
 
+  console.log(`[Folder Discovery] Starting folder structure discovery in root folder: ${rootId}`);
+
   // Find or create all required folders
   const entradaResult = await findOrCreateFolder(rootId, FOLDER_NAMES.entrada);
   if (!entradaResult.ok) return entradaResult;
@@ -236,6 +245,15 @@ export async function discoverFolderStructure(): Promise<Result<FolderStructure,
   };
 
   cachedStructure = structure;
+  console.log(`[Folder Discovery] Folder structure discovery complete:`);
+  console.log(`  - Entrada: ${entradaResult.value}`);
+  console.log(`  - Creditos: ${creditosResult.value}`);
+  console.log(`  - Debitos: ${debitosResult.value}`);
+  console.log(`  - Sin Procesar: ${sinProcesarResult.value}`);
+  console.log(`  - Bancos: ${bancosResult.value}`);
+  console.log(`  - Control de Creditos: ${controlCreditosResult.value}`);
+  console.log(`  - Control de Debitos: ${controlDebitosResult.value}`);
+  console.log(`  - Bank spreadsheets: ${bankSpreadsheets.size}`);
   return { ok: true, value: structure };
 }
 

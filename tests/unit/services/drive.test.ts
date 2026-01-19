@@ -85,7 +85,7 @@ describe('Drive folder operations', () => {
       expect(mockDriveFiles.list).toHaveBeenCalledWith({
         q: "'parentId' in parents and name = 'test.pdf' and trashed = false",
         fields: 'files(id, name, mimeType)',
-        pageSize: 1,
+        pageSize: 10,
         supportsAllDrives: true,
         includeItemsFromAllDrives: true,
       });
@@ -114,7 +114,7 @@ describe('Drive folder operations', () => {
       expect(mockDriveFiles.list).toHaveBeenCalledWith({
         q: "'parentId' in parents and name = 'Cobros' and trashed = false and mimeType = 'application/vnd.google-apps.folder'",
         fields: 'files(id, name, mimeType)',
-        pageSize: 1,
+        pageSize: 10,
         supportsAllDrives: true,
         includeItemsFromAllDrives: true,
       });
@@ -154,7 +154,7 @@ describe('Drive folder operations', () => {
       expect(mockDriveFiles.list).toHaveBeenCalledWith({
         q: "'parentId' in parents and name = 'file\\'s name.pdf' and trashed = false",
         fields: 'files(id, name, mimeType)',
-        pageSize: 1,
+        pageSize: 10,
         supportsAllDrives: true,
         includeItemsFromAllDrives: true,
       });

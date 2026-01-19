@@ -286,24 +286,41 @@ export async function findByName(
       query += ` and mimeType = '${mimeType}'`;
     }
 
-    const response = await drive.files.list({
+    console.log(`[Drive API] Searching for "${name}" in parent ${parentId} (mimeType: ${mimeType || 'any'})`);
+
+    // First, check for ALL matches to detect duplicates
+    const checkResponse = await drive.files.list({
       q: query,
       fields: 'files(id, name, mimeType)',
-      pageSize: 1,
+      pageSize: 10, // Check for up to 10 duplicates
       supportsAllDrives: true,
       includeItemsFromAllDrives: true,
     });
 
-    const files = response.data.files || [];
+    const files = checkResponse.data.files || [];
+    console.log(`[Drive API] Found ${files.length} file(s) named "${name}"`);
+
     if (files.length === 0) {
+      console.log(`[Drive API] No files found named "${name}"`);
       return { ok: true, value: null };
+    }
+
+    // Warn if duplicates exist
+    if (files.length > 1) {
+      console.warn(`[Drive API] WARNING: Found ${files.length} duplicate files named "${name}" in parent ${parentId}:`);
+      files.forEach((file, index) => {
+        console.warn(`  ${index + 1}. ID: ${file.id}, Name: ${file.name}, MimeType: ${file.mimeType}`);
+      });
+      console.warn(`[Drive API] Using the first one (ID: ${files[0].id}). Consider removing duplicates manually.`);
     }
 
     const file = files[0];
     if (!file.id || !file.name || !file.mimeType) {
+      console.log(`[Drive API] File found but missing required fields`);
       return { ok: true, value: null };
     }
 
+    console.log(`[Drive API] Found "${name}" with ID: ${file.id}`);
     return {
       ok: true,
       value: {
@@ -313,6 +330,7 @@ export async function findByName(
       },
     };
   } catch (error) {
+    console.error(`[Drive API] Error searching for "${name}":`, error);
     return {
       ok: false,
       error: error instanceof Error ? error : new Error(String(error)),
@@ -384,6 +402,8 @@ export async function createFolder(
   try {
     const drive = getDriveService();
 
+    console.log(`[Drive API] Creating folder "${name}" in parent ${parentId}`);
+
     const response = await drive.files.create({
       requestBody: {
         name,
@@ -396,11 +416,14 @@ export async function createFolder(
 
     const file = response.data;
     if (!file.id) {
+      console.error(`[Drive API] Failed to create folder "${name}": no ID returned`);
       return {
         ok: false,
         error: new Error('Failed to create folder: no ID returned'),
       };
     }
+
+    console.log(`[Drive API] Successfully created folder "${name}" with ID: ${file.id}`);
 
     return {
       ok: true,
@@ -411,6 +434,7 @@ export async function createFolder(
       },
     };
   } catch (error) {
+    console.error(`[Drive API] Error creating folder "${name}":`, error);
     return {
       ok: false,
       error: error instanceof Error ? error : new Error(String(error)),
