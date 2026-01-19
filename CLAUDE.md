@@ -64,7 +64,8 @@ src/
 │   ├── drive.ts           # googleapis Drive wrapper
 │   ├── sheets.ts          # googleapis Sheets wrapper
 │   ├── folder-structure.ts # Drive folder discovery/caching
-│   └── document-sorter.ts # Document file movement
+│   ├── document-sorter.ts # Document file movement
+│   └── watch-manager.ts   # Real-time monitoring
 ├── processing/
 │   └── queue.ts           # p-queue processing
 ├── types/index.ts         # TypeScript interfaces
@@ -105,6 +106,9 @@ GEMINI_API_KEY=<key>
 
 # Drive (required) - root folder containing the folder structure
 DRIVE_ROOT_FOLDER_ID=<folder id>
+
+# Webhooks (optional) - for real-time Drive notifications
+WEBHOOK_URL=<webhook url>
 
 # Matching
 MATCH_DAYS_BEFORE=10

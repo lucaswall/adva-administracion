@@ -158,21 +158,32 @@ ADVA Root Folder (env: DRIVE_ROOT_FOLDER_ID)
 
 ---
 
-## Phase 3: Real-time Monitoring ❌ NOT STARTED
+## Phase 3: Real-time Monitoring ✅ COMPLETE
 
-### Tasks
-- [ ] Implement Drive Push Notifications setup on startup
-- [ ] Complete `POST /webhooks/drive` implementation
+### Completed
+- [x] Implement Drive Push Notifications setup on startup
+- [x] Complete `POST /webhooks/drive` implementation
   - Parse notification headers
   - Queue incremental scans
   - Handle sync messages
-- [ ] Add channel auto-renewal with node-cron (every 30 min)
-- [ ] Add fallback polling (every 5 min)
-- [ ] Full scan on server startup
+  - Validate channel IDs
+  - Deduplication of notifications
+- [x] Add channel auto-renewal with node-cron (every 30 min)
+- [x] Add fallback polling (every 5 min)
+- [x] Full scan on server startup
+- [x] Graceful shutdown with channel cleanup
+- [x] New `src/services/watch-manager.ts` module
+- [x] Add `webhookUrl` config (optional)
+- [x] Add `WatchChannel` and `WatchManagerStatus` types
+- [x] Write unit tests (17 new tests)
+- [x] All 742 tests passing
+- [x] Build with zero warnings
 
 ### Notes
-- Drive watch/stop functions exist in `src/services/drive.ts`
-- Webhook route stub exists in `src/routes/webhooks.ts`
+- Real-time monitoring is optional - requires `WEBHOOK_URL` env var
+- Fallback polling runs even without webhook URL
+- Proper deduplication prevents duplicate processing
+- Channel auto-renewal prevents expiration
 
 ---
 
@@ -215,11 +226,11 @@ ADVA Root Folder (env: DRIVE_ROOT_FOLDER_ID)
 | Phase 1: Server Foundation | ✅ Complete | 100% |
 | Phase 1.5: Folder Structure | ✅ Complete | 100% |
 | Phase 2: Core Processing | ✅ Complete | 100% |
-| Phase 3: Real-time Monitoring | ❌ Not Started | 0% |
+| Phase 3: Real-time Monitoring | ✅ Complete | 100% |
 | Phase 4: Extended Classification | ❌ Not Started | 0% |
 | Phase 5: Multi-Spreadsheet | ❌ Not Started | 0% |
 
-**Overall Progress: ~60%** (core processing complete, ready for real-time monitoring)
+**Overall Progress: ~75%** (real-time monitoring complete, ready for deployment)
 
 ---
 
@@ -232,13 +243,14 @@ src/
 ├── routes/
 │   ├── status.ts          # NEW
 │   ├── scan.ts            # IMPLEMENTED - scan, rematch, autofill-bank
-│   └── webhooks.ts        # NEW (stub)
+│   └── webhooks.ts        # IMPLEMENTED - Drive push notifications
 ├── services/
 │   ├── google-auth.ts     # NEW
 │   ├── drive.ts           # NEW
 │   ├── sheets.ts          # NEW
 │   ├── folder-structure.ts # NEW - folder discovery/caching
-│   └── document-sorter.ts # NEW - file movement
+│   ├── document-sorter.ts # NEW - file movement
+│   └── watch-manager.ts   # NEW - real-time monitoring
 ├── processing/
 │   ├── queue.ts           # NEW
 │   └── scanner.ts         # NEW - core processing orchestration
@@ -255,19 +267,19 @@ src/
 
 ## Next Steps
 
-1. **Phase 3 Priority**: Implement real-time monitoring
-   - Set up Drive Push Notifications on startup
-   - Complete webhook handler for incremental scans
-   - Add channel auto-renewal with node-cron
-   - Add fallback polling mechanism
-
-2. **Deployment**: Set up Railway.app
+1. **Deployment**: Set up Railway.app with Phase 3
    - Create project
-   - Configure environment variables
+   - Configure environment variables (including `WEBHOOK_URL`)
    - Deploy and test endpoints
+   - Test real-time monitoring with Drive push notifications
    - Ensure `DRIVE_ROOT_FOLDER_ID` is set with proper folder structure
 
-3. **Integration Testing**: Add end-to-end tests
-   - Test full scan → process → match → sort flow
-   - Test rematch functionality
-   - Test bank autofill functionality
+2. **Phase 4**: Extended Classification
+   - Add new document types (factura_emitida, factura_recibida, pago_enviado, pago_recibido, resumen_bancario)
+   - Extend Gemini prompts
+   - Update parser and type definitions
+
+3. **Phase 5**: Multi-Spreadsheet Support
+   - Implement spreadsheet routing logic
+   - Support multiple Control spreadsheets
+   - Per-bank Movimientos spreadsheets

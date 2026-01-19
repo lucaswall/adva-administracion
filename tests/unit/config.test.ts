@@ -176,6 +176,40 @@ describe('config', () => {
       expect(config.geminiApiKey).toBe('test-gemini-key');
       expect(config.driveRootFolderId).toBe('test-folder-id');
     });
+
+    it('loads WEBHOOK_URL when provided', () => {
+      process.env.NODE_ENV = 'development';
+      process.env.GOOGLE_SERVICE_ACCOUNT_KEY = 'test-key';
+      process.env.GEMINI_API_KEY = 'test-gemini-key';
+      process.env.DRIVE_ROOT_FOLDER_ID = 'test-folder-id';
+      process.env.WEBHOOK_URL = 'https://example.com/webhooks/drive';
+
+      const config = loadConfig();
+
+      expect(config.webhookUrl).toBe('https://example.com/webhooks/drive');
+    });
+
+    it('returns null for WEBHOOK_URL when not provided', () => {
+      process.env.NODE_ENV = 'development';
+      process.env.GOOGLE_SERVICE_ACCOUNT_KEY = 'test-key';
+      process.env.GEMINI_API_KEY = 'test-gemini-key';
+      process.env.DRIVE_ROOT_FOLDER_ID = 'test-folder-id';
+
+      const config = loadConfig();
+
+      expect(config.webhookUrl).toBeNull();
+    });
+
+    it('allows missing WEBHOOK_URL in production', () => {
+      process.env.NODE_ENV = 'production';
+      process.env.GOOGLE_SERVICE_ACCOUNT_KEY = 'test-key';
+      process.env.GEMINI_API_KEY = 'test-gemini-key';
+      process.env.DRIVE_ROOT_FOLDER_ID = 'test-folder-id';
+
+      const config = loadConfig();
+
+      expect(config.webhookUrl).toBeNull();
+    });
   });
 
   describe('getConfig', () => {
