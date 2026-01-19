@@ -12,15 +12,16 @@ on:
 
 jobs:
   claude-review:
-    # Skip draft PRs and PRs from Claude branches (to avoid self-review)
-    if: |
-      github.event.pull_request.draft == false &&
-      !startsWith(github.head_ref, 'claude/')
+    # Optional: Filter by PR author
+    # if: |
+    #   github.event.pull_request.user.login == 'external-contributor' ||
+    #   github.event.pull_request.user.login == 'new-developer' ||
+    #   github.event.pull_request.author_association == 'FIRST_TIME_CONTRIBUTOR'
 
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      pull-requests: write
+      pull-requests: read
       issues: read
       id-token: write
 
@@ -28,20 +29,16 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          fetch-depth: 1
 
       - name: Run Claude Code Review
         id: claude-review
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          prompt: |
-            Review this pull request and provide feedback. Focus on:
-            1. Code quality and best practices
-            2. Potential bugs or security issues
-            3. Test coverage for new code
-            4. Consistency with the existing codebase style
-
-            After reviewing, post a comment summarizing your findings.
-            Use the gh CLI to post the review comment.
+          plugin_marketplaces: 'https://github.com/anthropics/claude-code.git'
+          plugins: 'code-review@claude-code-plugins'
+          prompt: '/code-review:code-review ${{ github.repository }}/pull/${{ github.event.pull_request.number }}'
+          # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
+          # or https://code.claude.com/docs/en/cli-reference for available options
 
