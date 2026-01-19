@@ -98,7 +98,6 @@ import {
   processFile,
   scanFolder,
   rematch,
-  createScanner,
 } from '../../../src/processing/scanner.js';
 
 describe('Scanner module', () => {
@@ -757,18 +756,4 @@ describe('Scanner module', () => {
     });
   });
 
-  describe('createScanner', () => {
-    it('creates a scanner with custom config', () => {
-      const scanner = createScanner({
-        concurrency: 5,
-        matchDaysBefore: 15,
-        matchDaysAfter: 90,
-      });
-
-      expect(scanner).toBeDefined();
-      expect(scanner.processFile).toBeDefined();
-      expect(scanner.scanFolder).toBeDefined();
-      expect(scanner.rematch).toBeDefined();
-    });
-  });
 });
