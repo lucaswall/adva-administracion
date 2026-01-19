@@ -59,15 +59,26 @@
    - **Never use:** `git add`, `git commit` directly
    - **Note:** Creates commit with proper message and co-author
 
-4. **`pr-creator`** (haiku) - Branch, commit (via commit-bot), push, create PR
-   - **When to use:** When user asks to create a pull request
-   - **Never use:** Manual git branching/pushing/PR creation
-   - **Workflow:** Creates branch → calls commit-bot → pushes → creates PR
+### Creating Pull Requests
+
+**CRITICAL:** When user asks to create a PR, follow this workflow:
+
+1. **Create branch:** `git checkout -b <type>/<description>`
+   - Types: `feat/`, `fix/`, `refactor/`, `chore/`, `docs/`
+
+2. **Commit changes:** Use `commit-bot` subagent
+   - NEVER use `git commit` directly
+
+3. **Push branch:** `git push -u origin <branch-name>`
+
+4. **Create PR:** Use `gh pr create`
+   - Include summary, changes, test plan
+   - Add "🤖 Generated with [Claude Code](https://claude.com/claude-code)" footer
 
 ### Usage Workflow
 
 ```
-Code changes → test-runner → builder → commit-bot → (optional) pr-creator
+Code changes → test-runner → builder → commit-bot → push → gh pr create
 ```
 
 **Example:**
@@ -77,7 +88,10 @@ Assistant:
   1. Fix code (write tests first per TDD)
   2. Use test-runner subagent
   3. Use builder subagent
-  4. Use pr-creator subagent (which will call commit-bot internally)
+  4. git checkout -b fix/webhook-resource-states
+  5. Use commit-bot subagent
+  6. git push -u origin fix/webhook-resource-states
+  7. gh pr create with detailed description
 ```
 
 ## REPO
