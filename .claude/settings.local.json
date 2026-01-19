@@ -32,12 +32,12 @@
       "Bash(done)",
       "Bash(python3:*)",
       "Bash(xargs:*)",
-      "WebFetch(domain:docs.railway.com)"
+      "WebFetch(domain:docs.railway.com)",
+      "Bash(curl:*)"
     ],
     "deny": [
       "Bash(rm -rf *)",
       "Bash(sudo:*)",
-      "Bash(curl:*)",
       "Bash(wget:*)",
       "Bash(chmod 777 *)",
       "Bash(> /etc/*)",

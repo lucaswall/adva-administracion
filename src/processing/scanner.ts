@@ -428,31 +428,42 @@ async function getProcessedFileIds(spreadsheetId: string): Promise<Set<string>> 
  */
 export async function scanFolder(folderId?: string): Promise<Result<ScanResult, Error>> {
   const startTime = Date.now();
+  console.log(`Starting folder scan${folderId ? ` for folder ${folderId}` : ''}...`);
+
   const folderStructure = getCachedFolderStructure();
 
   if (!folderStructure) {
+    const error = 'Folder structure not initialized. Call discoverFolderStructure first.';
+    console.error(error);
     return {
       ok: false,
-      error: new Error('Folder structure not initialized. Call discoverFolderStructure first.'),
+      error: new Error(error),
     };
   }
 
   const targetFolderId = folderId || folderStructure.entradaId;
   const spreadsheetId = folderStructure.controlPagosId;
 
+  console.log(`Scanning folder: ${targetFolderId}`);
+  console.log(`Using spreadsheet: ${spreadsheetId}`);
+
   // List files in folder
   const listResult = await listFilesInFolder(targetFolderId, '');
   if (!listResult.ok) {
+    console.error('Failed to list files in folder:', listResult.error.message);
     return listResult;
   }
 
   const allFiles = listResult.value;
+  console.log(`Found ${allFiles.length} total files in folder`);
 
   // Get already processed file IDs
   const processedIds = await getProcessedFileIds(spreadsheetId);
+  console.log(`${processedIds.size} files already processed`);
 
   // Filter to only new files
   const newFiles = allFiles.filter(f => !processedIds.has(f.id));
+  console.log(`${newFiles.length} new files to process`);
 
   const result: ScanResult = {
     filesProcessed: 0,
@@ -471,21 +482,35 @@ export async function scanFolder(folderId?: string): Promise<Result<ScanResult, 
 
   for (const fileInfo of newFiles) {
     await queue.add(async () => {
+      console.log(`Processing file: ${fileInfo.name} (${fileInfo.id})`);
       const processResult = await processFile(fileInfo);
 
       if (!processResult.ok) {
+        console.error(`Failed to process file ${fileInfo.name}:`, processResult.error.message);
         result.errors++;
         // Move failed file to Sin Procesar
-        await sortToSinProcesar(fileInfo.id, fileInfo.name);
+        const sortResult = await sortToSinProcesar(fileInfo.id, fileInfo.name);
+        if (!sortResult.success) {
+          console.error(`Failed to move file ${fileInfo.name} to Sin Procesar:`, sortResult.error);
+        } else {
+          console.log(`Moved failed file ${fileInfo.name} to ${sortResult.targetPath}`);
+        }
         return;
       }
 
       const processed = processResult.value;
       result.filesProcessed++;
+      console.log(`File ${fileInfo.name} classified as: ${processed.documentType}`);
 
       if (processed.documentType === 'unrecognized' || processed.documentType === 'unknown') {
+        console.log(`Moving unrecognized file ${fileInfo.name} to Sin Procesar`);
         // Move unrecognized to Sin Procesar
-        await sortToSinProcesar(fileInfo.id, fileInfo.name);
+        const sortResult = await sortToSinProcesar(fileInfo.id, fileInfo.name);
+        if (!sortResult.success) {
+          console.error(`Failed to move file ${fileInfo.name} to Sin Procesar:`, sortResult.error);
+        } else {
+          console.log(`Moved ${fileInfo.name} to ${sortResult.targetPath}`);
+        }
         return;
       }
 
@@ -494,33 +519,60 @@ export async function scanFolder(folderId?: string): Promise<Result<ScanResult, 
 
       // Store in appropriate sheet
       if (processed.documentType === 'factura') {
+        console.log(`Storing factura from ${fileInfo.name} in spreadsheet`);
         const storeResult = await storeFactura(doc as Factura, spreadsheetId);
         if (storeResult.ok) {
           result.facturasAdded++;
           processedDocs.push({ type: 'factura', doc });
+          console.log(`Factura stored successfully, moving to Cobros folder`);
           // Sort to Cobros folder
-          await sortDocument(doc, 'cobros');
+          const sortResult = await sortDocument(doc, 'cobros');
+          if (!sortResult.success) {
+            console.error(`Failed to move factura ${fileInfo.name} to Cobros:`, sortResult.error);
+            result.errors++;
+          } else {
+            console.log(`Moved factura ${fileInfo.name} to ${sortResult.targetPath}`);
+          }
         } else {
+          console.error(`Failed to store factura ${fileInfo.name}:`, storeResult.error.message);
           result.errors++;
         }
       } else if (processed.documentType === 'pago') {
+        console.log(`Storing pago from ${fileInfo.name} in spreadsheet`);
         const storeResult = await storePago(doc as Pago, spreadsheetId);
         if (storeResult.ok) {
           result.pagosAdded++;
           processedDocs.push({ type: 'pago', doc });
+          console.log(`Pago stored successfully, moving to Pagos folder`);
           // Sort to Pagos folder
-          await sortDocument(doc, 'pagos');
+          const sortResult = await sortDocument(doc, 'pagos');
+          if (!sortResult.success) {
+            console.error(`Failed to move pago ${fileInfo.name} to Pagos:`, sortResult.error);
+            result.errors++;
+          } else {
+            console.log(`Moved pago ${fileInfo.name} to ${sortResult.targetPath}`);
+          }
         } else {
+          console.error(`Failed to store pago ${fileInfo.name}:`, storeResult.error.message);
           result.errors++;
         }
       } else if (processed.documentType === 'recibo') {
+        console.log(`Storing recibo from ${fileInfo.name} in spreadsheet`);
         const storeResult = await storeRecibo(doc as Recibo, spreadsheetId);
         if (storeResult.ok) {
           result.recibosAdded++;
           processedDocs.push({ type: 'recibo', doc });
+          console.log(`Recibo stored successfully, moving to Pagos folder`);
           // Sort to Pagos folder (recibos are salary payments)
-          await sortDocument(doc, 'pagos');
+          const sortResult = await sortDocument(doc, 'pagos');
+          if (!sortResult.success) {
+            console.error(`Failed to move recibo ${fileInfo.name} to Pagos:`, sortResult.error);
+            result.errors++;
+          } else {
+            console.log(`Moved recibo ${fileInfo.name} to ${sortResult.targetPath}`);
+          }
         } else {
+          console.error(`Failed to store recibo ${fileInfo.name}:`, storeResult.error.message);
           result.errors++;
         }
       }
@@ -533,6 +585,14 @@ export async function scanFolder(folderId?: string): Promise<Result<ScanResult, 
   // TODO: Run matching after processing (Phase 2 enhancement)
 
   result.duration = Date.now() - startTime;
+
+  console.log(`Scan complete in ${result.duration}ms:`);
+  console.log(`  - Files processed: ${result.filesProcessed}`);
+  console.log(`  - Facturas added: ${result.facturasAdded}`);
+  console.log(`  - Pagos added: ${result.pagosAdded}`);
+  console.log(`  - Recibos added: ${result.recibosAdded}`);
+  console.log(`  - Errors: ${result.errors}`);
+
   return { ok: true, value: result };
 }
 

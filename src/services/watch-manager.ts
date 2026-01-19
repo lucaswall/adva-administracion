@@ -221,13 +221,15 @@ export function markNotificationProcessed(
 export function triggerScan(folderId?: string): void {
   const queue = getProcessingQueue();
 
+  console.log(`Queueing scan${folderId ? ` for folder ${folderId}` : ''}...`);
+
   queue.add(async () => {
-    console.log(`Triggering scan${folderId ? ` for folder ${folderId}` : ''}...`);
+    console.log(`Executing queued scan${folderId ? ` for folder ${folderId}` : ''}...`);
     const result = await scanFolder(folderId);
 
     if (result.ok) {
       lastScanTime = new Date();
-      console.log(`Scan complete: ${result.value.filesProcessed} files processed`);
+      console.log(`Scan complete: ${result.value.filesProcessed} files processed, ${result.value.errors} errors`);
     } else {
       console.error('Scan failed:', result.error.message);
     }
