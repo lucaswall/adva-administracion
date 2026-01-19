@@ -31,7 +31,8 @@
       "WebFetch(domain:developers.google.com)",
       "Bash(done)",
       "Bash(python3:*)",
-      "Bash(xargs:*)"
+      "Bash(xargs:*)",
+      "WebFetch(domain:docs.railway.com)"
     ],
     "deny": [
       "Bash(rm -rf *)",
