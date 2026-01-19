@@ -38,6 +38,10 @@
       "mcp__Railway__get-logs",
       "mcp__Railway__list-deployments",
       "mcp__gdrive__gdrive_search",
+      "mcp__gdrive__gdrive_read_file",
+      "mcp__gdrive__gdrive_list_folder",
+      "mcp__gdrive__gdrive_get_pdf",
+      "mcp__gdrive__gsheets_read",
       "WebFetch(domain:github.com)"
     ],
     "deny": [
