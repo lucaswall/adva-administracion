@@ -37,27 +37,24 @@ This server processes Argentine invoices and payment documents using AI, automat
 
 ## Deployment to Production
 
-### 1. Create Railway Project
-
-1. Go to https://railway.app
-2. Sign up or log in
-3. Click "New Project"
-4. Select "Empty Project"
-5. Name it `adva-administracion`
-
-### 2. Deploy via Railway CLI
+### 1. Install and Login to Railway CLI
 
 ```bash
 # Install Railway CLI
 npm install -g @railway/cli@latest
 
-# Login to Railway
+# Login to Railway (opens browser for authentication)
 railway login
+```
 
-# Link to your Railway project
-railway link
+### 2. Create Project and Deploy
 
-# Set environment variables (see next section)
+```bash
+# Initialize new Railway project
+# This will prompt you to name the project and select a team
+railway init
+
+# Set environment variables (see next section for details)
 railway variables set NODE_ENV=production
 railway variables set LOG_LEVEL=INFO
 railway variables set GEMINI_API_KEY=your_key_here
