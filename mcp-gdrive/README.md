@@ -111,20 +111,34 @@ Add to your Claude Code settings (`~/.config/claude-code/settings.json`):
   "mcpServers": {
     "gdrive": {
       "command": "npx",
-      "args": ["tsx", "/Users/lucaswall/Projects/adva-administracion/mcp-gdrive/index.ts"]
+      "args": ["tsx", "<path-to-repo>/mcp-gdrive/index.ts"]
     }
   }
 }
 ```
 
-Or with explicit env var:
+Replace `<path-to-repo>` with the absolute path to where you cloned this repository.
+
+**Example:**
+```json
+{
+  "mcpServers": {
+    "gdrive": {
+      "command": "npx",
+      "args": ["tsx", "/home/user/projects/adva-administracion/mcp-gdrive/index.ts"]
+    }
+  }
+}
+```
+
+Or with explicit env var (if not using the parent project's `.env`):
 
 ```json
 {
   "mcpServers": {
     "gdrive": {
       "command": "npx",
-      "args": ["tsx", "/Users/lucaswall/Projects/adva-administracion/mcp-gdrive/index.ts"],
+      "args": ["tsx", "<path-to-repo>/mcp-gdrive/index.ts"],
       "env": {
         "GOOGLE_SERVICE_ACCOUNT_KEY": "<base64-encoded-json>"
       }
@@ -135,8 +149,10 @@ Or with explicit env var:
 
 ## Running Manually
 
+From the repository root:
+
 ```bash
-cd /Users/lucaswall/Projects/adva-administracion/mcp-gdrive
+cd mcp-gdrive
 npm install
 npm start
 ```
