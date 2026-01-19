@@ -8,6 +8,11 @@
         "@railway/mcp-server"
       ],
       "env": {}
+    },
+    "gdrive": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["tsx", "mcp-gdrive/index.ts"]
     }
   }
 }

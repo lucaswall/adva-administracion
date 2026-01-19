@@ -104,48 +104,32 @@ The service account must have read access to the Drive files/folders you want to
 
 ## Claude Code Configuration
 
-Add to your Claude Code settings (`~/.config/claude-code/settings.json`):
+**This MCP server is already configured for this project!** 🎉
+
+The MCP server is pre-configured in the project's `.mcp.json` file at the repository root:
 
 ```json
 {
   "mcpServers": {
     "gdrive": {
+      "type": "stdio",
       "command": "npx",
-      "args": ["tsx", "<path-to-repo>/mcp-gdrive/index.ts"]
+      "args": ["tsx", "mcp-gdrive/index.ts"]
     }
   }
 }
 ```
 
-Replace `<path-to-repo>` with the absolute path to where you cloned this repository.
+When you open this project in Claude Code, it automatically discovers the `.mcp.json` file and makes the `gdrive` MCP server available. You'll see an approval prompt the first time you use it - just approve it to enable Google Drive access.
 
-**Example:**
-```json
-{
-  "mcpServers": {
-    "gdrive": {
-      "command": "npx",
-      "args": ["tsx", "/home/user/projects/adva-administracion/mcp-gdrive/index.ts"]
-    }
-  }
-}
-```
+**No manual configuration needed!** The server uses:
+- ✅ Relative paths from the project root
+- ✅ Automatic `.env` file loading from the parent directory
+- ✅ Project-scoped configuration (no global settings to modify)
 
-Or with explicit env var (if not using the parent project's `.env`):
+### For Other Projects
 
-```json
-{
-  "mcpServers": {
-    "gdrive": {
-      "command": "npx",
-      "args": ["tsx", "<path-to-repo>/mcp-gdrive/index.ts"],
-      "env": {
-        "GOOGLE_SERVICE_ACCOUNT_KEY": "<base64-encoded-json>"
-      }
-    }
-  }
-}
-```
+If you want to use this MCP server in a different project, copy the configuration above to that project's `.mcp.json` file (adjusting the path as needed).
 
 ## Running Manually
 
