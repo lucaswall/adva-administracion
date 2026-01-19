@@ -84,6 +84,28 @@ Assistant:
   7. gh pr create with detailed description
 ```
 
+## RAILWAY MCP
+
+**READ-ONLY ACCESS:** The Railway MCP server can be used for monitoring and diagnostics ONLY.
+
+### Allowed Operations
+- `get-logs` - Read deployment or build logs for debugging
+- `list-deployments` - View deployment history and status
+- `list-services` - View services in the project
+- `list-variables` - View environment variables
+- `check-railway-status` - Verify Railway CLI status
+
+### PROHIBITED Operations
+- **NEVER** use `deploy` - No deployments allowed
+- **NEVER** use `create-environment` - No environment changes
+- **NEVER** use `set-variables` - No variable modifications
+- **NEVER** use `create-project-and-link` - No project creation
+- **NEVER** use `deploy-template` - No template deployments
+- **NEVER** use `link-environment` or `link-service` - No linking changes
+- **NEVER** use `generate-domain` - No domain generation
+
+**Usage:** Use Railway MCP tools to read logs and troubleshoot issues, but all deployments and configuration changes must be done by the user.
+
 ## REPO
 - Node.js + Fastify server for Railway.app deployment
 - Output: `dist/` (compiled TypeScript)

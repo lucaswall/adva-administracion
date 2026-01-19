@@ -42,7 +42,9 @@ export async function listFilesInFolder(folderId, folderPath = '') {
                 includeItemsFromAllDrives: true,
             });
             const items = response.data.files || [];
+            console.log(`[Drive API] Query folder ${folderId}: found ${items.length} items`);
             for (const item of items) {
+                console.log(`[Drive API] Item: ${item.name} (${item.mimeType})`);
                 if (!item.id || !item.name || !item.mimeType)
                     continue;
                 // Check if it's a folder - recurse into it
