@@ -246,7 +246,8 @@ describe('generateResumenFileName', () => {
     fileName: 'original.pdf',
     folderPath: '',
     banco: 'BBVA',
-    fechaDesde: '2024-01-01',
+    numeroCuenta: '1234567890',
+    fechaDesde: '2024-01-15',
     fechaHasta: '2024-01-31',
     saldoInicial: 150000,
     saldoFinal: 185000,
@@ -257,20 +258,32 @@ describe('generateResumenFileName', () => {
     needsReview: false,
   };
 
-  it('generates ARS currency resumen', () => {
+  it('generates ARS currency resumen with account number', () => {
     const result = generateResumenFileName(baseResumen);
-    expect(result).toBe('2024-01 - Resumen Bancario - BBVA.pdf');
+    expect(result).toBe('2024-01-15 - Resumen - BBVA - 1234567890 ARS.pdf');
   });
 
-  it('generates USD currency resumen', () => {
+  it('generates USD currency resumen with account number', () => {
     const resumenUSD: ResumenBancario = { ...baseResumen, moneda: 'USD' };
     const result = generateResumenFileName(resumenUSD);
-    expect(result).toBe('2024-01 - Resumen Bancario USD - BBVA.pdf');
+    expect(result).toBe('2024-01-15 - Resumen - BBVA - 1234567890 USD.pdf');
+  });
+
+  it('generates resumen with credit card brand', () => {
+    const resumenVisa: ResumenBancario = { ...baseResumen, numeroCuenta: 'VISA', moneda: 'USD' };
+    const result = generateResumenFileName(resumenVisa);
+    expect(result).toBe('2024-01-15 - Resumen - BBVA - VISA USD.pdf');
   });
 
   it('handles bank name with accents', () => {
     const resumen: ResumenBancario = { ...baseResumen, banco: 'Río de la Plata' };
     const result = generateResumenFileName(resumen);
-    expect(result).toBe('2024-01 - Resumen Bancario - Rio de la Plata.pdf');
+    expect(result).toBe('2024-01-15 - Resumen - Rio de la Plata - 1234567890 ARS.pdf');
+  });
+
+  it('handles account number with spaces or special characters', () => {
+    const resumen: ResumenBancario = { ...baseResumen, numeroCuenta: '1234 5678 90' };
+    const result = generateResumenFileName(resumen);
+    expect(result).toBe('2024-01-15 - Resumen - BBVA - 1234 5678 90 ARS.pdf');
   });
 });

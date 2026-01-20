@@ -288,12 +288,16 @@ export const RESUMEN_BANCARIO_PROMPT = `You are analyzing an Argentine bank stat
 DOCUMENT STRUCTURE:
 Bank statements typically contain:
 1. BANK: The bank issuing the statement
-2. PERIOD: Date range covered by the statement
-3. BALANCES: Opening and closing balances
-4. MOVEMENTS: List of transactions (we only count them, not extract details)
+2. ACCOUNT: Account number or card brand (for credit cards)
+3. PERIOD: Date range covered by the statement
+4. BALANCES: Opening and closing balances
+5. MOVEMENTS: List of transactions (we only count them, not extract details)
 
 Required fields to extract:
 - banco: Bank name (e.g., "BBVA", "Santander", "Galicia", "Macro", "HSBC", "ICBC", "Banco Nación")
+- numeroCuenta: Account number OR card brand (e.g., "1234567890" or "VISA", "Mastercard", "American Express", "Cabal")
+  * For regular bank accounts: extract the full account number (CBU or account number visible in the document)
+  * For credit card statements: extract the card brand (VISA, Mastercard, American Express, Cabal, etc.)
 - fechaDesde: Start date of the statement period (format as YYYY-MM-DD)
 - fechaHasta: End date of the statement period (format as YYYY-MM-DD)
 - saldoInicial: Opening balance at the start of the period (number)
@@ -304,12 +308,25 @@ Required fields to extract:
 Return ONLY valid JSON in this exact format:
 {
   "banco": "BBVA",
+  "numeroCuenta": "1234567890",
   "fechaDesde": "2024-01-01",
   "fechaHasta": "2024-01-31",
   "saldoInicial": 150000.00,
   "saldoFinal": 185000.00,
   "moneda": "ARS",
   "cantidadMovimientos": 47
+}
+
+For credit cards, return format like:
+{
+  "banco": "BBVA",
+  "numeroCuenta": "VISA",
+  "fechaDesde": "2024-01-01",
+  "fechaHasta": "2024-01-31",
+  "saldoInicial": -50000.00,
+  "saldoFinal": 0.00,
+  "moneda": "ARS",
+  "cantidadMovimientos": 23
 }
 
 Important:

@@ -632,6 +632,7 @@ describe('parseResumenBancarioResponse', () => {
   it('parses valid resumen bancario JSON', () => {
     const json = JSON.stringify({
       banco: 'BBVA',
+      numeroCuenta: '1234567890',
       fechaDesde: '2024-01-01',
       fechaHasta: '2024-01-31',
       saldoInicial: 150000,
@@ -644,6 +645,7 @@ describe('parseResumenBancarioResponse', () => {
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.value.data.banco).toBe('BBVA');
+      expect(result.value.data.numeroCuenta).toBe('1234567890');
       expect(result.value.data.fechaDesde).toBe('2024-01-01');
       expect(result.value.data.fechaHasta).toBe('2024-01-31');
       expect(result.value.data.saldoInicial).toBe(150000);
@@ -656,12 +658,13 @@ describe('parseResumenBancarioResponse', () => {
   });
 
   it('handles markdown-wrapped JSON', () => {
-    const json = '```json\n{"banco": "Galicia", "fechaDesde": "2024-02-01", "fechaHasta": "2024-02-29", "saldoInicial": 50000, "saldoFinal": 75000, "moneda": "ARS", "cantidadMovimientos": 23}\n```';
+    const json = '```json\n{"banco": "Galicia", "numeroCuenta": "9876543210", "fechaDesde": "2024-02-01", "fechaHasta": "2024-02-29", "saldoInicial": 50000, "saldoFinal": 75000, "moneda": "ARS", "cantidadMovimientos": 23}\n```';
 
     const result = parseResumenBancarioResponse(json);
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.value.data.banco).toBe('Galicia');
+      expect(result.value.data.numeroCuenta).toBe('9876543210');
     }
   });
 
@@ -681,13 +684,14 @@ describe('parseResumenBancarioResponse', () => {
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.value.needsReview).toBe(true);
-      expect(result.value.missingFields!.length).toBe(5); // 5 missing required fields
+      expect(result.value.missingFields!.length).toBe(6); // 6 missing required fields (now including numeroCuenta)
     }
   });
 
   it('handles negative balances', () => {
     const json = JSON.stringify({
       banco: 'Santander',
+      numeroCuenta: 'VISA',
       fechaDesde: '2024-03-01',
       fechaHasta: '2024-03-31',
       saldoInicial: -50000,
@@ -707,6 +711,7 @@ describe('parseResumenBancarioResponse', () => {
   it('handles USD currency', () => {
     const json = JSON.stringify({
       banco: 'HSBC',
+      numeroCuenta: '5555666677778888',
       fechaDesde: '2024-01-01',
       fechaHasta: '2024-01-31',
       saldoInicial: 10000,
@@ -725,6 +730,7 @@ describe('parseResumenBancarioResponse', () => {
   it('handles zero movements', () => {
     const json = JSON.stringify({
       banco: 'Macro',
+      numeroCuenta: '0123456789',
       fechaDesde: '2024-04-01',
       fechaHasta: '2024-04-30',
       saldoInicial: 100000,
@@ -742,9 +748,10 @@ describe('parseResumenBancarioResponse', () => {
   });
 
   it('calculates confidence based on completeness', () => {
-    // All 7 required fields present
+    // All 8 required fields present
     const completeJson = JSON.stringify({
       banco: 'BBVA',
+      numeroCuenta: '1234567890',
       fechaDesde: '2024-01-01',
       fechaHasta: '2024-01-31',
       saldoInicial: 150000,
@@ -756,20 +763,20 @@ describe('parseResumenBancarioResponse', () => {
     const completeResult = parseResumenBancarioResponse(completeJson);
     expect(completeResult.ok).toBe(true);
     if (completeResult.ok) {
-      expect(completeResult.value.confidence).toBe(1.0); // 7/7 = 1.0
+      expect(completeResult.value.confidence).toBe(1.0); // 8/8 = 1.0
     }
 
-    // Only 2 required fields present out of 7
+    // Only 2 required fields present out of 8
     const partialJson = JSON.stringify({
       banco: 'BBVA',
       fechaDesde: '2024-01-01'
-      // Missing 5 fields
+      // Missing 6 fields
     });
 
     const partialResult = parseResumenBancarioResponse(partialJson);
     expect(partialResult.ok).toBe(true);
     if (partialResult.ok) {
-      // 2/7 = 0.286, but minimum is 0.5
+      // 2/8 = 0.25, but minimum is 0.5
       expect(partialResult.value.confidence).toBe(0.5);
     }
   });
@@ -777,6 +784,7 @@ describe('parseResumenBancarioResponse', () => {
   it('sets needsReview to false for high confidence (>0.9)', () => {
     const json = JSON.stringify({
       banco: 'BBVA',
+      numeroCuenta: '1234567890',
       fechaDesde: '2024-01-01',
       fechaHasta: '2024-01-31',
       saldoInicial: 150000,
@@ -798,7 +806,7 @@ describe('parseResumenBancarioResponse', () => {
       banco: 'BBVA',
       fechaDesde: '2024-01-01',
       fechaHasta: '2024-01-31'
-      // Missing 4 fields -> confidence = 3/7 = 0.43, clamped to 0.5
+      // Missing 5 fields -> confidence = 3/8 = 0.375, clamped to 0.5
     });
 
     const result = parseResumenBancarioResponse(json);

@@ -175,24 +175,26 @@ export function generateReciboFileName(recibo: Recibo): string {
 /**
  * Generates a standardized file name for a resumen bancario
  *
- * Format: YYYY-MM - Resumen Bancario [USD] - Bank Name.pdf
- * Example ARS: 2024-01 - Resumen Bancario - BBVA.pdf
- * Example USD: 2024-01 - Resumen Bancario USD - BBVA.pdf
+ * Format: YYYY-MM-DD - Resumen - Bank Name - Account Number CURRENCY.pdf
+ * Example ARS: 2024-01-15 - Resumen - BBVA - 1234567890 ARS.pdf
+ * Example USD: 2024-01-15 - Resumen - BBVA - 1234567890 USD.pdf
+ * Example Credit Card: 2024-01-15 - Resumen - BBVA - VISA USD.pdf
  *
  * @param resumen - Resumen bancario data
  * @returns Standardized file name
  */
 export function generateResumenFileName(resumen: ResumenBancario): string {
-  // Extract YYYY-MM from fechaDesde
-  const yearMonth = resumen.fechaDesde.substring(0, 7); // YYYY-MM-DD -> YYYY-MM
-
-  // Type label with USD suffix if applicable
-  const typeLabel = resumen.moneda === 'USD'
-    ? 'Resumen Bancario USD'
-    : 'Resumen Bancario';
+  // Date (YYYY-MM-DD from fechaDesde)
+  const fecha = resumen.fechaDesde;
 
   // Bank name (sanitized)
   const bankName = sanitizeFileName(resumen.banco);
 
-  return `${yearMonth} - ${typeLabel} - ${bankName}.pdf`;
+  // Account number or card brand (sanitized)
+  const numeroCuenta = sanitizeFileName(resumen.numeroCuenta);
+
+  // Currency
+  const moneda = resumen.moneda;
+
+  return `${fecha} - Resumen - ${bankName} - ${numeroCuenta} ${moneda}.pdf`;
 }

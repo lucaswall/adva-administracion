@@ -263,6 +263,8 @@ export interface ResumenBancario {
   // Bank info
   /** Bank name (e.g., "BBVA", "Santander", "Galicia") */
   banco: string;
+  /** Account number or card brand (e.g., "1234567890" or "VISA", "Mastercard") */
+  numeroCuenta: string;
 
   // Period
   /** Statement start date (ISO format: YYYY-MM-DD) */
