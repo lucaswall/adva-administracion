@@ -43,6 +43,7 @@ import {
   generatePagoFileName,
   generateReciboFileName,
 } from '../utils/file-naming.js';
+import { debug, info, warn, error as logError } from '../utils/logger.js';
 
 /**
  * Result of processing a single file
@@ -133,6 +134,16 @@ export async function processFile(
 
   const classification = classificationParse.value;
 
+  debug('Document classified', {
+    module: 'scanner',
+    phase: 'classification',
+    fileId: fileInfo.id,
+    fileName: fileInfo.name,
+    documentType: classification.documentType,
+    confidence: classification.confidence,
+    reason: classification.reason
+  });
+
   // Prepare timestamp for all documents
   const now = new Date().toISOString();
 
@@ -190,9 +201,48 @@ export async function processFile(
   // Step 3: Parse the extraction result
 
   if (classification.documentType === 'factura_emitida' || classification.documentType === 'factura_recibida') {
-    const parseResult = parseFacturaResponse(extractResult.value);
+    const parseResult = parseFacturaResponse(extractResult.value, classification.documentType);
     if (!parseResult.ok) {
+      logError('Failed to parse factura response', {
+        module: 'scanner',
+        phase: 'parsing',
+        fileId: fileInfo.id,
+        fileName: fileInfo.name,
+        documentType: classification.documentType,
+        error: parseResult.error.message,
+        rawResponse: parseResult.error.rawData?.substring(0, 1000) // Log first 1000 chars
+      });
       return { ok: false, error: parseResult.error };
+    }
+
+    debug('Factura extracted', {
+      module: 'scanner',
+      phase: 'extraction',
+      fileId: fileInfo.id,
+      documentType: classification.documentType,
+      confidence: parseResult.value.confidence,
+      needsReview: parseResult.value.needsReview,
+      roleValidation: parseResult.value.roleValidation
+    });
+
+    // Check if role validation failed
+    if (parseResult.value.roleValidation && !parseResult.value.roleValidation.isValid) {
+      logError('Document failed ADVA role validation', {
+        module: 'scanner',
+        phase: 'validation',
+        fileId: fileInfo.id,
+        fileName: fileInfo.name,
+        documentType: classification.documentType,
+        errors: parseResult.value.roleValidation.errors,
+        willMoveTo: 'Sin Procesar'
+      });
+
+      return {
+        ok: false,
+        error: new Error(
+          `Role validation failed: ${parseResult.value.roleValidation.errors.join(', ')}`
+        )
+      };
     }
 
     const factura: Factura = {
@@ -225,9 +275,40 @@ export async function processFile(
   }
 
   if (classification.documentType === 'pago_enviado' || classification.documentType === 'pago_recibido') {
-    const parseResult = parsePagoResponse(extractResult.value);
+    const parseResult = parsePagoResponse(extractResult.value, classification.documentType);
     if (!parseResult.ok) {
+      logError('Failed to parse pago response', {
+        module: 'scanner',
+        phase: 'parsing',
+        fileId: fileInfo.id,
+        fileName: fileInfo.name,
+        documentType: classification.documentType,
+        error: parseResult.error.message,
+        rawResponse: parseResult.error.rawData?.substring(0, 1000)
+      });
       return { ok: false, error: parseResult.error };
+    }
+
+    debug('Pago extracted', {
+      module: 'scanner',
+      phase: 'extraction',
+      fileId: fileInfo.id,
+      documentType: classification.documentType,
+      confidence: parseResult.value.confidence,
+      needsReview: parseResult.value.needsReview,
+      roleValidation: parseResult.value.roleValidation
+    });
+
+    // Check if role validation failed (for pagos we log but don't necessarily fail)
+    if (parseResult.value.roleValidation && !parseResult.value.roleValidation.isValid) {
+      warn('Pago role validation has warnings', {
+        module: 'scanner',
+        phase: 'validation',
+        fileId: fileInfo.id,
+        fileName: fileInfo.name,
+        documentType: classification.documentType,
+        errors: parseResult.value.roleValidation.errors
+      });
     }
 
     const pago: Pago = {
@@ -351,40 +432,79 @@ async function storeFactura(
   // Calculate the renamed filename that will be used when the file is moved
   const renamedFileName = generateFacturaFileName(factura, documentType);
 
-  const row: CellValueOrLink[] = [
-    factura.fechaEmision,
-    factura.fileId,
-    {
-      text: renamedFileName,
-      url: `https://drive.google.com/file/d/${factura.fileId}/view`,
-    },
-    factura.tipoComprobante,
-    factura.nroFactura,
-    factura.cuitEmisor,
-    factura.razonSocialEmisor,
-    factura.cuitReceptor || '',
-    formatUSCurrency(factura.importeNeto),
-    formatUSCurrency(factura.importeIva),
-    formatUSCurrency(factura.importeTotal),
-    factura.moneda,
-    factura.concepto || '',
-    factura.processedAt,
-    factura.confidence,
-    factura.needsReview ? 'YES' : 'NO',
-    factura.matchedPagoFileId || '',
-    factura.matchConfidence || '',
-    factura.hasCuitMatch ? 'YES' : 'NO',
-  ];
+  // Build row based on document type - only include counterparty info
+  let row: CellValueOrLink[];
+  let range: string;
 
-  const result = await appendRowsWithLinks(spreadsheetId, `${sheetName}!A:S`, [row]);
+  if (documentType === 'factura_emitida') {
+    // Facturas Emitidas: Only receptor info (columns A:R)
+    row = [
+      factura.fechaEmision,                 // A
+      factura.fileId,                       // B
+      { text: renamedFileName, url: `https://drive.google.com/file/d/${factura.fileId}/view` }, // C
+      factura.tipoComprobante,              // D
+      factura.nroFactura,                   // E
+      factura.cuitReceptor || '',           // F - counterparty
+      factura.razonSocialReceptor || '',    // G - counterparty
+      formatUSCurrency(factura.importeNeto), // H
+      formatUSCurrency(factura.importeIva),  // I
+      formatUSCurrency(factura.importeTotal),// J
+      factura.moneda,                       // K
+      factura.concepto || '',               // L
+      factura.processedAt,                  // M
+      factura.confidence,                   // N
+      factura.needsReview ? 'YES' : 'NO',   // O
+      factura.matchedPagoFileId || '',      // P
+      factura.matchConfidence || '',        // Q
+      factura.hasCuitMatch ? 'YES' : 'NO',  // R
+    ];
+    range = `${sheetName}!A:R`;
+  } else {
+    // Facturas Recibidas: Only emisor info (columns A:R)
+    row = [
+      factura.fechaEmision,                 // A
+      factura.fileId,                       // B
+      { text: renamedFileName, url: `https://drive.google.com/file/d/${factura.fileId}/view` }, // C
+      factura.tipoComprobante,              // D
+      factura.nroFactura,                   // E
+      factura.cuitEmisor || '',             // F - counterparty
+      factura.razonSocialEmisor || '',      // G - counterparty
+      formatUSCurrency(factura.importeNeto), // H
+      formatUSCurrency(factura.importeIva),  // I
+      formatUSCurrency(factura.importeTotal),// J
+      factura.moneda,                       // K
+      factura.concepto || '',               // L
+      factura.processedAt,                  // M
+      factura.confidence,                   // N
+      factura.needsReview ? 'YES' : 'NO',   // O
+      factura.matchedPagoFileId || '',      // P
+      factura.matchConfidence || '',        // Q
+      factura.hasCuitMatch ? 'YES' : 'NO',  // R
+    ];
+    range = `${sheetName}!A:R`;
+  }
+
+  const result = await appendRowsWithLinks(spreadsheetId, range, [row]);
   if (!result.ok) {
     return result;
   }
 
+  info('Factura stored successfully', {
+    module: 'scanner',
+    phase: 'storage',
+    fileId: factura.fileId,
+    documentType,
+    spreadsheet: sheetName
+  });
+
   // Sort sheet by fechaEmision (column A, index 0) in descending order (most recent first)
   const sortResult = await sortSheet(spreadsheetId, sheetName, 0, true);
   if (!sortResult.ok) {
-    console.warn(`Failed to sort sheet ${sheetName}:`, sortResult.error.message);
+    warn(`Failed to sort sheet ${sheetName}`, {
+      module: 'scanner',
+      phase: 'storage',
+      error: sortResult.error.message
+    });
     // Don't fail the operation if sorting fails
   }
 
@@ -408,38 +528,73 @@ async function storePago(
   // Calculate the renamed filename that will be used when the file is moved
   const renamedFileName = generatePagoFileName(pago, documentType);
 
-  const row: CellValueOrLink[] = [
-    pago.fechaPago,
-    pago.fileId,
-    {
-      text: renamedFileName,
-      url: `https://drive.google.com/file/d/${pago.fileId}/view`,
-    },
-    pago.banco,
-    formatUSCurrency(pago.importePagado),
-    pago.moneda || 'ARS',
-    pago.referencia || '',
-    pago.cuitPagador || '',
-    pago.nombrePagador || '',
-    pago.cuitBeneficiario || '',
-    pago.nombreBeneficiario || '',
-    pago.concepto || '',
-    pago.processedAt,
-    pago.confidence,
-    pago.needsReview ? 'YES' : 'NO',
-    pago.matchedFacturaFileId || '',
-    pago.matchConfidence || '',
-  ];
+  // Build row based on document type - only include counterparty info
+  let row: CellValueOrLink[];
+  let range: string;
 
-  const result = await appendRowsWithLinks(spreadsheetId, `${sheetName}!A:Q`, [row]);
+  if (documentType === 'pago_enviado') {
+    // Pagos Enviados: Only beneficiario info (columns A:O)
+    row = [
+      pago.fechaPago,                      // A
+      pago.fileId,                         // B
+      { text: renamedFileName, url: `https://drive.google.com/file/d/${pago.fileId}/view` }, // C
+      pago.banco,                          // D
+      formatUSCurrency(pago.importePagado),// E
+      pago.moneda || 'ARS',                // F
+      pago.referencia || '',               // G
+      pago.cuitBeneficiario || '',         // H - counterparty
+      pago.nombreBeneficiario || '',       // I - counterparty
+      pago.concepto || '',                 // J
+      pago.processedAt,                    // K
+      pago.confidence,                     // L
+      pago.needsReview ? 'YES' : 'NO',     // M
+      pago.matchedFacturaFileId || '',     // N
+      pago.matchConfidence || '',          // O
+    ];
+    range = `${sheetName}!A:O`;
+  } else {
+    // Pagos Recibidos: Only pagador info (columns A:O)
+    row = [
+      pago.fechaPago,                      // A
+      pago.fileId,                         // B
+      { text: renamedFileName, url: `https://drive.google.com/file/d/${pago.fileId}/view` }, // C
+      pago.banco,                          // D
+      formatUSCurrency(pago.importePagado),// E
+      pago.moneda || 'ARS',                // F
+      pago.referencia || '',               // G
+      pago.cuitPagador || '',              // H - counterparty
+      pago.nombrePagador || '',            // I - counterparty
+      pago.concepto || '',                 // J
+      pago.processedAt,                    // K
+      pago.confidence,                     // L
+      pago.needsReview ? 'YES' : 'NO',     // M
+      pago.matchedFacturaFileId || '',     // N
+      pago.matchConfidence || '',          // O
+    ];
+    range = `${sheetName}!A:O`;
+  }
+
+  const result = await appendRowsWithLinks(spreadsheetId, range, [row]);
   if (!result.ok) {
     return result;
   }
 
+  info('Pago stored successfully', {
+    module: 'scanner',
+    phase: 'storage',
+    fileId: pago.fileId,
+    documentType,
+    spreadsheet: sheetName
+  });
+
   // Sort sheet by fechaPago (column A, index 0) in descending order (most recent first)
   const sortResult = await sortSheet(spreadsheetId, sheetName, 0, true);
   if (!sortResult.ok) {
-    console.warn(`Failed to sort sheet ${sheetName}:`, sortResult.error.message);
+    warn(`Failed to sort sheet ${sheetName}`, {
+      module: 'scanner',
+      phase: 'storage',
+      error: sortResult.error.message
+    });
     // Don't fail the operation if sorting fails
   }
 
@@ -485,7 +640,11 @@ async function storeRecibo(recibo: Recibo, spreadsheetId: string): Promise<Resul
   // Sort sheet by fechaPago (column A, index 0) in descending order (most recent first)
   const sortResult = await sortSheet(spreadsheetId, 'Recibos', 0, true);
   if (!sortResult.ok) {
-    console.warn('Failed to sort sheet Recibos:', sortResult.error.message);
+    warn('Failed to sort sheet Recibos', {
+      module: 'scanner',
+      phase: 'storage',
+      error: sortResult.error.message
+    });
     // Don't fail the operation if sorting fails
   }
 
@@ -539,16 +698,22 @@ async function getProcessedFileIds(
  */
 export async function scanFolder(folderId?: string): Promise<Result<ScanResult, Error>> {
   const startTime = Date.now();
-  console.log(`Starting folder scan${folderId ? ` for folder ${folderId}` : ''}...`);
+  info(`Starting folder scan${folderId ? ` for folder ${folderId}` : ''}`, {
+    module: 'scanner',
+    phase: 'scan-start'
+  });
 
   const folderStructure = getCachedFolderStructure();
 
   if (!folderStructure) {
-    const error = 'Folder structure not initialized. Call discoverFolderStructure first.';
-    console.error(error);
+    const errorMsg = 'Folder structure not initialized. Call discoverFolderStructure first.';
+    logError(errorMsg, {
+      module: 'scanner',
+      phase: 'scan-start'
+    });
     return {
       ok: false,
-      error: new Error(error),
+      error: new Error(errorMsg),
     };
   }
 
@@ -556,27 +721,44 @@ export async function scanFolder(folderId?: string): Promise<Result<ScanResult, 
   const controlCreditosId = folderStructure.controlCreditosId;
   const controlDebitosId = folderStructure.controlDebitosId;
 
-  console.log(`Scanning folder: ${targetFolderId}`);
-  console.log(`Using Control de Creditos: ${controlCreditosId}`);
-  console.log(`Using Control de Debitos: ${controlDebitosId}`);
+  info('Scan configuration', {
+    module: 'scanner',
+    phase: 'scan-start',
+    targetFolderId,
+    controlCreditosId,
+    controlDebitosId
+  });
 
   // List files in folder
   const listResult = await listFilesInFolder(targetFolderId);
   if (!listResult.ok) {
-    console.error('Failed to list files in folder:', listResult.error.message);
+    logError('Failed to list files in folder', {
+      module: 'scanner',
+      phase: 'scan-start',
+      error: listResult.error.message
+    });
     return listResult;
   }
 
   const allFiles = listResult.value;
-  console.log(`Found ${allFiles.length} total files in folder`);
+  info(`Found ${allFiles.length} total files in folder`, {
+    module: 'scanner',
+    phase: 'scan-start'
+  });
 
   // Get already processed file IDs from both spreadsheets
   const processedIds = await getProcessedFileIds(controlCreditosId, controlDebitosId);
-  console.log(`${processedIds.size} files already processed`);
+  info(`${processedIds.size} files already processed`, {
+    module: 'scanner',
+    phase: 'scan-start'
+  });
 
   // Filter to only new files
   const newFiles = allFiles.filter(f => !processedIds.has(f.id));
-  console.log(`${newFiles.length} new files to process`);
+  info(`${newFiles.length} new files to process`, {
+    module: 'scanner',
+    phase: 'scan-start'
+  });
 
   const result: ScanResult = {
     filesProcessed: 0,
@@ -595,34 +777,72 @@ export async function scanFolder(folderId?: string): Promise<Result<ScanResult, 
 
   for (const fileInfo of newFiles) {
     await queue.add(async () => {
-      console.log(`Processing file: ${fileInfo.name} (${fileInfo.id})`);
+      info(`Processing file: ${fileInfo.name}`, {
+        module: 'scanner',
+        phase: 'process-file',
+        fileId: fileInfo.id
+      });
       const processResult = await processFile(fileInfo);
 
       if (!processResult.ok) {
-        console.error(`Failed to process file ${fileInfo.name}:`, processResult.error.message);
+        logError('Failed to process file', {
+          module: 'scanner',
+          phase: 'process-file',
+          fileId: fileInfo.id,
+          fileName: fileInfo.name,
+          error: processResult.error.message
+        });
         result.errors++;
         // Move failed file to Sin Procesar
         const sortResult = await sortToSinProcesar(fileInfo.id, fileInfo.name);
         if (!sortResult.success) {
-          console.error(`Failed to move file ${fileInfo.name} to Sin Procesar:`, sortResult.error);
+          logError('Failed to move file to Sin Procesar', {
+            module: 'scanner',
+            phase: 'process-file',
+            fileName: fileInfo.name,
+            error: sortResult.error
+          });
         } else {
-          console.log(`Moved failed file ${fileInfo.name} to ${sortResult.targetPath}`);
+          info(`Moved failed file to ${sortResult.targetPath}`, {
+            module: 'scanner',
+            phase: 'process-file',
+            fileName: fileInfo.name
+          });
         }
         return;
       }
 
       const processed = processResult.value;
       result.filesProcessed++;
-      console.log(`File ${fileInfo.name} classified as: ${processed.documentType}`);
+      info('File processed successfully', {
+        module: 'scanner',
+        phase: 'complete',
+        fileId: fileInfo.id,
+        fileName: fileInfo.name,
+        documentType: processed.documentType
+      });
 
       if (processed.documentType === 'unrecognized' || processed.documentType === 'unknown') {
-        console.log(`Moving unrecognized file ${fileInfo.name} to Sin Procesar`);
+        info('Moving unrecognized file to Sin Procesar', {
+          module: 'scanner',
+          phase: 'process-file',
+          fileName: fileInfo.name
+        });
         // Move unrecognized to Sin Procesar
         const sortResult = await sortToSinProcesar(fileInfo.id, fileInfo.name);
         if (!sortResult.success) {
-          console.error(`Failed to move file ${fileInfo.name} to Sin Procesar:`, sortResult.error);
+          logError('Failed to move file to Sin Procesar', {
+            module: 'scanner',
+            phase: 'process-file',
+            fileName: fileInfo.name,
+            error: sortResult.error
+          });
         } else {
-          console.log(`Moved ${fileInfo.name} to ${sortResult.targetPath}`);
+          info(`Moved to ${sortResult.targetPath}`, {
+            module: 'scanner',
+            phase: 'process-file',
+            fileName: fileInfo.name
+          });
         }
         return;
       }
@@ -633,13 +853,26 @@ export async function scanFolder(folderId?: string): Promise<Result<ScanResult, 
       // CRITICAL: Validate that document has required date field
       // Documents without dates MUST NOT be written to spreadsheets
       if (!hasValidDate(doc, processed.documentType)) {
-        console.warn(`No date extracted from ${fileInfo.name}, moving to Sin Procesar`);
+        warn('No date extracted, moving to Sin Procesar', {
+          module: 'scanner',
+          phase: 'process-file',
+          fileName: fileInfo.name
+        });
         const sortResult = await sortToSinProcesar(fileInfo.id, fileInfo.name);
         if (!sortResult.success) {
-          console.error(`Failed to move file ${fileInfo.name} to Sin Procesar:`, sortResult.error);
+          logError('Failed to move file to Sin Procesar', {
+            module: 'scanner',
+            phase: 'process-file',
+            fileName: fileInfo.name,
+            error: sortResult.error
+          });
           result.errors++;
         } else {
-          console.log(`Moved file without date ${fileInfo.name} to ${sortResult.targetPath}`);
+          info(`Moved file without date to ${sortResult.targetPath}`, {
+            module: 'scanner',
+            phase: 'process-file',
+            fileName: fileInfo.name
+          });
         }
         return; // STOP processing - do NOT write to spreadsheet or move to destination folder
       }
@@ -650,113 +883,251 @@ export async function scanFolder(folderId?: string): Promise<Result<ScanResult, 
 
       if (processed.documentType === 'factura_emitida') {
         // Factura issued BY ADVA -> goes to Control de Creditos
-        console.log(`Storing factura emitida from ${fileInfo.name} in Control de Creditos (${controlCreditosId})`);
-        console.log(`  Factura data: CUIT=${(doc as Factura).cuitEmisor}, Total=${(doc as Factura).importeTotal}, Date=${(doc as Factura).fechaEmision}`);
+        debug('Storing factura emitida', {
+          module: 'scanner',
+          phase: 'storage',
+          fileName: fileInfo.name,
+          spreadsheetId: controlCreditosId,
+          cuit: (doc as Factura).cuitReceptor,
+          total: (doc as Factura).importeTotal,
+          date: (doc as Factura).fechaEmision
+        });
         const storeResult = await storeFactura(doc as Factura, controlCreditosId, 'Facturas Emitidas', 'factura_emitida');
         if (storeResult.ok) {
           result.facturasAdded++;
           processedDocs.push({ type: 'factura_emitida', doc: doc as Factura });
-          console.log(`✓ Factura emitida stored successfully in spreadsheet, moving to Creditos folder`);
+          info('Factura emitida stored, moving to Creditos folder', {
+            module: 'scanner',
+            phase: 'storage',
+            fileName: fileInfo.name
+          });
           const sortResult = await sortAndRenameDocument(doc, 'creditos', 'factura_emitida');
           if (!sortResult.success) {
-            console.error(`Failed to move factura ${fileInfo.name} to Creditos:`, sortResult.error);
+            logError('Failed to move factura to Creditos', {
+              module: 'scanner',
+              phase: 'storage',
+              fileName: fileInfo.name,
+              error: sortResult.error
+            });
             result.errors++;
           } else {
-            console.log(`Moved factura ${fileInfo.name} to ${sortResult.targetPath}`);
+            info(`Moved to ${sortResult.targetPath}`, {
+              module: 'scanner',
+              phase: 'storage',
+              fileName: fileInfo.name
+            });
           }
         } else {
-          console.error(`Failed to store factura ${fileInfo.name}:`, storeResult.error.message);
+          logError('Failed to store factura', {
+            module: 'scanner',
+            phase: 'storage',
+            fileName: fileInfo.name,
+            error: storeResult.error.message
+          });
           result.errors++;
         }
       } else if (processed.documentType === 'factura_recibida') {
         // Factura received BY ADVA -> goes to Control de Debitos
-        console.log(`Storing factura recibida from ${fileInfo.name} in Control de Debitos (${controlDebitosId})`);
-        console.log(`  Factura data: CUIT=${(doc as Factura).cuitEmisor}, Total=${(doc as Factura).importeTotal}, Date=${(doc as Factura).fechaEmision}`);
+        debug('Storing factura recibida', {
+          module: 'scanner',
+          phase: 'storage',
+          fileName: fileInfo.name,
+          spreadsheetId: controlDebitosId,
+          cuit: (doc as Factura).cuitEmisor,
+          total: (doc as Factura).importeTotal,
+          date: (doc as Factura).fechaEmision
+        });
         const storeResult = await storeFactura(doc as Factura, controlDebitosId, 'Facturas Recibidas', 'factura_recibida');
         if (storeResult.ok) {
           result.facturasAdded++;
           processedDocs.push({ type: 'factura_recibida', doc: doc as Factura });
-          console.log(`✓ Factura recibida stored successfully in spreadsheet, moving to Debitos folder`);
+          info('Factura recibida stored, moving to Debitos folder', {
+            module: 'scanner',
+            phase: 'storage',
+            fileName: fileInfo.name
+          });
           const sortResult = await sortAndRenameDocument(doc, 'debitos', 'factura_recibida');
           if (!sortResult.success) {
-            console.error(`Failed to move factura ${fileInfo.name} to Debitos:`, sortResult.error);
+            logError('Failed to move factura to Debitos', {
+              module: 'scanner',
+              phase: 'storage',
+              fileName: fileInfo.name,
+              error: sortResult.error
+            });
             result.errors++;
           } else {
-            console.log(`Moved factura ${fileInfo.name} to ${sortResult.targetPath}`);
+            info(`Moved to ${sortResult.targetPath}`, {
+              module: 'scanner',
+              phase: 'storage',
+              fileName: fileInfo.name
+            });
           }
         } else {
-          console.error(`Failed to store factura ${fileInfo.name}:`, storeResult.error.message);
+          logError('Failed to store factura', {
+            module: 'scanner',
+            phase: 'storage',
+            fileName: fileInfo.name,
+            error: storeResult.error.message
+          });
           result.errors++;
         }
       } else if (processed.documentType === 'pago_recibido') {
         // Payment received BY ADVA -> goes to Control de Creditos
-        console.log(`Storing pago recibido from ${fileInfo.name} in Control de Creditos (${controlCreditosId})`);
-        console.log(`  Pago data: Banco=${(doc as Pago).banco}, Amount=${(doc as Pago).importePagado}, Date=${(doc as Pago).fechaPago}`);
+        debug('Storing pago recibido', {
+          module: 'scanner',
+          phase: 'storage',
+          fileName: fileInfo.name,
+          spreadsheetId: controlCreditosId,
+          banco: (doc as Pago).banco,
+          amount: (doc as Pago).importePagado,
+          date: (doc as Pago).fechaPago
+        });
         const storeResult = await storePago(doc as Pago, controlCreditosId, 'Pagos Recibidos', 'pago_recibido');
         if (storeResult.ok) {
           result.pagosAdded++;
           processedDocs.push({ type: 'pago_recibido', doc: doc as Pago });
-          console.log(`✓ Pago recibido stored successfully in spreadsheet, moving to Creditos folder`);
+          info('Pago recibido stored, moving to Creditos folder', {
+            module: 'scanner',
+            phase: 'storage',
+            fileName: fileInfo.name
+          });
           const sortResult = await sortAndRenameDocument(doc, 'creditos', 'pago_recibido');
           if (!sortResult.success) {
-            console.error(`Failed to move pago ${fileInfo.name} to Creditos:`, sortResult.error);
+            logError('Failed to move pago to Creditos', {
+              module: 'scanner',
+              phase: 'storage',
+              fileName: fileInfo.name,
+              error: sortResult.error
+            });
             result.errors++;
           } else {
-            console.log(`Moved pago ${fileInfo.name} to ${sortResult.targetPath}`);
+            info(`Moved to ${sortResult.targetPath}`, {
+              module: 'scanner',
+              phase: 'storage',
+              fileName: fileInfo.name
+            });
           }
         } else {
-          console.error(`Failed to store pago ${fileInfo.name}:`, storeResult.error.message);
+          logError('Failed to store pago', {
+            module: 'scanner',
+            phase: 'storage',
+            fileName: fileInfo.name,
+            error: storeResult.error.message
+          });
           result.errors++;
         }
       } else if (processed.documentType === 'pago_enviado') {
         // Payment sent BY ADVA -> goes to Control de Debitos
-        console.log(`Storing pago enviado from ${fileInfo.name} in Control de Debitos (${controlDebitosId})`);
-        console.log(`  Pago data: Banco=${(doc as Pago).banco}, Amount=${(doc as Pago).importePagado}, Date=${(doc as Pago).fechaPago}`);
+        debug('Storing pago enviado', {
+          module: 'scanner',
+          phase: 'storage',
+          fileName: fileInfo.name,
+          spreadsheetId: controlDebitosId,
+          banco: (doc as Pago).banco,
+          amount: (doc as Pago).importePagado,
+          date: (doc as Pago).fechaPago
+        });
         const storeResult = await storePago(doc as Pago, controlDebitosId, 'Pagos Enviados', 'pago_enviado');
         if (storeResult.ok) {
           result.pagosAdded++;
           processedDocs.push({ type: 'pago_enviado', doc: doc as Pago });
-          console.log(`✓ Pago enviado stored successfully in spreadsheet, moving to Debitos folder`);
+          info('Pago enviado stored, moving to Debitos folder', {
+            module: 'scanner',
+            phase: 'storage',
+            fileName: fileInfo.name
+          });
           const sortResult = await sortAndRenameDocument(doc, 'debitos', 'pago_enviado');
           if (!sortResult.success) {
-            console.error(`Failed to move pago ${fileInfo.name} to Debitos:`, sortResult.error);
+            logError('Failed to move pago to Debitos', {
+              module: 'scanner',
+              phase: 'storage',
+              fileName: fileInfo.name,
+              error: sortResult.error
+            });
             result.errors++;
           } else {
-            console.log(`Moved pago ${fileInfo.name} to ${sortResult.targetPath}`);
+            info(`Moved to ${sortResult.targetPath}`, {
+              module: 'scanner',
+              phase: 'storage',
+              fileName: fileInfo.name
+            });
           }
         } else {
-          console.error(`Failed to store pago ${fileInfo.name}:`, storeResult.error.message);
+          logError('Failed to store pago', {
+            module: 'scanner',
+            phase: 'storage',
+            fileName: fileInfo.name,
+            error: storeResult.error.message
+          });
           result.errors++;
         }
       } else if (processed.documentType === 'recibo') {
         // Salary receipt -> goes to Control de Debitos
-        console.log(`Storing recibo from ${fileInfo.name} in Control de Debitos (${controlDebitosId})`);
-        console.log(`  Recibo data: Employee=${(doc as Recibo).nombreEmpleado}, Total=${(doc as Recibo).totalNeto}, Date=${(doc as Recibo).fechaPago}`);
+        debug('Storing recibo', {
+          module: 'scanner',
+          phase: 'storage',
+          fileName: fileInfo.name,
+          spreadsheetId: controlDebitosId,
+          employee: (doc as Recibo).nombreEmpleado,
+          total: (doc as Recibo).totalNeto,
+          date: (doc as Recibo).fechaPago
+        });
         const storeResult = await storeRecibo(doc as Recibo, controlDebitosId);
         if (storeResult.ok) {
           result.recibosAdded++;
           processedDocs.push({ type: 'recibo', doc: doc as Recibo });
-          console.log(`✓ Recibo stored successfully in spreadsheet, moving to Debitos folder`);
+          info('Recibo stored, moving to Debitos folder', {
+            module: 'scanner',
+            phase: 'storage',
+            fileName: fileInfo.name
+          });
           const sortResult = await sortAndRenameDocument(doc, 'debitos', 'recibo');
           if (!sortResult.success) {
-            console.error(`Failed to move recibo ${fileInfo.name} to Debitos:`, sortResult.error);
+            logError('Failed to move recibo to Debitos', {
+              module: 'scanner',
+              phase: 'storage',
+              fileName: fileInfo.name,
+              error: sortResult.error
+            });
             result.errors++;
           } else {
-            console.log(`Moved recibo ${fileInfo.name} to ${sortResult.targetPath}`);
+            info(`Moved to ${sortResult.targetPath}`, {
+              module: 'scanner',
+              phase: 'storage',
+              fileName: fileInfo.name
+            });
           }
         } else {
-          console.error(`Failed to store recibo ${fileInfo.name}:`, storeResult.error.message);
+          logError('Failed to store recibo', {
+            module: 'scanner',
+            phase: 'storage',
+            fileName: fileInfo.name,
+            error: storeResult.error.message
+          });
           result.errors++;
         }
       } else if (processed.documentType === 'resumen_bancario') {
         // Bank statement -> goes to Bancos folder (TODO: store in bank spreadsheet)
-        console.log(`Moving resumen bancario ${fileInfo.name} to Bancos folder`);
+        info('Moving resumen bancario to Bancos folder', {
+          module: 'scanner',
+          phase: 'storage',
+          fileName: fileInfo.name
+        });
         const sortResult = await sortAndRenameDocument(doc, 'bancos', 'resumen_bancario');
         if (!sortResult.success) {
-          console.error(`Failed to move resumen ${fileInfo.name} to Bancos:`, sortResult.error);
+          logError('Failed to move resumen to Bancos', {
+            module: 'scanner',
+            phase: 'storage',
+            fileName: fileInfo.name,
+            error: sortResult.error
+          });
           result.errors++;
         } else {
-          console.log(`Moved resumen ${fileInfo.name} to ${sortResult.targetPath}`);
+          info(`Moved to ${sortResult.targetPath}`, {
+            module: 'scanner',
+            phase: 'storage',
+            fileName: fileInfo.name
+          });
         }
       }
     });
@@ -769,12 +1140,16 @@ export async function scanFolder(folderId?: string): Promise<Result<ScanResult, 
 
   result.duration = Date.now() - startTime;
 
-  console.log(`Scan complete in ${result.duration}ms:`);
-  console.log(`  - Files processed: ${result.filesProcessed}`);
-  console.log(`  - Facturas added: ${result.facturasAdded}`);
-  console.log(`  - Pagos added: ${result.pagosAdded}`);
-  console.log(`  - Recibos added: ${result.recibosAdded}`);
-  console.log(`  - Errors: ${result.errors}`);
+  info('Scan complete', {
+    module: 'scanner',
+    phase: 'scan-complete',
+    duration: result.duration,
+    filesProcessed: result.filesProcessed,
+    facturasAdded: result.facturasAdded,
+    pagosAdded: result.pagosAdded,
+    recibosAdded: result.recibosAdded,
+    errors: result.errors
+  });
 
   return { ok: true, value: result };
 }

@@ -6,6 +6,7 @@
 import type { GeminiResponse, Result } from '../types/index.js';
 import { GeminiError } from '../types/index.js';
 import { classifyError } from './errors.js';
+import { debug, warn, error as logError } from '../utils/logger.js';
 
 /**
  * Sleeps for a specified number of milliseconds
@@ -80,6 +81,12 @@ export class GeminiClient {
       if (attempt < attempts) {
         // Exponential backoff: 2^attempt * 1000ms, capped at 30s
         const delay = Math.min(Math.pow(2, attempt) * 1000, 30000);
+        warn('Rate limit enforced, sleeping', {
+          module: 'gemini-client',
+          phase: 'rate-limit',
+          sleepMs: delay,
+          attempt: attempt
+        });
         await sleep(delay);
       }
     }
@@ -115,6 +122,13 @@ export class GeminiClient {
 
       const payload = this.buildApiRequest(prompt, base64Data, mimeType);
 
+      debug('Gemini API request', {
+        module: 'gemini-client',
+        phase: 'api-call',
+        promptLength: prompt.length,
+        promptPreview: prompt.substring(0, 200) + '...'
+      });
+
       const response = await fetch(this.ENDPOINT, {
         method: 'POST',
         headers: {
@@ -128,15 +142,32 @@ export class GeminiClient {
       const result = this.parseApiResponse(responseText, response.status);
 
       if (result.ok) {
+        debug('Gemini API response', {
+          module: 'gemini-client',
+          phase: 'api-call',
+          responseLength: result.value.length,
+          responsePreview: result.value.substring(0, 500) + '...'
+        });
+      }
+
+      if (result.ok) {
         this.requestCount++;
       }
 
       return result;
     } catch (error) {
+      const err = error instanceof Error ? error : new Error('Unknown error');
+      logError('Gemini API error', {
+        module: 'gemini-client',
+        phase: 'api-call',
+        error: err.message,
+        details: error
+      });
+
       return {
         ok: false,
         error: new GeminiError(
-          error instanceof Error ? error.message : 'Unknown error',
+          err.message,
           undefined,
           error
         )
