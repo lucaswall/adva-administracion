@@ -30,7 +30,7 @@ export const FACTURA_HEADERS = [
   'hasCuitMatch',
 ];
 
-/** Headers for Pagos sheet (columns A:Q) */
+/** Headers for Pagos sheet (columns A:R) */
 export const PAGO_HEADERS = [
   'fileId',
   'fileName',
@@ -38,6 +38,7 @@ export const PAGO_HEADERS = [
   'banco',
   'fechaPago',
   'importePagado',
+  'moneda',
   'referencia',
   'cuitPagador',
   'nombrePagador',

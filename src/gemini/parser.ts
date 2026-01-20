@@ -155,7 +155,8 @@ export function parsePagoResponse(response: string): Result<ParseResult<Partial<
     const requiredFields: (keyof Pago)[] = [
       'banco',
       'fechaPago',
-      'importePagado'
+      'importePagado',
+      'moneda'
     ];
 
     // Check for missing or empty fields (empty strings are suspicious)

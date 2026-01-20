@@ -127,11 +127,12 @@ describe('parseFacturaResponse', () => {
 });
 
 describe('parsePagoResponse', () => {
-  it('parses valid pago JSON', () => {
+  it('parses valid pago JSON with moneda', () => {
     const json = JSON.stringify({
       banco: 'BBVA',
       fechaPago: '2024-01-18',
-      importePagado: 1210
+      importePagado: 1210,
+      moneda: 'ARS'
     });
 
     const result = parsePagoResponse(json);
@@ -139,6 +140,25 @@ describe('parsePagoResponse', () => {
     if (result.ok) {
       expect(result.value.data.banco).toBe('BBVA');
       expect(result.value.data.importePagado).toBe(1210);
+      expect(result.value.data.moneda).toBe('ARS');
+      expect(result.value.needsReview).toBe(false);
+    }
+  });
+
+  it('parses valid pago JSON with USD moneda', () => {
+    const json = JSON.stringify({
+      banco: 'BBVA',
+      fechaPago: '2024-01-18',
+      importePagado: 500,
+      moneda: 'USD'
+    });
+
+    const result = parsePagoResponse(json);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.data.banco).toBe('BBVA');
+      expect(result.value.data.importePagado).toBe(500);
+      expect(result.value.data.moneda).toBe('USD');
       expect(result.value.needsReview).toBe(false);
     }
   });
@@ -148,6 +168,7 @@ describe('parsePagoResponse', () => {
       banco: 'BBVA',
       fechaPago: '2024-01-18',
       importePagado: 1210,
+      moneda: 'ARS',
       referencia: 'TRX123',
       cuitPagador: '20111111119'
     });
@@ -157,20 +178,37 @@ describe('parsePagoResponse', () => {
     if (result.ok) {
       expect(result.value.data.referencia).toBe('TRX123');
       expect(result.value.data.cuitPagador).toBe('20111111119');
+      expect(result.value.data.moneda).toBe('ARS');
     }
   });
 
-  it('marks as needs review when missing required fields', () => {
+  it('marks as needs review when missing required fields including moneda', () => {
     const json = JSON.stringify({
       banco: 'BBVA'
-      // Missing fechaPago and importePagado
+      // Missing fechaPago, importePagado, and moneda
     });
 
     const result = parsePagoResponse(json);
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.value.needsReview).toBe(true);
-      expect(result.value.missingFields!.length).toBe(2);
+      expect(result.value.missingFields!.length).toBe(3); // banco, fechaPago, importePagado, moneda
+    }
+  });
+
+  it('marks as needs review when moneda is missing', () => {
+    const json = JSON.stringify({
+      banco: 'BBVA',
+      fechaPago: '2024-01-18',
+      importePagado: 1210
+      // Missing moneda
+    });
+
+    const result = parsePagoResponse(json);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.needsReview).toBe(true);
+      expect(result.value.missingFields).toContain('moneda');
     }
   });
 });

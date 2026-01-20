@@ -144,6 +144,7 @@ describe('generatePagoFileName', () => {
     banco: 'BBVA',
     fechaPago: '2024-01-18',
     importePagado: 1210.50,
+    moneda: 'ARS',
     nombrePagador: 'Juan Perez',
     cuitPagador: '20111111119',
     nombreBeneficiario: 'EMPRESA SA',
