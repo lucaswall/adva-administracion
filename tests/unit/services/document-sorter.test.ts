@@ -89,7 +89,7 @@ describe('DocumentSorter service', () => {
 
       expect(result.success).toBe(true);
       expect(result.targetFolderId).toBe('enero-folder-id');
-      expect(result.targetPath).toBe('Creditos/01 - Enero');
+      expect(result.targetPath).toBe('2024/Creditos/01 - Enero');
 
       expect(mockGetOrCreateMonthFolder).toHaveBeenCalledWith('creditos', expect.any(Date));
       expect(mockMoveFile).toHaveBeenCalledWith('file-123', 'entrada-id', 'enero-folder-id');
@@ -117,7 +117,7 @@ describe('DocumentSorter service', () => {
 
       expect(result.success).toBe(true);
       expect(result.targetFolderId).toBe('junio-folder-id');
-      expect(result.targetPath).toBe('Debitos/06 - Junio');
+      expect(result.targetPath).toBe('2024/Debitos/06 - Junio');
 
       expect(mockGetOrCreateMonthFolder).toHaveBeenCalledWith('debitos', expect.any(Date));
       expect(mockMoveFile).toHaveBeenCalledWith('pago-123', 'entrada-id', 'junio-folder-id');
