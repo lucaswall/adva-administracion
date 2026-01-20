@@ -20,13 +20,13 @@ vi.mock('../../../src/services/drive.js', () => ({
 
 const mockGetValues = vi.fn();
 const mockSetValues = vi.fn();
-const mockAppendRows = vi.fn();
+const mockAppendRowsWithLinks = vi.fn();
 const mockBatchUpdate = vi.fn();
 
 vi.mock('../../../src/services/sheets.js', () => ({
   getValues: (...args: unknown[]) => mockGetValues(...args),
   setValues: (...args: unknown[]) => mockSetValues(...args),
-  appendRows: (...args: unknown[]) => mockAppendRows(...args),
+  appendRowsWithLinks: (...args: unknown[]) => mockAppendRowsWithLinks(...args),
   batchUpdate: (...args: unknown[]) => mockBatchUpdate(...args),
   clearSheetsCache: vi.fn(),
 }));
@@ -124,6 +124,8 @@ describe('Scanner module', () => {
     mockGetCachedFolderStructure.mockReturnValue(mockFolderStructure);
     // Default mock for sortToSinProcesar
     mockSortToSinProcesar.mockResolvedValue({ success: true, targetPath: 'Sin Procesar' });
+    // Default mock for appendRowsWithLinks
+    mockAppendRowsWithLinks.mockResolvedValue({ ok: true, value: 1 });
   });
 
   afterEach(() => {
@@ -189,7 +191,7 @@ describe('Scanner module', () => {
       });
 
       // Mock sheet append
-      mockAppendRows.mockResolvedValue({ ok: true, value: 1 });
+      mockAppendRowsWithLinks.mockResolvedValue({ ok: true, value: 1 });
 
       const result = await processFile(mockFileInfo);
 
@@ -241,7 +243,7 @@ describe('Scanner module', () => {
         },
       });
 
-      mockAppendRows.mockResolvedValue({ ok: true, value: 1 });
+      mockAppendRowsWithLinks.mockResolvedValue({ ok: true, value: 1 });
 
       const result = await processFile(mockFileInfo);
 
@@ -296,7 +298,7 @@ describe('Scanner module', () => {
         },
       });
 
-      mockAppendRows.mockResolvedValue({ ok: true, value: 1 });
+      mockAppendRowsWithLinks.mockResolvedValue({ ok: true, value: 1 });
 
       const result = await processFile(mockFileInfo);
 
@@ -541,7 +543,7 @@ describe('Scanner module', () => {
         },
       });
 
-      mockAppendRows.mockResolvedValue({ ok: true, value: 1 });
+      mockAppendRowsWithLinks.mockResolvedValue({ ok: true, value: 1 });
       mockSortAndRenameDocument.mockResolvedValue({ success: true });
 
       const result = await scanFolder();
@@ -634,7 +636,7 @@ describe('Scanner module', () => {
         },
       });
 
-      mockAppendRows.mockResolvedValue({ ok: true, value: 1 });
+      mockAppendRowsWithLinks.mockResolvedValue({ ok: true, value: 1 });
       mockSortAndRenameDocument.mockResolvedValue({ success: true });
 
       const result = await scanFolder();
@@ -900,7 +902,7 @@ describe('Scanner module', () => {
         },
       });
 
-      mockAppendRows.mockResolvedValue({ ok: true, value: 1 });
+      mockAppendRowsWithLinks.mockResolvedValue({ ok: true, value: 1 });
       mockSortDocument.mockResolvedValue({ success: true });
       mockSortToSinProcesar.mockResolvedValue({ success: true });
 

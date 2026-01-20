@@ -5,7 +5,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { sheets_v4 } from 'googleapis';
 import { google } from 'googleapis';
-import { formatSheet, clearSheetsCache } from '../../../src/services/sheets.js';
+import { formatSheet, clearSheetsCache, appendRowsWithLinks } from '../../../src/services/sheets.js';
 
 // Mock googleapis
 vi.mock('googleapis', () => {
@@ -243,6 +243,276 @@ describe('formatSheet', () => {
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.error.message).toBe('Sheets API error');
+    }
+  });
+});
+
+describe('appendRowsWithLinks', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    clearSheetsCache();
+  });
+
+  it('should append rows with formatted links', async () => {
+    const mockGet = vi.fn().mockResolvedValue({
+      data: {
+        sheets: [
+          {
+            properties: {
+              title: 'Sheet1',
+              sheetId: 123,
+            },
+          },
+        ],
+      },
+    });
+
+    const mockBatchUpdate = vi.fn().mockResolvedValue({
+      data: {
+        replies: [
+          {
+            appendCells: {
+              updatedCells: 6,
+            },
+          },
+        ],
+      },
+    });
+
+    const mockSheets = google.sheets({} as any);
+    mockSheets.spreadsheets.get = mockGet;
+    mockSheets.spreadsheets.batchUpdate = mockBatchUpdate;
+
+    const rows = [
+      [
+        'fileId123',
+        { text: 'Document Name.pdf', url: 'https://drive.google.com/file/d/fileId123/view' },
+        'Folder/Path',
+      ],
+      [
+        'fileId456',
+        { text: 'Another Doc.pdf', url: 'https://drive.google.com/file/d/fileId456/view' },
+        'Other/Path',
+      ],
+    ];
+
+    const result = await appendRowsWithLinks('spreadsheetId123', 'Sheet1!A:C', rows);
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value).toBe(6);
+    }
+
+    expect(mockGet).toHaveBeenCalledWith({
+      spreadsheetId: 'spreadsheetId123',
+      fields: 'sheets.properties.title,sheets.properties.sheetId',
+    });
+
+    expect(mockBatchUpdate).toHaveBeenCalledWith({
+      spreadsheetId: 'spreadsheetId123',
+      requestBody: {
+        requests: [
+          {
+            appendCells: {
+              sheetId: 123,
+              rows: [
+                {
+                  values: [
+                    {
+                      userEnteredValue: { stringValue: 'fileId123' },
+                    },
+                    {
+                      userEnteredValue: { stringValue: 'Document Name.pdf' },
+                      textFormatRuns: [
+                        {
+                          format: {
+                            link: {
+                              uri: 'https://drive.google.com/file/d/fileId123/view',
+                            },
+                          },
+                        },
+                      ],
+                    },
+                    {
+                      userEnteredValue: { stringValue: 'Folder/Path' },
+                    },
+                  ],
+                },
+                {
+                  values: [
+                    {
+                      userEnteredValue: { stringValue: 'fileId456' },
+                    },
+                    {
+                      userEnteredValue: { stringValue: 'Another Doc.pdf' },
+                      textFormatRuns: [
+                        {
+                          format: {
+                            link: {
+                              uri: 'https://drive.google.com/file/d/fileId456/view',
+                            },
+                          },
+                        },
+                      ],
+                    },
+                    {
+                      userEnteredValue: { stringValue: 'Other/Path' },
+                    },
+                  ],
+                },
+              ],
+              fields: '*',
+            },
+          },
+        ],
+      },
+    });
+  });
+
+  it('should handle rows with no links', async () => {
+    const mockGet = vi.fn().mockResolvedValue({
+      data: {
+        sheets: [
+          {
+            properties: {
+              title: 'Sheet1',
+              sheetId: 123,
+            },
+          },
+        ],
+      },
+    });
+
+    const mockBatchUpdate = vi.fn().mockResolvedValue({
+      data: {
+        replies: [
+          {
+            appendCells: {
+              updatedCells: 3,
+            },
+          },
+        ],
+      },
+    });
+
+    const mockSheets = google.sheets({} as any);
+    mockSheets.spreadsheets.get = mockGet;
+    mockSheets.spreadsheets.batchUpdate = mockBatchUpdate;
+
+    const rows = [['value1', 'value2', 'value3']];
+
+    const result = await appendRowsWithLinks('spreadsheetId123', 'Sheet1!A:C', rows);
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value).toBe(3);
+    }
+  });
+
+  it('should handle numeric and boolean values', async () => {
+    const mockGet = vi.fn().mockResolvedValue({
+      data: {
+        sheets: [
+          {
+            properties: {
+              title: 'Sheet1',
+              sheetId: 123,
+            },
+          },
+        ],
+      },
+    });
+
+    const mockBatchUpdate = vi.fn().mockResolvedValue({
+      data: {
+        replies: [
+          {
+            appendCells: {
+              updatedCells: 3,
+            },
+          },
+        ],
+      },
+    });
+
+    const mockSheets = google.sheets({} as any);
+    mockSheets.spreadsheets.get = mockGet;
+    mockSheets.spreadsheets.batchUpdate = mockBatchUpdate;
+
+    const rows = [[123, true, 'text']];
+
+    const result = await appendRowsWithLinks('spreadsheetId123', 'Sheet1!A:C', rows);
+
+    expect(result.ok).toBe(true);
+    expect(mockBatchUpdate).toHaveBeenCalledWith({
+      spreadsheetId: 'spreadsheetId123',
+      requestBody: {
+        requests: [
+          {
+            appendCells: {
+              sheetId: 123,
+              rows: [
+                {
+                  values: [
+                    {
+                      userEnteredValue: { numberValue: 123 },
+                    },
+                    {
+                      userEnteredValue: { boolValue: true },
+                    },
+                    {
+                      userEnteredValue: { stringValue: 'text' },
+                    },
+                  ],
+                },
+              ],
+              fields: '*',
+            },
+          },
+        ],
+      },
+    });
+  });
+
+  it('should handle errors when sheet is not found', async () => {
+    const mockGet = vi.fn().mockResolvedValue({
+      data: {
+        sheets: [
+          {
+            properties: {
+              title: 'OtherSheet',
+              sheetId: 999,
+            },
+          },
+        ],
+      },
+    });
+
+    const mockSheets = google.sheets({} as any);
+    mockSheets.spreadsheets.get = mockGet;
+
+    const rows = [['value1', 'value2']];
+
+    const result = await appendRowsWithLinks('spreadsheetId123', 'Sheet1!A:B', rows);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.message).toContain('Sheet not found');
+    }
+  });
+
+  it('should handle API errors', async () => {
+    const mockGet = vi.fn().mockRejectedValue(new Error('API Error'));
+    const mockSheets = google.sheets({} as any);
+    mockSheets.spreadsheets.get = mockGet;
+
+    const rows = [['value1', 'value2']];
+
+    const result = await appendRowsWithLinks('spreadsheetId123', 'Sheet1!A:B', rows);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.message).toBe('API Error');
     }
   });
 });

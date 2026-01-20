@@ -31,14 +31,18 @@ import {
   parseResumenBancarioResponse,
 } from '../gemini/parser.js';
 import { listFilesInFolder, downloadFile } from '../services/drive.js';
-import { getValues, appendRows, batchUpdate } from '../services/sheets.js';
+import { getValues, appendRowsWithLinks, batchUpdate, type CellValueOrLink } from '../services/sheets.js';
 import { getCachedFolderStructure } from '../services/folder-structure.js';
 import { sortToSinProcesar, sortAndRenameDocument } from '../services/document-sorter.js';
 import { getProcessingQueue } from './queue.js';
 import { getConfig } from '../config.js';
 import { FacturaPagoMatcher } from '../matching/matcher.js';
-import { createDriveHyperlink } from '../utils/spreadsheet.js';
 import { formatUSCurrency, parseNumber } from '../utils/numbers.js';
+import {
+  generateFacturaFileName,
+  generatePagoFileName,
+  generateReciboFileName,
+} from '../utils/file-naming.js';
 
 /**
  * Result of processing a single file
@@ -340,11 +344,23 @@ export async function processFile(
  * @param factura - The factura to store
  * @param spreadsheetId - The spreadsheet ID (Control de Creditos or Control de Debitos)
  * @param sheetName - The sheet name ('Facturas Emitidas' or 'Facturas Recibidas')
+ * @param documentType - The document type for filename generation
  */
-async function storeFactura(factura: Factura, spreadsheetId: string, sheetName: string): Promise<Result<void, Error>> {
-  const row = [
+async function storeFactura(
+  factura: Factura,
+  spreadsheetId: string,
+  sheetName: string,
+  documentType: 'factura_emitida' | 'factura_recibida'
+): Promise<Result<void, Error>> {
+  // Calculate the renamed filename that will be used when the file is moved
+  const renamedFileName = generateFacturaFileName(factura, documentType);
+
+  const row: CellValueOrLink[] = [
     factura.fileId,
-    createDriveHyperlink(factura.fileId, factura.fileName),
+    {
+      text: renamedFileName,
+      url: `https://drive.google.com/file/d/${factura.fileId}/view`,
+    },
     factura.folderPath,
     factura.tipoComprobante,
     factura.nroFactura,
@@ -365,7 +381,7 @@ async function storeFactura(factura: Factura, spreadsheetId: string, sheetName: 
     factura.hasCuitMatch ? 'YES' : 'NO',
   ];
 
-  const result = await appendRows(spreadsheetId, `${sheetName}!A:T`, [row]);
+  const result = await appendRowsWithLinks(spreadsheetId, `${sheetName}!A:T`, [row]);
   if (!result.ok) {
     return result;
   }
@@ -379,11 +395,23 @@ async function storeFactura(factura: Factura, spreadsheetId: string, sheetName: 
  * @param pago - The pago to store
  * @param spreadsheetId - The spreadsheet ID (Control de Creditos or Control de Debitos)
  * @param sheetName - The sheet name ('Pagos Recibidos' or 'Pagos Enviados')
+ * @param documentType - The document type for filename generation
  */
-async function storePago(pago: Pago, spreadsheetId: string, sheetName: string): Promise<Result<void, Error>> {
-  const row = [
+async function storePago(
+  pago: Pago,
+  spreadsheetId: string,
+  sheetName: string,
+  documentType: 'pago_enviado' | 'pago_recibido'
+): Promise<Result<void, Error>> {
+  // Calculate the renamed filename that will be used when the file is moved
+  const renamedFileName = generatePagoFileName(pago, documentType);
+
+  const row: CellValueOrLink[] = [
     pago.fileId,
-    createDriveHyperlink(pago.fileId, pago.fileName),
+    {
+      text: renamedFileName,
+      url: `https://drive.google.com/file/d/${pago.fileId}/view`,
+    },
     pago.folderPath,
     pago.banco,
     pago.fechaPago,
@@ -402,7 +430,7 @@ async function storePago(pago: Pago, spreadsheetId: string, sheetName: string): 
     pago.matchConfidence || '',
   ];
 
-  const result = await appendRows(spreadsheetId, `${sheetName}!A:R`, [row]);
+  const result = await appendRowsWithLinks(spreadsheetId, `${sheetName}!A:R`, [row]);
   if (!result.ok) {
     return result;
   }
@@ -414,9 +442,15 @@ async function storePago(pago: Pago, spreadsheetId: string, sheetName: string): 
  * Stores a recibo in the Control de Debitos spreadsheet
  */
 async function storeRecibo(recibo: Recibo, spreadsheetId: string): Promise<Result<void, Error>> {
-  const row = [
+  // Calculate the renamed filename that will be used when the file is moved
+  const renamedFileName = generateReciboFileName(recibo);
+
+  const row: CellValueOrLink[] = [
     recibo.fileId,
-    createDriveHyperlink(recibo.fileId, recibo.fileName),
+    {
+      text: renamedFileName,
+      url: `https://drive.google.com/file/d/${recibo.fileId}/view`,
+    },
     recibo.folderPath,
     recibo.tipoRecibo,
     recibo.nombreEmpleado,
@@ -436,7 +470,7 @@ async function storeRecibo(recibo: Recibo, spreadsheetId: string): Promise<Resul
     recibo.matchConfidence || '',
   ];
 
-  const result = await appendRows(spreadsheetId, 'Recibos!A:S', [row]);
+  const result = await appendRowsWithLinks(spreadsheetId, 'Recibos!A:S', [row]);
   if (!result.ok) {
     return result;
   }
@@ -604,7 +638,7 @@ export async function scanFolder(folderId?: string): Promise<Result<ScanResult, 
         // Factura issued BY ADVA -> goes to Control de Creditos
         console.log(`Storing factura emitida from ${fileInfo.name} in Control de Creditos (${controlCreditosId})`);
         console.log(`  Factura data: CUIT=${(doc as Factura).cuitEmisor}, Total=${(doc as Factura).importeTotal}, Date=${(doc as Factura).fechaEmision}`);
-        const storeResult = await storeFactura(doc as Factura, controlCreditosId, 'Facturas Emitidas');
+        const storeResult = await storeFactura(doc as Factura, controlCreditosId, 'Facturas Emitidas', 'factura_emitida');
         if (storeResult.ok) {
           result.facturasAdded++;
           processedDocs.push({ type: 'factura_emitida', doc: doc as Factura });
@@ -624,7 +658,7 @@ export async function scanFolder(folderId?: string): Promise<Result<ScanResult, 
         // Factura received BY ADVA -> goes to Control de Debitos
         console.log(`Storing factura recibida from ${fileInfo.name} in Control de Debitos (${controlDebitosId})`);
         console.log(`  Factura data: CUIT=${(doc as Factura).cuitEmisor}, Total=${(doc as Factura).importeTotal}, Date=${(doc as Factura).fechaEmision}`);
-        const storeResult = await storeFactura(doc as Factura, controlDebitosId, 'Facturas Recibidas');
+        const storeResult = await storeFactura(doc as Factura, controlDebitosId, 'Facturas Recibidas', 'factura_recibida');
         if (storeResult.ok) {
           result.facturasAdded++;
           processedDocs.push({ type: 'factura_recibida', doc: doc as Factura });
@@ -644,7 +678,7 @@ export async function scanFolder(folderId?: string): Promise<Result<ScanResult, 
         // Payment received BY ADVA -> goes to Control de Creditos
         console.log(`Storing pago recibido from ${fileInfo.name} in Control de Creditos (${controlCreditosId})`);
         console.log(`  Pago data: Banco=${(doc as Pago).banco}, Amount=${(doc as Pago).importePagado}, Date=${(doc as Pago).fechaPago}`);
-        const storeResult = await storePago(doc as Pago, controlCreditosId, 'Pagos Recibidos');
+        const storeResult = await storePago(doc as Pago, controlCreditosId, 'Pagos Recibidos', 'pago_recibido');
         if (storeResult.ok) {
           result.pagosAdded++;
           processedDocs.push({ type: 'pago_recibido', doc: doc as Pago });
@@ -664,7 +698,7 @@ export async function scanFolder(folderId?: string): Promise<Result<ScanResult, 
         // Payment sent BY ADVA -> goes to Control de Debitos
         console.log(`Storing pago enviado from ${fileInfo.name} in Control de Debitos (${controlDebitosId})`);
         console.log(`  Pago data: Banco=${(doc as Pago).banco}, Amount=${(doc as Pago).importePagado}, Date=${(doc as Pago).fechaPago}`);
-        const storeResult = await storePago(doc as Pago, controlDebitosId, 'Pagos Enviados');
+        const storeResult = await storePago(doc as Pago, controlDebitosId, 'Pagos Enviados', 'pago_enviado');
         if (storeResult.ok) {
           result.pagosAdded++;
           processedDocs.push({ type: 'pago_enviado', doc: doc as Pago });
