@@ -6,6 +6,7 @@
 import type { GeminiResponse, Result } from '../types/index.js';
 import { GeminiError } from '../types/index.js';
 import { classifyError } from './errors.js';
+import { debug, warn, error as logError } from '../utils/logger.js';
 
 /**
  * Sleeps for a specified number of milliseconds
@@ -115,6 +116,13 @@ export class GeminiClient {
 
       const payload = this.buildApiRequest(prompt, base64Data, mimeType);
 
+      debug('Gemini API request', {
+        module: 'gemini-client',
+        phase: 'api-call',
+        promptLength: prompt.length,
+        promptPreview: prompt.substring(0, 200) + '...'
+      });
+
       const response = await fetch(this.ENDPOINT, {
         method: 'POST',
         headers: {
@@ -125,6 +133,15 @@ export class GeminiClient {
       });
 
       const responseText = await response.text();
+
+      debug('Gemini API response', {
+        module: 'gemini-client',
+        phase: 'api-call',
+        statusCode: response.status,
+        responseLength: responseText.length,
+        responsePreview: responseText.substring(0, 500) + '...'
+      });
+
       const result = this.parseApiResponse(responseText, response.status);
 
       if (result.ok) {
@@ -133,6 +150,13 @@ export class GeminiClient {
 
       return result;
     } catch (error) {
+      logError('Gemini API error', {
+        module: 'gemini-client',
+        phase: 'api-call',
+        error: error instanceof Error ? error.message : 'Unknown error',
+        details: error
+      });
+
       return {
         ok: false,
         error: new GeminiError(
@@ -256,6 +280,14 @@ export class GeminiClient {
     if (this.requestCount >= this.rpmLimit) {
       const sleepTime = 60000 - elapsed;
       if (sleepTime > 0) {
+        warn('Rate limit enforced, sleeping', {
+          module: 'gemini-client',
+          phase: 'rate-limit',
+          sleepMs: sleepTime,
+          requestCount: this.requestCount,
+          rpmLimit: this.rpmLimit
+        });
+
         await sleep(sleepTime);
         // Reset after sleeping
         this.requestCount = 0;

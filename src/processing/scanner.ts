@@ -351,32 +351,33 @@ async function storeFactura(
   // Calculate the renamed filename that will be used when the file is moved
   const renamedFileName = generateFacturaFileName(factura, documentType);
 
+  // Build row based on document type - only store counterparty info
   const row: CellValueOrLink[] = [
-    factura.fechaEmision,
-    factura.fileId,
-    {
+    factura.fechaEmision,                    // A - date first
+    factura.fileId,                          // B
+    {                                        // C - formatted link
       text: renamedFileName,
       url: `https://drive.google.com/file/d/${factura.fileId}/view`,
     },
-    factura.tipoComprobante,
-    factura.nroFactura,
-    factura.cuitEmisor,
-    factura.razonSocialEmisor,
-    factura.cuitReceptor || '',
-    formatUSCurrency(factura.importeNeto),
-    formatUSCurrency(factura.importeIva),
-    formatUSCurrency(factura.importeTotal),
-    factura.moneda,
-    factura.concepto || '',
-    factura.processedAt,
-    factura.confidence,
-    factura.needsReview ? 'YES' : 'NO',
-    factura.matchedPagoFileId || '',
-    factura.matchConfidence || '',
-    factura.hasCuitMatch ? 'YES' : 'NO',
+    factura.tipoComprobante,                 // D
+    factura.nroFactura,                      // E
+    // F, G - counterparty only (emisor for recibidas, receptor for emitidas)
+    documentType === 'factura_emitida' ? (factura.cuitReceptor || '') : (factura.cuitEmisor || ''),
+    documentType === 'factura_emitida' ? (factura.razonSocialReceptor || '') : (factura.razonSocialEmisor || ''),
+    formatUSCurrency(factura.importeNeto),   // H
+    formatUSCurrency(factura.importeIva),    // I
+    formatUSCurrency(factura.importeTotal),  // J
+    factura.moneda,                          // K
+    factura.concepto || '',                  // L
+    factura.processedAt,                     // M
+    factura.confidence,                      // N
+    factura.needsReview ? 'YES' : 'NO',      // O
+    factura.matchedPagoFileId || '',         // P
+    factura.matchConfidence || '',           // Q
+    factura.hasCuitMatch ? 'YES' : 'NO',     // R
   ];
 
-  const result = await appendRowsWithLinks(spreadsheetId, `${sheetName}!A:S`, [row]);
+  const result = await appendRowsWithLinks(spreadsheetId, `${sheetName}!A:R`, [row]);
   if (!result.ok) {
     return result;
   }
@@ -408,30 +409,30 @@ async function storePago(
   // Calculate the renamed filename that will be used when the file is moved
   const renamedFileName = generatePagoFileName(pago, documentType);
 
+  // Build row based on document type - only store counterparty info
   const row: CellValueOrLink[] = [
-    pago.fechaPago,
-    pago.fileId,
-    {
+    pago.fechaPago,                          // A - date first
+    pago.fileId,                             // B
+    {                                        // C - formatted link
       text: renamedFileName,
       url: `https://drive.google.com/file/d/${pago.fileId}/view`,
     },
-    pago.banco,
-    formatUSCurrency(pago.importePagado),
-    pago.moneda || 'ARS',
-    pago.referencia || '',
-    pago.cuitPagador || '',
-    pago.nombrePagador || '',
-    pago.cuitBeneficiario || '',
-    pago.nombreBeneficiario || '',
-    pago.concepto || '',
-    pago.processedAt,
-    pago.confidence,
-    pago.needsReview ? 'YES' : 'NO',
-    pago.matchedFacturaFileId || '',
-    pago.matchConfidence || '',
+    pago.banco,                              // D
+    formatUSCurrency(pago.importePagado),    // E
+    pago.moneda || 'ARS',                    // F
+    pago.referencia || '',                   // G
+    // H, I - counterparty only (beneficiario for enviados, pagador for recibidos)
+    documentType === 'pago_enviado' ? (pago.cuitBeneficiario || '') : (pago.cuitPagador || ''),
+    documentType === 'pago_enviado' ? (pago.nombreBeneficiario || '') : (pago.nombrePagador || ''),
+    pago.concepto || '',                     // J
+    pago.processedAt,                        // K
+    pago.confidence,                         // L
+    pago.needsReview ? 'YES' : 'NO',         // M
+    pago.matchedFacturaFileId || '',         // N
+    pago.matchConfidence || '',              // O
   ];
 
-  const result = await appendRowsWithLinks(spreadsheetId, `${sheetName}!A:Q`, [row]);
+  const result = await appendRowsWithLinks(spreadsheetId, `${sheetName}!A:O`, [row]);
   if (!result.ok) {
     return result;
   }
