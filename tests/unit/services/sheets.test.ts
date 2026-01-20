@@ -172,6 +172,63 @@ describe('formatSheet', () => {
     });
   });
 
+  it('should explicitly set data rows to non-bold', async () => {
+    const mockBatchUpdate = vi.fn().mockResolvedValue({});
+    const mockSheets = google.sheets({} as any);
+    mockSheets.spreadsheets.batchUpdate = mockBatchUpdate;
+
+    const result = await formatSheet('spreadsheetId123', 456, {
+      frozenRows: 1,
+      monetaryColumns: [],
+    });
+
+    expect(result.ok).toBe(true);
+    expect(mockBatchUpdate).toHaveBeenCalledWith({
+      spreadsheetId: 'spreadsheetId123',
+      requestBody: {
+        requests: expect.arrayContaining([
+          // Bold headers request for row 0
+          expect.objectContaining({
+            repeatCell: {
+              range: {
+                sheetId: 456,
+                startRowIndex: 0,
+                endRowIndex: 1,
+                startColumnIndex: 0,
+              },
+              cell: {
+                userEnteredFormat: {
+                  textFormat: {
+                    bold: true,
+                  },
+                },
+              },
+              fields: 'userEnteredFormat.textFormat.bold',
+            },
+          }),
+          // Non-bold data rows request for rows 1+
+          expect.objectContaining({
+            repeatCell: {
+              range: {
+                sheetId: 456,
+                startRowIndex: 1,
+                startColumnIndex: 0,
+              },
+              cell: {
+                userEnteredFormat: {
+                  textFormat: {
+                    bold: false,
+                  },
+                },
+              },
+              fields: 'userEnteredFormat.textFormat.bold',
+            },
+          }),
+        ]),
+      },
+    });
+  });
+
   it('should handle errors from the Sheets API', async () => {
     const mockBatchUpdate = vi
       .fn()

@@ -301,7 +301,26 @@ export async function formatSheet(
       },
     });
 
-    // 3. Apply number formatting to monetary columns
+    // 3. Explicitly set data rows to non-bold (rows 1+)
+    requests.push({
+      repeatCell: {
+        range: {
+          sheetId,
+          startRowIndex: 1,  // Start from row 1 (after header)
+          startColumnIndex: 0,
+        },
+        cell: {
+          userEnteredFormat: {
+            textFormat: {
+              bold: false,
+            },
+          },
+        },
+        fields: 'userEnteredFormat.textFormat.bold',
+      },
+    });
+
+    // 4. Apply number formatting to monetary columns
     if (monetaryColumns.length > 0) {
       for (const columnIndex of monetaryColumns) {
         requests.push({
