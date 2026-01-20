@@ -7,6 +7,11 @@ The system uses **dual control spreadsheets** based on money flow direction:
 
 All dates ISO format (YYYY-MM-DD), timestamps ISO datetime.
 
+**IMPORTANT: Counterparty-Only Data Model**
+- Spreadsheets only store **counterparty** information (the other party in the transaction)
+- ADVA's information (CUIT 30709076783) is NOT stored in spreadsheets
+- Role validation ensures ADVA is in the correct role before storing documents
+
 ---
 
 ## Control de Creditos (Money IN)
@@ -17,41 +22,47 @@ Located at root: `Control de Creditos.gsheet`
 
 Invoices FROM ADVA (ADVA is emisor). These represent money that ADVA expects to receive.
 
+**Columns (A:R, 18 columns):**
 ```
-fechaEmision | fileId | fileName | tipoComprobante | puntoVenta | numeroComprobante |
-fechaVtoCae | cuitEmisor | razonSocialEmisor | cuitReceptor | cae | importeNeto | importeIva |
-importeTotal | moneda | concepto | processedAt | confidence | needsReview | matchedPagoFileId |
-matchConfidence | hasCuitMatch
+fechaEmision | fileId | fileName | tipoComprobante | nroFactura | cuitReceptor |
+razonSocialReceptor | importeNeto | importeIva | importeTotal | moneda | concepto |
+processedAt | confidence | needsReview | matchedPagoFileId | matchConfidence | hasCuitMatch
 ```
 
-**Note:** Rows are automatically sorted by `fechaEmision` in descending order (most recent first) after each insert.
+**Note:** Rows are automatically sorted by `fechaEmision` (column A) in descending order (most recent first) after each insert.
 
 **Key Fields:**
-- `cuitEmisor`: ADVA's CUIT (30709076783)
-- `cuitReceptor`: Client's CUIT (invoice recipient)
+- `cuitReceptor`: Client's CUIT (counterparty - ADVA issued invoice TO this client)
+- `razonSocialReceptor`: Client's business name
+- `nroFactura`: Full invoice number (format: "XXXXX-XXXXXXXX")
 - `tipoComprobante`: A|B|C|E|NC|ND
 - `moneda`: ARS|USD
 - `matchedPagoFileId`: Links to Pagos Recibidos
 - `matchConfidence`: HIGH|MEDIUM|LOW
 - `hasCuitMatch`: boolean (whether match was based on CUIT)
 
+**ADVA's role:** Emisor (not stored in spreadsheet)
+
 ### Pagos Recibidos
 
 Payments TO ADVA (ADVA is beneficiario). These represent money that ADVA has received.
 
+**Columns (A:O, 15 columns):**
 ```
 fechaPago | fileId | fileName | banco | importePagado | moneda | referencia | cuitPagador |
-nombrePagador | cuitBeneficiario | nombreBeneficiario | concepto | processedAt | confidence |
-needsReview | matchedFacturaFileId | matchConfidence
+nombrePagador | concepto | processedAt | confidence | needsReview | matchedFacturaFileId |
+matchConfidence
 ```
 
-**Note:** Rows are automatically sorted by `fechaPago` in descending order (most recent first) after each insert.
+**Note:** Rows are automatically sorted by `fechaPago` (column A) in descending order (most recent first) after each insert.
 
 **Key Fields:**
-- `cuitBeneficiario`: ADVA's CUIT (30709076783) - receiver of payment
-- `cuitPagador`: Client's CUIT - sender of payment
+- `cuitPagador`: Client's CUIT (counterparty - who sent the payment)
+- `nombrePagador`: Client's name
 - `matchedFacturaFileId`: Links to Facturas Emitidas
 - `matchConfidence`: HIGH|MEDIUM|LOW
+
+**ADVA's role:** Beneficiario (not stored in spreadsheet)
 
 ---
 
@@ -63,46 +74,53 @@ Located at root: `Control de Debitos.gsheet`
 
 Invoices TO ADVA (ADVA is receptor). These represent money that ADVA needs to pay.
 
+**Columns (A:R, 18 columns):**
 ```
-fechaEmision | fileId | fileName | tipoComprobante | puntoVenta | numeroComprobante |
-fechaVtoCae | cuitEmisor | razonSocialEmisor | cuitReceptor | cae | importeNeto | importeIva |
-importeTotal | moneda | concepto | processedAt | confidence | needsReview | matchedPagoFileId |
-matchConfidence | hasCuitMatch
+fechaEmision | fileId | fileName | tipoComprobante | nroFactura | cuitEmisor |
+razonSocialEmisor | importeNeto | importeIva | importeTotal | moneda | concepto |
+processedAt | confidence | needsReview | matchedPagoFileId | matchConfidence | hasCuitMatch
 ```
 
-**Note:** Rows are automatically sorted by `fechaEmision` in descending order (most recent first) after each insert.
+**Note:** Rows are automatically sorted by `fechaEmision` (column A) in descending order (most recent first) after each insert.
 
 **Key Fields:**
-- `cuitEmisor`: Provider's CUIT (invoice issuer)
-- `cuitReceptor`: ADVA's CUIT (30709076783)
+- `cuitEmisor`: Provider's CUIT (counterparty - who issued the invoice TO ADVA)
+- `razonSocialEmisor`: Provider's business name
+- `nroFactura`: Full invoice number (format: "XXXXX-XXXXXXXX")
 - `tipoComprobante`: A|B|C|E|NC|ND
 - `moneda`: ARS|USD
 - `matchedPagoFileId`: Links to Pagos Enviados
 - `matchConfidence`: HIGH|MEDIUM|LOW
 - `hasCuitMatch`: boolean (whether match was based on CUIT)
 
+**ADVA's role:** Receptor (not stored in spreadsheet)
+
 ### Pagos Enviados
 
 Payments BY ADVA (ADVA is ordenante/pagador). These represent money that ADVA has paid out.
 
+**Columns (A:O, 15 columns):**
 ```
-fechaPago | fileId | fileName | banco | importePagado | moneda | referencia | cuitPagador |
-nombrePagador | cuitBeneficiario | nombreBeneficiario | concepto | processedAt | confidence |
-needsReview | matchedFacturaFileId | matchConfidence
+fechaPago | fileId | fileName | banco | importePagado | moneda | referencia | cuitBeneficiario |
+nombreBeneficiario | concepto | processedAt | confidence | needsReview | matchedFacturaFileId |
+matchConfidence
 ```
 
-**Note:** Rows are automatically sorted by `fechaPago` in descending order (most recent first) after each insert.
+**Note:** Rows are automatically sorted by `fechaPago` (column A) in descending order (most recent first) after each insert.
 
 **Key Fields:**
-- `cuitPagador`: ADVA's CUIT (30709076783) - sender of payment
-- `cuitBeneficiario`: Provider's CUIT - receiver of payment
+- `cuitBeneficiario`: Provider's CUIT (counterparty - who received the payment)
+- `nombreBeneficiario`: Provider's name
 - `matchedFacturaFileId`: Links to Facturas Recibidas or Recibos
 - `matchConfidence`: HIGH|MEDIUM|LOW
+
+**ADVA's role:** Pagador/Ordenante (not stored in spreadsheet)
 
 ### Recibos
 
 Employee salary receipts (sueldo, liquidación final). These represent salary payments made by ADVA.
 
+**Columns (A:R, 18 columns):**
 ```
 fechaPago | fileId | fileName | tipoRecibo | nombreEmpleado | cuilEmpleado | legajo |
 tareaDesempenada | cuitEmpleador | periodoAbonado | subtotalRemuneraciones |
@@ -110,18 +128,21 @@ subtotalDescuentos | totalNeto | processedAt | confidence | needsReview | matche
 matchConfidence
 ```
 
-**Note:** Rows are automatically sorted by `fechaPago` in descending order (most recent first) after each insert.
+**Note:** Rows are automatically sorted by `fechaPago` (column A) in descending order (most recent first) after each insert.
 
 **Key Fields:**
 - `tipoRecibo`: sueldo|liquidacion_final
-- `cuitEmpleador`: ADVA's CUIT (30709076783)
+- `cuitEmpleador`: ADVA's CUIT (30709076783) - **exception: stored for validation**
 - `cuilEmpleado`: Employee's CUIL (11 digits, CUIL format)
+- `nombreEmpleado`: Employee's name (counterparty)
 - `periodoAbonado`: Payment period (e.g., "diciembre/2024")
 - `subtotalRemuneraciones`: Gross salary before deductions
 - `subtotalDescuentos`: Total deductions
 - `totalNeto`: Net salary (subtotalRemuneraciones - subtotalDescuentos)
 - `matchedPagoFileId`: Links to Pagos Enviados
 - `matchConfidence`: HIGH|MEDIUM|LOW
+
+**ADVA's role:** Empleador (stored for validation purposes)
 
 ---
 
@@ -131,13 +152,15 @@ matchConfidence
 
 ### ResumenBancario
 
+**Columns:**
 ```
-fileId | fileName | banco | fechaDesde | fechaHasta | saldoInicial | saldoFinal |
+fileId | fileName | banco | numeroCuenta | fechaDesde | fechaHasta | saldoInicial | saldoFinal |
 moneda | cantidadMovimientos | processedAt | confidence | needsReview
 ```
 
 **Key Fields:**
 - `banco`: Bank name (e.g., "BBVA", "Santander", "Galicia")
+- `numeroCuenta`: Account number
 - `fechaDesde`: Statement start date (ISO format: YYYY-MM-DD)
 - `fechaHasta`: Statement end date (ISO format: YYYY-MM-DD)
 - `saldoInicial`: Opening balance at start of period
@@ -151,14 +174,19 @@ moneda | cantidadMovimientos | processedAt | confidence | needsReview
 
 Documents are classified based on ADVA's role (CUIT: 30709076783):
 
-| Document Type | ADVA's Role | Money Flow | Destination |
-|---------------|-------------|------------|-------------|
-| Factura Emitida | Emisor | IN → ADVA | Control de Creditos |
-| Factura Recibida | Receptor | OUT ← ADVA | Control de Debitos |
-| Pago Recibido | Beneficiario | IN → ADVA | Control de Creditos |
-| Pago Enviado | Pagador/Ordenante | OUT ← ADVA | Control de Debitos |
-| Resumen Bancario | Account Holder | Both | Bancos/ folder |
-| Recibo | Empleador | OUT ← ADVA | Control de Debitos |
+| Document Type | ADVA's Role | Money Flow | Destination | Counterparty Stored |
+|---------------|-------------|------------|-------------|---------------------|
+| Factura Emitida | Emisor | IN → ADVA | Control de Creditos | Receptor (client) |
+| Factura Recibida | Receptor | OUT ← ADVA | Control de Debitos | Emisor (provider) |
+| Pago Recibido | Beneficiario | IN → ADVA | Control de Creditos | Pagador (client) |
+| Pago Enviado | Pagador/Ordenante | OUT ← ADVA | Control de Debitos | Beneficiario (provider) |
+| Resumen Bancario | Account Holder | Both | Bancos/ folder | N/A |
+| Recibo | Empleador | OUT ← ADVA | Control de Debitos | Empleado |
+
+**Role Validation:**
+- Parser validates ADVA is in the correct role for each document type
+- Documents with invalid ADVA roles are rejected and routed to "Sin Procesar"
+- Role validation errors are logged at ERROR level with detailed context
 
 ---
 
@@ -211,7 +239,7 @@ When a new pago matches a factura/recibo with HIGHER quality, the old match is b
 
 ### File Tracking
 - `fileId`: Google Drive file ID
-- `fileName`: RichTextValue hyperlink to Drive file
+- `fileName`: RichTextValue hyperlink to Drive file (formatted with renamed filename)
 
 ### Processing Metadata
 - `processedAt`: ISO timestamp, text format (prevents Google Sheets auto-parsing)
@@ -219,10 +247,31 @@ When a new pago matches a factura/recibo with HIGHER quality, the old match is b
 - `needsReview`: boolean (whether manual review is recommended)
 
 ### Comprobante Fields
-- `puntoVenta`: 4-5 digits zero-padded
-- `numeroComprobante`: 8 digits zero-padded
-- `cae`: 14 digits
+- `nroFactura`: Full invoice number combining point of sale and invoice number (format: "XXXXX-XXXXXXXX")
 - `cuit`/`cuil`: 11 digits (mod11 checksum, no dashes)
+
+---
+
+## Logging
+
+The system uses Pino structured logging with configurable log levels:
+
+**Log Levels** (via `LOG_LEVEL` environment variable):
+- `DEBUG`: Detailed classification, extraction, and validation information
+- `INFO`: Document storage and processing completion
+- `WARN`: Non-critical issues (e.g., sort failures)
+- `ERROR`: Critical failures (role validation errors, parsing errors)
+
+**DEBUG Logging Includes:**
+- Document classification results with confidence and reason
+- Gemini API requests/responses (with preview)
+- Role validation results
+- Extraction confidence and needsReview status
+
+**ERROR Logging Includes:**
+- Role validation failures with expected vs. actual roles
+- Parsing errors with raw response preview
+- Documents routed to "Sin Procesar" with reason
 
 ---
 
@@ -230,6 +279,9 @@ When a new pago matches a factura/recibo with HIGHER quality, the old match is b
 
 - Dual spreadsheet design separates money IN (Creditos) from money OUT (Debitos)
 - Direction-aware classification automatically routes documents based on ADVA's role
+- **Counterparty-only model**: Only non-ADVA party information is stored in spreadsheets
 - All spreadsheets and folders are auto-created if missing
 - Month subfolders in Creditos/ and Debitos/ are created on demand
 - Optional fields use `?` suffix - empty string if absent
+- Date columns are always first (column A) for automatic chronological sorting
+- Role validation prevents misclassified documents from being stored
