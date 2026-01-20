@@ -322,23 +322,32 @@ The server expects this structure in `DRIVE_ROOT_FOLDER_ID`:
 
 ```
 ADVA Root Folder/
-├── Control de Creditos.gsheet     # Money IN tracking (Facturas Emitidas, Pagos Recibidos)
-├── Control de Debitos.gsheet      # Money OUT tracking (Facturas Recibidas, Pagos Enviados, Recibos)
-├── Entrada/                        # Incoming documents (scan source)
-├── Creditos/                       # Money IN documents (sorted by month)
-│   ├── 01 - Enero/
-│   ├── 02 - Febrero/
-│   └── ... (12 months, auto-created)
-├── Debitos/                        # Money OUT documents (sorted by month)
-│   ├── 01 - Enero/
-│   └── ... (12 months, auto-created)
-├── Bancos/                         # Bank statements
-└── Sin Procesar/                   # Failed or unmatched documents
+├── Control de Creditos.gsheet     # Money IN tracking (at root)
+├── Control de Debitos.gsheet      # Money OUT tracking (at root)
+├── Entrada/                        # Incoming documents (scan source, at root)
+├── Sin Procesar/                   # Failed/unmatched documents (at root)
+├── 2024/                           # Year folders (created on-demand)
+│   ├── Creditos/                   # Money IN documents for 2024
+│   │   ├── 01 - Enero/
+│   │   ├── 02 - Febrero/
+│   │   └── ... (12 months, auto-created as needed)
+│   ├── Debitos/                    # Money OUT documents for 2024
+│   │   ├── 01 - Enero/
+│   │   └── ... (12 months, auto-created as needed)
+│   └── Bancos/                     # Bank statements for 2024 (no month subfolders)
+├── 2025/                           # Next year (created when first document arrives)
+│   ├── Creditos/
+│   ├── Debitos/
+│   └── Bancos/
+└── ... (more years as needed)
 ```
 
 **Notes:**
-- All folders and spreadsheets are created automatically if missing
-- Month subfolders in Creditos/ and Debitos/ are created on demand
+- Year folders are created dynamically when the first document for that year is processed
+- Classification folders (Creditos, Debitos, Bancos) are auto-created inside each year folder
+- Month subfolders are created inside Creditos and Debitos as documents arrive
+- Bancos has no month subfolders - bank statements go directly into the year's Bancos folder
+- Entrada and Sin Procesar remain at the root level for easy access
 - Direction-aware classification routes documents based on ADVA's role (emisor/receptor/ordenante/beneficiario)
 
 ---

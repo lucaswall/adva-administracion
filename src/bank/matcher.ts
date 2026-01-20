@@ -11,8 +11,8 @@ import type {
   Recibo
 } from '../types/index.js';
 import { parseArgDate, isWithinDays } from '../utils/date.js';
-import { isValidCuit } from '../utils/validation.js';
-import { amountsMatch } from '../utils/currency.js';
+import { extractCuitFromText } from '../utils/validation.js';
+import { amountsMatch } from '../utils/numbers.js';
 import { amountsMatchCrossCurrency } from '../utils/exchange-rate.js';
 
 /**
@@ -208,53 +208,8 @@ export function isBankFee(concepto: string): boolean {
   return BANK_FEE_PATTERNS.some(pattern => pattern.test(concepto));
 }
 
-/**
- * Extracts CUIT/CUIL from bank concept text using regex patterns
- *
- * Patterns recognized:
- * - "CUIT 30-71234567-8" or "CUIL: 20271190523"
- * - "XX-XXXXXXXX-X" format
- * - Plain 11-digit number with valid checksum
- * - Embedded in text like "TRANSFERENCI 30709076783"
- *
- * @param concepto - Bank transaction concept text
- * @returns Extracted CUIT (11 digits) or undefined
- */
-export function extractCuitFromConcepto(concepto: string): string | undefined {
-  if (!concepto) {
-    return undefined;
-  }
-
-  // Pattern 1: Explicit CUIT/CUIL prefix
-  const explicitMatch = concepto.match(/CUI[TL][:\s]*(\d{2}[-\s]?\d{8}[-\s]?\d)/i);
-  if (explicitMatch) {
-    const cleaned = explicitMatch[1].replace(/[-\s]/g, '');
-    if (isValidCuit(cleaned)) {
-      return cleaned;
-    }
-  }
-
-  // Pattern 2: 11-digit number with separators (XX-XXXXXXXX-X)
-  const separatedMatch = concepto.match(/(\d{2})[-\s](\d{8})[-\s](\d)/);
-  if (separatedMatch) {
-    const cleaned = separatedMatch[1] + separatedMatch[2] + separatedMatch[3];
-    if (isValidCuit(cleaned)) {
-      return cleaned;
-    }
-  }
-
-  // Pattern 3: Plain 11-digit number (validate checksum to reduce false positives)
-  const plainMatches = concepto.match(/\b(\d{11})\b/g);
-  if (plainMatches) {
-    for (const match of plainMatches) {
-      if (isValidCuit(match)) {
-        return match;
-      }
-    }
-  }
-
-  return undefined;
-}
+/** Re-export for convenience */
+export const extractCuitFromConcepto = extractCuitFromText;
 
 /**
  * Matches bank movements against Facturas, Recibos, and Pagos

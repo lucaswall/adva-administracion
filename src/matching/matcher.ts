@@ -6,7 +6,7 @@
 import type { Factura, Pago, Recibo, MatchCandidate, ReciboMatchCandidate, MatchConfidence } from '../types/index.js';
 import { parseArgDate, isWithinDays } from '../utils/date.js';
 import { cuitOrDniMatch } from '../utils/validation.js';
-import { amountsMatch } from '../utils/currency.js';
+import { amountsMatch } from '../utils/numbers.js';
 import { amountsMatchCrossCurrency } from '../utils/exchange-rate.js';
 
 /**
