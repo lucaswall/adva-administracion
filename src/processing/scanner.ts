@@ -198,7 +198,6 @@ export async function processFile(
     const factura: Factura = {
       fileId: fileInfo.id,
       fileName: fileInfo.name,
-      folderPath: fileInfo.folderPath,
       tipoComprobante: parseResult.value.data.tipoComprobante || 'A',
       nroFactura: parseResult.value.data.nroFactura || '',
       fechaEmision: parseResult.value.data.fechaEmision || '',
@@ -234,7 +233,6 @@ export async function processFile(
     const pago: Pago = {
       fileId: fileInfo.id,
       fileName: fileInfo.name,
-      folderPath: fileInfo.folderPath,
       banco: parseResult.value.data.banco || '',
       fechaPago: parseResult.value.data.fechaPago || '',
       importePagado: parseResult.value.data.importePagado || 0,
@@ -269,7 +267,6 @@ export async function processFile(
     const recibo: Recibo = {
       fileId: fileInfo.id,
       fileName: fileInfo.name,
-      folderPath: fileInfo.folderPath,
       tipoRecibo: parseResult.value.data.tipoRecibo || 'sueldo',
       nombreEmpleado: parseResult.value.data.nombreEmpleado || '',
       cuilEmpleado: parseResult.value.data.cuilEmpleado || '',
@@ -305,7 +302,6 @@ export async function processFile(
     const resumen: ResumenBancario = {
       fileId: fileInfo.id,
       fileName: fileInfo.name,
-      folderPath: fileInfo.folderPath,
       banco: parseResult.value.data.banco || 'Desconocido',
       numeroCuenta: parseResult.value.data.numeroCuenta || '',
       fechaDesde: parseResult.value.data.fechaDesde || '',
@@ -361,7 +357,6 @@ async function storeFactura(
       text: renamedFileName,
       url: `https://drive.google.com/file/d/${factura.fileId}/view`,
     },
-    factura.folderPath,
     factura.tipoComprobante,
     factura.nroFactura,
     factura.fechaEmision,
@@ -381,7 +376,7 @@ async function storeFactura(
     factura.hasCuitMatch ? 'YES' : 'NO',
   ];
 
-  const result = await appendRowsWithLinks(spreadsheetId, `${sheetName}!A:T`, [row]);
+  const result = await appendRowsWithLinks(spreadsheetId, `${sheetName}!A:S`, [row]);
   if (!result.ok) {
     return result;
   }
@@ -412,7 +407,6 @@ async function storePago(
       text: renamedFileName,
       url: `https://drive.google.com/file/d/${pago.fileId}/view`,
     },
-    pago.folderPath,
     pago.banco,
     pago.fechaPago,
     formatUSCurrency(pago.importePagado),
@@ -430,7 +424,7 @@ async function storePago(
     pago.matchConfidence || '',
   ];
 
-  const result = await appendRowsWithLinks(spreadsheetId, `${sheetName}!A:R`, [row]);
+  const result = await appendRowsWithLinks(spreadsheetId, `${sheetName}!A:Q`, [row]);
   if (!result.ok) {
     return result;
   }
@@ -451,7 +445,6 @@ async function storeRecibo(recibo: Recibo, spreadsheetId: string): Promise<Resul
       text: renamedFileName,
       url: `https://drive.google.com/file/d/${recibo.fileId}/view`,
     },
-    recibo.folderPath,
     recibo.tipoRecibo,
     recibo.nombreEmpleado,
     recibo.cuilEmpleado,
@@ -470,7 +463,7 @@ async function storeRecibo(recibo: Recibo, spreadsheetId: string): Promise<Resul
     recibo.matchConfidence || '',
   ];
 
-  const result = await appendRowsWithLinks(spreadsheetId, 'Recibos!A:S', [row]);
+  const result = await appendRowsWithLinks(spreadsheetId, 'Recibos!A:R', [row]);
   if (!result.ok) {
     return result;
   }
@@ -547,7 +540,7 @@ export async function scanFolder(folderId?: string): Promise<Result<ScanResult, 
   console.log(`Using Control de Debitos: ${controlDebitosId}`);
 
   // List files in folder
-  const listResult = await listFilesInFolder(targetFolderId, '');
+  const listResult = await listFilesInFolder(targetFolderId);
   if (!listResult.ok) {
     console.error('Failed to list files in folder:', listResult.error.message);
     return listResult;
@@ -812,24 +805,23 @@ export async function rematch(): Promise<Result<RematchResult, Error>> {
         row: i + 1, // Sheet rows are 1-indexed
         fileId: String(row[0] || ''),
         fileName: String(row[1] || ''),
-        folderPath: String(row[2] || ''),
-        tipoComprobante: (row[3] || 'A') as Factura['tipoComprobante'],
-        nroFactura: String(row[4] || ''),
-        fechaEmision: String(row[5] || ''),
-        cuitEmisor: String(row[6] || ''),
-        razonSocialEmisor: String(row[7] || ''),
-        cuitReceptor: row[8] ? String(row[8]) : undefined,
-        importeNeto: parseNumber(row[9]) || 0,
-        importeIva: parseNumber(row[10]) || 0,
-        importeTotal: parseNumber(row[11]) || 0,
-        moneda: (row[12] || 'ARS') as Factura['moneda'],
-        concepto: row[13] ? String(row[13]) : undefined,
-        processedAt: String(row[14] || ''),
-        confidence: Number(row[15]) || 0,
-        needsReview: row[16] === 'YES',
-        matchedPagoFileId: row[17] ? String(row[17]) : undefined,
-        matchConfidence: row[18] ? (String(row[18]) as MatchConfidence) : undefined,
-        hasCuitMatch: row[19] === 'YES',
+        tipoComprobante: (row[2] || 'A') as Factura['tipoComprobante'],
+        nroFactura: String(row[3] || ''),
+        fechaEmision: String(row[4] || ''),
+        cuitEmisor: String(row[5] || ''),
+        razonSocialEmisor: String(row[6] || ''),
+        cuitReceptor: row[7] ? String(row[7]) : undefined,
+        importeNeto: parseNumber(row[8]) || 0,
+        importeIva: parseNumber(row[9]) || 0,
+        importeTotal: parseNumber(row[10]) || 0,
+        moneda: (row[11] || 'ARS') as Factura['moneda'],
+        concepto: row[12] ? String(row[12]) : undefined,
+        processedAt: String(row[13] || ''),
+        confidence: Number(row[14]) || 0,
+        needsReview: row[15] === 'YES',
+        matchedPagoFileId: row[16] ? String(row[16]) : undefined,
+        matchConfidence: row[17] ? (String(row[17]) as MatchConfidence) : undefined,
+        hasCuitMatch: row[18] === 'YES',
       });
     }
   }
@@ -843,22 +835,21 @@ export async function rematch(): Promise<Result<RematchResult, Error>> {
         row: i + 1,
         fileId: String(row[0] || ''),
         fileName: String(row[1] || ''),
-        folderPath: String(row[2] || ''),
-        banco: String(row[3] || ''),
-        fechaPago: String(row[4] || ''),
-        importePagado: parseNumber(row[5]) || 0,
-        moneda: (String(row[6]) as 'ARS' | 'USD') || 'ARS',
-        referencia: row[7] ? String(row[7]) : undefined,
-        cuitPagador: row[8] ? String(row[8]) : undefined,
-        nombrePagador: row[9] ? String(row[9]) : undefined,
-        cuitBeneficiario: row[10] ? String(row[10]) : undefined,
-        nombreBeneficiario: row[11] ? String(row[11]) : undefined,
-        concepto: row[12] ? String(row[12]) : undefined,
-        processedAt: String(row[13] || ''),
-        confidence: Number(row[14]) || 0,
-        needsReview: row[15] === 'YES',
-        matchedFacturaFileId: row[16] ? String(row[16]) : undefined,
-        matchConfidence: row[17] ? (String(row[17]) as MatchConfidence) : undefined,
+        banco: String(row[2] || ''),
+        fechaPago: String(row[3] || ''),
+        importePagado: parseNumber(row[4]) || 0,
+        moneda: (String(row[5]) as 'ARS' | 'USD') || 'ARS',
+        referencia: row[6] ? String(row[6]) : undefined,
+        cuitPagador: row[7] ? String(row[7]) : undefined,
+        nombrePagador: row[8] ? String(row[8]) : undefined,
+        cuitBeneficiario: row[9] ? String(row[9]) : undefined,
+        nombreBeneficiario: row[10] ? String(row[10]) : undefined,
+        concepto: row[11] ? String(row[11]) : undefined,
+        processedAt: String(row[12] || ''),
+        confidence: Number(row[13]) || 0,
+        needsReview: row[14] === 'YES',
+        matchedFacturaFileId: row[15] ? String(row[15]) : undefined,
+        matchConfidence: row[16] ? (String(row[16]) as MatchConfidence) : undefined,
       });
     }
   }

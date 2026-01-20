@@ -15,7 +15,6 @@ describe('FacturaPagoMatcher.findMatches', () => {
       row: 2,
       fileId: 'file1',
       fileName: 'factura1.pdf',
-      folderPath: '',
       tipoComprobante: 'A',
       puntoVenta: '00001',
       numeroComprobante: '00000001',
@@ -36,7 +35,6 @@ describe('FacturaPagoMatcher.findMatches', () => {
       row: 3,
       fileId: 'file2',
       fileName: 'factura2.pdf',
-      folderPath: '',
       tipoComprobante: 'B',
       puntoVenta: '00002',
       numeroComprobante: '00000002',
@@ -61,7 +59,6 @@ describe('FacturaPagoMatcher.findMatches', () => {
     const pago: Pago = {
       fileId: 'pago1',
       fileName: 'pago1.pdf',
-      folderPath: '',
       banco: 'BBVA',
       fechaPago: '2024-01-07', // 2 days after factura1
       importePagado: 1210,
@@ -89,7 +86,6 @@ describe('FacturaPagoMatcher.findMatches', () => {
     const pago: Pago = {
       fileId: 'pago1',
       fileName: 'pago1.pdf',
-      folderPath: '',
       banco: 'BBVA',
       fechaPago: '2024-01-07',
       importePagado: 1210,
@@ -107,7 +103,6 @@ describe('FacturaPagoMatcher.findMatches', () => {
     const pago: Pago = {
       fileId: 'pago1',
       fileName: 'pago1.pdf',
-      folderPath: '',
       banco: 'BBVA',
       fechaPago: '2024-01-07',
       importePagado: 1210,
@@ -129,7 +124,6 @@ describe('FacturaPagoMatcher.findMatches', () => {
     const pago: Pago = {
       fileId: 'pago1',
       fileName: 'pago1.pdf',
-      folderPath: '',
       banco: 'BBVA',
       fechaPago: '2024-01-07',
       importePagado: 9999, // no matching amount
@@ -147,7 +141,6 @@ describe('FacturaPagoMatcher.findMatches', () => {
     const pago: Pago = {
       fileId: 'pago1',
       fileName: 'pago1.pdf',
-      folderPath: '',
       banco: 'BBVA',
       fechaPago: '2024-05-10', // 125 days after factura1, outside extended +120 range
       importePagado: 1210,
@@ -165,7 +158,6 @@ describe('FacturaPagoMatcher.findMatches', () => {
     const pago: Pago = {
       fileId: 'pago1',
       fileName: 'pago1.pdf',
-      folderPath: '',
       banco: 'BBVA',
       fechaPago: '2024-03-05', // exactly 60 days after factura1 (Jan 5 + 60 = Mar 5)
       importePagado: 1210,
@@ -183,7 +175,6 @@ describe('FacturaPagoMatcher.findMatches', () => {
     const pago: Pago = {
       fileId: 'pago1',
       fileName: 'pago1.pdf',
-      folderPath: '',
       banco: 'BBVA',
       fechaPago: '2023-12-26', // exactly 10 days before factura1 (Jan 5 - 10 = Dec 26)
       importePagado: 1210,
@@ -201,7 +192,6 @@ describe('FacturaPagoMatcher.findMatches', () => {
     const pago: Pago = {
       fileId: 'pago1',
       fileName: 'pago1.pdf',
-      folderPath: '',
       banco: 'BBVA',
       fechaPago: 'invalid-date',
       importePagado: 1210,
@@ -223,7 +213,6 @@ describe('FacturaPagoMatcher.findMatches', () => {
     const pago: Pago = {
       fileId: 'pago1',
       fileName: 'pago1.pdf',
-      folderPath: '',
       banco: 'BBVA',
       fechaPago: '2024-01-07',
       importePagado: 1210,
@@ -248,7 +237,6 @@ describe('FacturaPagoMatcher.findMatches', () => {
     const pago: Pago = {
       fileId: 'pago1',
       fileName: 'pago1.pdf',
-      folderPath: '',
       banco: 'BBVA',
       fechaPago: '2024-01-07',
       importePagado: 1210,
@@ -266,7 +254,6 @@ describe('FacturaPagoMatcher.findMatches', () => {
     const pago: Pago = {
       fileId: 'pago1',
       fileName: 'pago1.pdf',
-      folderPath: '',
       banco: 'BBVA',
       fechaPago: '2024-02-20', // 46 days after factura1 (outside MEDIUM +30, but within LOW +60)
       importePagado: 1210,
@@ -290,7 +277,6 @@ describe('FacturaPagoMatcher.findMatches', () => {
     const pago: Pago = {
       fileId: 'pago1',
       fileName: 'pago1.pdf',
-      folderPath: '',
       banco: 'BBVA',
       fechaPago: '2023-12-28', // 8 days before factura1 (outside MEDIUM -3, but within LOW -10)
       importePagado: 1210,
@@ -311,7 +297,6 @@ describe('FacturaPagoMatcher.findMatches', () => {
     const pago: Pago = {
       fileId: 'pago1',
       fileName: 'pago1.pdf',
-      folderPath: '',
       banco: 'BBVA',
       fechaPago: '2024-01-07',
       importePagado: 1210,
@@ -334,7 +319,6 @@ describe('FacturaPagoMatcher.findMatches', () => {
     const pago: Pago = {
       fileId: 'pago1',
       fileName: 'pago1.pdf',
-      folderPath: '',
       banco: 'BBVA',
       fechaPago: '2024-01-07',
       importePagado: 1210,
@@ -359,7 +343,6 @@ describe('FacturaPagoMatcher.findMatches', () => {
     const pago: Pago = {
       fileId: 'pago1',
       fileName: 'pago1.pdf',
-      folderPath: '',
       banco: 'BBVA',
       fechaPago: '2024-01-07',
       importePagado: 1210,
@@ -392,7 +375,6 @@ describe('FacturaPagoMatcher.findMatches', () => {
     const pago: Pago = {
       fileId: 'pago1',
       fileName: 'pago1.pdf',
-      folderPath: '',
       banco: 'BBVA',
       fechaPago: '2024-01-15',
       importePagado: 1210,
@@ -417,7 +399,6 @@ describe('FacturaPagoMatcher.findMatches', () => {
     const pago: Pago = {
       fileId: 'pago1',
       fileName: 'pago1.pdf',
-      folderPath: '',
       banco: 'BBVA',
       fechaPago: '2024-01-07',
       importePagado: 1210,
@@ -435,7 +416,6 @@ describe('FacturaPagoMatcher.findMatches', () => {
     const pago: Pago = {
       fileId: 'pago1',
       fileName: 'pago1.pdf',
-      folderPath: '',
       banco: 'BBVA',
       fechaPago: '2024-01-07',
       importePagado: 1210,
@@ -459,7 +439,6 @@ describe('FacturaPagoMatcher.findMatches', () => {
     const pago: Pago = {
       fileId: 'pago1',
       fileName: 'pago1.pdf',
-      folderPath: '',
       banco: 'BBVA',
       fechaPago: '2024-01-07',
       importePagado: 1210,
@@ -482,7 +461,6 @@ describe('FacturaPagoMatcher.findMatches', () => {
     const pago: Pago = {
       fileId: 'pago1',
       fileName: 'pago1.pdf',
-      folderPath: '',
       banco: 'BBVA',
       fechaPago: '2024-01-07',
       importePagado: 1210,
@@ -509,7 +487,6 @@ describe('FacturaPagoMatcher.findMatches', () => {
     const pago: Pago = {
       fileId: 'pago1',
       fileName: 'pago1.pdf',
-      folderPath: '',
       banco: 'BBVA',
       fechaPago: '2024-01-07',
       importePagado: 1210,
@@ -532,7 +509,6 @@ describe('FacturaPagoMatcher.findMatches', () => {
     const pago: Pago = {
       fileId: 'pago1',
       fileName: 'pago1.pdf',
-      folderPath: '',
       banco: 'BBVA',
       fechaPago: '2024-01-07',
       importePagado: 1210,
@@ -557,7 +533,6 @@ describe('FacturaPagoMatcher.findMatches', () => {
     const pago: Pago = {
       fileId: 'pago1',
       fileName: 'pago1.pdf',
-      folderPath: '',
       banco: 'BBVA',
       fechaPago: '2024-01-07',
       importePagado: 1210,
@@ -581,7 +556,6 @@ describe('FacturaPagoMatcher.findMatches', () => {
     const pago: Pago = {
       fileId: 'pago1',
       fileName: 'pago1.pdf',
-      folderPath: '',
       banco: 'BBVA',
       fechaPago: '2024-01-07',
       importePagado: 1210,
@@ -606,7 +580,6 @@ describe('FacturaPagoMatcher.findMatches', () => {
     const pago: Pago = {
       fileId: 'pago1',
       fileName: 'pago1.pdf',
-      folderPath: '',
       banco: 'BBVA',
       fechaPago: '2024-01-07',
       importePagado: 1210,
@@ -640,7 +613,6 @@ describe('FacturaPagoMatcher.findMatches', () => {
     const pago: Pago = {
       fileId: 'pago1',
       fileName: 'pago1.pdf',
-      folderPath: '',
       banco: 'BBVA',
       fechaPago: '2024-01-07',
       importePagado: 1210,
@@ -665,7 +637,6 @@ describe('FacturaPagoMatcher.findMatches', () => {
     const pago: Pago = {
       fileId: 'pago1',
       fileName: 'pago1.pdf',
-      folderPath: '',
       banco: 'BBVA',
       fechaPago: '2024-01-07',
       importePagado: 1210,
@@ -703,7 +674,6 @@ describe('FacturaPagoMatcher cross-currency matching (USD→ARS)', () => {
     row: 2,
     fileId: 'usd-file1',
     fileName: 'factura-usd.pdf',
-    folderPath: '',
     tipoComprobante: 'A',
     puntoVenta: '00001',
     numeroComprobante: '00000001',
@@ -732,7 +702,6 @@ describe('FacturaPagoMatcher cross-currency matching (USD→ARS)', () => {
     const pago: Pago = {
       fileId: 'pago1',
       fileName: 'pago1.pdf',
-      folderPath: '',
       banco: 'BBVA',
       fechaPago: '2024-01-17', // 2 days after factura
       importePagado: 85550, // Exact converted amount
@@ -762,7 +731,6 @@ describe('FacturaPagoMatcher cross-currency matching (USD→ARS)', () => {
     const pago: Pago = {
       fileId: 'pago1',
       fileName: 'pago1.pdf',
-      folderPath: '',
       banco: 'BBVA',
       fechaPago: '2024-01-17',
       importePagado: 82000, // Within lower tolerance
@@ -788,7 +756,6 @@ describe('FacturaPagoMatcher cross-currency matching (USD→ARS)', () => {
     const pago: Pago = {
       fileId: 'pago1',
       fileName: 'pago1.pdf',
-      folderPath: '',
       banco: 'BBVA',
       fechaPago: '2024-01-17',
       importePagado: 70000, // Way below tolerance
@@ -812,7 +779,6 @@ describe('FacturaPagoMatcher cross-currency matching (USD→ARS)', () => {
     const pago: Pago = {
       fileId: 'pago1',
       fileName: 'pago1.pdf',
-      folderPath: '',
       banco: 'BBVA',
       fechaPago: '2024-01-17',
       importePagado: 85550,
@@ -842,7 +808,6 @@ describe('FacturaPagoMatcher cross-currency matching (USD→ARS)', () => {
     const pago: Pago = {
       fileId: 'pago1',
       fileName: 'pago1.pdf',
-      folderPath: '',
       banco: 'BBVA',
       fechaPago: '2024-01-17',
       importePagado: 85550,
@@ -868,7 +833,6 @@ describe('FacturaPagoMatcher cross-currency matching (USD→ARS)', () => {
     const pago: Pago = {
       fileId: 'pago1',
       fileName: 'pago1.pdf',
-      folderPath: '',
       banco: 'BBVA',
       fechaPago: '2024-01-17',
       importePagado: 85550,
@@ -893,7 +857,6 @@ describe('FacturaPagoMatcher cross-currency matching (USD→ARS)', () => {
     const pago: Pago = {
       fileId: 'pago1',
       fileName: 'pago1.pdf',
-      folderPath: '',
       banco: 'BBVA',
       fechaPago: '2024-01-17',
       importePagado: 85550, // Exact match
@@ -921,7 +884,6 @@ describe('ReciboPagoMatcher.findMatches', () => {
       row: 2,
       fileId: 'recibo1',
       fileName: 'recibo1.pdf',
-      folderPath: '',
       tipoRecibo: 'sueldo',
       nombreEmpleado: 'Juan Pérez',
       cuilEmpleado: '20123456789',
@@ -940,7 +902,6 @@ describe('ReciboPagoMatcher.findMatches', () => {
       row: 3,
       fileId: 'recibo2',
       fileName: 'recibo2.pdf',
-      folderPath: '',
       tipoRecibo: 'liquidacion_final',
       nombreEmpleado: 'María García',
       cuilEmpleado: '27987654321',
@@ -964,7 +925,6 @@ describe('ReciboPagoMatcher.findMatches', () => {
     const pago: Pago = {
       fileId: 'pago1',
       fileName: 'pago1.pdf',
-      folderPath: '',
       banco: 'BBVA',
       fechaPago: '2024-01-07', // 2 days after recibo1
       importePagado: 150000,
@@ -987,7 +947,6 @@ describe('ReciboPagoMatcher.findMatches', () => {
     const pago: Pago = {
       fileId: 'pago1',
       fileName: 'pago1.pdf',
-      folderPath: '',
       banco: 'BBVA',
       fechaPago: '2024-01-07',
       importePagado: 150000,
@@ -1010,7 +969,6 @@ describe('ReciboPagoMatcher.findMatches', () => {
     const pago: Pago = {
       fileId: 'pago1',
       fileName: 'pago1.pdf',
-      folderPath: '',
       banco: 'BBVA',
       fechaPago: '2024-01-07',
       importePagado: 150000,
@@ -1033,7 +991,6 @@ describe('ReciboPagoMatcher.findMatches', () => {
     const pago: Pago = {
       fileId: 'pago1',
       fileName: 'pago1.pdf',
-      folderPath: '',
       banco: 'BBVA',
       fechaPago: '2024-01-07',
       importePagado: 999999, // no matching amount
@@ -1051,7 +1008,6 @@ describe('ReciboPagoMatcher.findMatches', () => {
     const pago: Pago = {
       fileId: 'pago1',
       fileName: 'pago1.pdf',
-      folderPath: '',
       banco: 'BBVA',
       fechaPago: '2024-05-10', // 125 days after recibo1, outside +60 range
       importePagado: 150000,
@@ -1073,7 +1029,6 @@ describe('ReciboPagoMatcher.findMatches', () => {
     const pago: Pago = {
       fileId: 'pago1',
       fileName: 'pago1.pdf',
-      folderPath: '',
       banco: 'BBVA',
       fechaPago: '2024-01-07',
       importePagado: 150000,
@@ -1094,7 +1049,6 @@ describe('ReciboPagoMatcher.findMatches', () => {
     const pago: Pago = {
       fileId: 'pago1',
       fileName: 'pago1.pdf',
-      folderPath: '',
       banco: 'BBVA',
       fechaPago: '2024-02-20', // 46 days after recibo1, outside MEDIUM +30, within LOW +60
       importePagado: 150000,
@@ -1118,7 +1072,6 @@ describe('ReciboPagoMatcher.findMatches', () => {
     const pago: Pago = {
       fileId: 'pago1',
       fileName: 'pago1.pdf',
-      folderPath: '',
       banco: 'BBVA',
       fechaPago: '2024-01-07',
       importePagado: 150000,
@@ -1146,7 +1099,6 @@ describe('ReciboPagoMatcher.findMatches', () => {
     const pago: Pago = {
       fileId: 'pago1',
       fileName: 'pago1.pdf',
-      folderPath: '',
       banco: 'BBVA',
       fechaPago: '2024-01-07',
       importePagado: 150000,
@@ -1170,7 +1122,6 @@ describe('ReciboPagoMatcher.findMatches', () => {
     const pago: Pago = {
       fileId: 'pago1',
       fileName: 'pago1.pdf',
-      folderPath: '',
       banco: 'BBVA',
       fechaPago: '2024-01-15',
       importePagado: 150000,
@@ -1195,7 +1146,6 @@ describe('ReciboPagoMatcher.findMatches', () => {
     const pago: Pago = {
       fileId: 'pago1',
       fileName: 'pago1.pdf',
-      folderPath: '',
       banco: 'BBVA',
       fechaPago: '2024-01-07',
       importePagado: 150000,
@@ -1213,7 +1163,6 @@ describe('ReciboPagoMatcher.findMatches', () => {
     const pago: Pago = {
       fileId: 'pago1',
       fileName: 'pago1.pdf',
-      folderPath: '',
       banco: 'BBVA',
       fechaPago: '2024-01-07',
       importePagado: 150000,
@@ -1237,7 +1186,6 @@ describe('ReciboPagoMatcher.findMatches', () => {
     const pago: Pago = {
       fileId: 'pago1',
       fileName: 'pago1.pdf',
-      folderPath: '',
       banco: 'BBVA',
       fechaPago: 'invalid-date',
       importePagado: 150000,
@@ -1259,7 +1207,6 @@ describe('ReciboPagoMatcher.findMatches', () => {
     const pago: Pago = {
       fileId: 'pago1',
       fileName: 'pago1.pdf',
-      folderPath: '',
       banco: 'BBVA',
       fechaPago: '2024-01-07',
       importePagado: 150000,
@@ -1277,7 +1224,6 @@ describe('ReciboPagoMatcher.findMatches', () => {
     const pago: Pago = {
       fileId: 'pago1',
       fileName: 'pago1.pdf',
-      folderPath: '',
       banco: 'BBVA',
       fechaPago: '2024-01-07',
       importePagado: 150000,
@@ -1302,7 +1248,6 @@ describe('ReciboPagoMatcher.findMatches', () => {
     const pago: Pago = {
       fileId: 'pago1',
       fileName: 'pago1.pdf',
-      folderPath: '',
       banco: 'BBVA',
       fechaPago: '2024-01-07',
       importePagado: 150000,
@@ -1325,7 +1270,6 @@ describe('ReciboPagoMatcher.findMatches', () => {
     const pago: Pago = {
       fileId: 'pago1',
       fileName: 'pago1.pdf',
-      folderPath: '',
       banco: 'BBVA',
       fechaPago: '2024-01-07',
       importePagado: 150000,

@@ -138,7 +138,6 @@ describe('Scanner module', () => {
       name: 'test-factura.pdf',
       mimeType: 'application/pdf',
       lastUpdated: new Date('2024-01-15'),
-      folderPath: '',
     };
 
     it('processes a factura_recibida file successfully', async () => {
@@ -459,14 +458,12 @@ describe('Scanner module', () => {
             name: 'factura1.pdf',
             mimeType: 'application/pdf',
             lastUpdated: new Date('2024-01-15'),
-            folderPath: '',
           },
           {
             id: 'file-2',
             name: 'pago1.pdf',
             mimeType: 'application/pdf',
             lastUpdated: new Date('2024-01-16'),
-            folderPath: '',
           },
         ],
       });
@@ -567,14 +564,12 @@ describe('Scanner module', () => {
             name: 'factura1.pdf',
             mimeType: 'application/pdf',
             lastUpdated: new Date('2024-01-15'),
-            folderPath: '',
           },
           {
             id: 'file-2',
             name: 'already-processed.pdf',
             mimeType: 'application/pdf',
             lastUpdated: new Date('2024-01-14'),
-            folderPath: '',
           },
         ],
       });
@@ -675,7 +670,6 @@ describe('Scanner module', () => {
             name: 'resumen_banco.pdf',
             mimeType: 'application/pdf',
             lastUpdated: new Date('2024-01-31'),
-            folderPath: '',
           },
         ],
       });
@@ -762,7 +756,6 @@ describe('Scanner module', () => {
             name: 'resumen_sin_fecha.pdf',
             mimeType: 'application/pdf',
             lastUpdated: new Date('2024-01-31'),
-            folderPath: '',
           },
         ],
       });
@@ -861,8 +854,8 @@ describe('Scanner module', () => {
       mockListFilesInFolder.mockResolvedValue({
         ok: true,
         value: [
-          { id: 'file-1', name: 'good.pdf', mimeType: 'application/pdf', lastUpdated: new Date(), folderPath: '' },
-          { id: 'file-2', name: 'bad.pdf', mimeType: 'application/pdf', lastUpdated: new Date(), folderPath: '' },
+          { id: 'file-1', name: 'good.pdf', mimeType: 'application/pdf', lastUpdated: new Date() },
+          { id: 'file-2', name: 'bad.pdf', mimeType: 'application/pdf', lastUpdated: new Date() },
         ],
       });
 

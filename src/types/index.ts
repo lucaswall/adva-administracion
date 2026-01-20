@@ -71,8 +71,6 @@ export interface Factura {
   fileId: string;
   /** Original filename */
   fileName: string;
-  /** Relative folder path where file was found */
-  folderPath: string;
 
   // Comprobante identification
   /** Type of comprobante (A, B, C, E, NC, ND) */
@@ -132,8 +130,6 @@ export interface Pago {
   fileId: string;
   /** Original filename */
   fileName: string;
-  /** Relative folder path where file was found */
-  folderPath: string;
 
   // Bank info
   /** Bank name (e.g., "BBVA") */
@@ -189,8 +185,6 @@ export interface Recibo {
   fileId: string;
   /** Original filename */
   fileName: string;
-  /** Relative folder path where file was found */
-  folderPath: string;
 
   // Document type
   /** Type of recibo (sueldo or liquidacion_final) */
@@ -249,8 +243,6 @@ export interface ResumenBancario {
   fileId: string;
   /** Original filename */
   fileName: string;
-  /** Relative folder path where file was found */
-  folderPath: string;
 
   // Bank info
   /** Bank name (e.g., "BBVA", "Santander", "Galicia") */
@@ -293,8 +285,6 @@ export interface ProcessedFile {
   fileId: string;
   /** Original filename */
   fileName: string;
-  /** Relative folder path where file was found */
-  folderPath: string;
   /** Last modified timestamp from Drive */
   lastModified: string;
   /** When we processed this file */
@@ -469,8 +459,6 @@ export interface FileInfo {
   lastUpdated: Date;
   /** File content as Buffer */
   content: Buffer;
-  /** Relative folder path from root (e.g., "2024/Enero" or "" for root) */
-  folderPath: string;
 }
 
 /**

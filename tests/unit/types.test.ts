@@ -85,7 +85,6 @@ describe('ResumenBancario', () => {
     const resumen: ResumenBancario = {
       fileId: 'file-123',
       fileName: 'resumen.pdf',
-      folderPath: '',
       banco: 'BBVA',
       fechaDesde: '2024-01-01',
       fechaHasta: '2024-01-31',
@@ -111,7 +110,6 @@ describe('ResumenBancario', () => {
     const resumen: ResumenBancario = {
       fileId: 'file-456',
       fileName: 'resumen-usd.pdf',
-      folderPath: '',
       banco: 'Santander',
       fechaDesde: '2024-02-01',
       fechaHasta: '2024-02-29',

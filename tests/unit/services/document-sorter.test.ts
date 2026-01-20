@@ -63,7 +63,6 @@ describe('DocumentSorter service', () => {
       const factura: Factura = {
         fileId: 'file-123',
         fileName: 'factura.pdf',
-        folderPath: '',
         tipoComprobante: 'A',
         nroFactura: '00001-00001234',
         fechaEmision: '2024-01-15',
@@ -96,7 +95,6 @@ describe('DocumentSorter service', () => {
       const pago: Pago = {
         fileId: 'pago-123',
         fileName: 'pago.pdf',
-        folderPath: '',
         banco: 'BBVA',
         fechaPago: '2024-06-20',
         importePagado: 5000,
@@ -124,7 +122,6 @@ describe('DocumentSorter service', () => {
       const factura: Factura = {
         fileId: 'file-456',
         fileName: 'unmatched.pdf',
-        folderPath: '',
         tipoComprobante: 'A',
         nroFactura: '00001-00001234',
         fechaEmision: '2024-03-10',
@@ -158,7 +155,6 @@ describe('DocumentSorter service', () => {
       const factura: Factura = {
         fileId: 'file-789',
         fileName: 'test.pdf',
-        folderPath: '',
         tipoComprobante: 'A',
         nroFactura: '00001-00001234',
         fechaEmision: '2024-01-15',
@@ -185,7 +181,6 @@ describe('DocumentSorter service', () => {
       const factura: Factura = {
         fileId: 'file-123',
         fileName: 'test.pdf',
-        folderPath: '',
         tipoComprobante: 'A',
         nroFactura: '00001-00001234',
         fechaEmision: '2024-01-15',
@@ -213,7 +208,6 @@ describe('DocumentSorter service', () => {
       const factura: Factura = {
         fileId: 'file-123',
         fileName: 'test.pdf',
-        folderPath: '',
         tipoComprobante: 'A',
         nroFactura: '00001-00001234',
         fechaEmision: '2024-01-15',
@@ -242,7 +236,6 @@ describe('DocumentSorter service', () => {
       const factura: Factura = {
         fileId: 'file-123',
         fileName: 'test.pdf',
-        folderPath: '',
         tipoComprobante: 'A',
         nroFactura: '00001-00001234',
         fechaEmision: '2024-01-15',
@@ -267,7 +260,6 @@ describe('DocumentSorter service', () => {
       const factura: Factura = {
         fileId: 'file-123',
         fileName: 'test.pdf',
-        folderPath: '',
         tipoComprobante: 'A',
         nroFactura: '00001-00001234',
         fechaEmision: '2024-01-15',
@@ -298,7 +290,6 @@ describe('DocumentSorter service', () => {
       const factura: Factura = {
         fileId: 'file-123',
         fileName: 'test.pdf',
-        folderPath: '',
         tipoComprobante: 'A',
         nroFactura: '00001-00001234',
         fechaEmision: '2024-01-15',
@@ -361,7 +352,6 @@ describe('DocumentSorter service', () => {
       const factura: Factura = {
         fileId: 'file-123',
         fileName: 'factura.pdf',
-        folderPath: '',
         tipoComprobante: 'A',
         nroFactura: '00001-00001234',
         fechaEmision: '2024-01-15',
@@ -397,7 +387,6 @@ describe('DocumentSorter service', () => {
       const factura: Factura = {
         fileId: 'file-456',
         fileName: 'factura.pdf',
-        folderPath: '',
         tipoComprobante: 'A',
         nroFactura: '00002-00005678',
         fechaEmision: '2024-06-20',
@@ -431,7 +420,6 @@ describe('DocumentSorter service', () => {
       const pago: Pago = {
         fileId: 'pago-123',
         fileName: 'pago.pdf',
-        folderPath: '',
         banco: 'BBVA',
         fechaPago: '2024-06-20',
         importePagado: 5000.50,
@@ -460,7 +448,6 @@ describe('DocumentSorter service', () => {
       const pago: Pago = {
         fileId: 'pago-456',
         fileName: 'pago.pdf',
-        folderPath: '',
         banco: 'Santander Rio',
         fechaPago: '2024-03-15',
         importePagado: 12345.67,
@@ -489,7 +476,6 @@ describe('DocumentSorter service', () => {
       const recibo: Recibo = {
         fileId: 'recibo-123',
         fileName: 'recibo.pdf',
-        folderPath: '',
         tipoRecibo: 'sueldo',
         nombreEmpleado: 'Juan Perez',
         cuilEmpleado: '20111111119',
@@ -523,7 +509,6 @@ describe('DocumentSorter service', () => {
       const resumen: ResumenBancario = {
         fileId: 'resumen-123',
         fileName: 'resumen.pdf',
-        folderPath: '',
         banco: 'BBVA',
         numeroCuenta: '1234567890',
         fechaDesde: '2024-01-01',
@@ -554,7 +539,6 @@ describe('DocumentSorter service', () => {
       const resumen: ResumenBancario = {
         fileId: 'resumen-456',
         fileName: 'resumen.pdf',
-        folderPath: '',
         banco: 'BBVA',
         numeroCuenta: 'VISA',
         fechaDesde: '2024-02-01',
@@ -585,7 +569,6 @@ describe('DocumentSorter service', () => {
       const factura: Factura = {
         fileId: 'file-123',
         fileName: 'factura.pdf',
-        folderPath: '',
         tipoComprobante: 'A',
         nroFactura: '00001-00001234',
         fechaEmision: '2024-01-15',
@@ -615,7 +598,6 @@ describe('DocumentSorter service', () => {
       const factura: Factura = {
         fileId: 'file-123',
         fileName: 'factura.pdf',
-        folderPath: '',
         tipoComprobante: 'A',
         nroFactura: '00001-00001234',
         fechaEmision: '2024-01-15',

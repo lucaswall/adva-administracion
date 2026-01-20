@@ -49,7 +49,6 @@ describe('generateFacturaFileName', () => {
   const baseFactura: Factura = {
     fileId: 'file-123',
     fileName: 'original.pdf',
-    folderPath: '',
     tipoComprobante: 'A',
     nroFactura: '00001-00001234',
     fechaEmision: '2024-01-15',
@@ -137,7 +136,6 @@ describe('generatePagoFileName', () => {
   const basePago: Pago = {
     fileId: 'pago-123',
     fileName: 'original.pdf',
-    folderPath: '',
     banco: 'BBVA',
     fechaPago: '2024-01-18',
     importePagado: 1210.50,
@@ -197,7 +195,6 @@ describe('generateReciboFileName', () => {
   const baseRecibo: Recibo = {
     fileId: 'recibo-123',
     fileName: 'original.pdf',
-    folderPath: '',
     tipoRecibo: 'sueldo',
     nombreEmpleado: 'Juan Perez',
     cuilEmpleado: '20123456786',
@@ -241,7 +238,6 @@ describe('generateResumenFileName', () => {
   const baseResumen: ResumenBancario = {
     fileId: 'resumen-123',
     fileName: 'original.pdf',
-    folderPath: '',
     banco: 'BBVA',
     numeroCuenta: '1234567890',
     fechaDesde: '2024-01-15',

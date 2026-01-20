@@ -18,7 +18,7 @@ Located at root: `Control de Creditos.gsheet`
 Invoices FROM ADVA (ADVA is emisor). These represent money that ADVA expects to receive.
 
 ```
-fileId | fileName | folderPath | tipoComprobante | puntoVenta | numeroComprobante | fechaEmision |
+fileId | fileName | tipoComprobante | puntoVenta | numeroComprobante | fechaEmision |
 fechaVtoCae | cuitEmisor | razonSocialEmisor | cuitReceptor | cae | importeNeto | importeIva |
 importeTotal | moneda | concepto | processedAt | confidence | needsReview | matchedPagoFileId |
 matchConfidence | hasCuitMatch
@@ -38,7 +38,7 @@ matchConfidence | hasCuitMatch
 Payments TO ADVA (ADVA is beneficiario). These represent money that ADVA has received.
 
 ```
-fileId | fileName | folderPath | banco | fechaPago | importePagado | referencia | cuitPagador |
+fileId | fileName | banco | fechaPago | importePagado | referencia | cuitPagador |
 nombrePagador | cuitBeneficiario | nombreBeneficiario | concepto | processedAt | confidence |
 needsReview | matchedFacturaFileId | matchConfidence
 ```
@@ -60,7 +60,7 @@ Located at root: `Control de Debitos.gsheet`
 Invoices TO ADVA (ADVA is receptor). These represent money that ADVA needs to pay.
 
 ```
-fileId | fileName | folderPath | tipoComprobante | puntoVenta | numeroComprobante | fechaEmision |
+fileId | fileName | tipoComprobante | puntoVenta | numeroComprobante | fechaEmision |
 fechaVtoCae | cuitEmisor | razonSocialEmisor | cuitReceptor | cae | importeNeto | importeIva |
 importeTotal | moneda | concepto | processedAt | confidence | needsReview | matchedPagoFileId |
 matchConfidence | hasCuitMatch
@@ -80,7 +80,7 @@ matchConfidence | hasCuitMatch
 Payments BY ADVA (ADVA is ordenante/pagador). These represent money that ADVA has paid out.
 
 ```
-fileId | fileName | folderPath | banco | fechaPago | importePagado | referencia | cuitPagador |
+fileId | fileName | banco | fechaPago | importePagado | referencia | cuitPagador |
 nombrePagador | cuitBeneficiario | nombreBeneficiario | concepto | processedAt | confidence |
 needsReview | matchedFacturaFileId | matchConfidence
 ```
@@ -96,7 +96,7 @@ needsReview | matchedFacturaFileId | matchConfidence
 Employee salary receipts (sueldo, liquidación final). These represent salary payments made by ADVA.
 
 ```
-fileId | fileName | folderPath | tipoRecibo | nombreEmpleado | cuilEmpleado | legajo |
+fileId | fileName | tipoRecibo | nombreEmpleado | cuilEmpleado | legajo |
 tareaDesempenada | cuitEmpleador | periodoAbonado | fechaPago | subtotalRemuneraciones |
 subtotalDescuentos | totalNeto | processedAt | confidence | needsReview | matchedPagoFileId |
 matchConfidence
@@ -122,7 +122,7 @@ matchConfidence
 ### ResumenBancario
 
 ```
-fileId | fileName | folderPath | banco | fechaDesde | fechaHasta | saldoInicial | saldoFinal |
+fileId | fileName | banco | fechaDesde | fechaHasta | saldoInicial | saldoFinal |
 moneda | cantidadMovimientos | processedAt | confidence | needsReview
 ```
 
@@ -202,7 +202,6 @@ When a new pago matches a factura/recibo with HIGHER quality, the old match is b
 ### File Tracking
 - `fileId`: Google Drive file ID
 - `fileName`: RichTextValue hyperlink to Drive file
-- `folderPath`: Relative path from source folder, text format (preserves leading zeros)
 
 ### Processing Metadata
 - `processedAt`: ISO timestamp, text format (prevents Google Sheets auto-parsing)

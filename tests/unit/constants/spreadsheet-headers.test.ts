@@ -14,8 +14,8 @@ import {
 
 describe('spreadsheet-headers', () => {
   describe('FACTURA_HEADERS', () => {
-    it('has 20 headers (columns A:T)', () => {
-      expect(FACTURA_HEADERS).toHaveLength(20);
+    it('has 19 headers (columns A:S)', () => {
+      expect(FACTURA_HEADERS).toHaveLength(19);
     });
 
     it('starts with fileId', () => {
@@ -42,8 +42,8 @@ describe('spreadsheet-headers', () => {
   });
 
   describe('PAGO_HEADERS', () => {
-    it('has 18 headers (columns A:R)', () => {
-      expect(PAGO_HEADERS).toHaveLength(18);
+    it('has 17 headers (columns A:Q)', () => {
+      expect(PAGO_HEADERS).toHaveLength(17);
     });
 
     it('starts with fileId', () => {
@@ -70,8 +70,8 @@ describe('spreadsheet-headers', () => {
   });
 
   describe('RECIBO_HEADERS', () => {
-    it('has 19 headers (columns A:S)', () => {
-      expect(RECIBO_HEADERS).toHaveLength(19);
+    it('has 18 headers (columns A:R)', () => {
+      expect(RECIBO_HEADERS).toHaveLength(18);
     });
 
     it('starts with fileId', () => {
@@ -99,8 +99,8 @@ describe('spreadsheet-headers', () => {
   });
 
   describe('RESUMEN_BANCARIO_HEADERS', () => {
-    it('has 14 headers', () => {
-      expect(RESUMEN_BANCARIO_HEADERS).toHaveLength(14);
+    it('has 13 headers', () => {
+      expect(RESUMEN_BANCARIO_HEADERS).toHaveLength(13);
     });
 
     it('starts with fileId', () => {

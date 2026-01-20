@@ -3,11 +3,10 @@
  * These headers match the SPREADSHEET_FORMAT.md specification
  */
 
-/** Headers for Facturas sheet (columns A:T) */
+/** Headers for Facturas sheet (columns A:S) */
 export const FACTURA_HEADERS = [
   'fileId',
   'fileName',
-  'folderPath',
   'tipoComprobante',
   'nroFactura',
   'fechaEmision',
@@ -27,11 +26,10 @@ export const FACTURA_HEADERS = [
   'hasCuitMatch',
 ];
 
-/** Headers for Pagos sheet (columns A:R) */
+/** Headers for Pagos sheet (columns A:Q) */
 export const PAGO_HEADERS = [
   'fileId',
   'fileName',
-  'folderPath',
   'banco',
   'fechaPago',
   'importePagado',
@@ -49,11 +47,10 @@ export const PAGO_HEADERS = [
   'matchConfidence',
 ];
 
-/** Headers for Recibos sheet (columns A:S) */
+/** Headers for Recibos sheet (columns A:R) */
 export const RECIBO_HEADERS = [
   'fileId',
   'fileName',
-  'folderPath',
   'tipoRecibo',
   'nombreEmpleado',
   'cuilEmpleado',
@@ -76,7 +73,6 @@ export const RECIBO_HEADERS = [
 export const RESUMEN_BANCARIO_HEADERS = [
   'fileId',
   'fileName',
-  'folderPath',
   'banco',
   'numeroCuenta',
   'fechaDesde',
@@ -105,12 +101,12 @@ export const CONTROL_CREDITOS_SHEETS: SheetConfig[] = [
   {
     title: 'Facturas Emitidas',
     headers: FACTURA_HEADERS,
-    monetaryColumns: [9, 10, 11] // importeNeto, importeIva, importeTotal (columns J, K, L)
+    monetaryColumns: [8, 9, 10] // importeNeto, importeIva, importeTotal (columns I, J, K)
   },
   {
     title: 'Pagos Recibidos',
     headers: PAGO_HEADERS,
-    monetaryColumns: [5] // importePagado (column F)
+    monetaryColumns: [4] // importePagado (column E)
   },
 ];
 
@@ -122,16 +118,16 @@ export const CONTROL_DEBITOS_SHEETS: SheetConfig[] = [
   {
     title: 'Facturas Recibidas',
     headers: FACTURA_HEADERS,
-    monetaryColumns: [9, 10, 11] // importeNeto, importeIva, importeTotal (columns J, K, L)
+    monetaryColumns: [8, 9, 10] // importeNeto, importeIva, importeTotal (columns I, J, K)
   },
   {
     title: 'Pagos Enviados',
     headers: PAGO_HEADERS,
-    monetaryColumns: [5] // importePagado (column F)
+    monetaryColumns: [4] // importePagado (column E)
   },
   {
     title: 'Recibos',
     headers: RECIBO_HEADERS,
-    monetaryColumns: [11, 12, 13] // subtotalRemuneraciones, subtotalDescuentos, totalNeto (columns L, M, N)
+    monetaryColumns: [10, 11, 12] // subtotalRemuneraciones, subtotalDescuentos, totalNeto (columns K, L, M)
   },
 ];

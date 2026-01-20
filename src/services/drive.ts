@@ -30,12 +30,10 @@ function getDriveService(): drive_v3.Drive {
  * Lists PDF and image files in a folder (recursively)
  *
  * @param folderId - Google Drive folder ID
- * @param folderPath - Current folder path for tracking (default: '')
  * @returns Array of file metadata
  */
 export async function listFilesInFolder(
-  folderId: string,
-  folderPath: string = ''
+  folderId: string
 ): Promise<Result<Array<Omit<FileInfo, 'content'>>, Error>> {
   try {
     const drive = getDriveService();
@@ -64,8 +62,7 @@ export async function listFilesInFolder(
 
         // Check if it's a folder - recurse into it
         if (item.mimeType === 'application/vnd.google-apps.folder') {
-          const subPath = folderPath ? `${folderPath}/${item.name}` : item.name;
-          const subResult = await listFilesInFolder(item.id, subPath);
+          const subResult = await listFilesInFolder(item.id);
 
           if (subResult.ok) {
             files.push(...subResult.value);
@@ -89,7 +86,6 @@ export async function listFilesInFolder(
             name: item.name,
             mimeType: item.mimeType,
             lastUpdated: item.modifiedTime ? new Date(item.modifiedTime) : new Date(),
-            folderPath,
           });
         }
       }
@@ -144,15 +140,13 @@ export async function downloadFile(fileId: string): Promise<Result<Buffer, Error
  * @param name - File name
  * @param mimeType - MIME type
  * @param lastUpdated - Last modified date
- * @param folderPath - Folder path
  * @returns Complete FileInfo with content
  */
 export async function getFileWithContent(
   fileId: string,
   name: string,
   mimeType: string,
-  lastUpdated: Date,
-  folderPath: string
+  lastUpdated: Date
 ): Promise<Result<FileInfo, Error>> {
   const downloadResult = await downloadFile(fileId);
 
@@ -168,7 +162,6 @@ export async function getFileWithContent(
       mimeType,
       lastUpdated,
       content: downloadResult.value,
-      folderPath,
     },
   };
 }
