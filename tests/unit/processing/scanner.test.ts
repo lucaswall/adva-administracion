@@ -65,12 +65,14 @@ const mockParseClassificationResponse = vi.fn();
 const mockParseFacturaResponse = vi.fn();
 const mockParsePagoResponse = vi.fn();
 const mockParseReciboResponse = vi.fn();
+const mockParseResumenBancarioResponse = vi.fn();
 
 vi.mock('../../../src/gemini/parser.js', () => ({
   parseClassificationResponse: (...args: unknown[]) => mockParseClassificationResponse(...args),
   parseFacturaResponse: (...args: unknown[]) => mockParseFacturaResponse(...args),
   parsePagoResponse: (...args: unknown[]) => mockParsePagoResponse(...args),
   parseReciboResponse: (...args: unknown[]) => mockParseReciboResponse(...args),
+  parseResumenBancarioResponse: (...args: unknown[]) => mockParseResumenBancarioResponse(...args),
 }));
 
 // Mock config
@@ -305,12 +307,13 @@ describe('Scanner module', () => {
       }
     });
 
-    it('processes a resumen_bancario file and returns early', async () => {
+    it('processes a resumen_bancario file successfully', async () => {
       mockDownloadFile.mockResolvedValue({
         ok: true,
         value: Buffer.from('pdf content'),
       });
 
+      // Mock classification
       mockAnalyzeDocument.mockResolvedValueOnce({
         ok: true,
         value: '{"documentType": "resumen_bancario", "confidence": 0.9, "reason": "Bank statement", "indicators": ["BBVA", "Resumen"]}',
@@ -325,14 +328,40 @@ describe('Scanner module', () => {
         },
       });
 
+      // Mock extraction
+      mockAnalyzeDocument.mockResolvedValueOnce({
+        ok: true,
+        value: '{"banco": "BBVA", "fechaDesde": "2024-01-01", ...}',
+      });
+      mockParseResumenBancarioResponse.mockReturnValue({
+        ok: true,
+        value: {
+          data: {
+            banco: 'BBVA',
+            fechaDesde: '2024-01-01',
+            fechaHasta: '2024-01-31',
+            saldoInicial: 150000.00,
+            saldoFinal: 185000.00,
+            moneda: 'ARS',
+            cantidadMovimientos: 47,
+          },
+          confidence: 0.9,
+          needsReview: false,
+        },
+      });
+
       const result = await processFile(mockFileInfo);
 
       expect(result.ok).toBe(true);
       if (result.ok) {
         expect(result.value.documentType).toBe('resumen_bancario');
-        expect(result.value.classification).toBeDefined();
-        // Should not call extraction for resumen_bancario (not implemented yet)
-        expect(mockAnalyzeDocument).toHaveBeenCalledTimes(1);
+        expect(result.value.document).toBeDefined();
+        const resumen = result.value.document as import('../../../src/types/index.js').ResumenBancario;
+        expect(resumen.banco).toBe('BBVA');
+        expect(resumen.fechaDesde).toBe('2024-01-01');
+        expect(resumen.fechaHasta).toBe('2024-01-31');
+        // Should call extraction for resumen_bancario (implemented now)
+        expect(mockAnalyzeDocument).toHaveBeenCalledTimes(2);
       }
     });
 
@@ -634,9 +663,7 @@ describe('Scanner module', () => {
       }
     });
 
-    it('moves resumen_bancario without dates to Sin Procesar', async () => {
-      // NOTE: Until resumen_bancario extraction is implemented, all resumen_bancario files
-      // will have empty dates and should be moved to Sin Procesar instead of Bancos
+    it('moves resumen_bancario with valid dates to Bancos folder', async () => {
       mockListFilesInFolder.mockResolvedValue({
         ok: true,
         value: [
@@ -659,10 +686,15 @@ describe('Scanner module', () => {
       });
 
       // Classification returns resumen_bancario
-      mockAnalyzeDocument.mockResolvedValueOnce({
-        ok: true,
-        value: '{"documentType": "resumen_bancario", "confidence": 0.9, "reason": "Bank statement", "indicators": ["BBVA", "Resumen"]}',
-      });
+      mockAnalyzeDocument
+        .mockResolvedValueOnce({
+          ok: true,
+          value: '{"documentType": "resumen_bancario", "confidence": 0.9, "reason": "Bank statement", "indicators": ["BBVA", "Resumen"]}',
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          value: '{"banco": "BBVA", "fechaDesde": "2024-01-01", ...}',
+        });
       mockParseClassificationResponse.mockReturnValueOnce({
         ok: true,
         value: {
@@ -670,6 +702,109 @@ describe('Scanner module', () => {
           confidence: 0.9,
           reason: 'Bank statement',
           indicators: ['BBVA', 'Resumen'],
+        },
+      });
+      mockParseResumenBancarioResponse.mockReturnValueOnce({
+        ok: true,
+        value: {
+          data: {
+            banco: 'BBVA',
+            fechaDesde: '2024-01-01',
+            fechaHasta: '2024-01-31',
+            saldoInicial: 150000.00,
+            saldoFinal: 185000.00,
+            moneda: 'ARS',
+            cantidadMovimientos: 47,
+          },
+          confidence: 0.9,
+          needsReview: false,
+        },
+      });
+
+      mockSortAndRenameDocument.mockResolvedValue({ success: true, targetPath: 'Bancos' });
+
+      const result = await scanFolder();
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value.filesProcessed).toBe(1);
+        // Resumen bancario should be moved but not added to facturas/pagos/recibos counts
+        expect(result.value.facturasAdded).toBe(0);
+        expect(result.value.pagosAdded).toBe(0);
+        expect(result.value.recibosAdded).toBe(0);
+      }
+
+      // Should call sortAndRenameDocument with resumen data
+      expect(mockSortAndRenameDocument).toHaveBeenCalledWith(
+        expect.objectContaining({
+          fileId: 'resumen-1',
+          fileName: 'resumen_banco.pdf',
+          banco: 'BBVA',
+          fechaDesde: '2024-01-01',
+          fechaHasta: '2024-01-31',
+        }),
+        'bancos',
+        'resumen_bancario'
+      );
+    });
+
+    it('moves resumen_bancario without dates to Sin Procesar', async () => {
+      // When extraction fails or returns empty dates, files go to Sin Procesar
+      mockListFilesInFolder.mockResolvedValue({
+        ok: true,
+        value: [
+          {
+            id: 'resumen-bad',
+            name: 'resumen_sin_fecha.pdf',
+            mimeType: 'application/pdf',
+            lastUpdated: new Date('2024-01-31'),
+            folderPath: '',
+          },
+        ],
+      });
+
+      // Mock empty processed files list
+      mockGetValues.mockResolvedValue({ ok: true, value: [] });
+
+      mockDownloadFile.mockResolvedValue({
+        ok: true,
+        value: Buffer.from('pdf content'),
+      });
+
+      // Classification returns resumen_bancario
+      mockAnalyzeDocument
+        .mockResolvedValueOnce({
+          ok: true,
+          value: '{"documentType": "resumen_bancario", "confidence": 0.9, "reason": "Bank statement", "indicators": ["BBVA", "Resumen"]}',
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          value: '{"banco": "BBVA"}',
+        });
+      mockParseClassificationResponse.mockReturnValueOnce({
+        ok: true,
+        value: {
+          documentType: 'resumen_bancario',
+          confidence: 0.9,
+          reason: 'Bank statement',
+          indicators: ['BBVA', 'Resumen'],
+        },
+      });
+      // Extraction returns incomplete data (missing dates)
+      mockParseResumenBancarioResponse.mockReturnValueOnce({
+        ok: true,
+        value: {
+          data: {
+            banco: 'BBVA',
+            fechaDesde: '',
+            fechaHasta: '',
+            saldoInicial: 0,
+            saldoFinal: 0,
+            moneda: 'ARS',
+            cantidadMovimientos: 0,
+          },
+          confidence: 0.5,
+          needsReview: true,
         },
       });
 
@@ -686,8 +821,8 @@ describe('Scanner module', () => {
         expect(result.value.recibosAdded).toBe(0);
       }
 
-      // Should move to Sin Procesar because dates are empty (extraction not implemented)
-      expect(mockSortToSinProcesar).toHaveBeenCalledWith('resumen-1', 'resumen_banco.pdf');
+      // Should move to Sin Procesar because dates are empty
+      expect(mockSortToSinProcesar).toHaveBeenCalledWith('resumen-bad', 'resumen_sin_fecha.pdf');
       // Should NOT call sortAndRenameDocument (keeps original filename)
       expect(mockSortAndRenameDocument).not.toHaveBeenCalled();
     });
