@@ -51,11 +51,9 @@ async function initializeFolderStructure() {
     }
     console.log('Folder structure initialized successfully');
     console.log(`  - Entrada: ${result.value.entradaId}`);
-    console.log(`  - Creditos: ${result.value.creditosId}`);
-    console.log(`  - Debitos: ${result.value.debitosId}`);
     console.log(`  - Sin Procesar: ${result.value.sinProcesarId}`);
-    console.log(`  - Bancos: ${result.value.bancosId}`);
     console.log(`  - Bank spreadsheets: ${result.value.bankSpreadsheets.size}`);
+    console.log(`  - Year folders will be created on-demand`);
 }
 /**
  * Initialize real-time monitoring with Drive push notifications
