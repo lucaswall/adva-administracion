@@ -145,10 +145,8 @@ function validateAdvaRole(
       break;
   }
 
-  if (validation.errors.length > 0) {
-    validation.isValid = false;
-  }
-
+  // Note: isValid should only be false if ADVA is in wrong role
+  // Missing counterparty info is an error but shouldn't invalidate the document
   return validation;
 }
 

@@ -254,6 +254,7 @@ export async function processFile(
       cuitEmisor: parseResult.value.data.cuitEmisor || '',
       razonSocialEmisor: parseResult.value.data.razonSocialEmisor || '',
       cuitReceptor: parseResult.value.data.cuitReceptor,
+      razonSocialReceptor: parseResult.value.data.razonSocialReceptor,
       importeNeto: parseResult.value.data.importeNeto || 0,
       importeIva: parseResult.value.data.importeIva || 0,
       importeTotal: parseResult.value.data.importeTotal || 0,

@@ -49,7 +49,7 @@ src/
 ├── types/index.ts
 ├── matching/matcher.ts
 ├── gemini/{client,prompts,parser,errors}.ts
-├── utils/{date,numbers,currency,validation,file-naming,spanish-date,exchange-rate,drive-parser}.ts
+├── utils/{date,numbers,currency,validation,file-naming,spanish-date,exchange-rate,drive-parser,logger}.ts
 └── bank/{matcher,autofill,subdiario-matcher}.ts
 ```
 
@@ -105,7 +105,7 @@ ADVA CUIT: 30709076783 | Direction determines routing:
 |------|-----------|-------------|
 | factura_emitida | emisor | Creditos |
 | factura_recibida | receptor | Debitos |
-| pago_enviado | ordenante | Debitos |
+| pago_enviado | pagador | Debitos |
 | pago_recibido | beneficiario | Creditos |
 | resumen_bancario | - | Bancos |
 | recibo | empleador | Debitos |
