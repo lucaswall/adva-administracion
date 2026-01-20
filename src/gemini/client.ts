@@ -22,7 +22,7 @@ export class GeminiClient {
   private requestCount: number = 0;
   private windowStart: number = Date.now();
   private readonly rpmLimit: number;
-  private readonly MODEL = 'gemini-2.5-flash-lite';
+  private readonly MODEL = 'gemini-2.5-flash';
   private readonly ENDPOINT: string;
 
   /**
