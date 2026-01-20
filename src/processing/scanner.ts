@@ -31,7 +31,7 @@ import {
   parseResumenBancarioResponse,
 } from '../gemini/parser.js';
 import { listFilesInFolder, downloadFile } from '../services/drive.js';
-import { getValues, appendRowsWithLinks, batchUpdate, type CellValueOrLink } from '../services/sheets.js';
+import { getValues, appendRowsWithLinks, batchUpdate, sortSheet, type CellValueOrLink } from '../services/sheets.js';
 import { getCachedFolderStructure } from '../services/folder-structure.js';
 import { sortToSinProcesar, sortAndRenameDocument } from '../services/document-sorter.js';
 import { getProcessingQueue } from './queue.js';
@@ -352,6 +352,7 @@ async function storeFactura(
   const renamedFileName = generateFacturaFileName(factura, documentType);
 
   const row: CellValueOrLink[] = [
+    factura.fechaEmision,
     factura.fileId,
     {
       text: renamedFileName,
@@ -359,7 +360,6 @@ async function storeFactura(
     },
     factura.tipoComprobante,
     factura.nroFactura,
-    factura.fechaEmision,
     factura.cuitEmisor,
     factura.razonSocialEmisor,
     factura.cuitReceptor || '',
@@ -379,6 +379,13 @@ async function storeFactura(
   const result = await appendRowsWithLinks(spreadsheetId, `${sheetName}!A:S`, [row]);
   if (!result.ok) {
     return result;
+  }
+
+  // Sort sheet by fechaEmision (column A, index 0) in descending order (most recent first)
+  const sortResult = await sortSheet(spreadsheetId, sheetName, 0, true);
+  if (!sortResult.ok) {
+    console.warn(`Failed to sort sheet ${sheetName}:`, sortResult.error.message);
+    // Don't fail the operation if sorting fails
   }
 
   return { ok: true, value: undefined };
@@ -402,13 +409,13 @@ async function storePago(
   const renamedFileName = generatePagoFileName(pago, documentType);
 
   const row: CellValueOrLink[] = [
+    pago.fechaPago,
     pago.fileId,
     {
       text: renamedFileName,
       url: `https://drive.google.com/file/d/${pago.fileId}/view`,
     },
     pago.banco,
-    pago.fechaPago,
     formatUSCurrency(pago.importePagado),
     pago.moneda || 'ARS',
     pago.referencia || '',
@@ -429,6 +436,13 @@ async function storePago(
     return result;
   }
 
+  // Sort sheet by fechaPago (column A, index 0) in descending order (most recent first)
+  const sortResult = await sortSheet(spreadsheetId, sheetName, 0, true);
+  if (!sortResult.ok) {
+    console.warn(`Failed to sort sheet ${sheetName}:`, sortResult.error.message);
+    // Don't fail the operation if sorting fails
+  }
+
   return { ok: true, value: undefined };
 }
 
@@ -440,6 +454,7 @@ async function storeRecibo(recibo: Recibo, spreadsheetId: string): Promise<Resul
   const renamedFileName = generateReciboFileName(recibo);
 
   const row: CellValueOrLink[] = [
+    recibo.fechaPago,
     recibo.fileId,
     {
       text: renamedFileName,
@@ -452,7 +467,6 @@ async function storeRecibo(recibo: Recibo, spreadsheetId: string): Promise<Resul
     recibo.tareaDesempenada || '',
     recibo.cuitEmpleador,
     recibo.periodoAbonado,
-    recibo.fechaPago,
     formatUSCurrency(recibo.subtotalRemuneraciones),
     formatUSCurrency(recibo.subtotalDescuentos),
     formatUSCurrency(recibo.totalNeto),
@@ -466,6 +480,13 @@ async function storeRecibo(recibo: Recibo, spreadsheetId: string): Promise<Resul
   const result = await appendRowsWithLinks(spreadsheetId, 'Recibos!A:R', [row]);
   if (!result.ok) {
     return result;
+  }
+
+  // Sort sheet by fechaPago (column A, index 0) in descending order (most recent first)
+  const sortResult = await sortSheet(spreadsheetId, 'Recibos', 0, true);
+  if (!sortResult.ok) {
+    console.warn('Failed to sort sheet Recibos:', sortResult.error.message);
+    // Don't fail the operation if sorting fails
   }
 
   return { ok: true, value: undefined };
@@ -803,11 +824,11 @@ export async function rematch(): Promise<Result<RematchResult, Error>> {
 
       facturas.push({
         row: i + 1, // Sheet rows are 1-indexed
-        fileId: String(row[0] || ''),
-        fileName: String(row[1] || ''),
-        tipoComprobante: (row[2] || 'A') as Factura['tipoComprobante'],
-        nroFactura: String(row[3] || ''),
-        fechaEmision: String(row[4] || ''),
+        fechaEmision: String(row[0] || ''),
+        fileId: String(row[1] || ''),
+        fileName: String(row[2] || ''),
+        tipoComprobante: (row[3] || 'A') as Factura['tipoComprobante'],
+        nroFactura: String(row[4] || ''),
         cuitEmisor: String(row[5] || ''),
         razonSocialEmisor: String(row[6] || ''),
         cuitReceptor: row[7] ? String(row[7]) : undefined,
@@ -833,10 +854,10 @@ export async function rematch(): Promise<Result<RematchResult, Error>> {
 
       pagos.push({
         row: i + 1,
-        fileId: String(row[0] || ''),
-        fileName: String(row[1] || ''),
-        banco: String(row[2] || ''),
-        fechaPago: String(row[3] || ''),
+        fechaPago: String(row[0] || ''),
+        fileId: String(row[1] || ''),
+        fileName: String(row[2] || ''),
+        banco: String(row[3] || ''),
         importePagado: parseNumber(row[4]) || 0,
         moneda: (String(row[5]) as 'ARS' | 'USD') || 'ARS',
         referencia: row[6] ? String(row[6]) : undefined,

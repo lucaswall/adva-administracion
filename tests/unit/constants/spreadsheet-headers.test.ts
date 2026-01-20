@@ -18,8 +18,8 @@ describe('spreadsheet-headers', () => {
       expect(FACTURA_HEADERS).toHaveLength(19);
     });
 
-    it('starts with fileId', () => {
-      expect(FACTURA_HEADERS[0]).toBe('fileId');
+    it('starts with fechaEmision', () => {
+      expect(FACTURA_HEADERS[0]).toBe('fechaEmision');
     });
 
     it('contains required invoice fields', () => {
@@ -46,8 +46,8 @@ describe('spreadsheet-headers', () => {
       expect(PAGO_HEADERS).toHaveLength(17);
     });
 
-    it('starts with fileId', () => {
-      expect(PAGO_HEADERS[0]).toBe('fileId');
+    it('starts with fechaPago', () => {
+      expect(PAGO_HEADERS[0]).toBe('fechaPago');
     });
 
     it('contains required payment fields', () => {
@@ -74,8 +74,8 @@ describe('spreadsheet-headers', () => {
       expect(RECIBO_HEADERS).toHaveLength(18);
     });
 
-    it('starts with fileId', () => {
-      expect(RECIBO_HEADERS[0]).toBe('fileId');
+    it('starts with fechaPago', () => {
+      expect(RECIBO_HEADERS[0]).toBe('fechaPago');
     });
 
     it('contains required receipt fields', () => {

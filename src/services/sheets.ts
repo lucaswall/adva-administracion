@@ -555,6 +555,71 @@ export async function appendRowsWithLinks(
 }
 
 /**
+ * Sorts a sheet by a specific column
+ *
+ * @param spreadsheetId - Spreadsheet ID
+ * @param sheetName - Sheet name
+ * @param columnIndex - 0-based column index to sort by
+ * @param descending - Sort order (true = descending/newest first, false = ascending)
+ * @returns Success result
+ */
+export async function sortSheet(
+  spreadsheetId: string,
+  sheetName: string,
+  columnIndex: number = 0,
+  descending: boolean = true
+): Promise<Result<void, Error>> {
+  try {
+    const sheets = getSheetsService();
+
+    // First, get the sheet ID from the sheet name
+    const metadataResult = await getSheetMetadata(spreadsheetId);
+    if (!metadataResult.ok) {
+      return metadataResult;
+    }
+
+    const sheet = metadataResult.value.find(s => s.title === sheetName);
+    if (!sheet) {
+      return {
+        ok: false,
+        error: new Error(`Sheet "${sheetName}" not found`),
+      };
+    }
+
+    // Sort the sheet (excluding header row)
+    await sheets.spreadsheets.batchUpdate({
+      spreadsheetId,
+      requestBody: {
+        requests: [
+          {
+            sortRange: {
+              range: {
+                sheetId: sheet.sheetId,
+                startRowIndex: 1, // Skip header row
+                startColumnIndex: 0,
+              },
+              sortSpecs: [
+                {
+                  dimensionIndex: columnIndex,
+                  sortOrder: descending ? 'DESCENDING' : 'ASCENDING',
+                },
+              ],
+            },
+          },
+        ],
+      },
+    });
+
+    return { ok: true, value: undefined };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error : new Error(String(error)),
+    };
+  }
+}
+
+/**
  * Clears the cached Sheets service (for testing)
  */
 export function clearSheetsCache(): void {

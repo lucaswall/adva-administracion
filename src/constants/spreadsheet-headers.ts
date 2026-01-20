@@ -5,11 +5,11 @@
 
 /** Headers for Facturas sheet (columns A:S) */
 export const FACTURA_HEADERS = [
+  'fechaEmision',
   'fileId',
   'fileName',
   'tipoComprobante',
   'nroFactura',
-  'fechaEmision',
   'cuitEmisor',
   'razonSocialEmisor',
   'cuitReceptor',
@@ -28,10 +28,10 @@ export const FACTURA_HEADERS = [
 
 /** Headers for Pagos sheet (columns A:Q) */
 export const PAGO_HEADERS = [
+  'fechaPago',
   'fileId',
   'fileName',
   'banco',
-  'fechaPago',
   'importePagado',
   'moneda',
   'referencia',
@@ -49,6 +49,7 @@ export const PAGO_HEADERS = [
 
 /** Headers for Recibos sheet (columns A:R) */
 export const RECIBO_HEADERS = [
+  'fechaPago',
   'fileId',
   'fileName',
   'tipoRecibo',
@@ -58,7 +59,6 @@ export const RECIBO_HEADERS = [
   'tareaDesempenada',
   'cuitEmpleador',
   'periodoAbonado',
-  'fechaPago',
   'subtotalRemuneraciones',
   'subtotalDescuentos',
   'totalNeto',
@@ -101,12 +101,12 @@ export const CONTROL_CREDITOS_SHEETS: SheetConfig[] = [
   {
     title: 'Facturas Emitidas',
     headers: FACTURA_HEADERS,
-    monetaryColumns: [8, 9, 10] // importeNeto, importeIva, importeTotal (columns I, J, K)
+    monetaryColumns: [8, 9, 10] // importeNeto, importeIva, importeTotal (0-indexed: 8, 9, 10)
   },
   {
     title: 'Pagos Recibidos',
     headers: PAGO_HEADERS,
-    monetaryColumns: [4] // importePagado (column E)
+    monetaryColumns: [4] // importePagado (0-indexed: 4)
   },
 ];
 
@@ -118,16 +118,16 @@ export const CONTROL_DEBITOS_SHEETS: SheetConfig[] = [
   {
     title: 'Facturas Recibidas',
     headers: FACTURA_HEADERS,
-    monetaryColumns: [8, 9, 10] // importeNeto, importeIva, importeTotal (columns I, J, K)
+    monetaryColumns: [8, 9, 10] // importeNeto, importeIva, importeTotal (0-indexed: 8, 9, 10)
   },
   {
     title: 'Pagos Enviados',
     headers: PAGO_HEADERS,
-    monetaryColumns: [4] // importePagado (column E)
+    monetaryColumns: [4] // importePagado (0-indexed: 4)
   },
   {
     title: 'Recibos',
     headers: RECIBO_HEADERS,
-    monetaryColumns: [10, 11, 12] // subtotalRemuneraciones, subtotalDescuentos, totalNeto (columns K, L, M)
+    monetaryColumns: [10, 11, 12] // subtotalRemuneraciones, subtotalDescuentos, totalNeto (0-indexed: 10, 11, 12)
   },
 ];

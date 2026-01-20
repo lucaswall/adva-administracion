@@ -915,10 +915,10 @@ describe('Scanner module', () => {
       mockGetValues.mockResolvedValueOnce({
         ok: true,
         value: [
-          // Header row
-          ['fileId', 'fileName', 'tipo', 'puntoVenta', 'numero', 'fechaEmision', 'cuitEmisor', 'razonSocial', 'importeTotal', 'moneda', 'matchedPagoFileId'],
-          // Unmatched factura
-          ['fact-1', 'factura1.pdf', 'A', '00001', '00001234', '2024-01-15', '20123456786', 'TEST SA', 1210, 'ARS', ''],
+          // Header row (fechaEmision now at index 0)
+          ['fechaEmision', 'fileId', 'fileName', 'tipo', 'puntoVenta', 'numero', 'cuitEmisor', 'razonSocial', 'importeTotal', 'moneda', 'matchedPagoFileId'],
+          // Unmatched factura (fechaEmision moved to index 0)
+          ['2024-01-15', 'fact-1', 'factura1.pdf', 'A', '00001', '00001234', '20123456786', 'TEST SA', 1210, 'ARS', ''],
         ],
       });
 
@@ -926,10 +926,10 @@ describe('Scanner module', () => {
       mockGetValues.mockResolvedValueOnce({
         ok: true,
         value: [
-          // Header row
-          ['fileId', 'fileName', 'banco', 'fechaPago', 'importePagado', 'cuitBeneficiario', 'matchedFacturaFileId'],
-          // Unmatched pago that should match factura
-          ['pago-1', 'pago1.pdf', 'BBVA', '2024-01-18', 1210, '20123456786', ''],
+          // Header row (fechaPago now at index 0)
+          ['fechaPago', 'fileId', 'fileName', 'banco', 'importePagado', 'cuitBeneficiario', 'matchedFacturaFileId'],
+          // Unmatched pago that should match factura (fechaPago moved to index 0)
+          ['2024-01-18', 'pago-1', 'pago1.pdf', 'BBVA', 1210, '20123456786', ''],
         ],
       });
 
@@ -950,15 +950,19 @@ describe('Scanner module', () => {
         .mockResolvedValueOnce({
           ok: true,
           value: [
-            ['fileId', 'matchedPagoFileId'],
-            ['fact-1', 'pago-1'], // Already matched
+            // Full factura headers (19 columns)
+            ['fechaEmision', 'fileId', 'fileName', 'tipoComprobante', 'nroFactura', 'cuitEmisor', 'razonSocialEmisor', 'cuitReceptor', 'importeNeto', 'importeIva', 'importeTotal', 'moneda', 'concepto', 'processedAt', 'confidence', 'needsReview', 'matchedPagoFileId', 'matchConfidence', 'hasCuitMatch'],
+            // Already matched factura (fechaEmision first, matchedPagoFileId at index 16)
+            ['2024-01-15', 'fact-1', 'factura1.pdf', 'A', '00001234', '20123456786', 'TEST SA', '30709076783', 1000, 210, 1210, 'ARS', 'Test', '2024-01-16T10:00:00Z', 0.95, 'NO', 'pago-1', 'HIGH', 'YES'],
           ],
         })
         .mockResolvedValueOnce({
           ok: true,
           value: [
-            ['fileId', 'matchedFacturaFileId'],
-            ['pago-1', 'fact-1'], // Already matched
+            // Full pago headers (17 columns)
+            ['fechaPago', 'fileId', 'fileName', 'banco', 'importePagado', 'moneda', 'referencia', 'cuitPagador', 'nombrePagador', 'cuitBeneficiario', 'nombreBeneficiario', 'concepto', 'processedAt', 'confidence', 'needsReview', 'matchedFacturaFileId', 'matchConfidence'],
+            // Already matched pago (fechaPago first, matchedFacturaFileId at index 15)
+            ['2024-01-18', 'pago-1', 'pago1.pdf', 'BBVA', 1210, 'ARS', 'REF123', '30709076783', 'ADVA', '20123456786', 'TEST SA', 'Payment', '2024-01-18T10:00:00Z', 0.9, 'NO', 'fact-1', 'HIGH'],
           ],
         });
 

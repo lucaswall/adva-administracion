@@ -18,11 +18,13 @@ Located at root: `Control de Creditos.gsheet`
 Invoices FROM ADVA (ADVA is emisor). These represent money that ADVA expects to receive.
 
 ```
-fileId | fileName | tipoComprobante | puntoVenta | numeroComprobante | fechaEmision |
+fechaEmision | fileId | fileName | tipoComprobante | puntoVenta | numeroComprobante |
 fechaVtoCae | cuitEmisor | razonSocialEmisor | cuitReceptor | cae | importeNeto | importeIva |
 importeTotal | moneda | concepto | processedAt | confidence | needsReview | matchedPagoFileId |
 matchConfidence | hasCuitMatch
 ```
+
+**Note:** Rows are automatically sorted by `fechaEmision` in descending order (most recent first) after each insert.
 
 **Key Fields:**
 - `cuitEmisor`: ADVA's CUIT (30709076783)
@@ -38,10 +40,12 @@ matchConfidence | hasCuitMatch
 Payments TO ADVA (ADVA is beneficiario). These represent money that ADVA has received.
 
 ```
-fileId | fileName | banco | fechaPago | importePagado | referencia | cuitPagador |
+fechaPago | fileId | fileName | banco | importePagado | moneda | referencia | cuitPagador |
 nombrePagador | cuitBeneficiario | nombreBeneficiario | concepto | processedAt | confidence |
 needsReview | matchedFacturaFileId | matchConfidence
 ```
+
+**Note:** Rows are automatically sorted by `fechaPago` in descending order (most recent first) after each insert.
 
 **Key Fields:**
 - `cuitBeneficiario`: ADVA's CUIT (30709076783) - receiver of payment
@@ -60,11 +64,13 @@ Located at root: `Control de Debitos.gsheet`
 Invoices TO ADVA (ADVA is receptor). These represent money that ADVA needs to pay.
 
 ```
-fileId | fileName | tipoComprobante | puntoVenta | numeroComprobante | fechaEmision |
+fechaEmision | fileId | fileName | tipoComprobante | puntoVenta | numeroComprobante |
 fechaVtoCae | cuitEmisor | razonSocialEmisor | cuitReceptor | cae | importeNeto | importeIva |
 importeTotal | moneda | concepto | processedAt | confidence | needsReview | matchedPagoFileId |
 matchConfidence | hasCuitMatch
 ```
+
+**Note:** Rows are automatically sorted by `fechaEmision` in descending order (most recent first) after each insert.
 
 **Key Fields:**
 - `cuitEmisor`: Provider's CUIT (invoice issuer)
@@ -80,10 +86,12 @@ matchConfidence | hasCuitMatch
 Payments BY ADVA (ADVA is ordenante/pagador). These represent money that ADVA has paid out.
 
 ```
-fileId | fileName | banco | fechaPago | importePagado | referencia | cuitPagador |
+fechaPago | fileId | fileName | banco | importePagado | moneda | referencia | cuitPagador |
 nombrePagador | cuitBeneficiario | nombreBeneficiario | concepto | processedAt | confidence |
 needsReview | matchedFacturaFileId | matchConfidence
 ```
+
+**Note:** Rows are automatically sorted by `fechaPago` in descending order (most recent first) after each insert.
 
 **Key Fields:**
 - `cuitPagador`: ADVA's CUIT (30709076783) - sender of payment
@@ -96,11 +104,13 @@ needsReview | matchedFacturaFileId | matchConfidence
 Employee salary receipts (sueldo, liquidación final). These represent salary payments made by ADVA.
 
 ```
-fileId | fileName | tipoRecibo | nombreEmpleado | cuilEmpleado | legajo |
-tareaDesempenada | cuitEmpleador | periodoAbonado | fechaPago | subtotalRemuneraciones |
+fechaPago | fileId | fileName | tipoRecibo | nombreEmpleado | cuilEmpleado | legajo |
+tareaDesempenada | cuitEmpleador | periodoAbonado | subtotalRemuneraciones |
 subtotalDescuentos | totalNeto | processedAt | confidence | needsReview | matchedPagoFileId |
 matchConfidence
 ```
+
+**Note:** Rows are automatically sorted by `fechaPago` in descending order (most recent first) after each insert.
 
 **Key Fields:**
 - `tipoRecibo`: sueldo|liquidacion_final
