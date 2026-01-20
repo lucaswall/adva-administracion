@@ -293,8 +293,8 @@ Required fields to extract:
 - numeroCuenta: Account number OR card brand (e.g., "1234567890" or "VISA", "Mastercard", "American Express", "Cabal")
   * For regular bank accounts: extract the full account number (CBU or account number visible like "007-401617/2")
   * For credit card statements: extract the card brand (VISA, Mastercard, American Express, Cabal, etc.)
-- fechaDesde: Start date of the statement period (format as YYYY-MM-DD). If only a closing date is visible (e.g., "SALDO AL 30 DE DICIEMBRE"), estimate the start date as the first day of that month. IMPORTANT: You MUST extract the year from context - look for years in page headers, footers, legal text, or transaction dates. If no year is visible but current year can be inferred from context, use it.
-- fechaHasta: End date of the statement period (format as YYYY-MM-DD). Look for dates like "SALDO AL 30 DE DICIEMBRE" or "al DD/MM/YYYY". IMPORTANT: You MUST extract the year from context - look for years in page headers, footers, legal text, or transaction dates. If you see "30 DE DICIEMBRE" without a year, search the entire document for year information (e.g., "2024", "2025", "2026" in headers, footers, or legal notices).
+- fechaDesde: Start date of the statement period (format as YYYY-MM-DD). If only a closing date is visible (e.g., "SALDO AL 30 DE DICIEMBRE"), estimate the start date as the first day of that month. IMPORTANT: You MUST extract the year - look for years in page headers, footers, legal text, or transaction dates. If NO year is found anywhere, assume the document is RECENT and infer the year intelligently: If the month number is GREATER THAN the current month number (e.g., Feb-Dec when in January), it refers to LAST YEAR (2025). If the month number is LESS THAN OR EQUAL to the current month number, it refers to THIS YEAR (2026).
+- fechaHasta: End date of the statement period (format as YYYY-MM-DD). Look for dates like "SALDO AL 30 DE DICIEMBRE" or "al DD/MM/YYYY". IMPORTANT: You MUST extract the year - search for years in page headers, footers, legal text (e.g., "2024", "2025", "2026"), or transaction dates. If NO explicit year is found, assume the document is RECENT: If the month number is GREATER THAN the current month number (January = 1), use LAST YEAR (2025) to avoid future dates. If the month number is LESS THAN OR EQUAL to current month number, use THIS YEAR (2026). Example: "30 DE DICIEMBRE" in January 2026 → 2025-12-30 (month 12 > month 1, so use last year).
 - saldoInicial: Opening balance at the start of the period (number). May be labeled "Saldo Inicial", "Saldo Anterior", or "Opening Balance".
 - saldoFinal: Closing balance at the end of the period (number). May be labeled "Saldo Final", "Saldo al DD/MM/YYYY", or "Closing Balance".
 - moneda: Currency (ARS or USD). Look for "u$s", "USD", "U$S" for USD, or "$", "ARS", "Pesos" for ARS.
@@ -325,11 +325,14 @@ For credit cards, return format like:
 }
 
 For statements with only closing date (like "SALDO AL 30 DE DICIEMBRE"):
-1. Search the entire document for year information (headers, footers, legal notices, dates like "01/03/2026" or "20260102")
-2. If you find "SALDO AL 30 DE DICIEMBRE" and a year reference like "2026", consider if the closing is in December of the previous year (2025)
-3. Set fechaHasta to the closing date with the correct year
-4. Set fechaDesde to the first day of that month
-Example:
+1. Search the entire document for explicit year information (headers, footers, legal notices, dates like "01/03/2026" or "20260102")
+2. If NO explicit year is found, use SMART INFERENCE (assume document is recent):
+   - Current date: January 2026 (current month number = 1)
+   - "30 DE DICIEMBRE" → December (month 12) > current month (1) → Use LAST YEAR → 2025-12-30
+   - "20 DE ENERO" → January (month 1) = current month (1) → Use THIS YEAR → 2026-01-20
+3. Set fechaHasta to the closing date with the inferred year
+4. Set fechaDesde to the first day of that month with the same year
+Example for "SALDO AL 30 DE DICIEMBRE" processed in January 2026:
 {
   "banco": "BBVA",
   "numeroCuenta": "007-401617/2",
