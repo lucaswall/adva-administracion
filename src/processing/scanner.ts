@@ -43,6 +43,10 @@ import {
   generatePagoFileName,
   generateReciboFileName,
 } from '../utils/file-naming.js';
+import { debug, info, warn, error as logError } from '../utils/logger.js';
+
+/** ADVA's CUIT - used for row building */
+const ADVA_CUIT = '30709076783';
 
 /**
  * Result of processing a single file
@@ -133,6 +137,16 @@ export async function processFile(
 
   const classification = classificationParse.value;
 
+  debug('Document classified', {
+    module: 'scanner',
+    phase: 'classification',
+    fileId: fileInfo.id,
+    fileName: fileInfo.name,
+    documentType: classification.documentType,
+    confidence: classification.confidence,
+    reason: classification.reason
+  });
+
   // Prepare timestamp for all documents
   const now = new Date().toISOString();
 
@@ -190,9 +204,49 @@ export async function processFile(
   // Step 3: Parse the extraction result
 
   if (classification.documentType === 'factura_emitida' || classification.documentType === 'factura_recibida') {
-    const parseResult = parseFacturaResponse(extractResult.value);
+    const parseResult = parseFacturaResponse(extractResult.value, classification.documentType);
+
     if (!parseResult.ok) {
+      logError('Failed to parse factura response', {
+        module: 'scanner',
+        phase: 'parsing',
+        fileId: fileInfo.id,
+        fileName: fileInfo.name,
+        documentType: classification.documentType,
+        error: parseResult.error.message,
+        rawResponse: parseResult.error.rawData?.substring(0, 1000)
+      });
       return { ok: false, error: parseResult.error };
+    }
+
+    debug('Factura extracted', {
+      module: 'scanner',
+      phase: 'extraction',
+      fileId: fileInfo.id,
+      documentType: classification.documentType,
+      confidence: parseResult.value.confidence,
+      needsReview: parseResult.value.needsReview,
+      roleValidation: parseResult.value.roleValidation
+    });
+
+    // Check if role validation failed
+    if (parseResult.value.roleValidation && !parseResult.value.roleValidation.isValid) {
+      logError('Document failed ADVA role validation', {
+        module: 'scanner',
+        phase: 'validation',
+        fileId: fileInfo.id,
+        fileName: fileInfo.name,
+        documentType: classification.documentType,
+        errors: parseResult.value.roleValidation.errors,
+        willMoveTo: 'Sin Procesar'
+      });
+
+      return {
+        ok: false,
+        error: new Error(
+          `Role validation failed: ${parseResult.value.roleValidation.errors.join(', ')}`
+        )
+      };
     }
 
     const factura: Factura = {
@@ -225,9 +279,49 @@ export async function processFile(
   }
 
   if (classification.documentType === 'pago_enviado' || classification.documentType === 'pago_recibido') {
-    const parseResult = parsePagoResponse(extractResult.value);
+    const parseResult = parsePagoResponse(extractResult.value, classification.documentType);
+
     if (!parseResult.ok) {
+      logError('Failed to parse pago response', {
+        module: 'scanner',
+        phase: 'parsing',
+        fileId: fileInfo.id,
+        fileName: fileInfo.name,
+        documentType: classification.documentType,
+        error: parseResult.error.message,
+        rawResponse: parseResult.error.rawData?.substring(0, 1000)
+      });
       return { ok: false, error: parseResult.error };
+    }
+
+    debug('Pago extracted', {
+      module: 'scanner',
+      phase: 'extraction',
+      fileId: fileInfo.id,
+      documentType: classification.documentType,
+      confidence: parseResult.value.confidence,
+      needsReview: parseResult.value.needsReview,
+      roleValidation: parseResult.value.roleValidation
+    });
+
+    // Check if role validation failed
+    if (parseResult.value.roleValidation && !parseResult.value.roleValidation.isValid) {
+      logError('Document failed ADVA role validation', {
+        module: 'scanner',
+        phase: 'validation',
+        fileId: fileInfo.id,
+        fileName: fileInfo.name,
+        documentType: classification.documentType,
+        errors: parseResult.value.roleValidation.errors,
+        willMoveTo: 'Sin Procesar'
+      });
+
+      return {
+        ok: false,
+        error: new Error(
+          `Role validation failed: ${parseResult.value.roleValidation.errors.join(', ')}`
+        )
+      };
     }
 
     const pago: Pago = {
@@ -260,9 +354,29 @@ export async function processFile(
 
   if (classification.documentType === 'recibo') {
     const parseResult = parseReciboResponse(extractResult.value);
+
     if (!parseResult.ok) {
+      logError('Failed to parse recibo response', {
+        module: 'scanner',
+        phase: 'parsing',
+        fileId: fileInfo.id,
+        fileName: fileInfo.name,
+        documentType: classification.documentType,
+        error: parseResult.error.message,
+        rawResponse: parseResult.error.rawData?.substring(0, 1000)
+      });
       return { ok: false, error: parseResult.error };
     }
+
+    debug('Recibo extracted', {
+      module: 'scanner',
+      phase: 'extraction',
+      fileId: fileInfo.id,
+      documentType: classification.documentType,
+      confidence: parseResult.value.confidence,
+      needsReview: parseResult.value.needsReview,
+      roleValidation: parseResult.value.roleValidation
+    });
 
     const recibo: Recibo = {
       fileId: fileInfo.id,
