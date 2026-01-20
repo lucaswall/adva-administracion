@@ -720,23 +720,21 @@ export type SortDestination = 'creditos' | 'debitos' | 'bancos' | 'sin_procesar'
 export interface FolderStructure {
   /** Root folder ID */
   rootId: string;
-  /** Entrada (incoming) folder ID */
+  /** Entrada (incoming) folder ID - stays at root */
   entradaId: string;
-  /** Creditos (credits/income) folder ID - formerly Cobros */
-  creditosId: string;
-  /** Debitos (debits/expenses) folder ID - formerly Pagos */
-  debitosId: string;
-  /** Sin Procesar (unprocessed) folder ID */
+  /** Sin Procesar (unprocessed) folder ID - stays at root */
   sinProcesarId: string;
-  /** Bancos (banks) folder ID */
-  bancosId: string;
-  /** Control de Creditos spreadsheet ID - formerly Control de Cobros */
+  /** Control de Creditos spreadsheet ID - stays at root */
   controlCreditosId: string;
-  /** Control de Debitos spreadsheet ID - formerly Control de Pagos */
+  /** Control de Debitos spreadsheet ID - stays at root */
   controlDebitosId: string;
   /** Map of bank spreadsheet names to IDs */
   bankSpreadsheets: Map<string, string>;
-  /** Cache of month folders by destination and month key (e.g., "creditos:2024-01") */
+  /** Cache of year folders by year (e.g., "2024" -> folder ID) */
+  yearFolders: Map<string, string>;
+  /** Cache of classification folders by year:classification key (e.g., "2024:creditos" -> folder ID) */
+  classificationFolders: Map<string, string>;
+  /** Cache of month folders by year:destination:month key (e.g., "2024:creditos:01 - Enero" -> folder ID) */
   monthFolders: Map<string, string>;
   /** When the structure was last refreshed */
   lastRefreshed: Date;

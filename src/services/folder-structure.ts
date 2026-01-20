@@ -204,7 +204,8 @@ async function ensureSheetsExist(
 
 /**
  * Discovers and caches the folder structure from Drive
- * Creates missing folders as needed
+ * Creates root-level folders and spreadsheets only
+ * Year folders and classification folders are created on-demand
  *
  * @returns The folder structure or error
  */
@@ -214,23 +215,14 @@ export async function discoverFolderStructure(): Promise<Result<FolderStructure,
 
   console.log(`[Folder Discovery] Starting folder structure discovery in root folder: ${rootId}`);
 
-  // Find or create all required folders
+  // Find or create root-level folders (Entrada and Sin Procesar only)
   const entradaResult = await findOrCreateFolder(rootId, FOLDER_NAMES.entrada);
   if (!entradaResult.ok) return entradaResult;
-
-  const creditosResult = await findOrCreateFolder(rootId, FOLDER_NAMES.creditos);
-  if (!creditosResult.ok) return creditosResult;
-
-  const debitosResult = await findOrCreateFolder(rootId, FOLDER_NAMES.debitos);
-  if (!debitosResult.ok) return debitosResult;
 
   const sinProcesarResult = await findOrCreateFolder(rootId, FOLDER_NAMES.sinProcesar);
   if (!sinProcesarResult.ok) return sinProcesarResult;
 
-  const bancosResult = await findOrCreateFolder(rootId, FOLDER_NAMES.bancos);
-  if (!bancosResult.ok) return bancosResult;
-
-  // Find or create control spreadsheets
+  // Find or create control spreadsheets (at root level)
   const controlCreditosResult = await findOrCreateSpreadsheet(rootId, SPREADSHEET_NAMES.controlCreditos);
   if (!controlCreditosResult.ok) return controlCreditosResult;
 
@@ -244,12 +236,16 @@ export async function discoverFolderStructure(): Promise<Result<FolderStructure,
   const ensureDebitosSheetsResult = await ensureSheetsExist(controlDebitosResult.value, CONTROL_DEBITOS_SHEETS);
   if (!ensureDebitosSheetsResult.ok) return ensureDebitosSheetsResult;
 
-  // Discover bank spreadsheets in Bancos folder
-  const bankSpreadsheetsResult = await listByMimeType(bancosResult.value, SPREADSHEET_MIME);
+  // Discover bank spreadsheets in root folder (they can exist at root for external data)
+  const bankSpreadsheetsResult = await listByMimeType(rootId, SPREADSHEET_MIME);
   if (!bankSpreadsheetsResult.ok) return bankSpreadsheetsResult;
 
   const bankSpreadsheets = new Map<string, string>();
   for (const sheet of bankSpreadsheetsResult.value) {
+    // Skip control spreadsheets
+    if (sheet.name === SPREADSHEET_NAMES.controlCreditos || sheet.name === SPREADSHEET_NAMES.controlDebitos) {
+      continue;
+    }
     bankSpreadsheets.set(sheet.name, sheet.id);
   }
 
@@ -257,13 +253,12 @@ export async function discoverFolderStructure(): Promise<Result<FolderStructure,
   const structure: FolderStructure = {
     rootId,
     entradaId: entradaResult.value,
-    creditosId: creditosResult.value,
-    debitosId: debitosResult.value,
     sinProcesarId: sinProcesarResult.value,
-    bancosId: bancosResult.value,
     controlCreditosId: controlCreditosResult.value,
     controlDebitosId: controlDebitosResult.value,
     bankSpreadsheets,
+    yearFolders: new Map(),
+    classificationFolders: new Map(),
     monthFolders: new Map(),
     lastRefreshed: new Date(),
   };
@@ -271,22 +266,73 @@ export async function discoverFolderStructure(): Promise<Result<FolderStructure,
   cachedStructure = structure;
   console.log(`[Folder Discovery] Folder structure discovery complete:`);
   console.log(`  - Entrada: ${entradaResult.value}`);
-  console.log(`  - Creditos: ${creditosResult.value}`);
-  console.log(`  - Debitos: ${debitosResult.value}`);
   console.log(`  - Sin Procesar: ${sinProcesarResult.value}`);
-  console.log(`  - Bancos: ${bancosResult.value}`);
   console.log(`  - Control de Creditos: ${controlCreditosResult.value}`);
   console.log(`  - Control de Debitos: ${controlDebitosResult.value}`);
   console.log(`  - Bank spreadsheets: ${bankSpreadsheets.size}`);
+  console.log(`  - Year folders will be created on-demand`);
   return { ok: true, value: structure };
 }
 
 /**
- * Gets or creates a month folder for a destination
+ * Ensures all classification folders exist in a year folder
+ * Creates Creditos, Debitos, and Bancos folders if they don't exist
  *
- * @param destination - Sort destination ('creditos' or 'debitos')
- * @param date - Date to determine the month
- * @returns Folder ID for the month
+ * @param yearFolderId - Year folder ID
+ * @param year - Year string (e.g., "2024")
+ * @returns Success or error
+ */
+async function ensureClassificationFolders(
+  yearFolderId: string,
+  year: string
+): Promise<Result<void, Error>> {
+  if (!cachedStructure) {
+    return {
+      ok: false,
+      error: new Error('Folder structure not initialized.'),
+    };
+  }
+
+  const classifications: Array<keyof typeof FOLDER_NAMES> = ['creditos', 'debitos', 'bancos'];
+
+  for (const classification of classifications) {
+    const cacheKey = `${year}:${classification}`;
+
+    // Skip if already cached
+    if (cachedStructure.classificationFolders.has(cacheKey)) {
+      continue;
+    }
+
+    const folderName = FOLDER_NAMES[classification];
+
+    // Try to find existing folder
+    const findResult = await findByName(yearFolderId, folderName, FOLDER_MIME);
+    if (!findResult.ok) return findResult;
+
+    if (findResult.value) {
+      // Cache existing folder
+      cachedStructure.classificationFolders.set(cacheKey, findResult.value.id);
+      console.log(`[Folder Discovery] Found existing ${folderName} folder in year ${year}: ${findResult.value.id}`);
+    } else {
+      // Create new classification folder
+      const createResult = await createFolder(yearFolderId, folderName);
+      if (!createResult.ok) return createResult;
+
+      cachedStructure.classificationFolders.set(cacheKey, createResult.value.id);
+      console.log(`[Folder Discovery] Created ${folderName} folder in year ${year}: ${createResult.value.id}`);
+    }
+  }
+
+  return { ok: true, value: undefined };
+}
+
+/**
+ * Gets or creates a month folder for a destination
+ * Implements year-based folder structure: {year}/{classification}/{month}/
+ *
+ * @param destination - Sort destination ('creditos', 'debitos', 'bancos', or 'sin_procesar')
+ * @param date - Date to determine the year and month
+ * @returns Folder ID for the target location
  */
 export async function getOrCreateMonthFolder(
   destination: SortDestination,
@@ -299,43 +345,84 @@ export async function getOrCreateMonthFolder(
     };
   }
 
-  // sin_procesar and bancos don't use month folders
+  // sin_procesar stays at root level (no year, no month)
   if (destination === 'sin_procesar') {
     return { ok: true, value: cachedStructure.sinProcesarId };
   }
-  if (destination === 'bancos') {
-    return { ok: true, value: cachedStructure.bancosId };
+
+  // Extract year from date
+  const year = date.getFullYear().toString();
+
+  // Get or create year folder
+  let yearFolderId = cachedStructure.yearFolders.get(year);
+
+  if (!yearFolderId) {
+    // Try to find existing year folder
+    const findYearResult = await findByName(cachedStructure.rootId, year, FOLDER_MIME);
+    if (!findYearResult.ok) return findYearResult;
+
+    if (findYearResult.value) {
+      yearFolderId = findYearResult.value.id;
+      cachedStructure.yearFolders.set(year, yearFolderId);
+      console.log(`[Folder Discovery] Found existing year folder ${year}: ${yearFolderId}`);
+    } else {
+      // Create new year folder
+      const createYearResult = await createFolder(cachedStructure.rootId, year);
+      if (!createYearResult.ok) return createYearResult;
+
+      yearFolderId = createYearResult.value.id;
+      cachedStructure.yearFolders.set(year, yearFolderId);
+      console.log(`[Folder Discovery] Created year folder ${year}: ${yearFolderId}`);
+    }
   }
 
+  // Ensure all classification folders exist in this year
+  const ensureResult = await ensureClassificationFolders(yearFolderId, year);
+  if (!ensureResult.ok) return ensureResult;
+
+  // Get classification folder ID
+  const classificationCacheKey = `${year}:${destination}`;
+  const classificationFolderId = cachedStructure.classificationFolders.get(classificationCacheKey);
+
+  if (!classificationFolderId) {
+    return {
+      ok: false,
+      error: new Error(`Classification folder ${destination} not found for year ${year}`),
+    };
+  }
+
+  // bancos doesn't use month subfolders - return classification folder directly
+  if (destination === 'bancos') {
+    return { ok: true, value: classificationFolderId };
+  }
+
+  // For creditos and debitos, create/find month folder
   const monthName = formatMonthFolder(date);
-  const cacheKey = `${destination}:${monthName}`;
+  const monthCacheKey = `${year}:${destination}:${monthName}`;
 
   // Check cache first
-  const cachedId = cachedStructure.monthFolders.get(cacheKey);
-  if (cachedId) {
-    return { ok: true, value: cachedId };
+  const cachedMonthId = cachedStructure.monthFolders.get(monthCacheKey);
+  if (cachedMonthId) {
+    return { ok: true, value: cachedMonthId };
   }
 
-  // Determine parent folder
-  const parentId = destination === 'creditos'
-    ? cachedStructure.creditosId
-    : cachedStructure.debitosId;
+  // Try to find existing month folder
+  const findMonthResult = await findByName(classificationFolderId, monthName, FOLDER_MIME);
+  if (!findMonthResult.ok) return findMonthResult;
 
-  // Try to find existing folder
-  const findResult = await findByName(parentId, monthName, FOLDER_MIME);
-  if (!findResult.ok) return findResult;
-
-  if (findResult.value) {
+  if (findMonthResult.value) {
     // Cache and return existing folder
-    cachedStructure.monthFolders.set(cacheKey, findResult.value.id);
-    return { ok: true, value: findResult.value.id };
+    cachedStructure.monthFolders.set(monthCacheKey, findMonthResult.value.id);
+    console.log(`[Folder Discovery] Found existing month folder ${monthName} in ${year}/${destination}: ${findMonthResult.value.id}`);
+    return { ok: true, value: findMonthResult.value.id };
   }
 
   // Create new month folder
-  const createResult = await createFolder(parentId, monthName);
-  if (!createResult.ok) return createResult;
+  const createMonthResult = await createFolder(classificationFolderId, monthName);
+  if (!createMonthResult.ok) return createMonthResult;
 
   // Cache and return new folder
-  cachedStructure.monthFolders.set(cacheKey, createResult.value.id);
-  return { ok: true, value: createResult.value.id };
+  cachedStructure.monthFolders.set(monthCacheKey, createMonthResult.value.id);
+  console.log(`[Folder Discovery] Created month folder ${monthName} in ${year}/${destination}: ${createMonthResult.value.id}`);
+  return { ok: true, value: createMonthResult.value.id };
 }

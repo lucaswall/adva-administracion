@@ -47,14 +47,27 @@ function getDocumentDate(doc: SortableDocument): Date {
 
 /**
  * Builds a human-readable path for the sort result
+ * Format: {year}/{classification}/{month} or {year}/{classification} for bancos
  */
 function buildTargetPath(destination: SortDestination, date?: Date): string {
-  if (destination === 'sin_procesar' || destination === 'bancos') {
+  if (destination === 'sin_procesar') {
     return DESTINATION_NAMES[destination];
   }
 
-  const monthFolder = date ? formatMonthFolder(date) : '';
-  return `${DESTINATION_NAMES[destination]}/${monthFolder}`;
+  if (!date) {
+    return DESTINATION_NAMES[destination];
+  }
+
+  const year = date.getFullYear().toString();
+
+  if (destination === 'bancos') {
+    // Bancos: year/classification (no month)
+    return `${year}/${DESTINATION_NAMES[destination]}`;
+  }
+
+  // Creditos/Debitos: year/classification/month
+  const monthFolder = formatMonthFolder(date);
+  return `${year}/${DESTINATION_NAMES[destination]}/${monthFolder}`;
 }
 
 /**
@@ -100,12 +113,10 @@ export async function sortDocument(
   const docDate = getDocumentDate(doc);
 
   if (destination === 'sin_procesar') {
+    // Sin Procesar stays at root level
     targetFolderId = structure.sinProcesarId;
-  } else if (destination === 'bancos') {
-    // Bank statements go directly to Bancos folder (no month subfolders)
-    targetFolderId = structure.bancosId;
   } else {
-    // Creditos and Debitos use month subfolders
+    // All other destinations (creditos, debitos, bancos) use year-based structure
     const monthFolderResult = await getOrCreateMonthFolder(destination, docDate);
     if (!monthFolderResult.ok) {
       return {
@@ -125,11 +136,10 @@ export async function sortDocument(
     };
   }
 
-  const usesMonthFolder = destination !== 'sin_procesar' && destination !== 'bancos';
   return {
     success: true,
     targetFolderId,
-    targetPath: buildTargetPath(destination, usesMonthFolder ? docDate : undefined),
+    targetPath: buildTargetPath(destination, destination !== 'sin_procesar' ? docDate : undefined),
   };
 }
 
