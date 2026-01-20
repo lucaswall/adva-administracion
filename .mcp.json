@@ -13,6 +13,11 @@
       "type": "stdio",
       "command": "npx",
       "args": ["tsx", "mcp-gdrive/index.ts"]
+    },
+    "gemini": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["tsx", "mcp-gemini/index.ts"]
     }
   }
 }
