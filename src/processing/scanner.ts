@@ -21,12 +21,14 @@ import {
   FACTURA_PROMPT,
   PAGO_BBVA_PROMPT,
   RECIBO_PROMPT,
+  RESUMEN_BANCARIO_PROMPT,
 } from '../gemini/prompts.js';
 import {
   parseClassificationResponse,
   parseFacturaResponse,
   parsePagoResponse,
   parseReciboResponse,
+  parseResumenBancarioResponse,
 } from '../gemini/parser.js';
 import { listFilesInFolder, downloadFile } from '../services/drive.js';
 import { getValues, appendRows, batchUpdate } from '../services/sheets.js';
@@ -84,8 +86,9 @@ function hasValidDate(doc: any, documentType: DocumentType): boolean {
     case 'recibo':
       return !!doc.fechaPago && doc.fechaPago !== '';
     case 'resumen_bancario':
-      // Skip validation for resumen_bancario until extraction is implemented (TODO)
-      return true;
+      // Validate that both date fields are present and non-empty
+      // If dates cannot be parsed, file should go to Sin Procesar
+      return !!doc.fechaDesde && doc.fechaDesde !== '' && !!doc.fechaHasta && doc.fechaHasta !== '';
     default:
       return false;
   }
@@ -164,31 +167,8 @@ export async function processFile(
       extractPrompt = RECIBO_PROMPT;
       break;
     case 'resumen_bancario':
-      // TODO: Add RESUMEN_BANCARIO_PROMPT extraction in a future phase
-      // For now, create a minimal document to enable sorting and renaming
-      const resumen: import('../types/index.js').ResumenBancario = {
-        fileId: fileInfo.id,
-        fileName: fileInfo.name,
-        folderPath: fileInfo.folderPath,
-        banco: 'Desconocido', // Will be extracted in future
-        fechaDesde: '',
-        fechaHasta: '',
-        saldoInicial: 0,
-        saldoFinal: 0,
-        moneda: 'ARS',
-        cantidadMovimientos: 0,
-        processedAt: now,
-        confidence: classification.confidence,
-        needsReview: true, // Always needs review until extraction is implemented
-      };
-      return {
-        ok: true,
-        value: {
-          documentType: 'resumen_bancario',
-          document: resumen,
-          classification,
-        },
-      };
+      extractPrompt = RESUMEN_BANCARIO_PROMPT;
+      break;
     default:
       return {
         ok: true,
@@ -319,6 +299,38 @@ export async function processFile(
       value: {
         documentType: 'recibo',
         document: recibo,
+        classification,
+      },
+    };
+  }
+
+  if (classification.documentType === 'resumen_bancario') {
+    const parseResult = parseResumenBancarioResponse(extractResult.value);
+    if (!parseResult.ok) {
+      return { ok: false, error: parseResult.error };
+    }
+
+    const resumen: ResumenBancario = {
+      fileId: fileInfo.id,
+      fileName: fileInfo.name,
+      folderPath: fileInfo.folderPath,
+      banco: parseResult.value.data.banco || 'Desconocido',
+      fechaDesde: parseResult.value.data.fechaDesde || '',
+      fechaHasta: parseResult.value.data.fechaHasta || '',
+      saldoInicial: parseResult.value.data.saldoInicial || 0,
+      saldoFinal: parseResult.value.data.saldoFinal || 0,
+      moneda: parseResult.value.data.moneda || 'ARS',
+      cantidadMovimientos: parseResult.value.data.cantidadMovimientos || 0,
+      processedAt: now,
+      confidence: parseResult.value.confidence,
+      needsReview: parseResult.value.needsReview,
+    };
+
+    return {
+      ok: true,
+      value: {
+        documentType: 'resumen_bancario',
+        document: resumen,
         classification,
       },
     };
