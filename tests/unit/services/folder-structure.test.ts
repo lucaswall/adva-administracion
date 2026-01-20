@@ -376,8 +376,14 @@ describe('FolderStructure service', () => {
           ],
         });
 
-      // Mock getValues for existing sheets with correct headers (starting with 'fileId')
-      mockGetValues.mockResolvedValue({ ok: true, value: [['fileId', 'fileName', 'folderPath']] });
+      // Mock getValues for existing sheets with correct headers
+      // Facturas start with 'fechaEmision', Pagos/Recibos start with 'fechaPago'
+      mockGetValues
+        .mockResolvedValueOnce({ ok: true, value: [['fechaEmision', 'fileId', 'fileName']] }) // Facturas Emitidas
+        .mockResolvedValueOnce({ ok: true, value: [['fechaPago', 'fileId', 'fileName']] }) // Pagos Recibidos
+        .mockResolvedValueOnce({ ok: true, value: [['fechaEmision', 'fileId', 'fileName']] }) // Facturas Recibidas
+        .mockResolvedValueOnce({ ok: true, value: [['fechaPago', 'fileId', 'fileName']] }) // Pagos Enviados
+        .mockResolvedValueOnce({ ok: true, value: [['fechaPago', 'fileId', 'fileName']] }); // Recibos
 
       const result = await discoverFolderStructure();
 
@@ -418,8 +424,11 @@ describe('FolderStructure service', () => {
           value: [{ title: 'Facturas Recibidas', sheetId: 1 }],
         });
 
-      // Mock getValues for existing sheets with correct headers (starting with 'fileId')
-      mockGetValues.mockResolvedValue({ ok: true, value: [['fileId', 'fileName', 'folderPath']] });
+      // Mock getValues for existing sheets with correct headers
+      // Facturas start with 'fechaEmision'
+      mockGetValues
+        .mockResolvedValueOnce({ ok: true, value: [['fechaEmision', 'fileId', 'fileName']] }) // Facturas Emitidas
+        .mockResolvedValueOnce({ ok: true, value: [['fechaEmision', 'fileId', 'fileName']] }); // Facturas Recibidas
 
       // Mock creating missing sheets (1 for Creditos + 2 for Debitos = 3)
       mockCreateSheet

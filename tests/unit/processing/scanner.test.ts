@@ -22,12 +22,14 @@ const mockGetValues = vi.fn();
 const mockSetValues = vi.fn();
 const mockAppendRowsWithLinks = vi.fn();
 const mockBatchUpdate = vi.fn();
+const mockSortSheet = vi.fn();
 
 vi.mock('../../../src/services/sheets.js', () => ({
   getValues: (...args: unknown[]) => mockGetValues(...args),
   setValues: (...args: unknown[]) => mockSetValues(...args),
   appendRowsWithLinks: (...args: unknown[]) => mockAppendRowsWithLinks(...args),
   batchUpdate: (...args: unknown[]) => mockBatchUpdate(...args),
+  sortSheet: (...args: unknown[]) => mockSortSheet(...args),
   clearSheetsCache: vi.fn(),
 }));
 
@@ -126,6 +128,8 @@ describe('Scanner module', () => {
     mockSortToSinProcesar.mockResolvedValue({ success: true, targetPath: 'Sin Procesar' });
     // Default mock for appendRowsWithLinks
     mockAppendRowsWithLinks.mockResolvedValue({ ok: true, value: 1 });
+    // Default mock for sortSheet
+    mockSortSheet.mockResolvedValue({ ok: true, value: undefined });
   });
 
   afterEach(() => {
@@ -552,7 +556,7 @@ describe('Scanner module', () => {
         expect(result.value.pagosAdded).toBe(1);
       }
 
-      expect(mockListFilesInFolder).toHaveBeenCalledWith('entrada-id', '');
+      expect(mockListFilesInFolder).toHaveBeenCalledWith('entrada-id');
     });
 
     it('skips already processed files', async () => {
