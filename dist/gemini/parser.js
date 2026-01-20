@@ -138,7 +138,8 @@ export function parsePagoResponse(response) {
         const requiredFields = [
             'banco',
             'fechaPago',
-            'importePagado'
+            'importePagado',
+            'moneda'
         ];
         // Check for missing or empty fields (empty strings are suspicious)
         const missingFields = requiredFields.filter(field => {

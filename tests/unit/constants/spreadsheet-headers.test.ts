@@ -42,8 +42,8 @@ describe('spreadsheet-headers', () => {
   });
 
   describe('PAGO_HEADERS', () => {
-    it('has 17 headers (columns A:Q)', () => {
-      expect(PAGO_HEADERS).toHaveLength(17);
+    it('has 18 headers (columns A:R)', () => {
+      expect(PAGO_HEADERS).toHaveLength(18);
     });
 
     it('starts with fileId', () => {
@@ -54,6 +54,7 @@ describe('spreadsheet-headers', () => {
       expect(PAGO_HEADERS).toContain('banco');
       expect(PAGO_HEADERS).toContain('fechaPago');
       expect(PAGO_HEADERS).toContain('importePagado');
+      expect(PAGO_HEADERS).toContain('moneda');
       expect(PAGO_HEADERS).toContain('cuitPagador');
       expect(PAGO_HEADERS).toContain('cuitBeneficiario');
     });

@@ -118,6 +118,8 @@ export interface Pago {
     fechaPago: string;
     /** Amount paid */
     importePagado: number;
+    /** Currency */
+    moneda: Moneda;
     /** Transaction reference/ID (if visible) */
     referencia?: string;
     /** Payer CUIT (11 digits, no dashes) */

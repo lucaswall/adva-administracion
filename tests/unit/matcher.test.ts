@@ -65,6 +65,7 @@ describe('FacturaPagoMatcher.findMatches', () => {
       banco: 'BBVA',
       fechaPago: '2024-01-07', // 2 days after factura1
       importePagado: 1210,
+      moneda: 'ARS',
       processedAt: '2024-01-07T10:00:00Z',
       confidence: 1.0,
       needsReview: false
@@ -92,6 +93,7 @@ describe('FacturaPagoMatcher.findMatches', () => {
       banco: 'BBVA',
       fechaPago: '2024-01-07',
       importePagado: 1210,
+      moneda: 'ARS',
       processedAt: '2024-01-07T10:00:00Z',
       confidence: 1.0,
       needsReview: false
@@ -109,6 +111,7 @@ describe('FacturaPagoMatcher.findMatches', () => {
       banco: 'BBVA',
       fechaPago: '2024-01-07',
       importePagado: 1210,
+      moneda: 'ARS',
       cuitPagador: '20111111119', // matches factura1 emisor
       processedAt: '2024-01-07T10:00:00Z',
       confidence: 1.0,
@@ -130,6 +133,7 @@ describe('FacturaPagoMatcher.findMatches', () => {
       banco: 'BBVA',
       fechaPago: '2024-01-07',
       importePagado: 9999, // no matching amount
+      moneda: 'ARS',
       processedAt: '2024-01-07T10:00:00Z',
       confidence: 1.0,
       needsReview: false
@@ -147,6 +151,7 @@ describe('FacturaPagoMatcher.findMatches', () => {
       banco: 'BBVA',
       fechaPago: '2024-05-10', // 125 days after factura1, outside extended +120 range
       importePagado: 1210,
+      moneda: 'ARS',
       processedAt: '2024-05-10T10:00:00Z',
       confidence: 1.0,
       needsReview: false
@@ -164,6 +169,7 @@ describe('FacturaPagoMatcher.findMatches', () => {
       banco: 'BBVA',
       fechaPago: '2024-03-05', // exactly 60 days after factura1 (Jan 5 + 60 = Mar 5)
       importePagado: 1210,
+      moneda: 'ARS',
       processedAt: '2024-03-05T10:00:00Z',
       confidence: 1.0,
       needsReview: false
@@ -181,6 +187,7 @@ describe('FacturaPagoMatcher.findMatches', () => {
       banco: 'BBVA',
       fechaPago: '2023-12-26', // exactly 10 days before factura1 (Jan 5 - 10 = Dec 26)
       importePagado: 1210,
+      moneda: 'ARS',
       processedAt: '2023-12-26T10:00:00Z',
       confidence: 1.0,
       needsReview: false
@@ -198,6 +205,7 @@ describe('FacturaPagoMatcher.findMatches', () => {
       banco: 'BBVA',
       fechaPago: 'invalid-date',
       importePagado: 1210,
+      moneda: 'ARS',
       processedAt: '2024-01-07T10:00:00Z',
       confidence: 1.0,
       needsReview: false
@@ -219,6 +227,7 @@ describe('FacturaPagoMatcher.findMatches', () => {
       banco: 'BBVA',
       fechaPago: '2024-01-07',
       importePagado: 1210,
+      moneda: 'ARS',
       processedAt: '2024-01-07T10:00:00Z',
       confidence: 1.0,
       needsReview: false
@@ -243,6 +252,7 @@ describe('FacturaPagoMatcher.findMatches', () => {
       banco: 'BBVA',
       fechaPago: '2024-01-07',
       importePagado: 1210,
+      moneda: 'ARS',
       processedAt: '2024-01-07T10:00:00Z',
       confidence: 1.0,
       needsReview: false
@@ -260,6 +270,7 @@ describe('FacturaPagoMatcher.findMatches', () => {
       banco: 'BBVA',
       fechaPago: '2024-02-20', // 46 days after factura1 (outside MEDIUM +30, but within LOW +60)
       importePagado: 1210,
+      moneda: 'ARS',
       cuitPagador: '20111111119', // CUIT matches but date is outside MEDIUM range
       processedAt: '2024-02-20T10:00:00Z',
       confidence: 1.0,
@@ -283,6 +294,7 @@ describe('FacturaPagoMatcher.findMatches', () => {
       banco: 'BBVA',
       fechaPago: '2023-12-28', // 8 days before factura1 (outside MEDIUM -3, but within LOW -10)
       importePagado: 1210,
+      moneda: 'ARS',
       processedAt: '2023-12-28T10:00:00Z',
       confidence: 1.0,
       needsReview: false
@@ -303,6 +315,7 @@ describe('FacturaPagoMatcher.findMatches', () => {
       banco: 'BBVA',
       fechaPago: '2024-01-07',
       importePagado: 1210,
+      moneda: 'ARS',
       nombrePagador: 'EMPRESA UNO', // partial match with 'EMPRESA UNO SA'
       processedAt: '2024-01-07T10:00:00Z',
       confidence: 1.0,
@@ -325,6 +338,7 @@ describe('FacturaPagoMatcher.findMatches', () => {
       banco: 'BBVA',
       fechaPago: '2024-01-07',
       importePagado: 1210,
+      moneda: 'ARS',
       cuitPagador: '20111111119',
       nombrePagador: 'EMPRESA UNO SA',
       processedAt: '2024-01-07T10:00:00Z',
@@ -349,6 +363,7 @@ describe('FacturaPagoMatcher.findMatches', () => {
       banco: 'BBVA',
       fechaPago: '2024-01-07',
       importePagado: 1210,
+      moneda: 'ARS',
       nombrePagador: 'COMPLETELY DIFFERENT COMPANY',
       processedAt: '2024-01-07T10:00:00Z',
       confidence: 1.0,
@@ -381,6 +396,7 @@ describe('FacturaPagoMatcher.findMatches', () => {
       banco: 'BBVA',
       fechaPago: '2024-01-15',
       importePagado: 1210,
+      moneda: 'ARS',
       cuitPagador: '20333333337',
       processedAt: '2024-01-15T10:00:00Z',
       confidence: 1.0,
@@ -405,6 +421,7 @@ describe('FacturaPagoMatcher.findMatches', () => {
       banco: 'BBVA',
       fechaPago: '2024-01-07',
       importePagado: 1210,
+      moneda: 'ARS',
       processedAt: '2024-01-07T10:00:00Z',
       confidence: 1.0,
       needsReview: false
@@ -422,6 +439,7 @@ describe('FacturaPagoMatcher.findMatches', () => {
       banco: 'BBVA',
       fechaPago: '2024-01-07',
       importePagado: 1210,
+      moneda: 'ARS',
       // no cuitPagador, nombrePagador, referencia, concepto
       processedAt: '2024-01-07T10:00:00Z',
       confidence: 1.0,
@@ -445,6 +463,7 @@ describe('FacturaPagoMatcher.findMatches', () => {
       banco: 'BBVA',
       fechaPago: '2024-01-07',
       importePagado: 1210,
+      moneda: 'ARS',
       nombrePagador: 'empresa uno sa', // lowercase version
       processedAt: '2024-01-07T10:00:00Z',
       confidence: 1.0,
@@ -467,6 +486,7 @@ describe('FacturaPagoMatcher.findMatches', () => {
       banco: 'BBVA',
       fechaPago: '2024-01-07',
       importePagado: 1210,
+      moneda: 'ARS',
       nombrePagador: 'EMPRESA UNO', // factura has 'EMPRESA UNO SA'
       processedAt: '2024-01-07T10:00:00Z',
       confidence: 1.0,
@@ -493,6 +513,7 @@ describe('FacturaPagoMatcher.findMatches', () => {
       banco: 'BBVA',
       fechaPago: '2024-01-07',
       importePagado: 1210,
+      moneda: 'ARS',
       nombrePagador: 'ACME CORPORATION SA', // pago name contains 'ACME'
       processedAt: '2024-01-07T10:00:00Z',
       confidence: 1.0,
@@ -515,6 +536,7 @@ describe('FacturaPagoMatcher.findMatches', () => {
       banco: 'BBVA',
       fechaPago: '2024-01-07',
       importePagado: 1210,
+      moneda: 'ARS',
       cuitPagador: '20999999999', // Different CUIT (wrong)
       cuitBeneficiario: '20111111119', // Matches factura1 emisor (correct)
       processedAt: '2024-01-07T10:00:00Z',
@@ -539,6 +561,7 @@ describe('FacturaPagoMatcher.findMatches', () => {
       banco: 'BBVA',
       fechaPago: '2024-01-07',
       importePagado: 1210,
+      moneda: 'ARS',
       cuitPagador: '20111111119', // Matches factura1 emisor
       // No cuitBeneficiario
       processedAt: '2024-01-07T10:00:00Z',
@@ -562,6 +585,7 @@ describe('FacturaPagoMatcher.findMatches', () => {
       banco: 'BBVA',
       fechaPago: '2024-01-07',
       importePagado: 1210,
+      moneda: 'ARS',
       nombrePagador: 'WRONG COMPANY', // Does not match
       nombreBeneficiario: 'EMPRESA UNO SA', // Matches factura1 emisor
       processedAt: '2024-01-07T10:00:00Z',
@@ -586,6 +610,7 @@ describe('FacturaPagoMatcher.findMatches', () => {
       banco: 'BBVA',
       fechaPago: '2024-01-07',
       importePagado: 1210,
+      moneda: 'ARS',
       nombrePagador: 'EMPRESA UNO SA', // Matches factura1 emisor
       // No nombreBeneficiario
       processedAt: '2024-01-07T10:00:00Z',
@@ -619,6 +644,7 @@ describe('FacturaPagoMatcher.findMatches', () => {
       banco: 'BBVA',
       fechaPago: '2024-01-07',
       importePagado: 1210,
+      moneda: 'ARS',
       cuitBeneficiario: '40535475', // 8-digit DNI (not full CUIT)
       nombreBeneficiario: 'RABAGO NICOLAS',
       processedAt: '2024-01-07T10:00:00Z',
@@ -643,6 +669,7 @@ describe('FacturaPagoMatcher.findMatches', () => {
       banco: 'BBVA',
       fechaPago: '2024-01-07',
       importePagado: 1210,
+      moneda: 'ARS',
       cuitPagador: '20999999999', // Wrong CUIT
       nombrePagador: 'WRONG COMPANY', // Wrong name
       cuitBeneficiario: '20111111119', // Correct CUIT
@@ -709,6 +736,7 @@ describe('FacturaPagoMatcher cross-currency matching (USD→ARS)', () => {
       banco: 'BBVA',
       fechaPago: '2024-01-17', // 2 days after factura
       importePagado: 85550, // Exact converted amount
+      moneda: 'ARS',
       processedAt: '2024-01-17T10:00:00Z',
       confidence: 1.0,
       needsReview: false
@@ -738,6 +766,7 @@ describe('FacturaPagoMatcher cross-currency matching (USD→ARS)', () => {
       banco: 'BBVA',
       fechaPago: '2024-01-17',
       importePagado: 82000, // Within lower tolerance
+      moneda: 'ARS',
       processedAt: '2024-01-17T10:00:00Z',
       confidence: 1.0,
       needsReview: false
@@ -763,6 +792,7 @@ describe('FacturaPagoMatcher cross-currency matching (USD→ARS)', () => {
       banco: 'BBVA',
       fechaPago: '2024-01-17',
       importePagado: 70000, // Way below tolerance
+      moneda: 'ARS',
       processedAt: '2024-01-17T10:00:00Z',
       confidence: 1.0,
       needsReview: false
@@ -786,6 +816,7 @@ describe('FacturaPagoMatcher cross-currency matching (USD→ARS)', () => {
       banco: 'BBVA',
       fechaPago: '2024-01-17',
       importePagado: 85550,
+      moneda: 'ARS',
       cuitBeneficiario: '20111111119', // CUIT matches
       processedAt: '2024-01-17T10:00:00Z',
       confidence: 1.0,
@@ -815,6 +846,7 @@ describe('FacturaPagoMatcher cross-currency matching (USD→ARS)', () => {
       banco: 'BBVA',
       fechaPago: '2024-01-17',
       importePagado: 85550,
+      moneda: 'ARS',
       // No CUIT
       processedAt: '2024-01-17T10:00:00Z',
       confidence: 1.0,
@@ -840,6 +872,7 @@ describe('FacturaPagoMatcher cross-currency matching (USD→ARS)', () => {
       banco: 'BBVA',
       fechaPago: '2024-01-17',
       importePagado: 85550,
+      moneda: 'ARS',
       processedAt: '2024-01-17T10:00:00Z',
       confidence: 1.0,
       needsReview: false
@@ -864,6 +897,7 @@ describe('FacturaPagoMatcher cross-currency matching (USD→ARS)', () => {
       banco: 'BBVA',
       fechaPago: '2024-01-17',
       importePagado: 85550, // Exact match
+      moneda: 'ARS',
       processedAt: '2024-01-17T10:00:00Z',
       confidence: 1.0,
       needsReview: false
@@ -934,6 +968,7 @@ describe('ReciboPagoMatcher.findMatches', () => {
       banco: 'BBVA',
       fechaPago: '2024-01-07', // 2 days after recibo1
       importePagado: 150000,
+      moneda: 'ARS',
       processedAt: '2024-01-07T10:00:00Z',
       confidence: 1.0,
       needsReview: false
@@ -956,6 +991,7 @@ describe('ReciboPagoMatcher.findMatches', () => {
       banco: 'BBVA',
       fechaPago: '2024-01-07',
       importePagado: 150000,
+      moneda: 'ARS',
       cuitBeneficiario: '20123456789', // matches recibo1 employee CUIL
       processedAt: '2024-01-07T10:00:00Z',
       confidence: 1.0,
@@ -978,6 +1014,7 @@ describe('ReciboPagoMatcher.findMatches', () => {
       banco: 'BBVA',
       fechaPago: '2024-01-07',
       importePagado: 150000,
+      moneda: 'ARS',
       nombreBeneficiario: 'juan perez', // matches recibo1 employee name (case insensitive)
       processedAt: '2024-01-07T10:00:00Z',
       confidence: 1.0,
@@ -1000,6 +1037,7 @@ describe('ReciboPagoMatcher.findMatches', () => {
       banco: 'BBVA',
       fechaPago: '2024-01-07',
       importePagado: 999999, // no matching amount
+      moneda: 'ARS',
       processedAt: '2024-01-07T10:00:00Z',
       confidence: 1.0,
       needsReview: false
@@ -1017,6 +1055,7 @@ describe('ReciboPagoMatcher.findMatches', () => {
       banco: 'BBVA',
       fechaPago: '2024-05-10', // 125 days after recibo1, outside +60 range
       importePagado: 150000,
+      moneda: 'ARS',
       processedAt: '2024-05-10T10:00:00Z',
       confidence: 1.0,
       needsReview: false
@@ -1038,6 +1077,7 @@ describe('ReciboPagoMatcher.findMatches', () => {
       banco: 'BBVA',
       fechaPago: '2024-01-07',
       importePagado: 150000,
+      moneda: 'ARS',
       processedAt: '2024-01-07T10:00:00Z',
       confidence: 1.0,
       needsReview: false
@@ -1058,6 +1098,7 @@ describe('ReciboPagoMatcher.findMatches', () => {
       banco: 'BBVA',
       fechaPago: '2024-02-20', // 46 days after recibo1, outside MEDIUM +30, within LOW +60
       importePagado: 150000,
+      moneda: 'ARS',
       cuitBeneficiario: '20123456789', // CUIL matches but date is outside MEDIUM range
       processedAt: '2024-02-20T10:00:00Z',
       confidence: 1.0,
@@ -1081,6 +1122,7 @@ describe('ReciboPagoMatcher.findMatches', () => {
       banco: 'BBVA',
       fechaPago: '2024-01-07',
       importePagado: 150000,
+      moneda: 'ARS',
       nombreBeneficiario: 'PEREZ', // partial match with 'Juan Pérez'
       processedAt: '2024-01-07T10:00:00Z',
       confidence: 1.0,
@@ -1108,6 +1150,7 @@ describe('ReciboPagoMatcher.findMatches', () => {
       banco: 'BBVA',
       fechaPago: '2024-01-07',
       importePagado: 150000,
+      moneda: 'ARS',
       processedAt: '2024-01-07T10:00:00Z',
       confidence: 1.0,
       needsReview: false
@@ -1131,6 +1174,7 @@ describe('ReciboPagoMatcher.findMatches', () => {
       banco: 'BBVA',
       fechaPago: '2024-01-15',
       importePagado: 150000,
+      moneda: 'ARS',
       cuitBeneficiario: '20333333337',
       processedAt: '2024-01-15T10:00:00Z',
       confidence: 1.0,
@@ -1155,6 +1199,7 @@ describe('ReciboPagoMatcher.findMatches', () => {
       banco: 'BBVA',
       fechaPago: '2024-01-07',
       importePagado: 150000,
+      moneda: 'ARS',
       processedAt: '2024-01-07T10:00:00Z',
       confidence: 1.0,
       needsReview: false
@@ -1172,6 +1217,7 @@ describe('ReciboPagoMatcher.findMatches', () => {
       banco: 'BBVA',
       fechaPago: '2024-01-07',
       importePagado: 150000,
+      moneda: 'ARS',
       // no cuitBeneficiario, nombreBeneficiario
       processedAt: '2024-01-07T10:00:00Z',
       confidence: 1.0,
@@ -1195,6 +1241,7 @@ describe('ReciboPagoMatcher.findMatches', () => {
       banco: 'BBVA',
       fechaPago: 'invalid-date',
       importePagado: 150000,
+      moneda: 'ARS',
       processedAt: '2024-01-07T10:00:00Z',
       confidence: 1.0,
       needsReview: false
@@ -1216,6 +1263,7 @@ describe('ReciboPagoMatcher.findMatches', () => {
       banco: 'BBVA',
       fechaPago: '2024-01-07',
       importePagado: 150000,
+      moneda: 'ARS',
       processedAt: '2024-01-07T10:00:00Z',
       confidence: 1.0,
       needsReview: false
@@ -1233,6 +1281,7 @@ describe('ReciboPagoMatcher.findMatches', () => {
       banco: 'BBVA',
       fechaPago: '2024-01-07',
       importePagado: 150000,
+      moneda: 'ARS',
       cuitBeneficiario: '20123456789',
       nombreBeneficiario: 'Juan Pérez',
       processedAt: '2024-01-07T10:00:00Z',
@@ -1257,6 +1306,7 @@ describe('ReciboPagoMatcher.findMatches', () => {
       banco: 'BBVA',
       fechaPago: '2024-01-07',
       importePagado: 150000,
+      moneda: 'ARS',
       nombreBeneficiario: 'COMPLETELY DIFFERENT PERSON',
       processedAt: '2024-01-07T10:00:00Z',
       confidence: 1.0,
@@ -1279,6 +1329,7 @@ describe('ReciboPagoMatcher.findMatches', () => {
       banco: 'BBVA',
       fechaPago: '2024-01-07',
       importePagado: 150000,
+      moneda: 'ARS',
       cuitPagador: '20123456789', // Employee CUIL in payer field (wrong)
       nombrePagador: 'Juan Pérez', // Employee name in payer field (wrong)
       // No beneficiary fields

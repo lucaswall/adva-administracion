@@ -194,6 +194,7 @@ Required fields to extract:
 - banco: Bank name (e.g., "BBVA", "Santander", "Galicia", "Macro")
 - fechaPago: Payment date (format as YYYY-MM-DD)
 - importePagado: Amount paid (number)
+- moneda: Currency (ARS or USD). Look for currency symbols or explicit mentions like "$", "USD", "U$S", "ARS", "Pesos", "Dólares". If not explicitly stated, assume ARS (Argentine Pesos) as this is the default currency in Argentina.
 
 Optional fields:
 - referencia: Transaction reference or ID (may be labeled "N° de Referencia", "Número de Operación", etc.)
@@ -208,6 +209,7 @@ Return ONLY valid JSON in this exact format:
   "banco": "BBVA",
   "fechaPago": "2024-01-18",
   "importePagado": 1210.00,
+  "moneda": "ARS",
   "referencia": "TRX123456",
   "cuitPagador": "20111111119",
   "nombrePagador": "ADVA",
@@ -218,7 +220,7 @@ Return ONLY valid JSON in this exact format:
 
 Important:
 - Return ONLY the JSON object, no additional text
-- If a field is not visible, omit it from the JSON
+- If a field is not visible, omit it from the JSON (but moneda should default to ARS if not stated)
 - Ensure the date is in YYYY-MM-DD format
 - For CUIT/DNI fields: Remove dashes and spaces. Accept both full CUITs (11 digits like "30-71873398-3") and DNIs (7-8 digits like "40535475"). If the document shows only a short number (7-8 digits) in a CUIT/CUIL/CDI field, extract it as-is.
 - CRITICAL: Argentine number format uses DOTS (.) as thousand separators and COMMA (,) as decimal separator

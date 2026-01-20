@@ -365,6 +365,7 @@ describe('BankMovementMatcher', () => {
     banco: 'BBVA',
     fechaPago: '2025-01-07',
     importePagado: 100000,
+    moneda: 'ARS',
     cuitBeneficiario: '30712345671',
     nombreBeneficiario: 'Proveedor SA',
     processedAt: '2025-01-07T10:00:00Z',
