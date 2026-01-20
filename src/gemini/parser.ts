@@ -70,8 +70,7 @@ export function extractJSON(response: string): string {
  */
 function validateAdvaRole(
   data: any,
-  expectedRole: 'emisor' | 'receptor' | 'pagador' | 'beneficiario' | 'empleador',
-  documentType: string
+  expectedRole: 'emisor' | 'receptor' | 'pagador' | 'beneficiario' | 'empleador'
 ): AdvaRoleValidation {
   const validation: AdvaRoleValidation = {
     isValid: true,
@@ -232,7 +231,7 @@ export function parseFacturaResponse(
 
     // Validate ADVA role
     const expectedRole = documentType === 'factura_emitida' ? 'emisor' : 'receptor';
-    const roleValidation = validateAdvaRole(data, expectedRole, documentType);
+    const roleValidation = validateAdvaRole(data, expectedRole);
 
     // If role validation fails critically, return error
     if (!roleValidation.isValid) {
@@ -346,7 +345,7 @@ export function parsePagoResponse(
 
     // Validate ADVA role
     const expectedRole = documentType === 'pago_enviado' ? 'pagador' : 'beneficiario';
-    const roleValidation = validateAdvaRole(data, expectedRole, documentType);
+    const roleValidation = validateAdvaRole(data, expectedRole);
 
     // Note: For pagos, we're more lenient since CUIT might not always be present
     // Just add validation result, don't fail the parse unless critical error
@@ -453,7 +452,7 @@ export function parseReciboResponse(response: string): Result<ParseResult<Partia
     const needsReview = confidence <= 0.9 && (missingFields.length > 0 || hasSuspiciousEmptyFields);
 
     // Validate ADVA is empleador
-    const roleValidation = validateAdvaRole(data, 'empleador', 'recibo');
+    const roleValidation = validateAdvaRole(data, 'empleador');
 
     if (!roleValidation.isValid) {
       warn('ADVA role validation failed for recibo', {

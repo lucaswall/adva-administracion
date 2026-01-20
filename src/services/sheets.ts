@@ -197,10 +197,11 @@ export async function getSheetMetadata(
 
     const sheetsList = response.data.sheets || [];
     const result = sheetsList
-      .filter(s => s.properties?.title && s.properties?.sheetId !== undefined)
+      .filter((s): s is NonNullable<typeof s> & { properties: NonNullable<typeof s.properties> } =>
+        s?.properties?.title !== undefined && s?.properties?.sheetId !== undefined)
       .map(s => ({
-        title: s.properties!.title!,
-        sheetId: s.properties!.sheetId!,
+        title: s.properties.title!,
+        sheetId: s.properties.sheetId!,
       }));
 
     return { ok: true, value: result };

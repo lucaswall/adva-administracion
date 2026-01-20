@@ -80,13 +80,26 @@ vi.mock('../../../src/gemini/parser.js', () => ({
 // Mock config
 vi.mock('../../../src/config.js', () => ({
   getConfig: vi.fn(() => ({
+    port: 3000,
+    nodeEnv: 'test' as const,
+    logLevel: 'ERROR' as const,
+    googleServiceAccountKey: 'test-key',
     driveRootFolderId: 'root-folder-id',
     geminiApiKey: 'test-api-key',
+    webhookUrl: null,
     matchDaysBefore: 10,
     matchDaysAfter: 60,
     usdArsTolerancePercent: 5,
   })),
   isAdvaCuit: vi.fn((cuit: string) => cuit === '30709076783'),
+}));
+
+// Mock logger
+vi.mock('../../../src/utils/logger.js', () => ({
+  debug: vi.fn(),
+  info: vi.fn(),
+  warn: vi.fn(),
+  error: vi.fn(),
 }));
 
 // Mock queue

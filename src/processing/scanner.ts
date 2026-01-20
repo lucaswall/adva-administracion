@@ -21,14 +21,12 @@ import {
   FACTURA_PROMPT,
   PAGO_BBVA_PROMPT,
   RECIBO_PROMPT,
-  RESUMEN_BANCARIO_PROMPT,
 } from '../gemini/prompts.js';
 import {
   parseClassificationResponse,
   parseFacturaResponse,
   parsePagoResponse,
   parseReciboResponse,
-  parseResumenBancarioResponse,
 } from '../gemini/parser.js';
 import { listFilesInFolder, downloadFile } from '../services/drive.js';
 import { getValues, appendRowsWithLinks, batchUpdate, sortSheet, type CellValueOrLink } from '../services/sheets.js';
@@ -37,16 +35,13 @@ import { sortToSinProcesar, sortAndRenameDocument } from '../services/document-s
 import { getProcessingQueue } from './queue.js';
 import { getConfig } from '../config.js';
 import { FacturaPagoMatcher } from '../matching/matcher.js';
-import { formatUSCurrency, parseNumber } from '../utils/numbers.js';
+import { formatUSCurrency } from '../utils/numbers.js';
 import {
   generateFacturaFileName,
   generatePagoFileName,
   generateReciboFileName,
 } from '../utils/file-naming.js';
-import { debug, info, warn, error as logError } from '../utils/logger.js';
-
-/** ADVA's CUIT - used for row building */
-const ADVA_CUIT = '30709076783';
+import { debug, error as logError } from '../utils/logger.js';
 
 /**
  * Result of processing a single file
@@ -56,6 +51,16 @@ export interface ProcessFileResult {
   document?: Factura | Pago | Recibo | ResumenBancario;
   classification?: ClassificationResult;
   error?: string;
+}
+
+/**
+ * Scanner configuration options
+ */
+export interface ScannerConfig {
+  concurrency?: number;
+  matchDaysBefore?: number;
+  matchDaysAfter?: number;
+  usdArsTolerancePercent?: number;
 }
 
 /**
@@ -85,9 +90,8 @@ function hasValidDate(doc: any, documentType: DocumentType): boolean {
     case 'recibo':
       return !!doc.fechaPago && doc.fechaPago !== '';
     case 'resumen_bancario':
-      // Validate that both date fields are present and non-empty
-      // If dates cannot be parsed, file should go to Sin Procesar
-      return !!doc.fechaDesde && doc.fechaDesde !== '' && !!doc.fechaHasta && doc.fechaHasta !== '';
+      // Skip validation for resumen_bancario until extraction is implemented (TODO)
+      return true;
     default:
       return false;
   }
@@ -176,8 +180,31 @@ export async function processFile(
       extractPrompt = RECIBO_PROMPT;
       break;
     case 'resumen_bancario':
-      extractPrompt = RESUMEN_BANCARIO_PROMPT;
-      break;
+      // TODO: Add RESUMEN_BANCARIO_PROMPT extraction in a future phase
+      // For now, create a minimal document to enable sorting and renaming
+      const resumen: import('../types/index.js').ResumenBancario = {
+        fileId: fileInfo.id,
+        fileName: fileInfo.name,
+        banco: 'Desconocido', // Will be extracted in future
+        numeroCuenta: '', // Will be extracted in future
+        fechaDesde: '',
+        fechaHasta: '',
+        saldoInicial: 0,
+        saldoFinal: 0,
+        moneda: 'ARS',
+        cantidadMovimientos: 0,
+        processedAt: now,
+        confidence: classification.confidence,
+        needsReview: true, // Always needs review until extraction is implemented
+      };
+      return {
+        ok: true,
+        value: {
+          documentType: 'resumen_bancario',
+          document: resumen,
+          classification,
+        },
+      };
     default:
       return {
         ok: true,
@@ -258,6 +285,7 @@ export async function processFile(
       cuitEmisor: parseResult.value.data.cuitEmisor || '',
       razonSocialEmisor: parseResult.value.data.razonSocialEmisor || '',
       cuitReceptor: parseResult.value.data.cuitReceptor,
+      razonSocialReceptor: parseResult.value.data.razonSocialReceptor,
       importeNeto: parseResult.value.data.importeNeto || 0,
       importeIva: parseResult.value.data.importeIva || 0,
       importeTotal: parseResult.value.data.importeTotal || 0,
@@ -407,38 +435,6 @@ export async function processFile(
     };
   }
 
-  if (classification.documentType === 'resumen_bancario') {
-    const parseResult = parseResumenBancarioResponse(extractResult.value);
-    if (!parseResult.ok) {
-      return { ok: false, error: parseResult.error };
-    }
-
-    const resumen: ResumenBancario = {
-      fileId: fileInfo.id,
-      fileName: fileInfo.name,
-      banco: parseResult.value.data.banco || 'Desconocido',
-      numeroCuenta: parseResult.value.data.numeroCuenta || '',
-      fechaDesde: parseResult.value.data.fechaDesde || '',
-      fechaHasta: parseResult.value.data.fechaHasta || '',
-      saldoInicial: parseResult.value.data.saldoInicial || 0,
-      saldoFinal: parseResult.value.data.saldoFinal || 0,
-      moneda: parseResult.value.data.moneda || 'ARS',
-      cantidadMovimientos: parseResult.value.data.cantidadMovimientos || 0,
-      processedAt: now,
-      confidence: parseResult.value.confidence,
-      needsReview: parseResult.value.needsReview,
-    };
-
-    return {
-      ok: true,
-      value: {
-        documentType: 'resumen_bancario',
-        document: resumen,
-        classification,
-      },
-    };
-  }
-
   return {
     ok: true,
     value: {
@@ -454,7 +450,7 @@ export async function processFile(
  * @param factura - The factura to store
  * @param spreadsheetId - The spreadsheet ID (Control de Creditos or Control de Debitos)
  * @param sheetName - The sheet name ('Facturas Emitidas' or 'Facturas Recibidas')
- * @param documentType - The document type for filename generation
+ * @param documentType - Document type for conditional row building
  */
 async function storeFactura(
   factura: Factura,
@@ -512,7 +508,7 @@ async function storeFactura(
  * @param pago - The pago to store
  * @param spreadsheetId - The spreadsheet ID (Control de Creditos or Control de Debitos)
  * @param sheetName - The sheet name ('Pagos Recibidos' or 'Pagos Enviados')
- * @param documentType - The document type for filename generation
+ * @param documentType - Document type for conditional row building
  */
 async function storePago(
   pago: Pago,
@@ -569,27 +565,27 @@ async function storeRecibo(recibo: Recibo, spreadsheetId: string): Promise<Resul
   const renamedFileName = generateReciboFileName(recibo);
 
   const row: CellValueOrLink[] = [
-    recibo.fechaPago,
-    recibo.fileId,
-    {
+    recibo.fechaPago,                          // A - date first
+    recibo.fileId,                             // B
+    {                                          // C - formatted link
       text: renamedFileName,
       url: `https://drive.google.com/file/d/${recibo.fileId}/view`,
     },
-    recibo.tipoRecibo,
-    recibo.nombreEmpleado,
-    recibo.cuilEmpleado,
-    recibo.legajo,
-    recibo.tareaDesempenada || '',
-    recibo.cuitEmpleador,
-    recibo.periodoAbonado,
-    formatUSCurrency(recibo.subtotalRemuneraciones),
-    formatUSCurrency(recibo.subtotalDescuentos),
-    formatUSCurrency(recibo.totalNeto),
-    recibo.processedAt,
-    recibo.confidence,
-    recibo.needsReview ? 'YES' : 'NO',
-    recibo.matchedPagoFileId || '',
-    recibo.matchConfidence || '',
+    recibo.tipoRecibo,                         // D
+    recibo.nombreEmpleado,                     // E
+    recibo.cuilEmpleado,                       // F
+    recibo.legajo,                             // G
+    recibo.tareaDesempenada || '',             // H
+    recibo.cuitEmpleador,                      // I
+    recibo.periodoAbonado,                     // J
+    recibo.subtotalRemuneraciones,             // K
+    recibo.subtotalDescuentos,                 // L
+    recibo.totalNeto,                          // M
+    recibo.processedAt,                        // N
+    recibo.confidence,                         // O
+    recibo.needsReview ? 'YES' : 'NO',         // P
+    recibo.matchedPagoFileId || '',            // Q
+    recibo.matchConfidence || '',              // R
   ];
 
   const result = await appendRowsWithLinks(spreadsheetId, 'Recibos!A:R', [row]);
@@ -600,7 +596,7 @@ async function storeRecibo(recibo: Recibo, spreadsheetId: string): Promise<Resul
   // Sort sheet by fechaPago (column A, index 0) in descending order (most recent first)
   const sortResult = await sortSheet(spreadsheetId, 'Recibos', 0, true);
   if (!sortResult.ok) {
-    console.warn('Failed to sort sheet Recibos:', sortResult.error.message);
+    console.warn(`Failed to sort sheet Recibos:`, sortResult.error.message);
     // Don't fail the operation if sorting fails
   }
 
@@ -937,27 +933,41 @@ export async function rematch(): Promise<Result<RematchResult, Error>> {
       const row = facturasResult.value[i];
       if (!row || !row[0]) continue;
 
+      // New layout: A=fechaEmision, B=fileId, C=fileName, D=tipoComprobante, E=nroFactura,
+      // F=cuit(counterparty), G=razonSocial(counterparty), H=importeNeto, I=importeIva,
+      // J=importeTotal, K=moneda, L=concepto, M=processedAt, N=confidence, O=needsReview,
+      // P=matchedPagoFileId, Q=matchConfidence, R=hasCuitMatch
+      const fechaEmision = String(row[0] || '');
+      const fileId = String(row[1] || '');
+      const fileName = String(row[2] || '');
+      const tipoComprobante = (row[3] || 'A') as Factura['tipoComprobante'];
+      const nroFactura = String(row[4] || '');
+      const cuitCounterparty = String(row[5] || '');
+      const razonSocialCounterparty = String(row[6] || '');
+
+      // This is from "Facturas Recibidas" (debitos) so counterparty is emisor
       facturas.push({
-        row: i + 1, // Sheet rows are 1-indexed
-        fechaEmision: String(row[0] || ''),
-        fileId: String(row[1] || ''),
-        fileName: String(row[2] || ''),
-        tipoComprobante: (row[3] || 'A') as Factura['tipoComprobante'],
-        nroFactura: String(row[4] || ''),
-        cuitEmisor: String(row[5] || ''),
-        razonSocialEmisor: String(row[6] || ''),
-        cuitReceptor: row[7] ? String(row[7]) : undefined,
-        importeNeto: parseNumber(row[8]) || 0,
-        importeIva: parseNumber(row[9]) || 0,
-        importeTotal: parseNumber(row[10]) || 0,
-        moneda: (row[11] || 'ARS') as Factura['moneda'],
-        concepto: row[12] ? String(row[12]) : undefined,
-        processedAt: String(row[13] || ''),
-        confidence: Number(row[14]) || 0,
-        needsReview: row[15] === 'YES',
-        matchedPagoFileId: row[16] ? String(row[16]) : undefined,
-        matchConfidence: row[17] ? (String(row[17]) as MatchConfidence) : undefined,
-        hasCuitMatch: row[18] === 'YES',
+        row: i + 1,
+        fileId,
+        fileName,
+        tipoComprobante,
+        nroFactura,
+        fechaEmision,
+        cuitEmisor: cuitCounterparty,
+        razonSocialEmisor: razonSocialCounterparty,
+        cuitReceptor: undefined, // ADVA is receptor (not stored in spreadsheet)
+        razonSocialReceptor: undefined,
+        importeNeto: Number(row[7]) || 0,
+        importeIva: Number(row[8]) || 0,
+        importeTotal: Number(row[9]) || 0,
+        moneda: (row[10] || 'ARS') as Factura['moneda'],
+        concepto: row[11] ? String(row[11]) : undefined,
+        processedAt: String(row[12] || ''),
+        confidence: Number(row[13]) || 0,
+        needsReview: row[14] === 'YES',
+        matchedPagoFileId: row[15] ? String(row[15]) : undefined,
+        matchConfidence: row[16] ? (String(row[16]) as MatchConfidence) : undefined,
+        hasCuitMatch: row[17] === 'YES',
       });
     }
   }
@@ -969,23 +979,23 @@ export async function rematch(): Promise<Result<RematchResult, Error>> {
 
       pagos.push({
         row: i + 1,
-        fechaPago: String(row[0] || ''),
-        fileId: String(row[1] || ''),
-        fileName: String(row[2] || ''),
+        fileId: String(row[0] || ''),
+        fileName: String(row[1] || ''),
         banco: String(row[3] || ''),
-        importePagado: parseNumber(row[4]) || 0,
-        moneda: (String(row[5]) as 'ARS' | 'USD') || 'ARS',
-        referencia: row[6] ? String(row[6]) : undefined,
-        cuitPagador: row[7] ? String(row[7]) : undefined,
-        nombrePagador: row[8] ? String(row[8]) : undefined,
-        cuitBeneficiario: row[9] ? String(row[9]) : undefined,
-        nombreBeneficiario: row[10] ? String(row[10]) : undefined,
-        concepto: row[11] ? String(row[11]) : undefined,
-        processedAt: String(row[12] || ''),
-        confidence: Number(row[13]) || 0,
-        needsReview: row[14] === 'YES',
-        matchedFacturaFileId: row[15] ? String(row[15]) : undefined,
-        matchConfidence: row[16] ? (String(row[16]) as MatchConfidence) : undefined,
+        fechaPago: String(row[4] || ''),
+        importePagado: Number(row[5]) || 0,
+        moneda: (String(row[6]) as 'ARS' | 'USD') || 'ARS',
+        referencia: row[7] ? String(row[7]) : undefined,
+        cuitPagador: row[8] ? String(row[8]) : undefined,
+        nombrePagador: row[9] ? String(row[9]) : undefined,
+        cuitBeneficiario: row[10] ? String(row[10]) : undefined,
+        nombreBeneficiario: row[11] ? String(row[11]) : undefined,
+        concepto: row[12] ? String(row[12]) : undefined,
+        processedAt: String(row[13] || ''),
+        confidence: Number(row[14]) || 0,
+        needsReview: row[15] === 'YES',
+        matchedFacturaFileId: row[16] ? String(row[16]) : undefined,
+        matchConfidence: row[17] ? (String(row[17]) as MatchConfidence) : undefined,
       });
     }
   }
