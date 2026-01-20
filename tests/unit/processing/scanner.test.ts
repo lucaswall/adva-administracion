@@ -338,6 +338,7 @@ describe('Scanner module', () => {
         value: {
           data: {
             banco: 'BBVA',
+            numeroCuenta: '1234567890',
             fechaDesde: '2024-01-01',
             fechaHasta: '2024-01-31',
             saldoInicial: 150000.00,
@@ -709,6 +710,7 @@ describe('Scanner module', () => {
         value: {
           data: {
             banco: 'BBVA',
+            numeroCuenta: '1234567890',
             fechaDesde: '2024-01-01',
             fechaHasta: '2024-01-31',
             saldoInicial: 150000.00,
@@ -790,12 +792,13 @@ describe('Scanner module', () => {
           indicators: ['BBVA', 'Resumen'],
         },
       });
-      // Extraction returns incomplete data (missing dates)
+      // Extraction returns incomplete data (missing dates and numeroCuenta)
       mockParseResumenBancarioResponse.mockReturnValueOnce({
         ok: true,
         value: {
           data: {
             banco: 'BBVA',
+            numeroCuenta: '',
             fechaDesde: '',
             fechaHasta: '',
             saldoInicial: 0,

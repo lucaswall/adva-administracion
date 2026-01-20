@@ -306,6 +306,7 @@ export function parseResumenBancarioResponse(response: string): Result<ParseResu
     // Check for required fields
     const requiredFields: (keyof ResumenBancario)[] = [
       'banco',
+      'numeroCuenta',
       'fechaDesde',
       'fechaHasta',
       'saldoInicial',

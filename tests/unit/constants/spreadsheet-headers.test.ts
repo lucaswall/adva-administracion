@@ -99,8 +99,8 @@ describe('spreadsheet-headers', () => {
   });
 
   describe('RESUMEN_BANCARIO_HEADERS', () => {
-    it('has 13 headers', () => {
-      expect(RESUMEN_BANCARIO_HEADERS).toHaveLength(13);
+    it('has 14 headers', () => {
+      expect(RESUMEN_BANCARIO_HEADERS).toHaveLength(14);
     });
 
     it('starts with fileId', () => {
@@ -109,6 +109,7 @@ describe('spreadsheet-headers', () => {
 
     it('contains required bank statement fields', () => {
       expect(RESUMEN_BANCARIO_HEADERS).toContain('banco');
+      expect(RESUMEN_BANCARIO_HEADERS).toContain('numeroCuenta');
       expect(RESUMEN_BANCARIO_HEADERS).toContain('fechaDesde');
       expect(RESUMEN_BANCARIO_HEADERS).toContain('fechaHasta');
       expect(RESUMEN_BANCARIO_HEADERS).toContain('saldoInicial');

@@ -305,6 +305,7 @@ export async function processFile(
       fileName: fileInfo.name,
       folderPath: fileInfo.folderPath,
       banco: parseResult.value.data.banco || 'Desconocido',
+      numeroCuenta: parseResult.value.data.numeroCuenta || '',
       fechaDesde: parseResult.value.data.fechaDesde || '',
       fechaHasta: parseResult.value.data.fechaHasta || '',
       saldoInicial: parseResult.value.data.saldoInicial || 0,

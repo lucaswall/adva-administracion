@@ -555,9 +555,13 @@ describe('DocumentSorter service', () => {
         fileName: 'resumen.pdf',
         folderPath: '',
         banco: 'BBVA',
+        numeroCuenta: '1234567890',
         fechaDesde: '2024-01-01',
         fechaHasta: '2024-01-31',
+        saldoInicial: 150000,
+        saldoFinal: 185000,
         moneda: 'ARS',
+        cantidadMovimientos: 47,
         processedAt: new Date().toISOString(),
         confidence: 0.9,
         needsReview: false,
@@ -572,7 +576,7 @@ describe('DocumentSorter service', () => {
       expect(result.success).toBe(true);
       expect(mockRenameFile).toHaveBeenCalledWith(
         'resumen-123',
-        '2024-01 - Resumen Bancario - BBVA.pdf'
+        '2024-01-01 - Resumen - BBVA - 1234567890 ARS.pdf'
       );
     });
 
@@ -582,9 +586,13 @@ describe('DocumentSorter service', () => {
         fileName: 'resumen.pdf',
         folderPath: '',
         banco: 'BBVA',
+        numeroCuenta: 'VISA',
         fechaDesde: '2024-02-01',
         fechaHasta: '2024-02-29',
+        saldoInicial: 10000,
+        saldoFinal: 12500,
         moneda: 'USD',
+        cantidadMovimientos: 23,
         processedAt: new Date().toISOString(),
         confidence: 0.9,
         needsReview: false,
@@ -599,7 +607,7 @@ describe('DocumentSorter service', () => {
       expect(result.success).toBe(true);
       expect(mockRenameFile).toHaveBeenCalledWith(
         'resumen-456',
-        '2024-02 - Resumen Bancario USD - BBVA.pdf'
+        '2024-02-01 - Resumen - BBVA - VISA USD.pdf'
       );
     });
 

@@ -81,6 +81,7 @@ export const RESUMEN_BANCARIO_HEADERS = [
   'fileName',
   'folderPath',
   'banco',
+  'numeroCuenta',
   'fechaDesde',
   'fechaHasta',
   'saldoInicial',
