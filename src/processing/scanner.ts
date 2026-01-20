@@ -84,8 +84,9 @@ function hasValidDate(doc: any, documentType: DocumentType): boolean {
     case 'recibo':
       return !!doc.fechaPago && doc.fechaPago !== '';
     case 'resumen_bancario':
-      // Skip validation for resumen_bancario until extraction is implemented (TODO)
-      return true;
+      // Validate that both date fields are present and non-empty
+      // If dates cannot be parsed, file should go to Sin Procesar
+      return !!doc.fechaDesde && doc.fechaDesde !== '' && !!doc.fechaHasta && doc.fechaHasta !== '';
     default:
       return false;
   }

@@ -634,7 +634,9 @@ describe('Scanner module', () => {
       }
     });
 
-    it('moves resumen_bancario files to Bancos folder', async () => {
+    it('moves resumen_bancario without dates to Sin Procesar', async () => {
+      // NOTE: Until resumen_bancario extraction is implemented, all resumen_bancario files
+      // will have empty dates and should be moved to Sin Procesar instead of Bancos
       mockListFilesInFolder.mockResolvedValue({
         ok: true,
         value: [
@@ -671,28 +673,23 @@ describe('Scanner module', () => {
         },
       });
 
-      mockSortAndRenameDocument.mockResolvedValue({ success: true, targetPath: 'Bancos' });
+      mockSortToSinProcesar.mockResolvedValue({ success: true, targetPath: 'Sin Procesar' });
 
       const result = await scanFolder();
 
       expect(result.ok).toBe(true);
       if (result.ok) {
         expect(result.value.filesProcessed).toBe(1);
-        // Resumen bancario should be moved but not added to facturas/pagos/recibos counts
+        // Resumen bancario without dates should not be added to any counts
         expect(result.value.facturasAdded).toBe(0);
         expect(result.value.pagosAdded).toBe(0);
         expect(result.value.recibosAdded).toBe(0);
       }
 
-      // Should call sortAndRenameDocument with a document that has at least fileId and fileName, plus bancos destination and resumen_bancario type
-      expect(mockSortAndRenameDocument).toHaveBeenCalledWith(
-        expect.objectContaining({
-          fileId: 'resumen-1',
-          fileName: 'resumen_banco.pdf',
-        }),
-        'bancos',
-        'resumen_bancario'
-      );
+      // Should move to Sin Procesar because dates are empty (extraction not implemented)
+      expect(mockSortToSinProcesar).toHaveBeenCalledWith('resumen-1', 'resumen_banco.pdf');
+      // Should NOT call sortAndRenameDocument (keeps original filename)
+      expect(mockSortAndRenameDocument).not.toHaveBeenCalled();
     });
 
     it('returns error when folder structure is not initialized', async () => {
