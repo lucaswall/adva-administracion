@@ -20,6 +20,8 @@ let lastScanTime: Date | null = null;
 let renewalJob: cron.ScheduledTask | null = null;
 let pollingJob: cron.ScheduledTask | null = null;
 let runningScan: Promise<void> | null = null;
+let hasPendingScan: boolean = false;
+let pendingScanFolderId: string | undefined = undefined;
 
 // Configuration
 const CHANNEL_EXPIRATION_MS = 3600000; // 1 hour
@@ -216,14 +218,16 @@ export function markNotificationProcessed(
  * Trigger a scan of the folder
  * Runs scan directly (NOT queued) to avoid deadlock
  * The scan internally uses the processing queue for individual files
- * Prevents concurrent scans - if a scan is already running, skip
+ * Prevents concurrent scans - if a scan is already running, queues a pending scan
  *
  * @param folderId - Optional folder ID to scan (defaults to all)
  */
 export function triggerScan(folderId?: string): void {
-  // Skip if a scan is already running
+  // If a scan is already running, queue a pending scan
   if (runningScan) {
-    console.log(`Scan already in progress, skipping duplicate scan${folderId ? ` for folder ${folderId}` : ''}`);
+    console.log(`Scan already in progress, queuing pending scan${folderId ? ` for folder ${folderId}` : ''}`);
+    hasPendingScan = true;
+    pendingScanFolderId = folderId;
     return;
   }
 
@@ -245,6 +249,15 @@ export function triggerScan(folderId?: string): void {
     })
     .finally(() => {
       runningScan = null;
+
+      // If a pending scan was queued, trigger it now
+      if (hasPendingScan) {
+        const queuedFolderId = pendingScanFolderId;
+        hasPendingScan = false;
+        pendingScanFolderId = undefined;
+        console.log(`Starting pending scan${queuedFolderId ? ` for folder ${queuedFolderId}` : ''}...`);
+        triggerScan(queuedFolderId);
+      }
     });
 }
 
@@ -345,6 +358,8 @@ export async function shutdownWatchManager(): Promise<void> {
   lastNotificationTime = null;
   lastScanTime = null;
   runningScan = null;
+  hasPendingScan = false;
+  pendingScanFolderId = undefined;
 
   console.log('Watch manager shutdown complete');
 }

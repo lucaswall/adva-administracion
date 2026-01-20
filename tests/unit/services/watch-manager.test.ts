@@ -351,6 +351,97 @@ describe('watch-manager', () => {
       const afterStatus = getWatchManagerStatus();
       expect(afterStatus.lastScan).not.toBeNull();
     });
+
+    it('queues a pending scan when scan is triggered during active scan', async () => {
+      // Mock a slow scan that takes 200ms
+      let scanResolve: () => void;
+      const scanPromise = new Promise<void>(resolve => {
+        scanResolve = resolve;
+      });
+
+      const mockScanResult = {
+        ok: true,
+        value: {
+          filesProcessed: 5,
+          facturasAdded: 2,
+          pagosAdded: 1,
+          recibosAdded: 0,
+          matchesFound: 1,
+          errors: 0,
+          duration: 1000,
+        },
+      };
+
+      // First call will delay, second call returns immediately
+      vi.mocked(scanner.scanFolder)
+        .mockImplementationOnce(async () => {
+          await scanPromise;
+          return mockScanResult;
+        })
+        .mockResolvedValue(mockScanResult);
+
+      // Trigger first scan (will be slow)
+      triggerScan('folder1');
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      // Trigger second scan while first is running (should be queued)
+      triggerScan('folder2');
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      // Complete first scan
+      scanResolve!();
+      await new Promise(resolve => setTimeout(resolve, 150));
+
+      // Both scans should have been called
+      expect(scanner.scanFolder).toHaveBeenCalledTimes(2);
+      expect(scanner.scanFolder).toHaveBeenNthCalledWith(1, 'folder1');
+      expect(scanner.scanFolder).toHaveBeenNthCalledWith(2, 'folder2');
+    });
+
+    it('consolidates multiple pending scan requests into one', async () => {
+      // Mock a slow scan
+      let scanResolve: () => void;
+      const scanPromise = new Promise<void>(resolve => {
+        scanResolve = resolve;
+      });
+
+      const mockScanResult = {
+        ok: true,
+        value: {
+          filesProcessed: 5,
+          facturasAdded: 2,
+          pagosAdded: 1,
+          recibosAdded: 0,
+          matchesFound: 1,
+          errors: 0,
+          duration: 1000,
+        },
+      };
+
+      vi.mocked(scanner.scanFolder)
+        .mockImplementationOnce(async () => {
+          await scanPromise;
+          return mockScanResult;
+        })
+        .mockResolvedValue(mockScanResult);
+
+      // Trigger first scan (will be slow)
+      triggerScan();
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      // Trigger multiple scans while first is running (should consolidate)
+      triggerScan();
+      triggerScan();
+      triggerScan();
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      // Complete first scan
+      scanResolve!();
+      await new Promise(resolve => setTimeout(resolve, 150));
+
+      // Should only call scanFolder twice: once for initial, once for consolidated pending
+      expect(scanner.scanFolder).toHaveBeenCalledTimes(2);
+    });
   });
 
   describe('getWatchManagerStatus', () => {
