@@ -9,6 +9,7 @@ import { getSheetMetadata, createSheet, setValues, getValues, formatSheet, delet
 import { formatMonthFolder } from '../utils/spanish-date.js';
 import { CONTROL_CREDITOS_SHEETS, CONTROL_DEBITOS_SHEETS } from '../constants/spreadsheet-headers.js';
 import type { FolderStructure, Result, SortDestination } from '../types/index.js';
+import { debug, info, error as logError } from '../utils/logger.js';
 
 /** MIME type for Google Drive folders */
 const FOLDER_MIME = 'application/vnd.google-apps.folder';
@@ -60,30 +61,60 @@ async function findOrCreateFolder(
   rootId: string,
   name: string
 ): Promise<Result<string, Error>> {
-  console.log(`[Folder Discovery] Finding or creating folder "${name}" in parent ${rootId}`);
+  debug('Finding or creating folder', {
+    module: 'folder-structure',
+    phase: 'find-or-create',
+    folderName: name,
+    parentId: rootId
+  });
 
   const findResult = await findByName(rootId, name, FOLDER_MIME);
 
   if (!findResult.ok) {
-    console.error(`[Folder Discovery] Error searching for folder "${name}":`, findResult.error.message);
+    logError('Error searching for folder', {
+      module: 'folder-structure',
+      phase: 'find-or-create',
+      folderName: name,
+      error: findResult.error.message
+    });
     return findResult;
   }
 
   if (findResult.value) {
-    console.log(`[Folder Discovery] Folder "${name}" exists with ID: ${findResult.value.id}`);
+    debug('Folder already exists', {
+      module: 'folder-structure',
+      phase: 'find-or-create',
+      folderName: name,
+      folderId: findResult.value.id
+    });
     return { ok: true, value: findResult.value.id };
   }
 
   // Folder doesn't exist, create it
-  console.log(`[Folder Discovery] Folder "${name}" not found, creating new folder...`);
+  info('Creating new folder', {
+    module: 'folder-structure',
+    phase: 'find-or-create',
+    folderName: name,
+    parentId: rootId
+  });
   const createResult = await createFolder(rootId, name);
 
   if (!createResult.ok) {
-    console.error(`[Folder Discovery] Error creating folder "${name}":`, createResult.error.message);
+    logError('Error creating folder', {
+      module: 'folder-structure',
+      phase: 'find-or-create',
+      folderName: name,
+      error: createResult.error.message
+    });
     return createResult;
   }
 
-  console.log(`[Folder Discovery] Created folder "${name}" with ID: ${createResult.value.id}`);
+  info('Created folder successfully', {
+    module: 'folder-structure',
+    phase: 'find-or-create',
+    folderName: name,
+    folderId: createResult.value.id
+  });
   return { ok: true, value: createResult.value.id };
 }
 
@@ -213,7 +244,11 @@ export async function discoverFolderStructure(): Promise<Result<FolderStructure,
   const config = getConfig();
   const rootId = config.driveRootFolderId;
 
-  console.log(`[Folder Discovery] Starting folder structure discovery in root folder: ${rootId}`);
+  info('Starting folder structure discovery', {
+    module: 'folder-structure',
+    phase: 'discovery',
+    rootId
+  });
 
   // Find or create root-level folders (Entrada and Sin Procesar only)
   const entradaResult = await findOrCreateFolder(rootId, FOLDER_NAMES.entrada);
@@ -264,13 +299,15 @@ export async function discoverFolderStructure(): Promise<Result<FolderStructure,
   };
 
   cachedStructure = structure;
-  console.log(`[Folder Discovery] Folder structure discovery complete:`);
-  console.log(`  - Entrada: ${entradaResult.value}`);
-  console.log(`  - Sin Procesar: ${sinProcesarResult.value}`);
-  console.log(`  - Control de Creditos: ${controlCreditosResult.value}`);
-  console.log(`  - Control de Debitos: ${controlDebitosResult.value}`);
-  console.log(`  - Bank spreadsheets: ${bankSpreadsheets.size}`);
-  console.log(`  - Year folders will be created on-demand`);
+  info('Folder structure discovery complete', {
+    module: 'folder-structure',
+    phase: 'discovery',
+    entradaId: entradaResult.value,
+    sinProcesarId: sinProcesarResult.value,
+    controlCreditosId: controlCreditosResult.value,
+    controlDebitosId: controlDebitosResult.value,
+    bankSpreadsheets: bankSpreadsheets.size
+  });
   return { ok: true, value: structure };
 }
 
@@ -312,14 +349,26 @@ async function ensureClassificationFolders(
     if (findResult.value) {
       // Cache existing folder
       cachedStructure.classificationFolders.set(cacheKey, findResult.value.id);
-      console.log(`[Folder Discovery] Found existing ${folderName} folder in year ${year}: ${findResult.value.id}`);
+      debug('Found existing classification folder', {
+        module: 'folder-structure',
+        phase: 'classification-folders',
+        folderName,
+        year,
+        folderId: findResult.value.id
+      });
     } else {
       // Create new classification folder
       const createResult = await createFolder(yearFolderId, folderName);
       if (!createResult.ok) return createResult;
 
       cachedStructure.classificationFolders.set(cacheKey, createResult.value.id);
-      console.log(`[Folder Discovery] Created ${folderName} folder in year ${year}: ${createResult.value.id}`);
+      info('Created classification folder', {
+        module: 'folder-structure',
+        phase: 'classification-folders',
+        folderName,
+        year,
+        folderId: createResult.value.id
+      });
     }
   }
 
@@ -364,7 +413,12 @@ export async function getOrCreateMonthFolder(
     if (findYearResult.value) {
       yearFolderId = findYearResult.value.id;
       cachedStructure.yearFolders.set(year, yearFolderId);
-      console.log(`[Folder Discovery] Found existing year folder ${year}: ${yearFolderId}`);
+      debug('Found existing year folder', {
+        module: 'folder-structure',
+        phase: 'year-folder',
+        year,
+        folderId: yearFolderId
+      });
     } else {
       // Create new year folder
       const createYearResult = await createFolder(cachedStructure.rootId, year);
@@ -372,7 +426,12 @@ export async function getOrCreateMonthFolder(
 
       yearFolderId = createYearResult.value.id;
       cachedStructure.yearFolders.set(year, yearFolderId);
-      console.log(`[Folder Discovery] Created year folder ${year}: ${yearFolderId}`);
+      info('Created year folder', {
+        module: 'folder-structure',
+        phase: 'year-folder',
+        year,
+        folderId: yearFolderId
+      });
     }
   }
 
@@ -413,7 +472,14 @@ export async function getOrCreateMonthFolder(
   if (findMonthResult.value) {
     // Cache and return existing folder
     cachedStructure.monthFolders.set(monthCacheKey, findMonthResult.value.id);
-    console.log(`[Folder Discovery] Found existing month folder ${monthName} in ${year}/${destination}: ${findMonthResult.value.id}`);
+    debug('Found existing month folder', {
+      module: 'folder-structure',
+      phase: 'month-folder',
+      monthName,
+      year,
+      destination,
+      folderId: findMonthResult.value.id
+    });
     return { ok: true, value: findMonthResult.value.id };
   }
 
@@ -423,6 +489,13 @@ export async function getOrCreateMonthFolder(
 
   // Cache and return new folder
   cachedStructure.monthFolders.set(monthCacheKey, createMonthResult.value.id);
-  console.log(`[Folder Discovery] Created month folder ${monthName} in ${year}/${destination}: ${createMonthResult.value.id}`);
+  info('Created month folder', {
+    module: 'folder-structure',
+    phase: 'month-folder',
+    monthName,
+    year,
+    destination,
+    folderId: createMonthResult.value.id
+  });
   return { ok: true, value: createMonthResult.value.id };
 }

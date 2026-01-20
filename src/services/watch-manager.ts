@@ -8,6 +8,7 @@ import { randomUUID } from 'crypto';
 import { watchFolder, stopWatching as driveStopWatching } from './drive.js';
 import { scanFolder } from '../processing/scanner.js';
 import type { WatchChannel, WatchManagerStatus, Result } from '../types/index.js';
+import { debug, info, error as logError } from '../utils/logger.js';
 
 /**
  * Watch manager state
@@ -39,17 +40,17 @@ export function initWatchManager(url: string): void {
 
   // Start channel renewal cron job (every 30 minutes)
   renewalJob = cron.schedule('*/30 * * * *', async () => {
-    console.log('Running channel renewal check...');
+    debug('Running channel renewal check', { module: 'watch-manager', phase: 'renewal' });
     await renewChannels();
   });
 
   // Start fallback polling cron job (every 5 minutes)
   pollingJob = cron.schedule('*/5 * * * *', () => {
-    console.log('Running fallback polling check...');
+    debug('Running fallback polling check', { module: 'watch-manager', phase: 'polling' });
     checkAndTriggerFallbackScan();
   });
 
-  console.log('Watch manager initialized');
+  info('Watch manager initialized', { module: 'watch-manager', phase: 'init' });
 }
 
 /**
@@ -100,7 +101,13 @@ export async function startWatching(folderId: string): Promise<Result<WatchChann
 
   activeChannels.set(folderId, channel);
 
-  console.log(`Started watching folder ${folderId}, expires at ${channel.expiration.toISOString()}`);
+  info('Started watching folder', {
+    module: 'watch-manager',
+    phase: 'start-watching',
+    folderId,
+    channelId,
+    expiration: channel.expiration.toISOString()
+  });
 
   return { ok: true, value: channel };
 }
@@ -134,7 +141,11 @@ export async function stopWatching(folderId: string): Promise<Result<void>> {
   // Clean up processed notifications for this channel
   processedNotifications.delete(channel.channelId);
 
-  console.log(`Stopped watching folder ${folderId}`);
+  info('Stopped watching folder', {
+    module: 'watch-manager',
+    phase: 'stop-watching',
+    folderId
+  });
 
   return { ok: true, value: undefined };
 }
@@ -149,11 +160,19 @@ export async function stopAllWatching(): Promise<void> {
   for (const folderId of folderIds) {
     const result = await stopWatching(folderId);
     if (!result.ok) {
-      console.error(`Failed to stop watching ${folderId}:`, result.error.message);
+      logError('Failed to stop watching folder', {
+        module: 'watch-manager',
+        phase: 'stop-all-watching',
+        folderId,
+        error: result.error.message
+      });
     }
   }
 
-  console.log('Stopped all watch channels');
+  info('Stopped all watch channels', {
+    module: 'watch-manager',
+    phase: 'stop-all-watching'
+  });
 }
 
 /**
@@ -225,13 +244,21 @@ export function markNotificationProcessed(
 export function triggerScan(folderId?: string): void {
   // If a scan is already running, queue a pending scan
   if (runningScan) {
-    console.log(`Scan already in progress, queuing pending scan${folderId ? ` for folder ${folderId}` : ''}`);
+    info('Scan already in progress, queuing pending scan', {
+      module: 'watch-manager',
+      phase: 'scan-trigger',
+      folderId
+    });
     hasPendingScan = true;
     pendingScanFolderId = folderId;
     return;
   }
 
-  console.log(`Starting folder scan${folderId ? ` for folder ${folderId}` : ''}...`);
+  info('Starting folder scan', {
+    module: 'watch-manager',
+    phase: 'scan-trigger',
+    folderId
+  });
 
   // Run scan directly (not in queue) to avoid deadlock
   // The scanFolder function will use the queue for individual file processing
@@ -239,13 +266,28 @@ export function triggerScan(folderId?: string): void {
     .then(result => {
       if (result.ok) {
         lastScanTime = new Date();
-        console.log(`Scan complete: ${result.value.filesProcessed} files processed, ${result.value.errors} errors`);
+        info('Scan complete', {
+          module: 'watch-manager',
+          phase: 'scan-complete',
+          filesProcessed: result.value.filesProcessed,
+          errors: result.value.errors,
+          facturasAdded: result.value.facturasAdded,
+          pagosAdded: result.value.pagosAdded
+        });
       } else {
-        console.error('Scan failed:', result.error.message);
+        logError('Scan failed', {
+          module: 'watch-manager',
+          phase: 'scan-complete',
+          error: result.error.message
+        });
       }
     })
     .catch(err => {
-      console.error('Scan execution failed:', err);
+      logError('Scan execution failed', {
+        module: 'watch-manager',
+        phase: 'scan-complete',
+        error: err instanceof Error ? err.message : String(err)
+      });
     })
     .finally(() => {
       runningScan = null;
@@ -255,7 +297,11 @@ export function triggerScan(folderId?: string): void {
         const queuedFolderId = pendingScanFolderId;
         hasPendingScan = false;
         pendingScanFolderId = undefined;
-        console.log(`Starting pending scan${queuedFolderId ? ` for folder ${queuedFolderId}` : ''}...`);
+        info('Starting pending scan', {
+          module: 'watch-manager',
+          phase: 'scan-trigger',
+          folderId: queuedFolderId
+        });
         triggerScan(queuedFolderId);
       }
     });
@@ -293,19 +339,34 @@ async function renewChannels(): Promise<void> {
     const timeUntilExpiration = channel.expiration.getTime() - now;
 
     if (timeUntilExpiration < RENEWAL_THRESHOLD_MS) {
-      console.log(`Renewing channel for folder ${channel.folderId}...`);
+      info('Renewing channel', {
+        module: 'watch-manager',
+        phase: 'renewal',
+        folderId: channel.folderId,
+        expiresIn: timeUntilExpiration
+      });
 
       // Stop old channel
       const stopResult = await stopWatching(channel.folderId);
       if (!stopResult.ok) {
-        console.error(`Failed to stop old channel: ${stopResult.error.message}`);
+        logError('Failed to stop old channel', {
+          module: 'watch-manager',
+          phase: 'renewal',
+          folderId: channel.folderId,
+          error: stopResult.error.message
+        });
         continue;
       }
 
       // Start new channel
       const startResult = await startWatching(channel.folderId);
       if (!startResult.ok) {
-        console.error(`Failed to start new channel: ${startResult.error.message}`);
+        logError('Failed to start new channel', {
+          module: 'watch-manager',
+          phase: 'renewal',
+          folderId: channel.folderId,
+          error: startResult.error.message
+        });
       }
     }
   }
@@ -325,7 +386,10 @@ function checkAndTriggerFallbackScan(): void {
 
   // If we haven't received notifications in a while, trigger a scan
   if (!lastNotificationTime || (now - lastNotificationTime.getTime() > MAX_NOTIFICATION_AGE_MS)) {
-    console.log('No recent notifications, triggering fallback scan');
+    info('No recent notifications, triggering fallback scan', {
+      module: 'watch-manager',
+      phase: 'fallback-scan'
+    });
     triggerScan();
   }
 }
@@ -335,7 +399,10 @@ function checkAndTriggerFallbackScan(): void {
  * Stops cron jobs and all watch channels
  */
 export async function shutdownWatchManager(): Promise<void> {
-  console.log('Shutting down watch manager...');
+  info('Shutting down watch manager', {
+    module: 'watch-manager',
+    phase: 'shutdown'
+  });
 
   // Stop cron jobs
   if (renewalJob) {
@@ -361,5 +428,8 @@ export async function shutdownWatchManager(): Promise<void> {
   hasPendingScan = false;
   pendingScanFolderId = undefined;
 
-  console.log('Watch manager shutdown complete');
+  info('Watch manager shutdown complete', {
+    module: 'watch-manager',
+    phase: 'shutdown'
+  });
 }

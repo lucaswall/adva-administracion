@@ -11,6 +11,7 @@ import { webhookRoutes } from './routes/webhooks.js';
 import { discoverFolderStructure, getCachedFolderStructure } from './services/folder-structure.js';
 import { initWatchManager, startWatching, shutdownWatchManager } from './services/watch-manager.js';
 import { scanFolder } from './processing/scanner.js';
+import { info, error as logError } from './utils/logger.js';
 
 /**
  * Build and configure the Fastify server
@@ -47,23 +48,29 @@ async function initializeFolderStructure(): Promise<void> {
 
   // Skip in test mode or when no root folder is configured
   if (config.nodeEnv === 'test' || !config.driveRootFolderId) {
-    console.log('Skipping folder structure initialization');
+    info('Skipping folder structure initialization', { module: 'server', phase: 'init' });
     return;
   }
 
-  console.log('Discovering folder structure...');
+  info('Discovering folder structure', { module: 'server', phase: 'init' });
   const result = await discoverFolderStructure();
 
   if (!result.ok) {
-    console.error('Failed to discover folder structure:', result.error.message);
+    logError('Failed to discover folder structure', {
+      module: 'server',
+      phase: 'init',
+      error: result.error.message
+    });
     throw result.error;
   }
 
-  console.log('Folder structure initialized successfully');
-  console.log(`  - Entrada: ${result.value.entradaId}`);
-  console.log(`  - Sin Procesar: ${result.value.sinProcesarId}`);
-  console.log(`  - Bank spreadsheets: ${result.value.bankSpreadsheets.size}`);
-  console.log(`  - Year folders will be created on-demand`);
+  info('Folder structure initialized successfully', {
+    module: 'server',
+    phase: 'init',
+    entradaId: result.value.entradaId,
+    sinProcesarId: result.value.sinProcesarId,
+    bankSpreadsheets: result.value.bankSpreadsheets.size
+  });
 }
 
 /**
@@ -75,7 +82,10 @@ async function initializeRealTimeMonitoring(): Promise<void> {
 
   // Skip if no webhook URL configured
   if (!config.webhookUrl) {
-    console.log('Real-time monitoring disabled (no WEBHOOK_URL configured)');
+    info('Real-time monitoring disabled (no WEBHOOK_URL configured)', {
+      module: 'server',
+      phase: 'init'
+    });
     return;
   }
 
@@ -85,17 +95,31 @@ async function initializeRealTimeMonitoring(): Promise<void> {
   // Get entrada folder ID from cached structure
   const folderStructure = getCachedFolderStructure();
   if (!folderStructure) {
-    console.error('Cannot start watching: folder structure not initialized');
+    logError('Cannot start watching: folder structure not initialized', {
+      module: 'server',
+      phase: 'init'
+    });
     return;
   }
 
   // Start watching the Entrada folder
   const watchResult = await startWatching(folderStructure.entradaId);
   if (!watchResult.ok) {
-    console.error('Failed to start watching:', watchResult.error.message);
-    console.log('Continuing without real-time monitoring (fallback polling active)');
+    logError('Failed to start watching', {
+      module: 'server',
+      phase: 'init',
+      error: watchResult.error.message
+    });
+    info('Continuing without real-time monitoring (fallback polling active)', {
+      module: 'server',
+      phase: 'init'
+    });
   } else {
-    console.log('Real-time monitoring active for Entrada folder');
+    info('Real-time monitoring active for Entrada folder', {
+      module: 'server',
+      phase: 'init',
+      folderId: folderStructure.entradaId
+    });
   }
 }
 
@@ -110,13 +134,24 @@ async function performStartupScan(): Promise<void> {
     return;
   }
 
-  console.log('Performing startup scan...');
+  info('Performing startup scan', { module: 'server', phase: 'startup-scan' });
   const result = await scanFolder();
 
   if (result.ok) {
-    console.log(`Startup scan complete: ${result.value.filesProcessed} files processed`);
+    info('Startup scan complete', {
+      module: 'server',
+      phase: 'startup-scan',
+      filesProcessed: result.value.filesProcessed,
+      facturasAdded: result.value.facturasAdded,
+      pagosAdded: result.value.pagosAdded,
+      errors: result.value.errors
+    });
   } else {
-    console.error('Startup scan failed:', result.error.message);
+    logError('Startup scan failed', {
+      module: 'server',
+      phase: 'startup-scan',
+      error: result.error.message
+    });
   }
 }
 
@@ -134,8 +169,13 @@ async function start() {
       host: '0.0.0.0'
     });
 
-    console.log(`Server running at http://0.0.0.0:${config.port}`);
-    console.log(`Environment: ${config.nodeEnv}`);
+    info('Server started successfully', {
+      module: 'server',
+      phase: 'startup',
+      port: config.port,
+      environment: config.nodeEnv,
+      url: `http://0.0.0.0:${config.port}`
+    });
 
     // Initialize folder structure after server is running
     await initializeFolderStructure();
@@ -148,14 +188,18 @@ async function start() {
 
     // Graceful shutdown handler
     const shutdown = async (signal: string) => {
-      console.log(`Received ${signal}, shutting down gracefully...`);
+      info('Received shutdown signal', {
+        module: 'server',
+        phase: 'shutdown',
+        signal
+      });
 
       // Stop watching before closing
       await shutdownWatchManager();
-      console.log('Watch channels stopped');
+      info('Watch channels stopped', { module: 'server', phase: 'shutdown' });
 
       await server.close();
-      console.log('Server closed');
+      info('Server closed', { module: 'server', phase: 'shutdown' });
       process.exit(0);
     };
 
@@ -163,7 +207,11 @@ async function start() {
     process.on('SIGINT', () => shutdown('SIGINT'));
 
   } catch (err) {
-    console.error('Failed to start server:', err);
+    logError('Failed to start server', {
+      module: 'server',
+      phase: 'startup',
+      error: err instanceof Error ? err.message : String(err)
+    });
     process.exit(1);
   }
 }
