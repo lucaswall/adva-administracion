@@ -69,12 +69,13 @@ Common payment indicators (both types):
 
 5. "resumen_bancario" - Bank statement (Resumen/Extracto Bancario)
    Key indicators:
-   - Contains "Extracto Bancario", "Resumen de Cuenta", "Estado de Cuenta"
-   - Shows a DATE RANGE (período, desde/hasta, fechas)
-   - Has "Saldo Inicial" and "Saldo Final" (opening/closing balance)
-   - Lists multiple transactions/movements
+   - Contains "Extracto Bancario", "Resumen de Cuenta", "Estado de Cuenta", OR just "Resumen" in header
+   - Shows a DATE RANGE (período, desde/hasta, fechas) OR a specific statement date
+   - Has balance references: "Saldo Inicial"/"Saldo Final", "Saldo Anterior"/"Saldo al", or "Opening/Closing Balance"
+   - Shows account information: "Cuenta Corriente", "Caja de Ahorro", "CC", "CA", or CBU number
+   - Lists transactions/movements OR explicitly states "SIN MOVIMIENTOS" (no movements)
    - Bank name prominent in header
-   - May show "Total Débitos" and "Total Créditos"
+   - May show "Total Débitos" and "Total Créditos" or "Total Movimientos"
 
 ### SALARY RECEIPTS
 
@@ -283,21 +284,21 @@ DOCUMENT STRUCTURE:
 Bank statements typically contain:
 1. BANK: The bank issuing the statement
 2. ACCOUNT: Account number or card brand (for credit cards)
-3. PERIOD: Date range covered by the statement
-4. BALANCES: Opening and closing balances
-5. MOVEMENTS: List of transactions (we only count them, not extract details)
+3. PERIOD: Date range covered by the statement (may be a range or a specific closing date)
+4. BALANCES: Opening and closing balances (may be labeled "Saldo Inicial/Final" or "Saldo Anterior/Al")
+5. MOVEMENTS: List of transactions (we only count them, not extract details). May show "SIN MOVIMIENTOS" for zero transactions.
 
 Required fields to extract:
 - banco: Bank name (e.g., "BBVA", "Santander", "Galicia", "Macro", "HSBC", "ICBC", "Banco Nación")
 - numeroCuenta: Account number OR card brand (e.g., "1234567890" or "VISA", "Mastercard", "American Express", "Cabal")
-  * For regular bank accounts: extract the full account number (CBU or account number visible in the document)
+  * For regular bank accounts: extract the full account number (CBU or account number visible like "007-401617/2")
   * For credit card statements: extract the card brand (VISA, Mastercard, American Express, Cabal, etc.)
-- fechaDesde: Start date of the statement period (format as YYYY-MM-DD)
-- fechaHasta: End date of the statement period (format as YYYY-MM-DD)
-- saldoInicial: Opening balance at the start of the period (number)
-- saldoFinal: Closing balance at the end of the period (number)
-- moneda: Currency (ARS or USD)
-- cantidadMovimientos: Count of transaction entries in the statement (number)
+- fechaDesde: Start date of the statement period (format as YYYY-MM-DD). If only a closing date is visible (e.g., "SALDO AL 30 DE DICIEMBRE"), estimate the start date as the first day of that month. IMPORTANT: You MUST extract the year from context - look for years in page headers, footers, legal text, or transaction dates. If no year is visible but current year can be inferred from context, use it.
+- fechaHasta: End date of the statement period (format as YYYY-MM-DD). Look for dates like "SALDO AL 30 DE DICIEMBRE" or "al DD/MM/YYYY". IMPORTANT: You MUST extract the year from context - look for years in page headers, footers, legal text, or transaction dates. If you see "30 DE DICIEMBRE" without a year, search the entire document for year information (e.g., "2024", "2025", "2026" in headers, footers, or legal notices).
+- saldoInicial: Opening balance at the start of the period (number). May be labeled "Saldo Inicial", "Saldo Anterior", or "Opening Balance".
+- saldoFinal: Closing balance at the end of the period (number). May be labeled "Saldo Final", "Saldo al DD/MM/YYYY", or "Closing Balance".
+- moneda: Currency (ARS or USD). Look for "u$s", "USD", "U$S" for USD, or "$", "ARS", "Pesos" for ARS.
+- cantidadMovimientos: Count of transaction entries in the statement (number). If the statement shows "SIN MOVIMIENTOS", set this to 0.
 
 Return ONLY valid JSON in this exact format:
 {
@@ -321,6 +322,23 @@ For credit cards, return format like:
   "saldoFinal": 0.00,
   "moneda": "ARS",
   "cantidadMovimientos": 23
+}
+
+For statements with only closing date (like "SALDO AL 30 DE DICIEMBRE"):
+1. Search the entire document for year information (headers, footers, legal notices, dates like "01/03/2026" or "20260102")
+2. If you find "SALDO AL 30 DE DICIEMBRE" and a year reference like "2026", consider if the closing is in December of the previous year (2025)
+3. Set fechaHasta to the closing date with the correct year
+4. Set fechaDesde to the first day of that month
+Example:
+{
+  "banco": "BBVA",
+  "numeroCuenta": "007-401617/2",
+  "fechaDesde": "2025-12-01",
+  "fechaHasta": "2025-12-30",
+  "saldoInicial": 0.00,
+  "saldoFinal": 0.00,
+  "moneda": "USD",
+  "cantidadMovimientos": 0
 }
 
 Important:
