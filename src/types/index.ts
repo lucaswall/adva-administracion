@@ -341,6 +341,21 @@ export interface GeminiResponse {
 }
 
 /**
+ * ADVA role validation result
+ * Validates that ADVA CUIT is in the expected role for the document type
+ */
+export interface AdvaRoleValidation {
+  /** Whether ADVA is in the correct role */
+  isValid: boolean;
+  /** Expected role for this document type */
+  expectedRole: 'emisor' | 'receptor' | 'pagador' | 'beneficiario' | 'empleador';
+  /** ADVA's CUIT (always 30709076783) */
+  advaCuit: string;
+  /** Validation error messages */
+  errors: string[];
+}
+
+/**
  * Parse result with validation info
  */
 export interface ParseResult<T> {
@@ -352,6 +367,8 @@ export interface ParseResult<T> {
   needsReview: boolean;
   /** Missing required fields */
   missingFields?: string[];
+  /** ADVA role validation result */
+  roleValidation?: AdvaRoleValidation;
 }
 
 /**

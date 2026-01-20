@@ -49,7 +49,7 @@ src/
 ├── types/index.ts
 ├── matching/matcher.ts
 ├── gemini/{client,prompts,parser,errors}.ts
-├── utils/{date,numbers,currency,validation,file-naming,spanish-date,exchange-rate,drive-parser}.ts
+├── utils/{date,numbers,currency,validation,file-naming,spanish-date,exchange-rate,drive-parser,logger}.ts
 └── bank/{matcher,autofill,subdiario-matcher}.ts
 ```
 
@@ -105,7 +105,7 @@ ADVA CUIT: 30709076783 | Direction determines routing:
 |------|-----------|-------------|
 | factura_emitida | emisor | Creditos |
 | factura_recibida | receptor | Debitos |
-| pago_enviado | ordenante | Debitos |
+| pago_enviado | pagador | Debitos |
 | pago_recibido | beneficiario | Creditos |
 | resumen_bancario | - | Bancos |
 | recibo | empleador | Debitos |
@@ -124,5 +124,12 @@ ROOT/
 ```
 
 ## SPREADSHEETS
-- **Control de Creditos**: Facturas Emitidas, Pagos Recibidos
-- **Control de Debitos**: Facturas Recibidas, Pagos Enviados, Recibos
+- **Control de Creditos**: Facturas Emitidas (A:R, 18 cols), Pagos Recibidos (A:O, 15 cols)
+- **Control de Debitos**: Facturas Recibidas (A:R, 18 cols), Pagos Enviados (A:O, 15 cols), Recibos (A:R, 18 cols)
+
+**IMPORTANT**: Spreadsheets only store counterparty information, NOT ADVA's information:
+- **Facturas Emitidas**: Only receptor fields (cuitReceptor, razonSocialReceptor), ADVA as emisor is implicit
+- **Facturas Recibidas**: Only emisor fields (cuitEmisor, razonSocialEmisor), ADVA as receptor is implicit
+- **Pagos Enviados**: Only beneficiario fields (cuitBeneficiario, nombreBeneficiario), ADVA as pagador is implicit
+- **Pagos Recibidos**: Only pagador fields (cuitPagador, nombrePagador), ADVA as beneficiario is implicit
+- **Recibos**: Only employee info (nombreEmpleado, cuilEmpleado), ADVA as empleador is implicit

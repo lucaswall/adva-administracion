@@ -3,16 +3,15 @@
  * These headers match the SPREADSHEET_FORMAT.md specification
  */
 
-/** Headers for Facturas sheet (columns A:S) */
-export const FACTURA_HEADERS = [
+/** Headers for Facturas Emitidas sheet - ADVA is emisor, only store receptor info (columns A:R) */
+export const FACTURA_EMITIDA_HEADERS = [
   'fechaEmision',
   'fileId',
   'fileName',
   'tipoComprobante',
   'nroFactura',
-  'cuitEmisor',
-  'razonSocialEmisor',
   'cuitReceptor',
+  'razonSocialReceptor',
   'importeNeto',
   'importeIva',
   'importeTotal',
@@ -26,8 +25,49 @@ export const FACTURA_HEADERS = [
   'hasCuitMatch',
 ];
 
-/** Headers for Pagos sheet (columns A:Q) */
-export const PAGO_HEADERS = [
+/** Headers for Facturas Recibidas sheet - ADVA is receptor, only store emisor info (columns A:R) */
+export const FACTURA_RECIBIDA_HEADERS = [
+  'fechaEmision',
+  'fileId',
+  'fileName',
+  'tipoComprobante',
+  'nroFactura',
+  'cuitEmisor',
+  'razonSocialEmisor',
+  'importeNeto',
+  'importeIva',
+  'importeTotal',
+  'moneda',
+  'concepto',
+  'processedAt',
+  'confidence',
+  'needsReview',
+  'matchedPagoFileId',
+  'matchConfidence',
+  'hasCuitMatch',
+];
+
+/** Headers for Pagos Enviados sheet - ADVA is pagador, only store beneficiario info (columns A:O) */
+export const PAGO_ENVIADO_HEADERS = [
+  'fechaPago',
+  'fileId',
+  'fileName',
+  'banco',
+  'importePagado',
+  'moneda',
+  'referencia',
+  'cuitBeneficiario',
+  'nombreBeneficiario',
+  'concepto',
+  'processedAt',
+  'confidence',
+  'needsReview',
+  'matchedFacturaFileId',
+  'matchConfidence',
+];
+
+/** Headers for Pagos Recibidos sheet - ADVA is beneficiario, only store pagador info (columns A:O) */
+export const PAGO_RECIBIDO_HEADERS = [
   'fechaPago',
   'fileId',
   'fileName',
@@ -37,8 +77,6 @@ export const PAGO_HEADERS = [
   'referencia',
   'cuitPagador',
   'nombrePagador',
-  'cuitBeneficiario',
-  'nombreBeneficiario',
   'concepto',
   'processedAt',
   'confidence',
@@ -100,12 +138,12 @@ export interface SheetConfig {
 export const CONTROL_CREDITOS_SHEETS: SheetConfig[] = [
   {
     title: 'Facturas Emitidas',
-    headers: FACTURA_HEADERS,
-    monetaryColumns: [8, 9, 10] // importeNeto, importeIva, importeTotal (0-indexed: 8, 9, 10)
+    headers: FACTURA_EMITIDA_HEADERS,
+    monetaryColumns: [7, 8, 9] // importeNeto, importeIva, importeTotal (0-indexed: 7, 8, 9)
   },
   {
     title: 'Pagos Recibidos',
-    headers: PAGO_HEADERS,
+    headers: PAGO_RECIBIDO_HEADERS,
     monetaryColumns: [4] // importePagado (0-indexed: 4)
   },
 ];
@@ -117,12 +155,12 @@ export const CONTROL_CREDITOS_SHEETS: SheetConfig[] = [
 export const CONTROL_DEBITOS_SHEETS: SheetConfig[] = [
   {
     title: 'Facturas Recibidas',
-    headers: FACTURA_HEADERS,
-    monetaryColumns: [8, 9, 10] // importeNeto, importeIva, importeTotal (0-indexed: 8, 9, 10)
+    headers: FACTURA_RECIBIDA_HEADERS,
+    monetaryColumns: [7, 8, 9] // importeNeto, importeIva, importeTotal (0-indexed: 7, 8, 9)
   },
   {
     title: 'Pagos Enviados',
-    headers: PAGO_HEADERS,
+    headers: PAGO_ENVIADO_HEADERS,
     monetaryColumns: [4] // importePagado (0-indexed: 4)
   },
   {

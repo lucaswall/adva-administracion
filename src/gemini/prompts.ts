@@ -60,17 +60,28 @@ Return ONLY valid JSON, no additional text:
 /**
  * Prompt for extracting data from Argentine ARCA facturas
  */
-export const FACTURA_PROMPT = `You are analyzing an Argentine ARCA invoice (factura). Extract all available data and return it as JSON.
+export const FACTURA_PROMPT = `You are analyzing an Argentine ARCA invoice (factura). Extract data and return it as JSON.
 
-DOCUMENT STRUCTURE - Extract based on document POSITION, NOT assumptions:
+IMPORTANT - ADVA IDENTIFICATION:
+ADVA's CUIT is ${ADVA_CUIT}. Based on the classification you received:
+
+FOR FACTURAS EMITIDAS (ADVA is emisor):
+- ADVA issued this invoice, so cuitEmisor MUST be ${ADVA_CUIT}
+- Extract ONLY receptor information: cuitReceptor, razonSocialReceptor
+- You may extract emisor fields to validate ADVA's position, but focus on receptor
+
+FOR FACTURAS RECIBIDAS (ADVA is receptor):
+- ADVA received this invoice, so cuitReceptor should be ${ADVA_CUIT}
+- Extract ONLY emisor information: cuitEmisor, razonSocialEmisor
+- You may extract receptor fields to validate ADVA's position, but focus on emisor
+
+VALIDATION:
+- Extract the CUIT from the position that should contain ADVA
+- If it's NOT ${ADVA_CUIT}, this document may be misclassified
+
+DOCUMENT STRUCTURE - Extract based on document POSITION:
 1. ISSUER (Emisor): Company at TOP/HEADER section - the one ISSUING the invoice
 2. RECEPTOR (Cliente): Company in CLIENT section below - labeled "Razón Social", "Cliente", "Señor/es"
-
-EXTRACTION RULES:
-- cuitEmisor: CUIT from the TOP/HEADER section (the company issuing the invoice)
-- cuitReceptor: CUIT from the CLIENT section below
-- Do NOT assume which company should be in which field
-- Simply extract what you see in each position
 
 Required fields to extract:
 - tipoComprobante: ONLY the single letter code (A, B, C, E) or two-letter code (NC for Nota de Crédito, ND for Nota de Débito). DO NOT include the word "FACTURA" - extract ONLY the letter code that follows it. Examples: if the document shows "FACTURA C", extract "C"; if it shows "FACTURA B", extract "B".
@@ -122,6 +133,23 @@ Important:
  */
 export const PAGO_BBVA_PROMPT = `Extract data from this Argentine bank payment slip (BBVA, Santander, etc).
 
+IMPORTANT - ADVA IDENTIFICATION:
+ADVA's CUIT is ${ADVA_CUIT}. Based on the classification you received:
+
+FOR PAGOS ENVIADOS (ADVA is pagador):
+- ADVA sent this payment, so pagador should be ADVA
+- Extract ONLY beneficiario information: cuitBeneficiario, nombreBeneficiario
+- You may extract pagador fields to validate ADVA's position, but focus on beneficiario
+
+FOR PAGOS RECIBIDOS (ADVA is beneficiario):
+- ADVA received this payment, so beneficiario should be ADVA
+- Extract ONLY pagador information: cuitPagador, nombrePagador
+- You may extract beneficiario fields to validate ADVA's position, but focus on pagador
+
+VALIDATION:
+- Extract the CUIT from the position that should contain ADVA
+- If it's NOT ${ADVA_CUIT}, this document may be misclassified
+
 PAYMENT STRUCTURE - look for these section labels:
 - PAYER: "Ordenante", "Datos del Ordenante", "cuenta débito" = who SENDS money
 - BENEFICIARY: "Beneficiario", "Destinatario", "cuenta crédito" = who RECEIVES money
@@ -158,6 +186,10 @@ Return ONLY valid JSON, no additional text. If a field is not visible, omit it:
  * Prompt for extracting data from Argentine salary payment slips
  */
 export const RECIBO_PROMPT = `Extract data from this Argentine salary payment slip (Recibo de Sueldo).
+
+VALIDATION - ADVA IS EMPLOYER:
+- cuitEmpleador MUST be ${ADVA_CUIT} (ADVA is the employer)
+- If cuitEmpleador is different, this document is misclassified
 
 Required fields:
 - tipoRecibo: "sueldo" (regular) or "liquidacion_final" (severance)
