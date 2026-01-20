@@ -5,7 +5,7 @@
 
 import type { Result, Moneda } from '../types/index.js';
 import { parseArgDate } from './date.js';
-import { amountsMatch } from './currency.js';
+import { amountsMatch } from './numbers.js';
 
 /**
  * Exchange rate data from ArgentinaDatos API

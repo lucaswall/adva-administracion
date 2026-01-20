@@ -144,6 +144,7 @@ src/
 │   └── file-naming.ts     # Standardized document file naming
 └── bank/
     ├── matcher.ts         # Bank movement matching
+    ├── autofill.ts        # Bank auto-fill functionality
     └── subdiario-matcher.ts # Subdiario matching
 
 tests/

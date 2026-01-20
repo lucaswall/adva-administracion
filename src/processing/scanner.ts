@@ -50,16 +50,6 @@ export interface ProcessFileResult {
 }
 
 /**
- * Scanner configuration options
- */
-export interface ScannerConfig {
-  concurrency?: number;
-  matchDaysBefore?: number;
-  matchDaysAfter?: number;
-  usdArsTolerancePercent?: number;
-}
-
-/**
  * Rematch result
  */
 export interface RematchResult {

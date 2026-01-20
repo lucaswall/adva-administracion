@@ -117,7 +117,7 @@ matchConfidence
 
 ## Bancos (Bank Statements)
 
-**Note:** Bank statements are stored as individual files in the `Bancos/` folder, not in spreadsheets.
+**Note:** Bank statements are stored as individual files in year-based `{YYYY}/Bancos/` folders (no month subfolders), not in spreadsheets.
 
 ### ResumenBancario
 

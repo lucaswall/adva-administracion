@@ -9,13 +9,12 @@ import type {
   SubdiarioMatchResult,
   MatchConfidence
 } from '../types/index.js';
-import { isValidCuit } from '../utils/validation.js';
+import { extractCuitFromText } from '../utils/validation.js';
 import { parseArgDate } from '../utils/date.js';
+import { amountsMatch } from '../utils/numbers.js';
 
-/**
- * Amount tolerance for matching (in pesos)
- */
-const AMOUNT_TOLERANCE = 1;
+/** Re-export for convenience */
+export const extractCuitFromMovementConcepto = extractCuitFromText;
 
 /**
  * Date range for MEDIUM confidence (±15 days)
@@ -26,56 +25,6 @@ const MEDIUM_CONFIDENCE_DAYS = 15;
  * Date range for LOW confidence (±30 days)
  */
 const LOW_CONFIDENCE_DAYS = 30;
-
-/**
- * Extracts CUIT from bank movement concepto text
- * Uses the same logic as extractCuitFromConcepto in matcher.ts
- *
- * @param concepto - Bank movement concept text
- * @returns Extracted CUIT (11 digits) or undefined
- */
-export function extractCuitFromMovementConcepto(concepto: string): string | undefined {
-  if (!concepto) {
-    return undefined;
-  }
-
-  // Pattern 1: Explicit CUIT/CUIL prefix
-  const explicitMatch = concepto.match(/CUI[TL][:\s]*(\d{2}[-\s]?\d{8}[-\s]?\d)/i);
-  if (explicitMatch) {
-    const cleaned = explicitMatch[1].replace(/[-\s]/g, '');
-    if (isValidCuit(cleaned)) {
-      return cleaned;
-    }
-  }
-
-  // Pattern 2: 11-digit number with separators (XX-XXXXXXXX-X)
-  const separatedMatch = concepto.match(/(\d{2})[-\s](\d{8})[-\s](\d)/);
-  if (separatedMatch) {
-    const cleaned = separatedMatch[1] + separatedMatch[2] + separatedMatch[3];
-    if (isValidCuit(cleaned)) {
-      return cleaned;
-    }
-  }
-
-  // Pattern 3: Plain 11-digit number (validate checksum to reduce false positives)
-  const plainMatches = concepto.match(/\b(\d{11})\b/g);
-  if (plainMatches) {
-    for (const match of plainMatches) {
-      if (isValidCuit(match)) {
-        return match;
-      }
-    }
-  }
-
-  return undefined;
-}
-
-/**
- * Checks if two amounts match within tolerance
- */
-function amountsMatchWithTolerance(amount1: number, amount2: number): boolean {
-  return Math.abs(amount1 - amount2) <= AMOUNT_TOLERANCE;
-}
 
 /**
  * Calculates the number of days between two dates
@@ -202,7 +151,7 @@ export class SubdiarioMatcher {
       }
 
       // Check amount
-      if (!amountsMatchWithTolerance(cobro.total, amount)) {
+      if (!amountsMatch(cobro.total, amount)) {
         continue;
       }
 
@@ -234,7 +183,7 @@ export class SubdiarioMatcher {
 
     for (const cobro of cobros) {
       // Check amount
-      if (!amountsMatchWithTolerance(cobro.total, amount)) {
+      if (!amountsMatch(cobro.total, amount)) {
         continue;
       }
 

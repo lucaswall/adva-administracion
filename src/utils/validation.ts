@@ -375,3 +375,51 @@ export function validateTipoRecibo(value: unknown): TipoRecibo | undefined {
   const validTypes: TipoRecibo[] = ['sueldo', 'liquidacion_final'];
   return validTypes.includes(value as TipoRecibo) ? (value as TipoRecibo) : undefined;
 }
+
+/**
+ * Extracts CUIT/CUIL from text using regex patterns
+ *
+ * Patterns recognized:
+ * - "CUIT 30-71234567-8" or "CUIL: 20271190523"
+ * - "XX-XXXXXXXX-X" format
+ * - Plain 11-digit number with valid checksum
+ * - Embedded in text like "TRANSFERENCI 30709076783"
+ *
+ * @param text - Text to search for CUIT/CUIL
+ * @returns Extracted CUIT (11 digits) or undefined
+ */
+export function extractCuitFromText(text: string): string | undefined {
+  if (!text) {
+    return undefined;
+  }
+
+  // Pattern 1: Explicit CUIT/CUIL prefix
+  const explicitMatch = text.match(/CUI[TL][:\s]*(\d{2}[-\s]?\d{8}[-\s]?\d)/i);
+  if (explicitMatch) {
+    const cleaned = explicitMatch[1].replace(/[-\s]/g, '');
+    if (isValidCuit(cleaned)) {
+      return cleaned;
+    }
+  }
+
+  // Pattern 2: 11-digit number with separators (XX-XXXXXXXX-X)
+  const separatedMatch = text.match(/(\d{2})[-\s](\d{8})[-\s](\d)/);
+  if (separatedMatch) {
+    const cleaned = separatedMatch[1] + separatedMatch[2] + separatedMatch[3];
+    if (isValidCuit(cleaned)) {
+      return cleaned;
+    }
+  }
+
+  // Pattern 3: Plain 11-digit number (validate checksum to reduce false positives)
+  const plainMatches = text.match(/\b(\d{11})\b/g);
+  if (plainMatches) {
+    for (const match of plainMatches) {
+      if (isValidCuit(match)) {
+        return match;
+      }
+    }
+  }
+
+  return undefined;
+}
