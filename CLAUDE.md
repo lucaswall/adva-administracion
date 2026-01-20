@@ -91,6 +91,67 @@ npm run lint     # Type check
 - Names: kebab-files, PascalTypes, camelFuncs, UPPER_CONSTS
 - ESM imports with `.js` extensions
 
+## LOGGING
+
+**Infrastructure**: Pino logger (`src/utils/logger.ts`) - structured JSON logging with context.
+
+### Log Levels
+
+| Level | Use When | Examples |
+|-------|----------|----------|
+| `debug()` | Development details, low-level operations | Finding folders, processing items, cache hits |
+| `info()` | Important operations, state changes | Server started, folder created, scan complete |
+| `warn()` | Unexpected but handled situations | Duplicate files, missing optional data, degraded mode |
+| `error()` | Errors, failures, exceptions | API failures, file processing errors, validation failures |
+
+### Rules
+
+1. **ALWAYS use structured logging**:
+   ```typescript
+   // ✅ GOOD
+   info('Server started', { module: 'server', phase: 'startup', port: 3000 });
+
+   // ❌ BAD
+   console.log('Server started on port 3000');
+   ```
+
+2. **NEVER use `console.log`, `console.error`, etc.** - Always import from `utils/logger.ts`:
+   ```typescript
+   import { debug, info, warn, error as logError } from '../utils/logger.js';
+   ```
+
+3. **Include context** with `module` and `phase`:
+   ```typescript
+   error('Failed to process file', {
+     module: 'scanner',
+     phase: 'process-file',
+     fileId: 'abc123',
+     error: err.message
+   });
+   ```
+
+4. **Common patterns**:
+   - **Start of operation**: `info()` with operation details
+   - **Success**: `info()` or `debug()` with results
+   - **Error**: `error()` with error message and context
+   - **Unexpected but OK**: `warn()` with reason
+
+5. **Routes use Fastify logger**:
+   ```typescript
+   server.log.info({ folderId }, 'Starting manual scan');
+   server.log.error({ error: err.message }, 'Scan failed');
+   ```
+
+6. **Error context**: Always include `error: err.message` in context, never log error objects directly.
+
+### Configuration
+
+Set log level via `LOG_LEVEL` env var (default: `INFO`):
+- `DEBUG`: All logs (verbose)
+- `INFO`: Info, warn, error
+- `WARN`: Warn and error only
+- `ERROR`: Errors only
+
 ## TESTING
 - Framework: Vitest
 - **DATA POLICY**: No real non-ADVA data
