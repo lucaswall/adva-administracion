@@ -186,10 +186,10 @@ export async function autoFillBankMovements(
   const facturasRecibidasResult = await getValues(controlDebitosId, 'Facturas Recibidas!A:W');
   if (!facturasRecibidasResult.ok) return facturasRecibidasResult;
 
-  const pagosRecibidosResult = await getValues(controlCreditosId, 'Pagos Recibidos!A:Q');
+  const pagosRecibidosResult = await getValues(controlCreditosId, 'Pagos Recibidos!A:R');
   if (!pagosRecibidosResult.ok) return pagosRecibidosResult;
 
-  const pagosEnviadosResult = await getValues(controlDebitosId, 'Pagos Enviados!A:Q');
+  const pagosEnviadosResult = await getValues(controlDebitosId, 'Pagos Enviados!A:R');
   if (!pagosEnviadosResult.ok) return pagosEnviadosResult;
 
   const recibosResult = await getValues(controlDebitosId, 'Recibos!A:S');

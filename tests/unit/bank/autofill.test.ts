@@ -244,7 +244,7 @@ describe('autoFillBankMovements', () => {
 
       // Should fetch Facturas Emitidas and Pagos Recibidos
       expect(mockGetValues).toHaveBeenCalledWith('control-creditos-id', 'Facturas Emitidas!A:W');
-      expect(mockGetValues).toHaveBeenCalledWith('control-creditos-id', 'Pagos Recibidos!A:Q');
+      expect(mockGetValues).toHaveBeenCalledWith('control-creditos-id', 'Pagos Recibidos!A:R');
     });
 
     it('fetches from Control de Debitos spreadsheet', async () => {
@@ -252,7 +252,7 @@ describe('autoFillBankMovements', () => {
 
       // Should fetch Facturas Recibidas, Pagos Enviados, and Recibos
       expect(mockGetValues).toHaveBeenCalledWith('control-debitos-id', 'Facturas Recibidas!A:W');
-      expect(mockGetValues).toHaveBeenCalledWith('control-debitos-id', 'Pagos Enviados!A:Q');
+      expect(mockGetValues).toHaveBeenCalledWith('control-debitos-id', 'Pagos Enviados!A:R');
       expect(mockGetValues).toHaveBeenCalledWith('control-debitos-id', 'Recibos!A:S');
     });
 

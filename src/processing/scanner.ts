@@ -390,6 +390,7 @@ async function storePago(pago: Pago, spreadsheetId: string, sheetName: string): 
     pago.banco,
     pago.fechaPago,
     pago.importePagado,
+    pago.moneda || 'ARS',
     pago.referencia || '',
     pago.cuitPagador || '',
     pago.nombrePagador || '',
@@ -403,7 +404,7 @@ async function storePago(pago: Pago, spreadsheetId: string, sheetName: string): 
     pago.matchConfidence || '',
   ];
 
-  const result = await appendRows(spreadsheetId, `${sheetName}!A:Q`, [row]);
+  const result = await appendRows(spreadsheetId, `${sheetName}!A:R`, [row]);
   if (!result.ok) {
     return result;
   }
@@ -761,7 +762,7 @@ export async function rematch(): Promise<Result<RematchResult, Error>> {
   }
 
   // Get all pagos enviados (payments we made)
-  const pagosResult = await getValues(controlDebitosId, 'Pagos Enviados!A:Q');
+  const pagosResult = await getValues(controlDebitosId, 'Pagos Enviados!A:R');
   if (!pagosResult.ok) {
     return pagosResult;
   }
