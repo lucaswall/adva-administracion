@@ -262,13 +262,10 @@ describe('isValidCae', () => {
 describe('validateFactura', () => {
   const validFactura: Partial<Factura> = {
     tipoComprobante: 'A',
-    puntoVenta: '00001',
-    numeroComprobante: '00000001',
+    nroFactura: '00001-00000001',
     fechaEmision: '2024-01-15',
     cuitEmisor: '20-12345678-6',
     razonSocialEmisor: 'Test Company SA',
-    cae: '12345678901234',
-    fechaVtoCae: '2024-01-25',
     importeNeto: 1000.00,
     importeIva: 210.00,
     importeTotal: 1210.00,
@@ -288,18 +285,18 @@ describe('validateFactura', () => {
     expect(result.errors).toContain('Missing tipoComprobante');
   });
 
-  it('detects missing puntoVenta', () => {
-    const { puntoVenta, ...incomplete } = validFactura;
+  it('detects missing nroFactura', () => {
+    const { nroFactura, ...incomplete } = validFactura;
     const result = validateFactura(incomplete);
     expect(result.valid).toBe(false);
-    expect(result.errors).toContain('Missing puntoVenta');
+    expect(result.errors).toContain('Missing nroFactura');
   });
 
-  it('detects missing numeroComprobante', () => {
-    const { numeroComprobante, ...incomplete } = validFactura;
+  it('detects missing numeroComprobante (combined in nroFactura)', () => {
+    const { nroFactura, ...incomplete } = validFactura;
     const result = validateFactura(incomplete);
     expect(result.valid).toBe(false);
-    expect(result.errors).toContain('Missing numeroComprobante');
+    expect(result.errors).toContain('Missing nroFactura');
   });
 
   it('detects missing fechaEmision', () => {
@@ -330,26 +327,6 @@ describe('validateFactura', () => {
     expect(result.errors).toContain('Missing razonSocialEmisor');
   });
 
-  it('detects missing cae', () => {
-    const { cae, ...incomplete } = validFactura;
-    const result = validateFactura(incomplete);
-    expect(result.valid).toBe(false);
-    expect(result.errors).toContain('Missing cae');
-  });
-
-  it('detects invalid cae', () => {
-    const invalidCae = { ...validFactura, cae: '123' };
-    const result = validateFactura(invalidCae);
-    expect(result.valid).toBe(false);
-    expect(result.errors).toContain('Invalid cae');
-  });
-
-  it('detects missing fechaVtoCae', () => {
-    const { fechaVtoCae, ...incomplete } = validFactura;
-    const result = validateFactura(incomplete);
-    expect(result.valid).toBe(false);
-    expect(result.errors).toContain('Missing fechaVtoCae');
-  });
 
   it('detects missing importeNeto', () => {
     const { importeNeto, ...incomplete } = validFactura;
@@ -408,16 +385,14 @@ describe('validateFactura', () => {
   it('accumulates multiple errors', () => {
     const multipleErrors: Partial<Factura> = {
       tipoComprobante: 'A',
-      cuitEmisor: '20-12345678-9', // invalid
-      cae: '123' // invalid
+      cuitEmisor: '20-12345678-9' // invalid
       // missing most fields
     };
     const result = validateFactura(multipleErrors);
     expect(result.valid).toBe(false);
-    expect(result.errors.length).toBeGreaterThan(5);
+    expect(result.errors.length).toBeGreaterThan(4);
     expect(result.errors).toContain('Invalid cuitEmisor');
-    expect(result.errors).toContain('Invalid cae');
-    expect(result.errors).toContain('Missing puntoVenta');
+    expect(result.errors).toContain('Missing nroFactura');
   });
 });
 

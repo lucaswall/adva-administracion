@@ -77,16 +77,12 @@ export interface Factura {
   // Comprobante identification
   /** Type of comprobante (A, B, C, E, NC, ND) */
   tipoComprobante: TipoComprobante;
-  /** Punto de venta (4-5 digits, zero-padded) */
-  puntoVenta: string;
-  /** Sequential invoice number (8 digits, zero-padded) */
-  numeroComprobante: string;
+  /** Full invoice number (e.g., "00003-00001957" or "0003-00001957") */
+  nroFactura: string;
 
   // Dates
   /** Issue date (ISO format: YYYY-MM-DD) */
   fechaEmision: string;
-  /** CAE expiration date (ISO format: YYYY-MM-DD) */
-  fechaVtoCae: string;
 
   // Parties
   /** Issuer CUIT (11 digits, no dashes) */
@@ -97,10 +93,6 @@ export interface Factura {
   cuitReceptor?: string;
   /** Receptor business name (optional) */
   razonSocialReceptor?: string;
-
-  // Authorization
-  /** CAE (Código de Autorización Electrónico) - 14 digits */
-  cae: string;
 
   // Amounts (in original currency)
   /** Net amount before tax */

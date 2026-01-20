@@ -81,8 +81,8 @@ export function generateFacturaFileName(
       typeLabel = `Factura ${direction}`;
   }
 
-  // Invoice number (PPPPP-NNNNNNNN)
-  const numero = `${factura.puntoVenta}-${factura.numeroComprobante}`;
+  // Invoice number (already formatted as PPPPP-NNNNNNNN or PPPP-NNNNNNNN)
+  const numero = factura.nroFactura;
 
   // Entity name based on direction
   let entityName: string;

@@ -14,8 +14,8 @@ import {
 
 describe('spreadsheet-headers', () => {
   describe('FACTURA_HEADERS', () => {
-    it('has 23 headers (columns A:W)', () => {
-      expect(FACTURA_HEADERS).toHaveLength(23);
+    it('has 20 headers (columns A:T)', () => {
+      expect(FACTURA_HEADERS).toHaveLength(20);
     });
 
     it('starts with fileId', () => {
@@ -28,7 +28,7 @@ describe('spreadsheet-headers', () => {
       expect(FACTURA_HEADERS).toContain('cuitReceptor');
       expect(FACTURA_HEADERS).toContain('importeTotal');
       expect(FACTURA_HEADERS).toContain('fechaEmision');
-      expect(FACTURA_HEADERS).toContain('cae');
+      expect(FACTURA_HEADERS).toContain('nroFactura');
     });
 
     it('ends with hasCuitMatch', () => {

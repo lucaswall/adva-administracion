@@ -38,6 +38,7 @@ import { getProcessingQueue } from './queue.js';
 import { getConfig } from '../config.js';
 import { FacturaPagoMatcher } from '../matching/matcher.js';
 import { createDriveHyperlink } from '../utils/spreadsheet.js';
+import { formatUSCurrency, parseNumber } from '../utils/numbers.js';
 
 /**
  * Result of processing a single file
@@ -195,14 +196,11 @@ export async function processFile(
       fileName: fileInfo.name,
       folderPath: fileInfo.folderPath,
       tipoComprobante: parseResult.value.data.tipoComprobante || 'A',
-      puntoVenta: parseResult.value.data.puntoVenta || '',
-      numeroComprobante: parseResult.value.data.numeroComprobante || '',
+      nroFactura: parseResult.value.data.nroFactura || '',
       fechaEmision: parseResult.value.data.fechaEmision || '',
-      fechaVtoCae: parseResult.value.data.fechaVtoCae || '',
       cuitEmisor: parseResult.value.data.cuitEmisor || '',
       razonSocialEmisor: parseResult.value.data.razonSocialEmisor || '',
       cuitReceptor: parseResult.value.data.cuitReceptor,
-      cae: parseResult.value.data.cae || '',
       importeNeto: parseResult.value.data.importeNeto || 0,
       importeIva: parseResult.value.data.importeIva || 0,
       importeTotal: parseResult.value.data.importeTotal || 0,
@@ -348,17 +346,14 @@ async function storeFactura(factura: Factura, spreadsheetId: string, sheetName: 
     createDriveHyperlink(factura.fileId, factura.fileName),
     factura.folderPath,
     factura.tipoComprobante,
-    factura.puntoVenta,
-    factura.numeroComprobante,
+    factura.nroFactura,
     factura.fechaEmision,
-    factura.fechaVtoCae,
     factura.cuitEmisor,
     factura.razonSocialEmisor,
     factura.cuitReceptor || '',
-    factura.cae,
-    factura.importeNeto,
-    factura.importeIva,
-    factura.importeTotal,
+    formatUSCurrency(factura.importeNeto),
+    formatUSCurrency(factura.importeIva),
+    formatUSCurrency(factura.importeTotal),
     factura.moneda,
     factura.concepto || '',
     factura.processedAt,
@@ -369,7 +364,7 @@ async function storeFactura(factura: Factura, spreadsheetId: string, sheetName: 
     factura.hasCuitMatch ? 'YES' : 'NO',
   ];
 
-  const result = await appendRows(spreadsheetId, `${sheetName}!A:W`, [row]);
+  const result = await appendRows(spreadsheetId, `${sheetName}!A:T`, [row]);
   if (!result.ok) {
     return result;
   }
@@ -391,7 +386,7 @@ async function storePago(pago: Pago, spreadsheetId: string, sheetName: string): 
     pago.folderPath,
     pago.banco,
     pago.fechaPago,
-    pago.importePagado,
+    formatUSCurrency(pago.importePagado),
     pago.moneda || 'ARS',
     pago.referencia || '',
     pago.cuitPagador || '',
@@ -430,9 +425,9 @@ async function storeRecibo(recibo: Recibo, spreadsheetId: string): Promise<Resul
     recibo.cuitEmpleador,
     recibo.periodoAbonado,
     recibo.fechaPago,
-    recibo.subtotalRemuneraciones,
-    recibo.subtotalDescuentos,
-    recibo.totalNeto,
+    formatUSCurrency(recibo.subtotalRemuneraciones),
+    formatUSCurrency(recibo.subtotalDescuentos),
+    formatUSCurrency(recibo.totalNeto),
     recibo.processedAt,
     recibo.confidence,
     recibo.needsReview ? 'YES' : 'NO',
@@ -784,25 +779,22 @@ export async function rematch(): Promise<Result<RematchResult, Error>> {
         fileName: String(row[1] || ''),
         folderPath: String(row[2] || ''),
         tipoComprobante: (row[3] || 'A') as Factura['tipoComprobante'],
-        puntoVenta: String(row[4] || ''),
-        numeroComprobante: String(row[5] || ''),
-        fechaEmision: String(row[6] || ''),
-        fechaVtoCae: String(row[7] || ''),
-        cuitEmisor: String(row[8] || ''),
-        razonSocialEmisor: String(row[9] || ''),
-        cuitReceptor: row[10] ? String(row[10]) : undefined,
-        cae: String(row[11] || ''),
-        importeNeto: Number(row[12]) || 0,
-        importeIva: Number(row[13]) || 0,
-        importeTotal: Number(row[14]) || 0,
-        moneda: (row[15] || 'ARS') as Factura['moneda'],
-        concepto: row[16] ? String(row[16]) : undefined,
-        processedAt: String(row[17] || ''),
-        confidence: Number(row[18]) || 0,
-        needsReview: row[19] === 'YES',
-        matchedPagoFileId: row[20] ? String(row[20]) : undefined,
-        matchConfidence: row[21] ? (String(row[21]) as MatchConfidence) : undefined,
-        hasCuitMatch: row[22] === 'YES',
+        nroFactura: String(row[4] || ''),
+        fechaEmision: String(row[5] || ''),
+        cuitEmisor: String(row[6] || ''),
+        razonSocialEmisor: String(row[7] || ''),
+        cuitReceptor: row[8] ? String(row[8]) : undefined,
+        importeNeto: parseNumber(row[9]) || 0,
+        importeIva: parseNumber(row[10]) || 0,
+        importeTotal: parseNumber(row[11]) || 0,
+        moneda: (row[12] || 'ARS') as Factura['moneda'],
+        concepto: row[13] ? String(row[13]) : undefined,
+        processedAt: String(row[14] || ''),
+        confidence: Number(row[15]) || 0,
+        needsReview: row[16] === 'YES',
+        matchedPagoFileId: row[17] ? String(row[17]) : undefined,
+        matchConfidence: row[18] ? (String(row[18]) as MatchConfidence) : undefined,
+        hasCuitMatch: row[19] === 'YES',
       });
     }
   }
@@ -819,7 +811,7 @@ export async function rematch(): Promise<Result<RematchResult, Error>> {
         folderPath: String(row[2] || ''),
         banco: String(row[3] || ''),
         fechaPago: String(row[4] || ''),
-        importePagado: Number(row[5]) || 0,
+        importePagado: parseNumber(row[5]) || 0,
         moneda: (String(row[6]) as 'ARS' | 'USD') || 'ARS',
         referencia: row[7] ? String(row[7]) : undefined,
         cuitPagador: row[8] ? String(row[8]) : undefined,

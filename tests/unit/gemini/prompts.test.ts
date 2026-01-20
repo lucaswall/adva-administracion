@@ -91,12 +91,8 @@ describe('FACTURA_PROMPT', () => {
     expect(FACTURA_PROMPT).toContain('tipoComprobante');
   });
 
-  it('mentions required field: puntoVenta', () => {
-    expect(FACTURA_PROMPT).toContain('puntoVenta');
-  });
-
-  it('mentions required field: numeroComprobante', () => {
-    expect(FACTURA_PROMPT).toContain('numeroComprobante');
+  it('mentions required field: nroFactura', () => {
+    expect(FACTURA_PROMPT).toContain('nroFactura');
   });
 
   it('mentions required field: fechaEmision', () => {
@@ -111,13 +107,7 @@ describe('FACTURA_PROMPT', () => {
     expect(FACTURA_PROMPT).toContain('razonSocialEmisor');
   });
 
-  it('mentions required field: cae', () => {
-    expect(FACTURA_PROMPT).toContain('cae');
-  });
 
-  it('mentions required field: fechaVtoCae', () => {
-    expect(FACTURA_PROMPT).toContain('fechaVtoCae');
-  });
 
   it('mentions required field: importeNeto', () => {
     expect(FACTURA_PROMPT).toContain('importeNeto');
@@ -155,9 +145,6 @@ describe('FACTURA_PROMPT', () => {
     expect(FACTURA_PROMPT).toContain('no dashes');
   });
 
-  it('specifies CAE should be 14 digits', () => {
-    expect(FACTURA_PROMPT).toContain('14 digits');
-  });
 
   it('specifies date format as YYYY-MM-DD', () => {
     expect(FACTURA_PROMPT).toContain('YYYY-MM-DD');

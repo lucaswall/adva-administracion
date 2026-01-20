@@ -73,13 +73,10 @@ export function parseFacturaResponse(response: string): Result<ParseResult<Parti
     // Check for required fields
     const requiredFields: (keyof Factura)[] = [
       'tipoComprobante',
-      'puntoVenta',
-      'numeroComprobante',
+      'nroFactura',
       'fechaEmision',
       'cuitEmisor',
       'razonSocialEmisor',
-      'cae',
-      'fechaVtoCae',
       'importeNeto',
       'importeIva',
       'importeTotal',

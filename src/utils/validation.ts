@@ -240,15 +240,11 @@ export function validateFactura(data: Partial<Factura>): ValidationResult {
 
   // Required fields
   if (!data.tipoComprobante) errors.push('Missing tipoComprobante');
-  if (!data.puntoVenta) errors.push('Missing puntoVenta');
-  if (!data.numeroComprobante) errors.push('Missing numeroComprobante');
+  if (!data.nroFactura) errors.push('Missing nroFactura');
   if (!data.fechaEmision) errors.push('Missing fechaEmision');
   if (!data.cuitEmisor) errors.push('Missing cuitEmisor');
   else if (!isValidCuit(data.cuitEmisor)) errors.push('Invalid cuitEmisor');
   if (!data.razonSocialEmisor) errors.push('Missing razonSocialEmisor');
-  if (!data.cae) errors.push('Missing cae');
-  else if (!isValidCae(data.cae)) errors.push('Invalid cae');
-  if (!data.fechaVtoCae) errors.push('Missing fechaVtoCae');
   if (data.importeNeto === undefined) errors.push('Missing importeNeto');
   if (data.importeIva === undefined) errors.push('Missing importeIva');
   if (data.importeTotal === undefined) errors.push('Missing importeTotal');
