@@ -131,13 +131,10 @@ CRITICAL VALIDATION: In this system, the receptor is ALWAYS "ASOCIACION CIVIL DE
 
 Required fields to extract:
 - tipoComprobante: ONLY the single letter code (A, B, C, E) or two-letter code (NC for Nota de Crédito, ND for Nota de Débito). DO NOT include the word "FACTURA" - extract ONLY the letter code that follows it. Examples: if the document shows "FACTURA C", extract "C"; if it shows "FACTURA B", extract "B".
-- puntoVenta: Point of sale number (4-5 digits)
-- numeroComprobante: Invoice number (8 digits)
+- nroFactura: Full invoice number combining point of sale and invoice number (format: "XXXXX-XXXXXXXX" or "XXXX-XXXXXXXX"). Example: "00003-00001957" or "0003-00001957"
 - fechaEmision: Issue date (format as YYYY-MM-DD)
 - cuitEmisor: Issuer CUIT - the CUIT of the company at the TOP billing for services (11 digits, no dashes). May be formatted as XX-XXXXXXXX-X or XXXXXXXXXXX.
 - razonSocialEmisor: Issuer business name - the company name at the TOP
-- cae: CAE authorization code (14 digits)
-- fechaVtoCae: CAE expiration date (format as YYYY-MM-DD)
 - importeNeto: Net amount before tax (number)
 - importeIva: IVA/VAT amount (number). For Type C invoices, set to 0 if not itemized.
 - importeTotal: Total amount (number)
@@ -151,15 +148,12 @@ Optional fields:
 Return ONLY valid JSON in this exact format:
 {
   "tipoComprobante": "A",
-  "puntoVenta": "00001",
-  "numeroComprobante": "00000123",
+  "nroFactura": "00001-00000123",
   "fechaEmision": "2024-01-15",
   "cuitEmisor": "20123456786",
   "razonSocialEmisor": "EMPRESA SA",
   "cuitReceptor": "30712345678",
   "razonSocialReceptor": "CLIENTE SA",
-  "cae": "12345678901234",
-  "fechaVtoCae": "2024-01-25",
   "importeNeto": 1000.00,
   "importeIva": 210.00,
   "importeTotal": 1210.00,

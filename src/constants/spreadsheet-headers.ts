@@ -3,20 +3,17 @@
  * These headers match the SPREADSHEET_FORMAT.md specification
  */
 
-/** Headers for Facturas sheet (columns A:W) */
+/** Headers for Facturas sheet (columns A:T) */
 export const FACTURA_HEADERS = [
   'fileId',
   'fileName',
   'folderPath',
   'tipoComprobante',
-  'puntoVenta',
-  'numeroComprobante',
+  'nroFactura',
   'fechaEmision',
-  'fechaVtoCae',
   'cuitEmisor',
   'razonSocialEmisor',
   'cuitReceptor',
-  'cae',
   'importeNeto',
   'importeIva',
   'importeTotal',
@@ -108,7 +105,7 @@ export const CONTROL_CREDITOS_SHEETS: SheetConfig[] = [
   {
     title: 'Facturas Emitidas',
     headers: FACTURA_HEADERS,
-    monetaryColumns: [12, 13, 14] // importeNeto, importeIva, importeTotal (columns M, N, O)
+    monetaryColumns: [9, 10, 11] // importeNeto, importeIva, importeTotal (columns J, K, L)
   },
   {
     title: 'Pagos Recibidos',
@@ -125,7 +122,7 @@ export const CONTROL_DEBITOS_SHEETS: SheetConfig[] = [
   {
     title: 'Facturas Recibidas',
     headers: FACTURA_HEADERS,
-    monetaryColumns: [12, 13, 14] // importeNeto, importeIva, importeTotal (columns M, N, O)
+    monetaryColumns: [9, 10, 11] // importeNeto, importeIva, importeTotal (columns J, K, L)
   },
   {
     title: 'Pagos Enviados',

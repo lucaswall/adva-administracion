@@ -8,6 +8,7 @@ import {
   parseNumber,
   parseAmount,
   formatArgentineNumber,
+  formatUSCurrency,
   normalizeAmount,
   amountsMatch
 } from '../../../src/utils/numbers';
@@ -188,6 +189,48 @@ describe('formatArgentineNumber', () => {
     expect(formatArgentineNumber(1234.56789, 0)).toBe('1.235');
     expect(formatArgentineNumber(1234.56789, 3)).toBe('1.234,568');
     expect(formatArgentineNumber(1234.56789, 4)).toBe('1.234,5679');
+  });
+});
+
+describe('formatUSCurrency', () => {
+  it('formats numbers with thousands separator and 2 decimals', () => {
+    expect(formatUSCurrency(1234.56)).toBe('1,234.56');
+    expect(formatUSCurrency(847000)).toBe('847,000.00');
+    expect(formatUSCurrency(10000.5)).toBe('10,000.50');
+  });
+
+  it('formats small numbers', () => {
+    expect(formatUSCurrency(123.45)).toBe('123.45');
+    expect(formatUSCurrency(1.5)).toBe('1.50');
+    expect(formatUSCurrency(0.99)).toBe('0.99');
+  });
+
+  it('formats negative numbers with sign preserved', () => {
+    expect(formatUSCurrency(-1234.56)).toBe('-1,234.56');
+    expect(formatUSCurrency(-100)).toBe('-100.00');
+    expect(formatUSCurrency(-10000.50)).toBe('-10,000.50');
+  });
+
+  it('formats integers with .00', () => {
+    expect(formatUSCurrency(1000)).toBe('1,000.00');
+    expect(formatUSCurrency(42)).toBe('42.00');
+  });
+
+  it('accepts string input', () => {
+    expect(formatUSCurrency('1234.56')).toBe('1,234.56');
+    expect(formatUSCurrency('847,000.00')).toBe('847,000.00');
+  });
+
+  it('returns empty string for invalid values', () => {
+    expect(formatUSCurrency(null)).toBe('');
+    expect(formatUSCurrency(undefined)).toBe('');
+    expect(formatUSCurrency('invalid')).toBe('');
+  });
+
+  it('supports custom decimal places', () => {
+    expect(formatUSCurrency(1234.56789, 0)).toBe('1,235');
+    expect(formatUSCurrency(1234.56789, 3)).toBe('1,234.568');
+    expect(formatUSCurrency(1234.56789, 4)).toBe('1,234.5679');
   });
 });
 

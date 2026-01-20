@@ -163,6 +163,44 @@ export function formatArgentineNumber(value: unknown, decimals: number = 2): str
 }
 
 /**
+ * Formats a number as a US format string
+ *
+ * Output format: "1,234.56" (comma for thousands, dot for decimal)
+ * Always shows 2 decimal places by default.
+ * Preserves sign for negative numbers: "-1,234.56"
+ *
+ * @param value - Number to format
+ * @param decimals - Number of decimal places (default: 2)
+ * @returns Formatted string or empty string if invalid
+ */
+export function formatUSCurrency(value: unknown, decimals: number = 2): string {
+  const num = parseNumber(value);
+
+  if (num === null) {
+    return '';
+  }
+
+  // Preserve sign
+  const isNegative = num < 0;
+  const absNum = Math.abs(num);
+
+  // Convert to fixed decimal places
+  const fixed = absNum.toFixed(decimals);
+
+  // Split into integer and decimal parts
+  const [integerPart, decimalPart] = fixed.split('.');
+
+  // Add thousands separators (commas) to integer part
+  const withThousands = integerPart.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+
+  // Combine with dot as decimal separator
+  const formatted = decimalPart ? `${withThousands}.${decimalPart}` : withThousands;
+
+  // Add negative sign if needed
+  return isNegative ? `-${formatted}` : formatted;
+}
+
+/**
  * Normalizes an amount to a standardized string for comparison/keys
  *
  * Converts to absolute value with 2 decimal places: "1234.56"

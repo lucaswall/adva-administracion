@@ -49,13 +49,10 @@ describe('parseFacturaResponse', () => {
   it('parses valid factura JSON', () => {
     const json = JSON.stringify({
       tipoComprobante: 'A',
-      puntoVenta: '00001',
-      numeroComprobante: '00000123',
+      nroFactura: '00001-00000123',
       fechaEmision: '2024-01-15',
       cuitEmisor: '20123456786',
       razonSocialEmisor: 'TEST SA',
-      cae: '12345678901234',
-      fechaVtoCae: '2024-01-25',
       importeNeto: 1000,
       importeIva: 210,
       importeTotal: 1210,
@@ -72,7 +69,7 @@ describe('parseFacturaResponse', () => {
   });
 
   it('handles markdown-wrapped JSON', () => {
-    const json = '```json\n{"tipoComprobante": "B", "puntoVenta": "00002", "numeroComprobante": "00000456", "fechaEmision": "2024-01-15", "cuitEmisor": "20123456786", "razonSocialEmisor": "TEST", "cae": "12345678901234", "fechaVtoCae": "2024-01-25", "importeNeto": 1000, "importeIva": 210, "importeTotal": 1210, "moneda": "ARS"}\n```';
+    const json = '```json\n{"tipoComprobante": "B", "nroFactura": "00002-00000456", "fechaEmision": "2024-01-15", "cuitEmisor": "20123456786", "razonSocialEmisor": "TEST", "importeNeto": 1000, "importeIva": 210, "importeTotal": 1210, "moneda": "ARS"}\n```';
 
     const result = parseFacturaResponse(json);
     expect(result.ok).toBe(true);
@@ -86,7 +83,7 @@ describe('parseFacturaResponse', () => {
   it('marks as needs review when missing required fields', () => {
     const json = JSON.stringify({
       tipoComprobante: 'A',
-      puntoVenta: '00001'
+      nroFactura: '00001-00000001'
       // Missing many required fields
     });
 
@@ -94,21 +91,18 @@ describe('parseFacturaResponse', () => {
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.value.needsReview).toBe(true);
-      expect(result.value.missingFields!.length).toBe(10); // 10 missing required fields
+      expect(result.value.missingFields!.length).toBe(7); // 7 missing required fields (removed cae, fechaVtoCae, puntoVenta, numeroComprobante)
     }
   });
 
   it('does not swap when ADVA is correctly identified as receptor', () => {
     const json = JSON.stringify({
       tipoComprobante: 'B',
-      puntoVenta: '00002',
-      numeroComprobante: '00001171',
+      nroFactura: '00002-00001171',
       fechaEmision: '2025-12-23',
       cuitEmisor: '30555555554', // TEST TRAVEL COMPANY
       razonSocialEmisor: 'TEST TRAVEL COMPANY SRL',
       cuitReceptor: '30709076783', // ADVA (correct!)
-      cae: '75513050768065',
-      fechaVtoCae: '2026-01-02',
       importeNeto: 6557360,
       importeIva: 0,
       importeTotal: 6557360,
