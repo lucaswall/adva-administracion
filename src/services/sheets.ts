@@ -32,6 +32,19 @@ function getSheetsService(): sheets_v4.Sheets {
 export type CellValue = string | number | boolean | null | undefined;
 
 /**
+ * Cell link type - represents a hyperlinked text value
+ */
+export interface CellLink {
+  text: string;
+  url: string;
+}
+
+/**
+ * Cell value or link type
+ */
+export type CellValueOrLink = CellValue | CellLink;
+
+/**
  * Gets values from a range
  *
  * @param spreadsheetId - Spreadsheet ID
@@ -390,6 +403,149 @@ export async function deleteSheet(
     });
 
     return { ok: true, value: undefined };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error : new Error(String(error)),
+    };
+  }
+}
+
+/**
+ * Helper to check if a value is a CellLink
+ */
+function isCellLink(value: CellValueOrLink): value is CellLink {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'text' in value &&
+    'url' in value
+  );
+}
+
+/**
+ * Converts a CellValueOrLink to a Sheets API cell data object
+ */
+function convertToSheetsCellData(
+  value: CellValueOrLink
+): sheets_v4.Schema$CellData {
+  if (value === null || value === undefined) {
+    return {
+      userEnteredValue: { stringValue: '' },
+    };
+  }
+
+  if (isCellLink(value)) {
+    return {
+      userEnteredValue: { stringValue: value.text },
+      textFormatRuns: [
+        {
+          format: {
+            link: {
+              uri: value.url,
+            },
+          },
+        },
+      ],
+    };
+  }
+
+  if (typeof value === 'string') {
+    return {
+      userEnteredValue: { stringValue: value },
+    };
+  }
+
+  if (typeof value === 'number') {
+    return {
+      userEnteredValue: { numberValue: value },
+    };
+  }
+
+  if (typeof value === 'boolean') {
+    return {
+      userEnteredValue: { boolValue: value },
+    };
+  }
+
+  return {
+    userEnteredValue: { stringValue: '' },
+  };
+}
+
+/**
+ * Appends rows to a sheet with support for formatted links
+ *
+ * Unlike appendRows which only supports simple values and formulas,
+ * this function supports rich text formatting including hyperlinks
+ * that appear as formatted text (not HYPERLINK formulas).
+ *
+ * @param spreadsheetId - Spreadsheet ID
+ * @param range - A1 notation for target sheet (e.g., 'Sheet1!A:Z')
+ * @param values - 2D array of rows to append. Cells can be values or {text, url} objects for links
+ * @returns Number of updated cells
+ *
+ * @example
+ * await appendRowsWithLinks('abc123', 'Sheet1!A:C', [
+ *   [
+ *     'fileId123',
+ *     { text: 'Document.pdf', url: 'https://drive.google.com/...' },
+ *     'Path'
+ *   ]
+ * ]);
+ */
+export async function appendRowsWithLinks(
+  spreadsheetId: string,
+  range: string,
+  values: CellValueOrLink[][]
+): Promise<Result<number, Error>> {
+  try {
+    const sheets = getSheetsService();
+
+    // Parse sheet name from range (e.g., 'Sheet1!A:Z' -> 'Sheet1')
+    const sheetName = range.split('!')[0];
+
+    // Get sheet metadata to find the sheet ID
+    const metadataResult = await getSheetMetadata(spreadsheetId);
+    if (!metadataResult.ok) {
+      return metadataResult;
+    }
+
+    const sheet = metadataResult.value.find(s => s.title === sheetName);
+    if (!sheet) {
+      return {
+        ok: false,
+        error: new Error(`Sheet not found: ${sheetName}`),
+      };
+    }
+
+    // Convert rows to Sheets API format
+    const rows: sheets_v4.Schema$RowData[] = values.map(rowValues => ({
+      values: rowValues.map(convertToSheetsCellData),
+    }));
+
+    // Use batchUpdate with appendCells to support rich formatting
+    await sheets.spreadsheets.batchUpdate({
+      spreadsheetId,
+      requestBody: {
+        requests: [
+          {
+            appendCells: {
+              sheetId: sheet.sheetId,
+              rows,
+              fields: '*',
+            },
+          },
+        ],
+      },
+    });
+
+    // Calculate total cells appended (rows * columns)
+    const cellsAppended = rows.reduce((total, row) => {
+      return total + (row.values?.length || 0);
+    }, 0);
+
+    return { ok: true, value: cellsAppended };
   } catch (error) {
     return {
       ok: false,
