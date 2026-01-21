@@ -249,6 +249,19 @@ async function initializeDashboardOperativo(
   const ensureSheetsResult = await ensureSheetsExist(spreadsheetId, DASHBOARD_OPERATIVO_SHEETS);
   if (!ensureSheetsResult.ok) return ensureSheetsResult;
 
+  // Check if Resumen Mensual already has data (rows 2-13)
+  const resumanMensual = DASHBOARD_OPERATIVO_SHEETS[0];
+  const existingDataResult = await getValues(spreadsheetId, `${resumanMensual.title}!A2:A13`);
+  if (existingDataResult.ok && existingDataResult.value.length > 0 && existingDataResult.value[0].length > 0) {
+    // Data already exists, skip initialization
+    debug('Dashboard already initialized, skipping', {
+      module: 'folder-structure',
+      phase: 'init-dashboard',
+      spreadsheetId
+    });
+    return { ok: true, value: undefined };
+  }
+
   // Initialize Resumen Mensual with 12 months of data for current year
   const currentYear = new Date().getFullYear();
   const monthNames = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];

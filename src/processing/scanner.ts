@@ -136,6 +136,16 @@ export async function processFile(
           durationMs: data.durationMs,
           success: data.success,
           errorMessage: data.errorMessage || '',
+        }).then(result => {
+          if (!result.ok) {
+            warn('Failed to log token usage', {
+              module: 'scanner',
+              phase: 'token-logging',
+              fileId: data.fileId,
+              fileName: data.fileName,
+              error: result.error.message
+            });
+          }
         });
       }
     : undefined;

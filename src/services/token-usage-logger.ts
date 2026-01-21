@@ -7,6 +7,7 @@ import { randomUUID } from 'crypto';
 import { GEMINI_PRICING } from '../config.js';
 import { appendRows } from './sheets.js';
 import type { Result } from '../types/index.js';
+import { debug, error as logError } from '../utils/logger.js';
 
 /**
  * Data structure for token usage log entry
@@ -97,8 +98,25 @@ export async function logTokenUsage(
   const result = await appendRows(spreadsheetId, 'Uso de API', [row]);
 
   if (!result.ok) {
+    logError('Failed to log token usage', {
+      module: 'token-usage-logger',
+      phase: 'log-usage',
+      requestId: data.requestId,
+      fileId: data.fileId,
+      error: result.error.message
+    });
     return { ok: false, error: result.error };
   }
+
+  debug('Token usage logged', {
+    module: 'token-usage-logger',
+    phase: 'log-usage',
+    requestId: data.requestId,
+    fileId: data.fileId,
+    model: data.model,
+    totalTokens: data.totalTokens,
+    cost: data.estimatedCostUSD
+  });
 
   return { ok: true, value: undefined };
 }

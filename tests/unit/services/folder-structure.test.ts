@@ -747,8 +747,15 @@ describe('FolderStructure service', () => {
           ],
         });
 
-      // Mock getValues for existing sheets
-      mockGetValues.mockResolvedValue({ ok: true, value: [['fileId', 'fileName', 'folderPath']] });
+      // Mock getValues for existing sheets (headers check)
+      mockGetValues.mockImplementation((spreadsheetId: string, range: string) => {
+        // For data check (A2:A13), return empty to indicate no existing data
+        if (range.includes('A2:A13')) {
+          return Promise.resolve({ ok: true, value: [] });
+        }
+        // For header checks, return headers
+        return Promise.resolve({ ok: true, value: [['fileId', 'fileName', 'folderPath']] });
+      });
 
       // Mock createSheet for Dashboard Operativo sheets
       mockCreateSheet
