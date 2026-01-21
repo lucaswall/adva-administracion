@@ -32,10 +32,41 @@ Use subagents instead of direct commands:
 
 **Workflow:** code → test-runner → builder → commit-bot → push → PR
 
-## RAILWAY MCP (READ-ONLY)
+## MCP SERVERS
+
+### Railway MCP (READ-ONLY)
 **Allowed:** `get-logs`, `list-deployments`, `list-services`, `list-variables`, `check-railway-status`
 
 **NEVER:** `deploy`, `create-environment`, `set-variables`, `create-project-and-link`, `deploy-template`, `link-environment`, `link-service`, `generate-domain`
+
+### Google Drive MCP (`gdrive`)
+Read-only access to Google Drive with service account authentication.
+
+**Available Tools:**
+- `gdrive_search` - Search for files by name (supports pagination)
+- `gdrive_read_file` - Read file contents (Google Docs→Markdown, Sheets→CSV, binary files→base64)
+- `gdrive_list_folder` - List files and folders in a folder (supports pagination)
+- `gdrive_get_pdf` - Download PDFs or export Google Docs/Sheets/Slides to PDF, saves to disk
+- `gsheets_read` - Read spreadsheet data (entire sheet, specific ranges, or by sheet ID)
+
+**Use Cases:**
+- Search for documents in Drive
+- Read spreadsheet data for analysis
+- Download files for processing
+- List folder contents to understand structure
+
+### Gemini MCP (`gemini`)
+Gemini API integration for PDF document analysis and prompt testing.
+
+**Available Tools:**
+- `gemini_analyze_pdf` - Analyze PDF files using Gemini models (2.5-flash, 1.5-flash, 1.5-pro)
+
+**Use Cases:**
+- Test and optimize document parsing prompts
+- Experiment with different Gemini models for PDF extraction
+- Validate document parsing strategies before implementing in production code
+
+**Important:** This is for testing/development only. Production PDF parsing uses `src/gemini/` services.
 
 ## STRUCTURE
 ```
