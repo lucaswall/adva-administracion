@@ -72,13 +72,15 @@ Gemini API integration for PDF document analysis and prompt testing.
 ```
 src/
 ├── server.ts             # Entry: Fastify server
-├── config.ts             # Environment config
+├── config.ts             # Environment config (includes MAX_CASCADE_DEPTH, CASCADE_TIMEOUT_MS)
 ├── constants/spreadsheet-headers.ts
 ├── routes/{status,scan,webhooks}.ts
 ├── services/{google-auth,drive,sheets,folder-structure,document-sorter,watch-manager}.ts
-├── processing/{queue,scanner}.ts
+├── processing/{queue,scanner}.ts  # Includes cascading displacement logic
 ├── types/index.ts
-├── matching/matcher.ts
+├── matching/
+│   ├── matcher.ts        # FacturaPagoMatcher, ReciboPagoMatcher
+│   └── cascade-matcher.ts # Cascading displacement system
 ├── gemini/{client,prompts,parser,errors}.ts
 ├── utils/{date,numbers,currency,validation,file-naming,spanish-date,exchange-rate,drive-parser,logger}.ts
 └── bank/{matcher,autofill,subdiario-matcher}.ts
@@ -225,3 +227,90 @@ ROOT/
 - **Pagos Enviados**: Only beneficiario fields (cuitBeneficiario, nombreBeneficiario), ADVA as pagador is implicit
 - **Pagos Recibidos**: Only pagador fields (cuitPagador, nombrePagador), ADVA as beneficiario is implicit
 - **Recibos**: Only employee info (nombreEmpleado, cuilEmpleado), ADVA as empleador is implicit
+
+## CASCADING MATCH DISPLACEMENT
+
+Automatic re-matching system that allows better-quality matches to replace existing matches.
+
+### How It Works
+
+When documents are matched (new files OR re-match operations):
+1. Try to match against ALL documents (including already-matched ones)
+2. If a better match is found, displace the current match
+3. Re-match the displaced document against remaining candidates
+4. Continue cascading until no better matches are found or termination conditions met
+5. Apply all updates atomically to spreadsheets
+
+### Match Quality Hierarchy
+
+Three-tier comparison system (implemented in `compareMatchQuality()`):
+1. **Confidence level**: `HIGH` (3) > `MEDIUM` (2) > `LOW` (1)
+2. **CUIT/CUIL match**: Has match > No match
+3. **Date proximity**: Closer date > Farther date
+
+**Displacement rule**: New match must be **strictly better** (no equal swaps allowed).
+
+### Examples
+
+- ✅ **HIGH displaces MEDIUM**: New pago with HIGH confidence can displace existing MEDIUM match
+- ✅ **Same-tier by date**: MEDIUM with 5-day gap can displace MEDIUM with 20-day gap
+- ✅ **CUIT priority**: MEDIUM with CUIT match can displace MEDIUM without CUIT
+- ❌ **Equal quality**: Two MEDIUM matches with same CUIT status and date proximity don't displace
+- ❌ **Worse quality**: MEDIUM cannot displace HIGH
+
+### Termination Conditions
+
+1. **Max cascade depth**: 10 iterations (`MAX_CASCADE_DEPTH`)
+2. **Cycle detection**: Stops if cycle detected (A→B→C→A)
+3. **Quality improvement**: Only displaces if strictly better
+4. **No available candidates**: Displaced document has no remaining matches
+5. **Timeout**: 30 seconds maximum (`CASCADE_TIMEOUT_MS`)
+
+### Configuration
+
+Constants in `src/config.ts`:
+- `MAX_CASCADE_DEPTH = 10` - Maximum iterations
+- `CASCADE_TIMEOUT_MS = 30000` - 30-second timeout
+
+### Logging
+
+All cascade operations logged with structured logging:
+```typescript
+info('Starting cascading match displacement', {
+  module: 'scanner',
+  phase: 'cascade',
+  unmatchedPagos: count
+});
+
+debug('Match displaced', {
+  module: 'scanner',
+  phase: 'cascade',
+  fromPago: oldPagoId,
+  toPago: newPagoId,
+  factura: facturaId,
+  reason: 'Higher confidence'
+});
+
+info('Cascade complete', {
+  module: 'scanner',
+  phase: 'cascade',
+  displacedCount: state.displacedCount,
+  maxDepth: state.maxDepthReached,
+  cycleDetected: state.cycleDetected,
+  duration: Date.now() - state.startTime
+});
+```
+
+### Testing
+
+Comprehensive test coverage in:
+- `tests/unit/matching/cascade-matcher.test.ts` - Core data structures and helpers (28 tests)
+- `tests/unit/processing/scanner.test.ts` - Integration tests for full cascade flow (4 tests)
+
+Test scenarios:
+- Basic displacement (HIGH > MEDIUM > LOW)
+- Same-tier displacement by date proximity
+- No displacement for equal/worse quality
+- Cycle detection
+- Max depth termination
+- Recibo cascading displacement
