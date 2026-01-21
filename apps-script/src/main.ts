@@ -112,23 +112,21 @@ function makeApiCall(
   const ui = SpreadsheetApp.getUi();
 
   try {
-    const headers: Record<string, string> = {
-      'User-Agent': 'ADVA-Spreadsheet/3.0',
-      'Authorization': `Bearer ${API_SECRET}`
-    };
-
-    // Only set Content-Type when we have a payload
-    if (payload) {
-      headers['Content-Type'] = 'application/json';
-    }
-
     const options: GoogleAppsScript.URL_Fetch.URLFetchRequestOptions = {
       method: method,
-      headers: headers,
+      headers: {
+        'Content-Type': 'application/json',
+        'User-Agent': 'ADVA-Spreadsheet/3.0',
+        'Authorization': `Bearer ${API_SECRET}`
+      },
       muteHttpExceptions: true
     };
 
-    if (payload) {
+    // Always send a JSON payload (empty object if null) for POST requests
+    // This ensures Content-Type: application/json is valid
+    if (method.toLowerCase() === 'post') {
+      options.payload = JSON.stringify(payload || {});
+    } else if (payload) {
       options.payload = JSON.stringify(payload);
     }
 
