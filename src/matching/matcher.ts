@@ -117,11 +117,13 @@ export class FacturaPagoMatcher {
    *
    * @param pago - Payment to match
    * @param facturas - Available invoices (can include already matched ones)
+   * @param _includeMatched - Whether to consider already-matched facturas (for cascade displacement). Filtering is done by caller.
    * @returns Array of match candidates sorted by match quality
    */
   findMatches(
     pago: Pago,
-    facturas: Array<Factura & { row: number }>
+    facturas: Array<Factura & { row: number }>,
+    _includeMatched: boolean = false
   ): MatchCandidate[] {
     const candidates: MatchCandidate[] = [];
 
@@ -342,11 +344,13 @@ export class ReciboPagoMatcher {
    *
    * @param pago - Payment to match
    * @param recibos - Available salary slips (can include already matched ones)
+   * @param _includeMatched - Whether to consider already-matched recibos (for cascade displacement). Filtering is done by caller.
    * @returns Array of match candidates sorted by match quality
    */
   findMatches(
     pago: Pago,
-    recibos: Array<Recibo & { row: number }>
+    recibos: Array<Recibo & { row: number }>,
+    _includeMatched: boolean = false
   ): ReciboMatchCandidate[] {
     const candidates: ReciboMatchCandidate[] = [];
 

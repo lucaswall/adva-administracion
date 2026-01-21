@@ -24,6 +24,18 @@ export function isAdvaCuit(cuit: string): boolean {
 }
 
 /**
+ * Maximum cascade depth for match displacement
+ * Prevents infinite loops in cascading re-matching
+ */
+export const MAX_CASCADE_DEPTH = 10;
+
+/**
+ * Cascade timeout in milliseconds
+ * Maximum time allowed for entire cascade operation
+ */
+export const CASCADE_TIMEOUT_MS = 30000;
+
+/**
  * Application configuration loaded from environment
  */
 export interface Config {
