@@ -108,6 +108,7 @@ npm run lint     # Type check
 | MATCH_DAYS_BEFORE | No | 10 |
 | MATCH_DAYS_AFTER | No | 60 |
 | USD_ARS_TOLERANCE_PERCENT | No | 5 |
+| GEMINI_RPM_LIMIT | No | 150 |
 
 ## API
 | Method | Endpoint | Description |
