@@ -1522,9 +1522,9 @@ async function matchRecibosWithPagos(
           hasCuilMatch: bestMatch.hasCuilMatch
         });
 
-        // Update recibo with match info (columns P:Q)
+        // Update recibo with match info (columns Q:R)
         updates.push({
-          range: `'Recibos'!P${bestMatch.reciboRow}:Q${bestMatch.reciboRow}`,
+          range: `'Recibos'!Q${bestMatch.reciboRow}:R${bestMatch.reciboRow}`,
           values: [[
             pago.fileId,
             bestMatch.confidence,
