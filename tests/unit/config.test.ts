@@ -152,32 +152,49 @@ describe('config', () => {
       expect(config.driveRootFolderId).toBe('');
     });
 
-    it('throws for missing GOOGLE_SERVICE_ACCOUNT_KEY in production', () => {
+    it('throws for missing API_SECRET in production', () => {
       process.env.NODE_ENV = 'production';
+      process.env.GOOGLE_SERVICE_ACCOUNT_KEY = 'test-key';
       process.env.GEMINI_API_KEY = 'test-gemini-key';
       process.env.DRIVE_ROOT_FOLDER_ID = 'test-folder-id';
+      process.env.CONTROL_TEMPLATE_ID = 'test-template-id';
+
+      expect(() => loadConfig()).toThrow('API_SECRET is required');
+    });
+
+    it('throws for missing GOOGLE_SERVICE_ACCOUNT_KEY in production', () => {
+      process.env.NODE_ENV = 'production';
+      process.env.API_SECRET = 'test-secret';
+      process.env.GEMINI_API_KEY = 'test-gemini-key';
+      process.env.DRIVE_ROOT_FOLDER_ID = 'test-folder-id';
+      process.env.CONTROL_TEMPLATE_ID = 'test-template-id';
 
       expect(() => loadConfig()).toThrow('GOOGLE_SERVICE_ACCOUNT_KEY is required');
     });
 
     it('throws for missing GEMINI_API_KEY in production', () => {
       process.env.NODE_ENV = 'production';
+      process.env.API_SECRET = 'test-secret';
       process.env.GOOGLE_SERVICE_ACCOUNT_KEY = 'test-key';
       process.env.DRIVE_ROOT_FOLDER_ID = 'test-folder-id';
+      process.env.CONTROL_TEMPLATE_ID = 'test-template-id';
 
       expect(() => loadConfig()).toThrow('GEMINI_API_KEY is required');
     });
 
     it('throws for missing DRIVE_ROOT_FOLDER_ID in production', () => {
       process.env.NODE_ENV = 'production';
+      process.env.API_SECRET = 'test-secret';
       process.env.GOOGLE_SERVICE_ACCOUNT_KEY = 'test-key';
       process.env.GEMINI_API_KEY = 'test-gemini-key';
+      process.env.CONTROL_TEMPLATE_ID = 'test-template-id';
 
       expect(() => loadConfig()).toThrow('DRIVE_ROOT_FOLDER_ID is required');
     });
 
     it('throws for missing CONTROL_TEMPLATE_ID in production', () => {
       process.env.NODE_ENV = 'production';
+      process.env.API_SECRET = 'test-secret';
       process.env.GOOGLE_SERVICE_ACCOUNT_KEY = 'test-key';
       process.env.GEMINI_API_KEY = 'test-gemini-key';
       process.env.DRIVE_ROOT_FOLDER_ID = 'test-folder-id';
@@ -187,6 +204,7 @@ describe('config', () => {
 
     it('loads successfully with all required keys in production', () => {
       process.env.NODE_ENV = 'production';
+      process.env.API_SECRET = 'test-secret';
       process.env.GOOGLE_SERVICE_ACCOUNT_KEY = 'test-key';
       process.env.GEMINI_API_KEY = 'test-gemini-key';
       process.env.DRIVE_ROOT_FOLDER_ID = 'test-folder-id';
@@ -195,6 +213,7 @@ describe('config', () => {
       const config = loadConfig();
 
       expect(config.nodeEnv).toBe('production');
+      expect(config.apiSecret).toBe('test-secret');
       expect(config.googleServiceAccountKey).toBe('test-key');
       expect(config.geminiApiKey).toBe('test-gemini-key');
       expect(config.driveRootFolderId).toBe('test-folder-id');
@@ -226,6 +245,7 @@ describe('config', () => {
 
     it('allows missing WEBHOOK_URL in production', () => {
       process.env.NODE_ENV = 'production';
+      process.env.API_SECRET = 'test-secret';
       process.env.GOOGLE_SERVICE_ACCOUNT_KEY = 'test-key';
       process.env.GEMINI_API_KEY = 'test-gemini-key';
       process.env.DRIVE_ROOT_FOLDER_ID = 'test-folder-id';

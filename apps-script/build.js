@@ -48,7 +48,7 @@ const log = {
 function readEnvFile(envPath) {
   if (!fs.existsSync(envPath)) {
     log.error(`.env file not found at: ${envPath}`);
-    log.error('Please create a .env file in the project root with API_BASE_URL set.');
+    log.error('Please create a .env file in the project root with API_BASE_URL and API_SECRET set.');
     process.exit(1);
   }
 
@@ -95,11 +95,25 @@ async function build() {
 
   log.success(`API_BASE_URL: ${apiBaseUrl}`);
 
-  // Step 3: Inject API_BASE_URL into config.ts
+  // Step 2.5: Validate API_SECRET
+  const apiSecret = envVars.API_SECRET;
+  if (!apiSecret) {
+    log.error('API_SECRET is not set in .env file!');
+    log.error('');
+    log.error('Please add API_SECRET to your .env file:');
+    log.error('  API_SECRET=your-secret-token');
+    log.error('');
+    log.error('This secret is used to authenticate API requests.');
+    process.exit(1);
+  }
+
+  log.success(`API_SECRET: ${'*'.repeat(apiSecret.length)} (${apiSecret.length} characters)`);
+
+  // Step 3: Inject API_BASE_URL and API_SECRET into config.ts
   const templatePath = path.resolve(__dirname, 'src', 'config.template.ts');
   const configPath = path.resolve(__dirname, 'src', 'config.ts');
 
-  log.info('Injecting API_BASE_URL into config.ts...');
+  log.info('Injecting API_BASE_URL and API_SECRET into config.ts...');
 
   if (!fs.existsSync(templatePath)) {
     log.error(`Template file not found: ${templatePath}`);
@@ -107,7 +121,8 @@ async function build() {
   }
 
   const templateContent = fs.readFileSync(templatePath, 'utf-8');
-  const configContent = templateContent.replace('{{API_BASE_URL}}', apiBaseUrl);
+  let configContent = templateContent.replace('{{API_BASE_URL}}', apiBaseUrl);
+  configContent = configContent.replace('{{API_SECRET}}', apiSecret);
   fs.writeFileSync(configPath, configContent, 'utf-8');
 
   log.success('config.ts generated');

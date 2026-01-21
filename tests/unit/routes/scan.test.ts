@@ -33,11 +33,33 @@ vi.mock('../../../src/bank/autofill.js', () => ({
   autoFillBankMovements: (...args: unknown[]) => mockAutoFillBankMovements(...args),
 }));
 
-// Import routes after mocks
+// Mock config
+vi.mock('../../../src/config.js', () => ({
+  getConfig: vi.fn(),
+}));
+
+// Import modules after mocks
 import { scanRoutes } from '../../../src/routes/scan.js';
+import { getConfig } from '../../../src/config.js';
 
 describe('Scan routes', () => {
   let server: FastifyInstance;
+
+  const mockConfig = {
+    nodeEnv: 'test',
+    port: 3000,
+    logLevel: 'info' as const,
+    apiSecret: 'test-secret-123',
+    googleServiceAccountKey: 'mock-key',
+    geminiApiKey: 'mock-gemini-key',
+    driveRootFolderId: 'mock-folder-id',
+    controlTemplateId: 'mock-template-id',
+    webhookUrl: 'http://localhost:3000/webhooks/drive',
+    matchDaysBefore: 10,
+    matchDaysAfter: 60,
+    usdArsTolerancePercent: 5,
+    geminiRpmLimit: 150,
+  };
 
   const mockFolderStructure = {
     rootId: 'root-id',
@@ -55,6 +77,7 @@ describe('Scan routes', () => {
 
   beforeEach(async () => {
     vi.clearAllMocks();
+    vi.mocked(getConfig).mockReturnValue(mockConfig);
     mockGetCachedFolderStructure.mockReturnValue(mockFolderStructure);
 
     server = Fastify({ logger: false });
@@ -85,6 +108,9 @@ describe('Scan routes', () => {
       const response = await server.inject({
         method: 'POST',
         url: '/api/scan',
+        headers: {
+          authorization: 'Bearer test-secret-123',
+        },
         payload: {},
       });
 
@@ -115,6 +141,9 @@ describe('Scan routes', () => {
       const response = await server.inject({
         method: 'POST',
         url: '/api/scan',
+        headers: {
+          authorization: 'Bearer test-secret-123',
+        },
         payload: { folderId: 'custom-folder-id' },
       });
 
@@ -131,6 +160,9 @@ describe('Scan routes', () => {
       const response = await server.inject({
         method: 'POST',
         url: '/api/scan',
+        headers: {
+          authorization: 'Bearer test-secret-123',
+        },
         payload: {},
       });
 
@@ -153,6 +185,9 @@ describe('Scan routes', () => {
       const response = await server.inject({
         method: 'POST',
         url: '/api/rematch',
+        headers: {
+          authorization: 'Bearer test-secret-123',
+        },
         payload: {},
       });
 
@@ -174,6 +209,9 @@ describe('Scan routes', () => {
       const response = await server.inject({
         method: 'POST',
         url: '/api/rematch',
+        headers: {
+          authorization: 'Bearer test-secret-123',
+        },
         payload: { documentType: 'factura' },
       });
 
@@ -189,6 +227,9 @@ describe('Scan routes', () => {
       const response = await server.inject({
         method: 'POST',
         url: '/api/rematch',
+        headers: {
+          authorization: 'Bearer test-secret-123',
+        },
         payload: {},
       });
 
@@ -221,6 +262,9 @@ describe('Scan routes', () => {
       const response = await server.inject({
         method: 'POST',
         url: '/api/autofill-bank',
+        headers: {
+          authorization: 'Bearer test-secret-123',
+        },
         payload: {},
       });
 
@@ -239,6 +283,9 @@ describe('Scan routes', () => {
       const response = await server.inject({
         method: 'POST',
         url: '/api/autofill-bank',
+        headers: {
+          authorization: 'Bearer test-secret-123',
+        },
         payload: {},
       });
 

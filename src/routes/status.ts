@@ -4,6 +4,7 @@
 
 import type { FastifyInstance } from 'fastify';
 import { getConfig } from '../config.js';
+import { authMiddleware } from '../middleware/auth.js';
 
 /**
  * Health check response
@@ -25,8 +26,9 @@ interface HealthResponse {
 export async function statusRoutes(server: FastifyInstance) {
   /**
    * GET /api/status - Health check and system status
+   * Protected with authentication
    */
-  server.get('/api/status', async (_request, _reply): Promise<HealthResponse> => {
+  server.get('/api/status', { onRequest: authMiddleware }, async (_request, _reply): Promise<HealthResponse> => {
     const config = getConfig();
 
     return {

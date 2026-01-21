@@ -4,7 +4,7 @@
  * Menu callbacks use ADVALib prefix so they resolve to this library.
  */
 
-import { API_BASE_URL } from './config';
+import { API_BASE_URL, API_SECRET } from './config';
 
 /**
  * Response from the /api/status endpoint
@@ -67,15 +67,27 @@ export function triggerAutofillBank(): void {
 }
 
 /**
+ * Validates that configuration values were properly injected during build
+ */
+function validateConfig(): void {
+  // Check if API_BASE_URL was properly injected during build
+  if (!API_BASE_URL || API_BASE_URL.includes('{{') || API_BASE_URL.includes('}}')) {
+    throw new Error('API_BASE_URL not configured. Please rebuild the library with API_BASE_URL environment variable set.');
+  }
+
+  // Check if API_SECRET was properly injected during build
+  if (!API_SECRET || API_SECRET.includes('{{') || API_SECRET.includes('}}')) {
+    throw new Error('API_SECRET not configured. Please rebuild the library with API_SECRET environment variable set.');
+  }
+}
+
+/**
  * Constructs the full API URL with HTTPS protocol
  * @param endpoint - The API endpoint path (e.g., '/api/scan')
  * @returns The full HTTPS URL
  */
 function getApiUrl(endpoint: string): string {
-  // Check if API_BASE_URL was properly injected during build
-  if (!API_BASE_URL || API_BASE_URL.includes('{{') || API_BASE_URL.includes('}}')) {
-    throw new Error('API_BASE_URL not configured. Please rebuild the library with API_BASE_URL environment variable set.');
-  }
+  validateConfig();
 
   // Remove any trailing slash from base URL and leading slash from endpoint
   const cleanBase = API_BASE_URL.replace(/\/$/, '');
@@ -104,7 +116,8 @@ function makeApiCall(
       method: method,
       headers: {
         'Content-Type': 'application/json',
-        'User-Agent': 'ADVA-Spreadsheet/3.0'
+        'User-Agent': 'ADVA-Spreadsheet/3.0',
+        'Authorization': `Bearer ${API_SECRET}`
       },
       muteHttpExceptions: true
     };
@@ -175,7 +188,8 @@ function fetchServerStatus(): StatusResponse | null {
     const options: GoogleAppsScript.URL_Fetch.URLFetchRequestOptions = {
       method: 'get',
       headers: {
-        'User-Agent': 'ADVA-Spreadsheet/3.0'
+        'User-Agent': 'ADVA-Spreadsheet/3.0',
+        'Authorization': `Bearer ${API_SECRET}`
       },
       muteHttpExceptions: true
     };

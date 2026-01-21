@@ -6,6 +6,11 @@ import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { buildServer } from '../../../src/server.js';
 
+// Mock config
+vi.mock('../../../src/config.js', () => ({
+  getConfig: vi.fn(),
+}));
+
 // Mock watch manager
 vi.mock('../../../src/services/watch-manager.js', () => ({
   getActiveChannels: vi.fn(),
@@ -36,12 +41,30 @@ vi.mock('../../../src/services/folder-structure.js', () => ({
 }));
 
 import * as watchManager from '../../../src/services/watch-manager.js';
+import { getConfig } from '../../../src/config.js';
 
 describe('webhook routes', () => {
   let server: FastifyInstance;
 
+  const mockConfig = {
+    nodeEnv: 'test',
+    port: 3000,
+    logLevel: 'info' as const,
+    apiSecret: 'test-secret-123',
+    googleServiceAccountKey: 'mock-key',
+    geminiApiKey: 'mock-gemini-key',
+    driveRootFolderId: 'mock-folder-id',
+    controlTemplateId: 'mock-template-id',
+    webhookUrl: 'http://localhost:3000/webhooks/drive',
+    matchDaysBefore: 10,
+    matchDaysAfter: 60,
+    usdArsTolerancePercent: 5,
+    geminiRpmLimit: 150,
+  };
+
   beforeEach(async () => {
     vi.clearAllMocks();
+    vi.mocked(getConfig).mockReturnValue(mockConfig);
     server = await buildServer();
   });
 
@@ -65,6 +88,7 @@ describe('webhook routes', () => {
         method: 'POST',
         url: '/webhooks/drive',
         headers: {
+          authorization: 'Bearer test-secret-123',
           'x-goog-channel-id': 'test-channel',
           'x-goog-resource-id': 'resource123',
           'x-goog-resource-state': 'sync',
@@ -82,6 +106,7 @@ describe('webhook routes', () => {
         method: 'POST',
         url: '/webhooks/drive',
         headers: {
+          authorization: 'Bearer test-secret-123',
           'x-goog-channel-id': 'unknown-channel',
           'x-goog-resource-id': 'resource123',
           'x-goog-resource-state': 'change',
@@ -111,6 +136,7 @@ describe('webhook routes', () => {
         method: 'POST',
         url: '/webhooks/drive',
         headers: {
+          authorization: 'Bearer test-secret-123',
           'x-goog-channel-id': 'test-channel',
           'x-goog-resource-id': 'resource123',
           'x-goog-resource-state': 'change',
@@ -139,6 +165,7 @@ describe('webhook routes', () => {
         method: 'POST',
         url: '/webhooks/drive',
         headers: {
+          authorization: 'Bearer test-secret-123',
           'x-goog-channel-id': 'test-channel',
           'x-goog-resource-id': 'resource123',
           'x-goog-resource-state': 'change',
@@ -167,6 +194,7 @@ describe('webhook routes', () => {
         method: 'POST',
         url: '/webhooks/drive',
         headers: {
+          authorization: 'Bearer test-secret-123',
           'x-goog-channel-id': 'test-channel',
           'x-goog-resource-id': 'resource123',
           'x-goog-resource-state': 'change',
@@ -195,6 +223,7 @@ describe('webhook routes', () => {
         method: 'POST',
         url: '/webhooks/drive',
         headers: {
+          authorization: 'Bearer test-secret-123',
           'x-goog-channel-id': 'test-channel',
           'x-goog-resource-id': 'resource123',
           'x-goog-resource-state': 'add',
@@ -224,6 +253,7 @@ describe('webhook routes', () => {
         method: 'POST',
         url: '/webhooks/drive',
         headers: {
+          authorization: 'Bearer test-secret-123',
           'x-goog-channel-id': 'test-channel',
           'x-goog-resource-id': 'resource123',
           'x-goog-resource-state': 'update',
@@ -254,6 +284,7 @@ describe('webhook routes', () => {
         method: 'POST',
         url: '/webhooks/drive',
         headers: {
+          authorization: 'Bearer test-secret-123',
           'x-goog-channel-id': 'test-channel',
           'x-goog-resource-id': 'resource123',
           'x-goog-resource-state': 'update',
@@ -283,6 +314,7 @@ describe('webhook routes', () => {
         method: 'POST',
         url: '/webhooks/drive',
         headers: {
+          authorization: 'Bearer test-secret-123',
           'x-goog-channel-id': 'test-channel',
           'x-goog-resource-id': 'resource123',
           'x-goog-resource-state': 'update',
@@ -310,6 +342,7 @@ describe('webhook routes', () => {
         method: 'POST',
         url: '/webhooks/drive',
         headers: {
+          authorization: 'Bearer test-secret-123',
           'x-goog-channel-id': 'test-channel',
           'x-goog-resource-id': 'resource123',
           'x-goog-resource-state': 'remove',
