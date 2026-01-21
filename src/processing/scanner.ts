@@ -150,7 +150,7 @@ export async function processFile(
       }
     : undefined;
 
-  const gemini = new GeminiClient(config.geminiApiKey, undefined, usageCallback);
+  const gemini = new GeminiClient(config.geminiApiKey, config.geminiRpmLimit, usageCallback);
 
   // Download file content
   const downloadResult = await downloadFile(fileInfo.id);

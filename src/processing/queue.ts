@@ -26,12 +26,12 @@ export class ProcessingQueue {
   /**
    * Creates a new processing queue
    *
-   * @param concurrency - Maximum concurrent operations (default: 3)
+   * @param concurrency - Maximum concurrent operations (default: 12)
    * @param intervalMs - Interval for rate limiting in ms (default: 1000)
    * @param intervalCap - Max operations per interval (default: 10)
    */
   constructor(
-    concurrency: number = 3,
+    concurrency: number = 12,
     intervalMs: number = 1000,
     intervalCap: number = 10
   ) {

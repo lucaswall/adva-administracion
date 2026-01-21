@@ -72,6 +72,9 @@ export interface Config {
   matchDaysBefore: number;
   matchDaysAfter: number;
   usdArsTolerancePercent: number;
+
+  // Gemini API
+  geminiRpmLimit: number;
 }
 
 /**
@@ -115,6 +118,9 @@ export function loadConfig(): Config {
   const matchDaysAfter = parseInt(process.env.MATCH_DAYS_AFTER || '60', 10);
   const usdArsTolerancePercent = parseFloat(process.env.USD_ARS_TOLERANCE_PERCENT || '5');
 
+  // Gemini API configuration
+  const geminiRpmLimit = parseInt(process.env.GEMINI_RPM_LIMIT || '150', 10);
+
   return {
     port,
     nodeEnv,
@@ -127,6 +133,7 @@ export function loadConfig(): Config {
     matchDaysBefore,
     matchDaysAfter,
     usdArsTolerancePercent,
+    geminiRpmLimit,
   };
 }
 

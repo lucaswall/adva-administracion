@@ -77,6 +77,7 @@ describe('config', () => {
       expect(config.matchDaysBefore).toBe(10);
       expect(config.matchDaysAfter).toBe(60);
       expect(config.usdArsTolerancePercent).toBe(5);
+      expect(config.geminiRpmLimit).toBe(150);
     });
 
     it('loads custom PORT value', () => {
@@ -117,6 +118,18 @@ describe('config', () => {
       expect(config.matchDaysBefore).toBe(20);
       expect(config.matchDaysAfter).toBe(90);
       expect(config.usdArsTolerancePercent).toBe(10);
+    });
+
+    it('loads custom GEMINI_RPM_LIMIT value', () => {
+      process.env.GEMINI_RPM_LIMIT = '300';
+      process.env.NODE_ENV = 'development';
+      process.env.GOOGLE_SERVICE_ACCOUNT_KEY = 'test-key';
+      process.env.GEMINI_API_KEY = 'test-gemini-key';
+      process.env.DRIVE_ROOT_FOLDER_ID = 'test-folder-id';
+
+      const config = loadConfig();
+
+      expect(config.geminiRpmLimit).toBe(300);
     });
 
     it('allows missing keys in development', () => {
