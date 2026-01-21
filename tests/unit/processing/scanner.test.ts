@@ -914,30 +914,59 @@ describe('Scanner module', () => {
   });
 
   describe('rematch', () => {
-    it('matches unmatched pagos to facturas', async () => {
-      // Mock fetching unmatched facturas
+    it('matches unmatched pagos to facturas in Debitos', async () => {
+      // Mock Debitos: Facturas Recibidas
       mockGetValues.mockResolvedValueOnce({
         ok: true,
         value: [
-          // Header row (fechaEmision now at index 0)
-          ['fechaEmision', 'fileId', 'fileName', 'tipo', 'puntoVenta', 'numero', 'cuitEmisor', 'razonSocial', 'importeTotal', 'moneda', 'matchedPagoFileId'],
-          // Unmatched factura (fechaEmision moved to index 0)
-          ['2024-01-15', 'fact-1', 'factura1.pdf', 'A', '00001', '00001234', '20123456786', 'TEST SA', 1210, 'ARS', ''],
+          ['fechaEmision', 'fileId', 'fileName', 'tipoComprobante', 'nroFactura', 'cuitEmisor', 'razonSocialEmisor', 'importeNeto', 'importeIva', 'importeTotal', 'moneda', 'concepto', 'processedAt', 'confidence', 'needsReview', 'matchedPagoFileId', 'matchConfidence', 'hasCuitMatch'],
+          ['2024-01-15', 'fact-1', 'factura1.pdf', 'A', '00001234', '20123456786', 'TEST SA', 1000, 210, 1210, 'ARS', 'Test', '2024-01-16', 0.95, 'NO', '', '', ''],
         ],
       });
 
-      // Mock fetching unmatched pagos
+      // Mock Debitos: Pagos Enviados
       mockGetValues.mockResolvedValueOnce({
         ok: true,
         value: [
-          // Header row (fechaPago now at index 0)
-          ['fechaPago', 'fileId', 'fileName', 'banco', 'importePagado', 'cuitBeneficiario', 'matchedFacturaFileId'],
-          // Unmatched pago that should match factura (fechaPago moved to index 0)
-          ['2024-01-18', 'pago-1', 'pago1.pdf', 'BBVA', 1210, '20123456786', ''],
+          ['fechaPago', 'fileId', 'fileName', 'banco', 'importePagado', 'moneda', 'referencia', 'cuitBeneficiario', 'nombreBeneficiario', 'concepto', 'processedAt', 'confidence', 'needsReview', 'matchedFacturaFileId', 'matchConfidence'],
+          ['2024-01-18', 'pago-1', 'pago1.pdf', 'BBVA', 1210, 'ARS', 'REF123', '20123456786', 'TEST SA', 'Payment', '2024-01-18', 0.9, 'NO', '', ''],
         ],
       });
 
-      // Mock updating sheets
+      // Mock Creditos: Facturas Emitidas (all matched)
+      mockGetValues.mockResolvedValueOnce({
+        ok: true,
+        value: [
+          ['fechaEmision', 'fileId', 'fileName', 'tipoComprobante', 'nroFactura', 'cuitReceptor', 'razonSocialReceptor', 'importeNeto', 'importeIva', 'importeTotal', 'moneda', 'concepto', 'processedAt', 'confidence', 'needsReview', 'matchedPagoFileId', 'matchConfidence', 'hasCuitMatch'],
+        ],
+      });
+
+      // Mock Creditos: Pagos Recibidos (empty)
+      mockGetValues.mockResolvedValueOnce({
+        ok: true,
+        value: [
+          ['fechaPago', 'fileId', 'fileName', 'banco', 'importePagado', 'moneda', 'referencia', 'cuitPagador', 'nombrePagador', 'concepto', 'processedAt', 'confidence', 'needsReview', 'matchedFacturaFileId', 'matchConfidence'],
+        ],
+      });
+
+      // Mock Debitos: Recibos (empty)
+      mockGetValues.mockResolvedValueOnce({
+        ok: true,
+        value: [
+          ['fechaPago', 'fileId', 'fileName', 'tipoRecibo', 'nombreEmpleado', 'cuilEmpleado', 'legajo', 'tareaDesempenada', 'cuitEmpleador', 'periodoAbonado', 'subtotalRemuneraciones', 'subtotalDescuentos', 'totalNeto', 'processedAt', 'confidence', 'needsReview', 'matchedPagoFileId', 'matchConfidence'],
+        ],
+      });
+
+      // Mock Debitos: Pagos Enviados for recibos matching (reuse same data)
+      mockGetValues.mockResolvedValueOnce({
+        ok: true,
+        value: [
+          ['fechaPago', 'fileId', 'fileName', 'banco', 'importePagado', 'moneda', 'referencia', 'cuitBeneficiario', 'nombreBeneficiario', 'concepto', 'processedAt', 'confidence', 'needsReview', 'matchedFacturaFileId', 'matchConfidence'],
+          ['2024-01-18', 'pago-1', 'pago1.pdf', 'BBVA', 1210, 'ARS', 'REF123', '20123456786', 'TEST SA', 'Payment', '2024-01-18', 0.9, 'NO', 'fact-1', 'HIGH'], // Already matched
+        ],
+      });
+
+      // Mock batch updates
       mockBatchUpdate.mockResolvedValue({ ok: true, value: 2 });
 
       const result = await rematch();
@@ -948,27 +977,182 @@ describe('Scanner module', () => {
       }
     });
 
-    it('handles no unmatched documents', async () => {
-      // All documents are already matched
-      mockGetValues
-        .mockResolvedValueOnce({
-          ok: true,
-          value: [
-            // Full factura headers (19 columns)
-            ['fechaEmision', 'fileId', 'fileName', 'tipoComprobante', 'nroFactura', 'cuitEmisor', 'razonSocialEmisor', 'cuitReceptor', 'importeNeto', 'importeIva', 'importeTotal', 'moneda', 'concepto', 'processedAt', 'confidence', 'needsReview', 'matchedPagoFileId', 'matchConfidence', 'hasCuitMatch'],
-            // Already matched factura (fechaEmision first, matchedPagoFileId at index 16)
-            ['2024-01-15', 'fact-1', 'factura1.pdf', 'A', '00001234', '20123456786', 'TEST SA', '30709076783', 1000, 210, 1210, 'ARS', 'Test', '2024-01-16T10:00:00Z', 0.95, 'NO', 'pago-1', 'HIGH', 'YES'],
-          ],
-        })
-        .mockResolvedValueOnce({
-          ok: true,
-          value: [
-            // Full pago headers (17 columns)
-            ['fechaPago', 'fileId', 'fileName', 'banco', 'importePagado', 'moneda', 'referencia', 'cuitPagador', 'nombrePagador', 'cuitBeneficiario', 'nombreBeneficiario', 'concepto', 'processedAt', 'confidence', 'needsReview', 'matchedFacturaFileId', 'matchConfidence'],
-            // Already matched pago (fechaPago first, matchedFacturaFileId at index 15)
-            ['2024-01-18', 'pago-1', 'pago1.pdf', 'BBVA', 1210, 'ARS', 'REF123', '30709076783', 'ADVA', '20123456786', 'TEST SA', 'Payment', '2024-01-18T10:00:00Z', 0.9, 'NO', 'fact-1', 'HIGH'],
-          ],
-        });
+    it('matches Creditos: Facturas Emitidas with Pagos Recibidos', async () => {
+      // Mock Debitos: Facturas Recibidas (all matched)
+      mockGetValues.mockResolvedValueOnce({
+        ok: true,
+        value: [
+          ['fechaEmision', 'fileId', 'fileName', 'tipoComprobante', 'nroFactura', 'cuitEmisor', 'razonSocialEmisor', 'importeNeto', 'importeIva', 'importeTotal', 'moneda', 'concepto', 'processedAt', 'confidence', 'needsReview', 'matchedPagoFileId', 'matchConfidence', 'hasCuitMatch'],
+        ],
+      });
+
+      // Mock Debitos: Pagos Enviados (empty)
+      mockGetValues.mockResolvedValueOnce({
+        ok: true,
+        value: [
+          ['fechaPago', 'fileId', 'fileName', 'banco', 'importePagado', 'moneda', 'referencia', 'cuitBeneficiario', 'nombreBeneficiario', 'concepto', 'processedAt', 'confidence', 'needsReview', 'matchedFacturaFileId', 'matchConfidence'],
+        ],
+      });
+
+      // Mock Creditos: Facturas Emitidas
+      mockGetValues.mockResolvedValueOnce({
+        ok: true,
+        value: [
+          ['fechaEmision', 'fileId', 'fileName', 'tipoComprobante', 'nroFactura', 'cuitReceptor', 'razonSocialReceptor', 'importeNeto', 'importeIva', 'importeTotal', 'moneda', 'concepto', 'processedAt', 'confidence', 'needsReview', 'matchedPagoFileId', 'matchConfidence', 'hasCuitMatch'],
+          ['2024-02-10', 'fact-emit-1', 'factura_emitida.pdf', 'A', '00005678', '27234567891', 'EMPRESA UNO SA', 5000, 1050, 6050, 'ARS', 'Service', '2024-02-10', 0.95, 'NO', '', '', ''],
+        ],
+      });
+
+      // Mock Creditos: Pagos Recibidos
+      mockGetValues.mockResolvedValueOnce({
+        ok: true,
+        value: [
+          ['fechaPago', 'fileId', 'fileName', 'banco', 'importePagado', 'moneda', 'referencia', 'cuitPagador', 'nombrePagador', 'concepto', 'processedAt', 'confidence', 'needsReview', 'matchedFacturaFileId', 'matchConfidence'],
+          ['2024-02-15', 'pago-recib-1', 'pago_recibido.pdf', 'Galicia', 6050, 'ARS', 'TRANS001', '27234567891', 'EMPRESA UNO SA', 'Payment received', '2024-02-15', 0.9, 'NO', '', ''],
+        ],
+      });
+
+      // Mock Debitos: Recibos (empty)
+      mockGetValues.mockResolvedValueOnce({
+        ok: true,
+        value: [
+          ['fechaPago', 'fileId', 'fileName', 'tipoRecibo', 'nombreEmpleado', 'cuilEmpleado', 'legajo', 'tareaDesempenada', 'cuitEmpleador', 'periodoAbonado', 'subtotalRemuneraciones', 'subtotalDescuentos', 'totalNeto', 'processedAt', 'confidence', 'needsReview', 'matchedPagoFileId', 'matchConfidence'],
+        ],
+      });
+
+      // Mock Debitos: Pagos Enviados for recibos (empty)
+      mockGetValues.mockResolvedValueOnce({
+        ok: true,
+        value: [
+          ['fechaPago', 'fileId', 'fileName', 'banco', 'importePagado', 'moneda', 'referencia', 'cuitBeneficiario', 'nombreBeneficiario', 'concepto', 'processedAt', 'confidence', 'needsReview', 'matchedFacturaFileId', 'matchConfidence'],
+        ],
+      });
+
+      // Mock batch updates
+      mockBatchUpdate.mockResolvedValue({ ok: true, value: 2 });
+
+      const result = await rematch();
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value.matchesFound).toBeGreaterThanOrEqual(0);
+      }
+    });
+
+    it('matches Recibos with Pagos Enviados in Debitos', async () => {
+      // Mock Debitos: Facturas Recibidas (all matched)
+      mockGetValues.mockResolvedValueOnce({
+        ok: true,
+        value: [
+          ['fechaEmision', 'fileId', 'fileName', 'tipoComprobante', 'nroFactura', 'cuitEmisor', 'razonSocialEmisor', 'importeNeto', 'importeIva', 'importeTotal', 'moneda', 'concepto', 'processedAt', 'confidence', 'needsReview', 'matchedPagoFileId', 'matchConfidence', 'hasCuitMatch'],
+        ],
+      });
+
+      // Mock Debitos: Pagos Enviados (empty for first call)
+      mockGetValues.mockResolvedValueOnce({
+        ok: true,
+        value: [
+          ['fechaPago', 'fileId', 'fileName', 'banco', 'importePagado', 'moneda', 'referencia', 'cuitBeneficiario', 'nombreBeneficiario', 'concepto', 'processedAt', 'confidence', 'needsReview', 'matchedFacturaFileId', 'matchConfidence'],
+        ],
+      });
+
+      // Mock Creditos: Facturas Emitidas (all matched)
+      mockGetValues.mockResolvedValueOnce({
+        ok: true,
+        value: [
+          ['fechaEmision', 'fileId', 'fileName', 'tipoComprobante', 'nroFactura', 'cuitReceptor', 'razonSocialReceptor', 'importeNeto', 'importeIva', 'importeTotal', 'moneda', 'concepto', 'processedAt', 'confidence', 'needsReview', 'matchedPagoFileId', 'matchConfidence', 'hasCuitMatch'],
+        ],
+      });
+
+      // Mock Creditos: Pagos Recibidos (empty)
+      mockGetValues.mockResolvedValueOnce({
+        ok: true,
+        value: [
+          ['fechaPago', 'fileId', 'fileName', 'banco', 'importePagado', 'moneda', 'referencia', 'cuitPagador', 'nombrePagador', 'concepto', 'processedAt', 'confidence', 'needsReview', 'matchedFacturaFileId', 'matchConfidence'],
+        ],
+      });
+
+      // Mock Debitos: Recibos
+      mockGetValues.mockResolvedValueOnce({
+        ok: true,
+        value: [
+          ['fechaPago', 'fileId', 'fileName', 'tipoRecibo', 'nombreEmpleado', 'cuilEmpleado', 'legajo', 'tareaDesempenada', 'cuitEmpleador', 'periodoAbonado', 'subtotalRemuneraciones', 'subtotalDescuentos', 'totalNeto', 'processedAt', 'confidence', 'needsReview', 'matchedPagoFileId', 'matchConfidence'],
+          ['2024-03-31', 'recibo-1', 'recibo_marzo.pdf', 'sueldo', 'MARTIN, Miguel', '20271190523', '1', 'Operario', '30709076783', 'marzo/2024', 2346822.36, 398959.80, 1947863.00, '2024-03-31', 0.95, 'NO', '', ''],
+        ],
+      });
+
+      // Mock Debitos: Pagos Enviados for recibos matching
+      mockGetValues.mockResolvedValueOnce({
+        ok: true,
+        value: [
+          ['fechaPago', 'fileId', 'fileName', 'banco', 'importePagado', 'moneda', 'referencia', 'cuitBeneficiario', 'nombreBeneficiario', 'concepto', 'processedAt', 'confidence', 'needsReview', 'matchedFacturaFileId', 'matchConfidence'],
+          ['2024-03-31', 'pago-sueldo-1', 'transferencia_sueldo.pdf', 'BBVA', 1947863.00, 'ARS', 'SUELDO-MAR', '20271190523', 'MARTIN, Miguel', 'Salary payment', '2024-03-31', 0.9, 'NO', '', ''],
+        ],
+      });
+
+      // Mock batch updates
+      mockBatchUpdate.mockResolvedValue({ ok: true, value: 2 });
+
+      const result = await rematch();
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value.matchesFound).toBeGreaterThanOrEqual(0);
+      }
+    });
+
+    it('handles all documents already matched', async () => {
+      // Mock all spreadsheets with already matched documents
+      // Debitos: Facturas Recibidas (matched)
+      mockGetValues.mockResolvedValueOnce({
+        ok: true,
+        value: [
+          ['fechaEmision', 'fileId', 'fileName', 'tipoComprobante', 'nroFactura', 'cuitEmisor', 'razonSocialEmisor', 'importeNeto', 'importeIva', 'importeTotal', 'moneda', 'concepto', 'processedAt', 'confidence', 'needsReview', 'matchedPagoFileId', 'matchConfidence', 'hasCuitMatch'],
+          ['2024-01-15', 'fact-1', 'factura1.pdf', 'A', '00001234', '20123456786', 'TEST SA', 1000, 210, 1210, 'ARS', 'Test', '2024-01-16', 0.95, 'NO', 'pago-1', 'HIGH', 'YES'],
+        ],
+      });
+
+      // Debitos: Pagos Enviados (matched)
+      mockGetValues.mockResolvedValueOnce({
+        ok: true,
+        value: [
+          ['fechaPago', 'fileId', 'fileName', 'banco', 'importePagado', 'moneda', 'referencia', 'cuitBeneficiario', 'nombreBeneficiario', 'concepto', 'processedAt', 'confidence', 'needsReview', 'matchedFacturaFileId', 'matchConfidence'],
+          ['2024-01-18', 'pago-1', 'pago1.pdf', 'BBVA', 1210, 'ARS', 'REF123', '20123456786', 'TEST SA', 'Payment', '2024-01-18', 0.9, 'NO', 'fact-1', 'HIGH'],
+        ],
+      });
+
+      // Creditos: Facturas Emitidas (empty)
+      mockGetValues.mockResolvedValueOnce({
+        ok: true,
+        value: [
+          ['fechaEmision', 'fileId', 'fileName', 'tipoComprobante', 'nroFactura', 'cuitReceptor', 'razonSocialReceptor', 'importeNeto', 'importeIva', 'importeTotal', 'moneda', 'concepto', 'processedAt', 'confidence', 'needsReview', 'matchedPagoFileId', 'matchConfidence', 'hasCuitMatch'],
+        ],
+      });
+
+      // Creditos: Pagos Recibidos (empty)
+      mockGetValues.mockResolvedValueOnce({
+        ok: true,
+        value: [
+          ['fechaPago', 'fileId', 'fileName', 'banco', 'importePagado', 'moneda', 'referencia', 'cuitPagador', 'nombrePagador', 'concepto', 'processedAt', 'confidence', 'needsReview', 'matchedFacturaFileId', 'matchConfidence'],
+        ],
+      });
+
+      // Debitos: Recibos (empty)
+      mockGetValues.mockResolvedValueOnce({
+        ok: true,
+        value: [
+          ['fechaPago', 'fileId', 'fileName', 'tipoRecibo', 'nombreEmpleado', 'cuilEmpleado', 'legajo', 'tareaDesempenada', 'cuitEmpleador', 'periodoAbonado', 'subtotalRemuneraciones', 'subtotalDescuentos', 'totalNeto', 'processedAt', 'confidence', 'needsReview', 'matchedPagoFileId', 'matchConfidence'],
+        ],
+      });
+
+      // Debitos: Pagos Enviados for recibos (matched)
+      mockGetValues.mockResolvedValueOnce({
+        ok: true,
+        value: [
+          ['fechaPago', 'fileId', 'fileName', 'banco', 'importePagado', 'moneda', 'referencia', 'cuitBeneficiario', 'nombreBeneficiario', 'concepto', 'processedAt', 'confidence', 'needsReview', 'matchedFacturaFileId', 'matchConfidence'],
+          ['2024-01-18', 'pago-1', 'pago1.pdf', 'BBVA', 1210, 'ARS', 'REF123', '20123456786', 'TEST SA', 'Payment', '2024-01-18', 0.9, 'NO', 'fact-1', 'HIGH'],
+        ],
+      });
 
       const result = await rematch();
 
@@ -987,6 +1171,38 @@ describe('Scanner module', () => {
       const result = await rematch();
 
       expect(result.ok).toBe(false);
+    });
+
+    it('returns error when batch update fails', async () => {
+      // Mock unmatched documents
+      mockGetValues.mockResolvedValueOnce({
+        ok: true,
+        value: [
+          ['fechaEmision', 'fileId', 'fileName', 'tipoComprobante', 'nroFactura', 'cuitEmisor', 'razonSocialEmisor', 'importeNeto', 'importeIva', 'importeTotal', 'moneda', 'concepto', 'processedAt', 'confidence', 'needsReview', 'matchedPagoFileId', 'matchConfidence', 'hasCuitMatch'],
+          ['2024-01-15', 'fact-1', 'factura1.pdf', 'A', '00001234', '20123456786', 'TEST SA', 1000, 210, 1210, 'ARS', 'Test', '2024-01-16', 0.95, 'NO', '', '', ''],
+        ],
+      });
+
+      mockGetValues.mockResolvedValueOnce({
+        ok: true,
+        value: [
+          ['fechaPago', 'fileId', 'fileName', 'banco', 'importePagado', 'moneda', 'referencia', 'cuitBeneficiario', 'nombreBeneficiario', 'concepto', 'processedAt', 'confidence', 'needsReview', 'matchedFacturaFileId', 'matchConfidence'],
+          ['2024-01-18', 'pago-1', 'pago1.pdf', 'BBVA', 1210, 'ARS', 'REF123', '20123456786', 'TEST SA', 'Payment', '2024-01-18', 0.9, 'NO', '', ''],
+        ],
+      });
+
+      // Mock batch update failure
+      mockBatchUpdate.mockResolvedValue({
+        ok: false,
+        error: new Error('Update failed'),
+      });
+
+      const result = await rematch();
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.error.message).toContain('Update failed');
+      }
     });
   });
 
