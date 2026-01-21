@@ -75,7 +75,7 @@ src/
 ├── config.ts             # Environment config (includes MAX_CASCADE_DEPTH, CASCADE_TIMEOUT_MS)
 ├── constants/spreadsheet-headers.ts
 ├── routes/{status,scan,webhooks}.ts
-├── services/{google-auth,drive,sheets,folder-structure,document-sorter,watch-manager}.ts
+├── services/{google-auth,drive,sheets,folder-structure,document-sorter,watch-manager,token-usage-logger}.ts
 ├── processing/{queue,scanner}.ts  # Includes cascading displacement logic
 ├── types/index.ts
 ├── matching/
@@ -209,6 +209,7 @@ ADVA CUIT: 30709076783 | Direction determines routing:
 ROOT/
 ├── Control de Creditos.gsheet
 ├── Control de Debitos.gsheet
+├── Dashboard Operativo Contable.gsheet
 ├── Entrada/        # Scan source
 ├── Sin Procesar/   # Failed docs
 └── {YYYY}/         # Created on-demand
@@ -220,6 +221,7 @@ ROOT/
 ## SPREADSHEETS
 - **Control de Creditos**: Facturas Emitidas (A:R, 18 cols), Pagos Recibidos (A:O, 15 cols)
 - **Control de Debitos**: Facturas Recibidas (A:R, 18 cols), Pagos Enviados (A:O, 15 cols), Recibos (A:R, 18 cols)
+- **Dashboard Operativo Contable**: Resumen Mensual (A:H, 8 cols), Uso de API (A:L, 12 cols) - Tracks Gemini API token usage and costs
 
 **IMPORTANT**: Spreadsheets only store counterparty information, NOT ADVA's information:
 - **Facturas Emitidas**: Only receptor fields (cuitReceptor, razonSocialReceptor), ADVA as emisor is implicit

@@ -15,7 +15,7 @@ import type {
   ClassificationResult,
   MatchConfidence,
 } from '../types/index.js';
-import { GeminiClient } from '../gemini/client.js';
+import { GeminiClient, type UsageCallbackData } from '../gemini/client.js';
 import {
   CLASSIFICATION_PROMPT,
   FACTURA_PROMPT,
@@ -33,6 +33,7 @@ import {
 import { listFilesInFolder, downloadFile } from '../services/drive.js';
 import { getValues, appendRowsWithLinks, batchUpdate, sortSheet, type CellValueOrLink } from '../services/sheets.js';
 import { getCachedFolderStructure } from '../services/folder-structure.js';
+import { calculateCost, generateRequestId, logTokenUsage } from '../services/token-usage-logger.js';
 import { sortToSinProcesar, sortAndRenameDocument } from '../services/document-sorter.js';
 import { getProcessingQueue } from './queue.js';
 import { getConfig, MAX_CASCADE_DEPTH, CASCADE_TIMEOUT_MS } from '../config.js';
@@ -109,7 +110,47 @@ export async function processFile(
   fileInfo: Omit<FileInfo, 'content'>
 ): Promise<Result<ProcessFileResult, Error>> {
   const config = getConfig();
-  const gemini = new GeminiClient(config.geminiApiKey);
+
+  // Get folder structure for Dashboard Operativo Contable ID
+  const folderStructure = getCachedFolderStructure();
+  const dashboardOperativoId = folderStructure?.dashboardOperativoId;
+
+  // Create usage callback for token tracking
+  const usageCallback = dashboardOperativoId
+    ? (data: UsageCallbackData) => {
+        // Calculate estimated cost
+        const estimatedCostUSD = calculateCost(data.model, data.promptTokens, data.outputTokens);
+
+        // Log usage to Dashboard Operativo Contable
+        // Note: Fire and forget - don't await to avoid slowing down processing
+        void logTokenUsage(dashboardOperativoId, {
+          timestamp: new Date().toISOString(),
+          requestId: generateRequestId(),
+          fileId: data.fileId,
+          fileName: data.fileName,
+          model: data.model,
+          promptTokens: data.promptTokens,
+          outputTokens: data.outputTokens,
+          totalTokens: data.totalTokens,
+          estimatedCostUSD,
+          durationMs: data.durationMs,
+          success: data.success,
+          errorMessage: data.errorMessage || '',
+        }).then(result => {
+          if (!result.ok) {
+            warn('Failed to log token usage', {
+              module: 'scanner',
+              phase: 'token-logging',
+              fileId: data.fileId,
+              fileName: data.fileName,
+              error: result.error.message
+            });
+          }
+        });
+      }
+    : undefined;
+
+  const gemini = new GeminiClient(config.geminiApiKey, undefined, usageCallback);
 
   // Download file content
   const downloadResult = await downloadFile(fileInfo.id);
@@ -123,7 +164,10 @@ export async function processFile(
   const classifyResult = await gemini.analyzeDocument(
     content,
     fileInfo.mimeType,
-    CLASSIFICATION_PROMPT
+    CLASSIFICATION_PROMPT,
+    3,
+    fileInfo.id,
+    fileInfo.name
   );
 
   if (!classifyResult.ok) {
@@ -197,7 +241,10 @@ export async function processFile(
   const extractResult = await gemini.analyzeDocument(
     content,
     fileInfo.mimeType,
-    extractPrompt
+    extractPrompt,
+    3,
+    fileInfo.id,
+    fileInfo.name
   );
 
   if (!extractResult.ok) {

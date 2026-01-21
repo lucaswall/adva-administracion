@@ -544,4 +544,245 @@ describe('GeminiClient', () => {
       });
     });
   });
+
+  describe('usage tracking', () => {
+    const mockBuffer = Buffer.from('test-content');
+    const mockMimeType = 'application/pdf';
+    const mockPrompt = 'Extract data';
+
+    it('accepts usage callback in constructor', () => {
+      const callback = vi.fn();
+      const clientWithCallback = new GeminiClient(mockApiKey, 60, callback);
+      expect(clientWithCallback).toBeDefined();
+    });
+
+    it('calls usage callback on successful API call with usage metadata', async () => {
+      const callback = vi.fn();
+      const clientWithCallback = new GeminiClient(mockApiKey, 60, callback);
+
+      const mockResponse = {
+        candidates: [{
+          content: {
+            parts: [{ text: 'Extracted data' }]
+          }
+        }],
+        usageMetadata: {
+          promptTokenCount: 1000,
+          candidatesTokenCount: 500,
+          totalTokenCount: 1500
+        }
+      };
+
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify(mockResponse)
+      });
+
+      const result = await clientWithCallback.analyzeDocument(
+        mockBuffer,
+        mockMimeType,
+        mockPrompt,
+        1
+      );
+
+      expect(result.ok).toBe(true);
+      expect(callback).toHaveBeenCalledTimes(1);
+      expect(callback).toHaveBeenCalledWith(
+        expect.objectContaining({
+          success: true,
+          model: 'gemini-2.5-flash',
+          promptTokens: 1000,
+          outputTokens: 500,
+          totalTokens: 1500,
+          durationMs: expect.any(Number),
+          fileId: '',
+          fileName: ''
+        })
+      );
+    });
+
+    it('calls usage callback on failed API call with zero tokens', async () => {
+      const callback = vi.fn();
+      const clientWithCallback = new GeminiClient(mockApiKey, 60, callback);
+
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 400,
+        text: async () => 'Bad Request'
+      });
+
+      const result = await clientWithCallback.analyzeDocument(
+        mockBuffer,
+        mockMimeType,
+        mockPrompt,
+        1
+      );
+
+      expect(result.ok).toBe(false);
+      expect(callback).toHaveBeenCalledTimes(1);
+      expect(callback).toHaveBeenCalledWith(
+        expect.objectContaining({
+          success: false,
+          model: 'gemini-2.5-flash',
+          promptTokens: 0,
+          outputTokens: 0,
+          totalTokens: 0,
+          durationMs: expect.any(Number),
+          errorMessage: expect.stringContaining('400'),
+          fileId: '',
+          fileName: ''
+        })
+      );
+    });
+
+    it('calls usage callback with file context when provided', async () => {
+      const callback = vi.fn();
+      const clientWithCallback = new GeminiClient(mockApiKey, 60, callback);
+
+      const mockResponse = {
+        candidates: [{
+          content: {
+            parts: [{ text: 'Success' }]
+          }
+        }],
+        usageMetadata: {
+          promptTokenCount: 100,
+          candidatesTokenCount: 50,
+          totalTokenCount: 150
+        }
+      };
+
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify(mockResponse)
+      });
+
+      const result = await clientWithCallback.analyzeDocument(
+        mockBuffer,
+        mockMimeType,
+        mockPrompt,
+        1,
+        'file-id-123',
+        'invoice.pdf'
+      );
+
+      expect(result.ok).toBe(true);
+      expect(callback).toHaveBeenCalledWith(
+        expect.objectContaining({
+          fileId: 'file-id-123',
+          fileName: 'invoice.pdf'
+        })
+      );
+    });
+
+    it('handles missing usageMetadata gracefully', async () => {
+      const callback = vi.fn();
+      const clientWithCallback = new GeminiClient(mockApiKey, 60, callback);
+
+      const mockResponse = {
+        candidates: [{
+          content: {
+            parts: [{ text: 'Success' }]
+          }
+        }]
+        // usageMetadata missing
+      };
+
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify(mockResponse)
+      });
+
+      const result = await clientWithCallback.analyzeDocument(
+        mockBuffer,
+        mockMimeType,
+        mockPrompt,
+        1
+      );
+
+      expect(result.ok).toBe(true);
+      expect(callback).toHaveBeenCalledWith(
+        expect.objectContaining({
+          promptTokens: 0,
+          outputTokens: 0,
+          totalTokens: 0
+        })
+      );
+    });
+
+    it('does not call callback if not provided', async () => {
+      const mockResponse = {
+        candidates: [{
+          content: {
+            parts: [{ text: 'Success' }]
+          }
+        }],
+        usageMetadata: {
+          promptTokenCount: 100,
+          candidatesTokenCount: 50,
+          totalTokenCount: 150
+        }
+      };
+
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify(mockResponse)
+      });
+
+      // No callback provided - should not throw error
+      const result = await client.analyzeDocument(
+        mockBuffer,
+        mockMimeType,
+        mockPrompt,
+        1
+      );
+
+      expect(result.ok).toBe(true);
+    });
+
+    it('tracks request duration accurately', async () => {
+      const callback = vi.fn();
+      const clientWithCallback = new GeminiClient(mockApiKey, 60, callback);
+
+      const mockResponse = {
+        candidates: [{
+          content: {
+            parts: [{ text: 'Success' }]
+          }
+        }]
+      };
+
+      // Simulate slow API response
+      global.fetch = vi.fn().mockImplementation(async () => {
+        await new Promise(resolve => setTimeout(resolve, 100));
+        return {
+          ok: true,
+          status: 200,
+          text: async () => JSON.stringify(mockResponse)
+        };
+      });
+
+      const result = await clientWithCallback.analyzeDocument(
+        mockBuffer,
+        mockMimeType,
+        mockPrompt,
+        1
+      );
+
+      expect(result.ok).toBe(true);
+      expect(callback).toHaveBeenCalledWith(
+        expect.objectContaining({
+          durationMs: expect.any(Number)
+        })
+      );
+
+      const callArgs = callback.mock.calls[0][0];
+      expect(callArgs.durationMs).toBeGreaterThan(0);
+      expect(callArgs.durationMs).toBeLessThan(5000); // Sanity check
+    });
+  });
 });
