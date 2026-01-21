@@ -15,6 +15,7 @@ vi.mock('googleapis', () => ({
         get: vi.fn(),
         create: vi.fn(),
         update: vi.fn(),
+        copy: vi.fn(),
       },
     })),
   },
@@ -34,6 +35,7 @@ import {
   getParents,
   renameFile,
   clearDriveCache,
+  createSpreadsheetFromTemplate,
 } from '../../../src/services/drive.js';
 
 describe('Drive folder operations', () => {
@@ -42,6 +44,7 @@ describe('Drive folder operations', () => {
     get: ReturnType<typeof vi.fn>;
     create: ReturnType<typeof vi.fn>;
     update: ReturnType<typeof vi.fn>;
+    copy: ReturnType<typeof vi.fn>;
   };
 
   beforeEach(() => {
@@ -51,6 +54,7 @@ describe('Drive folder operations', () => {
       get: vi.fn(),
       create: vi.fn(),
       update: vi.fn(),
+      copy: vi.fn(),
     };
     vi.mocked(google.drive).mockReturnValue({
       files: mockDriveFiles,
@@ -406,6 +410,162 @@ describe('Drive folder operations', () => {
         fileId: 'fileId',
         requestBody: { name: 'Factura_00001-00001234_20123456786_2024-01-15.pdf' },
         fields: 'id, name',
+        supportsAllDrives: true,
+      });
+    });
+  });
+
+  describe('createSpreadsheetFromTemplate', () => {
+    it('creates a spreadsheet from template successfully', async () => {
+      mockDriveFiles.copy.mockResolvedValue({
+        data: {
+          id: 'newSpreadsheetId',
+          name: 'Control de Creditos',
+          mimeType: 'application/vnd.google-apps.spreadsheet',
+        },
+      });
+
+      const result = await createSpreadsheetFromTemplate(
+        'templateId',
+        'Control de Creditos',
+        'parentFolderId'
+      );
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value).toEqual({
+          id: 'newSpreadsheetId',
+          name: 'Control de Creditos',
+          mimeType: 'application/vnd.google-apps.spreadsheet',
+        });
+      }
+
+      expect(mockDriveFiles.copy).toHaveBeenCalledWith({
+        fileId: 'templateId',
+        requestBody: {
+          name: 'Control de Creditos',
+          parents: ['parentFolderId'],
+        },
+        fields: 'id, name, mimeType',
+        supportsAllDrives: true,
+      });
+    });
+
+    it('uses default mimeType when not returned by API', async () => {
+      mockDriveFiles.copy.mockResolvedValue({
+        data: {
+          id: 'newSpreadsheetId',
+          name: 'Control de Debitos',
+          // mimeType missing
+        },
+      });
+
+      const result = await createSpreadsheetFromTemplate(
+        'templateId',
+        'Control de Debitos',
+        'parentFolderId'
+      );
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value.mimeType).toBe('application/vnd.google-apps.spreadsheet');
+      }
+    });
+
+    it('uses provided name when name not returned by API', async () => {
+      mockDriveFiles.copy.mockResolvedValue({
+        data: {
+          id: 'newSpreadsheetId',
+          // name missing
+          mimeType: 'application/vnd.google-apps.spreadsheet',
+        },
+      });
+
+      const result = await createSpreadsheetFromTemplate(
+        'templateId',
+        'Control de Creditos',
+        'parentFolderId'
+      );
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value.name).toBe('Control de Creditos');
+      }
+    });
+
+    it('returns error when API returns no file ID', async () => {
+      mockDriveFiles.copy.mockResolvedValue({
+        data: {
+          // id missing
+          name: 'Control de Creditos',
+          mimeType: 'application/vnd.google-apps.spreadsheet',
+        },
+      });
+
+      const result = await createSpreadsheetFromTemplate(
+        'templateId',
+        'Control de Creditos',
+        'parentFolderId'
+      );
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.error.message).toBe('Failed to copy template spreadsheet: no ID returned');
+      }
+    });
+
+    it('returns error on API failure', async () => {
+      mockDriveFiles.copy.mockRejectedValue(new Error('Template not found'));
+
+      const result = await createSpreadsheetFromTemplate(
+        'invalidTemplateId',
+        'Control de Creditos',
+        'parentFolderId'
+      );
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.error.message).toBe('Template not found');
+      }
+    });
+
+    it('handles non-Error exceptions', async () => {
+      mockDriveFiles.copy.mockRejectedValue('String error');
+
+      const result = await createSpreadsheetFromTemplate(
+        'templateId',
+        'Control de Creditos',
+        'parentFolderId'
+      );
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.error.message).toBe('String error');
+      }
+    });
+
+    it('calls API with correct parameters for different templates', async () => {
+      mockDriveFiles.copy.mockResolvedValue({
+        data: {
+          id: 'newId',
+          name: 'Custom Name',
+          mimeType: 'application/vnd.google-apps.spreadsheet',
+        },
+      });
+
+      await createSpreadsheetFromTemplate(
+        'customTemplateId',
+        'Custom Name',
+        'customParentId'
+      );
+
+      expect(mockDriveFiles.copy).toHaveBeenCalledWith({
+        fileId: 'customTemplateId',
+        requestBody: {
+          name: 'Custom Name',
+          parents: ['customParentId'],
+        },
+        fields: 'id, name, mimeType',
         supportsAllDrives: true,
       });
     });

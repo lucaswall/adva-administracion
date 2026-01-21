@@ -6,7 +6,7 @@
 import { google, drive_v3 } from 'googleapis';
 import { getGoogleAuth, getDefaultScopes } from './google-auth.js';
 import type { FileInfo, Result } from '../types/index.js';
-import { debug, warn, error as logError } from '../utils/logger.js';
+import { debug, info, warn, error as logError } from '../utils/logger.js';
 
 /**
  * Drive service instance
