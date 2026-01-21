@@ -1,21 +1,22 @@
 /**
- * ADVA Administration Menu
- * Adds custom menu to trigger server operations via REST API
+ * ADVA Menu Library
+ * Shared library for Control spreadsheets.
+ * Menu callbacks use ADVALib prefix so they resolve to this library.
  */
 
 /**
- * Runs when the spreadsheet is opened
- * Creates the ADVA custom menu
+ * Creates the ADVA menu.
+ * Called from bound script's onOpen() trigger.
  */
-function onOpen() {
+function createMenu() {
   const ui = SpreadsheetApp.getUi();
   ui.createMenu('ADVA')
-    .addItem('🔄 Trigger Scan', 'triggerScan')
-    .addItem('🔗 Trigger Re-match', 'triggerRematch')
-    .addItem('🏦 Auto-fill Bank Data', 'triggerAutofillBank')
+    .addItem('🔄 Trigger Scan', 'ADVALib.triggerScan')
+    .addItem('🔗 Trigger Re-match', 'ADVALib.triggerRematch')
+    .addItem('🏦 Auto-fill Bank Data', 'ADVALib.triggerAutofillBank')
     .addSeparator()
-    .addItem('⚙️ Configure API URL', 'showConfigDialog')
-    .addItem('ℹ️ About', 'showAbout')
+    .addItem('⚙️ Configure API URL', 'ADVALib.showConfigDialog')
+    .addItem('ℹ️ About', 'ADVALib.showAbout')
     .addToUi();
 }
 
