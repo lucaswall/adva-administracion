@@ -36,7 +36,7 @@ import { getCachedFolderStructure } from '../services/folder-structure.js';
 import { sortToSinProcesar, sortAndRenameDocument } from '../services/document-sorter.js';
 import { getProcessingQueue } from './queue.js';
 import { getConfig } from '../config.js';
-import { FacturaPagoMatcher } from '../matching/matcher.js';
+import { FacturaPagoMatcher, ReciboPagoMatcher } from '../matching/matcher.js';
 import { formatUSCurrency, parseNumber } from '../utils/numbers.js';
 import {
   generateFacturaFileName,
@@ -705,6 +705,7 @@ export async function scanFolder(folderId?: string): Promise<Result<ScanResult, 
   });
 
   const folderStructure = getCachedFolderStructure();
+  const config = getConfig();
 
   if (!folderStructure) {
     const errorMsg = 'Folder structure not initialized. Call discoverFolderStructure first.';
@@ -1137,7 +1138,36 @@ export async function scanFolder(folderId?: string): Promise<Result<ScanResult, 
   // Wait for all processing to complete
   await queue.onIdle();
 
-  // TODO: Run matching after processing (Phase 2 enhancement)
+  // Run automatic matching after processing
+  if (result.filesProcessed > 0) {
+    debug('Running automatic matching', {
+      module: 'scanner',
+      phase: 'auto-match',
+      filesProcessed: result.filesProcessed
+    });
+
+    const matchResult = await runMatching(folderStructure, config);
+
+    if (matchResult.ok) {
+      result.matchesFound = matchResult.value;
+      info('Automatic matching complete', {
+        module: 'scanner',
+        phase: 'auto-match',
+        matchesFound: result.matchesFound
+      });
+    } else {
+      // Log warning but don't fail scanFolder - matching is a best-effort operation
+      warn('Automatic matching failed', {
+        module: 'scanner',
+        phase: 'auto-match',
+        error: matchResult.error.message
+      });
+      result.matchesFound = 0;
+    }
+  } else {
+    // No files processed, set matchesFound to 0
+    result.matchesFound = 0;
+  }
 
   result.duration = Date.now() - startTime;
 
@@ -1156,35 +1186,44 @@ export async function scanFolder(folderId?: string): Promise<Result<ScanResult, 
 }
 
 /**
- * Re-runs matching on unmatched documents
+ * Matches facturas with pagos in a single spreadsheet
  *
- * @returns Rematch result with matches found
+ * @param spreadsheetId - Spreadsheet ID (Control de Creditos or Control de Debitos)
+ * @param facturasSheetName - Facturas sheet name ('Facturas Emitidas' or 'Facturas Recibidas')
+ * @param pagosSheetName - Pagos sheet name ('Pagos Recibidos' or 'Pagos Enviados')
+ * @param facturaCuitField - CUIT field name in factura to match (e.g., 'cuitReceptor' or 'cuitEmisor')
+ * @param pagoCuitField - CUIT field name in pago to match (e.g., 'cuitPagador' or 'cuitBeneficiario')
+ * @param config - Configuration with matching parameters
+ * @returns Number of matches found
  */
-export async function rematch(): Promise<Result<RematchResult, Error>> {
-  const startTime = Date.now();
-  const folderStructure = getCachedFolderStructure();
+async function matchFacturasWithPagos(
+  spreadsheetId: string,
+  facturasSheetName: 'Facturas Emitidas' | 'Facturas Recibidas',
+  pagosSheetName: 'Pagos Recibidos' | 'Pagos Enviados',
+  facturaCuitField: 'cuitReceptor' | 'cuitEmisor',
+  pagoCuitField: 'cuitPagador' | 'cuitBeneficiario',
+  config: ReturnType<typeof getConfig>
+): Promise<Result<number, Error>> {
+  debug('Starting factura-pago matching', {
+    module: 'scanner',
+    phase: 'matching',
+    spreadsheetId,
+    facturasSheet: facturasSheetName,
+    pagosSheet: pagosSheetName
+  });
 
-  if (!folderStructure) {
-    return {
-      ok: false,
-      error: new Error('Folder structure not initialized'),
-    };
-  }
+  // Determine correct column ranges based on sheet type
+  const facturasRange = `${facturasSheetName}!A:R`; // Both factura sheets use A:R
+  const pagosRange = `${pagosSheetName}!A:O`; // Both pago sheets use A:O
 
-  // TODO: Update rematch to handle two-spreadsheet structure
-  // For now, rematch only works with facturas recibidas and pagos enviados (debitos)
-  // Full implementation would also match facturas emitidas with pagos recibidos (creditos)
-  const controlDebitosId = folderStructure.controlDebitosId;
-  const config = getConfig();
-
-  // Get all facturas recibidas (invoices we need to pay)
-  const facturasResult = await getValues(controlDebitosId, 'Facturas Recibidas!A:W');
+  // Get all facturas
+  const facturasResult = await getValues(spreadsheetId, facturasRange);
   if (!facturasResult.ok) {
     return facturasResult;
   }
 
-  // Get all pagos enviados (payments we made)
-  const pagosResult = await getValues(controlDebitosId, 'Pagos Enviados!A:R');
+  // Get all pagos
+  const pagosResult = await getValues(spreadsheetId, pagosRange);
   if (!pagosResult.ok) {
     return pagosResult;
   }
@@ -1198,28 +1237,33 @@ export async function rematch(): Promise<Result<RematchResult, Error>> {
       const row = facturasResult.value[i];
       if (!row || !row[0]) continue;
 
-      facturas.push({
+      // Build factura object based on sheet type
+      const factura: Factura & { row: number } = {
         row: i + 1, // Sheet rows are 1-indexed
         fechaEmision: String(row[0] || ''),
         fileId: String(row[1] || ''),
         fileName: String(row[2] || ''),
         tipoComprobante: (row[3] || 'A') as Factura['tipoComprobante'],
         nroFactura: String(row[4] || ''),
-        cuitEmisor: String(row[5] || ''),
-        razonSocialEmisor: String(row[6] || ''),
-        cuitReceptor: row[7] ? String(row[7]) : undefined,
-        importeNeto: parseNumber(row[8]) || 0,
-        importeIva: parseNumber(row[9]) || 0,
-        importeTotal: parseNumber(row[10]) || 0,
-        moneda: (row[11] || 'ARS') as Factura['moneda'],
-        concepto: row[12] ? String(row[12]) : undefined,
-        processedAt: String(row[13] || ''),
-        confidence: Number(row[14]) || 0,
-        needsReview: row[15] === 'YES',
-        matchedPagoFileId: row[16] ? String(row[16]) : undefined,
-        matchConfidence: row[17] ? (String(row[17]) as MatchConfidence) : undefined,
-        hasCuitMatch: row[18] === 'YES',
-      });
+        // Column 5 (F) and 6 (G) contain either emisor or receptor info depending on sheet
+        cuitEmisor: facturaCuitField === 'cuitEmisor' ? String(row[5] || '') : '',
+        razonSocialEmisor: facturaCuitField === 'cuitEmisor' ? String(row[6] || '') : '',
+        cuitReceptor: facturaCuitField === 'cuitReceptor' ? String(row[5] || '') : undefined,
+        razonSocialReceptor: facturaCuitField === 'cuitReceptor' ? String(row[6] || '') : undefined,
+        importeNeto: parseNumber(row[7]) || 0,
+        importeIva: parseNumber(row[8]) || 0,
+        importeTotal: parseNumber(row[9]) || 0,
+        moneda: (row[10] || 'ARS') as Factura['moneda'],
+        concepto: row[11] ? String(row[11]) : undefined,
+        processedAt: String(row[12] || ''),
+        confidence: Number(row[13]) || 0,
+        needsReview: row[14] === 'YES',
+        matchedPagoFileId: row[15] ? String(row[15]) : undefined,
+        matchConfidence: row[16] ? (String(row[16]) as MatchConfidence) : undefined,
+        hasCuitMatch: row[17] === 'YES',
+      };
+
+      facturas.push(factura);
     }
   }
 
@@ -1228,7 +1272,9 @@ export async function rematch(): Promise<Result<RematchResult, Error>> {
       const row = pagosResult.value[i];
       if (!row || !row[0]) continue;
 
-      pagos.push({
+      // Build pago object based on sheet type
+      // Column 7 (H) and 8 (I) contain either pagador or beneficiario info depending on sheet
+      const pago: Pago & { row: number } = {
         row: i + 1,
         fechaPago: String(row[0] || ''),
         fileId: String(row[1] || ''),
@@ -1237,17 +1283,19 @@ export async function rematch(): Promise<Result<RematchResult, Error>> {
         importePagado: parseNumber(row[4]) || 0,
         moneda: (String(row[5]) as 'ARS' | 'USD') || 'ARS',
         referencia: row[6] ? String(row[6]) : undefined,
-        cuitPagador: row[7] ? String(row[7]) : undefined,
-        nombrePagador: row[8] ? String(row[8]) : undefined,
-        cuitBeneficiario: row[9] ? String(row[9]) : undefined,
-        nombreBeneficiario: row[10] ? String(row[10]) : undefined,
-        concepto: row[11] ? String(row[11]) : undefined,
-        processedAt: String(row[12] || ''),
-        confidence: Number(row[13]) || 0,
-        needsReview: row[14] === 'YES',
-        matchedFacturaFileId: row[15] ? String(row[15]) : undefined,
-        matchConfidence: row[16] ? (String(row[16]) as MatchConfidence) : undefined,
-      });
+        cuitPagador: pagoCuitField === 'cuitPagador' ? String(row[7] || '') : undefined,
+        nombrePagador: pagoCuitField === 'cuitPagador' ? String(row[8] || '') : undefined,
+        cuitBeneficiario: pagoCuitField === 'cuitBeneficiario' ? String(row[7] || '') : undefined,
+        nombreBeneficiario: pagoCuitField === 'cuitBeneficiario' ? String(row[8] || '') : undefined,
+        concepto: row[9] ? String(row[9]) : undefined,
+        processedAt: String(row[10] || ''),
+        confidence: Number(row[11]) || 0,
+        needsReview: row[12] === 'YES',
+        matchedFacturaFileId: row[13] ? String(row[13]) : undefined,
+        matchConfidence: row[14] ? (String(row[14]) as MatchConfidence) : undefined,
+      };
+
+      pagos.push(pago);
     }
   }
 
@@ -1255,14 +1303,15 @@ export async function rematch(): Promise<Result<RematchResult, Error>> {
   const unmatchedFacturas = facturas.filter(f => !f.matchedPagoFileId);
   const unmatchedPagos = pagos.filter(p => !p.matchedFacturaFileId);
 
+  debug('Found unmatched documents', {
+    module: 'scanner',
+    phase: 'matching',
+    unmatchedFacturas: unmatchedFacturas.length,
+    unmatchedPagos: unmatchedPagos.length
+  });
+
   if (unmatchedPagos.length === 0) {
-    return {
-      ok: true,
-      value: {
-        matchesFound: 0,
-        duration: Date.now() - startTime,
-      },
-    };
+    return { ok: true, value: 0 };
   }
 
   // Run matching
@@ -1285,9 +1334,18 @@ export async function rematch(): Promise<Result<RematchResult, Error>> {
       if (bestMatch.confidence === 'HIGH' || matches.length === 1) {
         matchesFound++;
 
-        // Update factura with match info
+        debug('Match found', {
+          module: 'scanner',
+          phase: 'matching',
+          pagoId: pago.fileId,
+          facturaId: bestMatch.facturaFileId,
+          confidence: bestMatch.confidence,
+          hasCuitMatch: bestMatch.hasCuitMatch
+        });
+
+        // Update factura with match info (columns P:R)
         updates.push({
-          range: `'Facturas Recibidas'!U${bestMatch.facturaRow}:W${bestMatch.facturaRow}`,
+          range: `'${facturasSheetName}'!P${bestMatch.facturaRow}:R${bestMatch.facturaRow}`,
           values: [[
             pago.fileId,
             bestMatch.confidence,
@@ -1295,9 +1353,9 @@ export async function rematch(): Promise<Result<RematchResult, Error>> {
           ]],
         });
 
-        // Update pago with match info
+        // Update pago with match info (columns N:O)
         updates.push({
-          range: `'Pagos Enviados'!P${pago.row}:Q${pago.row}`,
+          range: `'${pagosSheetName}'!N${pago.row}:O${pago.row}`,
           values: [[
             bestMatch.facturaFileId,
             bestMatch.confidence,
@@ -1315,16 +1373,335 @@ export async function rematch(): Promise<Result<RematchResult, Error>> {
 
   // Apply updates
   if (updates.length > 0) {
-    const updateResult = await batchUpdate(controlDebitosId, updates);
+    info('Applying match updates', {
+      module: 'scanner',
+      phase: 'matching',
+      updateCount: updates.length,
+      matchesFound
+    });
+
+    const updateResult = await batchUpdate(spreadsheetId, updates);
     if (!updateResult.ok) {
       return updateResult;
     }
   }
 
+  return { ok: true, value: matchesFound };
+}
+
+/**
+ * Matches recibos with pagos enviados in Control de Debitos
+ *
+ * @param spreadsheetId - Control de Debitos spreadsheet ID
+ * @param config - Configuration with matching parameters
+ * @returns Number of matches found
+ */
+async function matchRecibosWithPagos(
+  spreadsheetId: string,
+  config: ReturnType<typeof getConfig>
+): Promise<Result<number, Error>> {
+  debug('Starting recibo-pago matching', {
+    module: 'scanner',
+    phase: 'matching',
+    spreadsheetId
+  });
+
+  // Get all recibos
+  const recibosResult = await getValues(spreadsheetId, 'Recibos!A:R');
+  if (!recibosResult.ok) {
+    return recibosResult;
+  }
+
+  // Get all pagos enviados
+  const pagosResult = await getValues(spreadsheetId, 'Pagos Enviados!A:O');
+  if (!pagosResult.ok) {
+    return pagosResult;
+  }
+
+  // Parse data (skip header row)
+  const recibos: Array<Recibo & { row: number }> = [];
+  const pagos: Array<Pago & { row: number }> = [];
+
+  if (recibosResult.value.length > 1) {
+    for (let i = 1; i < recibosResult.value.length; i++) {
+      const row = recibosResult.value[i];
+      if (!row || !row[0]) continue;
+
+      recibos.push({
+        row: i + 1,
+        fechaPago: String(row[0] || ''),
+        fileId: String(row[1] || ''),
+        fileName: String(row[2] || ''),
+        tipoRecibo: (row[3] || 'sueldo') as Recibo['tipoRecibo'],
+        nombreEmpleado: String(row[4] || ''),
+        cuilEmpleado: String(row[5] || ''),
+        legajo: String(row[6] || ''),
+        tareaDesempenada: row[7] ? String(row[7]) : undefined,
+        cuitEmpleador: String(row[8] || ''),
+        periodoAbonado: String(row[9] || ''),
+        subtotalRemuneraciones: parseNumber(row[10]) || 0,
+        subtotalDescuentos: parseNumber(row[11]) || 0,
+        totalNeto: parseNumber(row[12]) || 0,
+        processedAt: String(row[13] || ''),
+        confidence: Number(row[14]) || 0,
+        needsReview: row[15] === 'YES',
+        matchedPagoFileId: row[16] ? String(row[16]) : undefined,
+        matchConfidence: row[17] ? (String(row[17]) as MatchConfidence) : undefined,
+      });
+    }
+  }
+
+  if (pagosResult.value.length > 1) {
+    for (let i = 1; i < pagosResult.value.length; i++) {
+      const row = pagosResult.value[i];
+      if (!row || !row[0]) continue;
+
+      pagos.push({
+        row: i + 1,
+        fechaPago: String(row[0] || ''),
+        fileId: String(row[1] || ''),
+        fileName: String(row[2] || ''),
+        banco: String(row[3] || ''),
+        importePagado: parseNumber(row[4]) || 0,
+        moneda: (String(row[5]) as 'ARS' | 'USD') || 'ARS',
+        referencia: row[6] ? String(row[6]) : undefined,
+        cuitPagador: row[7] ? String(row[7]) : undefined,
+        nombrePagador: row[8] ? String(row[8]) : undefined,
+        cuitBeneficiario: String(row[7] || ''), // For Pagos Enviados, beneficiary is in columns H:I
+        nombreBeneficiario: String(row[8] || ''),
+        concepto: row[9] ? String(row[9]) : undefined,
+        processedAt: String(row[10] || ''),
+        confidence: Number(row[11]) || 0,
+        needsReview: row[12] === 'YES',
+        matchedFacturaFileId: row[13] ? String(row[13]) : undefined,
+        matchConfidence: row[14] ? (String(row[14]) as MatchConfidence) : undefined,
+      });
+    }
+  }
+
+  // Find unmatched documents
+  const unmatchedRecibos = recibos.filter(r => !r.matchedPagoFileId);
+  const unmatchedPagos = pagos.filter(p => !p.matchedFacturaFileId); // Recibos can also match in this field
+
+  debug('Found unmatched documents', {
+    module: 'scanner',
+    phase: 'matching',
+    unmatchedRecibos: unmatchedRecibos.length,
+    unmatchedPagos: unmatchedPagos.length
+  });
+
+  if (unmatchedPagos.length === 0) {
+    return { ok: true, value: 0 };
+  }
+
+  // Run matching
+  const matcher = new ReciboPagoMatcher(
+    config.matchDaysBefore,
+    config.matchDaysAfter
+  );
+
+  let matchesFound = 0;
+  const updates: Array<{ range: string; values: (string | number)[][] }> = [];
+
+  for (const pago of unmatchedPagos) {
+    const matches = matcher.findMatches(pago, unmatchedRecibos);
+
+    if (matches.length > 0) {
+      const bestMatch = matches[0];
+
+      // Only accept high-confidence unique matches
+      if (bestMatch.confidence === 'HIGH' || matches.length === 1) {
+        matchesFound++;
+
+        debug('Match found', {
+          module: 'scanner',
+          phase: 'matching',
+          pagoId: pago.fileId,
+          reciboId: bestMatch.reciboFileId,
+          confidence: bestMatch.confidence,
+          hasCuilMatch: bestMatch.hasCuilMatch
+        });
+
+        // Update recibo with match info (columns P:Q)
+        updates.push({
+          range: `'Recibos'!P${bestMatch.reciboRow}:Q${bestMatch.reciboRow}`,
+          values: [[
+            pago.fileId,
+            bestMatch.confidence,
+          ]],
+        });
+
+        // Update pago with match info (columns N:O)
+        // For recibos, we use the matchedFacturaFileId field to store recibo matches
+        updates.push({
+          range: `'Pagos Enviados'!N${pago.row}:O${pago.row}`,
+          values: [[
+            bestMatch.reciboFileId,
+            bestMatch.confidence,
+          ]],
+        });
+
+        // Remove matched recibo from candidates
+        const index = unmatchedRecibos.findIndex(r => r.fileId === bestMatch.reciboFileId);
+        if (index !== -1) {
+          unmatchedRecibos.splice(index, 1);
+        }
+      }
+    }
+  }
+
+  // Apply updates
+  if (updates.length > 0) {
+    info('Applying recibo match updates', {
+      module: 'scanner',
+      phase: 'matching',
+      updateCount: updates.length,
+      matchesFound
+    });
+
+    const updateResult = await batchUpdate(spreadsheetId, updates);
+    if (!updateResult.ok) {
+      return updateResult;
+    }
+  }
+
+  return { ok: true, value: matchesFound };
+}
+
+/**
+ * Runs matching on unmatched documents across all spreadsheets
+ *
+ * @param folderStructure - Cached folder structure with spreadsheet IDs
+ * @param config - Config with matching parameters (date ranges, tolerances)
+ * @returns Total number of matches found
+ */
+async function runMatching(
+  folderStructure: ReturnType<typeof getCachedFolderStructure>,
+  config: ReturnType<typeof getConfig>
+): Promise<Result<number, Error>> {
+  if (!folderStructure) {
+    return { ok: false, error: new Error('Folder structure not initialized') };
+  }
+
+  info('Starting comprehensive matching', {
+    module: 'scanner',
+    phase: 'auto-match',
+    controlCreditosId: folderStructure.controlCreditosId,
+    controlDebitosId: folderStructure.controlDebitosId
+  });
+
+  let totalMatches = 0;
+
+  // Match Debitos: Facturas Recibidas ↔ Pagos Enviados
+  debug('Matching Facturas Recibidas with Pagos Enviados', {
+    module: 'scanner',
+    phase: 'auto-match'
+  });
+
+  const debitosFacturaMatches = await matchFacturasWithPagos(
+    folderStructure.controlDebitosId,
+    'Facturas Recibidas',
+    'Pagos Enviados',
+    'cuitEmisor',       // Factura field to match
+    'cuitBeneficiario', // Pago field to match
+    config
+  );
+
+  if (!debitosFacturaMatches.ok) {
+    return debitosFacturaMatches;
+  }
+
+  totalMatches += debitosFacturaMatches.value;
+  debug('Debitos factura matches complete', {
+    module: 'scanner',
+    phase: 'auto-match',
+    matchesFound: debitosFacturaMatches.value
+  });
+
+  // Match Creditos: Facturas Emitidas ↔ Pagos Recibidos
+  debug('Matching Facturas Emitidas with Pagos Recibidos', {
+    module: 'scanner',
+    phase: 'auto-match'
+  });
+
+  const creditosMatches = await matchFacturasWithPagos(
+    folderStructure.controlCreditosId,
+    'Facturas Emitidas',
+    'Pagos Recibidos',
+    'cuitReceptor',  // Factura field to match
+    'cuitPagador',   // Pago field to match
+    config
+  );
+
+  if (!creditosMatches.ok) {
+    return creditosMatches;
+  }
+
+  totalMatches += creditosMatches.value;
+  debug('Creditos matches complete', {
+    module: 'scanner',
+    phase: 'auto-match',
+    matchesFound: creditosMatches.value
+  });
+
+  // Match Debitos: Recibos ↔ Pagos Enviados
+  debug('Matching Recibos with Pagos Enviados', {
+    module: 'scanner',
+    phase: 'auto-match'
+  });
+
+  const recibosMatches = await matchRecibosWithPagos(
+    folderStructure.controlDebitosId,
+    config
+  );
+
+  if (!recibosMatches.ok) {
+    return recibosMatches;
+  }
+
+  totalMatches += recibosMatches.value;
+  debug('Recibo matches complete', {
+    module: 'scanner',
+    phase: 'auto-match',
+    matchesFound: recibosMatches.value
+  });
+
+  info('Comprehensive matching complete', {
+    module: 'scanner',
+    phase: 'auto-match',
+    totalMatches
+  });
+
+  return { ok: true, value: totalMatches };
+}
+
+/**
+ * Re-runs matching on unmatched documents
+ *
+ * @returns Rematch result with matches found
+ */
+export async function rematch(): Promise<Result<RematchResult, Error>> {
+  const startTime = Date.now();
+  const folderStructure = getCachedFolderStructure();
+
+  if (!folderStructure) {
+    return {
+      ok: false,
+      error: new Error('Folder structure not initialized'),
+    };
+  }
+
+  const config = getConfig();
+  const matchResult = await runMatching(folderStructure, config);
+
+  if (!matchResult.ok) {
+    return matchResult;
+  }
+
   return {
     ok: true,
     value: {
-      matchesFound,
+      matchesFound: matchResult.value,
       duration: Date.now() - startTime,
     },
   };
