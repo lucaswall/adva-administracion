@@ -34,3 +34,6 @@ coverage/
 service-account.json
 *-service-account.json
 *.pem
+
+# Apps Script (contains project-specific IDs)
+apps-script/.clasp.json

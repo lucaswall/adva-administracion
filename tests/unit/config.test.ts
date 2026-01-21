@@ -168,6 +168,7 @@ describe('config', () => {
       process.env.GOOGLE_SERVICE_ACCOUNT_KEY = 'test-key';
       process.env.GEMINI_API_KEY = 'test-gemini-key';
       process.env.DRIVE_ROOT_FOLDER_ID = 'test-folder-id';
+      process.env.CONTROL_TEMPLATE_ID = 'test-template-id';
 
       const config = loadConfig();
 
@@ -175,6 +176,7 @@ describe('config', () => {
       expect(config.googleServiceAccountKey).toBe('test-key');
       expect(config.geminiApiKey).toBe('test-gemini-key');
       expect(config.driveRootFolderId).toBe('test-folder-id');
+      expect(config.controlTemplateId).toBe('test-template-id');
     });
 
     it('loads WEBHOOK_URL when provided', () => {
@@ -205,6 +207,7 @@ describe('config', () => {
       process.env.GOOGLE_SERVICE_ACCOUNT_KEY = 'test-key';
       process.env.GEMINI_API_KEY = 'test-gemini-key';
       process.env.DRIVE_ROOT_FOLDER_ID = 'test-folder-id';
+      process.env.CONTROL_TEMPLATE_ID = 'test-template-id';
 
       const config = loadConfig();
 

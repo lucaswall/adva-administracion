@@ -72,7 +72,7 @@ Gemini API integration for PDF document analysis and prompt testing.
 ```
 src/
 ├── server.ts             # Entry: Fastify server
-├── config.ts             # Environment config (includes MAX_CASCADE_DEPTH, CASCADE_TIMEOUT_MS)
+├── config.ts             # Environment config (includes MAX_CASCADE_DEPTH, CASCADE_TIMEOUT_MS, CONTROL_TEMPLATE_ID)
 ├── constants/spreadsheet-headers.ts
 ├── routes/{status,scan,webhooks}.ts
 ├── services/{google-auth,drive,sheets,folder-structure,document-sorter,watch-manager,token-usage-logger}.ts
@@ -84,15 +84,22 @@ src/
 ├── gemini/{client,prompts,parser,errors}.ts
 ├── utils/{date,numbers,currency,validation,file-naming,spanish-date,exchange-rate,drive-parser,logger}.ts
 └── bank/{matcher,autofill,subdiario-matcher}.ts
+
+apps-script/              # Google Apps Script (ADVA menu for spreadsheets)
+├── Code.js              # Menu functions (scan, rematch, autofill)
+├── appsscript.json      # Apps Script manifest
+├── .clasp.json.example  # Template for clasp deployment config
+└── README.md            # Deployment instructions
 ```
 
 ## COMMANDS
 ```bash
-npm run build    # Compile to dist/
-npm start        # Run server
-npm run dev      # Dev with watch
-npm test         # Vitest tests
-npm run lint     # Type check
+npm run build         # Compile to dist/
+npm start             # Run server
+npm run dev           # Dev with watch
+npm test              # Vitest tests
+npm run lint          # Type check
+npm run deploy:script # Deploy Apps Script to template spreadsheet (manual only)
 ```
 
 ## ENV VARS
@@ -101,6 +108,7 @@ npm run lint     # Type check
 | GOOGLE_SERVICE_ACCOUNT_KEY | Yes | - |
 | GEMINI_API_KEY | Yes | - |
 | DRIVE_ROOT_FOLDER_ID | Yes | - |
+| CONTROL_TEMPLATE_ID | Yes | - |
 | PORT | No | 3000 |
 | NODE_ENV | No | - |
 | LOG_LEVEL | No | INFO |
@@ -229,6 +237,47 @@ ROOT/
 - **Pagos Enviados**: Only beneficiario fields (cuitBeneficiario, nombreBeneficiario), ADVA as pagador is implicit
 - **Pagos Recibidos**: Only pagador fields (cuitPagador, nombrePagador), ADVA as beneficiario is implicit
 - **Recibos**: Only employee info (nombreEmpleado, cuilEmpleado), ADVA as empleador is implicit
+
+## APPS SCRIPT MENU
+
+Control spreadsheets include an embedded Google Apps Script that provides an "ADVA" custom menu for triggering server operations.
+
+### Setup (One-Time)
+
+1. **Create template spreadsheet** with embedded script (see `apps-script/README.md`)
+2. **Set `CONTROL_TEMPLATE_ID`** env var to template spreadsheet ID
+3. **Configure clasp** for deployment:
+   ```bash
+   cd apps-script
+   cp .clasp.json.example .clasp.json
+   # Edit .clasp.json with your script ID
+   ```
+
+### Deployment
+
+Deploy script updates to template (manual process):
+```bash
+npm run deploy:script
+```
+
+**Note:** `.clasp.json` is gitignored and contains project-specific script ID.
+
+### How It Works
+
+1. Server creates Control spreadsheets by **copying the template** (via `createSpreadsheetFromTemplate()`)
+2. Apps Script is automatically included in the copy
+3. Users see "ADVA" menu on spreadsheet open
+4. Menu options call REST API endpoints (`/api/scan`, `/api/rematch`, `/api/autofill-bank`)
+
+### Menu Options
+
+- **🔄 Trigger Scan** - Manual scan of Entrada folder
+- **🔗 Trigger Re-match** - Re-match unmatched documents
+- **🏦 Auto-fill Bank** - Fill bank data automatically
+- **⚙️ Configure API URL** - Set server URL (stored in Script Properties)
+- **ℹ️ About** - Show menu information
+
+**Technical:** Uses template copy approach (not runtime injection) to work with service account authentication.
 
 ## CASCADING MATCH DISPLACEMENT
 
