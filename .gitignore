@@ -35,5 +35,7 @@ service-account.json
 *-service-account.json
 *.pem
 
-# Apps Script (contains project-specific IDs)
+# Apps Script (contains project-specific IDs and generated files)
 apps-script/.clasp.json
+apps-script/dist/
+apps-script/src/config.ts
