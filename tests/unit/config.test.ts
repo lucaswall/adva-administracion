@@ -176,6 +176,15 @@ describe('config', () => {
       expect(() => loadConfig()).toThrow('DRIVE_ROOT_FOLDER_ID is required');
     });
 
+    it('throws for missing CONTROL_TEMPLATE_ID in production', () => {
+      process.env.NODE_ENV = 'production';
+      process.env.GOOGLE_SERVICE_ACCOUNT_KEY = 'test-key';
+      process.env.GEMINI_API_KEY = 'test-gemini-key';
+      process.env.DRIVE_ROOT_FOLDER_ID = 'test-folder-id';
+
+      expect(() => loadConfig()).toThrow('CONTROL_TEMPLATE_ID is required');
+    });
+
     it('loads successfully with all required keys in production', () => {
       process.env.NODE_ENV = 'production';
       process.env.GOOGLE_SERVICE_ACCOUNT_KEY = 'test-key';

@@ -11,12 +11,14 @@ const mockFindByName = vi.fn();
 const mockListByMimeType = vi.fn();
 const mockCreateFolder = vi.fn();
 const mockCreateSpreadsheet = vi.fn();
+const mockCreateSpreadsheetFromTemplate = vi.fn();
 
 vi.mock('../../../src/services/drive.js', () => ({
   findByName: (...args: unknown[]) => mockFindByName(...args),
   listByMimeType: (...args: unknown[]) => mockListByMimeType(...args),
   createFolder: (...args: unknown[]) => mockCreateFolder(...args),
   createSpreadsheet: (...args: unknown[]) => mockCreateSpreadsheet(...args),
+  createSpreadsheetFromTemplate: (...args: unknown[]) => mockCreateSpreadsheetFromTemplate(...args),
   clearDriveCache: vi.fn(),
 }));
 
@@ -42,6 +44,7 @@ vi.mock('../../../src/services/sheets.js', () => ({
 vi.mock('../../../src/config.js', () => ({
   getConfig: vi.fn(() => ({
     driveRootFolderId: 'root-folder-id',
+    controlTemplateId: 'test-template-id',
   })),
 }));
 
@@ -213,7 +216,7 @@ describe('FolderStructure service', () => {
         .mockResolvedValueOnce({ ok: true, value: null }) // Control de Debitos not found
         .mockResolvedValueOnce({ ok: true, value: null }); // Dashboard Operativo Contable not found
 
-      mockCreateSpreadsheet
+      mockCreateSpreadsheetFromTemplate
         .mockResolvedValueOnce({ ok: true, value: { id: 'new-control-creditos-id', name: 'Control de Creditos', mimeType: 'application/vnd.google-apps.spreadsheet' } })
         .mockResolvedValueOnce({ ok: true, value: { id: 'new-control-debitos-id', name: 'Control de Debitos', mimeType: 'application/vnd.google-apps.spreadsheet' } })
         .mockResolvedValueOnce({ ok: true, value: { id: 'new-dashboard-operativo-id', name: 'Dashboard Operativo Contable', mimeType: 'application/vnd.google-apps.spreadsheet' } });
@@ -263,10 +266,10 @@ describe('FolderStructure service', () => {
         expect(result.value.dashboardOperativoId).toBe('new-dashboard-operativo-id');
       }
 
-      expect(mockCreateSpreadsheet).toHaveBeenCalledTimes(3);
-      expect(mockCreateSpreadsheet).toHaveBeenCalledWith('root-folder-id', 'Control de Creditos');
-      expect(mockCreateSpreadsheet).toHaveBeenCalledWith('root-folder-id', 'Control de Debitos');
-      expect(mockCreateSpreadsheet).toHaveBeenCalledWith('root-folder-id', 'Dashboard Operativo Contable');
+      expect(mockCreateSpreadsheetFromTemplate).toHaveBeenCalledTimes(3);
+      expect(mockCreateSpreadsheetFromTemplate).toHaveBeenCalledWith('test-template-id', 'Control de Creditos', 'root-folder-id');
+      expect(mockCreateSpreadsheetFromTemplate).toHaveBeenCalledWith('test-template-id', 'Control de Debitos', 'root-folder-id');
+      expect(mockCreateSpreadsheetFromTemplate).toHaveBeenCalledWith('test-template-id', 'Dashboard Operativo Contable', 'root-folder-id');
     });
 
     it('returns error on Drive API failure', async () => {
@@ -706,8 +709,8 @@ describe('FolderStructure service', () => {
         .mockResolvedValueOnce({ ok: true, value: { id: 'control-debitos-id', name: 'Control de Debitos', mimeType: 'application/vnd.google-apps.spreadsheet' } })
         .mockResolvedValueOnce({ ok: true, value: null }); // Dashboard Operativo Contable not found
 
-      // Mock creating Dashboard Operativo Contable
-      mockCreateSpreadsheet.mockResolvedValueOnce({
+      // Mock creating Dashboard Operativo Contable from template
+      mockCreateSpreadsheetFromTemplate.mockResolvedValueOnce({
         ok: true,
         value: { id: 'dashboard-operativo-id', name: 'Dashboard Operativo Contable', mimeType: 'application/vnd.google-apps.spreadsheet' }
       });
@@ -769,8 +772,8 @@ describe('FolderStructure service', () => {
         expect(result.value.dashboardOperativoId).toBe('dashboard-operativo-id');
       }
 
-      // Verify Dashboard Operativo Contable was created
-      expect(mockCreateSpreadsheet).toHaveBeenCalledWith('root-folder-id', 'Dashboard Operativo Contable');
+      // Verify Dashboard Operativo Contable was created from template
+      expect(mockCreateSpreadsheetFromTemplate).toHaveBeenCalledWith('test-template-id', 'Dashboard Operativo Contable', 'root-folder-id');
 
       // Verify both sheets were created
       expect(mockCreateSheet).toHaveBeenCalledWith('dashboard-operativo-id', 'Resumen Mensual');

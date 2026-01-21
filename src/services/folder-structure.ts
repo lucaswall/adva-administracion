@@ -4,7 +4,7 @@
  */
 
 import { getConfig } from '../config.js';
-import { findByName, listByMimeType, createFolder, createSpreadsheet, createSpreadsheetFromTemplate } from './drive.js';
+import { findByName, listByMimeType, createFolder, createSpreadsheetFromTemplate } from './drive.js';
 import { getSheetMetadata, createSheet, setValues, getValues, formatSheet, deleteSheet } from './sheets.js';
 import { formatMonthFolder } from '../utils/spanish-date.js';
 import { CONTROL_CREDITOS_SHEETS, CONTROL_DEBITOS_SHEETS, DASHBOARD_OPERATIVO_SHEETS } from '../constants/spreadsheet-headers.js';
@@ -129,13 +129,13 @@ async function findOrCreateFolder(
 async function findOrCreateSpreadsheet(
   rootId: string,
   name: string,
-  templateId?: string
+  templateId: string
 ): Promise<Result<string, Error>> {
   debug('Finding or creating spreadsheet', {
     module: 'folder-structure',
     phase: 'find-or-create-spreadsheet',
     name,
-    usingTemplate: !!templateId
+    usingTemplate: true
   });
 
   const findResult = await findByName(rootId, name, SPREADSHEET_MIME);
@@ -160,30 +160,28 @@ async function findOrCreateSpreadsheet(
     return { ok: true, value: findResult.value.id };
   }
 
-  // Spreadsheet doesn't exist, create it
-  info('Creating new spreadsheet', {
+  // Spreadsheet doesn't exist, create it from template
+  info('Creating new spreadsheet from template', {
     module: 'folder-structure',
     phase: 'find-or-create-spreadsheet',
     name,
-    usingTemplate: !!templateId
+    templateId
   });
 
-  // Use template if provided, otherwise create blank spreadsheet
-  const createResult = templateId
-    ? await createSpreadsheetFromTemplate(templateId, name, rootId)
-    : await createSpreadsheet(rootId, name);
+  const createResult = await createSpreadsheetFromTemplate(templateId, name, rootId);
 
   if (!createResult.ok) {
-    logError('Error creating spreadsheet', {
+    logError('Error creating spreadsheet from template', {
       module: 'folder-structure',
       phase: 'find-or-create-spreadsheet',
       name,
+      templateId,
       error: createResult.error.message
     });
     return createResult;
   }
 
-  info('Created spreadsheet successfully', {
+  info('Created spreadsheet successfully from template', {
     module: 'folder-structure',
     phase: 'find-or-create-spreadsheet',
     name,
@@ -371,8 +369,8 @@ export async function discoverFolderStructure(): Promise<Result<FolderStructure,
   if (!sinProcesarResult.ok) return sinProcesarResult;
 
   // Find or create control spreadsheets (at root level)
-  // Use template if configured (preserves embedded App Script menu)
-  const templateId = config.controlTemplateId || undefined;
+  // Always copy from template (preserves embedded App Script menu)
+  const templateId = config.controlTemplateId;
   const controlCreditosResult = await findOrCreateSpreadsheet(rootId, SPREADSHEET_NAMES.controlCreditos, templateId);
   if (!controlCreditosResult.ok) return controlCreditosResult;
 
@@ -380,7 +378,8 @@ export async function discoverFolderStructure(): Promise<Result<FolderStructure,
   if (!controlDebitosResult.ok) return controlDebitosResult;
 
   // Find or create Dashboard Operativo Contable spreadsheet (at root level)
-  const dashboardOperativoResult = await findOrCreateSpreadsheet(rootId, SPREADSHEET_NAMES.dashboardOperativo);
+  // Also copy from template for consistency
+  const dashboardOperativoResult = await findOrCreateSpreadsheet(rootId, SPREADSHEET_NAMES.dashboardOperativo, templateId);
   if (!dashboardOperativoResult.ok) return dashboardOperativoResult;
 
   // Ensure required sheets exist in both control spreadsheets
