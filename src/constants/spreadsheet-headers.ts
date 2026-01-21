@@ -169,3 +169,48 @@ export const CONTROL_DEBITOS_SHEETS: SheetConfig[] = [
     monetaryColumns: [10, 11, 12] // subtotalRemuneraciones, subtotalDescuentos, totalNeto (0-indexed: 10, 11, 12)
   },
 ];
+
+/** Headers for Resumen Mensual sheet */
+export const RESUMEN_MENSUAL_HEADERS = [
+  'anio',
+  'mes',
+  'totalLlamadas',
+  'tokensEntrada',
+  'tokensSalida',
+  'costoTotalUSD',
+  'tasaExito',
+  'duracionPromedio',
+];
+
+/** Headers for Uso de API sheet */
+export const USO_API_HEADERS = [
+  'timestamp',
+  'requestId',
+  'fileId',
+  'fileName',
+  'model',
+  'promptTokens',
+  'outputTokens',
+  'totalTokens',
+  'estimatedCostUSD',
+  'durationMs',
+  'success',
+  'errorMessage',
+];
+
+/**
+ * Required sheets for Dashboard Operativo Contable spreadsheet
+ * Tracks Gemini API token usage and costs
+ */
+export const DASHBOARD_OPERATIVO_SHEETS: SheetConfig[] = [
+  {
+    title: 'Resumen Mensual',
+    headers: RESUMEN_MENSUAL_HEADERS,
+    monetaryColumns: [5] // costoTotalUSD (0-indexed: 5)
+  },
+  {
+    title: 'Uso de API',
+    headers: USO_API_HEADERS,
+    monetaryColumns: [8] // estimatedCostUSD (0-indexed: 8)
+  },
+];
