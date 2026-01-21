@@ -633,3 +633,74 @@ export async function createSpreadsheet(
     };
   }
 }
+
+/**
+ * Creates a spreadsheet by copying a template (preserves embedded App Scripts)
+ *
+ * @param templateId - Template spreadsheet ID to copy
+ * @param name - Name for the new spreadsheet
+ * @param parentId - Destination folder ID
+ * @returns Created spreadsheet info
+ */
+export async function createSpreadsheetFromTemplate(
+  templateId: string,
+  name: string,
+  parentId: string
+): Promise<Result<DriveFileInfo, Error>> {
+  debug('Creating spreadsheet from template', {
+    module: 'drive',
+    phase: 'create-from-template',
+    templateId,
+    name,
+    parentId,
+  });
+
+  try {
+    const drive = getDriveService();
+
+    const response = await drive.files.copy({
+      fileId: templateId,
+      requestBody: {
+        name,
+        parents: [parentId],
+      },
+      fields: 'id, name, mimeType',
+      supportsAllDrives: true,
+    });
+
+    const file = response.data;
+    if (!file.id) {
+      return {
+        ok: false,
+        error: new Error('Failed to copy template spreadsheet: no ID returned'),
+      };
+    }
+
+    info('Created spreadsheet from template', {
+      module: 'drive',
+      phase: 'create-from-template',
+      spreadsheetId: file.id,
+      name: file.name,
+    });
+
+    return {
+      ok: true,
+      value: {
+        id: file.id,
+        name: file.name || name,
+        mimeType: file.mimeType || 'application/vnd.google-apps.spreadsheet',
+      },
+    };
+  } catch (error) {
+    logError('Error creating spreadsheet from template', {
+      module: 'drive',
+      phase: 'create-from-template',
+      templateId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return {
+      ok: false,
+      error: error instanceof Error ? error : new Error(String(error)),
+    };
+  }
+}

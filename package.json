@@ -11,7 +11,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "deploy:script": "cd apps-script && clasp push"
   },
   "keywords": [
     "invoice",
@@ -32,6 +33,7 @@
     "pino": "^10.2.0"
   },
   "devDependencies": {
+    "@google/clasp": "^2.4.2",
     "@types/node": "^25.0.9",
     "@types/node-cron": "^3.0.11",
     "@vitest/coverage-v8": "^4.0.17",
