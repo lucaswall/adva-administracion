@@ -88,8 +88,7 @@ src/
 apps-script/              # Google Apps Script (ADVA menu for spreadsheets)
 ├── Code.js              # Menu functions (scan, rematch, autofill)
 ├── appsscript.json      # Apps Script manifest
-├── .clasp.json.example  # Template for clasp deployment config
-└── README.md            # Deployment instructions
+└── .clasp.json.example  # Template for clasp deployment config
 ```
 
 ## COMMANDS
@@ -262,7 +261,7 @@ npm run deploy:library  # Update menu logic - all spreadsheets get changes
 - **⚙️ Configure API URL** - Set server URL (Script Properties)
 - **ℹ️ About** - Show menu information
 
-See `apps-script/README.md` for setup instructions.
+See the "Template Spreadsheet Setup" section in the main README for setup instructions.
 
 ## CASCADING MATCH DISPLACEMENT
 
