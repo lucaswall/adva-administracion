@@ -1347,7 +1347,7 @@ async function processCascadingFacturaDisplacements(
     }
 
     iteration++;
-    cascadeState.maxDepthReached = Math.max(cascadeState.maxDepthReached, iteration);
+    cascadeState.maxDepthReached = Math.max(cascadeState.maxDepthReached, displaced.depth);
   }
 
   return { ok: true, value: undefined };
@@ -1825,7 +1825,7 @@ async function processCascadingReciboDisplacements(
     }
 
     iteration++;
-    cascadeState.maxDepthReached = Math.max(cascadeState.maxDepthReached, iteration);
+    cascadeState.maxDepthReached = Math.max(cascadeState.maxDepthReached, displaced.depth);
   }
 
   return { ok: true, value: undefined };
