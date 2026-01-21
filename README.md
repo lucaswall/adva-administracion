@@ -266,6 +266,8 @@ Set these in Railway dashboard (Variables tab) or via CLI:
 | `GOOGLE_SERVICE_ACCOUNT_KEY` | Yes | - | Base64-encoded service account JSON |
 | `GEMINI_API_KEY` | Yes | - | Gemini API key |
 | `DRIVE_ROOT_FOLDER_ID` | Yes | - | Google Drive root folder ID |
+| `CONTROL_TEMPLATE_ID` | Yes | - | Template spreadsheet ID for creating Control spreadsheets |
+| `API_BASE_URL` | Yes (for library) | - | Domain only (no protocol) for Apps Script library. Example: `adva-admin.railway.app`. Required for `npm run build:library`. |
 | `WEBHOOK_URL` | No | - | Public URL for Drive push notifications (e.g., `https://your-app.up.railway.app/webhooks/drive`) - enables real-time monitoring when set |
 | `MATCH_DAYS_BEFORE` | No | `10` | Days before invoice date to match payments |
 | `MATCH_DAYS_AFTER` | No | `60` | Days after invoice date to match payments |
@@ -358,13 +360,24 @@ The Control spreadsheets (Control de Creditos, Control de Debitos) include a cus
 
 ### Architecture
 
-- **Library** (`apps-script/` folder): Standalone Apps Script containing all menu logic
+- **Library** (`apps-script/` folder): TypeScript-based Apps Script library with build-time configuration
+- **Build process**: Injects `API_BASE_URL` from environment → compiles TypeScript → deploys to Google
 - **Template spreadsheet**: Minimal bound script + library reference
 - **New spreadsheets**: Inherit library reference when copied from template
 
 ### One-Time Setup
 
-#### 1. Create Library Project in Google
+#### 1. Configure API Base URL
+
+Add your Railway domain to `.env` (domain only, no protocol):
+
+```bash
+API_BASE_URL=your-app.up.railway.app
+```
+
+**Important:** The build process requires this variable and will fail if not set.
+
+#### 2. Create Library Project in Google
 
 **Option A - Using clasp:**
 ```bash
@@ -381,17 +394,23 @@ clasp create --title "ADVA Menu Library" --type standalone
    ```json
    {
      "scriptId": "YOUR_SCRIPT_ID_HERE",
-     "rootDir": "."
+     "rootDir": "./dist"
    }
    ```
 
-#### 2. Deploy Library Code
+Note: `rootDir` must be `./dist` as that's where compiled code is output.
+
+#### 3. Build and Deploy Library
 
 ```bash
+# Build TypeScript and inject API_BASE_URL
+npm run build:library
+
+# Deploy to Google Apps Script
 npm run deploy:library
 ```
 
-This pushes the code from `apps-script/Code.js` to Google Apps Script.
+The deploy command builds and pushes in one step. This uploads the compiled JavaScript from `apps-script/dist/` to Google Apps Script.
 
 #### 3. Create Template Spreadsheet
 
@@ -444,22 +463,23 @@ When you open a Control spreadsheet, the **ADVA** menu appears in the menu bar:
 | 🔄 Trigger Scan | POST /api/scan | Manually trigger document scan |
 | 🔗 Trigger Re-match | POST /api/rematch | Re-run matching on unmatched docs |
 | 🏦 Auto-fill Bank Data | POST /api/autofill-bank | Auto-fill bank movement descriptions |
-| ⚙️ Configure API URL | (Script Properties) | Set server URL for API calls |
-| ℹ️ About | (Info dialog) | Show menu information |
+| ℹ️ About | GET /api/status | Show server info, test connectivity, display uptime and queue status |
+
+**Note:** API URL is configured at build time via `API_BASE_URL` environment variable. No per-spreadsheet configuration needed.
 
 ### Updating Menu Logic
 
-After modifying library code in `apps-script/Code.js`:
+After modifying library code in `apps-script/src/main.ts`:
 
 ```bash
 npm run deploy:library
 ```
 
-Changes are **immediately available** to all spreadsheets using HEAD mode - no need to update individual spreadsheets.
+This rebuilds (with current `API_BASE_URL` from `.env`) and deploys. Changes are **immediately available** to all spreadsheets using HEAD mode - no need to update individual spreadsheets.
 
 ### Adding New Menu Items
 
-1. Edit `apps-script/Code.js` - add function and menu item
+1. Edit `apps-script/src/main.ts` - add function and menu item
 2. Menu callback must use `ADVALib.` prefix: `'ADVALib.newFunction'`
 3. Run `npm run deploy:library`
 4. All spreadsheets get the new item automatically
@@ -470,7 +490,8 @@ Changes are **immediately available** to all spreadsheets using HEAD mode - no n
 |-------|----------|
 | Menu doesn't appear | Refresh spreadsheet. Check Extensions → Apps Script for errors. Verify library is added with identifier `ADVALib`. |
 | "ADVALib is not defined" | Library not added to template. Wrong identifier (must be exactly `ADVALib`). Or library not deployed. |
-| API calls fail | Configure URL via ADVA → Configure API URL. Check server is running and accessible. |
+| API calls fail | Check "About" menu to test connectivity. Verify `API_BASE_URL` was set correctly when library was built. Rebuild and redeploy library if domain changed. Check server is running and accessible. |
+| Build fails | Ensure `API_BASE_URL` is set in `.env` file. Domain only, no protocol. |
 
 ---
 

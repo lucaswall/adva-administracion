@@ -86,19 +86,28 @@ src/
 └── bank/{matcher,autofill,subdiario-matcher}.ts
 
 apps-script/              # Google Apps Script (ADVA menu for spreadsheets)
-├── Code.js              # Menu functions (scan, rematch, autofill)
+├── src/
+│   ├── main.ts          # Menu functions (TypeScript)
+│   └── config.template.ts # Config template (API_BASE_URL injected at build)
+├── dist/                # Compiled output (clasp pushes from here)
+│   ├── main.js
+│   ├── config.js
+│   └── appsscript.json
+├── build.js             # Build script: inject env → compile TS
+├── tsconfig.json        # TypeScript config
 ├── appsscript.json      # Apps Script manifest
 └── .clasp.json.example  # Template for clasp deployment config
 ```
 
 ## COMMANDS
 ```bash
-npm run build         # Compile to dist/
+npm run build         # Compile server to dist/
 npm start             # Run server
 npm run dev           # Dev with watch
 npm test              # Vitest tests
 npm run lint          # Type check
-npm run deploy:library  # Update menu logic - all spreadsheets get changes
+npm run build:library   # Build Apps Script library (requires API_BASE_URL in .env)
+npm run deploy:library  # Build + deploy library - all spreadsheets get changes
 ```
 
 ## ENV VARS
@@ -108,6 +117,7 @@ npm run deploy:library  # Update menu logic - all spreadsheets get changes
 | GEMINI_API_KEY | Yes | - |
 | DRIVE_ROOT_FOLDER_ID | Yes | - |
 | CONTROL_TEMPLATE_ID | Yes | - |
+| API_BASE_URL | Yes (for library build) | - |
 | PORT | No | 3000 |
 | NODE_ENV | No | - |
 | LOG_LEVEL | No | INFO |
@@ -115,6 +125,8 @@ npm run deploy:library  # Update menu logic - all spreadsheets get changes
 | MATCH_DAYS_BEFORE | No | 10 |
 | MATCH_DAYS_AFTER | No | 60 |
 | USD_ARS_TOLERANCE_PERCENT | No | 5 |
+
+**Note**: `API_BASE_URL` is domain only (no protocol), e.g., `adva-admin.railway.app`. Required for Apps Script library build (`npm run build:library`).
 
 ## API
 | Method | Endpoint | Description |
@@ -243,14 +255,23 @@ Control spreadsheets include a custom ADVA menu via shared library.
 
 ### Architecture
 
-- **Library** (`apps-script/`): Standalone Apps Script with all menu logic
+- **Library** (`apps-script/`): TypeScript-based Apps Script library with build-time config injection
+- **Build process**: Injects `API_BASE_URL` from `.env` → compiles TypeScript → outputs to `dist/`
 - **Template**: Minimal bound script (`onOpen()` only) + library reference
 - **New spreadsheets**: Copy from template inherits library reference
+
+### Configuration
+
+API URL is configured via environment variable and injected at build time:
+- Set `API_BASE_URL` in `.env` (domain only, no protocol)
+- Example: `API_BASE_URL=adva-admin.railway.app`
+- Build fails if not set
 
 ### Deployment
 
 ```bash
-npm run deploy:library  # Update menu logic - all spreadsheets get changes
+npm run build:library   # Build with env injection (requires API_BASE_URL)
+npm run deploy:library  # Build + push to Google Apps Script (all spreadsheets get changes)
 ```
 
 ### Menu Options
@@ -258,8 +279,9 @@ npm run deploy:library  # Update menu logic - all spreadsheets get changes
 - **🔄 Trigger Scan** - POST /api/scan
 - **🔗 Trigger Re-match** - POST /api/rematch
 - **🏦 Auto-fill Bank** - POST /api/autofill-bank
-- **⚙️ Configure API URL** - Set server URL (Script Properties)
-- **ℹ️ About** - Show menu information
+- **ℹ️ About** - Show menu info + test connectivity via GET /api/status
+
+The "About" dialog displays server status (online/offline), uptime, and queue info by calling the `/api/status` endpoint.
 
 See the "Template Spreadsheet Setup" section in the main README for setup instructions.
 

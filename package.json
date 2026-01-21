@@ -12,7 +12,8 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "lint": "tsc --noEmit",
-    "deploy:library": "cd apps-script && clasp push"
+    "build:library": "node apps-script/build.js",
+    "deploy:library": "npm run build:library && cd apps-script && clasp push"
   },
   "keywords": [
     "invoice",
@@ -28,12 +29,13 @@
   "dependencies": {
     "fastify": "^5.2.1",
     "googleapis": "^170.1.0",
-    "p-queue": "^9.1.0",
     "node-cron": "^4.2.1",
+    "p-queue": "^9.1.0",
     "pino": "^10.2.0"
   },
   "devDependencies": {
     "@google/clasp": "^2.4.2",
+    "@types/google-apps-script": "^2.0.8",
     "@types/node": "^25.0.9",
     "@types/node-cron": "^3.0.11",
     "@vitest/coverage-v8": "^4.0.17",
