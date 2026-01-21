@@ -5,7 +5,7 @@
  * This script:
  * 1. Reads API_BASE_URL from .env file
  * 2. Injects it into config.template.ts → config.ts
- * 3. Compiles TypeScript to JavaScript
+ * 3. Bundles TypeScript with esbuild (IIFE format for Apps Script)
  * 4. Copies appsscript.json to dist/
  *
  * Usage: node build.js
@@ -14,7 +14,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
-import { execSync } from 'child_process';
+import * as esbuild from 'esbuild';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -73,7 +73,7 @@ function readEnvFile(envPath) {
 /**
  * Main build function
  */
-function build() {
+async function build() {
   log.info('Building ADVA Apps Script Library...\n');
 
   // Step 1: Read environment variables
@@ -112,14 +112,38 @@ function build() {
 
   log.success('config.ts generated');
 
-  // Step 4: Compile TypeScript
-  log.info('Compiling TypeScript...');
+  // Step 4: Bundle with esbuild
+  log.info('Bundling with esbuild...');
+
+  const entryPoint = path.resolve(__dirname, 'src', 'main.ts');
+  const outfile = path.resolve(__dirname, 'dist', 'main.js');
 
   try {
-    execSync('npx tsc', { cwd: __dirname, stdio: 'inherit' });
-    log.success('TypeScript compiled successfully');
+    await esbuild.build({
+      entryPoints: [entryPoint],
+      bundle: true,
+      outfile: outfile,
+      format: 'iife',
+      globalName: 'ADVALib',
+      target: 'es2019',
+      platform: 'browser',
+      minify: false,
+      sourcemap: false,
+      footer: {
+        js: `
+// Expose functions to global scope for Apps Script
+var createMenu = ADVALib.createMenu;
+var triggerScan = ADVALib.triggerScan;
+var triggerRematch = ADVALib.triggerRematch;
+var triggerAutofillBank = ADVALib.triggerAutofillBank;
+var showAbout = ADVALib.showAbout;
+`
+      }
+    });
+    log.success('TypeScript bundled successfully');
   } catch (error) {
-    log.error('TypeScript compilation failed!');
+    log.error('Bundling failed!');
+    log.error(error.message);
     process.exit(1);
   }
 
@@ -152,7 +176,7 @@ function build() {
 
 // Run build
 try {
-  build();
+  await build();
 } catch (error) {
   log.error(`Build failed: ${error.message}`);
   process.exit(1);

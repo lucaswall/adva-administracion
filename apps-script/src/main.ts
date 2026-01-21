@@ -31,7 +31,7 @@ interface ErrorResponse {
  * Creates the ADVA menu.
  * Called from bound script's onOpen() trigger.
  */
-function createMenu(): void {
+export function createMenu(): void {
   const ui = SpreadsheetApp.getUi();
   ui.createMenu('ADVA')
     .addItem('🔄 Trigger Scan', 'ADVALib.triggerScan')
@@ -45,7 +45,7 @@ function createMenu(): void {
 /**
  * Triggers a manual scan of the Entrada folder
  */
-function triggerScan(): void {
+export function triggerScan(): void {
   const url = getApiUrl('/api/scan');
   makeApiCall(url, 'post', null, 'Scan triggered successfully!');
 }
@@ -53,7 +53,7 @@ function triggerScan(): void {
 /**
  * Triggers re-matching of unmatched documents
  */
-function triggerRematch(): void {
+export function triggerRematch(): void {
   const url = getApiUrl('/api/rematch');
   makeApiCall(url, 'post', null, 'Re-match triggered successfully!');
 }
@@ -61,7 +61,7 @@ function triggerRematch(): void {
 /**
  * Triggers automatic bank data filling
  */
-function triggerAutofillBank(): void {
+export function triggerAutofillBank(): void {
   const url = getApiUrl('/api/autofill-bank');
   makeApiCall(url, 'post', null, 'Bank auto-fill triggered successfully!');
 }
@@ -215,7 +215,7 @@ function formatUptime(seconds: number): string {
 /**
  * Shows information about the ADVA menu and tests API connectivity
  */
-function showAbout(): void {
+export function showAbout(): void {
   const ui = SpreadsheetApp.getUi();
 
   let message = 'ADVA Administration Menu v3.0\n\n';
