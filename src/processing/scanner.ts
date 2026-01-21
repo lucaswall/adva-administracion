@@ -109,7 +109,7 @@ export async function processFile(
   fileInfo: Omit<FileInfo, 'content'>
 ): Promise<Result<ProcessFileResult, Error>> {
   const config = getConfig();
-  const gemini = new GeminiClient(config.geminiApiKey);
+  const gemini = new GeminiClient(config.geminiApiKey, config.geminiRpmLimit);
 
   // Download file content
   const downloadResult = await downloadFile(fileInfo.id);
