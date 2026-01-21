@@ -200,7 +200,7 @@ export class GeminiClient {
       generationConfig: {
         temperature: 0.1, // Low temperature for factual extraction
         topP: 0.8,
-        maxOutputTokens: 2048
+        maxOutputTokens: 8192 // Increased from 2048 to prevent truncation of verbose responses
       }
     };
   }

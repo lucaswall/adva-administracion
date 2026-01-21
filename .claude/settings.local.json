@@ -43,7 +43,8 @@
       "mcp__gdrive__gdrive_get_pdf",
       "mcp__gdrive__gsheets_read",
       "WebFetch(domain:github.com)",
-      "mcp__gemini__gemini_analyze_pdf"
+      "mcp__gemini__gemini_analyze_pdf",
+      "WebFetch(domain:ai.google.dev)"
     ],
     "deny": [
       "Bash(rm -rf *)",

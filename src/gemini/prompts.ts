@@ -81,7 +81,25 @@ VALIDATION:
 
 DOCUMENT STRUCTURE - Extract based on document POSITION:
 1. ISSUER (Emisor): Company at TOP/HEADER section - the one ISSUING the invoice
+   - LOCATION: Physically at the TOP of the document, in the header/letterhead area
+   - Extract cuitEmisor from the CUIT shown at the TOP of the document
 2. RECEPTOR (Cliente): Company in CLIENT section below - labeled "Razón Social", "Cliente", "Señor/es"
+   - LOCATION: In the CLIENT/BUYER section below the header, typically mid-page
+   - Extract cuitReceptor from the CUIT shown in the CLIENT section
+
+CRITICAL EXTRACTION RULE - DO NOT SWAP CUITs:
+- The CUIT at the TOP of the document ALWAYS goes to cuitEmisor
+- The CUIT in the CLIENT section ALWAYS goes to cuitReceptor
+- This is true REGARDLESS of which company is ADVA
+- Even if ADVA appears in the client section, extract exactly as positioned
+
+EXAMPLE - Correct extraction when ADVA is receptor:
+Document shows:
+  TOP (Header): "MATARUCCO MARIA ANGELICA - CUIT 27-13078025-9"
+  CLIENT Section: "Razón Social: ADVA - CUIT 30-70907678-3"
+Correct extraction:
+  cuitEmisor: "27130780259" (from TOP position)
+  cuitReceptor: "30709076783" (from CLIENT position)
 
 Required fields to extract:
 - tipoComprobante: ONLY the single letter code (A, B, C, E) or two-letter code (NC for Nota de Crédito, ND for Nota de Débito). DO NOT include the word "FACTURA" - extract ONLY the letter code that follows it. Examples: if the document shows "FACTURA C", extract "C"; if it shows "FACTURA B", extract "B".

@@ -4,9 +4,44 @@
 
 import type { Factura, Pago, Recibo, ResumenBancario, ParseResult, Result, ClassificationResult, AdvaRoleValidation } from '../types/index.js';
 import { ParseError } from '../types/index.js';
+import { warn } from '../utils/logger.js';
 
 /** ADVA's CUIT - used for role validation */
 const ADVA_CUIT = '30709076783';
+
+/**
+ * Detects if a response appears to be truncated
+ *
+ * @param response - Raw response text
+ * @returns True if response appears truncated
+ */
+function isTruncated(response: string): boolean {
+  const trimmed = response.trim();
+
+  // Check if response ends with incomplete JSON structure
+  const lastChar = trimmed[trimmed.length - 1];
+  const endsWithValidJson = lastChar === '}' || lastChar === ']';
+
+  if (!endsWithValidJson) {
+    // Count opening and closing braces/brackets
+    let braceCount = 0;
+    let bracketCount = 0;
+
+    for (const char of trimmed) {
+      if (char === '{') braceCount++;
+      if (char === '}') braceCount--;
+      if (char === '[') bracketCount++;
+      if (char === ']') bracketCount--;
+    }
+
+    // If there are unmatched opening braces/brackets, likely truncated
+    if (braceCount > 0 || bracketCount > 0) {
+      return true;
+    }
+  }
+
+  return false;
+}
 
 /**
  * Extracts JSON from a response that might be wrapped in markdown
@@ -19,6 +54,24 @@ export function extractJSON(response: string): string {
 
   // Remove leading/trailing whitespace
   const trimmed = response.trim();
+
+  // Check for truncation before attempting extraction
+  if (isTruncated(trimmed)) {
+    const preview = trimmed.length > 200
+      ? trimmed.substring(trimmed.length - 200)
+      : trimmed;
+
+    warn('Response appears truncated', {
+      module: 'gemini-parser',
+      phase: 'extract-json',
+      responseLength: trimmed.length,
+      responseEnd: preview
+    });
+
+    // Return empty string - caller will handle "No JSON found" error
+    // But the warning log will help diagnose the issue
+    return '';
+  }
 
   // Check for markdown code blocks (use non-greedy match and take first occurrence)
   const markdownMatches = trimmed.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/g);
