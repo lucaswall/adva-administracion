@@ -87,6 +87,9 @@ NODE_ENV=production
 LOG_LEVEL=INFO
 GEMINI_API_KEY=your_key_here
 DRIVE_ROOT_FOLDER_ID=your_folder_id
+CONTROL_TEMPLATE_ID=your_template_id_here
+API_SECRET=your_secret_token_here
+API_BASE_URL=your-app.up.railway.app
 GOOGLE_SERVICE_ACCOUNT_KEY=<base64-encoded-service-account-json>
 WEBHOOK_URL=https://your-app.up.railway.app/webhooks/drive
 ```
@@ -206,6 +209,9 @@ railway variables --set NODE_ENV=production
 railway variables --set LOG_LEVEL=INFO
 railway variables --set GEMINI_API_KEY=your_key_here
 railway variables --set DRIVE_ROOT_FOLDER_ID=your_folder_id
+railway variables --set CONTROL_TEMPLATE_ID=your_template_id_here
+railway variables --set API_SECRET=your_secret_token_here
+railway variables --set API_BASE_URL=your-app.up.railway.app
 railway variables --set GOOGLE_SERVICE_ACCOUNT_KEY=$(cat service-account.json | base64 | tr -d '\n')
 
 # Optional: Set after generating domain in step 5 for real-time monitoring
@@ -267,6 +273,7 @@ Set these in Railway dashboard (Variables tab) or via CLI:
 | `GEMINI_API_KEY` | Yes | - | Gemini API key |
 | `DRIVE_ROOT_FOLDER_ID` | Yes | - | Google Drive root folder ID |
 | `CONTROL_TEMPLATE_ID` | Yes | - | Template spreadsheet ID for creating Control spreadsheets |
+| `API_SECRET` | Yes | - | Secret token for API authentication. Used by server to validate requests and injected into Apps Script library at build time. Keep secure and rotate periodically. |
 | `API_BASE_URL` | Yes (for library) | - | Domain only (no protocol) for Apps Script library. Example: `adva-admin.railway.app`. Required for `npm run build:library`. |
 | `WEBHOOK_URL` | No | - | Public URL for Drive push notifications (e.g., `https://your-app.up.railway.app/webhooks/drive`) - enables real-time monitoring when set |
 | `MATCH_DAYS_BEFORE` | No | `10` | Days before invoice date to match payments |
