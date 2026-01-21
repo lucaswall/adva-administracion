@@ -12,7 +12,7 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "lint": "tsc --noEmit",
-    "deploy:script": "cd apps-script && clasp push"
+    "deploy:library": "cd apps-script && clasp push"
   },
   "keywords": [
     "invoice",

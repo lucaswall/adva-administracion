@@ -1,144 +1,129 @@
-# ADVA Apps Script Deployment
+# ADVA Apps Script Library
 
-This folder contains the Google Apps Script code that adds a custom "ADVA" menu to the Control spreadsheets.
+Shared library providing the ADVA menu for Control spreadsheets.
 
-## Setup
+## Architecture
 
-### 1. Create Template Spreadsheet (One-Time)
+- **This folder**: Contains the shared library code
+- **Template spreadsheet**: Has minimal bound script + library reference
+- **New spreadsheets**: Inherit library reference when copied from template
 
-1. Create a new empty spreadsheet in your Google Drive
-2. Copy the spreadsheet ID from the URL:
-   ```
-   https://docs.google.com/spreadsheets/d/SPREADSHEET_ID_HERE/edit
-   ```
-3. Open Apps Script editor: **Extensions → Apps Script**
-4. Note the Script ID from the URL:
-   ```
-   https://script.google.com/home/projects/SCRIPT_ID_HERE/edit
-   ```
+## Setup (One-Time)
 
-### 2. Configure Environment Variables
+### 1. Create Library Project in Google
 
-Add these to your `.env` file:
-
-```bash
-# Template spreadsheet ID (the empty spreadsheet with the script)
-CONTROL_TEMPLATE_ID=your_spreadsheet_id_here
-```
-
-The script ID is used locally for deployment only (not needed in production).
-
-### 3. Configure clasp
-
-Copy the example file and add your script ID:
-
+**Option A - Using clasp:**
 ```bash
 cd apps-script
-cp .clasp.json.example .clasp.json
+clasp create --title "ADVA Menu Library" --type standalone
+# This creates .clasp.json with the new Script ID
 ```
 
-Edit `.clasp.json` and replace `YOUR_SCRIPT_ID_HERE` with your actual script ID.
+**Option B - Manually:**
+1. Go to https://script.google.com → New Project
+2. Name it "ADVA Menu Library"
+3. Copy Script ID from URL
+4. Create `.clasp.json`:
+   ```json
+   {
+     "scriptId": "YOUR_SCRIPT_ID_HERE",
+     "rootDir": "."
+   }
+   ```
 
-**Note:** `.clasp.json` is gitignored and will not be committed to the repository.
-
-### 4. Install clasp
-
-Install clasp globally (one-time):
+### 2. Deploy Library Code
 
 ```bash
-npm install -g @google/clasp
+npm run deploy:library
 ```
 
-Login to your Google Account (one-time):
+### 3. Create Template Spreadsheet
 
+1. Create a new empty spreadsheet in Google Drive
+2. Note the spreadsheet ID from URL
+3. Open Apps Script: **Extensions → Apps Script**
+
+### 4. Add Library Reference to Template
+
+In the template's Apps Script editor:
+1. Click **+** next to "Libraries" in left sidebar
+2. Enter the library Script ID (from step 1)
+3. Set identifier: **ADVALib** (must be exact)
+4. Select version: **HEAD** (Development mode)
+5. Click **Add**
+
+### 5. Add Bound Script to Template
+
+In the template's Apps Script editor, replace the default code with:
+
+```javascript
+/**
+ * Trigger that runs when spreadsheet opens.
+ * Delegates to shared ADVALib library for menu creation.
+ */
+function onOpen() {
+  ADVALib.createMenu();
+}
+```
+
+Save the script.
+
+### 6. Configure Server Environment
+
+Add to your `.env`:
 ```bash
-clasp login
+CONTROL_TEMPLATE_ID=your_template_spreadsheet_id
 ```
 
 ## Deployment
 
-### Deploy Script to Template Spreadsheet
-
-From the **project root directory**, run:
-
+After modifying library code:
 ```bash
-npm run deploy:script
+npm run deploy:library
 ```
 
-This pushes the code from `apps-script/` to your template spreadsheet.
-
-### Manual Deployment
-
-```bash
-cd apps-script
-clasp push
-```
-
-## What the Script Does
-
-Adds a custom **ADVA** menu with the following options:
-
-1. **🔄 Trigger Scan** - Calls `POST /api/scan` to process new documents
-2. **🔗 Trigger Re-match** - Calls `POST /api/rematch` to re-match unmatched documents
-3. **🏦 Auto-fill Bank Data** - Calls `POST /api/autofill-bank` to fill bank information
-4. **⚙️ Configure API URL** - Sets the server URL (stored in Script Properties)
-5. **ℹ️ About** - Shows information about the menu
-
-## Testing the Menu
-
-1. Open your template spreadsheet
-2. Refresh the page (the `onOpen()` trigger runs on page load)
-3. You should see an "ADVA" menu in the menu bar
-4. Click "ADVA → Configure API URL" and set your server URL
-5. Test the menu items
-
-## How It Works with the Server
-
-When the server creates "Control de Creditos" or "Control de Debitos" spreadsheets:
-
-1. It **copies** the template spreadsheet (using `CONTROL_TEMPLATE_ID`)
-2. The Apps Script is automatically included in the copy
-3. Users opening the spreadsheet see the ADVA menu automatically
-
-This approach works with service account authentication (no OAuth required).
+Changes are immediately available to all spreadsheets (HEAD mode).
 
 ## File Structure
 
 ```
 apps-script/
-├── Code.js                    # Main script with menu functions
-├── appsscript.json            # Apps Script manifest
-├── .clasp.json                # clasp config (gitignored, contains script ID)
-├── .clasp.json.example        # Template for clasp config
-└── README.md                  # This file
+├── Code.js               # Library code (all menu logic)
+├── appsscript.json       # Library manifest
+├── .clasp.json           # Library Script ID (gitignored)
+├── .clasp.json.example   # Template for clasp config
+└── README.md             # This file
 ```
+
+## Menu Functions
+
+| Menu Item | API Endpoint |
+|-----------|--------------|
+| 🔄 Trigger Scan | POST /api/scan |
+| 🔗 Trigger Re-match | POST /api/rematch |
+| 🏦 Auto-fill Bank Data | POST /api/autofill-bank |
+| ⚙️ Configure API URL | (Script Properties) |
+| ℹ️ About | (Info dialog) |
+
+## Adding New Menu Items
+
+1. Edit `Code.js` - add function and menu item
+2. Menu callback must use `ADVALib.` prefix: `'ADVALib.newFunction'`
+3. Run `npm run deploy:library`
+4. All spreadsheets get the new item automatically
 
 ## Troubleshooting
 
-### "Script not found" error
-- Make sure you're logged in: `clasp login`
-- Verify the script ID in `.clasp.json` matches your project
-- Check that you have edit permissions on the script
-
 ### Menu doesn't appear
-- Refresh the spreadsheet page
-- Check browser console for errors
-- Verify the script is deployed: Extensions → Apps Script
+- Refresh the spreadsheet
+- Check Extensions → Apps Script for errors
+- Verify library is added with identifier `ADVALib`
+
+### "ADVALib is not defined"
+- Library not added to template
+- Wrong identifier (must be exactly `ADVALib`)
+- Library not deployed
 
 ### API calls fail
-- Configure the API URL: ADVA → Configure API URL
-- Make sure your server is running and accessible
-- Check server logs for errors
-
-### clasp push fails
-- Ensure `.clasp.json` exists in `apps-script/` directory
-- Verify you're logged in with the correct Google account
-- Try `clasp login --creds <file>` if using service account
-
-## Security Notes
-
-- The script only requires minimal permissions (current spreadsheet only)
-- API URL is stored in Script Properties (not visible to spreadsheet viewers)
-- No sensitive data is stored in the script
-- All API calls should use HTTPS in production
-- Script ID and Spreadsheet ID are kept out of version control
+- Configure URL: ADVA → Configure API URL
+- Check server is running and accessible

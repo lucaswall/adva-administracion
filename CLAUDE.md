@@ -240,44 +240,29 @@ ROOT/
 
 ## APPS SCRIPT MENU
 
-Control spreadsheets include an embedded Google Apps Script that provides an "ADVA" custom menu for triggering server operations.
+Control spreadsheets include a custom ADVA menu via shared library.
 
-### Setup (One-Time)
+### Architecture
 
-1. **Create template spreadsheet** with embedded script (see `apps-script/README.md`)
-2. **Set `CONTROL_TEMPLATE_ID`** env var to template spreadsheet ID
-3. **Configure clasp** for deployment:
-   ```bash
-   cd apps-script
-   cp .clasp.json.example .clasp.json
-   # Edit .clasp.json with your script ID
-   ```
+- **Library** (`apps-script/`): Standalone Apps Script with all menu logic
+- **Template**: Minimal bound script (`onOpen()` only) + library reference
+- **New spreadsheets**: Copy from template inherits library reference
 
 ### Deployment
 
-Deploy script updates to template (manual process):
 ```bash
-npm run deploy:script
+npm run deploy:library  # Update menu logic - all spreadsheets get changes
 ```
-
-**Note:** `.clasp.json` is gitignored and contains project-specific script ID.
-
-### How It Works
-
-1. Server creates Control spreadsheets by **copying the template** (via `createSpreadsheetFromTemplate()`)
-2. Apps Script is automatically included in the copy
-3. Users see "ADVA" menu on spreadsheet open
-4. Menu options call REST API endpoints (`/api/scan`, `/api/rematch`, `/api/autofill-bank`)
 
 ### Menu Options
 
-- **🔄 Trigger Scan** - Manual scan of Entrada folder
-- **🔗 Trigger Re-match** - Re-match unmatched documents
-- **🏦 Auto-fill Bank** - Fill bank data automatically
-- **⚙️ Configure API URL** - Set server URL (stored in Script Properties)
+- **🔄 Trigger Scan** - POST /api/scan
+- **🔗 Trigger Re-match** - POST /api/rematch
+- **🏦 Auto-fill Bank** - POST /api/autofill-bank
+- **⚙️ Configure API URL** - Set server URL (Script Properties)
 - **ℹ️ About** - Show menu information
 
-**Technical:** Uses template copy approach (not runtime injection) to work with service account authentication.
+See `apps-script/README.md` for setup instructions.
 
 ## CASCADING MATCH DISPLACEMENT
 
