@@ -36,6 +36,17 @@ export const MAX_CASCADE_DEPTH = 10;
 export const CASCADE_TIMEOUT_MS = 30000;
 
 /**
+ * Gemini API pricing per token
+ * Update when pricing changes: https://ai.google.dev/gemini-api/docs/pricing
+ */
+export const GEMINI_PRICING = {
+  'gemini-2.5-flash': {
+    inputPerToken: 0.00000015,   // $0.15 per 1M tokens
+    outputPerToken: 0.0000006,   // $0.60 per 1M tokens
+  }
+} as const;
+
+/**
  * Application configuration loaded from environment
  */
 export interface Config {

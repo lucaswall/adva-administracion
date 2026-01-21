@@ -315,6 +315,18 @@ export interface ErrorRecord {
 
 
 /**
+ * Token usage metadata from Gemini API
+ */
+export interface GeminiUsageMetadata {
+  /** Number of input/prompt tokens */
+  promptTokenCount: number;
+  /** Number of output/candidate tokens */
+  candidatesTokenCount: number;
+  /** Total tokens (prompt + candidates) */
+  totalTokenCount: number;
+}
+
+/**
  * Gemini API response structure
  */
 export interface GeminiResponse {
@@ -338,6 +350,8 @@ export interface GeminiResponse {
     /** Error code */
     code?: number;
   };
+  /** Token usage metadata */
+  usageMetadata?: GeminiUsageMetadata;
 }
 
 /**
@@ -727,6 +741,8 @@ export interface FolderStructure {
   controlCreditosId: string;
   /** Control de Debitos spreadsheet ID - stays at root */
   controlDebitosId: string;
+  /** Dashboard Operativo Contable spreadsheet ID - stays at root */
+  dashboardOperativoId: string;
   /** Map of bank spreadsheet names to IDs */
   bankSpreadsheets: Map<string, string>;
   /** Cache of year folders by year (e.g., "2024" -> folder ID) */

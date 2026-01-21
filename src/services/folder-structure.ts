@@ -7,7 +7,7 @@ import { getConfig } from '../config.js';
 import { findByName, listByMimeType, createFolder, createSpreadsheet } from './drive.js';
 import { getSheetMetadata, createSheet, setValues, getValues, formatSheet, deleteSheet } from './sheets.js';
 import { formatMonthFolder } from '../utils/spanish-date.js';
-import { CONTROL_CREDITOS_SHEETS, CONTROL_DEBITOS_SHEETS } from '../constants/spreadsheet-headers.js';
+import { CONTROL_CREDITOS_SHEETS, CONTROL_DEBITOS_SHEETS, DASHBOARD_OPERATIVO_SHEETS } from '../constants/spreadsheet-headers.js';
 import type { FolderStructure, Result, SortDestination } from '../types/index.js';
 import { debug, info, error as logError } from '../utils/logger.js';
 
@@ -30,6 +30,7 @@ const FOLDER_NAMES = {
 const SPREADSHEET_NAMES = {
   controlCreditos: 'Control de Creditos',
   controlDebitos: 'Control de Debitos',
+  dashboardOperativo: 'Dashboard Operativo Contable',
 } as const;
 
 /** Cached folder structure */
@@ -234,6 +235,61 @@ async function ensureSheetsExist(
 }
 
 /**
+ * Initializes Dashboard Operativo Contable spreadsheet with sheets and data
+ * Creates "Resumen Mensual" and "Uso de API" sheets with headers
+ * Initializes "Resumen Mensual" with 12 months of formula-based data for current year
+ *
+ * @param spreadsheetId - Dashboard Operativo Contable spreadsheet ID
+ * @returns Success or error
+ */
+async function initializeDashboardOperativo(
+  spreadsheetId: string
+): Promise<Result<void, Error>> {
+  // Ensure both sheets exist with headers
+  const ensureSheetsResult = await ensureSheetsExist(spreadsheetId, DASHBOARD_OPERATIVO_SHEETS);
+  if (!ensureSheetsResult.ok) return ensureSheetsResult;
+
+  // Initialize Resumen Mensual with 12 months of data for current year
+  const currentYear = new Date().getFullYear();
+  const monthNames = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+
+  // Create rows with formulas for each month
+  for (let monthIndex = 0; monthIndex < 12; monthIndex++) {
+    const monthName = monthNames[monthIndex];
+    const rowNumber = monthIndex + 2; // Row 1 is headers, data starts at row 2
+
+    // Create formulas for this month
+    // Note: Using Spanish month names for matching in formulas
+    const row = [
+      currentYear,
+      monthName,
+      // totalLlamadas: Count all calls in this month
+      `=COUNTIFS('Uso de API'!A:A, ">="&DATE(${currentYear}, ${monthIndex + 1}, 1), 'Uso de API'!A:A, "<"&DATE(${currentYear}, ${monthIndex + 1 === 12 ? currentYear + 1 : currentYear}, ${monthIndex + 1 === 12 ? 1 : monthIndex + 2}, 1))`,
+      // tokensEntrada: Sum of prompt tokens in this month
+      `=SUMIFS('Uso de API'!F:F, 'Uso de API'!A:A, ">="&DATE(${currentYear}, ${monthIndex + 1}, 1), 'Uso de API'!A:A, "<"&DATE(${currentYear}, ${monthIndex + 1 === 12 ? currentYear + 1 : currentYear}, ${monthIndex + 1 === 12 ? 1 : monthIndex + 2}, 1))`,
+      // tokensSalida: Sum of output tokens in this month
+      `=SUMIFS('Uso de API'!G:G, 'Uso de API'!A:A, ">="&DATE(${currentYear}, ${monthIndex + 1}, 1), 'Uso de API'!A:A, "<"&DATE(${currentYear}, ${monthIndex + 1 === 12 ? currentYear + 1 : currentYear}, ${monthIndex + 1 === 12 ? 1 : monthIndex + 2}, 1))`,
+      // costoTotalUSD: Sum of costs in this month
+      `=SUMIFS('Uso de API'!I:I, 'Uso de API'!A:A, ">="&DATE(${currentYear}, ${monthIndex + 1}, 1), 'Uso de API'!A:A, "<"&DATE(${currentYear}, ${monthIndex + 1 === 12 ? currentYear + 1 : currentYear}, ${monthIndex + 1 === 12 ? 1 : monthIndex + 2}, 1))`,
+      // tasaExito: Success rate (successful calls / total calls)
+      `=IF(C${rowNumber}=0, 0, COUNTIFS('Uso de API'!A:A, ">="&DATE(${currentYear}, ${monthIndex + 1}, 1), 'Uso de API'!A:A, "<"&DATE(${currentYear}, ${monthIndex + 1 === 12 ? currentYear + 1 : currentYear}, ${monthIndex + 1 === 12 ? 1 : monthIndex + 2}, 1), 'Uso de API'!K:K, "YES") / C${rowNumber})`,
+      // duracionPromedio: Average duration in this month
+      `=AVERAGEIFS('Uso de API'!J:J, 'Uso de API'!A:A, ">="&DATE(${currentYear}, ${monthIndex + 1}, 1), 'Uso de API'!A:A, "<"&DATE(${currentYear}, ${monthIndex + 1 === 12 ? currentYear + 1 : currentYear}, ${monthIndex + 1 === 12 ? 1 : monthIndex + 2}, 1))`,
+    ];
+
+    // Set values for this month
+    const setResult = await setValues(
+      spreadsheetId,
+      `Resumen Mensual!A${rowNumber}:H${rowNumber}`,
+      [row]
+    );
+    if (!setResult.ok) return setResult;
+  }
+
+  return { ok: true, value: undefined };
+}
+
+/**
  * Discovers and caches the folder structure from Drive
  * Creates root-level folders and spreadsheets only
  * Year folders and classification folders are created on-demand
@@ -264,6 +320,10 @@ export async function discoverFolderStructure(): Promise<Result<FolderStructure,
   const controlDebitosResult = await findOrCreateSpreadsheet(rootId, SPREADSHEET_NAMES.controlDebitos);
   if (!controlDebitosResult.ok) return controlDebitosResult;
 
+  // Find or create Dashboard Operativo Contable spreadsheet (at root level)
+  const dashboardOperativoResult = await findOrCreateSpreadsheet(rootId, SPREADSHEET_NAMES.dashboardOperativo);
+  if (!dashboardOperativoResult.ok) return dashboardOperativoResult;
+
   // Ensure required sheets exist in both control spreadsheets
   const ensureCreditosSheetsResult = await ensureSheetsExist(controlCreditosResult.value, CONTROL_CREDITOS_SHEETS);
   if (!ensureCreditosSheetsResult.ok) return ensureCreditosSheetsResult;
@@ -271,14 +331,20 @@ export async function discoverFolderStructure(): Promise<Result<FolderStructure,
   const ensureDebitosSheetsResult = await ensureSheetsExist(controlDebitosResult.value, CONTROL_DEBITOS_SHEETS);
   if (!ensureDebitosSheetsResult.ok) return ensureDebitosSheetsResult;
 
+  // Initialize Dashboard Operativo Contable with sheets and data
+  const initializeDashboardResult = await initializeDashboardOperativo(dashboardOperativoResult.value);
+  if (!initializeDashboardResult.ok) return initializeDashboardResult;
+
   // Discover bank spreadsheets in root folder (they can exist at root for external data)
   const bankSpreadsheetsResult = await listByMimeType(rootId, SPREADSHEET_MIME);
   if (!bankSpreadsheetsResult.ok) return bankSpreadsheetsResult;
 
   const bankSpreadsheets = new Map<string, string>();
   for (const sheet of bankSpreadsheetsResult.value) {
-    // Skip control spreadsheets
-    if (sheet.name === SPREADSHEET_NAMES.controlCreditos || sheet.name === SPREADSHEET_NAMES.controlDebitos) {
+    // Skip control spreadsheets and dashboard
+    if (sheet.name === SPREADSHEET_NAMES.controlCreditos ||
+        sheet.name === SPREADSHEET_NAMES.controlDebitos ||
+        sheet.name === SPREADSHEET_NAMES.dashboardOperativo) {
       continue;
     }
     bankSpreadsheets.set(sheet.name, sheet.id);
@@ -291,6 +357,7 @@ export async function discoverFolderStructure(): Promise<Result<FolderStructure,
     sinProcesarId: sinProcesarResult.value,
     controlCreditosId: controlCreditosResult.value,
     controlDebitosId: controlDebitosResult.value,
+    dashboardOperativoId: dashboardOperativoResult.value,
     bankSpreadsheets,
     yearFolders: new Map(),
     classificationFolders: new Map(),
@@ -306,6 +373,7 @@ export async function discoverFolderStructure(): Promise<Result<FolderStructure,
     sinProcesarId: sinProcesarResult.value,
     controlCreditosId: controlCreditosResult.value,
     controlDebitosId: controlDebitosResult.value,
+    dashboardOperativoId: dashboardOperativoResult.value,
     bankSpreadsheets: bankSpreadsheets.size
   });
   return { ok: true, value: structure };

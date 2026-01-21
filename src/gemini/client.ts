@@ -3,10 +3,39 @@
  * Uses native fetch for Node.js environment
  */
 
-import type { GeminiResponse, Result } from '../types/index.js';
+import type { GeminiResponse, GeminiUsageMetadata, Result } from '../types/index.js';
 import { GeminiError } from '../types/index.js';
 import { classifyError } from './errors.js';
 import { debug, warn, error as logError } from '../utils/logger.js';
+
+/**
+ * Usage callback data structure
+ */
+export interface UsageCallbackData {
+  /** Whether the request succeeded */
+  success: boolean;
+  /** Model used */
+  model: 'gemini-2.5-flash';
+  /** Number of prompt tokens */
+  promptTokens: number;
+  /** Number of output tokens */
+  outputTokens: number;
+  /** Total tokens */
+  totalTokens: number;
+  /** Request duration in milliseconds */
+  durationMs: number;
+  /** File ID being processed */
+  fileId: string;
+  /** File name being processed */
+  fileName: string;
+  /** Error message if failed */
+  errorMessage?: string;
+}
+
+/**
+ * Optional callback for tracking token usage
+ */
+export type UsageCallback = (data: UsageCallbackData) => void;
 
 /**
  * Sleeps for a specified number of milliseconds
@@ -25,16 +54,19 @@ export class GeminiClient {
   private readonly rpmLimit: number;
   private readonly MODEL = 'gemini-2.5-flash';
   private readonly ENDPOINT: string;
+  private readonly usageCallback?: UsageCallback;
 
   /**
    * Creates a new Gemini client
    *
    * @param apiKey - Gemini API key
    * @param rpmLimit - Requests per minute limit (default: 60)
+   * @param usageCallback - Optional callback for tracking token usage
    */
-  constructor(apiKey: string, rpmLimit: number = 60) {
+  constructor(apiKey: string, rpmLimit: number = 60, usageCallback?: UsageCallback) {
     this.apiKey = apiKey;
     this.rpmLimit = rpmLimit;
+    this.usageCallback = usageCallback;
     this.ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${this.MODEL}:generateContent`;
   }
 
@@ -45,13 +77,17 @@ export class GeminiClient {
    * @param mimeType - MIME type of the file (e.g., 'application/pdf', 'image/png')
    * @param prompt - Extraction prompt
    * @param maxRetries - Maximum number of retry attempts (default: 3)
+   * @param fileId - Optional Drive file ID for usage tracking
+   * @param fileName - Optional file name for usage tracking
    * @returns API response text or error
    */
   async analyzeDocument(
     fileBuffer: Buffer,
     mimeType: string,
     prompt: string,
-    maxRetries: number = 3
+    maxRetries: number = 3,
+    fileId: string = '',
+    fileName: string = ''
   ): Promise<Result<string, GeminiError>> {
     // Ensure at least one attempt
     const attempts = Math.max(1, maxRetries);
@@ -62,7 +98,7 @@ export class GeminiClient {
 
     for (let attempt = 1; attempt <= attempts; attempt++) {
       // Attempt the API call
-      lastResult = await this.doAnalyzeDocument(fileBuffer, mimeType, prompt);
+      lastResult = await this.doAnalyzeDocument(fileBuffer, mimeType, prompt, fileId, fileName);
 
       // If successful, return immediately
       if (lastResult.ok) {
@@ -101,23 +137,29 @@ export class GeminiClient {
    * @param fileBuffer - File buffer to analyze
    * @param mimeType - MIME type of the file
    * @param prompt - Extraction prompt
+   * @param fileId - Drive file ID for usage tracking
+   * @param fileName - File name for usage tracking
    * @returns API response text or error
    */
   private async doAnalyzeDocument(
     fileBuffer: Buffer,
     mimeType: string,
-    prompt: string
+    prompt: string,
+    fileId: string,
+    fileName: string
   ): Promise<Result<string, GeminiError>> {
+    const startTime = Date.now();
+    let usageMetadata: GeminiUsageMetadata | undefined;
+
     try {
       await this.enforceRateLimit();
 
       const base64Data = fileBuffer.toString('base64');
 
       if (!mimeType) {
-        return {
-          ok: false,
-          error: new GeminiError('Unable to determine file MIME type', 400)
-        };
+        const error = new GeminiError('Unable to determine file MIME type', 400);
+        this.callUsageCallback(false, usageMetadata, Date.now() - startTime, fileId, fileName, error.message);
+        return { ok: false, error };
       }
 
       const payload = this.buildApiRequest(prompt, base64Data, mimeType);
@@ -139,30 +181,41 @@ export class GeminiClient {
       });
 
       const responseText = await response.text();
-      const result = this.parseApiResponse(responseText, response.status);
+      const parseResult = this.parseApiResponse(responseText, response.status);
 
-      if (result.ok) {
+      // Extract usage metadata from parse result
+      if (parseResult.ok && 'usageMetadata' in parseResult) {
+        usageMetadata = (parseResult as any).usageMetadata;
+      }
+
+      const duration = Date.now() - startTime;
+
+      if (parseResult.ok) {
         debug('Gemini API response', {
           module: 'gemini-client',
           phase: 'api-call',
-          responseLength: result.value.length,
-          responsePreview: result.value.substring(0, 500) + '...'
+          responseLength: parseResult.value.length,
+          responsePreview: parseResult.value.substring(0, 500) + '...'
         });
-      }
-
-      if (result.ok) {
         this.requestCount++;
+        this.callUsageCallback(true, usageMetadata, duration, fileId, fileName);
+        return { ok: true, value: parseResult.value };
+      } else {
+        this.callUsageCallback(false, usageMetadata, duration, fileId, fileName, parseResult.error.message);
+        return parseResult;
       }
-
-      return result;
     } catch (error) {
       const err = error instanceof Error ? error : new Error('Unknown error');
+      const duration = Date.now() - startTime;
+
       logError('Gemini API error', {
         module: 'gemini-client',
         phase: 'api-call',
         error: err.message,
         details: error
       });
+
+      this.callUsageCallback(false, usageMetadata, duration, fileId, fileName, err.message);
 
       return {
         ok: false,
@@ -173,6 +226,32 @@ export class GeminiClient {
         )
       };
     }
+  }
+
+  /**
+   * Calls the usage callback if provided
+   */
+  private callUsageCallback(
+    success: boolean,
+    usageMetadata: GeminiUsageMetadata | undefined,
+    durationMs: number,
+    fileId: string,
+    fileName: string,
+    errorMessage?: string
+  ): void {
+    if (!this.usageCallback) return;
+
+    this.usageCallback({
+      success,
+      model: this.MODEL,
+      promptTokens: usageMetadata?.promptTokenCount || 0,
+      outputTokens: usageMetadata?.candidatesTokenCount || 0,
+      totalTokens: usageMetadata?.totalTokenCount || 0,
+      durationMs,
+      fileId,
+      fileName,
+      errorMessage,
+    });
   }
 
   /**
@@ -210,12 +289,12 @@ export class GeminiClient {
    *
    * @param responseText - Response body text
    * @param statusCode - HTTP status code
-   * @returns Extracted text or error
+   * @returns Extracted text with usage metadata or error
    */
   private parseApiResponse(
     responseText: string,
     statusCode: number
-  ): Result<string, GeminiError> {
+  ): Result<string, GeminiError> & { usageMetadata?: GeminiUsageMetadata } {
     if (statusCode !== 200) {
       return {
         ok: false,
@@ -264,7 +343,8 @@ export class GeminiClient {
 
     return {
       ok: true,
-      value: text
+      value: text,
+      usageMetadata: parsedResponse.usageMetadata
     };
   }
 
