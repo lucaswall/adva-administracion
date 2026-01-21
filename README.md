@@ -352,6 +352,128 @@ ADVA Root Folder/
 
 ---
 
+## Template Spreadsheet Setup
+
+The Control spreadsheets (Control de Creditos, Control de Debitos) include a custom **ADVA** menu that provides quick access to server operations. This menu is delivered via a shared Apps Script library.
+
+### Architecture
+
+- **Library** (`apps-script/` folder): Standalone Apps Script containing all menu logic
+- **Template spreadsheet**: Minimal bound script + library reference
+- **New spreadsheets**: Inherit library reference when copied from template
+
+### One-Time Setup
+
+#### 1. Create Library Project in Google
+
+**Option A - Using clasp:**
+```bash
+cd apps-script
+clasp create --title "ADVA Menu Library" --type standalone
+# This creates .clasp.json with the new Script ID
+```
+
+**Option B - Manually:**
+1. Go to https://script.google.com → New Project
+2. Name it "ADVA Menu Library"
+3. Copy Script ID from URL
+4. Create `.clasp.json` in `apps-script/` folder:
+   ```json
+   {
+     "scriptId": "YOUR_SCRIPT_ID_HERE",
+     "rootDir": "."
+   }
+   ```
+
+#### 2. Deploy Library Code
+
+```bash
+npm run deploy:library
+```
+
+This pushes the code from `apps-script/Code.js` to Google Apps Script.
+
+#### 3. Create Template Spreadsheet
+
+1. Create a new empty spreadsheet in Google Drive
+2. Note the spreadsheet ID from the URL
+3. Open Apps Script: **Extensions → Apps Script**
+
+#### 4. Add Library Reference to Template
+
+In the template's Apps Script editor:
+1. Click **+** next to "Libraries" in left sidebar
+2. Enter the library Script ID (from step 1)
+3. Set identifier: **ADVALib** (must be exact)
+4. Select version: **HEAD** (Development mode - auto-updates)
+5. Click **Add**
+
+#### 5. Add Bound Script to Template
+
+In the template's Apps Script editor, replace the default code with:
+
+```javascript
+/**
+ * Trigger that runs when spreadsheet opens.
+ * Delegates to shared ADVALib library for menu creation.
+ */
+function onOpen() {
+  ADVALib.createMenu();
+}
+```
+
+Save the script and close the editor.
+
+#### 6. Configure Server Environment
+
+Add the template spreadsheet ID to your environment variables:
+
+```bash
+# In Railway dashboard or via CLI:
+railway variables --set CONTROL_TEMPLATE_ID=your_template_spreadsheet_id
+```
+
+This allows the server to copy the template when creating new Control spreadsheets.
+
+### Menu Functions
+
+When you open a Control spreadsheet, the **ADVA** menu appears in the menu bar:
+
+| Menu Item | API Endpoint | Description |
+|-----------|--------------|-------------|
+| 🔄 Trigger Scan | POST /api/scan | Manually trigger document scan |
+| 🔗 Trigger Re-match | POST /api/rematch | Re-run matching on unmatched docs |
+| 🏦 Auto-fill Bank Data | POST /api/autofill-bank | Auto-fill bank movement descriptions |
+| ⚙️ Configure API URL | (Script Properties) | Set server URL for API calls |
+| ℹ️ About | (Info dialog) | Show menu information |
+
+### Updating Menu Logic
+
+After modifying library code in `apps-script/Code.js`:
+
+```bash
+npm run deploy:library
+```
+
+Changes are **immediately available** to all spreadsheets using HEAD mode - no need to update individual spreadsheets.
+
+### Adding New Menu Items
+
+1. Edit `apps-script/Code.js` - add function and menu item
+2. Menu callback must use `ADVALib.` prefix: `'ADVALib.newFunction'`
+3. Run `npm run deploy:library`
+4. All spreadsheets get the new item automatically
+
+### Troubleshooting
+
+| Issue | Solution |
+|-------|----------|
+| Menu doesn't appear | Refresh spreadsheet. Check Extensions → Apps Script for errors. Verify library is added with identifier `ADVALib`. |
+| "ADVALib is not defined" | Library not added to template. Wrong identifier (must be exactly `ADVALib`). Or library not deployed. |
+| API calls fail | Configure URL via ADVA → Configure API URL. Check server is running and accessible. |
+
+---
+
 ## API Endpoints
 
 | Method | Endpoint | Description | Use Case |
