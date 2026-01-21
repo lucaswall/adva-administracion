@@ -4,7 +4,7 @@
  * This file is auto-generated during the build process.
  * DO NOT EDIT MANUALLY - Changes will be overwritten.
  *
- * The API_BASE_URL is injected from the environment variable during build.
+ * The API_BASE_URL and API_SECRET are injected from environment variables during build.
  */
 
 /**
@@ -12,3 +12,9 @@
  * Example: 'adva-admin.railway.app'
  */
 export const API_BASE_URL = '{{API_BASE_URL}}';
+
+/**
+ * API secret for authentication
+ * This secret is used to authenticate API requests via Bearer token
+ */
+export const API_SECRET = '{{API_SECRET}}';

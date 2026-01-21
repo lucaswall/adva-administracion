@@ -8,14 +8,13 @@ import Fastify from 'fastify';
 import type { FastifyInstance } from 'fastify';
 
 // Mock config
-const mockGetConfig = vi.fn();
-
 vi.mock('../../../src/config.js', () => ({
-  getConfig: () => mockGetConfig(),
+  getConfig: vi.fn(),
 }));
 
-// Import routes after mocks
+// Import modules after mocks
 import { statusRoutes } from '../../../src/routes/status.js';
+import { getConfig } from '../../../src/config.js';
 
 describe('Status routes', () => {
   let server: FastifyInstance;
@@ -24,18 +23,21 @@ describe('Status routes', () => {
     nodeEnv: 'test',
     port: 3000,
     logLevel: 'info' as const,
+    apiSecret: 'test-secret-123',
     googleServiceAccountKey: 'mock-key',
     geminiApiKey: 'mock-gemini-key',
     driveRootFolderId: 'mock-folder-id',
+    controlTemplateId: 'mock-template-id',
     webhookUrl: 'http://localhost:3000/webhooks/drive',
     matchDaysBefore: 10,
     matchDaysAfter: 60,
     usdArsTolerancePercent: 5,
+    geminiRpmLimit: 150,
   };
 
   beforeEach(async () => {
     vi.clearAllMocks();
-    mockGetConfig.mockReturnValue(mockConfig);
+    vi.mocked(getConfig).mockReturnValue(mockConfig);
 
     server = Fastify({ logger: false });
     await server.register(statusRoutes);
@@ -52,6 +54,9 @@ describe('Status routes', () => {
       const response = await server.inject({
         method: 'GET',
         url: '/api/status',
+        headers: {
+          authorization: 'Bearer test-secret-123',
+        },
       });
 
       expect(response.statusCode).toBe(200);
@@ -61,6 +66,9 @@ describe('Status routes', () => {
       const response = await server.inject({
         method: 'GET',
         url: '/api/status',
+        headers: {
+          authorization: 'Bearer test-secret-123',
+        },
       });
 
       const body = JSON.parse(response.body);
@@ -71,6 +79,9 @@ describe('Status routes', () => {
       const response = await server.inject({
         method: 'GET',
         url: '/api/status',
+        headers: {
+          authorization: 'Bearer test-secret-123',
+        },
       });
 
       const body = JSON.parse(response.body);
@@ -83,6 +94,9 @@ describe('Status routes', () => {
       const response = await server.inject({
         method: 'GET',
         url: '/api/status',
+        headers: {
+          authorization: 'Bearer test-secret-123',
+        },
       });
 
       const body = JSON.parse(response.body);
@@ -93,6 +107,9 @@ describe('Status routes', () => {
       const response = await server.inject({
         method: 'GET',
         url: '/api/status',
+        headers: {
+          authorization: 'Bearer test-secret-123',
+        },
       });
 
       const body = JSON.parse(response.body);
@@ -103,6 +120,9 @@ describe('Status routes', () => {
       const response = await server.inject({
         method: 'GET',
         url: '/api/status',
+        headers: {
+          authorization: 'Bearer test-secret-123',
+        },
       });
 
       const body = JSON.parse(response.body);
@@ -117,6 +137,9 @@ describe('Status routes', () => {
       const response = await server.inject({
         method: 'GET',
         url: '/api/status',
+        headers: {
+          authorization: 'Bearer test-secret-123',
+        },
       });
 
       const body = JSON.parse(response.body);
@@ -125,6 +148,31 @@ describe('Status routes', () => {
       expect(body).toHaveProperty('version');
       expect(body).toHaveProperty('environment');
       expect(body).toHaveProperty('queue');
+    });
+
+    it('rejects request without authorization', async () => {
+      const response = await server.inject({
+        method: 'GET',
+        url: '/api/status',
+      });
+
+      expect(response.statusCode).toBe(401);
+      const body = JSON.parse(response.body);
+      expect(body.error).toBe('Unauthorized');
+    });
+
+    it('rejects request with invalid token', async () => {
+      const response = await server.inject({
+        method: 'GET',
+        url: '/api/status',
+        headers: {
+          authorization: 'Bearer wrong-token',
+        },
+      });
+
+      expect(response.statusCode).toBe(401);
+      const body = JSON.parse(response.body);
+      expect(body.error).toBe('Unauthorized');
     });
   });
 

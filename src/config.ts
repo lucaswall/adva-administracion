@@ -54,6 +54,7 @@ export interface Config {
   port: number;
   nodeEnv: 'development' | 'production' | 'test';
   logLevel: LogLevel;
+  apiSecret: string;
 
   // Google Auth
   googleServiceAccountKey: string;
@@ -85,6 +86,12 @@ export function loadConfig(): Config {
   const port = parseInt(process.env.PORT || '3000', 10);
   const nodeEnv = (process.env.NODE_ENV || 'development') as Config['nodeEnv'];
   const logLevel = (process.env.LOG_LEVEL || 'INFO') as LogLevel;
+
+  // API Secret - required for production
+  const apiSecret = process.env.API_SECRET || '';
+  if (!apiSecret && nodeEnv === 'production') {
+    throw new Error('API_SECRET is required');
+  }
 
   // Google Auth - required
   const googleServiceAccountKey = process.env.GOOGLE_SERVICE_ACCOUNT_KEY || '';
@@ -125,6 +132,7 @@ export function loadConfig(): Config {
     port,
     nodeEnv,
     logLevel,
+    apiSecret,
     googleServiceAccountKey,
     geminiApiKey,
     driveRootFolderId,

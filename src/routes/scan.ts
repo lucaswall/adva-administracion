@@ -6,6 +6,7 @@ import type { FastifyInstance } from 'fastify';
 import type { ScanResult, BankAutoFillResult } from '../types/index.js';
 import { scanFolder, rematch, RematchResult } from '../processing/scanner.js';
 import { autoFillBankMovements } from '../bank/autofill.js';
+import { authMiddleware } from '../middleware/auth.js';
 
 /**
  * Scan request body
@@ -43,8 +44,9 @@ interface ErrorResponse {
 export async function scanRoutes(server: FastifyInstance) {
   /**
    * POST /api/scan - Trigger a manual scan of the Drive folder
+   * Protected with authentication
    */
-  server.post<{ Body: ScanRequest }>('/scan', async (request, reply): Promise<ScanResult | ErrorResponse> => {
+  server.post<{ Body: ScanRequest }>('/scan', { onRequest: authMiddleware }, async (request, reply): Promise<ScanResult | ErrorResponse> => {
     const { folderId } = request.body || {};
 
     server.log.info({ folderId }, 'Starting manual scan');
@@ -63,8 +65,9 @@ export async function scanRoutes(server: FastifyInstance) {
 
   /**
    * POST /api/rematch - Re-run matching on unmatched documents
+   * Protected with authentication
    */
-  server.post<{ Body: RematchRequest }>('/rematch', async (request, reply): Promise<RematchResult | ErrorResponse> => {
+  server.post<{ Body: RematchRequest }>('/rematch', { onRequest: authMiddleware }, async (request, reply): Promise<RematchResult | ErrorResponse> => {
     const { documentType = 'all' } = request.body || {};
 
     server.log.info({ documentType }, 'Starting rematch');
@@ -83,8 +86,9 @@ export async function scanRoutes(server: FastifyInstance) {
 
   /**
    * POST /api/autofill-bank - Auto-fill bank movement descriptions
+   * Protected with authentication
    */
-  server.post<{ Body: AutofillRequest }>('/autofill-bank', async (request, reply): Promise<BankAutoFillResult | ErrorResponse> => {
+  server.post<{ Body: AutofillRequest }>('/autofill-bank', { onRequest: authMiddleware }, async (request, reply): Promise<BankAutoFillResult | ErrorResponse> => {
     const { bankName } = request.body || {};
 
     server.log.info({ bankName }, 'Starting bank autofill');

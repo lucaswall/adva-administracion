@@ -2,13 +2,14 @@
  * Webhook routes for external notifications
  */
 
-import type { FastifyInstance, FastifyRequest } from 'fastify';
+import type { FastifyInstance } from 'fastify';
 import {
   getActiveChannels,
   isNotificationDuplicate,
   markNotificationProcessed,
   triggerScan,
 } from '../services/watch-manager.js';
+import { authMiddleware } from '../middleware/auth.js';
 
 /**
  * Drive push notification headers
@@ -27,6 +28,7 @@ interface DriveNotificationHeaders {
 export async function webhookRoutes(server: FastifyInstance) {
   /**
    * POST /webhooks/drive - Handle Drive push notifications
+   * Protected with authentication
    *
    * Google Drive sends notifications when files change in a watched folder.
    * This endpoint receives those notifications and triggers processing.
@@ -40,8 +42,8 @@ export async function webhookRoutes(server: FastifyInstance) {
    *
    * See: https://developers.google.com/workspace/drive/api/guides/push
    */
-  server.post('/drive', async (request: FastifyRequest<{ Headers: DriveNotificationHeaders }>, reply) => {
-    const headers = request.headers;
+  server.post('/drive', { onRequest: authMiddleware }, async (request, reply) => {
+    const headers = request.headers as DriveNotificationHeaders;
 
     const channelId = headers['x-goog-channel-id'];
     const resourceId = headers['x-goog-resource-id'];

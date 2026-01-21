@@ -72,9 +72,10 @@ Gemini API integration for PDF document analysis and prompt testing.
 ```
 src/
 ├── server.ts             # Entry: Fastify server
-├── config.ts             # Environment config (includes MAX_CASCADE_DEPTH, CASCADE_TIMEOUT_MS, CONTROL_TEMPLATE_ID)
+├── config.ts             # Environment config (includes MAX_CASCADE_DEPTH, CASCADE_TIMEOUT_MS, CONTROL_TEMPLATE_ID, API_SECRET)
 ├── constants/spreadsheet-headers.ts
 ├── routes/{status,scan,webhooks}.ts
+├── middleware/auth.ts    # Bearer token authentication
 ├── services/{google-auth,drive,sheets,folder-structure,document-sorter,watch-manager,token-usage-logger}.ts
 ├── processing/{queue,scanner}.ts  # Includes cascading displacement logic
 ├── types/index.ts
@@ -88,7 +89,7 @@ src/
 apps-script/              # Google Apps Script (ADVA menu for spreadsheets)
 ├── src/
 │   ├── main.ts          # Menu functions (TypeScript)
-│   └── config.template.ts # Config template (API_BASE_URL injected at build)
+│   └── config.template.ts # Config template (API_BASE_URL and API_SECRET injected at build)
 ├── dist/                # Compiled output (clasp pushes from here)
 │   ├── main.js
 │   ├── config.js
@@ -97,6 +98,51 @@ apps-script/              # Google Apps Script (ADVA menu for spreadsheets)
 ├── tsconfig.json        # TypeScript config
 ├── appsscript.json      # Apps Script manifest
 └── .clasp.json.example  # Template for clasp deployment config
+```
+
+## SECURITY
+
+### API Authentication
+
+All API endpoints (except `/health`) are protected with Bearer token authentication.
+
+**Architecture**:
+- **Secret Storage**: `API_SECRET` environment variable
+- **Server**: Validates token using constant-time comparison (`src/middleware/auth.ts`)
+- **Apps Script**: Sends token in `Authorization: Bearer <token>` header (hardcoded at build time)
+- **Build Process**: `apps-script/build.js` injects `API_SECRET` from `.env` into compiled output
+
+**Implementation Details**:
+- Middleware: `src/middleware/auth.ts` - Fastify hook with timing-attack resistant comparison
+- Protected routes use: `{ onRequest: authMiddleware }`
+- Failed auth attempts logged with structured logging (path, IP)
+- 401 responses with generic error messages (no secret leakage)
+
+**Secret Rotation**:
+1. Update `API_SECRET` in `.env`
+2. Rebuild Apps Script library: `npm run build:library`
+3. Deploy library: `npm run deploy:library`
+4. Restart server (picks up new secret from env)
+5. All spreadsheets automatically get updated secret via shared library
+
+**Security Features**:
+- ✅ Constant-time comparison (prevents timing attacks)
+- ✅ Structured logging of failed auth attempts
+- ✅ Generic error messages (no information leakage)
+- ✅ Public `/health` endpoint for load balancers
+- ✅ Easy secret rotation via rebuild + redeploy
+
+**Adding New Endpoints**:
+```typescript
+// ✅ CORRECT - Protected endpoint
+server.post('/api/new-endpoint', { onRequest: authMiddleware }, async (request, reply) => {
+  // Handler code
+});
+
+// ❌ WRONG - Unprotected endpoint (only allowed for /health)
+server.post('/api/new-endpoint', async (request, reply) => {
+  // Handler code - THIS IS NOT SECURE
+});
 ```
 
 ## COMMANDS
@@ -117,6 +163,7 @@ npm run deploy:library  # Build + deploy library - all spreadsheets get changes
 | GEMINI_API_KEY | Yes | - |
 | DRIVE_ROOT_FOLDER_ID | Yes | - |
 | CONTROL_TEMPLATE_ID | Yes | - |
+| API_SECRET | Yes | - |
 | API_BASE_URL | Yes (for library build) | - |
 | PORT | No | 3000 |
 | NODE_ENV | No | - |
@@ -126,17 +173,36 @@ npm run deploy:library  # Build + deploy library - all spreadsheets get changes
 | MATCH_DAYS_AFTER | No | 60 |
 | USD_ARS_TOLERANCE_PERCENT | No | 5 |
 
-**Note**: `API_BASE_URL` is domain only (no protocol), e.g., `adva-admin.railway.app`. Required for Apps Script library build (`npm run build:library`).
+**Notes**:
+- `API_SECRET`: Secret token for API authentication. Used by server to validate requests and injected into Apps Script library at build time. Keep this secret secure and rotate periodically.
+- `API_BASE_URL`: Domain only (no protocol), e.g., `adva-admin.railway.app`. Required for Apps Script library build (`npm run build:library`).
 
 ## API
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | /health | Health check |
-| GET | /api/status | Status + queue info |
-| POST | /api/scan | Manual scan |
-| POST | /api/rematch | Rematch unmatched |
-| POST | /api/autofill-bank | Auto-fill bank |
-| POST | /webhooks/drive | Drive notifications |
+
+### Authentication
+
+**CRITICAL**: All API endpoints require Bearer token authentication **EXCEPT** `/health`.
+
+- **Protected endpoints**: `/api/status`, `/api/scan`, `/api/rematch`, `/api/autofill-bank`, `/webhooks/drive`
+- **Public endpoint**: `/health` (for load balancer health checks)
+- **Authentication method**: Bearer token in `Authorization` header
+- **Header format**: `Authorization: Bearer <API_SECRET>`
+
+**When adding new endpoints**:
+- ✅ **ALWAYS** protect new API endpoints with auth middleware
+- ❌ **NEVER** create unprotected endpoints except for health checks
+- Apply middleware using: `{ onRequest: authMiddleware }`
+
+### Endpoints
+
+| Method | Endpoint | Auth Required | Description |
+|--------|----------|---------------|-------------|
+| GET | /health | ❌ No | Health check (public for load balancers) |
+| GET | /api/status | ✅ Yes | Status + queue info |
+| POST | /api/scan | ✅ Yes | Manual scan |
+| POST | /api/rematch | ✅ Yes | Rematch unmatched |
+| POST | /api/autofill-bank | ✅ Yes | Auto-fill bank |
+| POST | /webhooks/drive | ✅ Yes | Drive notifications |
 
 ## STYLE
 - TS strict mode, `interface`, JSDoc, `Result<T,E>`
@@ -256,30 +322,40 @@ Control spreadsheets include a custom ADVA menu via shared library.
 ### Architecture
 
 - **Library** (`apps-script/`): TypeScript-based Apps Script library with build-time config injection
-- **Build process**: Injects `API_BASE_URL` from `.env` → compiles TypeScript → outputs to `dist/`
+- **Build process**: Injects `API_BASE_URL` and `API_SECRET` from `.env` → compiles TypeScript → outputs to `dist/`
 - **Template**: Minimal bound script (`onOpen()` only) + library reference
 - **New spreadsheets**: Copy from template inherits library reference
+- **Authentication**: API secret is hardcoded in compiled library output, sent in `Authorization` header
 
 ### Configuration
 
-API URL is configured via environment variable and injected at build time:
+API URL and secret are configured via environment variables and injected at build time:
 - Set `API_BASE_URL` in `.env` (domain only, no protocol)
-- Example: `API_BASE_URL=adva-admin.railway.app`
-- Build fails if not set
+- Set `API_SECRET` in `.env` (used for Bearer token authentication)
+- Example:
+  ```
+  API_BASE_URL=adva-admin.railway.app
+  API_SECRET=your-secret-token-here
+  ```
+- Build fails if either is not set
 
 ### Deployment
 
 ```bash
-npm run build:library   # Build with env injection (requires API_BASE_URL)
+npm run build:library   # Build with env injection (requires API_BASE_URL and API_SECRET)
 npm run deploy:library  # Build + push to Google Apps Script (all spreadsheets get changes)
 ```
 
+**IMPORTANT**: After changing `API_SECRET`, you must rebuild and redeploy the library so all spreadsheets get the updated secret.
+
 ### Menu Options
 
-- **🔄 Trigger Scan** - POST /api/scan
-- **🔗 Trigger Re-match** - POST /api/rematch
-- **🏦 Auto-fill Bank** - POST /api/autofill-bank
-- **ℹ️ About** - Show menu info + test connectivity via GET /api/status
+All menu actions require authentication (secret sent automatically):
+
+- **🔄 Trigger Scan** - POST /api/scan (authenticated)
+- **🔗 Trigger Re-match** - POST /api/rematch (authenticated)
+- **🏦 Auto-fill Bank** - POST /api/autofill-bank (authenticated)
+- **ℹ️ About** - Show menu info + test connectivity via GET /api/status (authenticated)
 
 The "About" dialog displays server status (online/offline), uptime, and queue info by calling the `/api/status` endpoint.
 

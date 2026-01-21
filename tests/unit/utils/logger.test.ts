@@ -131,7 +131,10 @@ describe('Logger', () => {
       process.env.NODE_ENV = 'development';
 
       vi.resetModules();
-      await import('../../../src/utils/logger.js');
+      const { info } = await import('../../../src/utils/logger.js');
+
+      // Trigger logger initialization by calling a logging function
+      info('test');
 
       expect(pino).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -162,7 +165,10 @@ describe('Logger', () => {
         })),
       }));
 
-      await import('../../../src/utils/logger.js');
+      const { info } = await import('../../../src/utils/logger.js');
+
+      // Trigger logger initialization by calling a logging function
+      info('test');
 
       expect(pino).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -185,7 +191,10 @@ describe('Logger', () => {
         })),
       }));
 
-      await import('../../../src/utils/logger.js');
+      const { info } = await import('../../../src/utils/logger.js');
+
+      // Trigger logger initialization by calling a logging function
+      info('test');
 
       expect(pino).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -202,7 +211,10 @@ describe('Logger', () => {
         getConfig: vi.fn(() => ({})),
       }));
 
-      await import('../../../src/utils/logger.js');
+      const { info } = await import('../../../src/utils/logger.js');
+
+      // Trigger logger initialization by calling a logging function
+      info('test');
 
       expect(pino).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -221,7 +233,10 @@ describe('Logger', () => {
         })),
       }));
 
-      await import('../../../src/utils/logger.js');
+      const { info } = await import('../../../src/utils/logger.js');
+
+      // Trigger logger initialization by calling a logging function
+      info('test');
 
       expect(pino).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -256,11 +271,15 @@ describe('Logger', () => {
   });
 
   describe('default export', () => {
-    it('should export the pino logger instance as default', async () => {
+    it('should export the getLogger function as default', async () => {
       const loggerModule = await import('../../../src/utils/logger.js');
 
       expect(loggerModule.default).toBeDefined();
-      expect(loggerModule.default).toBe(mockPinoInstance);
+      expect(typeof loggerModule.default).toBe('function');
+
+      // Calling the default export should return the logger instance
+      const logger = loggerModule.default();
+      expect(logger).toBe(mockPinoInstance);
     });
   });
 });
