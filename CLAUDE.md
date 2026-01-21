@@ -99,7 +99,7 @@ npm start             # Run server
 npm run dev           # Dev with watch
 npm test              # Vitest tests
 npm run lint          # Type check
-npm run deploy:script # Deploy Apps Script to template spreadsheet (manual only)
+npm run deploy:library  # Update menu logic - all spreadsheets get changes
 ```
 
 ## ENV VARS
