@@ -91,6 +91,5 @@ export function error(message: string, context?: Record<string, unknown>): void 
   }
 }
 
-// Export getLogger function as default for backward compatibility
-// Users can call getLogger() to get the logger instance
-export { getLogger as default };
+// Export getLogger for direct logger access
+export { getLogger };

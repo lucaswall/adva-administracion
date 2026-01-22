@@ -466,32 +466,40 @@ Only Dashboard has the menu, so only needs one-time redeployment.
 
 ## API Endpoints
 
-| Method | Endpoint | Description | Use Case |
-|--------|----------|-------------|----------|
-| GET | `/health` | Simple health check | Load balancer probes |
-| GET | `/api/status` | Detailed status + queue info | Monitoring, debugging |
-| POST | `/api/scan` | Trigger manual document scan | Force scan outside schedule |
-| POST | `/api/rematch` | Re-run matching on unmatched docs | After correcting data |
-| POST | `/api/autofill-bank` | Auto-fill bank descriptions | Monthly maintenance |
-| POST | `/webhooks/drive` | Drive push notifications | Automated by Google |
+All endpoints except `/health` require Bearer token authentication (`Authorization: Bearer <API_SECRET>`).
+
+| Method | Endpoint | Auth | Description |
+|--------|----------|------|-------------|
+| GET | `/health` | No | Simple health check (load balancer probes) |
+| GET | `/api/status` | Yes | Detailed status + queue info |
+| POST | `/api/scan` | Yes | Trigger manual document scan |
+| POST | `/api/rematch` | Yes | Re-run matching on unmatched docs |
+| POST | `/api/autofill-bank` | Yes | Auto-fill bank descriptions |
+| POST | `/webhooks/drive` | Yes | Drive push notifications |
 
 ### Example API Calls
 
+**Note:** All endpoints except `/health` require authentication via Bearer token.
+
 ```bash
-# Health check
+# Health check (no auth required)
 curl https://your-app.up.railway.app/health
 
-# Full status
-curl https://your-app.up.railway.app/api/status
+# Full status (requires auth)
+curl -H "Authorization: Bearer YOUR_API_SECRET" \
+  https://your-app.up.railway.app/api/status
 
-# Trigger scan
-curl -X POST https://your-app.up.railway.app/api/scan
+# Trigger scan (requires auth)
+curl -X POST -H "Authorization: Bearer YOUR_API_SECRET" \
+  https://your-app.up.railway.app/api/scan
 
-# Rematch unmatched documents
-curl -X POST https://your-app.up.railway.app/api/rematch
+# Rematch unmatched documents (requires auth)
+curl -X POST -H "Authorization: Bearer YOUR_API_SECRET" \
+  https://your-app.up.railway.app/api/rematch
 
-# Auto-fill bank movements
-curl -X POST https://your-app.up.railway.app/api/autofill-bank
+# Auto-fill bank movements (requires auth)
+curl -X POST -H "Authorization: Bearer YOUR_API_SECRET" \
+  https://your-app.up.railway.app/api/autofill-bank
 ```
 
 ---
