@@ -10,12 +10,22 @@ import { API_BASE_URL, API_SECRET } from './config';
  * Response from the /api/status endpoint
  */
 interface StatusResponse {
-  status: 'ok';
+  status: 'ok' | 'error';
   timestamp: string;
-  uptime: number;
-  queue?: {
-    size: number;
+  version: string;
+  environment: string;
+  uptime: string;
+  startTime: string;
+  queue: {
     pending: number;
+    running: number;
+    completed: number;
+    failed: number;
+  };
+  memory: {
+    heapUsed: string;
+    heapTotal: string;
+    rss: string;
   };
 }
 
@@ -213,21 +223,17 @@ function fetchServerStatus(): StatusResponse | null {
 }
 
 /**
- * Formats uptime in seconds to human-readable string
- * @param seconds - Uptime in seconds
- * @returns Formatted string (e.g., "2h 34m", "45m", "1d 3h")
+ * Formats an ISO date string to a readable local format
+ * @param isoString - ISO 8601 date string
+ * @returns Formatted date string
  */
-function formatUptime(seconds: number): string {
-  const days = Math.floor(seconds / 86400);
-  const hours = Math.floor((seconds % 86400) / 3600);
-  const minutes = Math.floor((seconds % 3600) / 60);
-
-  const parts: string[] = [];
-  if (days > 0) parts.push(`${days}d`);
-  if (hours > 0) parts.push(`${hours}h`);
-  if (minutes > 0) parts.push(`${minutes}m`);
-
-  return parts.length > 0 ? parts.join(' ') : '< 1m';
+function formatDateTime(isoString: string): string {
+  try {
+    const date = new Date(isoString);
+    return Utilities.formatDate(date, Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm:ss z');
+  } catch (e) {
+    return isoString;
+  }
 }
 
 /**
@@ -244,20 +250,37 @@ export function showAbout(): void {
   message += '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n';
 
   // Test API connectivity
-  message += `API Base URL: ${API_BASE_URL}\n`;
+  message += `API URL: ${API_BASE_URL}\n\n`;
 
   const status = fetchServerStatus();
 
   if (status) {
-    message += `Status: ✅ Online\n`;
-    message += `Uptime: ${formatUptime(status.uptime)}\n`;
+    message += `✅ Server Status: Online\n\n`;
 
-    if (status.queue) {
-      message += `Queue: ${status.queue.pending} pending / ${status.queue.size} total\n`;
-    }
+    // Version and Environment
+    message += `Version: ${status.version}\n`;
+    message += `Environment: ${status.environment}\n\n`;
+
+    // Uptime Information
+    message += `Uptime: ${status.uptime}\n`;
+    message += `Started: ${formatDateTime(status.startTime)}\n\n`;
+
+    // Queue Statistics
+    message += `━━ Queue Status ━━\n`;
+    message += `Running: ${status.queue.running}\n`;
+    message += `Pending: ${status.queue.pending}\n`;
+    message += `Completed: ${status.queue.completed}\n`;
+    message += `Failed: ${status.queue.failed}\n\n`;
+
+    // Memory Usage
+    message += `━━ Memory Usage ━━\n`;
+    message += `Heap Used: ${status.memory.heapUsed}\n`;
+    message += `Heap Total: ${status.memory.heapTotal}\n`;
+    message += `RSS: ${status.memory.rss}\n`;
   } else {
-    message += 'Status: ⚠️ Unable to connect\n';
-    message += '\nThe server may be offline or the API URL may be incorrect.';
+    message += '⚠️ Server Status: Offline\n\n';
+    message += 'Unable to connect to the server.\n';
+    message += 'The server may be down or the API URL may be incorrect.';
   }
 
   ui.alert('About ADVA Menu', message, ui.ButtonSet.OK);
