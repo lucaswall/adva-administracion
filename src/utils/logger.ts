@@ -16,7 +16,7 @@ let loggerInstance: Logger | null = null;
 function getLogger(): Logger {
   if (!loggerInstance) {
     const config = getConfig();
-    const logLevel = config.logLevel || 'INFO';
+    const logLevel = config?.logLevel || 'INFO';
 
     loggerInstance = pino({
       level: logLevel.toLowerCase(),

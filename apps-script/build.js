@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 /**
- * Build script for ADVA Apps Script Library
+ * Build script for ADVA Apps Script
  *
  * This script:
- * 1. Reads API_BASE_URL from .env file
- * 2. Injects it into config.template.ts → config.ts
+ * 1. Reads API_BASE_URL and API_SECRET from .env file
+ * 2. Injects them into config.template.ts → config.ts
  * 3. Bundles TypeScript with esbuild (IIFE format for Apps Script)
  * 4. Copies appsscript.json to dist/
  *
@@ -74,7 +74,7 @@ function readEnvFile(envPath) {
  * Main build function
  */
 async function build() {
-  log.info('Building ADVA Apps Script Library...\n');
+  log.info('Building ADVA Apps Script...\n');
 
   // Step 1: Read environment variables
   const envPath = path.resolve(__dirname, '..', '.env');
@@ -139,19 +139,19 @@ async function build() {
       bundle: true,
       outfile: outfile,
       format: 'iife',
-      globalName: 'ADVALib',
+      globalName: 'ADVA',
       target: 'es2019',
       platform: 'browser',
-      minify: false,
+      minify: true,
       sourcemap: false,
       footer: {
         js: `
 // Expose functions to global scope for Apps Script
-var createMenu = ADVALib.createMenu;
-var triggerScan = ADVALib.triggerScan;
-var triggerRematch = ADVALib.triggerRematch;
-var triggerAutofillBank = ADVALib.triggerAutofillBank;
-var showAbout = ADVALib.showAbout;
+var onOpen = ADVA.createMenu;  // onOpen trigger
+var triggerScan = ADVA.triggerScan;
+var triggerRematch = ADVA.triggerRematch;
+var triggerAutofillBank = ADVA.triggerAutofillBank;
+var showAbout = ADVA.showAbout;
 `
       }
     });
@@ -183,10 +183,11 @@ var showAbout = ADVALib.showAbout;
   log.success('appsscript.json copied to dist/');
 
   // Build complete
-  log.success('\n✓ Build complete! Library is ready in apps-script/dist/');
+  log.success('\n✓ Build complete! Script is ready in apps-script/dist/');
   log.info('\nNext steps:');
-  log.info('  1. Run: npm run deploy:library');
+  log.info('  1. Run: npm run deploy:script');
   log.info('  2. Or manually: cd apps-script && clasp push');
+  log.info('  3. Deploy once after Dashboard is created');
 }
 
 // Run build

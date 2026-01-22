@@ -216,5 +216,7 @@ async function start() {
   }
 }
 
-// Start the server if this is the main module
-start();
+// Start the server only when run directly (not imported during tests)
+if (import.meta.url === `file://${process.argv[1]}`) {
+  start();
+}

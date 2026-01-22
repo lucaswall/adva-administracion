@@ -72,7 +72,7 @@ Gemini API integration for PDF document analysis and prompt testing.
 ```
 src/
 ├── server.ts             # Entry: Fastify server
-├── config.ts             # Environment config (includes MAX_CASCADE_DEPTH, CASCADE_TIMEOUT_MS, CONTROL_TEMPLATE_ID, API_SECRET)
+├── config.ts             # Environment config (includes MAX_CASCADE_DEPTH, CASCADE_TIMEOUT_MS, API_SECRET)
 ├── constants/spreadsheet-headers.ts
 ├── routes/{status,scan,webhooks}.ts
 ├── middleware/auth.ts    # Bearer token authentication
@@ -86,9 +86,9 @@ src/
 ├── utils/{date,numbers,currency,validation,file-naming,spanish-date,exchange-rate,drive-parser,logger}.ts
 └── bank/{matcher,autofill,subdiario-matcher}.ts
 
-apps-script/              # Google Apps Script (ADVA menu for spreadsheets)
+apps-script/              # Google Apps Script (ADVA menu for Dashboard)
 ├── src/
-│   ├── main.ts          # Menu functions (TypeScript)
+│   ├── main.ts          # Menu functions + onOpen trigger (TypeScript)
 │   └── config.template.ts # Config template (API_BASE_URL and API_SECRET injected at build)
 ├── dist/                # Compiled output (clasp pushes from here)
 │   ├── main.js
@@ -109,7 +109,7 @@ All API endpoints (except `/health`) are protected with Bearer token authenticat
 **Architecture**:
 - **Secret Storage**: `API_SECRET` environment variable
 - **Server**: Validates token using constant-time comparison (`src/middleware/auth.ts`)
-- **Apps Script**: Sends token in `Authorization: Bearer <token>` header (hardcoded at build time)
+- **Apps Script**: Sends token in `Authorization: Bearer <token>` header (hardcoded at build time in Dashboard bound script)
 - **Build Process**: `apps-script/build.js` injects `API_SECRET` from `.env` into compiled output
 
 **Implementation Details**:
@@ -120,10 +120,10 @@ All API endpoints (except `/health`) are protected with Bearer token authenticat
 
 **Secret Rotation**:
 1. Update `API_SECRET` in `.env`
-2. Rebuild Apps Script library: `npm run build:library`
-3. Deploy library: `npm run deploy:library`
+2. Rebuild Apps Script: `npm run build:script`
+3. Redeploy script to Dashboard: `npm run deploy:script`
 4. Restart server (picks up new secret from env)
-5. All spreadsheets automatically get updated secret via shared library
+5. Only Dashboard has the menu, so only needs one-time redeployment
 
 **Security Features**:
 - ✅ Constant-time comparison (prevents timing attacks)
@@ -152,8 +152,8 @@ npm start             # Run server
 npm run dev           # Dev with watch
 npm test              # Vitest tests
 npm run lint          # Type check
-npm run build:library   # Build Apps Script library (requires API_BASE_URL in .env)
-npm run deploy:library  # Build + deploy library - all spreadsheets get changes
+npm run build:script    # Build Apps Script (requires API_BASE_URL and API_SECRET in .env)
+npm run deploy:script   # Build + deploy script to Dashboard (one-time setup)
 ```
 
 ## ENV VARS
@@ -162,9 +162,8 @@ npm run deploy:library  # Build + deploy library - all spreadsheets get changes
 | GOOGLE_SERVICE_ACCOUNT_KEY | Yes | - |
 | GEMINI_API_KEY | Yes | - |
 | DRIVE_ROOT_FOLDER_ID | Yes | - |
-| CONTROL_TEMPLATE_ID | Yes | - |
 | API_SECRET | Yes | - |
-| API_BASE_URL | Yes (for library build) | - |
+| API_BASE_URL | Yes (for script build) | - |
 | PORT | No | 3000 |
 | NODE_ENV | No | - |
 | LOG_LEVEL | No | INFO |
@@ -174,8 +173,8 @@ npm run deploy:library  # Build + deploy library - all spreadsheets get changes
 | USD_ARS_TOLERANCE_PERCENT | No | 5 |
 
 **Notes**:
-- `API_SECRET`: Secret token for API authentication. Used by server to validate requests and injected into Apps Script library at build time. Keep this secret secure and rotate periodically.
-- `API_BASE_URL`: Domain only (no protocol), e.g., `adva-admin.railway.app`. Required for Apps Script library build (`npm run build:library`).
+- `API_SECRET`: Secret token for API authentication. Used by server to validate requests and injected into Apps Script at build time. Keep this secret secure and rotate periodically.
+- `API_BASE_URL`: Domain only (no protocol), e.g., `adva-admin.railway.app`. Required for Apps Script build (`npm run build:script`).
 
 ## API
 
@@ -317,15 +316,15 @@ ROOT/
 
 ## APPS SCRIPT MENU
 
-Control spreadsheets include a custom ADVA menu via shared library.
+Dashboard Operativo Contable includes a custom ADVA menu via bound script.
 
 ### Architecture
 
-- **Library** (`apps-script/`): TypeScript-based Apps Script library with build-time config injection
+- **Bound script** (`apps-script/`): TypeScript-based bound script attached to Dashboard Operativo Contable
 - **Build process**: Injects `API_BASE_URL` and `API_SECRET` from `.env` → compiles TypeScript → outputs to `dist/`
-- **Template**: Minimal bound script (`onOpen()` only) + library reference
-- **New spreadsheets**: Copy from template inherits library reference
-- **Authentication**: API secret is hardcoded in compiled library output, sent in `Authorization` header
+- **Deployment**: One-time manual deployment to Dashboard spreadsheet after server creates it
+- **Control spreadsheets**: Created fresh by server using Google Sheets API (no template, no script)
+- **Authentication**: API secret is hardcoded in compiled script output, sent in `Authorization` header
 
 ### Configuration
 
@@ -342,11 +341,13 @@ API URL and secret are configured via environment variables and injected at buil
 ### Deployment
 
 ```bash
-npm run build:library   # Build with env injection (requires API_BASE_URL and API_SECRET)
-npm run deploy:library  # Build + push to Google Apps Script (all spreadsheets get changes)
+npm run build:script   # Build with env injection (requires API_BASE_URL and API_SECRET)
+npm run deploy:script  # Build + push to Dashboard spreadsheet (one-time manual setup)
 ```
 
-**IMPORTANT**: After changing `API_SECRET`, you must rebuild and redeploy the library so all spreadsheets get the updated secret.
+**Note**: Deploy once after Dashboard is created. No need to redeploy unless menu changes.
+
+**Secret Rotation**: After changing `API_SECRET`, rebuild and redeploy: `npm run deploy:script`. Only Dashboard has the menu, so only needs one-time redeployment.
 
 ### Menu Options
 
@@ -358,8 +359,6 @@ All menu actions require authentication (secret sent automatically):
 - **ℹ️ About** - Show menu info + test connectivity via GET /api/status (authenticated)
 
 The "About" dialog displays server status (online/offline), uptime, and queue info by calling the `/api/status` endpoint.
-
-See the "Template Spreadsheet Setup" section in the main README for setup instructions.
 
 ## CASCADING MATCH DISPLACEMENT
 
