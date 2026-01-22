@@ -439,27 +439,14 @@ describe('FolderStructure service', () => {
       // Mock getValues for existing sheets with correct headers
       // Facturas start with 'fechaEmision', Pagos/Recibos start with 'fechaPago', Dashboard has specific headers
       mockGetValues
-        .mockResolvedValueOnce({ ok: true, value: [['fechaEmision', 'fileId', 'fileName']] }) // Facturas Emitidas
-        .mockResolvedValueOnce({ ok: true, value: [['fechaPago', 'fileId', 'fileName']] }) // Pagos Recibidos
-        .mockResolvedValueOnce({ ok: true, value: [['fechaEmision', 'fileId', 'fileName']] }) // Facturas Recibidas
-        .mockResolvedValueOnce({ ok: true, value: [['fechaPago', 'fileId', 'fileName']] }) // Pagos Enviados
-        .mockResolvedValueOnce({ ok: true, value: [['fechaPago', 'fileId', 'fileName']] }) // Recibos
-        .mockResolvedValueOnce({ ok: true, value: [
-          ['anio', 'mes', 'totalLlamadas'],
-          [2026, 'Enero', 0],
-          [2026, 'Febrero', 0],
-          [2026, 'Marzo', 0],
-          [2026, 'Abril', 0],
-          [2026, 'Mayo', 0],
-          [2026, 'Junio', 0],
-          [2026, 'Julio', 0],
-          [2026, 'Agosto', 0],
-          [2026, 'Septiembre', 0],
-          [2026, 'Octubre', 0],
-          [2026, 'Noviembre', 0],
-          [2026, 'Diciembre', 0]
-        ] }) // Resumen Mensual (with all 12 months already initialized)
-        .mockResolvedValueOnce({ ok: true, value: [['timestamp', 'requestId', 'fileId']] }); // Uso de API
+        .mockResolvedValueOnce({ ok: true, value: [['fechaEmision', 'fileId', 'fileName']] }) // Facturas Emitidas headers
+        .mockResolvedValueOnce({ ok: true, value: [['fechaPago', 'fileId', 'fileName']] }) // Pagos Recibidos headers
+        .mockResolvedValueOnce({ ok: true, value: [['fechaEmision', 'fileId', 'fileName']] }) // Facturas Recibidas headers
+        .mockResolvedValueOnce({ ok: true, value: [['fechaPago', 'fileId', 'fileName']] }) // Pagos Enviados headers
+        .mockResolvedValueOnce({ ok: true, value: [['fechaPago', 'fileId', 'fileName']] }) // Recibos headers
+        .mockResolvedValueOnce({ ok: true, value: [['anio', 'mes', 'totalLlamadas', 'tokensEntrada', 'tokensSalida', 'costoTotalUSD', 'tasaExito', 'duracionPromedio']] }) // Resumen Mensual headers
+        .mockResolvedValueOnce({ ok: true, value: [['timestamp', 'requestId', 'fileId', 'fileName', 'model', 'promptTokens', 'outputTokens', 'totalTokens', 'estimatedCostUSD', 'durationMs', 'success', 'errorMessage']] }) // Uso de API headers
+        .mockResolvedValueOnce({ ok: true, value: [[2026]] }); // Resumen Mensual A2:A2 (data exists)
 
       const result = await discoverFolderStructure();
 
@@ -471,9 +458,8 @@ describe('FolderStructure service', () => {
       expect(mockGetSheetMetadata).toHaveBeenCalledWith('dashboard-operativo-id');
       expect(mockCreateSheet).not.toHaveBeenCalled();
 
-      // Note: Dashboard Operativo Contable's Resumen Mensual is always initialized with 12 months
-      // even when sheets exist, to ensure formulas are up to date for current year
-      expect(mockSetValues).toHaveBeenCalledTimes(12); // 12 month rows in Resumen Mensual
+      // Dashboard Operativo Contable's Resumen Mensual is skipped when data already exists
+      expect(mockSetValues).not.toHaveBeenCalled();
     });
 
     it('creates only missing sheets when some exist', async () => {
@@ -749,8 +735,8 @@ describe('FolderStructure service', () => {
 
       // Mock getValues for existing sheets (headers check)
       mockGetValues.mockImplementation((spreadsheetId: string, range: string) => {
-        // For data check (A2:A13), return empty to indicate no existing data
-        if (range.includes('A2:A13')) {
+        // For data check (A2:A2), return empty to indicate no existing data
+        if (range.includes('A2:A2')) {
           return Promise.resolve({ ok: true, value: [] });
         }
         // For header checks, return headers
@@ -788,30 +774,30 @@ describe('FolderStructure service', () => {
         [['timestamp', 'requestId', 'fileId', 'fileName', 'model', 'promptTokens', 'outputTokens', 'totalTokens', 'estimatedCostUSD', 'durationMs', 'success', 'errorMessage']]
       );
 
-      // Verify Resumen Mensual was initialized with 12 months
+      // Verify Resumen Mensual was initialized with current month only
       const monthNames = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
-      const currentYear = new Date().getFullYear();
+      const now = new Date();
+      const currentYear = now.getFullYear();
+      const currentMonth = now.getMonth();
+      const currentMonthName = monthNames[currentMonth];
 
-      for (let i = 0; i < 12; i++) {
-        const month = monthNames[i];
-        // Verify each month row was initialized with formulas
-        expect(mockSetValues).toHaveBeenCalledWith(
-          'dashboard-operativo-id',
-          `Resumen Mensual!A${i + 2}:H${i + 2}`,
+      // Verify current month row was initialized with formulas wrapped in IFERROR
+      expect(mockSetValues).toHaveBeenCalledWith(
+        'dashboard-operativo-id',
+        `Resumen Mensual!A2:H2`,
+        expect.arrayContaining([
           expect.arrayContaining([
-            expect.arrayContaining([
-              currentYear,
-              month,
-              expect.stringContaining('=COUNTIFS'), // totalLlamadas formula
-              expect.stringContaining('=SUMIFS'),   // tokensEntrada formula
-              expect.stringContaining('=SUMIFS'),   // tokensSalida formula
-              expect.stringContaining('=SUMIFS'),   // costoTotalUSD formula
-              expect.stringContaining('='),         // tasaExito formula
-              expect.stringContaining('=AVERAGEIFS'), // duracionPromedio formula
-            ])
+            currentYear,
+            currentMonthName,
+            expect.stringContaining('=IFERROR(COUNTIFS'), // totalLlamadas formula with IFERROR
+            expect.stringContaining('=IFERROR(SUMIFS'),   // tokensEntrada formula with IFERROR
+            expect.stringContaining('=IFERROR(SUMIFS'),   // tokensSalida formula with IFERROR
+            expect.stringContaining('=IFERROR(SUMIFS'),   // costoTotalUSD formula with IFERROR
+            expect.stringContaining('=IFERROR(IF'),       // tasaExito formula with IFERROR
+            expect.stringContaining('=IFERROR(AVERAGEIFS'), // duracionPromedio formula with IFERROR
           ])
-        );
-      }
+        ])
+      );
 
       // Verify Sheet1 was deleted
       expect(mockDeleteSheet).toHaveBeenCalledWith('dashboard-operativo-id', 0);

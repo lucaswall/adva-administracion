@@ -274,7 +274,7 @@ async function ensureSheetsExist(
 /**
  * Initializes Dashboard Operativo Contable spreadsheet with sheets and data
  * Creates "Resumen Mensual" and "Uso de API" sheets with headers
- * Initializes "Resumen Mensual" with 12 months of formula-based data for current year
+ * Initializes "Resumen Mensual" with current month only, with IFERROR handling for empty data
  *
  * @param spreadsheetId - Dashboard Operativo Contable spreadsheet ID
  * @returns Success or error
@@ -286,9 +286,9 @@ async function initializeDashboardOperativo(
   const ensureSheetsResult = await ensureSheetsExist(spreadsheetId, DASHBOARD_OPERATIVO_SHEETS);
   if (!ensureSheetsResult.ok) return ensureSheetsResult;
 
-  // Check if Resumen Mensual already has data (rows 2-13)
+  // Check if Resumen Mensual already has data (row 2)
   const resumanMensual = DASHBOARD_OPERATIVO_SHEETS[0];
-  const existingDataResult = await getValues(spreadsheetId, `${resumanMensual.title}!A2:A13`);
+  const existingDataResult = await getValues(spreadsheetId, `${resumanMensual.title}!A2:A2`);
   if (existingDataResult.ok && existingDataResult.value.length > 0 && existingDataResult.value[0].length > 0) {
     // Data already exists, skip initialization
     debug('Dashboard already initialized, skipping', {
@@ -299,42 +299,42 @@ async function initializeDashboardOperativo(
     return { ok: true, value: undefined };
   }
 
-  // Initialize Resumen Mensual with 12 months of data for current year
-  const currentYear = new Date().getFullYear();
+  // Initialize Resumen Mensual with current month only
+  const now = new Date();
+  const currentYear = now.getFullYear();
+  const currentMonth = now.getMonth(); // 0-indexed (0 = January, 11 = December)
   const monthNames = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
 
-  // Create rows with formulas for each month
-  for (let monthIndex = 0; monthIndex < 12; monthIndex++) {
-    const monthName = monthNames[monthIndex];
-    const rowNumber = monthIndex + 2; // Row 1 is headers, data starts at row 2
+  const monthName = monthNames[currentMonth];
+  const rowNumber = 2; // Row 1 is headers, data starts at row 2
+  const nextMonth = currentMonth === 11 ? 0 : currentMonth + 1;
+  const yearForNextMonth = currentMonth === 11 ? currentYear + 1 : currentYear;
 
-    // Create formulas for this month
-    // Note: Using Spanish month names for matching in formulas
-    const row = [
-      currentYear,
-      monthName,
-      // totalLlamadas: Count all calls in this month
-      `=COUNTIFS('Uso de API'!A:A, ">="&DATE(${currentYear}, ${monthIndex + 1}, 1), 'Uso de API'!A:A, "<"&DATE(${currentYear}, ${monthIndex + 1 === 12 ? currentYear + 1 : currentYear}, ${monthIndex + 1 === 12 ? 1 : monthIndex + 2}, 1))`,
-      // tokensEntrada: Sum of prompt tokens in this month
-      `=SUMIFS('Uso de API'!F:F, 'Uso de API'!A:A, ">="&DATE(${currentYear}, ${monthIndex + 1}, 1), 'Uso de API'!A:A, "<"&DATE(${currentYear}, ${monthIndex + 1 === 12 ? currentYear + 1 : currentYear}, ${monthIndex + 1 === 12 ? 1 : monthIndex + 2}, 1))`,
-      // tokensSalida: Sum of output tokens in this month
-      `=SUMIFS('Uso de API'!G:G, 'Uso de API'!A:A, ">="&DATE(${currentYear}, ${monthIndex + 1}, 1), 'Uso de API'!A:A, "<"&DATE(${currentYear}, ${monthIndex + 1 === 12 ? currentYear + 1 : currentYear}, ${monthIndex + 1 === 12 ? 1 : monthIndex + 2}, 1))`,
-      // costoTotalUSD: Sum of costs in this month
-      `=SUMIFS('Uso de API'!I:I, 'Uso de API'!A:A, ">="&DATE(${currentYear}, ${monthIndex + 1}, 1), 'Uso de API'!A:A, "<"&DATE(${currentYear}, ${monthIndex + 1 === 12 ? currentYear + 1 : currentYear}, ${monthIndex + 1 === 12 ? 1 : monthIndex + 2}, 1))`,
-      // tasaExito: Success rate (successful calls / total calls)
-      `=IF(C${rowNumber}=0, 0, COUNTIFS('Uso de API'!A:A, ">="&DATE(${currentYear}, ${monthIndex + 1}, 1), 'Uso de API'!A:A, "<"&DATE(${currentYear}, ${monthIndex + 1 === 12 ? currentYear + 1 : currentYear}, ${monthIndex + 1 === 12 ? 1 : monthIndex + 2}, 1), 'Uso de API'!K:K, "YES") / C${rowNumber})`,
-      // duracionPromedio: Average duration in this month
-      `=AVERAGEIFS('Uso de API'!J:J, 'Uso de API'!A:A, ">="&DATE(${currentYear}, ${monthIndex + 1}, 1), 'Uso de API'!A:A, "<"&DATE(${currentYear}, ${monthIndex + 1 === 12 ? currentYear + 1 : currentYear}, ${monthIndex + 1 === 12 ? 1 : monthIndex + 2}, 1))`,
-    ];
+  // Create formulas for current month only with IFERROR for "no data" handling
+  const row = [
+    currentYear,
+    monthName,
+    // totalLlamadas: Count all calls in this month
+    `=IFERROR(COUNTIFS('Uso de API'!A:A, ">="&DATE(${currentYear}, ${currentMonth + 1}, 1), 'Uso de API'!A:A, "<"&DATE(${yearForNextMonth}, ${nextMonth + 1}, 1)), "no data")`,
+    // tokensEntrada: Sum of prompt tokens in this month
+    `=IFERROR(SUMIFS('Uso de API'!F:F, 'Uso de API'!A:A, ">="&DATE(${currentYear}, ${currentMonth + 1}, 1), 'Uso de API'!A:A, "<"&DATE(${yearForNextMonth}, ${nextMonth + 1}, 1)), "no data")`,
+    // tokensSalida: Sum of output tokens in this month
+    `=IFERROR(SUMIFS('Uso de API'!G:G, 'Uso de API'!A:A, ">="&DATE(${currentYear}, ${currentMonth + 1}, 1), 'Uso de API'!A:A, "<"&DATE(${yearForNextMonth}, ${nextMonth + 1}, 1)), "no data")`,
+    // costoTotalUSD: Sum of costs in this month
+    `=IFERROR(SUMIFS('Uso de API'!I:I, 'Uso de API'!A:A, ">="&DATE(${currentYear}, ${currentMonth + 1}, 1), 'Uso de API'!A:A, "<"&DATE(${yearForNextMonth}, ${nextMonth + 1}, 1)), "no data")`,
+    // tasaExito: Success rate (successful calls / total calls)
+    `=IFERROR(IF(C${rowNumber}=0, 0, COUNTIFS('Uso de API'!A:A, ">="&DATE(${currentYear}, ${currentMonth + 1}, 1), 'Uso de API'!A:A, "<"&DATE(${yearForNextMonth}, ${nextMonth + 1}, 1), 'Uso de API'!K:K, "YES") / C${rowNumber}), "no data")`,
+    // duracionPromedio: Average duration in this month
+    `=IFERROR(AVERAGEIFS('Uso de API'!J:J, 'Uso de API'!A:A, ">="&DATE(${currentYear}, ${currentMonth + 1}, 1), 'Uso de API'!A:A, "<"&DATE(${yearForNextMonth}, ${nextMonth + 1}, 1)), "no data")`,
+  ];
 
-    // Set values for this month
-    const setResult = await setValues(
-      spreadsheetId,
-      `Resumen Mensual!A${rowNumber}:H${rowNumber}`,
-      [row]
-    );
-    if (!setResult.ok) return setResult;
-  }
+  // Set values for current month
+  const setResult = await setValues(
+    spreadsheetId,
+    `Resumen Mensual!A${rowNumber}:H${rowNumber}`,
+    [row]
+  );
+  if (!setResult.ok) return setResult;
 
   return { ok: true, value: undefined };
 }
