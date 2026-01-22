@@ -100,7 +100,7 @@ describe('Status routes', () => {
       });
 
       const body = JSON.parse(response.body);
-      expect(body.version).toBe('2.0.0');
+      expect(body.version).toBe('1.0.0');
     });
 
     it('returns environment from config', async () => {
@@ -129,8 +129,12 @@ describe('Status routes', () => {
       expect(body.queue).toBeDefined();
       expect(body.queue.pending).toBeDefined();
       expect(body.queue.running).toBeDefined();
+      expect(body.queue.completed).toBeDefined();
+      expect(body.queue.failed).toBeDefined();
       expect(typeof body.queue.pending).toBe('number');
       expect(typeof body.queue.running).toBe('number');
+      expect(typeof body.queue.completed).toBe('number');
+      expect(typeof body.queue.failed).toBe('number');
     });
 
     it('returns all required fields', async () => {
@@ -147,7 +151,45 @@ describe('Status routes', () => {
       expect(body).toHaveProperty('timestamp');
       expect(body).toHaveProperty('version');
       expect(body).toHaveProperty('environment');
+      expect(body).toHaveProperty('uptime');
+      expect(body).toHaveProperty('startTime');
       expect(body).toHaveProperty('queue');
+      expect(body).toHaveProperty('memory');
+    });
+
+    it('returns uptime information', async () => {
+      const response = await server.inject({
+        method: 'GET',
+        url: '/api/status',
+        headers: {
+          authorization: 'Bearer test-secret-123',
+        },
+      });
+
+      const body = JSON.parse(response.body);
+      expect(body.uptime).toBeDefined();
+      expect(typeof body.uptime).toBe('string');
+      expect(body.startTime).toBeDefined();
+      expect(() => new Date(body.startTime)).not.toThrow();
+    });
+
+    it('returns memory information', async () => {
+      const response = await server.inject({
+        method: 'GET',
+        url: '/api/status',
+        headers: {
+          authorization: 'Bearer test-secret-123',
+        },
+      });
+
+      const body = JSON.parse(response.body);
+      expect(body.memory).toBeDefined();
+      expect(body.memory.heapUsed).toBeDefined();
+      expect(body.memory.heapTotal).toBeDefined();
+      expect(body.memory.rss).toBeDefined();
+      expect(body.memory.heapUsed).toMatch(/^\d+MB$/);
+      expect(body.memory.heapTotal).toMatch(/^\d+MB$/);
+      expect(body.memory.rss).toMatch(/^\d+MB$/);
     });
 
     it('rejects request without authorization', async () => {

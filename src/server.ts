@@ -5,7 +5,7 @@
 
 import Fastify from 'fastify';
 import { getConfig } from './config.js';
-import { statusRoutes } from './routes/status.js';
+import { statusRoutes, setServerStartTime } from './routes/status.js';
 import { scanRoutes } from './routes/scan.js';
 import { webhookRoutes } from './routes/webhooks.js';
 import { discoverFolderStructure, getCachedFolderStructure } from './services/folder-structure.js';
@@ -168,6 +168,9 @@ async function start() {
       port: config.port,
       host: '0.0.0.0'
     });
+
+    // Set server start time for uptime tracking
+    setServerStartTime();
 
     info('Server started successfully', {
       module: 'server',

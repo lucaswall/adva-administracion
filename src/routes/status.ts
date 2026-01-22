@@ -5,18 +5,61 @@
 import type { FastifyInstance } from 'fastify';
 import { getConfig } from '../config.js';
 import { authMiddleware } from '../middleware/auth.js';
+import { getProcessingQueue } from '../processing/queue.js';
 
 /**
- * Health check response
+ * Server start time for uptime calculation
  */
-interface HealthResponse {
+let serverStartTime: Date | null = null;
+
+/**
+ * Sets the server start time (called when server starts)
+ */
+export function setServerStartTime(): void {
+  serverStartTime = new Date();
+}
+
+/**
+ * Calculates server uptime in human-readable format
+ */
+function formatUptime(startTime: Date): string {
+  const uptimeMs = Date.now() - startTime.getTime();
+  const seconds = Math.floor(uptimeMs / 1000);
+  const minutes = Math.floor(seconds / 60);
+  const hours = Math.floor(minutes / 60);
+  const days = Math.floor(hours / 24);
+
+  if (days > 0) {
+    return `${days}d ${hours % 24}h ${minutes % 60}m`;
+  } else if (hours > 0) {
+    return `${hours}h ${minutes % 60}m`;
+  } else if (minutes > 0) {
+    return `${minutes}m ${seconds % 60}s`;
+  } else {
+    return `${seconds}s`;
+  }
+}
+
+/**
+ * Status response
+ */
+interface StatusResponse {
   status: 'ok' | 'error';
   timestamp: string;
   version: string;
   environment: string;
-  queue?: {
+  uptime: string;
+  startTime: string;
+  queue: {
     pending: number;
     running: number;
+    completed: number;
+    failed: number;
+  };
+  memory: {
+    heapUsed: string;
+    heapTotal: string;
+    rss: string;
   };
 }
 
@@ -28,17 +71,31 @@ export async function statusRoutes(server: FastifyInstance) {
    * GET /api/status - Health check and system status
    * Protected with authentication
    */
-  server.get('/api/status', { onRequest: authMiddleware }, async (_request, _reply): Promise<HealthResponse> => {
+  server.get('/api/status', { onRequest: authMiddleware }, async (_request, _reply): Promise<StatusResponse> => {
     const config = getConfig();
+    const queue = getProcessingQueue();
+    const queueStats = queue.getStats();
+    const memUsage = process.memoryUsage();
+
+    const startTime = serverStartTime || new Date();
 
     return {
       status: 'ok',
       timestamp: new Date().toISOString(),
-      version: '2.0.0',
+      version: '1.0.0',
       environment: config.nodeEnv,
+      uptime: formatUptime(startTime),
+      startTime: startTime.toISOString(),
       queue: {
-        pending: 0,
-        running: 0
+        pending: queueStats.pending,
+        running: queueStats.running,
+        completed: queueStats.completed,
+        failed: queueStats.failed
+      },
+      memory: {
+        heapUsed: `${Math.round(memUsage.heapUsed / 1024 / 1024)}MB`,
+        heapTotal: `${Math.round(memUsage.heapTotal / 1024 / 1024)}MB`,
+        rss: `${Math.round(memUsage.rss / 1024 / 1024)}MB`
       }
     };
   });

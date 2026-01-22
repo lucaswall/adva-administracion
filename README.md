@@ -161,7 +161,7 @@ curl https://your-app.up.railway.app/health
 # Response: {"status":"ok"}
 
 curl https://your-app.up.railway.app/api/status
-# Response: {"status":"ok","version":"2.0.0","environment":"production",...}
+# Response: {"status":"ok","version":"1.0.0","environment":"production",...}
 ```
 
 #### 8. Configure Custom Domain (Optional)
