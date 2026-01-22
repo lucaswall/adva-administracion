@@ -6,15 +6,16 @@
 
 ## RULES
 - **TDD**: Write tests FIRST (red→green→refactor), coverage >=80%
-- **VERIFY**: code → test-runner → builder → fix before commit
+- **VERIFY**: code → bug-hunter → test-runner → builder → fix before commit
 - **BUILD**: Zero warnings required
 - **SYNC**: Update this file when architecture changes
 
 ## SUBAGENTS
 | Agent | Use For | Never |
 |-------|---------|-------|
-| `test-runner` (haiku) | After code changes | `npm test` |
-| `builder` (haiku) | After code changes | `npm run build` |
+| `bug-hunter` (opus) | Before test-runner, finds bugs in git changes | - |
+| `test-runner` (haiku) | After bug-hunter passes | `npm test` |
+| `builder` (haiku) | After test-runner passes | `npm run build` |
 | `commit-bot` (haiku) | After tests+build pass | `git commit` |
 | `pr-creator` (haiku) | Creating PRs | `gh pr create` |
 
