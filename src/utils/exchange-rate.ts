@@ -6,6 +6,8 @@
 import type { Result, Moneda } from '../types/index.js';
 import { parseArgDate } from './date.js';
 import { amountsMatch } from './numbers.js';
+import { warn } from './logger.js';
+import { getCorrelationId } from './correlation.js';
 
 /**
  * Exchange rate data from ArgentinaDatos API
@@ -28,6 +30,8 @@ export interface CrossCurrencyMatchResult {
   rate?: number;
   /** Expected ARS amount - only for cross-currency */
   expectedArs?: number;
+  /** Whether the match failed due to exchange rate cache miss */
+  cacheMiss?: boolean;
 }
 
 /**
@@ -254,9 +258,21 @@ export function amountsMatchCrossCurrency(
 
   if (!rateResult.ok) {
     // Cache miss - cannot determine match
+    // Log warning so this is visible and can be debugged
+    warn('Exchange rate cache miss - USD invoice cannot be matched', {
+      module: 'exchange-rate',
+      phase: 'cross-currency-match',
+      facturaFecha,
+      facturaAmount,
+      pagoAmount,
+      error: rateResult.error.message,
+      correlationId: getCorrelationId(),
+    });
+
     return {
       matches: false,
       isCrossCurrency: true,
+      cacheMiss: true,
     };
   }
 
