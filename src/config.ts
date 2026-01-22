@@ -64,7 +64,6 @@ export interface Config {
 
   // Drive
   driveRootFolderId: string;
-  controlTemplateId: string;
 
   // Webhooks
   webhookUrl: string | null;
@@ -111,12 +110,6 @@ export function loadConfig(): Config {
     throw new Error('DRIVE_ROOT_FOLDER_ID is required');
   }
 
-  // Template spreadsheet with embedded App Script menu - required
-  const controlTemplateId = process.env.CONTROL_TEMPLATE_ID || '';
-  if (!controlTemplateId && nodeEnv === 'production') {
-    throw new Error('CONTROL_TEMPLATE_ID is required');
-  }
-
   // Webhooks - optional
   const webhookUrl = process.env.WEBHOOK_URL || null;
 
@@ -136,7 +129,6 @@ export function loadConfig(): Config {
     googleServiceAccountKey,
     geminiApiKey,
     driveRootFolderId,
-    controlTemplateId,
     webhookUrl,
     matchDaysBefore,
     matchDaysAfter,

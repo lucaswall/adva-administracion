@@ -157,7 +157,6 @@ describe('config', () => {
       process.env.GOOGLE_SERVICE_ACCOUNT_KEY = 'test-key';
       process.env.GEMINI_API_KEY = 'test-gemini-key';
       process.env.DRIVE_ROOT_FOLDER_ID = 'test-folder-id';
-      process.env.CONTROL_TEMPLATE_ID = 'test-template-id';
 
       expect(() => loadConfig()).toThrow('API_SECRET is required');
     });
@@ -167,7 +166,6 @@ describe('config', () => {
       process.env.API_SECRET = 'test-secret';
       process.env.GEMINI_API_KEY = 'test-gemini-key';
       process.env.DRIVE_ROOT_FOLDER_ID = 'test-folder-id';
-      process.env.CONTROL_TEMPLATE_ID = 'test-template-id';
 
       expect(() => loadConfig()).toThrow('GOOGLE_SERVICE_ACCOUNT_KEY is required');
     });
@@ -177,7 +175,6 @@ describe('config', () => {
       process.env.API_SECRET = 'test-secret';
       process.env.GOOGLE_SERVICE_ACCOUNT_KEY = 'test-key';
       process.env.DRIVE_ROOT_FOLDER_ID = 'test-folder-id';
-      process.env.CONTROL_TEMPLATE_ID = 'test-template-id';
 
       expect(() => loadConfig()).toThrow('GEMINI_API_KEY is required');
     });
@@ -187,19 +184,8 @@ describe('config', () => {
       process.env.API_SECRET = 'test-secret';
       process.env.GOOGLE_SERVICE_ACCOUNT_KEY = 'test-key';
       process.env.GEMINI_API_KEY = 'test-gemini-key';
-      process.env.CONTROL_TEMPLATE_ID = 'test-template-id';
 
       expect(() => loadConfig()).toThrow('DRIVE_ROOT_FOLDER_ID is required');
-    });
-
-    it('throws for missing CONTROL_TEMPLATE_ID in production', () => {
-      process.env.NODE_ENV = 'production';
-      process.env.API_SECRET = 'test-secret';
-      process.env.GOOGLE_SERVICE_ACCOUNT_KEY = 'test-key';
-      process.env.GEMINI_API_KEY = 'test-gemini-key';
-      process.env.DRIVE_ROOT_FOLDER_ID = 'test-folder-id';
-
-      expect(() => loadConfig()).toThrow('CONTROL_TEMPLATE_ID is required');
     });
 
     it('loads successfully with all required keys in production', () => {
@@ -208,7 +194,6 @@ describe('config', () => {
       process.env.GOOGLE_SERVICE_ACCOUNT_KEY = 'test-key';
       process.env.GEMINI_API_KEY = 'test-gemini-key';
       process.env.DRIVE_ROOT_FOLDER_ID = 'test-folder-id';
-      process.env.CONTROL_TEMPLATE_ID = 'test-template-id';
 
       const config = loadConfig();
 
@@ -217,7 +202,6 @@ describe('config', () => {
       expect(config.googleServiceAccountKey).toBe('test-key');
       expect(config.geminiApiKey).toBe('test-gemini-key');
       expect(config.driveRootFolderId).toBe('test-folder-id');
-      expect(config.controlTemplateId).toBe('test-template-id');
     });
 
     it('loads WEBHOOK_URL when provided', () => {
@@ -249,7 +233,6 @@ describe('config', () => {
       process.env.GOOGLE_SERVICE_ACCOUNT_KEY = 'test-key';
       process.env.GEMINI_API_KEY = 'test-gemini-key';
       process.env.DRIVE_ROOT_FOLDER_ID = 'test-folder-id';
-      process.env.CONTROL_TEMPLATE_ID = 'test-template-id';
 
       const config = loadConfig();
 

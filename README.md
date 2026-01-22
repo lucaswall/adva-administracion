@@ -87,7 +87,6 @@ NODE_ENV=production
 LOG_LEVEL=INFO
 GEMINI_API_KEY=your_key_here
 DRIVE_ROOT_FOLDER_ID=your_folder_id
-CONTROL_TEMPLATE_ID=your_template_id_here
 API_SECRET=your_secret_token_here
 API_BASE_URL=your-app.up.railway.app
 GOOGLE_SERVICE_ACCOUNT_KEY=<base64-encoded-service-account-json>
@@ -209,7 +208,6 @@ railway variables --set NODE_ENV=production
 railway variables --set LOG_LEVEL=INFO
 railway variables --set GEMINI_API_KEY=your_key_here
 railway variables --set DRIVE_ROOT_FOLDER_ID=your_folder_id
-railway variables --set CONTROL_TEMPLATE_ID=your_template_id_here
 railway variables --set API_SECRET=your_secret_token_here
 railway variables --set API_BASE_URL=your-app.up.railway.app
 railway variables --set GOOGLE_SERVICE_ACCOUNT_KEY=$(cat service-account.json | base64 | tr -d '\n')
@@ -272,9 +270,8 @@ Set these in Railway dashboard (Variables tab) or via CLI:
 | `GOOGLE_SERVICE_ACCOUNT_KEY` | Yes | - | Base64-encoded service account JSON |
 | `GEMINI_API_KEY` | Yes | - | Gemini API key |
 | `DRIVE_ROOT_FOLDER_ID` | Yes | - | Google Drive root folder ID |
-| `CONTROL_TEMPLATE_ID` | Yes | - | Template spreadsheet ID for creating Control spreadsheets |
-| `API_SECRET` | Yes | - | Secret token for API authentication. Used by server to validate requests and injected into Apps Script library at build time. Keep secure and rotate periodically. |
-| `API_BASE_URL` | Yes (for library) | - | Domain only (no protocol) for Apps Script library. Example: `adva-admin.railway.app`. Required for `npm run build:library`. |
+| `API_SECRET` | Yes | - | Secret token for API authentication. Used by server to validate requests and injected into Apps Script at build time. Keep secure and rotate periodically. |
+| `API_BASE_URL` | Yes (for script) | - | Domain only (no protocol) for Apps Script. Example: `adva-admin.railway.app`. Required for `npm run build:script`. |
 | `WEBHOOK_URL` | No | - | Public URL for Drive push notifications (e.g., `https://your-app.up.railway.app/webhooks/drive`) - enables real-time monitoring when set |
 | `MATCH_DAYS_BEFORE` | No | `10` | Days before invoice date to match payments |
 | `MATCH_DAYS_AFTER` | No | `60` | Days after invoice date to match payments |
@@ -361,42 +358,45 @@ ADVA Root Folder/
 
 ---
 
-## Template Spreadsheet Setup
+## Apps Script Menu Setup
 
-The Control spreadsheets (Control de Creditos, Control de Debitos) include a custom **ADVA** menu that provides quick access to server operations. This menu is delivered via a shared Apps Script library.
+The **Dashboard Operativo Contable** spreadsheet includes a custom **ADVA** menu that provides quick access to server operations. This menu is delivered via a bound Apps Script attached directly to the Dashboard.
 
 ### Architecture
 
-- **Library** (`apps-script/` folder): TypeScript-based Apps Script library with build-time configuration
-- **Build process**: Injects `API_BASE_URL` from environment → compiles TypeScript → deploys to Google
-- **Template spreadsheet**: Minimal bound script + library reference
-- **New spreadsheets**: Inherit library reference when copied from template
+- **Bound script** (`apps-script/` folder): TypeScript-based script attached to Dashboard Operativo Contable
+- **Build process**: Injects `API_BASE_URL` and `API_SECRET` from environment → compiles TypeScript → outputs to `dist/`
+- **Deployment**: One-time manual deployment to Dashboard spreadsheet after server creates it
+- **Control spreadsheets**: Created fresh by server (no script, no template)
 
 ### One-Time Setup
 
-#### 1. Configure API Base URL
+#### 1. Configure API Settings
 
-Add your Railway domain to `.env` (domain only, no protocol):
+Add your Railway domain and API secret to `.env` (domain only, no protocol):
 
 ```bash
 API_BASE_URL=your-app.up.railway.app
+API_SECRET=your_secret_token_here
 ```
 
-**Important:** The build process requires this variable and will fail if not set.
+**Important:** The build process requires both variables and will fail if not set.
 
-#### 2. Create Library Project in Google
+#### 2. Create Dashboard Script Project
+
+The server will create the Dashboard Operativo Contable spreadsheet automatically. After it's created:
 
 **Option A - Using clasp:**
 ```bash
 cd apps-script
-clasp create --title "ADVA Menu Library" --type standalone
+clasp create --title "ADVA Dashboard Menu" --parentId YOUR_DASHBOARD_SPREADSHEET_ID
 # This creates .clasp.json with the new Script ID
 ```
 
 **Option B - Manually:**
-1. Go to https://script.google.com → New Project
-2. Name it "ADVA Menu Library"
-3. Copy Script ID from URL
+1. Open Dashboard Operativo Contable spreadsheet
+2. Go to **Extensions → Apps Script**
+3. Copy Script ID from the project settings
 4. Create `.clasp.json` in `apps-script/` folder:
    ```json
    {
@@ -407,63 +407,23 @@ clasp create --title "ADVA Menu Library" --type standalone
 
 Note: `rootDir` must be `./dist` as that's where compiled code is output.
 
-#### 3. Build and Deploy Library
+#### 3. Build and Deploy Script
 
 ```bash
-# Build TypeScript and inject API_BASE_URL
-npm run build:library
+# Build TypeScript and inject API_BASE_URL and API_SECRET
+npm run build:script
 
-# Deploy to Google Apps Script
-npm run deploy:library
+# Deploy to Dashboard spreadsheet
+npm run deploy:script
 ```
 
-The deploy command builds and pushes in one step. This uploads the compiled JavaScript from `apps-script/dist/` to Google Apps Script.
+The deploy command builds and pushes in one step. This uploads the compiled JavaScript from `apps-script/dist/` to the Dashboard's bound script.
 
-#### 3. Create Template Spreadsheet
-
-1. Create a new empty spreadsheet in Google Drive
-2. Note the spreadsheet ID from the URL
-3. Open Apps Script: **Extensions → Apps Script**
-
-#### 4. Add Library Reference to Template
-
-In the template's Apps Script editor:
-1. Click **+** next to "Libraries" in left sidebar
-2. Enter the library Script ID (from step 1)
-3. Set identifier: **ADVALib** (must be exact)
-4. Select version: **HEAD** (Development mode - auto-updates)
-5. Click **Add**
-
-#### 5. Add Bound Script to Template
-
-In the template's Apps Script editor, replace the default code with:
-
-```javascript
-/**
- * Trigger that runs when spreadsheet opens.
- * Delegates to shared ADVALib library for menu creation.
- */
-function onOpen() {
-  ADVALib.createMenu();
-}
-```
-
-Save the script and close the editor.
-
-#### 6. Configure Server Environment
-
-Add the template spreadsheet ID to your environment variables:
-
-```bash
-# In Railway dashboard or via CLI:
-railway variables --set CONTROL_TEMPLATE_ID=your_template_spreadsheet_id
-```
-
-This allows the server to copy the template when creating new Control spreadsheets.
+**Note:** Deploy once after Dashboard is created. No need to redeploy unless menu changes.
 
 ### Menu Functions
 
-When you open a Control spreadsheet, the **ADVA** menu appears in the menu bar:
+When you open the Dashboard Operativo Contable spreadsheet, the **ADVA** menu appears in the menu bar:
 
 | Menu Item | API Endpoint | Description |
 |-----------|--------------|-------------|
@@ -472,33 +432,35 @@ When you open a Control spreadsheet, the **ADVA** menu appears in the menu bar:
 | 🏦 Auto-fill Bank Data | POST /api/autofill-bank | Auto-fill bank movement descriptions |
 | ℹ️ About | GET /api/status | Show server info, test connectivity, display uptime and queue status |
 
-**Note:** API URL is configured at build time via `API_BASE_URL` environment variable. No per-spreadsheet configuration needed.
+**Note:** API URL and secret are configured at build time via environment variables. No per-spreadsheet configuration needed.
 
 ### Updating Menu Logic
 
-After modifying library code in `apps-script/src/main.ts`:
+After modifying script code in `apps-script/src/main.ts`:
 
 ```bash
-npm run deploy:library
+npm run deploy:script
 ```
 
-This rebuilds (with current `API_BASE_URL` from `.env`) and deploys. Changes are **immediately available** to all spreadsheets using HEAD mode - no need to update individual spreadsheets.
+This rebuilds (with current `API_BASE_URL` and `API_SECRET` from `.env`) and deploys to the Dashboard.
 
-### Adding New Menu Items
+### Secret Rotation
 
-1. Edit `apps-script/src/main.ts` - add function and menu item
-2. Menu callback must use `ADVALib.` prefix: `'ADVALib.newFunction'`
-3. Run `npm run deploy:library`
-4. All spreadsheets get the new item automatically
+After changing `API_SECRET`:
+
+1. Update `API_SECRET` in `.env`
+2. Rebuild and redeploy: `npm run deploy:script`
+3. Restart server (picks up new secret from env)
+
+Only Dashboard has the menu, so only needs one-time redeployment.
 
 ### Troubleshooting
 
 | Issue | Solution |
 |-------|----------|
-| Menu doesn't appear | Refresh spreadsheet. Check Extensions → Apps Script for errors. Verify library is added with identifier `ADVALib`. |
-| "ADVALib is not defined" | Library not added to template. Wrong identifier (must be exactly `ADVALib`). Or library not deployed. |
-| API calls fail | Check "About" menu to test connectivity. Verify `API_BASE_URL` was set correctly when library was built. Rebuild and redeploy library if domain changed. Check server is running and accessible. |
-| Build fails | Ensure `API_BASE_URL` is set in `.env` file. Domain only, no protocol. |
+| Menu doesn't appear | Refresh spreadsheet. Check Extensions → Apps Script for errors. Ensure script is deployed. |
+| API calls fail | Check "About" menu to test connectivity. Verify `API_BASE_URL` and `API_SECRET` were set correctly when script was built. Rebuild and redeploy if either changed. Check server is running and accessible. |
+| Build fails | Ensure both `API_BASE_URL` and `API_SECRET` are set in `.env` file. Domain only for URL, no protocol. |
 
 ---
 

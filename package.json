@@ -12,8 +12,8 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "lint": "tsc --noEmit",
-    "build:library": "node apps-script/build.js",
-    "deploy:library": "npm run build:library && cd apps-script && clasp push"
+    "build:script": "node apps-script/build.js",
+    "deploy:script": "npm run build:script && cd apps-script && clasp push"
   },
   "keywords": [
     "invoice",

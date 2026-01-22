@@ -1,7 +1,7 @@
 /**
- * ADVA Menu Library
- * Shared library for Control spreadsheets.
- * Menu callbacks use ADVALib prefix so they resolve to this library.
+ * ADVA Menu Bound Script
+ * Attached directly to Dashboard Operativo Contable spreadsheet.
+ * Provides menu for triggering server operations.
  */
 
 import { API_BASE_URL, API_SECRET } from './config';
@@ -28,24 +28,24 @@ interface ErrorResponse {
 }
 
 /**
- * Creates the ADVA menu.
- * Called from bound script's onOpen() trigger.
+ * Apps Script trigger: Runs when spreadsheet is opened.
+ * Creates the ADVA menu in the UI.
  */
-export function createMenu(): void {
+function createMenu(): void {
   const ui = SpreadsheetApp.getUi();
   ui.createMenu('ADVA')
-    .addItem('🔄 Trigger Scan', 'ADVALib.triggerScan')
-    .addItem('🔗 Trigger Re-match', 'ADVALib.triggerRematch')
-    .addItem('🏦 Auto-fill Bank Data', 'ADVALib.triggerAutofillBank')
+    .addItem('🔄 Trigger Scan', 'triggerScan')
+    .addItem('🔗 Trigger Re-match', 'triggerRematch')
+    .addItem('🏦 Auto-fill Bank Data', 'triggerAutofillBank')
     .addSeparator()
-    .addItem('ℹ️ About', 'ADVALib.showAbout')
+    .addItem('ℹ️ About', 'showAbout')
     .addToUi();
 }
 
 /**
  * Triggers a manual scan of the Entrada folder
  */
-export function triggerScan(): void {
+function triggerScan(): void {
   const url = getApiUrl('/api/scan');
   makeApiCall(url, 'post', null, 'Scan triggered successfully!');
 }
@@ -53,7 +53,7 @@ export function triggerScan(): void {
 /**
  * Triggers re-matching of unmatched documents
  */
-export function triggerRematch(): void {
+function triggerRematch(): void {
   const url = getApiUrl('/api/rematch');
   makeApiCall(url, 'post', null, 'Re-match triggered successfully!');
 }
@@ -61,7 +61,7 @@ export function triggerRematch(): void {
 /**
  * Triggers automatic bank data filling
  */
-export function triggerAutofillBank(): void {
+function triggerAutofillBank(): void {
   const url = getApiUrl('/api/autofill-bank');
   makeApiCall(url, 'post', null, 'Bank auto-fill triggered successfully!');
 }
@@ -72,12 +72,12 @@ export function triggerAutofillBank(): void {
 function validateConfig(): void {
   // Check if API_BASE_URL was properly injected during build
   if (!API_BASE_URL || API_BASE_URL.includes('{{') || API_BASE_URL.includes('}}')) {
-    throw new Error('API_BASE_URL not configured. Please rebuild the library with API_BASE_URL environment variable set.');
+    throw new Error('API_BASE_URL not configured. Please rebuild the script with API_BASE_URL environment variable set.');
   }
 
   // Check if API_SECRET was properly injected during build
   if (!API_SECRET || API_SECRET.includes('{{') || API_SECRET.includes('}}')) {
-    throw new Error('API_SECRET not configured. Please rebuild the library with API_SECRET environment variable set.');
+    throw new Error('API_SECRET not configured. Please rebuild the script with API_SECRET environment variable set.');
   }
 }
 
@@ -233,7 +233,7 @@ function formatUptime(seconds: number): string {
 /**
  * Shows information about the ADVA menu and tests API connectivity
  */
-export function showAbout(): void {
+function showAbout(): void {
   const ui = SpreadsheetApp.getUi();
 
   let message = 'ADVA Administration Menu v3.0\n\n';
