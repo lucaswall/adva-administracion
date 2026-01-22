@@ -172,8 +172,8 @@ async function processCascadingFacturaDisplacements(
       }
     } else {
       // No match found - pago becomes unmatched
-      // If this pago was previously matched to a factura, unmatch that factura
-      if (displaced.previousMatchFileId) {
+      // If this pago was previously matched to a factura that wasn't claimed, unmatch it
+      if (displaced.previousMatchFileId && !claims.claimedFacturas.has(displaced.previousMatchFileId)) {
         const previousFactura = facturas.find(f => f.fileId === displaced.previousMatchFileId);
         if (previousFactura) {
           cascadeState.updates.set(
@@ -532,7 +532,7 @@ async function doMatchFacturasWithPagos(
   let matchesFound = 0;
 
   for (const [facturaFileId, update] of cascadeState.updates) {
-    if (update.facturaFileId && update.facturaRow) {
+    if (update.facturaFileId && update.facturaRow && update.pagoFileId) {
       matchesFound++;
 
       // Update factura with match info
