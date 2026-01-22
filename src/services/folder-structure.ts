@@ -5,7 +5,7 @@
 
 import { getConfig } from '../config.js';
 import { findByName, listByMimeType, createFolder, createSpreadsheet } from './drive.js';
-import { getSheetMetadata, createSheet, setValues, getValues, formatSheet, deleteSheet } from './sheets.js';
+import { getSheetMetadata, createSheet, setValues, getValues, formatSheet, deleteSheet, moveSheetToFirst } from './sheets.js';
 import { formatMonthFolder } from '../utils/spanish-date.js';
 import { CONTROL_CREDITOS_SHEETS, CONTROL_DEBITOS_SHEETS, DASHBOARD_OPERATIVO_SHEETS } from '../constants/spreadsheet-headers.js';
 import type { FolderStructure, Result, SortDestination } from '../types/index.js';
@@ -282,12 +282,27 @@ async function ensureSheetsExist(
 async function initializeDashboardOperativo(
   spreadsheetId: string
 ): Promise<Result<void, Error>> {
-  // Ensure both sheets exist with headers
+  // Ensure all sheets exist with headers
   const ensureSheetsResult = await ensureSheetsExist(spreadsheetId, DASHBOARD_OPERATIVO_SHEETS);
   if (!ensureSheetsResult.ok) return ensureSheetsResult;
 
+  // Move Pagos Pendientes to first position (leftmost tab)
+  const moveResult = await moveSheetToFirst(spreadsheetId, 'Pagos Pendientes');
+  if (!moveResult.ok) {
+    debug('Failed to move Pagos Pendientes to first position', {
+      module: 'folder-structure',
+      phase: 'init-dashboard',
+      error: moveResult.error.message,
+      spreadsheetId
+    });
+    // Don't fail initialization if we can't move the sheet
+  }
+
   // Check if Resumen Mensual already has data (row 2)
-  const resumanMensual = DASHBOARD_OPERATIVO_SHEETS[0];
+  const resumanMensual = DASHBOARD_OPERATIVO_SHEETS.find(s => s.title === 'Resumen Mensual');
+  if (!resumanMensual) {
+    return { ok: false, error: new Error('Resumen Mensual sheet config not found') };
+  }
   const existingDataResult = await getValues(spreadsheetId, `${resumanMensual.title}!A2:A2`);
   if (existingDataResult.ok && existingDataResult.value.length > 0 && existingDataResult.value[0].length > 0) {
     // Data already exists, skip initialization

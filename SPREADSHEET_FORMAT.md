@@ -70,7 +70,7 @@ Rows sorted by `fechaPago` descending after insert.
 
 Located at root: `Control de Debitos.gsheet`
 
-### Facturas Recibidas (18 columns, A:R)
+### Facturas Recibidas (19 columns, A:S)
 
 Invoices TO ADVA (ADVA is receptor). ADVA info is implicit; only emisor (counterparty) stored.
 
@@ -94,6 +94,7 @@ Invoices TO ADVA (ADVA is receptor). ADVA info is implicit; only emisor (counter
 | P | matchedPagoFileId | string | Linked Pago Enviado fileId |
 | Q | matchConfidence | enum | HIGH\|MEDIUM\|LOW |
 | R | hasCuitMatch | boolean | Match based on CUIT |
+| S | pagada | enum | SI\|NO - Payment status |
 
 Rows sorted by `fechaEmision` descending after insert.
 
@@ -177,6 +178,25 @@ Bank statements stored as files in `{YYYY}/Bancos/` folders (no month subfolders
 ## Dashboard Operativo Contable
 
 Located at root: `Dashboard Operativo Contable.gsheet`
+
+### Pagos Pendientes (10 columns, A:J)
+
+Unpaid invoices from Control de Debitos. Automatically synced after matching.
+
+| Column | Field | Type | Description |
+|--------|-------|------|-------------|
+| A | fechaEmision | date | Issue date (YYYY-MM-DD) |
+| B | fileId | string | Google Drive file ID |
+| C | fileName | string | File name |
+| D | tipoComprobante | enum | A\|B\|C\|E\|NC\|ND |
+| E | nroFactura | string | Full invoice number |
+| F | cuitEmisor | string | Provider CUIT (11 digits) |
+| G | razonSocialEmisor | string | Provider business name |
+| H | importeTotal | currency | Total amount |
+| I | moneda | enum | ARS\|USD |
+| J | concepto | string | Brief description (optional) |
+
+Auto-synced from Facturas Recibidas where `pagada != "SI"`.
 
 ### Resumen Mensual (8 columns, A:H)
 

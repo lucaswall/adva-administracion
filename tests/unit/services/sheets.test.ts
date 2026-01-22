@@ -5,7 +5,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { sheets_v4 } from 'googleapis';
 import { google } from 'googleapis';
-import { formatSheet, clearSheetsCache, appendRowsWithLinks } from '../../../src/services/sheets.js';
+import { formatSheet, clearSheetsCache, appendRowsWithLinks, clearSheetData, moveSheetToFirst } from '../../../src/services/sheets.js';
 
 // Mock googleapis
 vi.mock('googleapis', () => {
@@ -17,6 +17,7 @@ vi.mock('googleapis', () => {
         update: vi.fn(),
         append: vi.fn(),
         batchUpdate: vi.fn(),
+        clear: vi.fn(),
       },
       get: vi.fn(),
       batchUpdate: mockBatchUpdate,
@@ -509,6 +510,135 @@ describe('appendRowsWithLinks', () => {
     const rows = [['value1', 'value2']];
 
     const result = await appendRowsWithLinks('spreadsheetId123', 'Sheet1!A:B', rows);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.message).toBe('API Error');
+    }
+  });
+});
+
+describe('clearSheetData', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    clearSheetsCache();
+  });
+
+  it('should clear data from a sheet while preserving header row', async () => {
+    const mockClear = vi.fn().mockResolvedValue({});
+    const mockSheets = google.sheets({} as any);
+    mockSheets.spreadsheets.values.clear = mockClear;
+
+    const result = await clearSheetData('spreadsheetId123', 'Pagos Pendientes');
+
+    expect(result.ok).toBe(true);
+    expect(mockClear).toHaveBeenCalledWith({
+      spreadsheetId: 'spreadsheetId123',
+      range: 'Pagos Pendientes!A2:Z',
+    });
+  });
+
+  it('should handle errors from the Sheets API', async () => {
+    const mockClear = vi.fn().mockRejectedValue(new Error('Sheets API error'));
+    const mockSheets = google.sheets({} as any);
+    mockSheets.spreadsheets.values.clear = mockClear;
+
+    const result = await clearSheetData('spreadsheetId123', 'Pagos Pendientes');
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.message).toBe('Sheets API error');
+    }
+  });
+});
+
+describe('moveSheetToFirst', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    clearSheetsCache();
+  });
+
+  it('should move a sheet to the first position', async () => {
+    const mockGet = vi.fn().mockResolvedValue({
+      data: {
+        sheets: [
+          {
+            properties: {
+              title: 'Resumen Mensual',
+              sheetId: 0,
+            },
+          },
+          {
+            properties: {
+              title: 'Pagos Pendientes',
+              sheetId: 123,
+            },
+          },
+        ],
+      },
+    });
+
+    const mockBatchUpdate = vi.fn().mockResolvedValue({});
+    const mockSheets = google.sheets({} as any);
+    mockSheets.spreadsheets.get = mockGet;
+    mockSheets.spreadsheets.batchUpdate = mockBatchUpdate;
+
+    const result = await moveSheetToFirst('spreadsheetId123', 'Pagos Pendientes');
+
+    expect(result.ok).toBe(true);
+    expect(mockGet).toHaveBeenCalledWith({
+      spreadsheetId: 'spreadsheetId123',
+      fields: 'sheets.properties.title,sheets.properties.sheetId',
+    });
+    expect(mockBatchUpdate).toHaveBeenCalledWith({
+      spreadsheetId: 'spreadsheetId123',
+      requestBody: {
+        requests: [
+          {
+            updateSheetProperties: {
+              properties: {
+                sheetId: 123,
+                index: 0,
+              },
+              fields: 'index',
+            },
+          },
+        ],
+      },
+    });
+  });
+
+  it('should handle errors when sheet is not found', async () => {
+    const mockGet = vi.fn().mockResolvedValue({
+      data: {
+        sheets: [
+          {
+            properties: {
+              title: 'Other Sheet',
+              sheetId: 456,
+            },
+          },
+        ],
+      },
+    });
+
+    const mockSheets = google.sheets({} as any);
+    mockSheets.spreadsheets.get = mockGet;
+
+    const result = await moveSheetToFirst('spreadsheetId123', 'Pagos Pendientes');
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.message).toContain('Sheet "Pagos Pendientes" not found');
+    }
+  });
+
+  it('should handle errors from the Sheets API', async () => {
+    const mockGet = vi.fn().mockRejectedValue(new Error('API Error'));
+    const mockSheets = google.sheets({} as any);
+    mockSheets.spreadsheets.get = mockGet;
+
+    const result = await moveSheetToFirst('spreadsheetId123', 'Pagos Pendientes');
 
     expect(result.ok).toBe(false);
     if (!result.ok) {

@@ -620,6 +620,92 @@ export async function sortSheet(
 }
 
 /**
+ * Clears data from a sheet while preserving the header row
+ *
+ * @param spreadsheetId - Spreadsheet ID
+ * @param sheetName - Sheet name
+ * @returns Success or error
+ */
+export async function clearSheetData(
+  spreadsheetId: string,
+  sheetName: string
+): Promise<Result<void, Error>> {
+  try {
+    const sheets = getSheetsService();
+
+    // Clear all data starting from row 2 (preserves header row)
+    const range = `${sheetName}!A2:Z`;
+
+    await sheets.spreadsheets.values.clear({
+      spreadsheetId,
+      range,
+    });
+
+    return { ok: true, value: undefined };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error : new Error(String(error)),
+    };
+  }
+}
+
+/**
+ * Moves a sheet to the first position (leftmost tab)
+ *
+ * @param spreadsheetId - Spreadsheet ID
+ * @param sheetName - Sheet name to move
+ * @returns Success or error
+ */
+export async function moveSheetToFirst(
+  spreadsheetId: string,
+  sheetName: string
+): Promise<Result<void, Error>> {
+  try {
+    const sheets = getSheetsService();
+
+    // Get sheet metadata to find the sheet ID
+    const metadataResult = await getSheetMetadata(spreadsheetId);
+    if (!metadataResult.ok) {
+      return metadataResult;
+    }
+
+    const sheet = metadataResult.value.find(s => s.title === sheetName);
+    if (!sheet) {
+      return {
+        ok: false,
+        error: new Error(`Sheet "${sheetName}" not found`),
+      };
+    }
+
+    // Update sheet properties to move it to index 0
+    await sheets.spreadsheets.batchUpdate({
+      spreadsheetId,
+      requestBody: {
+        requests: [
+          {
+            updateSheetProperties: {
+              properties: {
+                sheetId: sheet.sheetId,
+                index: 0,
+              },
+              fields: 'index',
+            },
+          },
+        ],
+      },
+    });
+
+    return { ok: true, value: undefined };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error : new Error(String(error)),
+    };
+  }
+}
+
+/**
  * Clears the cached Sheets service (for testing)
  */
 export function clearSheetsCache(): void {

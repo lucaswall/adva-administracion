@@ -14,6 +14,7 @@ import {
   isBetterMatch,
   detectCycle,
   buildFacturaMatchUpdate,
+  buildUnmatchUpdate,
 } from '../../matching/cascade-matcher.js';
 import { parseNumber } from '../../utils/numbers.js';
 import { debug, info, warn } from '../../utils/logger.js';
@@ -171,6 +172,29 @@ async function processCascadingFacturaDisplacements(
       }
     } else {
       // No match found - pago becomes unmatched
+      // If this pago was previously matched to a factura, unmatch that factura
+      if (displaced.previousMatchFileId) {
+        const previousFactura = facturas.find(f => f.fileId === displaced.previousMatchFileId);
+        if (previousFactura) {
+          cascadeState.updates.set(
+            displaced.previousMatchFileId,
+            buildUnmatchUpdate(
+              displaced.previousMatchFileId,
+              previousFactura.row,
+              'factura'
+            )
+          );
+
+          debug('Unmatched factura due to displaced pago with no new match', {
+            module: 'matching',
+            phase: 'cascade',
+            pagoId: displacedPago.fileId,
+            facturaId: displaced.previousMatchFileId,
+            correlationId,
+          });
+        }
+      }
+
       debug('Displaced pago has no remaining matches', {
         module: 'matching',
         phase: 'cascade',
@@ -254,7 +278,10 @@ async function doMatchFacturasWithPagos(
   const correlationId = getCorrelationId();
 
   // Determine correct column ranges based on sheet type
-  const facturasRange = `${facturasSheetName}!A:R`; // Both factura sheets use A:R
+  // Facturas Recibidas has pagada column (A:S), Facturas Emitidas doesn't (A:R)
+  const facturasRange = facturasSheetName === 'Facturas Recibidas'
+    ? `${facturasSheetName}!A:S`
+    : `${facturasSheetName}!A:R`;
   const pagosRange = `${pagosSheetName}!A:O`; // Both pago sheets use A:O
 
   // Get all facturas
@@ -508,15 +535,29 @@ async function doMatchFacturasWithPagos(
     if (update.facturaFileId && update.facturaRow) {
       matchesFound++;
 
-      // Update factura with match info (columns P:R)
-      updates.push({
-        range: `'${facturasSheetName}'!P${update.facturaRow}:R${update.facturaRow}`,
-        values: [[
-          update.pagoFileId,
-          update.confidence,
-          update.hasCuitMatch ? 'YES' : 'NO',
-        ]],
-      });
+      // Update factura with match info
+      // For Facturas Recibidas: columns P:S (includes pagada)
+      // For Facturas Emitidas: columns P:R (no pagada)
+      if (facturasSheetName === 'Facturas Recibidas') {
+        updates.push({
+          range: `'${facturasSheetName}'!P${update.facturaRow}:S${update.facturaRow}`,
+          values: [[
+            update.pagoFileId,
+            update.confidence,
+            update.hasCuitMatch ? 'YES' : 'NO',
+            update.pagada !== undefined ? (update.pagada ? 'SI' : 'NO') : '',
+          ]],
+        });
+      } else {
+        updates.push({
+          range: `'${facturasSheetName}'!P${update.facturaRow}:R${update.facturaRow}`,
+          values: [[
+            update.pagoFileId,
+            update.confidence,
+            update.hasCuitMatch ? 'YES' : 'NO',
+          ]],
+        });
+      }
 
       // Update pago with match info (columns N:O)
       const pago = pagosMap.get(update.pagoFileId);

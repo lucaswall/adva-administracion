@@ -55,7 +55,7 @@ export async function storeFactura(
     ];
     range = `${sheetName}!A:R`;
   } else {
-    // Facturas Recibidas: Only emisor info (columns A:R)
+    // Facturas Recibidas: Only emisor info (columns A:S)
     row = [
       factura.fechaEmision,                 // A
       factura.fileId,                       // B
@@ -75,8 +75,9 @@ export async function storeFactura(
       factura.matchedPagoFileId || '',      // P
       factura.matchConfidence || '',        // Q
       factura.hasCuitMatch ? 'YES' : 'NO',  // R
+      '',                                   // S - pagada (initially empty)
     ];
-    range = `${sheetName}!A:R`;
+    range = `${sheetName}!A:S`;
   }
 
   const result = await appendRowsWithLinks(spreadsheetId, range, [row]);

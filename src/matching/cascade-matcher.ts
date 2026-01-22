@@ -73,6 +73,8 @@ export interface MatchUpdate {
   confidence: MatchConfidence;
   /** Whether the match has CUIT/CUIL match */
   hasCuitMatch: boolean;
+  /** Whether the factura has been paid (facturas only) */
+  pagada?: boolean;
 }
 
 /**
@@ -139,7 +141,8 @@ export function buildFacturaMatchUpdate(
   facturaRow: number,
   pagoFileId: string,
   confidence: MatchConfidence,
-  hasCuitMatch: boolean
+  hasCuitMatch: boolean,
+  pagada: boolean = true
 ): MatchUpdate {
   return {
     facturaFileId,
@@ -147,6 +150,7 @@ export function buildFacturaMatchUpdate(
     pagoFileId,
     confidence,
     hasCuitMatch,
+    pagada,
   };
 }
 
@@ -184,6 +188,7 @@ export function buildUnmatchUpdate(
       pagoFileId: '',
       confidence: 'LOW',
       hasCuitMatch: false,
+      pagada: false,
     };
   } else {
     return {
