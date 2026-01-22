@@ -165,11 +165,25 @@ async function build() {
       footer: {
         js: `
 // Expose functions to global scope for Apps Script
-var onOpen = ADVA.createMenu;  // onOpen trigger
-var triggerScan = ADVA.triggerScan;
-var triggerRematch = ADVA.triggerRematch;
-var triggerAutofillBank = ADVA.triggerAutofillBank;
-var showAbout = ADVA.showAbout;
+function onOpen() {
+  return ADVA.createMenu();
+}
+
+function triggerScan() {
+  return ADVA.triggerScan();
+}
+
+function triggerRematch() {
+  return ADVA.triggerRematch();
+}
+
+function triggerAutofillBank() {
+  return ADVA.triggerAutofillBank();
+}
+
+function showAbout() {
+  return ADVA.showAbout();
+}
 `
       }
     });

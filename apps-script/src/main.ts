@@ -22,11 +22,6 @@ interface StatusResponse {
     completed: number;
     failed: number;
   };
-  memory: {
-    heapUsed: string;
-    heapTotal: string;
-    rss: string;
-  };
 }
 
 /**
@@ -126,7 +121,7 @@ function makeApiCall(
       method: method,
       headers: {
         'Content-Type': 'application/json',
-        'User-Agent': 'ADVA-Spreadsheet/3.0',
+        'User-Agent': 'ADVA-Spreadsheet',
         'Authorization': `Bearer ${API_SECRET}`
       },
       muteHttpExceptions: true
@@ -202,7 +197,7 @@ function fetchServerStatus(): StatusResponse | null {
     const options: GoogleAppsScript.URL_Fetch.URLFetchRequestOptions = {
       method: 'get',
       headers: {
-        'User-Agent': 'ADVA-Spreadsheet/3.0',
+        'User-Agent': 'ADVA-Spreadsheet',
         'Authorization': `Bearer ${API_SECRET}`
       },
       muteHttpExceptions: true
@@ -242,12 +237,7 @@ function formatDateTime(isoString: string): string {
 export function showAbout(): void {
   const ui = SpreadsheetApp.getUi();
 
-  let message = 'ADVA Administration Menu v3.0\n\n';
-  message += 'This menu allows you to trigger server operations:\n\n';
-  message += '• Trigger Scan: Processes new documents in Entrada folder\n';
-  message += '• Trigger Re-match: Re-matches unmatched documents\n';
-  message += '• Auto-fill Bank: Fills bank data automatically\n\n';
-  message += '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n';
+  let message = 'ADVA Administration Menu\n\n';
 
   // Test API connectivity
   message += `API URL: ${API_BASE_URL}\n\n`;
@@ -270,13 +260,7 @@ export function showAbout(): void {
     message += `Running: ${status.queue.running}\n`;
     message += `Pending: ${status.queue.pending}\n`;
     message += `Completed: ${status.queue.completed}\n`;
-    message += `Failed: ${status.queue.failed}\n\n`;
-
-    // Memory Usage
-    message += `━━ Memory Usage ━━\n`;
-    message += `Heap Used: ${status.memory.heapUsed}\n`;
-    message += `Heap Total: ${status.memory.heapTotal}\n`;
-    message += `RSS: ${status.memory.rss}\n`;
+    message += `Failed: ${status.queue.failed}`;
   } else {
     message += '⚠️ Server Status: Offline\n\n';
     message += 'Unable to connect to the server.\n';
