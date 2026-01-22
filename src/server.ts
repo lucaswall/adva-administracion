@@ -82,7 +82,7 @@ async function initializeRealTimeMonitoring(): Promise<void> {
 
   // Skip if no webhook URL configured
   if (!config.webhookUrl) {
-    info('Real-time monitoring disabled (no WEBHOOK_URL configured)', {
+    info('Real-time monitoring disabled (no API_BASE_URL configured)', {
       module: 'server',
       phase: 'init'
     });

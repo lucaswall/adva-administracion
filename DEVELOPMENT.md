@@ -30,8 +30,8 @@ GEMINI_API_KEY=your_gemini_api_key
 DRIVE_ROOT_FOLDER_ID=your_folder_id
 API_SECRET=dev-secret-token
 
-# Optional: for Apps Script build
-API_BASE_URL=localhost:3000
+# Optional: for Apps Script build and webhooks (use http:// for localhost)
+API_BASE_URL=http://localhost:3000
 
 # Optional: matching parameters
 MATCH_DAYS_BEFORE=10

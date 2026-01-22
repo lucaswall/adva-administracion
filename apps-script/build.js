@@ -81,19 +81,34 @@ async function build() {
   log.info(`Reading environment from: ${envPath}`);
   const envVars = readEnvFile(envPath);
 
-  // Step 2: Validate API_BASE_URL
-  const apiBaseUrl = envVars.API_BASE_URL;
+  // Step 2: Validate and process API_BASE_URL
+  let apiBaseUrl = envVars.API_BASE_URL;
   if (!apiBaseUrl || apiBaseUrl === 'your_domain_here') {
     log.error('API_BASE_URL is not set in .env file!');
     log.error('');
     log.error('Please add API_BASE_URL to your .env file:');
-    log.error('  API_BASE_URL=your-domain.railway.app');
+    log.error('  API_BASE_URL=https://your-domain.railway.app');
     log.error('');
-    log.error('(Domain only, no protocol)');
+    log.error('(Full URL with protocol, e.g., https://example.com)');
     process.exit(1);
   }
 
+  // Extract domain from full URL for Apps Script
+  // Apps Script needs domain only (no protocol)
+  let domain = apiBaseUrl;
+  if (apiBaseUrl.startsWith('http://') || apiBaseUrl.startsWith('https://')) {
+    try {
+      const url = new URL(apiBaseUrl);
+      domain = url.host;
+    } catch (error) {
+      log.error(`Invalid API_BASE_URL format: ${apiBaseUrl}`);
+      log.error('Please use a valid URL (e.g., https://your-domain.railway.app)');
+      process.exit(1);
+    }
+  }
+
   log.success(`API_BASE_URL: ${apiBaseUrl}`);
+  log.success(`Domain for Apps Script: ${domain}`);
 
   // Step 2.5: Validate API_SECRET
   const apiSecret = envVars.API_SECRET;
@@ -121,7 +136,8 @@ async function build() {
   }
 
   const templateContent = fs.readFileSync(templatePath, 'utf-8');
-  let configContent = templateContent.replace('{{API_BASE_URL}}', apiBaseUrl);
+  // Inject domain (without protocol) for Apps Script
+  let configContent = templateContent.replace('{{API_BASE_URL}}', domain);
   configContent = configContent.replace('{{API_SECRET}}', apiSecret);
   fs.writeFileSync(configPath, configContent, 'utf-8');
 
