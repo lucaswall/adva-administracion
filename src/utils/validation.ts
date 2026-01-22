@@ -30,6 +30,12 @@ export function isValidCuit(cuit: string): boolean {
   // Must be all numeric
   if (!/^\d+$/.test(cleaned)) return false;
 
+  // Validate type prefix (first 2 digits)
+  // Valid prefixes: 20 (male), 23 (unisex), 24 (unisex), 27 (female), 30 (company), 33 (company), 34 (company)
+  const prefix = cleaned.substring(0, 2);
+  const validPrefixes = ['20', '23', '24', '27', '30', '33', '34'];
+  if (!validPrefixes.includes(prefix)) return false;
+
   // Extract digits
   const digits = cleaned.split('').map(Number);
 

@@ -1306,22 +1306,23 @@ async function processCascadingFacturaDisplacements(
 
     // Find best remaining match (exclude already claimed facturas)
     const availableFacturas = facturas.filter(f => !claims.claimedFacturas.has(f.fileId));
-    const matches = matcher.findMatches(displacedPago, availableFacturas, true);
+    const matches = matcher.findMatches(displacedPago, availableFacturas, true, pagosMap);
 
     if (matches.length > 0) {
       const bestMatch = matches[0];
 
       if (bestMatch.isUpgrade && bestMatch.existingPagoFileId) {
         // This match would displace another pago - check if it's strictly better
+        // Note: existingDateProximityDays is calculated by matcher when factura already has a match
         const existingQuality: MatchQuality = {
           confidence: bestMatch.existingMatchConfidence || 'LOW',
           hasCuitMatch: bestMatch.factura.hasCuitMatch || false,
-          dateProximityDays: 999 // We don't have the exact date proximity for existing match
+          dateProximityDays: bestMatch.existingDateProximityDays ?? 999
         };
         const newQuality: MatchQuality = {
           confidence: bestMatch.confidence,
           hasCuitMatch: bestMatch.hasCuitMatch || false,
-          dateProximityDays: bestMatch.dateProximityDays || 999
+          dateProximityDays: bestMatch.dateProximityDays ?? 999
         };
 
         if (isBetterMatch(newQuality, existingQuality)) {
@@ -1564,7 +1565,7 @@ async function matchFacturasWithPagos(
 
   // Process unmatched pagos - try to match against ALL facturas (including matched ones)
   for (const pago of unmatchedPagos) {
-    const matches = matcher.findMatches(pago, facturas, true); // includeMatched=true
+    const matches = matcher.findMatches(pago, facturas, true, pagosMap); // includeMatched=true
 
     if (matches.length > 0) {
       const bestMatch = matches[0];
@@ -1573,15 +1574,16 @@ async function matchFacturasWithPagos(
       if (bestMatch.confidence === 'HIGH' || matches.length === 1) {
         // Check if this is an upgrade (factura already matched)
         if (bestMatch.isUpgrade && bestMatch.existingPagoFileId) {
+          // Note: existingDateProximityDays is calculated by matcher when factura already has a match
           const existingQuality: MatchQuality = {
             confidence: bestMatch.existingMatchConfidence || 'LOW',
             hasCuitMatch: bestMatch.factura.hasCuitMatch || false,
-            dateProximityDays: 999
+            dateProximityDays: bestMatch.existingDateProximityDays ?? 999
           };
           const newQuality: MatchQuality = {
             confidence: bestMatch.confidence,
             hasCuitMatch: bestMatch.hasCuitMatch || false,
-            dateProximityDays: bestMatch.dateProximityDays || 999
+            dateProximityDays: bestMatch.dateProximityDays ?? 999
           };
 
           if (isBetterMatch(newQuality, existingQuality)) {
@@ -1784,22 +1786,24 @@ async function processCascadingReciboDisplacements(
 
     // Find best remaining match (exclude already claimed recibos)
     const availableRecibos = recibos.filter(r => !claims.claimedRecibos.has(r.fileId));
-    const matches = matcher.findMatches(displacedPago, availableRecibos, true);
+    const matches = matcher.findMatches(displacedPago, availableRecibos, true, pagosMap);
 
     if (matches.length > 0) {
       const bestMatch = matches[0];
 
       if (bestMatch.isUpgrade && bestMatch.existingPagoFileId) {
         // This match would displace another pago - check if it's strictly better
+        // Note: We don't have the exact hasCuilMatch for existing match, so we conservatively assume false
+        // unless the existing confidence was HIGH (which implies a strong match)
         const existingQuality: MatchQuality = {
           confidence: bestMatch.existingMatchConfidence || 'LOW',
-          hasCuitMatch: bestMatch.recibo.matchConfidence === 'HIGH',
-          dateProximityDays: 999
+          hasCuitMatch: bestMatch.existingMatchConfidence === 'HIGH', // Conservative: HIGH confidence implies good CUIL match
+          dateProximityDays: bestMatch.existingDateProximityDays ?? 999
         };
         const newQuality: MatchQuality = {
           confidence: bestMatch.confidence,
           hasCuitMatch: bestMatch.hasCuilMatch || false,
-          dateProximityDays: bestMatch.dateProximityDays || 999
+          dateProximityDays: bestMatch.dateProximityDays ?? 999
         };
 
         if (isBetterMatch(newQuality, existingQuality)) {
@@ -2017,7 +2021,7 @@ async function matchRecibosWithPagos(
 
   // Process unmatched pagos - try to match against ALL recibos (including matched ones)
   for (const pago of unmatchedPagos) {
-    const matches = matcher.findMatches(pago, recibos, true); // includeMatched=true
+    const matches = matcher.findMatches(pago, recibos, true, pagosMap); // includeMatched=true
 
     if (matches.length > 0) {
       const bestMatch = matches[0];
@@ -2026,15 +2030,17 @@ async function matchRecibosWithPagos(
       if (bestMatch.confidence === 'HIGH' || matches.length === 1) {
         // Check if this is an upgrade (recibo already matched)
         if (bestMatch.isUpgrade && bestMatch.existingPagoFileId) {
+          // Note: We don't have the exact hasCuilMatch for existing match, so we conservatively assume false
+          // unless the existing confidence was HIGH (which implies a strong match)
           const existingQuality: MatchQuality = {
             confidence: bestMatch.existingMatchConfidence || 'LOW',
-            hasCuitMatch: bestMatch.recibo.matchConfidence === 'HIGH',
-            dateProximityDays: 999
+            hasCuitMatch: bestMatch.existingMatchConfidence === 'HIGH', // Conservative: HIGH confidence implies good CUIL match
+            dateProximityDays: bestMatch.existingDateProximityDays ?? 999
           };
           const newQuality: MatchQuality = {
             confidence: bestMatch.confidence,
             hasCuitMatch: bestMatch.hasCuilMatch || false,
-            dateProximityDays: bestMatch.dateProximityDays || 999
+            dateProximityDays: bestMatch.dateProximityDays ?? 999
           };
 
           if (isBetterMatch(newQuality, existingQuality)) {

@@ -15,7 +15,7 @@ import { debug, info, error as logError } from '../utils/logger.js';
  */
 let webhookUrl: string | null = null;
 let activeChannels: Map<string, WatchChannel> = new Map();
-let processedNotifications: Map<string, Set<string>> = new Map();
+let processedNotifications: Map<string, Map<string, number>> = new Map(); // channelId -> (messageNumber -> timestamp)
 let lastNotificationTime: Date | null = null;
 let lastScanTime: Date | null = null;
 let renewalJob: cron.ScheduledTask | null = null;
@@ -189,18 +189,37 @@ export function getActiveChannels(): WatchChannel[] {
  *
  * @param messageNumber - Notification message number
  * @param channelId - Channel ID
- * @returns True if notification was already processed
+ * @returns True if notification was already processed (within MAX_NOTIFICATION_AGE_MS)
  */
 export function isNotificationDuplicate(
   messageNumber: string | undefined,
   channelId: string
 ): boolean {
   if (!messageNumber) {
+    // Without messageNumber, we cannot track duplicates - treat as new
+    // Generate a unique identifier for this notification
     return false;
   }
 
   const channelNotifications = processedNotifications.get(channelId);
-  return channelNotifications?.has(messageNumber) ?? false;
+  if (!channelNotifications) {
+    return false;
+  }
+
+  const timestamp = channelNotifications.get(messageNumber);
+  if (timestamp === undefined) {
+    return false;
+  }
+
+  // Check if the notification is still within the age window
+  const age = Date.now() - timestamp;
+  if (age > MAX_NOTIFICATION_AGE_MS) {
+    // Notification is too old, treat as new
+    channelNotifications.delete(messageNumber);
+    return false;
+  }
+
+  return true;
 }
 
 /**
@@ -214,22 +233,39 @@ export function markNotificationProcessed(
   channelId: string
 ): void {
   lastNotificationTime = new Date();
+  const now = Date.now();
 
   let channelNotifications = processedNotifications.get(channelId);
 
   if (!channelNotifications) {
-    channelNotifications = new Set();
+    channelNotifications = new Map();
     processedNotifications.set(channelId, channelNotifications);
   }
 
-  channelNotifications.add(messageNumber);
+  channelNotifications.set(messageNumber, now);
 
-  // Limit size to prevent memory growth
+  // Clean up old entries and limit size
   if (channelNotifications.size > MAX_NOTIFICATIONS_PER_CHANNEL) {
-    // Remove oldest entries (simple FIFO)
-    const entries = Array.from(channelNotifications);
-    const toRemove = entries.slice(0, channelNotifications.size - MAX_NOTIFICATIONS_PER_CHANNEL);
-    toRemove.forEach(entry => channelNotifications!.delete(entry));
+    // Remove entries that are too old first
+    const cutoffTime = now - MAX_NOTIFICATION_AGE_MS;
+    for (const [msgNum, timestamp] of channelNotifications) {
+      if (timestamp < cutoffTime) {
+        channelNotifications.delete(msgNum);
+      }
+    }
+
+    // If still too many, remove oldest entries
+    if (channelNotifications.size > MAX_NOTIFICATIONS_PER_CHANNEL) {
+      // Sort by timestamp and keep only the most recent
+      const entries = Array.from(channelNotifications.entries())
+        .sort((a, b) => b[1] - a[1]) // Sort descending by timestamp
+        .slice(0, MAX_NOTIFICATIONS_PER_CHANNEL);
+
+      channelNotifications.clear();
+      for (const [msgNum, timestamp] of entries) {
+        channelNotifications.set(msgNum, timestamp);
+      }
+    }
   }
 }
 

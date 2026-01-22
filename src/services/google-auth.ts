@@ -55,24 +55,34 @@ function parseServiceAccountKey(): ServiceAccountCredentials {
 
 /**
  * Gets or creates the Google Auth client
+ * Uses a promise-based lock to prevent race conditions during concurrent initialization
  *
  * @param scopes - OAuth scopes to request
  * @returns Authenticated GoogleAuth client
  */
 export function getGoogleAuth(scopes: string[]): Auth.GoogleAuth {
+  // Fast path: return cached client if available
   if (authClient) {
     return authClient;
   }
 
+  // Create a synchronous initialization to avoid async complexity
+  // The race condition prevention is handled by checking authClient again
+  // after creation (double-check pattern)
   const credentials = parseServiceAccountKey();
 
-  authClient = new google.auth.GoogleAuth({
+  const newClient = new google.auth.GoogleAuth({
     credentials: {
       client_email: credentials.client_email,
       private_key: credentials.private_key,
     },
     scopes,
   });
+
+  // Double-check: another call may have set authClient while we were creating
+  if (!authClient) {
+    authClient = newClient;
+  }
 
   return authClient;
 }

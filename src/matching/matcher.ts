@@ -118,12 +118,14 @@ export class FacturaPagoMatcher {
    * @param pago - Payment to match
    * @param facturas - Available invoices (can include already matched ones)
    * @param _includeMatched - Whether to consider already-matched facturas (for cascade displacement). Filtering is done by caller.
+   * @param pagosMap - Optional map of pagos by fileId for calculating existingDateProximityDays
    * @returns Array of match candidates sorted by match quality
    */
   findMatches(
     pago: Pago,
     facturas: Array<Factura & { row: number }>,
-    _includeMatched: boolean = false
+    _includeMatched: boolean = false,
+    pagosMap?: Map<string, Pago>
   ): MatchCandidate[] {
     const candidates: MatchCandidate[] = [];
 
@@ -231,6 +233,20 @@ export class FacturaPagoMatcher {
       const existingMatchConfidence = isUpgrade ? (factura.matchConfidence || 'LOW' as MatchConfidence) : undefined;
       const existingPagoFileId = isUpgrade ? factura.matchedPagoFileId : undefined;
 
+      // Calculate existing date proximity if we have access to the pagos map
+      let existingDateProximityDays: number | undefined;
+      if (isUpgrade && existingPagoFileId && pagosMap) {
+        const existingPago = pagosMap.get(existingPagoFileId);
+        if (existingPago?.fechaPago) {
+          const existingPagoDate = parseArgDate(existingPago.fechaPago);
+          if (existingPagoDate && facturaDate) {
+            existingDateProximityDays = Math.abs(Math.floor(
+              (existingPagoDate.getTime() - facturaDate.getTime()) / (1000 * 60 * 60 * 24)
+            ));
+          }
+        }
+      }
+
       if (isUpgrade) {
         reasons.push(`Potential upgrade from ${existingMatchConfidence}`);
       }
@@ -245,7 +261,8 @@ export class FacturaPagoMatcher {
         dateProximityDays: daysDiff,
         isUpgrade,
         existingMatchConfidence,
-        existingPagoFileId
+        existingPagoFileId,
+        existingDateProximityDays
       });
     }
 
@@ -345,12 +362,14 @@ export class ReciboPagoMatcher {
    * @param pago - Payment to match
    * @param recibos - Available salary slips (can include already matched ones)
    * @param _includeMatched - Whether to consider already-matched recibos (for cascade displacement). Filtering is done by caller.
+   * @param pagosMap - Optional map of pagos by fileId for calculating existingDateProximityDays
    * @returns Array of match candidates sorted by match quality
    */
   findMatches(
     pago: Pago,
     recibos: Array<Recibo & { row: number }>,
-    _includeMatched: boolean = false
+    _includeMatched: boolean = false,
+    pagosMap?: Map<string, Pago>
   ): ReciboMatchCandidate[] {
     const candidates: ReciboMatchCandidate[] = [];
 
@@ -427,6 +446,20 @@ export class ReciboPagoMatcher {
       const existingMatchConfidence = isUpgrade ? (recibo.matchConfidence || 'LOW' as MatchConfidence) : undefined;
       const existingPagoFileId = isUpgrade ? recibo.matchedPagoFileId : undefined;
 
+      // Calculate existing date proximity if we have access to the pagos map
+      let existingDateProximityDays: number | undefined;
+      if (isUpgrade && existingPagoFileId && pagosMap) {
+        const existingPago = pagosMap.get(existingPagoFileId);
+        if (existingPago?.fechaPago) {
+          const existingPagoDate = parseArgDate(existingPago.fechaPago);
+          if (existingPagoDate && reciboDate) {
+            existingDateProximityDays = Math.abs(Math.floor(
+              (existingPagoDate.getTime() - reciboDate.getTime()) / (1000 * 60 * 60 * 24)
+            ));
+          }
+        }
+      }
+
       if (isUpgrade) {
         reasons.push(`Potential upgrade from ${existingMatchConfidence}`);
       }
@@ -441,7 +474,8 @@ export class ReciboPagoMatcher {
         dateProximityDays: daysDiff,
         isUpgrade,
         existingMatchConfidence,
-        existingPagoFileId
+        existingPagoFileId,
+        existingDateProximityDays
       });
     }
 

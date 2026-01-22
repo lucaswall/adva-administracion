@@ -27,7 +27,9 @@ export function parseArgDate(dateInput: string | Date): Date | null {
   const isoStrictMatch = dateInput.match(/^(\d{4})-(\d{2})-(\d{2})$/);
   if (isoStrictMatch) {
     const [, year, month, day] = isoStrictMatch;
-    const date = new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
+    // Create date at noon UTC to avoid timezone issues when comparing dates
+    // Using noon instead of midnight avoids off-by-one errors at date boundaries
+    const date = new Date(Date.UTC(parseInt(year), parseInt(month) - 1, parseInt(day), 12, 0, 0));
     if (!isNaN(date.getTime())) return date;
   }
 
@@ -35,7 +37,8 @@ export function parseArgDate(dateInput: string | Date): Date | null {
   const isoFlexMatch = dateInput.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
   if (isoFlexMatch) {
     const [, year, month, day] = isoFlexMatch;
-    const date = new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
+    // Create date at noon UTC to avoid timezone issues
+    const date = new Date(Date.UTC(parseInt(year), parseInt(month) - 1, parseInt(day), 12, 0, 0));
     if (!isNaN(date.getTime())) return date;
   }
 
@@ -43,7 +46,8 @@ export function parseArgDate(dateInput: string | Date): Date | null {
   const argMatch = dateInput.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})$/);
   if (argMatch) {
     const [, day, month, year] = argMatch;
-    const date = new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
+    // Create date at noon UTC to avoid timezone issues
+    const date = new Date(Date.UTC(parseInt(year), parseInt(month) - 1, parseInt(day), 12, 0, 0));
     if (!isNaN(date.getTime())) return date;
   }
 

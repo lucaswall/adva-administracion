@@ -55,6 +55,22 @@ export class DisplacementQueue {
   isEmpty(): boolean {
     return this.queue.length === 0;
   }
+
+  /**
+   * Clears the queue and processed set
+   * Call this after completing cascade operations to prevent memory leaks
+   */
+  clear(): void {
+    this.queue = [];
+    this.processed.clear();
+  }
+
+  /**
+   * Gets the number of items in the queue
+   */
+  size(): number {
+    return this.queue.length;
+  }
 }
 
 /**

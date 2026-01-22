@@ -432,6 +432,8 @@ export interface MatchCandidate {
   existingMatchConfidence?: MatchConfidence;
   /** Existing pago file ID (if upgrade) */
   existingPagoFileId?: string;
+  /** Existing date proximity in days (if upgrade) */
+  existingDateProximityDays?: number;
   /** Whether this match has CUIT match */
   hasCuitMatch?: boolean;
   /** Date proximity in days from invoice date */
@@ -458,6 +460,8 @@ export interface ReciboMatchCandidate {
   existingMatchConfidence?: MatchConfidence;
   /** Existing pago file ID (if upgrade) */
   existingPagoFileId?: string;
+  /** Existing date proximity in days (if upgrade) */
+  existingDateProximityDays?: number;
   /** Whether this match has CUIL match */
   hasCuilMatch?: boolean;
   /** Date proximity in days from recibo date */

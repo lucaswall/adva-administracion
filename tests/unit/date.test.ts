@@ -12,19 +12,29 @@ import {
 } from '../../src/utils/date';
 
 describe('parseArgDate', () => {
+  // Helper to compare date components (ignores time)
+  function expectDateEquals(actual: Date | null, year: number, month: number, day: number): void {
+    expect(actual).not.toBe(null);
+    if (actual) {
+      expect(actual.getUTCFullYear()).toBe(year);
+      expect(actual.getUTCMonth()).toBe(month - 1); // Month is 0-indexed
+      expect(actual.getUTCDate()).toBe(day);
+    }
+  }
+
   it('parses DD/MM/YYYY format', () => {
     const result = parseArgDate('15/03/2024');
-    expect(result).toEqual(new Date(2024, 2, 15)); // Month is 0-indexed
+    expectDateEquals(result, 2024, 3, 15);
   });
 
   it('parses YYYY-MM-DD format', () => {
     const result = parseArgDate('2024-03-15');
-    expect(result).toEqual(new Date(2024, 2, 15));
+    expectDateEquals(result, 2024, 3, 15);
   });
 
   it('parses DD-MM-YYYY format', () => {
     const result = parseArgDate('15-03-2024');
-    expect(result).toEqual(new Date(2024, 2, 15));
+    expectDateEquals(result, 2024, 3, 15);
   });
 
   it('returns null for invalid date', () => {
@@ -39,7 +49,7 @@ describe('parseArgDate', () => {
 
   it('handles single digit day and month', () => {
     const result = parseArgDate('5/3/2024');
-    expect(result).toEqual(new Date(2024, 2, 5));
+    expectDateEquals(result, 2024, 3, 5);
   });
 
   // Date object handling (Google Sheets returns Date objects for date columns)

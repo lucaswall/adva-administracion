@@ -44,6 +44,9 @@ function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+/** Overall timeout for the entire document analysis pipeline (including retries) */
+const PIPELINE_TIMEOUT_MS = 60000; // 60 seconds
+
 /**
  * Gemini API client with built-in rate limiting
  */
@@ -89,6 +92,8 @@ export class GeminiClient {
     fileId: string = '',
     fileName: string = ''
   ): Promise<Result<string, GeminiError>> {
+    const startTime = Date.now();
+
     // Ensure at least one attempt
     const attempts = Math.max(1, maxRetries);
     let lastResult: Result<string, GeminiError> = {
@@ -97,6 +102,25 @@ export class GeminiClient {
     };
 
     for (let attempt = 1; attempt <= attempts; attempt++) {
+      // Check pipeline timeout before each attempt
+      const elapsed = Date.now() - startTime;
+      if (elapsed >= PIPELINE_TIMEOUT_MS) {
+        warn('Pipeline timeout exceeded', {
+          module: 'gemini-client',
+          phase: 'timeout',
+          elapsed,
+          attempt,
+          fileId
+        });
+        return {
+          ok: false,
+          error: new GeminiError(
+            `Pipeline timeout exceeded (${Math.round(elapsed / 1000)}s)`,
+            408
+          )
+        };
+      }
+
       // Attempt the API call
       lastResult = await this.doAnalyzeDocument(fileBuffer, mimeType, prompt, fileId, fileName);
 
@@ -117,6 +141,19 @@ export class GeminiClient {
       if (attempt < attempts) {
         // Exponential backoff: 2^attempt * 1000ms, capped at 30s
         const delay = Math.min(Math.pow(2, attempt) * 1000, 30000);
+
+        // Don't sleep longer than remaining timeout
+        const remainingTime = PIPELINE_TIMEOUT_MS - (Date.now() - startTime);
+        if (delay >= remainingTime) {
+          warn('Skipping backoff sleep due to timeout constraint', {
+            module: 'gemini-client',
+            phase: 'rate-limit',
+            delay,
+            remainingTime
+          });
+          continue;
+        }
+
         warn('Rate limit enforced, sleeping', {
           module: 'gemini-client',
           phase: 'rate-limit',
@@ -333,11 +370,32 @@ export class GeminiClient {
 
     const candidate = parsedResponse.candidates?.[0];
     const text = candidate?.content?.parts?.[0]?.text;
+    const finishReason = candidate?.finishReason;
 
-    if (!text) {
+    // Check for problematic finish reasons
+    if (finishReason === 'SAFETY') {
       return {
         ok: false,
-        error: new GeminiError('No text in API response', undefined, parsedResponse)
+        error: new GeminiError('Response blocked by safety filters', undefined, parsedResponse)
+      };
+    }
+
+    if (finishReason === 'MAX_TOKENS') {
+      warn('Gemini response may be truncated (MAX_TOKENS)', {
+        module: 'gemini-client',
+        phase: 'parse-response',
+        textLength: text?.length || 0
+      });
+      // Continue processing but log warning - the response may still be usable
+    }
+
+    if (!text) {
+      const reason = finishReason
+        ? `No text in API response (finishReason: ${finishReason})`
+        : 'No text in API response';
+      return {
+        ok: false,
+        error: new GeminiError(reason, undefined, parsedResponse)
       };
     }
 

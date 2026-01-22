@@ -125,6 +125,9 @@ describe('Scan routes', () => {
     });
 
     it('accepts optional folderId parameter', async () => {
+      // Valid Drive ID format: 28-44 alphanumeric characters
+      const validFolderId = '1a2b3c4d5e6f7g8h9i0j1k2l3m4n5o6p';
+
       mockScanFolder.mockResolvedValue({
         ok: true,
         value: {
@@ -144,11 +147,56 @@ describe('Scan routes', () => {
         headers: {
           authorization: 'Bearer test-secret-123',
         },
-        payload: { folderId: 'custom-folder-id' },
+        payload: { folderId: validFolderId },
       });
 
       expect(response.statusCode).toBe(200);
-      expect(mockScanFolder).toHaveBeenCalledWith('custom-folder-id');
+      expect(mockScanFolder).toHaveBeenCalledWith(validFolderId);
+    });
+
+    it('returns 400 for invalid folderId format', async () => {
+      const response = await server.inject({
+        method: 'POST',
+        url: '/api/scan',
+        headers: {
+          authorization: 'Bearer test-secret-123',
+        },
+        payload: { folderId: 'too-short' },
+      });
+
+      expect(response.statusCode).toBe(400);
+      const body = JSON.parse(response.payload);
+      expect(body.error).toBe('Invalid folderId format');
+    });
+
+    it('accepts folderId as Drive URL', async () => {
+      const validFolderId = '1a2b3c4d5e6f7g8h9i0j1k2l3m4n5o6p';
+      const driveUrl = `https://drive.google.com/drive/folders/${validFolderId}`;
+
+      mockScanFolder.mockResolvedValue({
+        ok: true,
+        value: {
+          filesProcessed: 1,
+          facturasAdded: 0,
+          pagosAdded: 0,
+          recibosAdded: 0,
+          matchesFound: 0,
+          errors: 0,
+          duration: 100,
+        },
+      });
+
+      const response = await server.inject({
+        method: 'POST',
+        url: '/api/scan',
+        headers: {
+          authorization: 'Bearer test-secret-123',
+        },
+        payload: { folderId: driveUrl },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(mockScanFolder).toHaveBeenCalledWith(validFolderId);
     });
 
     it('returns 500 on scan failure', async () => {
