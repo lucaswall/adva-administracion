@@ -50,7 +50,7 @@ cat service-account.json | base64
 # Development mode with watch
 npm run dev
 
-# Test the server (note: all endpoints except /health require auth)
+# Test the server (note: all endpoints except /health and /webhooks/drive require auth)
 curl http://localhost:3000/health
 curl -H "Authorization: Bearer dev-secret-token" http://localhost:3000/api/status
 curl -X POST -H "Authorization: Bearer dev-secret-token" http://localhost:3000/api/scan

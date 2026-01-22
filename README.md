@@ -463,7 +463,7 @@ Only Dashboard has the menu, so only needs one-time redeployment.
 
 ## API Endpoints
 
-All endpoints except `/health` require Bearer token authentication (`Authorization: Bearer <API_SECRET>`).
+All endpoints except `/health` and `/webhooks/drive` require Bearer token authentication (`Authorization: Bearer <API_SECRET>`).
 
 | Method | Endpoint | Auth | Description |
 |--------|----------|------|-------------|
@@ -472,11 +472,11 @@ All endpoints except `/health` require Bearer token authentication (`Authorizati
 | POST | `/api/scan` | Yes | Trigger manual document scan |
 | POST | `/api/rematch` | Yes | Re-run matching on unmatched docs |
 | POST | `/api/autofill-bank` | Yes | Auto-fill bank descriptions |
-| POST | `/webhooks/drive` | Yes | Drive push notifications |
+| POST | `/webhooks/drive` | No | Drive push notifications (validated via channel ID) |
 
 ### Example API Calls
 
-**Note:** All endpoints except `/health` require authentication via Bearer token.
+**Note:** All endpoints except `/health` and `/webhooks/drive` require authentication via Bearer token.
 
 ```bash
 # Health check (no auth required)

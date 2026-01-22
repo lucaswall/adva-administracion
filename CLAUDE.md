@@ -51,12 +51,14 @@ apps-script/   # Dashboard ADVA menu (bound script)
 
 ## SECURITY
 
-All endpoints except `/health` require Bearer token: `Authorization: Bearer <API_SECRET>`
+All endpoints except `/health` and `/webhooks/drive` require Bearer token: `Authorization: Bearer <API_SECRET>`
 
 **Adding endpoints**: Always use `{ onRequest: authMiddleware }`:
 ```typescript
 server.post('/api/new', { onRequest: authMiddleware }, handler);
 ```
+
+**Webhook endpoint**: `/webhooks/drive` is public (no auth) - Google Drive cannot send custom headers. Security via channel ID validation.
 
 **Secret rotation**: Update `.env`, run `npm run deploy:script`, restart server.
 
@@ -93,7 +95,7 @@ npm run deploy:script # Build + deploy to Dashboard
 | POST | /api/scan | Yes | Manual scan |
 | POST | /api/rematch | Yes | Rematch unmatched |
 | POST | /api/autofill-bank | Yes | Auto-fill bank |
-| POST | /webhooks/drive | Yes | Drive notifications |
+| POST | /webhooks/drive | No | Drive notifications |
 
 ## STYLE
 - TS strict mode, `interface`, JSDoc, `Result<T,E>`
