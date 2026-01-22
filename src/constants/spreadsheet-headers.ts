@@ -25,7 +25,7 @@ export const FACTURA_EMITIDA_HEADERS = [
   'hasCuitMatch',
 ];
 
-/** Headers for Facturas Recibidas sheet - ADVA is receptor, only store emisor info (columns A:R) */
+/** Headers for Facturas Recibidas sheet - ADVA is receptor, only store emisor info (columns A:S) */
 export const FACTURA_RECIBIDA_HEADERS = [
   'fechaEmision',
   'fileId',
@@ -45,6 +45,7 @@ export const FACTURA_RECIBIDA_HEADERS = [
   'matchedPagoFileId',
   'matchConfidence',
   'hasCuitMatch',
+  'pagada',
 ];
 
 /** Headers for Pagos Enviados sheet - ADVA is pagador, only store beneficiario info (columns A:O) */
@@ -198,11 +199,30 @@ export const USO_API_HEADERS = [
   'errorMessage',
 ];
 
+/** Headers for Pagos Pendientes sheet - unpaid invoices from Control de Debitos */
+export const PAGOS_PENDIENTES_HEADERS = [
+  'fechaEmision',
+  'fileId',
+  'fileName',
+  'tipoComprobante',
+  'nroFactura',
+  'cuitEmisor',
+  'razonSocialEmisor',
+  'importeTotal',
+  'moneda',
+  'concepto',
+];
+
 /**
  * Required sheets for Dashboard Operativo Contable spreadsheet
- * Tracks Gemini API token usage and costs
+ * Tracks Gemini API token usage, costs, and pending payments
  */
 export const DASHBOARD_OPERATIVO_SHEETS: SheetConfig[] = [
+  {
+    title: 'Pagos Pendientes',
+    headers: PAGOS_PENDIENTES_HEADERS,
+    monetaryColumns: [7] // importeTotal (0-indexed: 7)
+  },
   {
     title: 'Resumen Mensual',
     headers: RESUMEN_MENSUAL_HEADERS,

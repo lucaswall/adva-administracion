@@ -34,7 +34,7 @@ src/
 ├── constants/spreadsheet-headers.ts
 ├── routes/{status,scan,webhooks}.ts
 ├── middleware/auth.ts          # Bearer token authentication
-├── services/{google-auth,drive,sheets,folder-structure,document-sorter,watch-manager,token-usage-logger}.ts
+├── services/{google-auth,drive,sheets,folder-structure,document-sorter,watch-manager,token-usage-logger,pagos-pendientes}.ts
 ├── processing/{queue,scanner,extractor}.ts
 ├── processing/matching/{index,factura-pago-matcher,recibo-pago-matcher}.ts
 ├── processing/storage/{index,factura-store,pago-store,recibo-store}.ts
@@ -146,8 +146,8 @@ ROOT/
 See `SPREADSHEET_FORMAT.md` for complete schema.
 
 - **Control de Creditos**: Facturas Emitidas (18 cols), Pagos Recibidos (15 cols)
-- **Control de Debitos**: Facturas Recibidas (18 cols), Pagos Enviados (15 cols), Recibos (18 cols)
-- **Dashboard**: Resumen Mensual (8 cols), Uso de API (12 cols)
+- **Control de Debitos**: Facturas Recibidas (19 cols), Pagos Enviados (15 cols), Recibos (18 cols)
+- **Dashboard**: Pagos Pendientes (10 cols), Resumen Mensual (8 cols), Uso de API (12 cols)
 
 **Key principle**: Store counterparty info only, ADVA's role is implicit.
 

@@ -5,7 +5,8 @@
 import type { Result } from '../../types/index.js';
 import { getConfig } from '../../config.js';
 import { getCachedFolderStructure } from '../../services/folder-structure.js';
-import { debug, info } from '../../utils/logger.js';
+import { syncPagosPendientes } from '../../services/pagos-pendientes.js';
+import { debug, info, warn } from '../../utils/logger.js';
 import { getCorrelationId } from '../../utils/correlation.js';
 
 // Re-export matching functions
@@ -122,6 +123,35 @@ export async function runMatching(
     matchesFound: recibosMatches.value,
     correlationId,
   });
+
+  // Sync unpaid facturas to Dashboard's Pagos Pendientes sheet
+  debug('Syncing Pagos Pendientes', {
+    module: 'matching',
+    phase: 'pagos-pendientes',
+    correlationId,
+  });
+
+  const syncResult = await syncPagosPendientes(
+    folderStructure.controlDebitosId,
+    folderStructure.dashboardOperativoId
+  );
+
+  if (!syncResult.ok) {
+    warn('Failed to sync Pagos Pendientes', {
+      module: 'matching',
+      phase: 'pagos-pendientes',
+      error: syncResult.error.message,
+      correlationId,
+    });
+    // Don't fail matching if sync fails - this is not critical
+  } else {
+    debug('Pagos Pendientes sync complete', {
+      module: 'matching',
+      phase: 'pagos-pendientes',
+      pendingPayments: syncResult.value,
+      correlationId,
+    });
+  }
 
   info('Comprehensive matching complete', {
     module: 'matching',

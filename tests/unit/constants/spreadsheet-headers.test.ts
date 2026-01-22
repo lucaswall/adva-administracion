@@ -10,8 +10,10 @@ import {
   PAGO_RECIBIDO_HEADERS,
   RECIBO_HEADERS,
   RESUMEN_BANCARIO_HEADERS,
+  PAGOS_PENDIENTES_HEADERS,
   CONTROL_CREDITOS_SHEETS,
   CONTROL_DEBITOS_SHEETS,
+  DASHBOARD_OPERATIVO_SHEETS,
 } from '../../../src/constants/spreadsheet-headers.js';
 
 describe('spreadsheet-headers', () => {
@@ -49,8 +51,8 @@ describe('spreadsheet-headers', () => {
   });
 
   describe('FACTURA_RECIBIDA_HEADERS', () => {
-    it('has 18 headers (columns A:R)', () => {
-      expect(FACTURA_RECIBIDA_HEADERS).toHaveLength(18);
+    it('has 19 headers (columns A:S)', () => {
+      expect(FACTURA_RECIBIDA_HEADERS).toHaveLength(19);
     });
 
     it('starts with fechaEmision', () => {
@@ -71,13 +73,15 @@ describe('spreadsheet-headers', () => {
       expect(FACTURA_RECIBIDA_HEADERS).not.toContain('razonSocialReceptor');
     });
 
-    it('ends with hasCuitMatch', () => {
-      expect(FACTURA_RECIBIDA_HEADERS[FACTURA_RECIBIDA_HEADERS.length - 1]).toBe('hasCuitMatch');
+    it('ends with pagada', () => {
+      expect(FACTURA_RECIBIDA_HEADERS[FACTURA_RECIBIDA_HEADERS.length - 1]).toBe('pagada');
     });
 
     it('contains matching fields', () => {
       expect(FACTURA_RECIBIDA_HEADERS).toContain('matchedPagoFileId');
       expect(FACTURA_RECIBIDA_HEADERS).toContain('matchConfidence');
+      expect(FACTURA_RECIBIDA_HEADERS).toContain('hasCuitMatch');
+      expect(FACTURA_RECIBIDA_HEADERS).toContain('pagada');
     });
   });
 
@@ -255,6 +259,74 @@ describe('spreadsheet-headers', () => {
 
     it('all sheet configs have title and headers', () => {
       CONTROL_DEBITOS_SHEETS.forEach(sheet => {
+        expect(sheet.title).toBeTruthy();
+        expect(Array.isArray(sheet.headers)).toBe(true);
+        expect(sheet.headers.length).toBeGreaterThan(0);
+      });
+    });
+  });
+
+  describe('PAGOS_PENDIENTES_HEADERS', () => {
+    it('has 10 headers', () => {
+      expect(PAGOS_PENDIENTES_HEADERS).toHaveLength(10);
+    });
+
+    it('starts with fechaEmision', () => {
+      expect(PAGOS_PENDIENTES_HEADERS[0]).toBe('fechaEmision');
+    });
+
+    it('contains required fields for tracking unpaid invoices', () => {
+      expect(PAGOS_PENDIENTES_HEADERS).toContain('fileId');
+      expect(PAGOS_PENDIENTES_HEADERS).toContain('fileName');
+      expect(PAGOS_PENDIENTES_HEADERS).toContain('tipoComprobante');
+      expect(PAGOS_PENDIENTES_HEADERS).toContain('nroFactura');
+      expect(PAGOS_PENDIENTES_HEADERS).toContain('cuitEmisor');
+      expect(PAGOS_PENDIENTES_HEADERS).toContain('razonSocialEmisor');
+      expect(PAGOS_PENDIENTES_HEADERS).toContain('importeTotal');
+      expect(PAGOS_PENDIENTES_HEADERS).toContain('moneda');
+      expect(PAGOS_PENDIENTES_HEADERS).toContain('concepto');
+    });
+
+    it('ends with concepto', () => {
+      expect(PAGOS_PENDIENTES_HEADERS[PAGOS_PENDIENTES_HEADERS.length - 1]).toBe('concepto');
+    });
+
+    it('does not contain internal tracking fields', () => {
+      expect(PAGOS_PENDIENTES_HEADERS).not.toContain('processedAt');
+      expect(PAGOS_PENDIENTES_HEADERS).not.toContain('confidence');
+      expect(PAGOS_PENDIENTES_HEADERS).not.toContain('needsReview');
+      expect(PAGOS_PENDIENTES_HEADERS).not.toContain('matchedPagoFileId');
+      expect(PAGOS_PENDIENTES_HEADERS).not.toContain('pagada');
+    });
+  });
+
+  describe('DASHBOARD_OPERATIVO_SHEETS', () => {
+    it('has 3 sheet configurations', () => {
+      expect(DASHBOARD_OPERATIVO_SHEETS).toHaveLength(3);
+    });
+
+    it('has Pagos Pendientes as the first sheet', () => {
+      expect(DASHBOARD_OPERATIVO_SHEETS[0].title).toBe('Pagos Pendientes');
+      expect(DASHBOARD_OPERATIVO_SHEETS[0].headers).toBe(PAGOS_PENDIENTES_HEADERS);
+    });
+
+    it('contains Resumen Mensual sheet', () => {
+      const sheet = DASHBOARD_OPERATIVO_SHEETS.find(s => s.title === 'Resumen Mensual');
+      expect(sheet).toBeDefined();
+    });
+
+    it('contains Uso de API sheet', () => {
+      const sheet = DASHBOARD_OPERATIVO_SHEETS.find(s => s.title === 'Uso de API');
+      expect(sheet).toBeDefined();
+    });
+
+    it('Pagos Pendientes has correct monetary columns', () => {
+      const sheet = DASHBOARD_OPERATIVO_SHEETS[0];
+      expect(sheet.monetaryColumns).toEqual([7]); // importeTotal
+    });
+
+    it('all sheet configs have title and headers', () => {
+      DASHBOARD_OPERATIVO_SHEETS.forEach(sheet => {
         expect(sheet.title).toBeTruthy();
         expect(Array.isArray(sheet.headers)).toBe(true);
         expect(sheet.headers.length).toBeGreaterThan(0);
