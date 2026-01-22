@@ -1,4 +1,4 @@
 {
-  "scriptId": "YOUR_LIBRARY_SCRIPT_ID_HERE",
+  "scriptId": "YOUR_BOUND_SCRIPT_ID_HERE",
   "rootDir": "./dist"
 }
