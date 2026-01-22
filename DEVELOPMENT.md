@@ -28,6 +28,10 @@ LOG_LEVEL=DEBUG
 GOOGLE_SERVICE_ACCOUNT_KEY=<base64-encoded-json>
 GEMINI_API_KEY=your_gemini_api_key
 DRIVE_ROOT_FOLDER_ID=your_folder_id
+API_SECRET=dev-secret-token
+
+# Optional: for Apps Script build
+API_BASE_URL=localhost:3000
 
 # Optional: matching parameters
 MATCH_DAYS_BEFORE=10
@@ -46,10 +50,10 @@ cat service-account.json | base64
 # Development mode with watch
 npm run dev
 
-# Test the server
+# Test the server (note: all endpoints except /health require auth)
 curl http://localhost:3000/health
-curl http://localhost:3000/api/status
-curl -X POST http://localhost:3000/api/scan
+curl -H "Authorization: Bearer dev-secret-token" http://localhost:3000/api/status
+curl -X POST -H "Authorization: Bearer dev-secret-token" http://localhost:3000/api/scan
 ```
 
 ---
@@ -121,34 +125,41 @@ src/
 │   ├── status.ts          # GET /health, /api/status
 │   ├── scan.ts            # POST /api/scan, /rematch, /autofill-bank
 │   └── webhooks.ts        # POST /webhooks/drive
+├── middleware/
+│   └── auth.ts            # Bearer token authentication
 ├── services/
 │   ├── google-auth.ts     # Service account authentication
 │   ├── drive.ts           # Drive API wrapper
 │   ├── sheets.ts          # Sheets API wrapper
-│   ├── folder-structure.ts # Folder discovery/caching (dual spreadsheets)
-│   ├── document-sorter.ts  # Document file movement (Creditos/Debitos routing)
-│   └── watch-manager.ts   # Real-time monitoring
+│   ├── folder-structure.ts # Folder discovery/caching
+│   ├── document-sorter.ts # Document file movement
+│   ├── watch-manager.ts   # Real-time monitoring
+│   └── token-usage-logger.ts # Gemini API cost tracking
 ├── processing/
 │   ├── queue.ts           # p-queue processing
 │   └── scanner.ts         # Document scanning and classification
 ├── types/
-│   └── index.ts           # TypeScript interfaces (direction-aware types)
+│   └── index.ts           # TypeScript interfaces
 ├── matching/
-│   └── matcher.ts         # Invoice-payment matching algorithms
+│   ├── matcher.ts         # Invoice-payment matching
+│   └── cascade-matcher.ts # Cascading displacement system
 ├── gemini/
-│   ├── client.ts          # Gemini API client (native fetch)
-│   ├── prompts.ts         # Direction-aware extraction prompts
-│   ├── parser.ts          # Response parsing (includes ResumenBancario)
+│   ├── client.ts          # Gemini API client
+│   ├── prompts.ts         # Extraction prompts
+│   ├── parser.ts          # Response parsing
 │   └── errors.ts          # Error classification
-├── utils/                 # Pure utilities (date, currency, validation, file-naming)
-│   └── file-naming.ts     # Standardized document file naming
+├── utils/                 # Pure utilities
+│   ├── date.ts, numbers.ts, currency.ts
+│   ├── validation.ts, file-naming.ts
+│   ├── spanish-date.ts, exchange-rate.ts
+│   ├── drive-parser.ts, spreadsheet.ts
+│   └── logger.ts          # Pino structured logging
 └── bank/
     ├── matcher.ts         # Bank movement matching
     ├── autofill.ts        # Bank auto-fill functionality
     └── subdiario-matcher.ts # Subdiario matching
 
-tests/
-└── unit/                  # Unit tests mirroring src/ structure
+tests/unit/                # Unit tests mirroring src/ structure
 ```
 
 ### Module Responsibilities

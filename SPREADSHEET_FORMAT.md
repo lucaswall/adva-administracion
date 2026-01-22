@@ -1,9 +1,9 @@
 # Spreadsheet Schema
 
-The system uses **dual control spreadsheets** based on money flow direction:
+Dual control spreadsheets based on money flow direction:
 
-- **Control de Creditos** - Money coming IN to ADVA (facturas emitidas, pagos recibidos)
-- **Control de Debitos** - Money going OUT from ADVA (facturas recibidas, pagos enviados, recibos)
+- **Control de Creditos** - Money IN to ADVA (facturas emitidas, pagos recibidos)
+- **Control de Debitos** - Money OUT from ADVA (facturas recibidas, pagos enviados, recibos)
 
 All dates ISO format (YYYY-MM-DD), timestamps ISO datetime.
 
@@ -13,45 +13,56 @@ All dates ISO format (YYYY-MM-DD), timestamps ISO datetime.
 
 Located at root: `Control de Creditos.gsheet`
 
-### Facturas Emitidas
+### Facturas Emitidas (18 columns, A:R)
 
-Invoices FROM ADVA (ADVA is emisor). These represent money that ADVA expects to receive.
+Invoices FROM ADVA (ADVA is emisor). ADVA info is implicit; only receptor (counterparty) stored.
 
-```
-fechaEmision | fileId | fileName | tipoComprobante | puntoVenta | numeroComprobante |
-fechaVtoCae | cuitEmisor | razonSocialEmisor | cuitReceptor | cae | importeNeto | importeIva |
-importeTotal | moneda | concepto | processedAt | confidence | needsReview | matchedPagoFileId |
-matchConfidence | hasCuitMatch
-```
+| Column | Field | Type | Description |
+|--------|-------|------|-------------|
+| A | fechaEmision | date | Issue date (YYYY-MM-DD) |
+| B | fileId | string | Google Drive file ID |
+| C | fileName | hyperlink | Link to Drive file |
+| D | tipoComprobante | enum | A\|B\|C\|E\|NC\|ND |
+| E | nroFactura | string | Full invoice number (e.g., "00003-00001957") |
+| F | cuitReceptor | string | Client CUIT (11 digits) |
+| G | razonSocialReceptor | string | Client business name |
+| H | importeNeto | currency | Net amount before tax |
+| I | importeIva | currency | IVA/VAT amount |
+| J | importeTotal | currency | Total amount |
+| K | moneda | enum | ARS\|USD |
+| L | concepto | string | Brief description (optional) |
+| M | processedAt | timestamp | Processing timestamp |
+| N | confidence | number | Extraction confidence (0.0-1.0) |
+| O | needsReview | boolean | Manual review needed |
+| P | matchedPagoFileId | string | Linked Pago Recibido fileId |
+| Q | matchConfidence | enum | HIGH\|MEDIUM\|LOW |
+| R | hasCuitMatch | boolean | Match based on CUIT |
 
-**Note:** Rows are automatically sorted by `fechaEmision` in descending order (most recent first) after each insert.
+Rows sorted by `fechaEmision` descending after insert.
 
-**Key Fields:**
-- `cuitEmisor`: ADVA's CUIT (30709076783)
-- `cuitReceptor`: Client's CUIT (invoice recipient)
-- `tipoComprobante`: A|B|C|E|NC|ND
-- `moneda`: ARS|USD
-- `matchedPagoFileId`: Links to Pagos Recibidos
-- `matchConfidence`: HIGH|MEDIUM|LOW
-- `hasCuitMatch`: boolean (whether match was based on CUIT)
+### Pagos Recibidos (15 columns, A:O)
 
-### Pagos Recibidos
+Payments TO ADVA (ADVA is beneficiario). ADVA info is implicit; only pagador (counterparty) stored.
 
-Payments TO ADVA (ADVA is beneficiario). These represent money that ADVA has received.
+| Column | Field | Type | Description |
+|--------|-------|------|-------------|
+| A | fechaPago | date | Payment date (YYYY-MM-DD) |
+| B | fileId | string | Google Drive file ID |
+| C | fileName | hyperlink | Link to Drive file |
+| D | banco | string | Bank name |
+| E | importePagado | currency | Amount paid |
+| F | moneda | enum | ARS\|USD |
+| G | referencia | string | Transaction reference (optional) |
+| H | cuitPagador | string | Client CUIT (11 digits) |
+| I | nombrePagador | string | Client name |
+| J | concepto | string | Payment description (optional) |
+| K | processedAt | timestamp | Processing timestamp |
+| L | confidence | number | Extraction confidence (0.0-1.0) |
+| M | needsReview | boolean | Manual review needed |
+| N | matchedFacturaFileId | string | Linked Factura Emitida fileId |
+| O | matchConfidence | enum | HIGH\|MEDIUM\|LOW |
 
-```
-fechaPago | fileId | fileName | banco | importePagado | moneda | referencia | cuitPagador |
-nombrePagador | cuitBeneficiario | nombreBeneficiario | concepto | processedAt | confidence |
-needsReview | matchedFacturaFileId | matchConfidence
-```
-
-**Note:** Rows are automatically sorted by `fechaPago` in descending order (most recent first) after each insert.
-
-**Key Fields:**
-- `cuitBeneficiario`: ADVA's CUIT (30709076783) - receiver of payment
-- `cuitPagador`: Client's CUIT - sender of payment
-- `matchedFacturaFileId`: Links to Facturas Emitidas
-- `matchConfidence`: HIGH|MEDIUM|LOW
+Rows sorted by `fechaPago` descending after insert.
 
 ---
 
@@ -59,104 +70,156 @@ needsReview | matchedFacturaFileId | matchConfidence
 
 Located at root: `Control de Debitos.gsheet`
 
-### Facturas Recibidas
+### Facturas Recibidas (18 columns, A:R)
 
-Invoices TO ADVA (ADVA is receptor). These represent money that ADVA needs to pay.
+Invoices TO ADVA (ADVA is receptor). ADVA info is implicit; only emisor (counterparty) stored.
 
-```
-fechaEmision | fileId | fileName | tipoComprobante | puntoVenta | numeroComprobante |
-fechaVtoCae | cuitEmisor | razonSocialEmisor | cuitReceptor | cae | importeNeto | importeIva |
-importeTotal | moneda | concepto | processedAt | confidence | needsReview | matchedPagoFileId |
-matchConfidence | hasCuitMatch
-```
+| Column | Field | Type | Description |
+|--------|-------|------|-------------|
+| A | fechaEmision | date | Issue date (YYYY-MM-DD) |
+| B | fileId | string | Google Drive file ID |
+| C | fileName | hyperlink | Link to Drive file |
+| D | tipoComprobante | enum | A\|B\|C\|E\|NC\|ND |
+| E | nroFactura | string | Full invoice number (e.g., "00003-00001957") |
+| F | cuitEmisor | string | Provider CUIT (11 digits) |
+| G | razonSocialEmisor | string | Provider business name |
+| H | importeNeto | currency | Net amount before tax |
+| I | importeIva | currency | IVA/VAT amount |
+| J | importeTotal | currency | Total amount |
+| K | moneda | enum | ARS\|USD |
+| L | concepto | string | Brief description (optional) |
+| M | processedAt | timestamp | Processing timestamp |
+| N | confidence | number | Extraction confidence (0.0-1.0) |
+| O | needsReview | boolean | Manual review needed |
+| P | matchedPagoFileId | string | Linked Pago Enviado fileId |
+| Q | matchConfidence | enum | HIGH\|MEDIUM\|LOW |
+| R | hasCuitMatch | boolean | Match based on CUIT |
 
-**Note:** Rows are automatically sorted by `fechaEmision` in descending order (most recent first) after each insert.
+Rows sorted by `fechaEmision` descending after insert.
 
-**Key Fields:**
-- `cuitEmisor`: Provider's CUIT (invoice issuer)
-- `cuitReceptor`: ADVA's CUIT (30709076783)
-- `tipoComprobante`: A|B|C|E|NC|ND
-- `moneda`: ARS|USD
-- `matchedPagoFileId`: Links to Pagos Enviados
-- `matchConfidence`: HIGH|MEDIUM|LOW
-- `hasCuitMatch`: boolean (whether match was based on CUIT)
+### Pagos Enviados (15 columns, A:O)
 
-### Pagos Enviados
+Payments BY ADVA (ADVA is pagador). ADVA info is implicit; only beneficiario (counterparty) stored.
 
-Payments BY ADVA (ADVA is ordenante/pagador). These represent money that ADVA has paid out.
+| Column | Field | Type | Description |
+|--------|-------|------|-------------|
+| A | fechaPago | date | Payment date (YYYY-MM-DD) |
+| B | fileId | string | Google Drive file ID |
+| C | fileName | hyperlink | Link to Drive file |
+| D | banco | string | Bank name |
+| E | importePagado | currency | Amount paid |
+| F | moneda | enum | ARS\|USD |
+| G | referencia | string | Transaction reference (optional) |
+| H | cuitBeneficiario | string | Provider CUIT (11 digits) |
+| I | nombreBeneficiario | string | Provider name |
+| J | concepto | string | Payment description (optional) |
+| K | processedAt | timestamp | Processing timestamp |
+| L | confidence | number | Extraction confidence (0.0-1.0) |
+| M | needsReview | boolean | Manual review needed |
+| N | matchedFacturaFileId | string | Linked Factura/Recibo fileId |
+| O | matchConfidence | enum | HIGH\|MEDIUM\|LOW |
 
-```
-fechaPago | fileId | fileName | banco | importePagado | moneda | referencia | cuitPagador |
-nombrePagador | cuitBeneficiario | nombreBeneficiario | concepto | processedAt | confidence |
-needsReview | matchedFacturaFileId | matchConfidence
-```
+Rows sorted by `fechaPago` descending after insert.
 
-**Note:** Rows are automatically sorted by `fechaPago` in descending order (most recent first) after each insert.
+### Recibos (18 columns, A:R)
 
-**Key Fields:**
-- `cuitPagador`: ADVA's CUIT (30709076783) - sender of payment
-- `cuitBeneficiario`: Provider's CUIT - receiver of payment
-- `matchedFacturaFileId`: Links to Facturas Recibidas or Recibos
-- `matchConfidence`: HIGH|MEDIUM|LOW
+Employee salary receipts (ADVA is empleador). ADVA info is implicit; only employee stored.
 
-### Recibos
+| Column | Field | Type | Description |
+|--------|-------|------|-------------|
+| A | fechaPago | date | Payment date (YYYY-MM-DD) |
+| B | fileId | string | Google Drive file ID |
+| C | fileName | hyperlink | Link to Drive file |
+| D | tipoRecibo | enum | sueldo\|liquidacion_final |
+| E | nombreEmpleado | string | Employee name |
+| F | cuilEmpleado | string | Employee CUIL (11 digits) |
+| G | legajo | string | Employee number |
+| H | tareaDesempenada | string | Job title (optional) |
+| I | cuitEmpleador | string | ADVA CUIT (30709076783) |
+| J | periodoAbonado | string | Period (e.g., "diciembre/2024") |
+| K | subtotalRemuneraciones | currency | Gross salary |
+| L | subtotalDescuentos | currency | Total deductions |
+| M | totalNeto | currency | Net salary |
+| N | processedAt | timestamp | Processing timestamp |
+| O | confidence | number | Extraction confidence (0.0-1.0) |
+| P | needsReview | boolean | Manual review needed |
+| Q | matchedPagoFileId | string | Linked Pago Enviado fileId |
+| R | matchConfidence | enum | HIGH\|MEDIUM\|LOW |
 
-Employee salary receipts (sueldo, liquidación final). These represent salary payments made by ADVA.
-
-```
-fechaPago | fileId | fileName | tipoRecibo | nombreEmpleado | cuilEmpleado | legajo |
-tareaDesempenada | cuitEmpleador | periodoAbonado | subtotalRemuneraciones |
-subtotalDescuentos | totalNeto | processedAt | confidence | needsReview | matchedPagoFileId |
-matchConfidence
-```
-
-**Note:** Rows are automatically sorted by `fechaPago` in descending order (most recent first) after each insert.
-
-**Key Fields:**
-- `tipoRecibo`: sueldo|liquidacion_final
-- `cuitEmpleador`: ADVA's CUIT (30709076783)
-- `cuilEmpleado`: Employee's CUIL (11 digits, CUIL format)
-- `periodoAbonado`: Payment period (e.g., "diciembre/2024")
-- `subtotalRemuneraciones`: Gross salary before deductions
-- `subtotalDescuentos`: Total deductions
-- `totalNeto`: Net salary (subtotalRemuneraciones - subtotalDescuentos)
-- `matchedPagoFileId`: Links to Pagos Enviados
-- `matchConfidence`: HIGH|MEDIUM|LOW
+Rows sorted by `fechaPago` descending after insert.
 
 ---
 
 ## Bancos (Bank Statements)
 
-**Note:** Bank statements are stored as individual files in year-based `{YYYY}/Bancos/` folders (no month subfolders), not in spreadsheets.
+Bank statements stored as files in `{YYYY}/Bancos/` folders (no month subfolders).
 
-### ResumenBancario
+### ResumenBancario (13 columns, A:M)
 
-```
-fileId | fileName | banco | fechaDesde | fechaHasta | saldoInicial | saldoFinal |
-moneda | cantidadMovimientos | processedAt | confidence | needsReview
-```
+| Column | Field | Type | Description |
+|--------|-------|------|-------------|
+| A | fileId | string | Google Drive file ID |
+| B | fileName | hyperlink | Link to Drive file |
+| C | banco | string | Bank name |
+| D | numeroCuenta | string | Account number or card brand |
+| E | fechaDesde | date | Statement start date |
+| F | fechaHasta | date | Statement end date |
+| G | saldoInicial | currency | Opening balance |
+| H | saldoFinal | currency | Closing balance |
+| I | moneda | enum | ARS\|USD |
+| J | cantidadMovimientos | number | Movement count |
+| K | processedAt | timestamp | Processing timestamp |
+| L | confidence | number | Extraction confidence (0.0-1.0) |
+| M | needsReview | boolean | Manual review needed |
 
-**Key Fields:**
-- `banco`: Bank name (e.g., "BBVA", "Santander", "Galicia")
-- `fechaDesde`: Statement start date (ISO format: YYYY-MM-DD)
-- `fechaHasta`: Statement end date (ISO format: YYYY-MM-DD)
-- `saldoInicial`: Opening balance at start of period
-- `saldoFinal`: Closing balance at end of period
-- `moneda`: ARS|USD
-- `cantidadMovimientos`: Number of movements in the period
+---
+
+## Dashboard Operativo Contable
+
+Located at root: `Dashboard Operativo Contable.gsheet`
+
+### Resumen Mensual (8 columns, A:H)
+
+| Column | Field | Type | Description |
+|--------|-------|------|-------------|
+| A | anio | number | Year |
+| B | mes | string | Month name |
+| C | totalLlamadas | number | Total API calls |
+| D | tokensEntrada | number | Input tokens |
+| E | tokensSalida | number | Output tokens |
+| F | costoTotalUSD | currency | Total cost USD |
+| G | tasaExito | number | Success rate |
+| H | duracionPromedio | number | Average duration |
+
+### Uso de API (12 columns, A:L)
+
+| Column | Field | Type | Description |
+|--------|-------|------|-------------|
+| A | timestamp | timestamp | Request timestamp |
+| B | requestId | string | Unique request ID |
+| C | fileId | string | Processed file ID |
+| D | fileName | string | Processed file name |
+| E | model | string | Gemini model used |
+| F | promptTokens | number | Input tokens |
+| G | outputTokens | number | Output tokens |
+| H | totalTokens | number | Total tokens |
+| I | estimatedCostUSD | currency | Estimated cost |
+| J | durationMs | number | Duration in ms |
+| K | success | boolean | Request succeeded |
+| L | errorMessage | string | Error message if failed |
 
 ---
 
 ## Direction-Aware Classification
 
-Documents are classified based on ADVA's role (CUIT: 30709076783):
+Documents classified by ADVA's role (CUIT: 30709076783):
 
 | Document Type | ADVA's Role | Money Flow | Destination |
 |---------------|-------------|------------|-------------|
 | Factura Emitida | Emisor | IN → ADVA | Control de Creditos |
 | Factura Recibida | Receptor | OUT ← ADVA | Control de Debitos |
 | Pago Recibido | Beneficiario | IN → ADVA | Control de Creditos |
-| Pago Enviado | Pagador/Ordenante | OUT ← ADVA | Control de Debitos |
+| Pago Enviado | Pagador | OUT ← ADVA | Control de Debitos |
 | Resumen Bancario | Account Holder | Both | Bancos/ folder |
 | Recibo | Empleador | OUT ← ADVA | Control de Debitos |
 
@@ -164,72 +227,31 @@ Documents are classified based on ADVA's role (CUIT: 30709076783):
 
 ## Matching Logic
 
-### Match Confidence Levels
+### Confidence Levels
 
-**THREE-TIER DATE RANGES (relative to invoice/recibo date):**
-- **HIGH range**: [0, 15] days (payment after invoice, within 15 days)
-- **MEDIUM range**: (-3, 30) days (payment 3 days before to 30 days after invoice)
-- **LOW range**: (-10, 60) days (payment 10 days before to 60 days after invoice)
+**Date ranges (relative to invoice/recibo date):**
+- **HIGH range**: [0, 15] days after
+- **MEDIUM range**: (-3, 30) days
+- **LOW range**: (-10, 60) days
 
-**CONFIDENCE CALCULATION:**
-- **HIGH**: amount match + date within HIGH/MEDIUM range + CUIT/name match
-- **MEDIUM**: amount match + date within HIGH/MEDIUM range, no CUIT/name match
-- **LOW**: amount match + date within LOW range only (CUIT/name does NOT boost confidence)
+**Confidence calculation:**
+- **HIGH**: amount match + date in HIGH/MEDIUM range + CUIT/name match
+- **MEDIUM**: amount match + date in HIGH/MEDIUM range, no CUIT/name match
+- **LOW**: amount match + date in LOW range only
 
 ### Cross-References
 
 **Control de Creditos:**
-- `Facturas Emitidas.matchedPagoFileId` ↔ `Pagos Recibidos.matchedFacturaFileId` (by fileId)
+- `Facturas Emitidas.matchedPagoFileId` ↔ `Pagos Recibidos.matchedFacturaFileId`
 
 **Control de Debitos:**
-- `Facturas Recibidas.matchedPagoFileId` ↔ `Pagos Enviados.matchedFacturaFileId` (by fileId)
-- `Recibos.matchedPagoFileId` ↔ `Pagos Enviados.matchedFacturaFileId` (by fileId)
-
-### Match Upgrading
-
-When a new pago matches a factura/recibo with HIGHER quality, the old match is broken:
-1. Match quality order: Confidence (HIGH > MEDIUM > LOW), then CUIT/CUIL match (has > no), then date proximity (closer > farther)
-2. Old pago is unmatched (cleared) and attempts to re-match to other facturas/recibos
-3. All sheets store matchConfidence for quality tracking
-4. Legacy matches without stored confidence are treated as LOW (can be upgraded)
+- `Facturas Recibidas.matchedPagoFileId` ↔ `Pagos Enviados.matchedFacturaFileId`
+- `Recibos.matchedPagoFileId` ↔ `Pagos Enviados.matchedFacturaFileId`
 
 ### Cross-Currency Matching (USD→ARS)
 
-- USD facturas can be matched with ARS pagos using historical exchange rates
-- Exchange rates fetched from ArgentinaDatos API (`api.argentinadatos.com/v1/cotizaciones/dolares/oficial/{YYYY/MM/DD}`)
-- Uses `venta` (sell) rate - what you pay in ARS to settle a USD invoice
-- Tolerance of ±5% (configurable via `USD_ARS_RATE_TOLERANCE_PERCENT`)
-- **Confidence rules for cross-currency matches:**
-  - With CUIT match: capped at MEDIUM (never HIGH)
-  - Without CUIT match: always LOW
-- API responses cached for 24 hours (rates don't change retroactively)
-- If API fails: match returns false, user can manually match in spreadsheet
-
----
-
-## Common Fields
-
-### File Tracking
-- `fileId`: Google Drive file ID
-- `fileName`: RichTextValue hyperlink to Drive file
-
-### Processing Metadata
-- `processedAt`: ISO timestamp, text format (prevents Google Sheets auto-parsing)
-- `confidence`: Extraction confidence (0.0 to 1.0)
-- `needsReview`: boolean (whether manual review is recommended)
-
-### Comprobante Fields
-- `puntoVenta`: 4-5 digits zero-padded
-- `numeroComprobante`: 8 digits zero-padded
-- `cae`: 14 digits
-- `cuit`/`cuil`: 11 digits (mod11 checksum, no dashes)
-
----
-
-## Notes
-
-- Dual spreadsheet design separates money IN (Creditos) from money OUT (Debitos)
-- Direction-aware classification automatically routes documents based on ADVA's role
-- All spreadsheets and folders are auto-created if missing
-- Month subfolders in Creditos/ and Debitos/ are created on demand
-- Optional fields use `?` suffix - empty string if absent
+- USD facturas matched with ARS pagos using historical exchange rates
+- Exchange rates from ArgentinaDatos API (official `venta` rate)
+- Tolerance: ±5% (configurable via `USD_ARS_TOLERANCE_PERCENT`)
+- Confidence: With CUIT match → MEDIUM max; Without CUIT → LOW
+- API cache: 24 hours

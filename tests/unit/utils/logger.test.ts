@@ -270,15 +270,15 @@ describe('Logger', () => {
     });
   });
 
-  describe('default export', () => {
-    it('should export the getLogger function as default', async () => {
+  describe('getLogger export', () => {
+    it('should export the getLogger function as named export', async () => {
       const loggerModule = await import('../../../src/utils/logger.js');
 
-      expect(loggerModule.default).toBeDefined();
-      expect(typeof loggerModule.default).toBe('function');
+      expect(loggerModule.getLogger).toBeDefined();
+      expect(typeof loggerModule.getLogger).toBe('function');
 
-      // Calling the default export should return the logger instance
-      const logger = loggerModule.default();
+      // Calling getLogger should return the logger instance
+      const logger = loggerModule.getLogger();
       expect(logger).toBe(mockPinoInstance);
     });
   });
