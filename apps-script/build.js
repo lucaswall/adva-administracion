@@ -139,6 +139,7 @@ async function build() {
       bundle: true,
       outfile: outfile,
       format: 'iife',
+      globalName: 'ADVA',
       target: 'es2019',
       platform: 'browser',
       minify: true,
@@ -146,11 +147,11 @@ async function build() {
       footer: {
         js: `
 // Expose functions to global scope for Apps Script
-var onOpen = createMenu;  // onOpen trigger
-var triggerScan = triggerScan;
-var triggerRematch = triggerRematch;
-var triggerAutofillBank = triggerAutofillBank;
-var showAbout = showAbout;
+var onOpen = ADVA.createMenu;  // onOpen trigger
+var triggerScan = ADVA.triggerScan;
+var triggerRematch = ADVA.triggerRematch;
+var triggerAutofillBank = ADVA.triggerAutofillBank;
+var showAbout = ADVA.showAbout;
 `
       }
     });
