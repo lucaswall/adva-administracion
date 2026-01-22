@@ -35,10 +35,12 @@ src/
 ├── routes/{status,scan,webhooks}.ts
 ├── middleware/auth.ts          # Bearer token authentication
 ├── services/{google-auth,drive,sheets,folder-structure,document-sorter,watch-manager,token-usage-logger}.ts
-├── processing/{queue,scanner}.ts
+├── processing/{queue,scanner,extractor}.ts
+├── processing/matching/{index,factura-pago-matcher,recibo-pago-matcher}.ts
+├── processing/storage/{index,factura-store,pago-store,recibo-store}.ts
 ├── matching/{matcher,cascade-matcher}.ts
 ├── gemini/{client,prompts,parser,errors}.ts
-├── utils/{date,numbers,currency,validation,file-naming,spanish-date,exchange-rate,drive-parser,logger,spreadsheet}.ts
+├── utils/{date,numbers,currency,validation,file-naming,spanish-date,exchange-rate,drive-parser,logger,spreadsheet,circuit-breaker,concurrency,correlation}.ts
 └── bank/{matcher,autofill,subdiario-matcher}.ts
 
 apps-script/   # Dashboard ADVA menu (bound script)
