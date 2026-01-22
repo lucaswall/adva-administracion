@@ -93,13 +93,16 @@ async function build() {
     process.exit(1);
   }
 
-  // Extract domain from full URL for Apps Script
-  // Apps Script needs domain only (no protocol)
-  let domain = apiBaseUrl;
-  if (apiBaseUrl.startsWith('http://') || apiBaseUrl.startsWith('https://')) {
+  // Validate URL format and ensure it has a protocol
+  let fullUrl = apiBaseUrl;
+  if (!apiBaseUrl.startsWith('http://') && !apiBaseUrl.startsWith('https://')) {
+    // Add https:// if no protocol specified
+    fullUrl = `https://${apiBaseUrl}`;
+    log.warn(`No protocol specified, using: ${fullUrl}`);
+  } else {
+    // Validate URL format
     try {
-      const url = new URL(apiBaseUrl);
-      domain = url.host;
+      new URL(apiBaseUrl);
     } catch (error) {
       log.error(`Invalid API_BASE_URL format: ${apiBaseUrl}`);
       log.error('Please use a valid URL (e.g., https://your-domain.railway.app)');
@@ -107,8 +110,7 @@ async function build() {
     }
   }
 
-  log.success(`API_BASE_URL: ${apiBaseUrl}`);
-  log.success(`Domain for Apps Script: ${domain}`);
+  log.success(`API_BASE_URL: ${fullUrl}`);
 
   // Step 2.5: Validate API_SECRET
   const apiSecret = envVars.API_SECRET;
@@ -136,8 +138,8 @@ async function build() {
   }
 
   const templateContent = fs.readFileSync(templatePath, 'utf-8');
-  // Inject domain (without protocol) for Apps Script
-  let configContent = templateContent.replace('{{API_BASE_URL}}', domain);
+  // Inject full URL with protocol for Apps Script
+  let configContent = templateContent.replace('{{API_BASE_URL}}', fullUrl);
   configContent = configContent.replace('{{API_SECRET}}', apiSecret);
   fs.writeFileSync(configPath, configContent, 'utf-8');
 
