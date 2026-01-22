@@ -8,8 +8,8 @@
  */
 
 /**
- * Base URL for the ADVA API (domain only, protocol added automatically)
- * Example: 'adva-admin.railway.app'
+ * Base URL for the ADVA API (full URL with protocol)
+ * Example: 'https://adva-admin.railway.app'
  */
 export const API_BASE_URL = '{{API_BASE_URL}}';
 

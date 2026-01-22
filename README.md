@@ -88,12 +88,11 @@ LOG_LEVEL=INFO
 GEMINI_API_KEY=your_key_here
 DRIVE_ROOT_FOLDER_ID=your_folder_id
 API_SECRET=your_secret_token_here
-API_BASE_URL=your-app.up.railway.app
+API_BASE_URL=https://your-app.up.railway.app
 GOOGLE_SERVICE_ACCOUNT_KEY=<base64-encoded-service-account-json>
-WEBHOOK_URL=https://your-app.up.railway.app/webhooks/drive
 ```
 
-**Note:** Set `WEBHOOK_URL` after generating your Railway domain in step 6. Use your actual Railway URL + `/webhooks/drive`.
+**Note:** Set `API_BASE_URL` after generating your Railway domain in step 6. Use your actual Railway URL with protocol (e.g., `https://your-app.up.railway.app`). The webhook URL is automatically derived by appending `/webhooks/drive`.
 
 To encode your service account key:
 ```bash
@@ -209,11 +208,10 @@ railway variables --set LOG_LEVEL=INFO
 railway variables --set GEMINI_API_KEY=your_key_here
 railway variables --set DRIVE_ROOT_FOLDER_ID=your_folder_id
 railway variables --set API_SECRET=your_secret_token_here
-railway variables --set API_BASE_URL=your-app.up.railway.app
 railway variables --set GOOGLE_SERVICE_ACCOUNT_KEY=$(cat service-account.json | base64 | tr -d '\n')
 
-# Optional: Set after generating domain in step 5 for real-time monitoring
-# railway variables --set WEBHOOK_URL=https://your-app.up.railway.app/webhooks/drive
+# Set after generating domain in step 5 (enables webhooks and Apps Script)
+railway variables --set API_BASE_URL=https://your-app.up.railway.app
 ```
 
 #### 4. Deploy
@@ -271,8 +269,7 @@ Set these in Railway dashboard (Variables tab) or via CLI:
 | `GEMINI_API_KEY` | Yes | - | Gemini API key |
 | `DRIVE_ROOT_FOLDER_ID` | Yes | - | Google Drive root folder ID |
 | `API_SECRET` | Yes | - | Secret token for API authentication. Used by server to validate requests and injected into Apps Script at build time. Keep secure and rotate periodically. |
-| `API_BASE_URL` | Yes (for script) | - | Domain only (no protocol) for Apps Script. Example: `adva-admin.railway.app`. Required for `npm run build:script`. |
-| `WEBHOOK_URL` | No | - | Public URL for Drive push notifications (e.g., `https://your-app.up.railway.app/webhooks/drive`) - enables real-time monitoring when set |
+| `API_BASE_URL` | No | - | Full URL with protocol (e.g., `https://adva-admin.railway.app`). Enables webhooks (appends `/webhooks/drive`) and Apps Script (domain extracted at build time). |
 | `MATCH_DAYS_BEFORE` | No | `10` | Days before invoice date to match payments |
 | `MATCH_DAYS_AFTER` | No | `60` | Days after invoice date to match payments |
 | `USD_ARS_TOLERANCE_PERCENT` | No | `5` | Tolerance % for USD/ARS exchange matching |
@@ -373,14 +370,14 @@ The **Dashboard Operativo Contable** spreadsheet includes a custom **ADVA** menu
 
 #### 1. Configure API Settings
 
-Add your Railway domain and API secret to `.env` (domain only, no protocol):
+Add your Railway domain and API secret to `.env` (full URL with protocol):
 
 ```bash
-API_BASE_URL=your-app.up.railway.app
+API_BASE_URL=https://your-app.up.railway.app
 API_SECRET=your_secret_token_here
 ```
 
-**Important:** The build process requires both variables and will fail if not set.
+**Important:** The build process requires both variables and will fail if not set. The domain will be automatically extracted for Apps Script.
 
 #### 2. Create Dashboard Script Project
 
@@ -460,7 +457,7 @@ Only Dashboard has the menu, so only needs one-time redeployment.
 |-------|----------|
 | Menu doesn't appear | Refresh spreadsheet. Check Extensions → Apps Script for errors. Ensure script is deployed. |
 | API calls fail | Check "About" menu to test connectivity. Verify `API_BASE_URL` and `API_SECRET` were set correctly when script was built. Rebuild and redeploy if either changed. Check server is running and accessible. |
-| Build fails | Ensure both `API_BASE_URL` and `API_SECRET` are set in `.env` file. Domain only for URL, no protocol. |
+| Build fails | Ensure both `API_BASE_URL` and `API_SECRET` are set in `.env` file. Use full URL with protocol (e.g., `https://example.com`). |
 
 ---
 
@@ -517,21 +514,21 @@ The server supports real-time document processing through Google Drive Push Noti
 
 ### Setup
 
-Real-time monitoring is **optional** and requires the `WEBHOOK_URL` environment variable:
+Real-time monitoring is **optional** and requires the `API_BASE_URL` environment variable:
 
 ```bash
 # Set after deploying and generating your Railway domain
-railway variables --set WEBHOOK_URL=https://your-app.up.railway.app/webhooks/drive
+railway variables --set API_BASE_URL=https://your-app.up.railway.app
 ```
 
-**Requirements:**
+**How it works:**
+- The webhook URL is automatically derived by appending `/webhooks/drive` to `API_BASE_URL`
 - Must be a public HTTPS URL (Railway provides this automatically)
-- URL must end with `/webhooks/drive`
 - Server will validate incoming notifications from Google
 
 ### Without Real-time Monitoring
 
-If `WEBHOOK_URL` is not set:
+If `API_BASE_URL` is not set:
 - Real-time monitoring is disabled
 - Fallback polling still runs every 5 minutes
 - Manual scans via `/api/scan` still work

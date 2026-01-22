@@ -55,6 +55,7 @@ export interface Config {
   nodeEnv: 'development' | 'production' | 'test';
   logLevel: LogLevel;
   apiSecret: string;
+  apiBaseUrl: string | null;
 
   // Google Auth
   googleServiceAccountKey: string;
@@ -65,7 +66,7 @@ export interface Config {
   // Drive
   driveRootFolderId: string;
 
-  // Webhooks
+  // Webhooks (derived from apiBaseUrl)
   webhookUrl: string | null;
 
   // Matching
@@ -110,8 +111,18 @@ export function loadConfig(): Config {
     throw new Error('DRIVE_ROOT_FOLDER_ID is required');
   }
 
-  // Webhooks - optional
-  const webhookUrl = process.env.WEBHOOK_URL || null;
+  // API Base URL - optional (required for webhooks and Apps Script)
+  const apiBaseUrl = process.env.API_BASE_URL || null;
+
+  // Webhooks - derived from API_BASE_URL
+  let webhookUrl: string | null = null;
+  if (apiBaseUrl) {
+    // Ensure apiBaseUrl has a protocol
+    const baseUrl = apiBaseUrl.startsWith('http://') || apiBaseUrl.startsWith('https://')
+      ? apiBaseUrl
+      : `https://${apiBaseUrl}`;
+    webhookUrl = `${baseUrl.replace(/\/$/, '')}/webhooks/drive`;
+  }
 
   // Matching configuration
   const matchDaysBefore = parseInt(process.env.MATCH_DAYS_BEFORE || '10', 10);
@@ -126,6 +137,7 @@ export function loadConfig(): Config {
     nodeEnv,
     logLevel,
     apiSecret,
+    apiBaseUrl,
     googleServiceAccountKey,
     geminiApiKey,
     driveRootFolderId,

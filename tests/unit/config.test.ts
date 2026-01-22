@@ -204,19 +204,20 @@ describe('config', () => {
       expect(config.driveRootFolderId).toBe('test-folder-id');
     });
 
-    it('loads WEBHOOK_URL when provided', () => {
+    it('derives webhookUrl from API_BASE_URL when provided', () => {
       process.env.NODE_ENV = 'development';
       process.env.GOOGLE_SERVICE_ACCOUNT_KEY = 'test-key';
       process.env.GEMINI_API_KEY = 'test-gemini-key';
       process.env.DRIVE_ROOT_FOLDER_ID = 'test-folder-id';
-      process.env.WEBHOOK_URL = 'https://example.com/webhooks/drive';
+      process.env.API_BASE_URL = 'https://example.com';
 
       const config = loadConfig();
 
+      expect(config.apiBaseUrl).toBe('https://example.com');
       expect(config.webhookUrl).toBe('https://example.com/webhooks/drive');
     });
 
-    it('returns null for WEBHOOK_URL when not provided', () => {
+    it('returns null for webhookUrl when API_BASE_URL not provided', () => {
       process.env.NODE_ENV = 'development';
       process.env.GOOGLE_SERVICE_ACCOUNT_KEY = 'test-key';
       process.env.GEMINI_API_KEY = 'test-gemini-key';
@@ -224,10 +225,11 @@ describe('config', () => {
 
       const config = loadConfig();
 
+      expect(config.apiBaseUrl).toBeNull();
       expect(config.webhookUrl).toBeNull();
     });
 
-    it('allows missing WEBHOOK_URL in production', () => {
+    it('allows missing API_BASE_URL in production', () => {
       process.env.NODE_ENV = 'production';
       process.env.API_SECRET = 'test-secret';
       process.env.GOOGLE_SERVICE_ACCOUNT_KEY = 'test-key';
@@ -236,7 +238,47 @@ describe('config', () => {
 
       const config = loadConfig();
 
+      expect(config.apiBaseUrl).toBeNull();
       expect(config.webhookUrl).toBeNull();
+    });
+
+    it('adds https:// protocol to API_BASE_URL without protocol', () => {
+      process.env.NODE_ENV = 'development';
+      process.env.GOOGLE_SERVICE_ACCOUNT_KEY = 'test-key';
+      process.env.GEMINI_API_KEY = 'test-gemini-key';
+      process.env.DRIVE_ROOT_FOLDER_ID = 'test-folder-id';
+      process.env.API_BASE_URL = 'example.com';
+
+      const config = loadConfig();
+
+      expect(config.apiBaseUrl).toBe('example.com');
+      expect(config.webhookUrl).toBe('https://example.com/webhooks/drive');
+    });
+
+    it('strips trailing slash from API_BASE_URL in webhook URL', () => {
+      process.env.NODE_ENV = 'development';
+      process.env.GOOGLE_SERVICE_ACCOUNT_KEY = 'test-key';
+      process.env.GEMINI_API_KEY = 'test-gemini-key';
+      process.env.DRIVE_ROOT_FOLDER_ID = 'test-folder-id';
+      process.env.API_BASE_URL = 'https://example.com/';
+
+      const config = loadConfig();
+
+      expect(config.apiBaseUrl).toBe('https://example.com/');
+      expect(config.webhookUrl).toBe('https://example.com/webhooks/drive');
+    });
+
+    it('handles http:// protocol in API_BASE_URL', () => {
+      process.env.NODE_ENV = 'development';
+      process.env.GOOGLE_SERVICE_ACCOUNT_KEY = 'test-key';
+      process.env.GEMINI_API_KEY = 'test-gemini-key';
+      process.env.DRIVE_ROOT_FOLDER_ID = 'test-folder-id';
+      process.env.API_BASE_URL = 'http://localhost:3000';
+
+      const config = loadConfig();
+
+      expect(config.apiBaseUrl).toBe('http://localhost:3000');
+      expect(config.webhookUrl).toBe('http://localhost:3000/webhooks/drive');
     });
   });
 

@@ -82,9 +82,9 @@ function validateConfig(): void {
 }
 
 /**
- * Constructs the full API URL with HTTPS protocol
+ * Constructs the full API URL
  * @param endpoint - The API endpoint path (e.g., '/api/scan')
- * @returns The full HTTPS URL
+ * @returns The full URL
  */
 function getApiUrl(endpoint: string): string {
   validateConfig();
@@ -93,7 +93,7 @@ function getApiUrl(endpoint: string): string {
   const cleanBase = API_BASE_URL.replace(/\/$/, '');
   const cleanEndpoint = endpoint.replace(/^\//, '');
 
-  return `https://${cleanBase}/${cleanEndpoint}`;
+  return `${cleanBase}/${cleanEndpoint}`;
 }
 
 /**

@@ -74,13 +74,14 @@ npm run deploy:script # Build + deploy to Dashboard
 | GEMINI_API_KEY | Yes | - |
 | DRIVE_ROOT_FOLDER_ID | Yes | - |
 | API_SECRET | Yes | - |
-| API_BASE_URL | Yes (script) | - |
+| API_BASE_URL | No | - |
 | PORT | No | 3000 |
 | LOG_LEVEL | No | INFO |
-| WEBHOOK_URL | No | - |
 | MATCH_DAYS_BEFORE | No | 10 |
 | MATCH_DAYS_AFTER | No | 60 |
 | USD_ARS_TOLERANCE_PERCENT | No | 5 |
+
+**Note:** `API_BASE_URL` enables webhooks (URL + `/webhooks/drive`) and Apps Script (domain extracted at build)
 
 ## API ENDPOINTS
 | Method | Endpoint | Auth | Description |
