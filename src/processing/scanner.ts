@@ -77,15 +77,15 @@ export async function scanFolder(folderId?: string): Promise<Result<ScanResult, 
     }
 
     const targetFolderId = folderId || folderStructure.entradaId;
-    const controlCreditosId = folderStructure.controlCreditosId;
-    const controlDebitosId = folderStructure.controlDebitosId;
+    const controlIngresosId = folderStructure.controlIngresosId;
+    const controlEgresosId = folderStructure.controlEgresosId;
 
     info('Scan configuration', {
       module: 'scanner',
       phase: 'scan-start',
       targetFolderId,
-      controlCreditosId,
-      controlDebitosId,
+      controlIngresosId,
+      controlEgresosId,
       correlationId,
     });
 
@@ -109,7 +109,7 @@ export async function scanFolder(folderId?: string): Promise<Result<ScanResult, 
     });
 
     // Get already processed file IDs from both spreadsheets
-    const processedIds = await getProcessedFileIds(controlCreditosId, controlDebitosId);
+    const processedIds = await getProcessedFileIds(controlIngresosId, controlEgresosId);
     info(`${processedIds.size} files already processed`, {
       module: 'scanner',
       phase: 'scan-start',
@@ -263,8 +263,8 @@ export async function scanFolder(folderId?: string): Promise<Result<ScanResult, 
             doc,
             processed.documentType,
             fileInfo,
-            controlCreditosId,
-            controlDebitosId,
+            controlIngresosId,
+            controlEgresosId,
             result,
             fileCorrelationId
           );
@@ -336,39 +336,39 @@ async function storeAndSortDocument(
   doc: Factura | Pago | Recibo | ResumenBancario | Retencion,
   documentType: DocumentType,
   fileInfo: { id: string; name: string },
-  controlCreditosId: string,
-  controlDebitosId: string,
+  controlIngresosId: string,
+  controlEgresosId: string,
   result: ScanResult,
   correlationId: string | undefined
 ): Promise<void> {
   // Store in appropriate sheet based on document type
-  // Creditos (money IN): factura_emitida, pago_recibido -> Control de Creditos -> Creditos folder
-  // Debitos (money OUT): factura_recibida, pago_enviado, recibo -> Control de Debitos -> Debitos folder
+  // Ingresos (money IN): factura_emitida, pago_recibido -> Control de Ingresos -> Ingresos folder
+  // Egresos (money OUT): factura_recibida, pago_enviado, recibo -> Control de Egresos -> Egresos folder
 
   if (documentType === 'factura_emitida') {
-    // Factura issued BY ADVA -> goes to Control de Creditos
+    // Factura issued BY ADVA -> goes to Control de Ingresos
     debug('Storing factura emitida', {
       module: 'scanner',
       phase: 'storage',
       fileName: fileInfo.name,
-      spreadsheetId: controlCreditosId,
+      spreadsheetId: controlIngresosId,
       cuit: (doc as Factura).cuitReceptor,
       total: (doc as Factura).importeTotal,
       date: (doc as Factura).fechaEmision,
       correlationId,
     });
-    const storeResult = await storeFactura(doc as Factura, controlCreditosId, 'Facturas Emitidas', 'factura_emitida');
+    const storeResult = await storeFactura(doc as Factura, controlIngresosId, 'Facturas Emitidas', 'factura_emitida');
     if (storeResult.ok) {
       result.facturasAdded++;
-      info('Factura emitida stored, moving to Creditos folder', {
+      info('Factura emitida stored, moving to Ingresos folder', {
         module: 'scanner',
         phase: 'storage',
         fileName: fileInfo.name,
         correlationId,
       });
-      const sortResult = await sortAndRenameDocument(doc, 'creditos', 'factura_emitida');
+      const sortResult = await sortAndRenameDocument(doc, 'ingresos', 'factura_emitida');
       if (!sortResult.success) {
-        logError('Failed to move factura to Creditos', {
+        logError('Failed to move factura to Ingresos', {
           module: 'scanner',
           phase: 'storage',
           fileName: fileInfo.name,
@@ -395,29 +395,29 @@ async function storeAndSortDocument(
       result.errors++;
     }
   } else if (documentType === 'factura_recibida') {
-    // Factura received BY ADVA -> goes to Control de Debitos
+    // Factura received BY ADVA -> goes to Control de Egresos
     debug('Storing factura recibida', {
       module: 'scanner',
       phase: 'storage',
       fileName: fileInfo.name,
-      spreadsheetId: controlDebitosId,
+      spreadsheetId: controlEgresosId,
       cuit: (doc as Factura).cuitEmisor,
       total: (doc as Factura).importeTotal,
       date: (doc as Factura).fechaEmision,
       correlationId,
     });
-    const storeResult = await storeFactura(doc as Factura, controlDebitosId, 'Facturas Recibidas', 'factura_recibida');
+    const storeResult = await storeFactura(doc as Factura, controlEgresosId, 'Facturas Recibidas', 'factura_recibida');
     if (storeResult.ok) {
       result.facturasAdded++;
-      info('Factura recibida stored, moving to Debitos folder', {
+      info('Factura recibida stored, moving to Egresos folder', {
         module: 'scanner',
         phase: 'storage',
         fileName: fileInfo.name,
         correlationId,
       });
-      const sortResult = await sortAndRenameDocument(doc, 'debitos', 'factura_recibida');
+      const sortResult = await sortAndRenameDocument(doc, 'egresos', 'factura_recibida');
       if (!sortResult.success) {
-        logError('Failed to move factura to Debitos', {
+        logError('Failed to move factura to Egresos', {
           module: 'scanner',
           phase: 'storage',
           fileName: fileInfo.name,
@@ -444,29 +444,29 @@ async function storeAndSortDocument(
       result.errors++;
     }
   } else if (documentType === 'pago_recibido') {
-    // Payment received BY ADVA -> goes to Control de Creditos
+    // Payment received BY ADVA -> goes to Control de Ingresos
     debug('Storing pago recibido', {
       module: 'scanner',
       phase: 'storage',
       fileName: fileInfo.name,
-      spreadsheetId: controlCreditosId,
+      spreadsheetId: controlIngresosId,
       banco: (doc as Pago).banco,
       amount: (doc as Pago).importePagado,
       date: (doc as Pago).fechaPago,
       correlationId,
     });
-    const storeResult = await storePago(doc as Pago, controlCreditosId, 'Pagos Recibidos', 'pago_recibido');
+    const storeResult = await storePago(doc as Pago, controlIngresosId, 'Pagos Recibidos', 'pago_recibido');
     if (storeResult.ok) {
       result.pagosAdded++;
-      info('Pago recibido stored, moving to Creditos folder', {
+      info('Pago recibido stored, moving to Ingresos folder', {
         module: 'scanner',
         phase: 'storage',
         fileName: fileInfo.name,
         correlationId,
       });
-      const sortResult = await sortAndRenameDocument(doc, 'creditos', 'pago_recibido');
+      const sortResult = await sortAndRenameDocument(doc, 'ingresos', 'pago_recibido');
       if (!sortResult.success) {
-        logError('Failed to move pago to Creditos', {
+        logError('Failed to move pago to Ingresos', {
           module: 'scanner',
           phase: 'storage',
           fileName: fileInfo.name,
@@ -493,29 +493,29 @@ async function storeAndSortDocument(
       result.errors++;
     }
   } else if (documentType === 'pago_enviado') {
-    // Payment sent BY ADVA -> goes to Control de Debitos
+    // Payment sent BY ADVA -> goes to Control de Egresos
     debug('Storing pago enviado', {
       module: 'scanner',
       phase: 'storage',
       fileName: fileInfo.name,
-      spreadsheetId: controlDebitosId,
+      spreadsheetId: controlEgresosId,
       banco: (doc as Pago).banco,
       amount: (doc as Pago).importePagado,
       date: (doc as Pago).fechaPago,
       correlationId,
     });
-    const storeResult = await storePago(doc as Pago, controlDebitosId, 'Pagos Enviados', 'pago_enviado');
+    const storeResult = await storePago(doc as Pago, controlEgresosId, 'Pagos Enviados', 'pago_enviado');
     if (storeResult.ok) {
       result.pagosAdded++;
-      info('Pago enviado stored, moving to Debitos folder', {
+      info('Pago enviado stored, moving to Egresos folder', {
         module: 'scanner',
         phase: 'storage',
         fileName: fileInfo.name,
         correlationId,
       });
-      const sortResult = await sortAndRenameDocument(doc, 'debitos', 'pago_enviado');
+      const sortResult = await sortAndRenameDocument(doc, 'egresos', 'pago_enviado');
       if (!sortResult.success) {
-        logError('Failed to move pago to Debitos', {
+        logError('Failed to move pago to Egresos', {
           module: 'scanner',
           phase: 'storage',
           fileName: fileInfo.name,
@@ -542,29 +542,29 @@ async function storeAndSortDocument(
       result.errors++;
     }
   } else if (documentType === 'recibo') {
-    // Salary receipt -> goes to Control de Debitos
+    // Salary receipt -> goes to Control de Egresos
     debug('Storing recibo', {
       module: 'scanner',
       phase: 'storage',
       fileName: fileInfo.name,
-      spreadsheetId: controlDebitosId,
+      spreadsheetId: controlEgresosId,
       employee: (doc as Recibo).nombreEmpleado,
       total: (doc as Recibo).totalNeto,
       date: (doc as Recibo).fechaPago,
       correlationId,
     });
-    const storeResult = await storeRecibo(doc as Recibo, controlDebitosId);
+    const storeResult = await storeRecibo(doc as Recibo, controlEgresosId);
     if (storeResult.ok) {
       result.recibosAdded++;
-      info('Recibo stored, moving to Debitos folder', {
+      info('Recibo stored, moving to Egresos folder', {
         module: 'scanner',
         phase: 'storage',
         fileName: fileInfo.name,
         correlationId,
       });
-      const sortResult = await sortAndRenameDocument(doc, 'debitos', 'recibo');
+      const sortResult = await sortAndRenameDocument(doc, 'egresos', 'recibo');
       if (!sortResult.success) {
-        logError('Failed to move recibo to Debitos', {
+        logError('Failed to move recibo to Egresos', {
           module: 'scanner',
           phase: 'storage',
           fileName: fileInfo.name,
@@ -617,28 +617,28 @@ async function storeAndSortDocument(
       });
     }
   } else if (documentType === 'certificado_retencion') {
-    // Tax withholding certificate -> goes to Control de Creditos
+    // Tax withholding certificate -> goes to Control de Ingresos
     debug('Storing certificado de retencion', {
       module: 'scanner',
       phase: 'storage',
       fileName: fileInfo.name,
-      spreadsheetId: controlCreditosId,
+      spreadsheetId: controlIngresosId,
       nroCertificado: (doc as Retencion).nroCertificado,
       montoRetencion: (doc as Retencion).montoRetencion,
       date: (doc as Retencion).fechaEmision,
       correlationId,
     });
-    const storeResult = await storeRetencion(doc as Retencion, controlCreditosId);
+    const storeResult = await storeRetencion(doc as Retencion, controlIngresosId);
     if (storeResult.ok) {
-      info('Retencion stored, moving to Creditos folder', {
+      info('Retencion stored, moving to Ingresos folder', {
         module: 'scanner',
         phase: 'storage',
         fileName: fileInfo.name,
         correlationId,
       });
-      const sortResult = await sortAndRenameDocument(doc, 'creditos', 'certificado_retencion');
+      const sortResult = await sortAndRenameDocument(doc, 'ingresos', 'certificado_retencion');
       if (!sortResult.success) {
-        logError('Failed to move retencion to Creditos', {
+        logError('Failed to move retencion to Ingresos', {
           module: 'scanner',
           phase: 'storage',
           fileName: fileInfo.name,

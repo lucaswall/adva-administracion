@@ -2,16 +2,16 @@
 
 Dual control spreadsheets based on money flow direction:
 
-- **Control de Creditos** - Money IN to ADVA (facturas emitidas, pagos recibidos)
-- **Control de Debitos** - Money OUT from ADVA (facturas recibidas, pagos enviados, recibos)
+- **Control de Ingresos** - Money IN to ADVA (facturas emitidas, pagos recibidos)
+- **Control de Egresos** - Money OUT from ADVA (facturas recibidas, pagos enviados, recibos)
 
 All dates ISO format (YYYY-MM-DD), timestamps ISO datetime.
 
 ---
 
-## Control de Creditos (Money IN)
+## Control de Ingresos (Money IN)
 
-Located at root: `Control de Creditos.gsheet`
+Located at root: `Control de Ingresos.gsheet`
 
 ### Facturas Emitidas (18 columns, A:R)
 
@@ -90,9 +90,9 @@ Rows sorted by `fechaEmision` descending after insert.
 
 ---
 
-## Control de Debitos (Money OUT)
+## Control de Egresos (Money OUT)
 
-Located at root: `Control de Debitos.gsheet`
+Located at root: `Control de Egresos.gsheet`
 
 ### Facturas Recibidas (19 columns, A:S)
 
@@ -205,7 +205,7 @@ Located at root: `Dashboard Operativo Contable.gsheet`
 
 ### Pagos Pendientes (10 columns, A:J)
 
-Unpaid invoices from Control de Debitos. Automatically synced after matching.
+Unpaid invoices from Control de Egresos. Automatically synced after matching.
 
 | Column | Field | Type | Description |
 |--------|-------|------|-------------|
@@ -259,13 +259,13 @@ Documents classified by ADVA's role (CUIT: 30709076783):
 
 | Document Type | ADVA's Role | Money Flow | Destination |
 |---------------|-------------|------------|-------------|
-| Factura Emitida | Emisor | IN → ADVA | Control de Creditos |
-| Factura Recibida | Receptor | OUT ← ADVA | Control de Debitos |
-| Pago Recibido | Beneficiario | IN → ADVA | Control de Creditos |
-| Pago Enviado | Pagador | OUT ← ADVA | Control de Debitos |
-| Certificado de Retencion | Sujeto Retenido | IN → ADVA | Control de Creditos |
+| Factura Emitida | Emisor | IN → ADVA | Control de Ingresos |
+| Factura Recibida | Receptor | OUT ← ADVA | Control de Egresos |
+| Pago Recibido | Beneficiario | IN → ADVA | Control de Ingresos |
+| Pago Enviado | Pagador | OUT ← ADVA | Control de Egresos |
+| Certificado de Retencion | Sujeto Retenido | IN → ADVA | Control de Ingresos |
 | Resumen Bancario | Account Holder | Both | Bancos/ folder |
-| Recibo | Empleador | OUT ← ADVA | Control de Debitos |
+| Recibo | Empleador | OUT ← ADVA | Control de Egresos |
 
 ---
 
@@ -285,10 +285,10 @@ Documents classified by ADVA's role (CUIT: 30709076783):
 
 ### Cross-References
 
-**Control de Creditos:**
+**Control de Ingresos:**
 - `Facturas Emitidas.matchedPagoFileId` ↔ `Pagos Recibidos.matchedFacturaFileId`
 
-**Control de Debitos:**
+**Control de Egresos:**
 - `Facturas Recibidas.matchedPagoFileId` ↔ `Pagos Enviados.matchedFacturaFileId`
 - `Recibos.matchedPagoFileId` ↔ `Pagos Enviados.matchedFacturaFileId`
 

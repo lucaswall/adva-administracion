@@ -1,6 +1,6 @@
 /**
  * Storage operations for retenciones (tax withholding certificates)
- * Handles writing retenciones to Control de Creditos spreadsheet
+ * Handles writing retenciones to Control de Ingresos spreadsheet
  */
 
 import type { Result, Retencion } from '../../types/index.js';
@@ -10,10 +10,10 @@ import { info } from '../../utils/logger.js';
 import { getCorrelationId } from '../../utils/correlation.js';
 
 /**
- * Stores a retencion in Control de Creditos
+ * Stores a retencion in Control de Ingresos
  *
  * @param retencion - The retencion to store
- * @param spreadsheetId - The Control de Creditos spreadsheet ID
+ * @param spreadsheetId - The Control de Ingresos spreadsheet ID
  */
 export async function storeRetencion(
   retencion: Retencion,

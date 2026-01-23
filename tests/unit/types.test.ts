@@ -53,8 +53,8 @@ describe('DocumentType', () => {
 describe('SortDestination', () => {
   it('accepts all valid sort destinations', () => {
     const validDestinations: SortDestination[] = [
-      'creditos',
-      'debitos',
+      'ingresos',
+      'egresos',
       'bancos',
       'sin_procesar',
     ];
@@ -64,14 +64,14 @@ describe('SortDestination', () => {
     });
   });
 
-  it('uses creditos instead of cobros', () => {
-    const dest: SortDestination = 'creditos';
-    expect(dest).toBe('creditos');
+  it('uses ingresos instead of cobros', () => {
+    const dest: SortDestination = 'ingresos';
+    expect(dest).toBe('ingresos');
   });
 
-  it('uses debitos instead of pagos', () => {
-    const dest: SortDestination = 'debitos';
-    expect(dest).toBe('debitos');
+  it('uses egresos instead of pagos', () => {
+    const dest: SortDestination = 'egresos';
+    expect(dest).toBe('egresos');
   });
 
   it('has bancos destination for bank statements', () => {
@@ -127,24 +127,22 @@ describe('ResumenBancario', () => {
 });
 
 describe('FolderStructure', () => {
-  it('has renamed fields for creditos and debitos', () => {
+  it('has renamed fields for ingresos and egresos', () => {
     const structure: FolderStructure = {
       rootId: 'root-id',
       entradaId: 'entrada-id',
-      creditosId: 'creditos-id',
-      debitosId: 'debitos-id',
       sinProcesarId: 'sin-procesar-id',
-      bancosId: 'bancos-id',
-      controlCreditosId: 'control-creditos-id',
-      controlDebitosId: 'control-debitos-id',
+      controlIngresosId: 'control-ingresos-id',
+      controlEgresosId: 'control-egresos-id',
+      dashboardOperativoId: 'dashboard-id',
       bankSpreadsheets: new Map(),
+      yearFolders: new Map(),
+      classificationFolders: new Map(),
       monthFolders: new Map(),
       lastRefreshed: new Date(),
     };
 
-    expect(structure.creditosId).toBe('creditos-id');
-    expect(structure.debitosId).toBe('debitos-id');
-    expect(structure.controlCreditosId).toBe('control-creditos-id');
-    expect(structure.controlDebitosId).toBe('control-debitos-id');
+    expect(structure.controlIngresosId).toBe('control-ingresos-id');
+    expect(structure.controlEgresosId).toBe('control-egresos-id');
   });
 });

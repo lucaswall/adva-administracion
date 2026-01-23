@@ -17,8 +17,8 @@ import type { Factura, Pago, Recibo, ResumenBancario, Retencion, SortDestination
 
 /** Destination folder names for path building */
 const DESTINATION_NAMES: Record<SortDestination, string> = {
-  creditos: 'Creditos',
-  debitos: 'Debitos',
+  ingresos: 'Ingresos',
+  egresos: 'Egresos',
   bancos: 'Bancos',
   sin_procesar: 'Sin Procesar',
 };
@@ -66,7 +66,7 @@ function buildTargetPath(destination: SortDestination, date?: Date): string {
     return `${year}/${DESTINATION_NAMES[destination]}`;
   }
 
-  // Creditos/Debitos: year/classification/month
+  // Ingresos/Egresos: year/classification/month
   const monthFolder = formatMonthFolder(date);
   return `${year}/${DESTINATION_NAMES[destination]}/${monthFolder}`;
 }
@@ -75,7 +75,7 @@ function buildTargetPath(destination: SortDestination, date?: Date): string {
  * Sorts a document into the appropriate folder based on destination and date
  *
  * @param doc - The document to sort (Factura, Pago, Recibo, or ResumenBancario)
- * @param destination - Target destination ('creditos', 'debitos', 'bancos', or 'sin_procesar')
+ * @param destination - Target destination ('ingresos', 'egresos', 'bancos', or 'sin_procesar')
  * @returns Sort result with success status and target info
  */
 export async function sortDocument(
@@ -117,7 +117,7 @@ export async function sortDocument(
     // Sin Procesar stays at root level
     targetFolderId = structure.sinProcesarId;
   } else {
-    // All other destinations (creditos, debitos, bancos) use year-based structure
+    // All other destinations (ingresos, egresos, bancos) use year-based structure
     const monthFolderResult = await getOrCreateMonthFolder(destination, docDate);
     if (!monthFolderResult.ok) {
       return {
@@ -208,7 +208,7 @@ type SortableDocumentWithType = Factura | Pago | Recibo | ResumenBancario | Rete
  * Sorts a document and renames it with a standardized name
  *
  * @param doc - The document to sort and rename
- * @param destination - Target destination ('creditos', 'debitos', 'bancos', or 'sin_procesar')
+ * @param destination - Target destination ('ingresos', 'egresos', 'bancos', or 'sin_procesar')
  * @param documentType - The type of document for proper naming
  * @returns Sort result with success status and target info
  */

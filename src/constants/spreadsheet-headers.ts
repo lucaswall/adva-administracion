@@ -152,10 +152,10 @@ export interface SheetConfig {
 }
 
 /**
- * Required sheets for Control de Creditos spreadsheet
- * Creditos = money coming IN to ADVA (facturas emitidas, pagos recibidos, retenciones)
+ * Required sheets for Control de Ingresos spreadsheet
+ * Ingresos = money coming IN to ADVA (facturas emitidas, pagos recibidos, retenciones)
  */
-export const CONTROL_CREDITOS_SHEETS: SheetConfig[] = [
+export const CONTROL_INGRESOS_SHEETS: SheetConfig[] = [
   {
     title: 'Facturas Emitidas',
     headers: FACTURA_EMITIDA_HEADERS,
@@ -174,10 +174,10 @@ export const CONTROL_CREDITOS_SHEETS: SheetConfig[] = [
 ];
 
 /**
- * Required sheets for Control de Debitos spreadsheet
- * Debitos = money going OUT from ADVA (facturas recibidas, pagos enviados, recibos)
+ * Required sheets for Control de Egresos spreadsheet
+ * Egresos = money going OUT from ADVA (facturas recibidas, pagos enviados, recibos)
  */
-export const CONTROL_DEBITOS_SHEETS: SheetConfig[] = [
+export const CONTROL_EGRESOS_SHEETS: SheetConfig[] = [
   {
     title: 'Facturas Recibidas',
     headers: FACTURA_RECIBIDA_HEADERS,
@@ -222,7 +222,7 @@ export const USO_API_HEADERS = [
   'errorMessage',
 ];
 
-/** Headers for Pagos Pendientes sheet - unpaid invoices from Control de Debitos */
+/** Headers for Pagos Pendientes sheet - unpaid invoices from Control de Egresos */
 export const PAGOS_PENDIENTES_HEADERS = [
   'fechaEmision',
   'fileId',

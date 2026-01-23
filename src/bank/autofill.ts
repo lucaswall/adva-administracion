@@ -169,25 +169,25 @@ export async function autoFillBankMovements(
 
   const config = getConfig();
   const matcher = new BankMovementMatcher(config.usdArsTolerancePercent);
-  const controlCreditosId = folderStructure.controlCreditosId;
-  const controlDebitosId = folderStructure.controlDebitosId;
+  const controlIngresosId = folderStructure.controlIngresosId;
+  const controlEgresosId = folderStructure.controlEgresosId;
 
   // Get all document data from both control spreadsheets
-  // Control de Creditos: Facturas Emitidas (issued by ADVA), Pagos Recibidos (received by ADVA)
-  // Control de Debitos: Facturas Recibidas (received by ADVA), Pagos Enviados (sent by ADVA), Recibos
-  const facturasEmitidasResult = await getValues(controlCreditosId, 'Facturas Emitidas!A:W');
+  // Control de Ingresos: Facturas Emitidas (issued by ADVA), Pagos Recibidos (received by ADVA)
+  // Control de Egresos: Facturas Recibidas (received by ADVA), Pagos Enviados (sent by ADVA), Recibos
+  const facturasEmitidasResult = await getValues(controlIngresosId, 'Facturas Emitidas!A:W');
   if (!facturasEmitidasResult.ok) return facturasEmitidasResult;
 
-  const facturasRecibidasResult = await getValues(controlDebitosId, 'Facturas Recibidas!A:W');
+  const facturasRecibidasResult = await getValues(controlEgresosId, 'Facturas Recibidas!A:W');
   if (!facturasRecibidasResult.ok) return facturasRecibidasResult;
 
-  const pagosRecibidosResult = await getValues(controlCreditosId, 'Pagos Recibidos!A:R');
+  const pagosRecibidosResult = await getValues(controlIngresosId, 'Pagos Recibidos!A:R');
   if (!pagosRecibidosResult.ok) return pagosRecibidosResult;
 
-  const pagosEnviadosResult = await getValues(controlDebitosId, 'Pagos Enviados!A:R');
+  const pagosEnviadosResult = await getValues(controlEgresosId, 'Pagos Enviados!A:R');
   if (!pagosEnviadosResult.ok) return pagosEnviadosResult;
 
-  const recibosResult = await getValues(controlDebitosId, 'Recibos!A:S');
+  const recibosResult = await getValues(controlEgresosId, 'Recibos!A:S');
   if (!recibosResult.ok) return recibosResult;
 
   // Combine facturas from both spreadsheets for matching

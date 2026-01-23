@@ -1,6 +1,6 @@
 /**
  * Storage operations for pagos
- * Handles writing pagos to Control de Creditos/Debitos spreadsheets
+ * Handles writing pagos to Control de Ingresos/Egresos spreadsheets
  */
 
 import type { Result, Pago } from '../../types/index.js';
@@ -59,7 +59,7 @@ async function isDuplicatePago(
  * Stores a pago in the appropriate Control spreadsheet
  *
  * @param pago - The pago to store
- * @param spreadsheetId - The spreadsheet ID (Control de Creditos or Control de Debitos)
+ * @param spreadsheetId - The spreadsheet ID (Control de Ingresos or Control de Egresos)
  * @param sheetName - The sheet name ('Pagos Recibidos' or 'Pagos Enviados')
  * @param documentType - The document type for filename generation
  */

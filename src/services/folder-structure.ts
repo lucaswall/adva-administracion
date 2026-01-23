@@ -7,7 +7,7 @@ import { getConfig } from '../config.js';
 import { findByName, listByMimeType, createFolder, createSpreadsheet } from './drive.js';
 import { getSheetMetadata, createSheet, setValues, getValues, formatSheet, deleteSheet, moveSheetToFirst } from './sheets.js';
 import { formatMonthFolder } from '../utils/spanish-date.js';
-import { CONTROL_CREDITOS_SHEETS, CONTROL_DEBITOS_SHEETS, DASHBOARD_OPERATIVO_SHEETS } from '../constants/spreadsheet-headers.js';
+import { CONTROL_INGRESOS_SHEETS, CONTROL_EGRESOS_SHEETS, DASHBOARD_OPERATIVO_SHEETS } from '../constants/spreadsheet-headers.js';
 import type { FolderStructure, Result, SortDestination } from '../types/index.js';
 import { debug, info, error as logError } from '../utils/logger.js';
 import { withLock } from '../utils/concurrency.js';
@@ -21,16 +21,16 @@ const SPREADSHEET_MIME = 'application/vnd.google-apps.spreadsheet';
 /** Required folder names */
 const FOLDER_NAMES = {
   entrada: 'Entrada',
-  creditos: 'Creditos',
-  debitos: 'Debitos',
+  ingresos: 'Ingresos',
+  egresos: 'Egresos',
   sinProcesar: 'Sin Procesar',
   bancos: 'Bancos',
 } as const;
 
 /** Required spreadsheet names */
 const SPREADSHEET_NAMES = {
-  controlCreditos: 'Control de Creditos',
-  controlDebitos: 'Control de Debitos',
+  controlIngresos: 'Control de Ingresos',
+  controlEgresos: 'Control de Egresos',
   dashboardOperativo: 'Dashboard Operativo Contable',
 } as const;
 
@@ -385,22 +385,22 @@ export async function discoverFolderStructure(): Promise<Result<FolderStructure,
   if (!sinProcesarResult.ok) return sinProcesarResult;
 
   // Find or create control spreadsheets (at root level)
-  const controlCreditosResult = await findOrCreateSpreadsheet(rootId, SPREADSHEET_NAMES.controlCreditos);
-  if (!controlCreditosResult.ok) return controlCreditosResult;
+  const controlIngresosResult = await findOrCreateSpreadsheet(rootId, SPREADSHEET_NAMES.controlIngresos);
+  if (!controlIngresosResult.ok) return controlIngresosResult;
 
-  const controlDebitosResult = await findOrCreateSpreadsheet(rootId, SPREADSHEET_NAMES.controlDebitos);
-  if (!controlDebitosResult.ok) return controlDebitosResult;
+  const controlEgresosResult = await findOrCreateSpreadsheet(rootId, SPREADSHEET_NAMES.controlEgresos);
+  if (!controlEgresosResult.ok) return controlEgresosResult;
 
   // Find or create Dashboard Operativo Contable spreadsheet (at root level)
   const dashboardOperativoResult = await findOrCreateSpreadsheet(rootId, SPREADSHEET_NAMES.dashboardOperativo);
   if (!dashboardOperativoResult.ok) return dashboardOperativoResult;
 
   // Ensure required sheets exist in both control spreadsheets
-  const ensureCreditosSheetsResult = await ensureSheetsExist(controlCreditosResult.value, CONTROL_CREDITOS_SHEETS);
-  if (!ensureCreditosSheetsResult.ok) return ensureCreditosSheetsResult;
+  const ensureIngresosSheetsResult = await ensureSheetsExist(controlIngresosResult.value, CONTROL_INGRESOS_SHEETS);
+  if (!ensureIngresosSheetsResult.ok) return ensureIngresosSheetsResult;
 
-  const ensureDebitosSheetsResult = await ensureSheetsExist(controlDebitosResult.value, CONTROL_DEBITOS_SHEETS);
-  if (!ensureDebitosSheetsResult.ok) return ensureDebitosSheetsResult;
+  const ensureEgresosSheetsResult = await ensureSheetsExist(controlEgresosResult.value, CONTROL_EGRESOS_SHEETS);
+  if (!ensureEgresosSheetsResult.ok) return ensureEgresosSheetsResult;
 
   // Initialize Dashboard Operativo Contable with sheets and data
   const initializeDashboardResult = await initializeDashboardOperativo(dashboardOperativoResult.value);
@@ -413,8 +413,8 @@ export async function discoverFolderStructure(): Promise<Result<FolderStructure,
   const bankSpreadsheets = new Map<string, string>();
   for (const sheet of bankSpreadsheetsResult.value) {
     // Skip control spreadsheets and dashboard
-    if (sheet.name === SPREADSHEET_NAMES.controlCreditos ||
-        sheet.name === SPREADSHEET_NAMES.controlDebitos ||
+    if (sheet.name === SPREADSHEET_NAMES.controlIngresos ||
+        sheet.name === SPREADSHEET_NAMES.controlEgresos ||
         sheet.name === SPREADSHEET_NAMES.dashboardOperativo) {
       continue;
     }
@@ -426,8 +426,8 @@ export async function discoverFolderStructure(): Promise<Result<FolderStructure,
     rootId,
     entradaId: entradaResult.value,
     sinProcesarId: sinProcesarResult.value,
-    controlCreditosId: controlCreditosResult.value,
-    controlDebitosId: controlDebitosResult.value,
+    controlIngresosId: controlIngresosResult.value,
+    controlEgresosId: controlEgresosResult.value,
     dashboardOperativoId: dashboardOperativoResult.value,
     bankSpreadsheets,
     yearFolders: new Map(),
@@ -442,8 +442,8 @@ export async function discoverFolderStructure(): Promise<Result<FolderStructure,
     phase: 'discovery',
     entradaId: entradaResult.value,
     sinProcesarId: sinProcesarResult.value,
-    controlCreditosId: controlCreditosResult.value,
-    controlDebitosId: controlDebitosResult.value,
+    controlIngresosId: controlIngresosResult.value,
+    controlEgresosId: controlEgresosResult.value,
     dashboardOperativoId: dashboardOperativoResult.value,
     bankSpreadsheets: bankSpreadsheets.size
   });
@@ -452,7 +452,7 @@ export async function discoverFolderStructure(): Promise<Result<FolderStructure,
 
 /**
  * Ensures all classification folders exist in a year folder
- * Creates Creditos, Debitos, and Bancos folders if they don't exist
+ * Creates Ingresos, Egresos, and Bancos folders if they don't exist
  *
  * @param yearFolderId - Year folder ID
  * @param year - Year string (e.g., "2024")
@@ -469,7 +469,7 @@ async function ensureClassificationFolders(
     };
   }
 
-  const classifications: Array<keyof typeof FOLDER_NAMES> = ['creditos', 'debitos', 'bancos'];
+  const classifications: Array<keyof typeof FOLDER_NAMES> = ['ingresos', 'egresos', 'bancos'];
 
   for (const classification of classifications) {
     const cacheKey = `${year}:${classification}`;
@@ -534,7 +534,7 @@ async function ensureClassificationFolders(
  * Gets or creates a month folder for a destination
  * Implements year-based folder structure: {year}/{classification}/{month}/
  *
- * @param destination - Sort destination ('creditos', 'debitos', 'bancos', or 'sin_procesar')
+ * @param destination - Sort destination ('ingresos', 'egresos', 'bancos', or 'sin_procesar')
  * @param date - Date to determine the year and month
  * @returns Folder ID for the target location
  */
@@ -625,7 +625,7 @@ export async function getOrCreateMonthFolder(
     return { ok: true, value: classificationFolderId };
   }
 
-  // For creditos and debitos, create/find month folder
+  // For ingresos and egresos, create/find month folder
   const monthName = formatMonthFolder(date);
   const monthCacheKey = `${year}:${destination}:${monthName}`;
 

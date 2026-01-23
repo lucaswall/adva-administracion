@@ -13,12 +13,12 @@ export { storeRetencion } from './retencion-store.js';
 /**
  * Gets list of already processed file IDs from both control spreadsheets
  *
- * @param controlCreditosId - Control de Creditos spreadsheet ID
- * @param controlDebitosId - Control de Debitos spreadsheet ID
+ * @param controlIngresosId - Control de Ingresos spreadsheet ID
+ * @param controlEgresosId - Control de Egresos spreadsheet ID
  */
 export async function getProcessedFileIds(
-  controlCreditosId: string,
-  controlDebitosId: string
+  controlIngresosId: string,
+  controlEgresosId: string
 ): Promise<Set<string>> {
   const processedIds = new Set<string>();
 
@@ -37,15 +37,15 @@ export async function getProcessedFileIds(
     }
   };
 
-  // Get from Control de Creditos
-  await extractFileIds(controlCreditosId, 'Facturas Emitidas');
-  await extractFileIds(controlCreditosId, 'Pagos Recibidos');
-  await extractFileIds(controlCreditosId, 'Retenciones Recibidas');
+  // Get from Control de Ingresos
+  await extractFileIds(controlIngresosId, 'Facturas Emitidas');
+  await extractFileIds(controlIngresosId, 'Pagos Recibidos');
+  await extractFileIds(controlIngresosId, 'Retenciones Recibidas');
 
-  // Get from Control de Debitos
-  await extractFileIds(controlDebitosId, 'Facturas Recibidas');
-  await extractFileIds(controlDebitosId, 'Pagos Enviados');
-  await extractFileIds(controlDebitosId, 'Recibos');
+  // Get from Control de Egresos
+  await extractFileIds(controlEgresosId, 'Facturas Recibidas');
+  await extractFileIds(controlEgresosId, 'Pagos Enviados');
+  await extractFileIds(controlEgresosId, 'Recibos');
 
   return processedIds;
 }

@@ -68,7 +68,7 @@ describe('syncPagosPendientes', () => {
       value: 20, // 2 rows * 10 columns
     });
 
-    const result = await syncPagosPendientes('debitos123', 'dashboard456');
+    const result = await syncPagosPendientes('egresos123', 'dashboard456');
 
     expect(result.ok).toBe(true);
     if (result.ok) {
@@ -77,7 +77,7 @@ describe('syncPagosPendientes', () => {
 
     // Should read facturas recibidas
     expect(sheets.getValues).toHaveBeenCalledWith(
-      'debitos123',
+      'egresos123',
       'Facturas Recibidas!A:S'
     );
 
@@ -108,7 +108,7 @@ describe('syncPagosPendientes', () => {
       value: [['header1', 'header2']], // Only header row
     });
 
-    const result = await syncPagosPendientes('debitos123', 'dashboard456');
+    const result = await syncPagosPendientes('egresos123', 'dashboard456');
 
     expect(result.ok).toBe(true);
     if (result.ok) {
@@ -143,7 +143,7 @@ describe('syncPagosPendientes', () => {
       value: undefined,
     });
 
-    const result = await syncPagosPendientes('debitos123', 'dashboard456');
+    const result = await syncPagosPendientes('egresos123', 'dashboard456');
 
     expect(result.ok).toBe(true);
     if (result.ok) {
@@ -161,7 +161,7 @@ describe('syncPagosPendientes', () => {
       error: new Error('Failed to read sheet'),
     });
 
-    const result = await syncPagosPendientes('debitos123', 'dashboard456');
+    const result = await syncPagosPendientes('egresos123', 'dashboard456');
 
     expect(result.ok).toBe(false);
     if (!result.ok) {
@@ -185,7 +185,7 @@ describe('syncPagosPendientes', () => {
       error: new Error('Failed to clear sheet'),
     });
 
-    const result = await syncPagosPendientes('debitos123', 'dashboard456');
+    const result = await syncPagosPendientes('egresos123', 'dashboard456');
 
     expect(result.ok).toBe(false);
     if (!result.ok) {
@@ -214,7 +214,7 @@ describe('syncPagosPendientes', () => {
       error: new Error('Failed to append rows'),
     });
 
-    const result = await syncPagosPendientes('debitos123', 'dashboard456');
+    const result = await syncPagosPendientes('egresos123', 'dashboard456');
 
     expect(result.ok).toBe(false);
     if (!result.ok) {
@@ -246,7 +246,7 @@ describe('syncPagosPendientes', () => {
       value: 10,
     });
 
-    await syncPagosPendientes('debitos123', 'dashboard456');
+    await syncPagosPendientes('egresos123', 'dashboard456');
 
     // Verify column mapping: fechaEmision, fileId, fileName, tipoComprobante,
     // nroFactura, cuitEmisor, razonSocialEmisor, importeTotal, moneda, concepto

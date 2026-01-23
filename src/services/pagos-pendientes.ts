@@ -1,6 +1,6 @@
 /**
  * Pagos Pendientes service
- * Syncs unpaid invoices from Control de Debitos to Dashboard's Pagos Pendientes sheet
+ * Syncs unpaid invoices from Control de Egresos to Dashboard's Pagos Pendientes sheet
  */
 
 import type { Result } from '../types/index.js';
@@ -11,12 +11,12 @@ import { getCorrelationId } from '../utils/correlation.js';
 /**
  * Syncs unpaid invoices (facturas recibidas) to Dashboard's Pagos Pendientes sheet
  *
- * @param controlDebitosId - Control de Debitos spreadsheet ID
+ * @param controlEgresosId - Control de Egresos spreadsheet ID
  * @param dashboardId - Dashboard Operativo spreadsheet ID
  * @returns Number of pending payments synced
  */
 export async function syncPagosPendientes(
-  controlDebitosId: string,
+  controlEgresosId: string,
   dashboardId: string
 ): Promise<Result<number, Error>> {
   const correlationId = getCorrelationId();
@@ -25,14 +25,14 @@ export async function syncPagosPendientes(
     info('Starting Pagos Pendientes sync', {
       module: 'pagos-pendientes',
       phase: 'sync',
-      controlDebitosId,
+      controlEgresosId,
       dashboardId,
       correlationId,
     });
 
     // 1. Read all facturas recibidas (A:S)
     const facturasResult = await getValues(
-      controlDebitosId,
+      controlEgresosId,
       'Facturas Recibidas!A:S'
     );
 

@@ -1,6 +1,6 @@
 /**
  * Storage operations for recibos
- * Handles writing recibos to Control de Debitos spreadsheet
+ * Handles writing recibos to Control de Egresos spreadsheet
  */
 
 import type { Result, Recibo } from '../../types/index.js';
@@ -11,10 +11,10 @@ import { info, warn } from '../../utils/logger.js';
 import { getCorrelationId } from '../../utils/correlation.js';
 
 /**
- * Stores a recibo in the Control de Debitos spreadsheet
+ * Stores a recibo in the Control de Egresos spreadsheet
  *
  * @param recibo - The recibo to store
- * @param spreadsheetId - The Control de Debitos spreadsheet ID
+ * @param spreadsheetId - The Control de Egresos spreadsheet ID
  */
 export async function storeRecibo(
   recibo: Recibo,

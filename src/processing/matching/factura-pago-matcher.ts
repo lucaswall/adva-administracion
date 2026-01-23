@@ -213,7 +213,7 @@ async function processCascadingFacturaDisplacements(
 /**
  * Matches facturas with pagos in a single spreadsheet
  *
- * @param spreadsheetId - Spreadsheet ID (Control de Creditos or Control de Debitos)
+ * @param spreadsheetId - Spreadsheet ID (Control de Ingresos or Control de Egresos)
  * @param facturasSheetName - Facturas sheet name ('Facturas Emitidas' or 'Facturas Recibidas')
  * @param pagosSheetName - Pagos sheet name ('Pagos Recibidos' or 'Pagos Enviados')
  * @param facturaCuitField - CUIT field name in factura to match (e.g., 'cuitReceptor' or 'cuitEmisor')

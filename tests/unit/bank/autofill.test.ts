@@ -42,12 +42,12 @@ describe('autoFillBankMovements', () => {
   const mockFolderStructure = {
     rootId: 'root-id',
     entradaId: 'entrada-id',
-    creditosId: 'creditos-id',
-    debitosId: 'debitos-id',
+    ingresosId: 'ingresos-id',
+    egresosId: 'egresos-id',
     sinProcesarId: 'sin-procesar-id',
     bancosId: 'bancos-id',
-    controlCreditosId: 'control-creditos-id',
-    controlDebitosId: 'control-debitos-id',
+    controlIngresosId: 'control-ingresos-id',
+    controlEgresosId: 'control-egresos-id',
     bankSpreadsheets: new Map([
       ['BBVA', 'bbva-sheet-id'],
       ['Santander', 'santander-sheet-id'],
@@ -239,21 +239,21 @@ describe('autoFillBankMovements', () => {
   });
 
   describe('data fetching', () => {
-    it('fetches from Control de Creditos spreadsheet', async () => {
+    it('fetches from Control de Ingresos spreadsheet', async () => {
       await autoFillBankMovements();
 
       // Should fetch Facturas Emitidas and Pagos Recibidos
-      expect(mockGetValues).toHaveBeenCalledWith('control-creditos-id', 'Facturas Emitidas!A:W');
-      expect(mockGetValues).toHaveBeenCalledWith('control-creditos-id', 'Pagos Recibidos!A:R');
+      expect(mockGetValues).toHaveBeenCalledWith('control-ingresos-id', 'Facturas Emitidas!A:W');
+      expect(mockGetValues).toHaveBeenCalledWith('control-ingresos-id', 'Pagos Recibidos!A:R');
     });
 
-    it('fetches from Control de Debitos spreadsheet', async () => {
+    it('fetches from Control de Egresos spreadsheet', async () => {
       await autoFillBankMovements();
 
       // Should fetch Facturas Recibidas, Pagos Enviados, and Recibos
-      expect(mockGetValues).toHaveBeenCalledWith('control-debitos-id', 'Facturas Recibidas!A:W');
-      expect(mockGetValues).toHaveBeenCalledWith('control-debitos-id', 'Pagos Enviados!A:R');
-      expect(mockGetValues).toHaveBeenCalledWith('control-debitos-id', 'Recibos!A:S');
+      expect(mockGetValues).toHaveBeenCalledWith('control-egresos-id', 'Facturas Recibidas!A:W');
+      expect(mockGetValues).toHaveBeenCalledWith('control-egresos-id', 'Pagos Enviados!A:R');
+      expect(mockGetValues).toHaveBeenCalledWith('control-egresos-id', 'Recibos!A:S');
     });
 
     it('fetches bank movements from correct sheet', async () => {

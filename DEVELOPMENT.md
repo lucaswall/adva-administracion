@@ -165,7 +165,7 @@ tests/unit/                # Unit tests mirroring src/ structure
 ### Module Responsibilities
 
 - **types/**: TypeScript interfaces (DocumentType with direction awareness)
-- **constants/**: Spreadsheet header definitions (Creditos/Debitos split)
+- **constants/**: Spreadsheet header definitions (Ingresos/Egresos split)
 - **gemini/**: PDF to structured data extraction (direction-aware classification)
 - **services/**: Google APIs integration (dual spreadsheet support)
 - **matching/**: Invoice-payment matching and scoring

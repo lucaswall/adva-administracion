@@ -187,9 +187,9 @@ async function processCascadingReciboDisplacements(
 }
 
 /**
- * Matches recibos with pagos enviados in Control de Debitos
+ * Matches recibos with pagos enviados in Control de Egresos
  *
- * @param spreadsheetId - Control de Debitos spreadsheet ID
+ * @param spreadsheetId - Control de Egresos spreadsheet ID
  * @param config - Configuration with matching parameters
  * @returns Number of matches found
  */

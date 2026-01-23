@@ -11,8 +11,8 @@ import {
   RECIBO_HEADERS,
   RESUMEN_BANCARIO_HEADERS,
   PAGOS_PENDIENTES_HEADERS,
-  CONTROL_CREDITOS_SHEETS,
-  CONTROL_DEBITOS_SHEETS,
+  CONTROL_INGRESOS_SHEETS,
+  CONTROL_EGRESOS_SHEETS,
   DASHBOARD_OPERATIVO_SHEETS,
 } from '../../../src/constants/spreadsheet-headers.js';
 
@@ -208,25 +208,25 @@ describe('spreadsheet-headers', () => {
     });
   });
 
-  describe('CONTROL_CREDITOS_SHEETS', () => {
+  describe('CONTROL_INGRESOS_SHEETS', () => {
     it('has 3 sheet configurations', () => {
-      expect(CONTROL_CREDITOS_SHEETS).toHaveLength(3);
+      expect(CONTROL_INGRESOS_SHEETS).toHaveLength(3);
     });
 
     it('contains Facturas Emitidas sheet with correct headers', () => {
-      const sheet = CONTROL_CREDITOS_SHEETS.find(s => s.title === 'Facturas Emitidas');
+      const sheet = CONTROL_INGRESOS_SHEETS.find(s => s.title === 'Facturas Emitidas');
       expect(sheet).toBeDefined();
       expect(sheet?.headers).toBe(FACTURA_EMITIDA_HEADERS);
     });
 
     it('contains Pagos Recibidos sheet with correct headers', () => {
-      const sheet = CONTROL_CREDITOS_SHEETS.find(s => s.title === 'Pagos Recibidos');
+      const sheet = CONTROL_INGRESOS_SHEETS.find(s => s.title === 'Pagos Recibidos');
       expect(sheet).toBeDefined();
       expect(sheet?.headers).toBe(PAGO_RECIBIDO_HEADERS);
     });
 
     it('all sheet configs have title and headers', () => {
-      CONTROL_CREDITOS_SHEETS.forEach(sheet => {
+      CONTROL_INGRESOS_SHEETS.forEach(sheet => {
         expect(sheet.title).toBeTruthy();
         expect(Array.isArray(sheet.headers)).toBe(true);
         expect(sheet.headers.length).toBeGreaterThan(0);
@@ -234,31 +234,31 @@ describe('spreadsheet-headers', () => {
     });
   });
 
-  describe('CONTROL_DEBITOS_SHEETS', () => {
+  describe('CONTROL_EGRESOS_SHEETS', () => {
     it('has 3 sheet configurations', () => {
-      expect(CONTROL_DEBITOS_SHEETS).toHaveLength(3);
+      expect(CONTROL_EGRESOS_SHEETS).toHaveLength(3);
     });
 
     it('contains Facturas Recibidas sheet with correct headers', () => {
-      const sheet = CONTROL_DEBITOS_SHEETS.find(s => s.title === 'Facturas Recibidas');
+      const sheet = CONTROL_EGRESOS_SHEETS.find(s => s.title === 'Facturas Recibidas');
       expect(sheet).toBeDefined();
       expect(sheet?.headers).toBe(FACTURA_RECIBIDA_HEADERS);
     });
 
     it('contains Pagos Enviados sheet with correct headers', () => {
-      const sheet = CONTROL_DEBITOS_SHEETS.find(s => s.title === 'Pagos Enviados');
+      const sheet = CONTROL_EGRESOS_SHEETS.find(s => s.title === 'Pagos Enviados');
       expect(sheet).toBeDefined();
       expect(sheet?.headers).toBe(PAGO_ENVIADO_HEADERS);
     });
 
     it('contains Recibos sheet', () => {
-      const sheet = CONTROL_DEBITOS_SHEETS.find(s => s.title === 'Recibos');
+      const sheet = CONTROL_EGRESOS_SHEETS.find(s => s.title === 'Recibos');
       expect(sheet).toBeDefined();
       expect(sheet?.headers).toBe(RECIBO_HEADERS);
     });
 
     it('all sheet configs have title and headers', () => {
-      CONTROL_DEBITOS_SHEETS.forEach(sheet => {
+      CONTROL_EGRESOS_SHEETS.forEach(sheet => {
         expect(sheet.title).toBeTruthy();
         expect(Array.isArray(sheet.headers)).toBe(true);
         expect(sheet.headers.length).toBeGreaterThan(0);

@@ -20,13 +20,13 @@ export type LogLevel = 'DEBUG' | 'INFO' | 'WARN' | 'ERROR';
  * Document types that can be processed
  *
  * Extended classification (Phase 4):
- * - factura_emitida: Invoice FROM ADVA (ADVA is emisor) → goes to Creditos
- * - factura_recibida: Invoice TO ADVA (ADVA is receptor) → goes to Debitos
- * - pago_enviado: Payment BY ADVA → goes to Debitos
- * - pago_recibido: Payment TO ADVA → goes to Creditos
+ * - factura_emitida: Invoice FROM ADVA (ADVA is emisor) → goes to Ingresos
+ * - factura_recibida: Invoice TO ADVA (ADVA is receptor) → goes to Egresos
+ * - pago_enviado: Payment BY ADVA → goes to Egresos
+ * - pago_recibido: Payment TO ADVA → goes to Ingresos
  * - resumen_bancario: Bank statement → goes to Bancos
- * - recibo: Salary receipt → goes to Debitos
- * - certificado_retencion: Tax withholding certificate → goes to Creditos
+ * - recibo: Salary receipt → goes to Egresos
+ * - certificado_retencion: Tax withholding certificate → goes to Ingresos
  */
 export type DocumentType =
   | 'factura_emitida'    // Invoice FROM ADVA (ADVA is emisor)
@@ -783,21 +783,21 @@ export interface SubdiarioMatchResult {
 /**
  * Sort destination types for document sorting
  *
- * Renamed from Cobros/Pagos to Creditos/Debitos (Phase 5):
- * - creditos: Money coming IN to ADVA (facturas emitidas, pagos recibidos)
- * - debitos: Money going OUT from ADVA (facturas recibidas, pagos enviados, recibos)
+ * Renamed from Cobros/Pagos to Ingresos/Egresos (Phase 5):
+ * - ingresos: Money coming IN to ADVA (facturas emitidas, pagos recibidos)
+ * - egresos: Money going OUT from ADVA (facturas recibidas, pagos enviados, recibos)
  * - bancos: Bank statements (resumenes bancarios)
  * - sin_procesar: Unprocessed/unrecognized documents
  */
-export type SortDestination = 'creditos' | 'debitos' | 'bancos' | 'sin_procesar';
+export type SortDestination = 'ingresos' | 'egresos' | 'bancos' | 'sin_procesar';
 
 /**
  * Cached folder structure for Drive operations
  * Represents the discovered folder hierarchy
  *
- * Renamed from Cobros/Pagos to Creditos/Debitos (Phase 5):
- * - Creditos: Money coming IN to ADVA
- * - Debitos: Money going OUT from ADVA
+ * Renamed from Cobros/Pagos to Ingresos/Egresos (Phase 5):
+ * - Ingresos: Money coming IN to ADVA
+ * - Egresos: Money going OUT from ADVA
  */
 export interface FolderStructure {
   /** Root folder ID */
@@ -806,19 +806,19 @@ export interface FolderStructure {
   entradaId: string;
   /** Sin Procesar (unprocessed) folder ID - stays at root */
   sinProcesarId: string;
-  /** Control de Creditos spreadsheet ID - stays at root */
-  controlCreditosId: string;
-  /** Control de Debitos spreadsheet ID - stays at root */
-  controlDebitosId: string;
+  /** Control de Ingresos spreadsheet ID - stays at root */
+  controlIngresosId: string;
+  /** Control de Egresos spreadsheet ID - stays at root */
+  controlEgresosId: string;
   /** Dashboard Operativo Contable spreadsheet ID - stays at root */
   dashboardOperativoId: string;
   /** Map of bank spreadsheet names to IDs */
   bankSpreadsheets: Map<string, string>;
   /** Cache of year folders by year (e.g., "2024" -> folder ID) */
   yearFolders: Map<string, string>;
-  /** Cache of classification folders by year:classification key (e.g., "2024:creditos" -> folder ID) */
+  /** Cache of classification folders by year:classification key (e.g., "2024:ingresos" -> folder ID) */
   classificationFolders: Map<string, string>;
-  /** Cache of month folders by year:destination:month key (e.g., "2024:creditos:01 - Enero" -> folder ID) */
+  /** Cache of month folders by year:destination:month key (e.g., "2024:ingresos:01 - Enero" -> folder ID) */
   monthFolders: Map<string, string>;
   /** When the structure was last refreshed */
   lastRefreshed: Date;

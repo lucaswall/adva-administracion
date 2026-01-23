@@ -37,22 +37,22 @@ export async function runMatching(
   info('Starting comprehensive matching', {
     module: 'matching',
     phase: 'auto-match',
-    controlCreditosId: folderStructure.controlCreditosId,
-    controlDebitosId: folderStructure.controlDebitosId,
+    controlIngresosId: folderStructure.controlIngresosId,
+    controlEgresosId: folderStructure.controlEgresosId,
     correlationId,
   });
 
   let totalMatches = 0;
 
-  // Match Debitos: Facturas Recibidas ↔ Pagos Enviados
+  // Match Egresos: Facturas Recibidas ↔ Pagos Enviados
   debug('Matching Facturas Recibidas with Pagos Enviados', {
     module: 'matching',
     phase: 'auto-match',
     correlationId,
   });
 
-  const debitosFacturaMatches = await matchFacturasWithPagos(
-    folderStructure.controlDebitosId,
+  const egresosFacturaMatches = await matchFacturasWithPagos(
+    folderStructure.controlEgresosId,
     'Facturas Recibidas',
     'Pagos Enviados',
     'cuitEmisor',       // Factura field to match
@@ -60,27 +60,27 @@ export async function runMatching(
     config
   );
 
-  if (!debitosFacturaMatches.ok) {
-    return debitosFacturaMatches;
+  if (!egresosFacturaMatches.ok) {
+    return egresosFacturaMatches;
   }
 
-  totalMatches += debitosFacturaMatches.value;
-  debug('Debitos factura matches complete', {
+  totalMatches += egresosFacturaMatches.value;
+  debug('Egresos factura matches complete', {
     module: 'matching',
     phase: 'auto-match',
-    matchesFound: debitosFacturaMatches.value,
+    matchesFound: egresosFacturaMatches.value,
     correlationId,
   });
 
-  // Match Creditos: Facturas Emitidas ↔ Pagos Recibidos
+  // Match Ingresos: Facturas Emitidas ↔ Pagos Recibidos
   debug('Matching Facturas Emitidas with Pagos Recibidos', {
     module: 'matching',
     phase: 'auto-match',
     correlationId,
   });
 
-  const creditosMatches = await matchFacturasWithPagos(
-    folderStructure.controlCreditosId,
+  const ingresosMatches = await matchFacturasWithPagos(
+    folderStructure.controlIngresosId,
     'Facturas Emitidas',
     'Pagos Recibidos',
     'cuitReceptor',  // Factura field to match
@@ -88,19 +88,19 @@ export async function runMatching(
     config
   );
 
-  if (!creditosMatches.ok) {
-    return creditosMatches;
+  if (!ingresosMatches.ok) {
+    return ingresosMatches;
   }
 
-  totalMatches += creditosMatches.value;
-  debug('Creditos matches complete', {
+  totalMatches += ingresosMatches.value;
+  debug('Ingresos matches complete', {
     module: 'matching',
     phase: 'auto-match',
-    matchesFound: creditosMatches.value,
+    matchesFound: ingresosMatches.value,
     correlationId,
   });
 
-  // Match Debitos: Recibos ↔ Pagos Enviados
+  // Match Egresos: Recibos ↔ Pagos Enviados
   debug('Matching Recibos with Pagos Enviados', {
     module: 'matching',
     phase: 'auto-match',
@@ -108,7 +108,7 @@ export async function runMatching(
   });
 
   const recibosMatches = await matchRecibosWithPagos(
-    folderStructure.controlDebitosId,
+    folderStructure.controlEgresosId,
     config
   );
 
@@ -132,7 +132,7 @@ export async function runMatching(
   });
 
   const syncResult = await syncPagosPendientes(
-    folderStructure.controlDebitosId,
+    folderStructure.controlEgresosId,
     folderStructure.dashboardOperativoId
   );
 

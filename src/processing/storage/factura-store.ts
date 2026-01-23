@@ -1,6 +1,6 @@
 /**
  * Storage operations for facturas
- * Handles writing facturas to Control de Creditos/Debitos spreadsheets
+ * Handles writing facturas to Control de Ingresos/Egresos spreadsheets
  */
 
 import type { Result, Factura } from '../../types/index.js';
@@ -63,7 +63,7 @@ async function isDuplicateFactura(
  * Stores a factura in the appropriate Control spreadsheet
  *
  * @param factura - The factura to store
- * @param spreadsheetId - The spreadsheet ID (Control de Creditos or Control de Debitos)
+ * @param spreadsheetId - The spreadsheet ID (Control de Ingresos or Control de Egresos)
  * @param sheetName - The sheet name ('Facturas Emitidas' or 'Facturas Recibidas')
  * @param documentType - The document type for filename generation
  */

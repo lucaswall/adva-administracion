@@ -125,30 +125,30 @@ ADVA CUIT: 30709076783 | Direction determines routing:
 
 | Type | ADVA Role | Destination |
 |------|-----------|-------------|
-| factura_emitida | emisor | Creditos |
-| factura_recibida | receptor | Debitos |
-| pago_enviado | pagador | Debitos |
-| pago_recibido | beneficiario | Creditos |
-| certificado_retencion | sujeto retenido | Creditos |
+| factura_emitida | emisor | Ingresos |
+| factura_recibida | receptor | Egresos |
+| pago_enviado | pagador | Egresos |
+| pago_recibido | beneficiario | Ingresos |
+| certificado_retencion | sujeto retenido | Ingresos |
 | resumen_bancario | - | Bancos |
-| recibo | empleador | Debitos |
+| recibo | empleador | Egresos |
 
 ## FOLDER STRUCTURE
 ```
 ROOT/
-├── Control de Creditos.gsheet, Control de Debitos.gsheet
+├── Control de Ingresos.gsheet, Control de Egresos.gsheet
 ├── Dashboard Operativo Contable.gsheet
 ├── Entrada/, Sin Procesar/
 └── {YYYY}/
-    ├── Creditos/{MM - Mes}/, Debitos/{MM - Mes}/
+    ├── Ingresos/{MM - Mes}/, Egresos/{MM - Mes}/
     └── Bancos/  # No month subfolders
 ```
 
 ## SPREADSHEETS
 See `SPREADSHEET_FORMAT.md` for complete schema.
 
-- **Control de Creditos**: Facturas Emitidas (18 cols), Pagos Recibidos (15 cols), Retenciones Recibidas (15 cols)
-- **Control de Debitos**: Facturas Recibidas (19 cols), Pagos Enviados (15 cols), Recibos (18 cols)
+- **Control de Ingresos**: Facturas Emitidas (18 cols), Pagos Recibidos (15 cols), Retenciones Recibidas (15 cols)
+- **Control de Egresos**: Facturas Recibidas (19 cols), Pagos Enviados (15 cols), Recibos (18 cols)
 - **Dashboard**: Pagos Pendientes (10 cols), Resumen Mensual (7 cols), Uso de API (12 cols)
 
 **Key principle**: Store counterparty info only, ADVA's role is implicit.
