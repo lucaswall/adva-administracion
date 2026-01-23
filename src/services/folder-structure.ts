@@ -25,6 +25,7 @@ const FOLDER_NAMES = {
   egresos: 'Egresos',
   sinProcesar: 'Sin Procesar',
   bancos: 'Bancos',
+  duplicado: 'Duplicado',
 } as const;
 
 /** Required spreadsheet names */
@@ -380,12 +381,15 @@ export async function discoverFolderStructure(): Promise<Result<FolderStructure,
     rootId
   });
 
-  // Find or create root-level folders (Entrada and Sin Procesar only)
+  // Find or create root-level folders (Entrada, Sin Procesar, and Duplicado)
   const entradaResult = await findOrCreateFolder(rootId, FOLDER_NAMES.entrada);
   if (!entradaResult.ok) return entradaResult;
 
   const sinProcesarResult = await findOrCreateFolder(rootId, FOLDER_NAMES.sinProcesar);
   if (!sinProcesarResult.ok) return sinProcesarResult;
+
+  const duplicadoResult = await findOrCreateFolder(rootId, FOLDER_NAMES.duplicado);
+  if (!duplicadoResult.ok) return duplicadoResult;
 
   // Find or create control spreadsheets (at root level)
   const controlIngresosResult = await findOrCreateSpreadsheet(rootId, SPREADSHEET_NAMES.controlIngresos);
@@ -429,6 +433,7 @@ export async function discoverFolderStructure(): Promise<Result<FolderStructure,
     rootId,
     entradaId: entradaResult.value,
     sinProcesarId: sinProcesarResult.value,
+    duplicadoId: duplicadoResult.value,
     controlIngresosId: controlIngresosResult.value,
     controlEgresosId: controlEgresosResult.value,
     dashboardOperativoId: dashboardOperativoResult.value,
@@ -445,6 +450,7 @@ export async function discoverFolderStructure(): Promise<Result<FolderStructure,
     phase: 'discovery',
     entradaId: entradaResult.value,
     sinProcesarId: sinProcesarResult.value,
+    duplicadoId: duplicadoResult.value,
     controlIngresosId: controlIngresosResult.value,
     controlEgresosId: controlEgresosResult.value,
     dashboardOperativoId: dashboardOperativoResult.value,

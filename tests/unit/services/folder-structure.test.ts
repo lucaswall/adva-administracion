@@ -78,10 +78,11 @@ describe('FolderStructure service', () => {
 
   describe('discoverFolderStructure', () => {
     it('discovers all required folders and spreadsheets at root', async () => {
-      // Mock finding root-level folders (Entrada and Sin Procesar only)
+      // Mock finding root-level folders (Entrada, Sin Procesar, and Duplicado)
       mockFindByName
         .mockResolvedValueOnce({ ok: true, value: { id: 'entrada-id', name: 'Entrada', mimeType: 'application/vnd.google-apps.folder' } })
         .mockResolvedValueOnce({ ok: true, value: { id: 'sin-procesar-id', name: 'Sin Procesar', mimeType: 'application/vnd.google-apps.folder' } })
+        .mockResolvedValueOnce({ ok: true, value: { id: 'duplicado-id', name: 'Duplicado', mimeType: 'application/vnd.google-apps.folder' } })
         .mockResolvedValueOnce({ ok: true, value: { id: 'control-ingresos-id', name: 'Control de Ingresos', mimeType: 'application/vnd.google-apps.spreadsheet' } })
         .mockResolvedValueOnce({ ok: true, value: { id: 'control-egresos-id', name: 'Control de Egresos', mimeType: 'application/vnd.google-apps.spreadsheet' } })
         .mockResolvedValueOnce({ ok: true, value: { id: 'dashboard-operativo-id', name: 'Dashboard Operativo Contable', mimeType: 'application/vnd.google-apps.spreadsheet' } });
@@ -135,6 +136,7 @@ describe('FolderStructure service', () => {
         expect(result.value.rootId).toBe('root-folder-id');
         expect(result.value.entradaId).toBe('entrada-id');
         expect(result.value.sinProcesarId).toBe('sin-procesar-id');
+        expect(result.value.duplicadoId).toBe('duplicado-id');
         expect(result.value.controlIngresosId).toBe('control-ingresos-id');
         expect(result.value.controlEgresosId).toBe('control-egresos-id');
         expect(result.value.dashboardOperativoId).toBe('dashboard-operativo-id');
@@ -148,10 +150,11 @@ describe('FolderStructure service', () => {
     });
 
     it('creates missing folders when they do not exist', async () => {
-      // Mock: Entrada doesn't exist, Sin Procesar does
+      // Mock: Entrada doesn't exist, Sin Procesar and Duplicado do
       mockFindByName
         .mockResolvedValueOnce({ ok: true, value: null }) // Entrada not found
         .mockResolvedValueOnce({ ok: true, value: { id: 'sin-procesar-id', name: 'Sin Procesar', mimeType: 'application/vnd.google-apps.folder' } })
+        .mockResolvedValueOnce({ ok: true, value: { id: 'duplicado-id', name: 'Duplicado', mimeType: 'application/vnd.google-apps.folder' } })
         .mockResolvedValueOnce({ ok: true, value: { id: 'control-ingresos-id', name: 'Control de Ingresos', mimeType: 'application/vnd.google-apps.spreadsheet' } })
         .mockResolvedValueOnce({ ok: true, value: { id: 'control-egresos-id', name: 'Control de Egresos', mimeType: 'application/vnd.google-apps.spreadsheet' } })
         .mockResolvedValueOnce({ ok: true, value: { id: 'dashboard-operativo-id', name: 'Dashboard Operativo Contable', mimeType: 'application/vnd.google-apps.spreadsheet' } });
@@ -213,6 +216,7 @@ describe('FolderStructure service', () => {
       mockFindByName
         .mockResolvedValueOnce({ ok: true, value: { id: 'entrada-id', name: 'Entrada', mimeType: 'application/vnd.google-apps.folder' } })
         .mockResolvedValueOnce({ ok: true, value: { id: 'sin-procesar-id', name: 'Sin Procesar', mimeType: 'application/vnd.google-apps.folder' } })
+        .mockResolvedValueOnce({ ok: true, value: { id: 'duplicado-id', name: 'Duplicado', mimeType: 'application/vnd.google-apps.folder' } })
         .mockResolvedValueOnce({ ok: true, value: null }) // Control de Ingresos not found
         .mockResolvedValueOnce({ ok: true, value: null }) // Control de Egresos not found
         .mockResolvedValueOnce({ ok: true, value: null }); // Dashboard Operativo Contable not found
@@ -289,6 +293,7 @@ describe('FolderStructure service', () => {
       mockFindByName
         .mockResolvedValueOnce({ ok: true, value: { id: 'entrada-id', name: 'Entrada', mimeType: 'application/vnd.google-apps.folder' } })
         .mockResolvedValueOnce({ ok: true, value: { id: 'sin-procesar-id', name: 'Sin Procesar', mimeType: 'application/vnd.google-apps.folder' } })
+        .mockResolvedValueOnce({ ok: true, value: { id: 'duplicado-id', name: 'Duplicado', mimeType: 'application/vnd.google-apps.folder' } })
         .mockResolvedValueOnce({ ok: true, value: { id: 'control-ingresos-id', name: 'Control de Ingresos', mimeType: 'application/vnd.google-apps.spreadsheet' } })
         .mockResolvedValueOnce({ ok: true, value: { id: 'control-egresos-id', name: 'Control de Egresos', mimeType: 'application/vnd.google-apps.spreadsheet' } })
         .mockResolvedValueOnce({ ok: true, value: { id: 'dashboard-operativo-id', name: 'Dashboard Operativo Contable', mimeType: 'application/vnd.google-apps.spreadsheet' } });
@@ -328,9 +333,9 @@ describe('FolderStructure service', () => {
           ],
         });
 
-      // First call discovers (now 5 findByName calls: Entrada, Sin Procesar, 3 spreadsheets)
+      // First call discovers (now 6 findByName calls: Entrada, Sin Procesar, Duplicado, 3 spreadsheets)
       await discoverFolderStructure();
-      expect(mockFindByName).toHaveBeenCalledTimes(5);
+      expect(mockFindByName).toHaveBeenCalledTimes(6);
 
       // Second call uses cache
       const cached = getCachedFolderStructure();
@@ -347,6 +352,7 @@ describe('FolderStructure service', () => {
       mockFindByName
         .mockResolvedValueOnce({ ok: true, value: { id: 'entrada-id', name: 'Entrada', mimeType: 'application/vnd.google-apps.folder' } })
         .mockResolvedValueOnce({ ok: true, value: { id: 'sin-procesar-id', name: 'Sin Procesar', mimeType: 'application/vnd.google-apps.folder' } })
+        .mockResolvedValueOnce({ ok: true, value: { id: 'duplicado-id', name: 'Duplicado', mimeType: 'application/vnd.google-apps.folder' } })
         .mockResolvedValueOnce({ ok: true, value: { id: 'control-ingresos-id', name: 'Control de Ingresos', mimeType: 'application/vnd.google-apps.spreadsheet' } })
         .mockResolvedValueOnce({ ok: true, value: { id: 'control-egresos-id', name: 'Control de Egresos', mimeType: 'application/vnd.google-apps.spreadsheet' } })
         .mockResolvedValueOnce({ ok: true, value: { id: 'dashboard-operativo-id', name: 'Dashboard Operativo Contable', mimeType: 'application/vnd.google-apps.spreadsheet' } });
@@ -405,6 +411,7 @@ describe('FolderStructure service', () => {
       mockFindByName
         .mockResolvedValueOnce({ ok: true, value: { id: 'entrada-id', name: 'Entrada', mimeType: 'application/vnd.google-apps.folder' } })
         .mockResolvedValueOnce({ ok: true, value: { id: 'sin-procesar-id', name: 'Sin Procesar', mimeType: 'application/vnd.google-apps.folder' } })
+        .mockResolvedValueOnce({ ok: true, value: { id: 'duplicado-id', name: 'Duplicado', mimeType: 'application/vnd.google-apps.folder' } })
         .mockResolvedValueOnce({ ok: true, value: { id: 'control-ingresos-id', name: 'Control de Ingresos', mimeType: 'application/vnd.google-apps.spreadsheet' } })
         .mockResolvedValueOnce({ ok: true, value: { id: 'control-egresos-id', name: 'Control de Egresos', mimeType: 'application/vnd.google-apps.spreadsheet' } })
         .mockResolvedValueOnce({ ok: true, value: { id: 'dashboard-operativo-id', name: 'Dashboard Operativo Contable', mimeType: 'application/vnd.google-apps.spreadsheet' } });
@@ -478,6 +485,7 @@ describe('FolderStructure service', () => {
       mockFindByName
         .mockResolvedValueOnce({ ok: true, value: { id: 'entrada-id', name: 'Entrada', mimeType: 'application/vnd.google-apps.folder' } })
         .mockResolvedValueOnce({ ok: true, value: { id: 'sin-procesar-id', name: 'Sin Procesar', mimeType: 'application/vnd.google-apps.folder' } })
+        .mockResolvedValueOnce({ ok: true, value: { id: 'duplicado-id', name: 'Duplicado', mimeType: 'application/vnd.google-apps.folder' } })
         .mockResolvedValueOnce({ ok: true, value: { id: 'control-ingresos-id', name: 'Control de Ingresos', mimeType: 'application/vnd.google-apps.spreadsheet' } })
         .mockResolvedValueOnce({ ok: true, value: { id: 'control-egresos-id', name: 'Control de Egresos', mimeType: 'application/vnd.google-apps.spreadsheet' } })
         .mockResolvedValueOnce({ ok: true, value: { id: 'dashboard-operativo-id', name: 'Dashboard Operativo Contable', mimeType: 'application/vnd.google-apps.spreadsheet' } });
@@ -551,6 +559,7 @@ describe('FolderStructure service', () => {
       mockFindByName
         .mockResolvedValueOnce({ ok: true, value: { id: 'entrada-id', name: 'Entrada', mimeType: 'application/vnd.google-apps.folder' } })
         .mockResolvedValueOnce({ ok: true, value: { id: 'sin-procesar-id', name: 'Sin Procesar', mimeType: 'application/vnd.google-apps.folder' } })
+        .mockResolvedValueOnce({ ok: true, value: { id: 'duplicado-id', name: 'Duplicado', mimeType: 'application/vnd.google-apps.folder' } })
         .mockResolvedValueOnce({ ok: true, value: { id: 'control-ingresos-id', name: 'Control de Ingresos', mimeType: 'application/vnd.google-apps.spreadsheet' } })
         .mockResolvedValueOnce({ ok: true, value: { id: 'control-egresos-id', name: 'Control de Egresos', mimeType: 'application/vnd.google-apps.spreadsheet' } })
         .mockResolvedValueOnce({ ok: true, value: { id: 'dashboard-operativo-id', name: 'Dashboard Operativo Contable', mimeType: 'application/vnd.google-apps.spreadsheet' } });
@@ -583,6 +592,7 @@ describe('FolderStructure service', () => {
       mockFindByName
         .mockResolvedValueOnce({ ok: true, value: { id: 'entrada-id', name: 'Entrada', mimeType: 'application/vnd.google-apps.folder' } })
         .mockResolvedValueOnce({ ok: true, value: { id: 'sin-procesar-id', name: 'Sin Procesar', mimeType: 'application/vnd.google-apps.folder' } })
+        .mockResolvedValueOnce({ ok: true, value: { id: 'duplicado-id', name: 'Duplicado', mimeType: 'application/vnd.google-apps.folder' } })
         .mockResolvedValueOnce({ ok: true, value: { id: 'control-ingresos-id', name: 'Control de Ingresos', mimeType: 'application/vnd.google-apps.spreadsheet' } })
         .mockResolvedValueOnce({ ok: true, value: { id: 'control-egresos-id', name: 'Control de Egresos', mimeType: 'application/vnd.google-apps.spreadsheet' } })
         .mockResolvedValueOnce({ ok: true, value: { id: 'dashboard-operativo-id', name: 'Dashboard Operativo Contable', mimeType: 'application/vnd.google-apps.spreadsheet' } });
@@ -650,6 +660,7 @@ describe('FolderStructure service', () => {
       mockFindByName
         .mockResolvedValueOnce({ ok: true, value: { id: 'entrada-id', name: 'Entrada', mimeType: 'application/vnd.google-apps.folder' } })
         .mockResolvedValueOnce({ ok: true, value: { id: 'sin-procesar-id', name: 'Sin Procesar', mimeType: 'application/vnd.google-apps.folder' } })
+        .mockResolvedValueOnce({ ok: true, value: { id: 'duplicado-id', name: 'Duplicado', mimeType: 'application/vnd.google-apps.folder' } })
         .mockResolvedValueOnce({ ok: true, value: { id: 'control-ingresos-id', name: 'Control de Ingresos', mimeType: 'application/vnd.google-apps.spreadsheet' } })
         .mockResolvedValueOnce({ ok: true, value: { id: 'control-egresos-id', name: 'Control de Egresos', mimeType: 'application/vnd.google-apps.spreadsheet' } })
         .mockResolvedValueOnce({ ok: true, value: { id: 'dashboard-operativo-id', name: 'Dashboard Operativo Contable', mimeType: 'application/vnd.google-apps.spreadsheet' } });
@@ -704,6 +715,7 @@ describe('FolderStructure service', () => {
       mockFindByName
         .mockResolvedValueOnce({ ok: true, value: { id: 'entrada-id', name: 'Entrada', mimeType: 'application/vnd.google-apps.folder' } })
         .mockResolvedValueOnce({ ok: true, value: { id: 'sin-procesar-id', name: 'Sin Procesar', mimeType: 'application/vnd.google-apps.folder' } })
+        .mockResolvedValueOnce({ ok: true, value: { id: 'duplicado-id', name: 'Duplicado', mimeType: 'application/vnd.google-apps.folder' } })
         .mockResolvedValueOnce({ ok: true, value: { id: 'control-ingresos-id', name: 'Control de Ingresos', mimeType: 'application/vnd.google-apps.spreadsheet' } })
         .mockResolvedValueOnce({ ok: true, value: { id: 'control-egresos-id', name: 'Control de Egresos', mimeType: 'application/vnd.google-apps.spreadsheet' } })
         .mockResolvedValueOnce({ ok: true, value: null }); // Dashboard Operativo Contable not found
@@ -838,6 +850,7 @@ describe('FolderStructure service', () => {
       mockFindByName
         .mockResolvedValueOnce({ ok: true, value: { id: 'entrada-id', name: 'Entrada', mimeType: 'application/vnd.google-apps.folder' } })
         .mockResolvedValueOnce({ ok: true, value: { id: 'sin-procesar-id', name: 'Sin Procesar', mimeType: 'application/vnd.google-apps.folder' } })
+        .mockResolvedValueOnce({ ok: true, value: { id: 'duplicado-id', name: 'Duplicado', mimeType: 'application/vnd.google-apps.folder' } })
         .mockResolvedValueOnce({ ok: true, value: { id: 'control-ingresos-id', name: 'Control de Ingresos', mimeType: 'application/vnd.google-apps.spreadsheet' } })
         .mockResolvedValueOnce({ ok: true, value: { id: 'control-egresos-id', name: 'Control de Egresos', mimeType: 'application/vnd.google-apps.spreadsheet' } })
         .mockResolvedValueOnce({ ok: true, value: { id: 'dashboard-operativo-id', name: 'Dashboard Operativo Contable', mimeType: 'application/vnd.google-apps.spreadsheet' } });

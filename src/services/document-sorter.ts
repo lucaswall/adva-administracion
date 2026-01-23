@@ -13,7 +13,7 @@ import {
   generateResumenFileName,
   generateRetencionFileName,
 } from '../utils/file-naming.js';
-import type { Factura, Pago, Recibo, ResumenBancario, Retencion, SortDestination, SortResult, DocumentType } from '../types/index.js';
+import type { Factura, Pago, Recibo, ResumenBancario, Retencion, SortDestination, SortResult, DocumentType, Result } from '../types/index.js';
 
 /** Destination folder names for path building */
 const DESTINATION_NAMES: Record<SortDestination, string> = {
@@ -267,4 +267,69 @@ export async function sortAndRenameDocument(
   }
 
   return sortResult;
+}
+
+/**
+ * Moves a duplicate file to the Duplicado folder
+ * Used when a file is detected as a duplicate during storage
+ *
+ * @param fileId - Drive file ID
+ * @param fileName - File name for error messages
+ * @returns Result with success status
+ */
+export async function moveToDuplicadoFolder(
+  fileId: string,
+  fileName: string
+): Promise<Result<SortResult, Error>> {
+  const structure = getCachedFolderStructure();
+
+  if (!structure) {
+    return {
+      ok: false,
+      error: new Error('Folder structure not initialized. Call discoverFolderStructure first.'),
+    };
+  }
+
+  if (!structure.duplicadoId) {
+    return {
+      ok: false,
+      error: new Error('Duplicado folder not found in folder structure'),
+    };
+  }
+
+  // Get the file's current parent folder
+  const parentsResult = await getParents(fileId);
+  if (!parentsResult.ok) {
+    return {
+      ok: false,
+      error: parentsResult.error,
+    };
+  }
+
+  if (parentsResult.value.length === 0) {
+    return {
+      ok: false,
+      error: new Error(`File ${fileName} has no parent folder`),
+    };
+  }
+
+  const currentParentId = parentsResult.value[0];
+
+  // Move to Duplicado folder
+  const moveResult = await moveFile(fileId, currentParentId, structure.duplicadoId);
+  if (!moveResult.ok) {
+    return {
+      ok: false,
+      error: moveResult.error,
+    };
+  }
+
+  return {
+    ok: true,
+    value: {
+      success: true,
+      targetFolderId: structure.duplicadoId,
+      targetPath: 'Duplicado',
+    },
+  };
 }

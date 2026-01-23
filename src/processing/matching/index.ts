@@ -12,10 +12,12 @@ import { getCorrelationId } from '../../utils/correlation.js';
 // Re-export matching functions
 export { matchFacturasWithPagos } from './factura-pago-matcher.js';
 export { matchRecibosWithPagos } from './recibo-pago-matcher.js';
+export { matchNCsWithFacturas } from './nc-factura-matcher.js';
 
 // Import for internal use
 import { matchFacturasWithPagos } from './factura-pago-matcher.js';
 import { matchRecibosWithPagos } from './recibo-pago-matcher.js';
+import { matchNCsWithFacturas } from './nc-factura-matcher.js';
 
 /**
  * Runs matching on unmatched documents across all spreadsheets
@@ -123,6 +125,33 @@ export async function runMatching(
     matchesFound: recibosMatches.value,
     correlationId,
   });
+
+  // Match NC (Nota de Credito) with Facturas Recibidas
+  debug('Matching NCs with Facturas Recibidas', {
+    module: 'matching',
+    phase: 'nc-match',
+    correlationId,
+  });
+
+  const ncMatches = await matchNCsWithFacturas(folderStructure.controlEgresosId);
+
+  if (!ncMatches.ok) {
+    warn('NC matching failed', {
+      module: 'matching',
+      phase: 'nc-match',
+      error: ncMatches.error.message,
+      correlationId,
+    });
+    // Don't fail the entire matching process if NC matching fails
+  } else {
+    totalMatches += ncMatches.value;
+    debug('NC matches complete', {
+      module: 'matching',
+      phase: 'nc-match',
+      matchesFound: ncMatches.value,
+      correlationId,
+    });
+  }
 
   // Sync unpaid facturas to Dashboard's Pagos Pendientes sheet
   debug('Syncing Pagos Pendientes', {

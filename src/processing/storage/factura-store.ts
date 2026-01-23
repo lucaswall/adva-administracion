@@ -3,7 +3,7 @@
  * Handles writing facturas to Control de Ingresos/Egresos spreadsheets
  */
 
-import type { Result, Factura } from '../../types/index.js';
+import type { Result, Factura, StoreResult } from '../../types/index.js';
 import { appendRowsWithLinks, sortSheet, getValues, type CellValueOrLink } from '../../services/sheets.js';
 import { formatUSCurrency, parseNumber } from '../../utils/numbers.js';
 import { generateFacturaFileName } from '../../utils/file-naming.js';
@@ -72,7 +72,7 @@ export async function storeFactura(
   spreadsheetId: string,
   sheetName: string,
   documentType: 'factura_emitida' | 'factura_recibida'
-): Promise<Result<void, Error>> {
+): Promise<Result<StoreResult, Error>> {
   // Check for duplicates
   const counterpartyCuit = documentType === 'factura_emitida'
     ? (factura.cuitReceptor || '')
@@ -98,7 +98,7 @@ export async function storeFactura(
       newFileId: factura.fileId,
       correlationId: getCorrelationId(),
     });
-    return { ok: true, value: undefined };
+    return { ok: true, value: { stored: false, existingFileId: dupeCheck.existingFileId } };
   }
 
   // Calculate the renamed filename that will be used when the file is moved
@@ -159,7 +159,7 @@ export async function storeFactura(
 
   const result = await appendRowsWithLinks(spreadsheetId, range, [row]);
   if (!result.ok) {
-    return result;
+    return { ok: false, error: result.error };
   }
 
   info('Factura stored successfully', {
@@ -183,5 +183,5 @@ export async function storeFactura(
     // Don't fail the operation if sorting fails
   }
 
-  return { ok: true, value: undefined };
+  return { ok: true, value: { stored: true } };
 }

@@ -17,6 +17,17 @@ export type Result<T, E = Error> =
 export type LogLevel = 'DEBUG' | 'INFO' | 'WARN' | 'ERROR';
 
 /**
+ * Result of storing a document to a spreadsheet
+ * Distinguishes between "stored" (new row added) and "skipped" (duplicate detected)
+ */
+export interface StoreResult {
+  /** true if row was added, false if duplicate skipped */
+  stored: boolean;
+  /** fileId of existing duplicate if skipped */
+  existingFileId?: string;
+}
+
+/**
  * Document types that can be processed
  *
  * Extended classification (Phase 4):
@@ -812,6 +823,8 @@ export interface FolderStructure {
   entradaId: string;
   /** Sin Procesar (unprocessed) folder ID - stays at root */
   sinProcesarId: string;
+  /** Duplicado (duplicate files) folder ID - stays at root */
+  duplicadoId: string;
   /** Control de Ingresos spreadsheet ID - stays at root */
   controlIngresosId: string;
   /** Control de Egresos spreadsheet ID - stays at root */
