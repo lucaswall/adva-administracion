@@ -10,6 +10,7 @@ import { formatMonthFolder } from '../utils/spanish-date.js';
 import { CONTROL_CREDITOS_SHEETS, CONTROL_DEBITOS_SHEETS, DASHBOARD_OPERATIVO_SHEETS } from '../constants/spreadsheet-headers.js';
 import type { FolderStructure, Result, SortDestination } from '../types/index.js';
 import { debug, info, error as logError } from '../utils/logger.js';
+import { withLock } from '../utils/concurrency.js';
 
 /** MIME type for Google Drive folders */
 const FOLDER_MIME = 'application/vnd.google-apps.folder';
@@ -475,34 +476,50 @@ async function ensureClassificationFolders(
 
     const folderName = FOLDER_NAMES[classification];
 
-    // Try to find existing folder
-    const findResult = await findByName(yearFolderId, folderName, FOLDER_MIME);
-    if (!findResult.ok) return findResult;
+    // Use lock to prevent concurrent creation of the same classification folder
+    const lockKey = `folder:classification:${year}:${classification}`;
+    const classificationResult = await withLock(lockKey, async () => {
+      // Check cache again inside lock
+      const cachedId = cachedStructure?.classificationFolders.get(cacheKey);
+      if (cachedId) {
+        return cachedId;
+      }
 
-    if (findResult.value) {
-      // Cache existing folder
-      cachedStructure.classificationFolders.set(cacheKey, findResult.value.id);
-      debug('Found existing classification folder', {
-        module: 'folder-structure',
-        phase: 'classification-folders',
-        folderName,
-        year,
-        folderId: findResult.value.id
-      });
-    } else {
+      // Try to find existing folder
+      const findResult = await findByName(yearFolderId, folderName, FOLDER_MIME);
+      if (!findResult.ok) throw findResult.error;
+
+      if (findResult.value) {
+        // Cache existing folder
+        const foundId = findResult.value.id;
+        cachedStructure!.classificationFolders.set(cacheKey, foundId);
+        debug('Found existing classification folder', {
+          module: 'folder-structure',
+          phase: 'classification-folders',
+          folderName,
+          year,
+          folderId: foundId
+        });
+        return foundId;
+      }
+
       // Create new classification folder
       const createResult = await createFolder(yearFolderId, folderName);
-      if (!createResult.ok) return createResult;
+      if (!createResult.ok) throw createResult.error;
 
-      cachedStructure.classificationFolders.set(cacheKey, createResult.value.id);
+      const createdId = createResult.value.id;
+      cachedStructure!.classificationFolders.set(cacheKey, createdId);
       info('Created classification folder', {
         module: 'folder-structure',
         phase: 'classification-folders',
         folderName,
         year,
-        folderId: createResult.value.id
+        folderId: createdId
       });
-    }
+      return createdId;
+    });
+
+    if (!classificationResult.ok) return classificationResult;
   }
 
   return { ok: true, value: undefined };
@@ -535,37 +552,52 @@ export async function getOrCreateMonthFolder(
   // Extract year from date
   const year = date.getFullYear().toString();
 
-  // Get or create year folder
+  // Get or create year folder with lock to prevent race conditions
   let yearFolderId = cachedStructure.yearFolders.get(year);
 
   if (!yearFolderId) {
-    // Try to find existing year folder
-    const findYearResult = await findByName(cachedStructure.rootId, year, FOLDER_MIME);
-    if (!findYearResult.ok) return findYearResult;
+    // Use lock to prevent concurrent creation of the same year folder
+    const lockKey = `folder:year:${year}`;
+    const yearResult = await withLock(lockKey, async () => {
+      // Check cache again inside lock (another call might have created it)
+      const cachedId = cachedStructure?.yearFolders.get(year);
+      if (cachedId) {
+        return cachedId;
+      }
 
-    if (findYearResult.value) {
-      yearFolderId = findYearResult.value.id;
-      cachedStructure.yearFolders.set(year, yearFolderId);
-      debug('Found existing year folder', {
-        module: 'folder-structure',
-        phase: 'year-folder',
-        year,
-        folderId: yearFolderId
-      });
-    } else {
+      // Try to find existing year folder
+      const findYearResult = await findByName(cachedStructure!.rootId, year, FOLDER_MIME);
+      if (!findYearResult.ok) throw findYearResult.error;
+
+      if (findYearResult.value) {
+        const foundId = findYearResult.value.id;
+        cachedStructure!.yearFolders.set(year, foundId);
+        debug('Found existing year folder', {
+          module: 'folder-structure',
+          phase: 'year-folder',
+          year,
+          folderId: foundId
+        });
+        return foundId;
+      }
+
       // Create new year folder
-      const createYearResult = await createFolder(cachedStructure.rootId, year);
-      if (!createYearResult.ok) return createYearResult;
+      const createYearResult = await createFolder(cachedStructure!.rootId, year);
+      if (!createYearResult.ok) throw createYearResult.error;
 
-      yearFolderId = createYearResult.value.id;
-      cachedStructure.yearFolders.set(year, yearFolderId);
+      const createdId = createYearResult.value.id;
+      cachedStructure!.yearFolders.set(year, createdId);
       info('Created year folder', {
         module: 'folder-structure',
         phase: 'year-folder',
         year,
-        folderId: yearFolderId
+        folderId: createdId
       });
-    }
+      return createdId;
+    });
+
+    if (!yearResult.ok) return yearResult;
+    yearFolderId = yearResult.value;
   }
 
   // Ensure all classification folders exist in this year
@@ -598,37 +630,51 @@ export async function getOrCreateMonthFolder(
     return { ok: true, value: cachedMonthId };
   }
 
-  // Try to find existing month folder
-  const findMonthResult = await findByName(classificationFolderId, monthName, FOLDER_MIME);
-  if (!findMonthResult.ok) return findMonthResult;
+  // Use lock to prevent concurrent creation of the same month folder
+  const lockKey = `folder:month:${year}:${destination}:${monthName}`;
+  const monthResult = await withLock(lockKey, async () => {
+    // Check cache again inside lock
+    const cachedId = cachedStructure?.monthFolders.get(monthCacheKey);
+    if (cachedId) {
+      return cachedId;
+    }
 
-  if (findMonthResult.value) {
-    // Cache and return existing folder
-    cachedStructure.monthFolders.set(monthCacheKey, findMonthResult.value.id);
-    debug('Found existing month folder', {
+    // Try to find existing month folder
+    const findMonthResult = await findByName(classificationFolderId, monthName, FOLDER_MIME);
+    if (!findMonthResult.ok) throw findMonthResult.error;
+
+    if (findMonthResult.value) {
+      // Cache and return existing folder
+      const foundId = findMonthResult.value.id;
+      cachedStructure!.monthFolders.set(monthCacheKey, foundId);
+      debug('Found existing month folder', {
+        module: 'folder-structure',
+        phase: 'month-folder',
+        monthName,
+        year,
+        destination,
+        folderId: foundId
+      });
+      return foundId;
+    }
+
+    // Create new month folder
+    const createMonthResult = await createFolder(classificationFolderId, monthName);
+    if (!createMonthResult.ok) throw createMonthResult.error;
+
+    // Cache and return new folder
+    const createdId = createMonthResult.value.id;
+    cachedStructure!.monthFolders.set(monthCacheKey, createdId);
+    info('Created month folder', {
       module: 'folder-structure',
       phase: 'month-folder',
       monthName,
       year,
       destination,
-      folderId: findMonthResult.value.id
+      folderId: createdId
     });
-    return { ok: true, value: findMonthResult.value.id };
-  }
-
-  // Create new month folder
-  const createMonthResult = await createFolder(classificationFolderId, monthName);
-  if (!createMonthResult.ok) return createMonthResult;
-
-  // Cache and return new folder
-  cachedStructure.monthFolders.set(monthCacheKey, createMonthResult.value.id);
-  info('Created month folder', {
-    module: 'folder-structure',
-    phase: 'month-folder',
-    monthName,
-    year,
-    destination,
-    folderId: createMonthResult.value.id
+    return createdId;
   });
-  return { ok: true, value: createMonthResult.value.id };
+
+  return monthResult;
 }
