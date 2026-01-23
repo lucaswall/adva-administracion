@@ -38,7 +38,7 @@ src/
 ├── middleware/auth.ts          # Bearer token authentication
 ├── services/{google-auth,drive,sheets,folder-structure,document-sorter,watch-manager,token-usage-logger,pagos-pendientes}.ts
 ├── processing/{queue,scanner,extractor}.ts
-├── processing/matching/{index,factura-pago-matcher,recibo-pago-matcher}.ts
+├── processing/matching/{index,factura-pago-matcher,recibo-pago-matcher,nc-factura-matcher}.ts
 ├── processing/storage/{index,factura-store,pago-store,recibo-store,retencion-store}.ts
 ├── matching/{matcher,cascade-matcher}.ts
 ├── gemini/{client,prompts,parser,errors}.ts
@@ -139,7 +139,7 @@ ADVA CUIT: 30709076783 | Direction determines routing:
 ROOT/
 ├── Control de Ingresos.gsheet, Control de Egresos.gsheet
 ├── Dashboard Operativo Contable.gsheet
-├── Entrada/, Sin Procesar/
+├── Entrada/, Sin Procesar/, Duplicado/
 └── {YYYY}/
     ├── Ingresos/{MM - Mes}/, Egresos/{MM - Mes}/
     └── Bancos/  # No month subfolders
