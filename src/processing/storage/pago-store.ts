@@ -3,7 +3,7 @@
  * Handles writing pagos to Control de Ingresos/Egresos spreadsheets
  */
 
-import type { Result, Pago } from '../../types/index.js';
+import type { Result, Pago, StoreResult } from '../../types/index.js';
 import { appendRowsWithLinks, sortSheet, getValues, type CellValueOrLink } from '../../services/sheets.js';
 import { formatUSCurrency, parseNumber } from '../../utils/numbers.js';
 import { generatePagoFileName } from '../../utils/file-naming.js';
@@ -68,7 +68,7 @@ export async function storePago(
   spreadsheetId: string,
   sheetName: string,
   documentType: 'pago_enviado' | 'pago_recibido'
-): Promise<Result<void, Error>> {
+): Promise<Result<StoreResult, Error>> {
   // Check for duplicates
   const counterpartyCuit = documentType === 'pago_enviado'
     ? (pago.cuitBeneficiario || '')
@@ -92,7 +92,7 @@ export async function storePago(
       newFileId: pago.fileId,
       correlationId: getCorrelationId(),
     });
-    return { ok: true, value: undefined };
+    return { ok: true, value: { stored: false, existingFileId: dupeCheck.existingFileId } };
   }
 
   // Calculate the renamed filename that will be used when the file is moved
@@ -146,7 +146,7 @@ export async function storePago(
 
   const result = await appendRowsWithLinks(spreadsheetId, range, [row]);
   if (!result.ok) {
-    return result;
+    return { ok: false, error: result.error };
   }
 
   info('Pago stored successfully', {
@@ -170,5 +170,5 @@ export async function storePago(
     // Don't fail the operation if sorting fails
   }
 
-  return { ok: true, value: undefined };
+  return { ok: true, value: { stored: true } };
 }

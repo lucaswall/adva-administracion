@@ -20,7 +20,7 @@ import type {
 } from '../types/index.js';
 import { listFilesInFolder } from '../services/drive.js';
 import { getCachedFolderStructure } from '../services/folder-structure.js';
-import { sortToSinProcesar, sortAndRenameDocument } from '../services/document-sorter.js';
+import { sortToSinProcesar, sortAndRenameDocument, moveToDuplicadoFolder } from '../services/document-sorter.js';
 import { getProcessingQueue } from './queue.js';
 import { getConfig } from '../config.js';
 import { debug, info, warn, error as logError } from '../utils/logger.js';
@@ -547,30 +547,59 @@ async function storeAndSortDocument(
     });
     const storeResult = await storeFactura(doc as Factura, controlIngresosId, 'Facturas Emitidas', 'factura_emitida');
     if (storeResult.ok) {
-      result.facturasAdded++;
-      info('Factura emitida stored, moving to Ingresos folder', {
-        module: 'scanner',
-        phase: 'storage',
-        fileName: fileInfo.name,
-        correlationId,
-      });
-      const sortResult = await sortAndRenameDocument(doc, 'ingresos', 'factura_emitida');
-      if (!sortResult.success) {
-        logError('Failed to move factura to Ingresos', {
+      if (storeResult.value.stored) {
+        result.facturasAdded++;
+        info('Factura emitida stored, moving to Ingresos folder', {
           module: 'scanner',
           phase: 'storage',
           fileName: fileInfo.name,
-          error: sortResult.error,
           correlationId,
         });
-        result.errors++;
+        const sortResult = await sortAndRenameDocument(doc, 'ingresos', 'factura_emitida');
+        if (!sortResult.success) {
+          logError('Failed to move factura to Ingresos', {
+            module: 'scanner',
+            phase: 'storage',
+            fileName: fileInfo.name,
+            error: sortResult.error,
+            correlationId,
+          });
+          result.errors++;
+        } else {
+          info(`Moved to ${sortResult.targetPath}`, {
+            module: 'scanner',
+            phase: 'storage',
+            fileName: fileInfo.name,
+            correlationId,
+          });
+        }
       } else {
-        info(`Moved to ${sortResult.targetPath}`, {
+        // Duplicate detected - move to Duplicado folder
+        info('Duplicate factura emitida detected, moving to Duplicado folder', {
           module: 'scanner',
           phase: 'storage',
           fileName: fileInfo.name,
+          existingFileId: storeResult.value.existingFileId,
           correlationId,
         });
+        const moveResult = await moveToDuplicadoFolder(fileInfo.id, fileInfo.name);
+        if (!moveResult.ok) {
+          logError('Failed to move duplicate to Duplicado folder', {
+            module: 'scanner',
+            phase: 'storage',
+            fileName: fileInfo.name,
+            error: moveResult.error.message,
+            correlationId,
+          });
+          result.errors++;
+        } else {
+          info(`Moved duplicate to ${moveResult.value.targetPath}`, {
+            module: 'scanner',
+            phase: 'storage',
+            fileName: fileInfo.name,
+            correlationId,
+          });
+        }
       }
     } else {
       logError('Failed to store factura', {
@@ -596,30 +625,59 @@ async function storeAndSortDocument(
     });
     const storeResult = await storeFactura(doc as Factura, controlEgresosId, 'Facturas Recibidas', 'factura_recibida');
     if (storeResult.ok) {
-      result.facturasAdded++;
-      info('Factura recibida stored, moving to Egresos folder', {
-        module: 'scanner',
-        phase: 'storage',
-        fileName: fileInfo.name,
-        correlationId,
-      });
-      const sortResult = await sortAndRenameDocument(doc, 'egresos', 'factura_recibida');
-      if (!sortResult.success) {
-        logError('Failed to move factura to Egresos', {
+      if (storeResult.value.stored) {
+        result.facturasAdded++;
+        info('Factura recibida stored, moving to Egresos folder', {
           module: 'scanner',
           phase: 'storage',
           fileName: fileInfo.name,
-          error: sortResult.error,
           correlationId,
         });
-        result.errors++;
+        const sortResult = await sortAndRenameDocument(doc, 'egresos', 'factura_recibida');
+        if (!sortResult.success) {
+          logError('Failed to move factura to Egresos', {
+            module: 'scanner',
+            phase: 'storage',
+            fileName: fileInfo.name,
+            error: sortResult.error,
+            correlationId,
+          });
+          result.errors++;
+        } else {
+          info(`Moved to ${sortResult.targetPath}`, {
+            module: 'scanner',
+            phase: 'storage',
+            fileName: fileInfo.name,
+            correlationId,
+          });
+        }
       } else {
-        info(`Moved to ${sortResult.targetPath}`, {
+        // Duplicate detected - move to Duplicado folder
+        info('Duplicate factura recibida detected, moving to Duplicado folder', {
           module: 'scanner',
           phase: 'storage',
           fileName: fileInfo.name,
+          existingFileId: storeResult.value.existingFileId,
           correlationId,
         });
+        const moveResult = await moveToDuplicadoFolder(fileInfo.id, fileInfo.name);
+        if (!moveResult.ok) {
+          logError('Failed to move duplicate to Duplicado folder', {
+            module: 'scanner',
+            phase: 'storage',
+            fileName: fileInfo.name,
+            error: moveResult.error.message,
+            correlationId,
+          });
+          result.errors++;
+        } else {
+          info(`Moved duplicate to ${moveResult.value.targetPath}`, {
+            module: 'scanner',
+            phase: 'storage',
+            fileName: fileInfo.name,
+            correlationId,
+          });
+        }
       }
     } else {
       logError('Failed to store factura', {
@@ -645,30 +703,59 @@ async function storeAndSortDocument(
     });
     const storeResult = await storePago(doc as Pago, controlIngresosId, 'Pagos Recibidos', 'pago_recibido');
     if (storeResult.ok) {
-      result.pagosAdded++;
-      info('Pago recibido stored, moving to Ingresos folder', {
-        module: 'scanner',
-        phase: 'storage',
-        fileName: fileInfo.name,
-        correlationId,
-      });
-      const sortResult = await sortAndRenameDocument(doc, 'ingresos', 'pago_recibido');
-      if (!sortResult.success) {
-        logError('Failed to move pago to Ingresos', {
+      if (storeResult.value.stored) {
+        result.pagosAdded++;
+        info('Pago recibido stored, moving to Ingresos folder', {
           module: 'scanner',
           phase: 'storage',
           fileName: fileInfo.name,
-          error: sortResult.error,
           correlationId,
         });
-        result.errors++;
+        const sortResult = await sortAndRenameDocument(doc, 'ingresos', 'pago_recibido');
+        if (!sortResult.success) {
+          logError('Failed to move pago to Ingresos', {
+            module: 'scanner',
+            phase: 'storage',
+            fileName: fileInfo.name,
+            error: sortResult.error,
+            correlationId,
+          });
+          result.errors++;
+        } else {
+          info(`Moved to ${sortResult.targetPath}`, {
+            module: 'scanner',
+            phase: 'storage',
+            fileName: fileInfo.name,
+            correlationId,
+          });
+        }
       } else {
-        info(`Moved to ${sortResult.targetPath}`, {
+        // Duplicate detected - move to Duplicado folder
+        info('Duplicate pago recibido detected, moving to Duplicado folder', {
           module: 'scanner',
           phase: 'storage',
           fileName: fileInfo.name,
+          existingFileId: storeResult.value.existingFileId,
           correlationId,
         });
+        const moveResult = await moveToDuplicadoFolder(fileInfo.id, fileInfo.name);
+        if (!moveResult.ok) {
+          logError('Failed to move duplicate to Duplicado folder', {
+            module: 'scanner',
+            phase: 'storage',
+            fileName: fileInfo.name,
+            error: moveResult.error.message,
+            correlationId,
+          });
+          result.errors++;
+        } else {
+          info(`Moved duplicate to ${moveResult.value.targetPath}`, {
+            module: 'scanner',
+            phase: 'storage',
+            fileName: fileInfo.name,
+            correlationId,
+          });
+        }
       }
     } else {
       logError('Failed to store pago', {
@@ -694,30 +781,59 @@ async function storeAndSortDocument(
     });
     const storeResult = await storePago(doc as Pago, controlEgresosId, 'Pagos Enviados', 'pago_enviado');
     if (storeResult.ok) {
-      result.pagosAdded++;
-      info('Pago enviado stored, moving to Egresos folder', {
-        module: 'scanner',
-        phase: 'storage',
-        fileName: fileInfo.name,
-        correlationId,
-      });
-      const sortResult = await sortAndRenameDocument(doc, 'egresos', 'pago_enviado');
-      if (!sortResult.success) {
-        logError('Failed to move pago to Egresos', {
+      if (storeResult.value.stored) {
+        result.pagosAdded++;
+        info('Pago enviado stored, moving to Egresos folder', {
           module: 'scanner',
           phase: 'storage',
           fileName: fileInfo.name,
-          error: sortResult.error,
           correlationId,
         });
-        result.errors++;
+        const sortResult = await sortAndRenameDocument(doc, 'egresos', 'pago_enviado');
+        if (!sortResult.success) {
+          logError('Failed to move pago to Egresos', {
+            module: 'scanner',
+            phase: 'storage',
+            fileName: fileInfo.name,
+            error: sortResult.error,
+            correlationId,
+          });
+          result.errors++;
+        } else {
+          info(`Moved to ${sortResult.targetPath}`, {
+            module: 'scanner',
+            phase: 'storage',
+            fileName: fileInfo.name,
+            correlationId,
+          });
+        }
       } else {
-        info(`Moved to ${sortResult.targetPath}`, {
+        // Duplicate detected - move to Duplicado folder
+        info('Duplicate pago enviado detected, moving to Duplicado folder', {
           module: 'scanner',
           phase: 'storage',
           fileName: fileInfo.name,
+          existingFileId: storeResult.value.existingFileId,
           correlationId,
         });
+        const moveResult = await moveToDuplicadoFolder(fileInfo.id, fileInfo.name);
+        if (!moveResult.ok) {
+          logError('Failed to move duplicate to Duplicado folder', {
+            module: 'scanner',
+            phase: 'storage',
+            fileName: fileInfo.name,
+            error: moveResult.error.message,
+            correlationId,
+          });
+          result.errors++;
+        } else {
+          info(`Moved duplicate to ${moveResult.value.targetPath}`, {
+            module: 'scanner',
+            phase: 'storage',
+            fileName: fileInfo.name,
+            correlationId,
+          });
+        }
       }
     } else {
       logError('Failed to store pago', {
