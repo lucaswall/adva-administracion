@@ -29,7 +29,7 @@ function getSheetsService(): sheets_v4.Sheets {
 /**
  * Cell value type
  */
-export type CellValue = string | number | boolean | null | undefined;
+export type CellValue = string | number | boolean | null | undefined | Date;
 
 /**
  * Cell link type - represents a hyperlinked text value
@@ -697,6 +697,105 @@ export async function moveSheetToFirst(
     });
 
     return { ok: true, value: undefined };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error : new Error(String(error)),
+    };
+  }
+}
+
+/**
+ * Appends rows with explicit formatting (non-bold text)
+ * Use this when appending to sheets with bold headers to prevent new rows from inheriting bold formatting
+ *
+ * @param spreadsheetId - Spreadsheet ID
+ * @param range - A1 notation for target sheet (e.g., 'Sheet1!A:Z')
+ * @param values - 2D array of rows to append. Date objects are supported.
+ * @returns Number of updated cells
+ */
+export async function appendRowsWithFormatting(
+  spreadsheetId: string,
+  range: string,
+  values: CellValue[][]
+): Promise<Result<number, Error>> {
+  try {
+    const sheets = getSheetsService();
+
+    // Parse sheet name from range (e.g., 'Sheet1!A:Z' -> 'Sheet1')
+    const sheetName = range.split('!')[0];
+
+    // Get sheet metadata to find the sheet ID
+    const metadataResult = await getSheetMetadata(spreadsheetId);
+    if (!metadataResult.ok) {
+      return metadataResult;
+    }
+
+    const sheet = metadataResult.value.find(s => s.title === sheetName);
+    if (!sheet) {
+      return {
+        ok: false,
+        error: new Error(`Sheet not found: ${sheetName}`),
+      };
+    }
+
+    // Convert rows to Sheets API format with explicit non-bold formatting
+    const rows: sheets_v4.Schema$RowData[] = values.map(rowValues => ({
+      values: rowValues.map(value => {
+        const cellData: sheets_v4.Schema$CellData = {
+          userEnteredFormat: {
+            textFormat: {
+              bold: false,
+            },
+          },
+        };
+
+        if (value === null || value === undefined) {
+          cellData.userEnteredValue = { stringValue: '' };
+        } else if (value instanceof Date) {
+          // Convert Date to serial number for Sheets
+          // Google Sheets uses Dec 30, 1899 as day 0
+          const baseDate = new Date(Date.UTC(1899, 11, 30));
+          const serialNumber = (value.getTime() - baseDate.getTime()) / (1000 * 60 * 60 * 24);
+          cellData.userEnteredValue = { numberValue: serialNumber };
+          cellData.userEnteredFormat!.numberFormat = {
+            type: 'DATE_TIME',
+            pattern: 'yyyy-mm-dd hh:mm:ss',
+          };
+        } else if (typeof value === 'string') {
+          cellData.userEnteredValue = { stringValue: value };
+        } else if (typeof value === 'number') {
+          cellData.userEnteredValue = { numberValue: value };
+        } else if (typeof value === 'boolean') {
+          cellData.userEnteredValue = { boolValue: value };
+        }
+
+        return cellData;
+      }),
+    }));
+
+    // Use batchUpdate with appendCells to support formatting
+    await sheets.spreadsheets.batchUpdate({
+      spreadsheetId,
+      requestBody: {
+        requests: [
+          {
+            appendCells: {
+              sheetId: sheet.sheetId,
+              rows,
+              fields: '*',
+            },
+          },
+        ],
+      },
+    });
+
+    // Calculate total cells appended
+    const cellsAppended = rows.reduce((total, row) => {
+      return total + (row.values?.length || 0);
+    }, 0);
+
+    return { ok: true, value: cellsAppended };
   } catch (error) {
     return {
       ok: false,

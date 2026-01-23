@@ -5,7 +5,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { sheets_v4 } from 'googleapis';
 import { google } from 'googleapis';
-import { formatSheet, clearSheetsCache, appendRowsWithLinks, clearSheetData, moveSheetToFirst } from '../../../src/services/sheets.js';
+import { formatSheet, clearSheetsCache, appendRowsWithLinks, appendRowsWithFormatting, clearSheetData, moveSheetToFirst } from '../../../src/services/sheets.js';
 
 // Mock googleapis
 vi.mock('googleapis', () => {
@@ -510,6 +510,233 @@ describe('appendRowsWithLinks', () => {
     const rows = [['value1', 'value2']];
 
     const result = await appendRowsWithLinks('spreadsheetId123', 'Sheet1!A:B', rows);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.message).toBe('API Error');
+    }
+  });
+});
+
+describe('appendRowsWithFormatting', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    clearSheetsCache();
+  });
+
+  it('should append rows with non-bold formatting', async () => {
+    const mockGet = vi.fn().mockResolvedValue({
+      data: {
+        sheets: [
+          {
+            properties: {
+              title: 'Uso de API',
+              sheetId: 789,
+            },
+          },
+        ],
+      },
+    });
+
+    const mockBatchUpdate = vi.fn().mockResolvedValue({
+      data: {
+        replies: [
+          {
+            appendCells: {
+              updatedCells: 4,
+            },
+          },
+        ],
+      },
+    });
+
+    const mockSheets = google.sheets({} as any);
+    mockSheets.spreadsheets.get = mockGet;
+    mockSheets.spreadsheets.batchUpdate = mockBatchUpdate;
+
+    const rows = [
+      ['value1', 'value2', 123, true],
+    ];
+
+    const result = await appendRowsWithFormatting('spreadsheetId123', 'Uso de API!A:D', rows);
+
+    expect(result.ok).toBe(true);
+    expect(result.value).toBe(4);
+
+    expect(mockBatchUpdate).toHaveBeenCalledWith({
+      spreadsheetId: 'spreadsheetId123',
+      requestBody: {
+        requests: [
+          {
+            appendCells: {
+              sheetId: 789,
+              rows: [
+                {
+                  values: [
+                    {
+                      userEnteredFormat: { textFormat: { bold: false } },
+                      userEnteredValue: { stringValue: 'value1' },
+                    },
+                    {
+                      userEnteredFormat: { textFormat: { bold: false } },
+                      userEnteredValue: { stringValue: 'value2' },
+                    },
+                    {
+                      userEnteredFormat: { textFormat: { bold: false } },
+                      userEnteredValue: { numberValue: 123 },
+                    },
+                    {
+                      userEnteredFormat: { textFormat: { bold: false } },
+                      userEnteredValue: { boolValue: true },
+                    },
+                  ],
+                },
+              ],
+              fields: '*',
+            },
+          },
+        ],
+      },
+    });
+  });
+
+  it('should handle Date objects with proper datetime formatting', async () => {
+    const mockGet = vi.fn().mockResolvedValue({
+      data: {
+        sheets: [
+          {
+            properties: {
+              title: 'Uso de API',
+              sheetId: 789,
+            },
+          },
+        ],
+      },
+    });
+
+    const mockBatchUpdate = vi.fn().mockResolvedValue({
+      data: {
+        replies: [
+          {
+            appendCells: {
+              updatedCells: 2,
+            },
+          },
+        ],
+      },
+    });
+
+    const mockSheets = google.sheets({} as any);
+    mockSheets.spreadsheets.get = mockGet;
+    mockSheets.spreadsheets.batchUpdate = mockBatchUpdate;
+
+    const testDate = new Date('2026-01-21T10:30:00.000Z');
+    const rows = [
+      [testDate, 'test'],
+    ];
+
+    const result = await appendRowsWithFormatting('spreadsheetId123', 'Uso de API!A:B', rows);
+
+    expect(result.ok).toBe(true);
+    expect(mockBatchUpdate).toHaveBeenCalled();
+
+    const callArgs = mockBatchUpdate.mock.calls[0][0];
+    const cellData = callArgs.requestBody.requests[0].appendCells.rows[0].values[0];
+
+    // Verify Date is converted to serial number
+    expect(cellData.userEnteredValue).toHaveProperty('numberValue');
+    expect(typeof cellData.userEnteredValue.numberValue).toBe('number');
+
+    // Verify datetime format is applied
+    expect(cellData.userEnteredFormat?.numberFormat).toEqual({
+      type: 'DATE_TIME',
+      pattern: 'yyyy-mm-dd hh:mm:ss',
+    });
+
+    // Verify non-bold formatting
+    expect(cellData.userEnteredFormat?.textFormat?.bold).toBe(false);
+  });
+
+  it('should handle null and undefined values', async () => {
+    const mockGet = vi.fn().mockResolvedValue({
+      data: {
+        sheets: [
+          {
+            properties: {
+              title: 'Sheet1',
+              sheetId: 123,
+            },
+          },
+        ],
+      },
+    });
+
+    const mockBatchUpdate = vi.fn().mockResolvedValue({
+      data: {
+        replies: [
+          {
+            appendCells: {
+              updatedCells: 2,
+            },
+          },
+        ],
+      },
+    });
+
+    const mockSheets = google.sheets({} as any);
+    mockSheets.spreadsheets.get = mockGet;
+    mockSheets.spreadsheets.batchUpdate = mockBatchUpdate;
+
+    const rows = [
+      [null, undefined],
+    ];
+
+    const result = await appendRowsWithFormatting('spreadsheetId123', 'Sheet1!A:B', rows);
+
+    expect(result.ok).toBe(true);
+
+    const callArgs = mockBatchUpdate.mock.calls[0][0];
+    const rowData = callArgs.requestBody.requests[0].appendCells.rows[0].values;
+
+    expect(rowData[0].userEnteredValue).toEqual({ stringValue: '' });
+    expect(rowData[1].userEnteredValue).toEqual({ stringValue: '' });
+  });
+
+  it('should handle sheet not found error', async () => {
+    const mockGet = vi.fn().mockResolvedValue({
+      data: {
+        sheets: [
+          {
+            properties: {
+              title: 'Sheet1',
+              sheetId: 123,
+            },
+          },
+        ],
+      },
+    });
+
+    const mockSheets = google.sheets({} as any);
+    mockSheets.spreadsheets.get = mockGet;
+
+    const rows = [['value1']];
+
+    const result = await appendRowsWithFormatting('spreadsheetId123', 'NonExistentSheet!A:A', rows);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.message).toContain('Sheet not found');
+    }
+  });
+
+  it('should handle API errors', async () => {
+    const mockGet = vi.fn().mockRejectedValue(new Error('API Error'));
+    const mockSheets = google.sheets({} as any);
+    mockSheets.spreadsheets.get = mockGet;
+
+    const rows = [['value1']];
+
+    const result = await appendRowsWithFormatting('spreadsheetId123', 'Sheet1!A:A', rows);
 
     expect(result.ok).toBe(false);
     if (!result.ok) {

@@ -8,7 +8,7 @@ import * as sheetsService from '../../../src/services/sheets.js';
 
 // Mock sheets service
 vi.mock('../../../src/services/sheets.js', () => ({
-  appendRows: vi.fn(),
+  appendRowsWithFormatting: vi.fn(),
 }));
 
 describe('calculateCost', () => {
@@ -86,11 +86,12 @@ describe('logTokenUsage', () => {
   });
 
   it('should log successful API call with all fields', async () => {
-    const mockAppendRows = vi.mocked(sheetsService.appendRows);
+    const mockAppendRows = vi.mocked(sheetsService.appendRowsWithFormatting);
     mockAppendRows.mockResolvedValue({ ok: true, value: undefined });
 
+    const timestampStr = '2026-01-21T10:30:00.000Z';
     const data = {
-      timestamp: '2026-01-21T10:30:00.000Z',
+      timestamp: timestampStr,
       requestId: '123e4567-e89b-12d3-a456-426614174000',
       fileId: 'file123',
       fileName: 'invoice.pdf',
@@ -111,7 +112,7 @@ describe('logTokenUsage', () => {
       'spreadsheet123',
       'Uso de API',
       [[
-        '2026-01-21T10:30:00.000Z',
+        new Date(timestampStr),
         '123e4567-e89b-12d3-a456-426614174000',
         'file123',
         'invoice.pdf',
@@ -128,11 +129,12 @@ describe('logTokenUsage', () => {
   });
 
   it('should log failed API call with error message', async () => {
-    const mockAppendRows = vi.mocked(sheetsService.appendRows);
+    const mockAppendRows = vi.mocked(sheetsService.appendRowsWithFormatting);
     mockAppendRows.mockResolvedValue({ ok: true, value: undefined });
 
+    const timestampStr = '2026-01-21T10:30:00.000Z';
     const data = {
-      timestamp: '2026-01-21T10:30:00.000Z',
+      timestamp: timestampStr,
       requestId: '123e4567-e89b-12d3-a456-426614174000',
       fileId: 'file123',
       fileName: 'invoice.pdf',
@@ -153,7 +155,7 @@ describe('logTokenUsage', () => {
       'spreadsheet123',
       'Uso de API',
       [[
-        '2026-01-21T10:30:00.000Z',
+        new Date(timestampStr),
         '123e4567-e89b-12d3-a456-426614174000',
         'file123',
         'invoice.pdf',
@@ -169,8 +171,8 @@ describe('logTokenUsage', () => {
     );
   });
 
-  it('should return error when appendRows fails', async () => {
-    const mockAppendRows = vi.mocked(sheetsService.appendRows);
+  it('should return error when appendRowsWithFormatting fails', async () => {
+    const mockAppendRows = vi.mocked(sheetsService.appendRowsWithFormatting);
     mockAppendRows.mockResolvedValue({
       ok: false,
       error: new Error('Failed to append row')
@@ -200,11 +202,12 @@ describe('logTokenUsage', () => {
   });
 
   it('should handle missing optional fields', async () => {
-    const mockAppendRows = vi.mocked(sheetsService.appendRows);
+    const mockAppendRows = vi.mocked(sheetsService.appendRowsWithFormatting);
     mockAppendRows.mockResolvedValue({ ok: true, value: undefined });
 
+    const timestampStr = '2026-01-21T10:30:00.000Z';
     const data = {
-      timestamp: '2026-01-21T10:30:00.000Z',
+      timestamp: timestampStr,
       requestId: '123e4567-e89b-12d3-a456-426614174000',
       fileId: '',
       fileName: '',
@@ -225,7 +228,7 @@ describe('logTokenUsage', () => {
       'spreadsheet123',
       'Uso de API',
       [[
-        '2026-01-21T10:30:00.000Z',
+        new Date(timestampStr),
         '123e4567-e89b-12d3-a456-426614174000',
         '',
         '',
@@ -235,6 +238,49 @@ describe('logTokenUsage', () => {
         150,
         0.000045,
         500,
+        'YES',
+        '',
+      ]]
+    );
+  });
+
+  it('should handle Date object timestamps', async () => {
+    const mockAppendRows = vi.mocked(sheetsService.appendRowsWithFormatting);
+    mockAppendRows.mockResolvedValue({ ok: true, value: undefined });
+
+    const timestampDate = new Date('2026-01-21T10:30:00.000Z');
+    const data = {
+      timestamp: timestampDate,
+      requestId: '123e4567-e89b-12d3-a456-426614174000',
+      fileId: 'file123',
+      fileName: 'invoice.pdf',
+      model: 'gemini-2.5-flash' as const,
+      promptTokens: 1000,
+      outputTokens: 500,
+      totalTokens: 1500,
+      estimatedCostUSD: 0.00045,
+      durationMs: 2500,
+      success: true,
+      errorMessage: '',
+    };
+
+    const result = await logTokenUsage('spreadsheet123', data);
+
+    expect(result.ok).toBe(true);
+    expect(mockAppendRows).toHaveBeenCalledWith(
+      'spreadsheet123',
+      'Uso de API',
+      [[
+        timestampDate,
+        '123e4567-e89b-12d3-a456-426614174000',
+        'file123',
+        'invoice.pdf',
+        'gemini-2.5-flash',
+        1000,
+        500,
+        1500,
+        0.00045,
+        2500,
         'YES',
         '',
       ]]

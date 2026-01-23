@@ -12,7 +12,7 @@ import type {
   Recibo,
   MatchConfidence,
 } from '../types/index.js';
-import { getValues, batchUpdate } from '../services/sheets.js';
+import { getValues, batchUpdate, type CellValue } from '../services/sheets.js';
 import { getCachedFolderStructure } from '../services/folder-structure.js';
 import { BankMovementMatcher } from './matcher.js';
 import { parseNumber } from '../utils/numbers.js';
@@ -21,7 +21,7 @@ import { getConfig } from '../config.js';
 /**
  * Parses a row from the bank movements sheet into a BankMovement object
  */
-function parseMovementRow(row: (string | number | boolean | null | undefined)[], rowNumber: number): BankMovement | null {
+function parseMovementRow(row: CellValue[], rowNumber: number): BankMovement | null {
   // Columns: Fecha, FechaValor, Concepto, Codigo, Oficina, AreaADVA, Credito, Debito, Detalle
   if (!row[0] || !row[2]) return null; // Need at least date and concepto
 
@@ -42,7 +42,7 @@ function parseMovementRow(row: (string | number | boolean | null | undefined)[],
 /**
  * Parses facturas from sheet data
  */
-function parseFacturas(data: (string | number | boolean | null | undefined)[][]): Array<Factura & { row: number }> {
+function parseFacturas(data: CellValue[][]): Array<Factura & { row: number }> {
   const facturas: Array<Factura & { row: number }> = [];
 
   // Skip header row
@@ -80,7 +80,7 @@ function parseFacturas(data: (string | number | boolean | null | undefined)[][])
 /**
  * Parses pagos from sheet data
  */
-function parsePagos(data: (string | number | boolean | null | undefined)[][]): Array<Pago & { row: number }> {
+function parsePagos(data: CellValue[][]): Array<Pago & { row: number }> {
   const pagos: Array<Pago & { row: number }> = [];
 
   for (let i = 1; i < data.length; i++) {
@@ -115,7 +115,7 @@ function parsePagos(data: (string | number | boolean | null | undefined)[][]): A
 /**
  * Parses recibos from sheet data
  */
-function parseRecibos(data: (string | number | boolean | null | undefined)[][]): Array<Recibo & { row: number }> {
+function parseRecibos(data: CellValue[][]): Array<Recibo & { row: number }> {
   const recibos: Array<Recibo & { row: number }> = [];
 
   for (let i = 1; i < data.length; i++) {

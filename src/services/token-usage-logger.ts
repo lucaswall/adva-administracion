@@ -5,7 +5,7 @@
 
 import { randomUUID } from 'crypto';
 import { GEMINI_PRICING } from '../config.js';
-import { appendRows } from './sheets.js';
+import { appendRowsWithFormatting } from './sheets.js';
 import type { Result } from '../types/index.js';
 import { debug, error as logError } from '../utils/logger.js';
 
@@ -13,8 +13,8 @@ import { debug, error as logError } from '../utils/logger.js';
  * Data structure for token usage log entry
  */
 export interface TokenUsageData {
-  /** ISO timestamp of the request */
-  timestamp: string;
+  /** Timestamp of the request (Date object or ISO string) */
+  timestamp: Date | string;
   /** Unique request ID (UUID) */
   requestId: string;
   /** Google Drive file ID being processed */
@@ -78,9 +78,14 @@ export async function logTokenUsage(
   spreadsheetId: string,
   data: TokenUsageData
 ): Promise<Result<void, Error>> {
-  // Format data as spreadsheet row
+  // Convert timestamp to Date object if it's a string
+  const timestamp = typeof data.timestamp === 'string'
+    ? new Date(data.timestamp)
+    : data.timestamp;
+
+  // Format data as spreadsheet row with Date object for proper datetime formatting
   const row = [
-    data.timestamp,
+    timestamp,
     data.requestId,
     data.fileId,
     data.fileName,
@@ -94,8 +99,8 @@ export async function logTokenUsage(
     data.errorMessage,
   ];
 
-  // Append row to "Uso de API" sheet
-  const result = await appendRows(spreadsheetId, 'Uso de API', [row]);
+  // Append row with explicit formatting to prevent bold inheritance
+  const result = await appendRowsWithFormatting(spreadsheetId, 'Uso de API', [row]);
 
   if (!result.ok) {
     logError('Failed to log token usage', {
