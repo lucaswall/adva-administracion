@@ -6,19 +6,31 @@
 
 ## RULES
 - **TDD**: Write tests FIRST (red→green→refactor), coverage >=80%
-- **VERIFY**: code → bug-hunter → test-runner → builder → fix before commit
+- **VERIFY**: code → `bug-hunter` → `test-runner` → `builder` → fix issues → then git
+- **GIT**: After verify passes, use `commit-bot` (commit only) OR `pr-creator` (full PR) - never both
 - **BUILD**: Zero warnings required
 - **SYNC**: Update this file when architecture changes
 - **PLANS**: Must be fully executable by Claude - no manual human steps
 
 ## SUBAGENTS
-| Agent | Use For | Never |
-|-------|---------|-------|
-| `bug-hunter` (opus) | Before test-runner, finds bugs in git changes | - |
-| `test-runner` (haiku) | After bug-hunter passes | `npm test` |
-| `builder` (haiku) | After test-runner passes | `npm run build` |
-| `commit-bot` (haiku) | After tests+build pass | `git commit` |
-| `pr-creator` (haiku) | Creating PRs | `gh pr create` |
+
+### Verification Pipeline
+Run in order: `bug-hunter` → `test-runner` → `builder`
+
+| Agent | Purpose | Replaces |
+|-------|---------|----------|
+| `bug-hunter` (opus) | Find bugs in git changes | - |
+| `test-runner` (haiku) | Run tests | `npm test` |
+| `builder` (haiku) | Build project | `npm run build` |
+
+### Git Operations (MUTUALLY EXCLUSIVE - pick ONE)
+
+| Agent | When to Use | What It Does |
+|-------|-------------|--------------|
+| `commit-bot` (haiku) | Commit only, no PR needed | Commits to current branch |
+| `pr-creator` (haiku) | **PR requested** | Creates branch + commits + pushes + opens PR |
+
+⚠️ **IMPORTANT**: If user requests a PR, use ONLY `pr-creator`. Do NOT call `commit-bot` first - `pr-creator` handles the entire workflow including the commit.
 
 ## MCP SERVERS
 
