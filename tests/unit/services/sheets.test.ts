@@ -230,6 +230,79 @@ describe('formatSheet', () => {
     });
   });
 
+  it('should apply custom number formats from numberFormats map', async () => {
+    const mockBatchUpdate = vi.fn().mockResolvedValue({});
+    const mockSheets = google.sheets({} as any);
+    mockSheets.spreadsheets.batchUpdate = mockBatchUpdate;
+
+    const numberFormats = new Map([
+      [1, { type: 'number' as const, decimals: 0 }],  // Thousands separator, no decimals
+      [5, { type: 'currency' as const, decimals: 2 }], // 2 decimals
+      [8, { type: 'currency' as const, decimals: 8 }], // 8 decimals
+    ]);
+
+    const result = await formatSheet('spreadsheetId123', 456, {
+      numberFormats,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(mockBatchUpdate).toHaveBeenCalledWith({
+      spreadsheetId: 'spreadsheetId123',
+      requestBody: {
+        requests: expect.arrayContaining([
+          // Check that column 1 has #,##0 format
+          expect.objectContaining({
+            repeatCell: expect.objectContaining({
+              range: expect.objectContaining({
+                startColumnIndex: 1,
+                endColumnIndex: 2,
+              }),
+              cell: expect.objectContaining({
+                userEnteredFormat: expect.objectContaining({
+                  numberFormat: expect.objectContaining({
+                    pattern: '#,##0',
+                  }),
+                }),
+              }),
+            }),
+          }),
+          // Check that column 5 has #,##0.00 format
+          expect.objectContaining({
+            repeatCell: expect.objectContaining({
+              range: expect.objectContaining({
+                startColumnIndex: 5,
+                endColumnIndex: 6,
+              }),
+              cell: expect.objectContaining({
+                userEnteredFormat: expect.objectContaining({
+                  numberFormat: expect.objectContaining({
+                    pattern: '#,##0.00',
+                  }),
+                }),
+              }),
+            }),
+          }),
+          // Check that column 8 has #,##0.00000000 format
+          expect.objectContaining({
+            repeatCell: expect.objectContaining({
+              range: expect.objectContaining({
+                startColumnIndex: 8,
+                endColumnIndex: 9,
+              }),
+              cell: expect.objectContaining({
+                userEnteredFormat: expect.objectContaining({
+                  numberFormat: expect.objectContaining({
+                    pattern: '#,##0.00000000',
+                  }),
+                }),
+              }),
+            }),
+          }),
+        ]),
+      },
+    });
+  });
+
   it('should handle errors from the Sheets API', async () => {
     const mockBatchUpdate = vi
       .fn()

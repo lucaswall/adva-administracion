@@ -144,11 +144,19 @@ export const RESUMEN_BANCARIO_HEADERS = [
   'needsReview',
 ];
 
+/** Number format patterns */
+export type NumberFormat =
+  | { type: 'currency'; decimals: 2 }  // e.g., $1,234.56
+  | { type: 'currency'; decimals: 8 }  // e.g., 0.00000123 (for cost-per-token)
+  | { type: 'number'; decimals: 0 }    // e.g., 1,234 (for counts)
+  | { type: 'number'; decimals: 2 };   // e.g., 12.34 (for rates/percentages)
+
 /** Sheet configuration */
 export interface SheetConfig {
   title: string;
   headers: string[];
   monetaryColumns?: number[]; // 0-indexed column numbers to format as currency
+  numberFormats?: Map<number, NumberFormat>; // 0-indexed column number -> format
 }
 
 /**
@@ -253,11 +261,24 @@ export const DASHBOARD_OPERATIVO_SHEETS: SheetConfig[] = [
   {
     title: 'Resumen Mensual',
     headers: RESUMEN_MENSUAL_HEADERS,
-    monetaryColumns: [5] // costoTotalUSD (0-indexed: 5 after adding tokensCache)
+    numberFormats: new Map([
+      [1, { type: 'number', decimals: 0 }],  // totalLlamadas - thousands separator
+      [2, { type: 'number', decimals: 0 }],  // tokensEntrada - thousands separator
+      [3, { type: 'number', decimals: 0 }],  // tokensCache - thousands separator
+      [4, { type: 'number', decimals: 0 }],  // tokensSalida - thousands separator
+      [5, { type: 'currency', decimals: 2 }], // costoTotalUSD - 2 decimals
+      [6, { type: 'number', decimals: 2 }],  // tasaExito - 2 decimals (success rate)
+      [7, { type: 'number', decimals: 2 }],  // duracionPromedio - 2 decimals (avg duration)
+    ])
   },
   {
     title: 'Uso de API',
     headers: USO_API_HEADERS,
-    monetaryColumns: [8, 9, 10, 11] // cost columns and estimatedCostUSD (0-indexed: 8-11)
+    numberFormats: new Map([
+      [8, { type: 'currency', decimals: 8 }],  // promptCostPerToken - 8 decimals
+      [9, { type: 'currency', decimals: 8 }],  // cachedCostPerToken - 8 decimals
+      [10, { type: 'currency', decimals: 8 }], // outputCostPerToken - 8 decimals
+      [11, { type: 'currency', decimals: 8 }], // estimatedCostUSD - 8 decimals
+    ])
   },
 ];

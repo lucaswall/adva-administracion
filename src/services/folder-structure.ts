@@ -7,7 +7,7 @@ import { getConfig } from '../config.js';
 import { findByName, listByMimeType, createFolder, createSpreadsheet } from './drive.js';
 import { getSheetMetadata, createSheet, setValues, getValues, formatSheet, deleteSheet, moveSheetToFirst } from './sheets.js';
 import { formatMonthFolder } from '../utils/spanish-date.js';
-import { CONTROL_INGRESOS_SHEETS, CONTROL_EGRESOS_SHEETS, DASHBOARD_OPERATIVO_SHEETS } from '../constants/spreadsheet-headers.js';
+import { CONTROL_INGRESOS_SHEETS, CONTROL_EGRESOS_SHEETS, DASHBOARD_OPERATIVO_SHEETS, type SheetConfig } from '../constants/spreadsheet-headers.js';
 import type { FolderStructure, Result, SortDestination } from '../types/index.js';
 import { debug, info, error as logError } from '../utils/logger.js';
 import { withLock } from '../utils/concurrency.js';
@@ -198,7 +198,7 @@ async function findOrCreateSpreadsheet(
  */
 async function ensureSheetsExist(
   spreadsheetId: string,
-  sheetConfigs: Array<{ title: string; headers: string[]; monetaryColumns?: number[] }>
+  sheetConfigs: SheetConfig[]
 ): Promise<Result<void, Error>> {
   // Get existing sheets
   const metadataResult = await getSheetMetadata(spreadsheetId);
@@ -250,9 +250,10 @@ async function ensureSheetsExist(
       }
     }
 
-    // Always apply formatting (bold headers, frozen rows, and monetary columns if specified)
+    // Always apply formatting (bold headers, frozen rows, and number formats if specified)
     const formatResult = await formatSheet(spreadsheetId, sheetId, {
       monetaryColumns: config.monetaryColumns || [],
+      numberFormats: config.numberFormats,
       frozenRows: 1,
     });
     if (!formatResult.ok) {

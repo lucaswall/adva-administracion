@@ -325,6 +325,35 @@ describe('spreadsheet-headers', () => {
       expect(sheet.monetaryColumns).toEqual([7]); // importeTotal
     });
 
+    it('Resumen Mensual has correct number formats', () => {
+      const sheet = DASHBOARD_OPERATIVO_SHEETS.find(s => s.title === 'Resumen Mensual');
+      expect(sheet).toBeDefined();
+      expect(sheet?.numberFormats).toBeDefined();
+
+      // Check thousand separator formats (no decimals)
+      expect(sheet?.numberFormats?.get(1)).toEqual({ type: 'number', decimals: 0 }); // totalLlamadas
+      expect(sheet?.numberFormats?.get(2)).toEqual({ type: 'number', decimals: 0 }); // tokensEntrada
+      expect(sheet?.numberFormats?.get(3)).toEqual({ type: 'number', decimals: 0 }); // tokensCache
+      expect(sheet?.numberFormats?.get(4)).toEqual({ type: 'number', decimals: 0 }); // tokensSalida
+
+      // Check 2 decimal formats
+      expect(sheet?.numberFormats?.get(5)).toEqual({ type: 'currency', decimals: 2 }); // costoTotalUSD
+      expect(sheet?.numberFormats?.get(6)).toEqual({ type: 'number', decimals: 2 }); // tasaExito
+      expect(sheet?.numberFormats?.get(7)).toEqual({ type: 'number', decimals: 2 }); // duracionPromedio
+    });
+
+    it('Uso de API has correct number formats for cost columns', () => {
+      const sheet = DASHBOARD_OPERATIVO_SHEETS.find(s => s.title === 'Uso de API');
+      expect(sheet).toBeDefined();
+      expect(sheet?.numberFormats).toBeDefined();
+
+      // Check 8 decimal formats for all cost columns
+      expect(sheet?.numberFormats?.get(8)).toEqual({ type: 'currency', decimals: 8 }); // promptCostPerToken
+      expect(sheet?.numberFormats?.get(9)).toEqual({ type: 'currency', decimals: 8 }); // cachedCostPerToken
+      expect(sheet?.numberFormats?.get(10)).toEqual({ type: 'currency', decimals: 8 }); // outputCostPerToken
+      expect(sheet?.numberFormats?.get(11)).toEqual({ type: 'currency', decimals: 8 }); // estimatedCostUSD
+    });
+
     it('all sheet configs have title and headers', () => {
       DASHBOARD_OPERATIVO_SHEETS.forEach(sheet => {
         expect(sheet.title).toBeTruthy();

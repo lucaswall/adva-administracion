@@ -256,12 +256,37 @@ export async function createSheet(
 }
 
 /**
+ * Number format configuration for columns
+ */
+export type NumberFormat =
+  | { type: 'currency'; decimals: 2 }  // e.g., $1,234.56
+  | { type: 'currency'; decimals: 8 }  // e.g., 0.00000123 (for cost-per-token)
+  | { type: 'number'; decimals: 0 }    // e.g., 1,234 (for counts)
+  | { type: 'number'; decimals: 2 };   // e.g., 12.34 (for rates/percentages)
+
+/**
+ * Converts a NumberFormat to a Sheets number format pattern
+ */
+function getNumberFormatPattern(format: NumberFormat): string {
+  if (format.decimals === 0) {
+    return '#,##0';
+  } else if (format.decimals === 2) {
+    return '#,##0.00';
+  } else if (format.decimals === 8) {
+    return '#,##0.00000000';
+  }
+  // Default fallback
+  return '#,##0.00';
+}
+
+/**
  * Formats a sheet with bold headers, frozen rows, and number formatting
  *
  * @param spreadsheetId - Spreadsheet ID
  * @param sheetId - Sheet ID (not the name, the numeric ID)
  * @param options - Formatting options
- * @param options.monetaryColumns - 0-indexed columns to format as currency (e.g., [12, 13, 14])
+ * @param options.monetaryColumns - 0-indexed columns to format as currency with 2 decimals (backward compatibility)
+ * @param options.numberFormats - Map of 0-indexed column number to NumberFormat
  * @param options.frozenRows - Number of rows to freeze at top (default: 1)
  * @returns Success or error
  */
@@ -270,12 +295,13 @@ export async function formatSheet(
   sheetId: number,
   options: {
     monetaryColumns?: number[];
+    numberFormats?: Map<number, NumberFormat>;
     frozenRows?: number;
   } = {}
 ): Promise<Result<void, Error>> {
   try {
     const sheets = getSheetsService();
-    const { monetaryColumns = [], frozenRows = 1 } = options;
+    const { monetaryColumns = [], numberFormats, frozenRows = 1 } = options;
 
     const requests: sheets_v4.Schema$Request[] = [];
 
@@ -333,8 +359,32 @@ export async function formatSheet(
       },
     });
 
-    // 4. Apply number formatting to monetary columns
-    if (monetaryColumns.length > 0) {
+    // 4. Apply number formatting from numberFormats map (takes precedence)
+    if (numberFormats && numberFormats.size > 0) {
+      for (const [columnIndex, format] of numberFormats) {
+        requests.push({
+          repeatCell: {
+            range: {
+              sheetId,
+              startColumnIndex: columnIndex,
+              endColumnIndex: columnIndex + 1,
+              startRowIndex: 1, // Skip header row
+            },
+            cell: {
+              userEnteredFormat: {
+                numberFormat: {
+                  type: 'NUMBER',
+                  pattern: getNumberFormatPattern(format),
+                },
+              },
+            },
+            fields: 'userEnteredFormat.numberFormat',
+          },
+        });
+      }
+    }
+    // 5. Apply legacy monetaryColumns formatting (backward compatibility)
+    else if (monetaryColumns.length > 0) {
       for (const columnIndex of monetaryColumns) {
         requests.push({
           repeatCell: {
