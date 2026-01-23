@@ -763,7 +763,12 @@ export async function appendRowsWithFormatting(
             pattern: 'yyyy-mm-dd hh:mm:ss',
           };
         } else if (typeof value === 'string') {
-          cellData.userEnteredValue = { stringValue: value };
+          // If string starts with =, it's a formula - use formulaValue instead of stringValue
+          if (value.startsWith('=')) {
+            cellData.userEnteredValue = { formulaValue: value };
+          } else {
+            cellData.userEnteredValue = { stringValue: value };
+          }
         } else if (typeof value === 'number') {
           cellData.userEnteredValue = { numberValue: value };
         } else if (typeof value === 'boolean') {
