@@ -10,7 +10,7 @@ import * as sheets from '../../../src/services/sheets.js';
 vi.mock('../../../src/services/sheets.js', () => ({
   getValues: vi.fn(),
   clearSheetData: vi.fn(),
-  appendRows: vi.fn(),
+  appendRowsWithFormatting: vi.fn(),
 }));
 
 // Mock logger
@@ -63,7 +63,7 @@ describe('syncPagosPendientes', () => {
       value: undefined,
     });
 
-    vi.mocked(sheets.appendRows).mockResolvedValue({
+    vi.mocked(sheets.appendRowsWithFormatting).mockResolvedValue({
       ok: true,
       value: 20, // 2 rows * 10 columns
     });
@@ -88,7 +88,7 @@ describe('syncPagosPendientes', () => {
     );
 
     // Should append only unpaid facturas with correct columns
-    expect(sheets.appendRows).toHaveBeenCalledWith(
+    expect(sheets.appendRowsWithFormatting).toHaveBeenCalledWith(
       'dashboard456',
       'Pagos Pendientes!A:J',
       [
@@ -117,7 +117,7 @@ describe('syncPagosPendientes', () => {
 
     // Should not clear or append
     expect(sheets.clearSheetData).not.toHaveBeenCalled();
-    expect(sheets.appendRows).not.toHaveBeenCalled();
+    expect(sheets.appendRowsWithFormatting).not.toHaveBeenCalled();
   });
 
   it('should handle all facturas paid', async () => {
@@ -152,7 +152,7 @@ describe('syncPagosPendientes', () => {
 
     // Should clear but not append
     expect(sheets.clearSheetData).toHaveBeenCalled();
-    expect(sheets.appendRows).not.toHaveBeenCalled();
+    expect(sheets.appendRowsWithFormatting).not.toHaveBeenCalled();
   });
 
   it('should handle errors when reading facturas', async () => {
@@ -209,7 +209,7 @@ describe('syncPagosPendientes', () => {
       value: undefined,
     });
 
-    vi.mocked(sheets.appendRows).mockResolvedValue({
+    vi.mocked(sheets.appendRowsWithFormatting).mockResolvedValue({
       ok: false,
       error: new Error('Failed to append rows'),
     });
@@ -241,7 +241,7 @@ describe('syncPagosPendientes', () => {
       value: undefined,
     });
 
-    vi.mocked(sheets.appendRows).mockResolvedValue({
+    vi.mocked(sheets.appendRowsWithFormatting).mockResolvedValue({
       ok: true,
       value: 10,
     });
@@ -250,7 +250,7 @@ describe('syncPagosPendientes', () => {
 
     // Verify column mapping: fechaEmision, fileId, fileName, tipoComprobante,
     // nroFactura, cuitEmisor, razonSocialEmisor, importeTotal, moneda, concepto
-    expect(sheets.appendRows).toHaveBeenCalledWith(
+    expect(sheets.appendRowsWithFormatting).toHaveBeenCalledWith(
       'dashboard456',
       'Pagos Pendientes!A:J',
       [

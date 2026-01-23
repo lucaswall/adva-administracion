@@ -4,7 +4,7 @@
  */
 
 import type { Result } from '../types/index.js';
-import { getValues, clearSheetData, appendRows } from './sheets.js';
+import { getValues, clearSheetData, appendRowsWithFormatting } from './sheets.js';
 import { info, warn } from '../utils/logger.js';
 import { getCorrelationId } from '../utils/correlation.js';
 
@@ -100,7 +100,7 @@ export async function syncPagosPendientes(
     ]);
 
     // 5. Write filtered rows to Pagos Pendientes
-    const appendResult = await appendRows(
+    const appendResult = await appendRowsWithFormatting(
       dashboardId,
       'Pagos Pendientes!A:J',
       pagosPendientesRows
