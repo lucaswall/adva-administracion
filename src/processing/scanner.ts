@@ -136,9 +136,12 @@ export async function scanFolder(folderId?: string): Promise<Result<ScanResult, 
 
     const queue = getProcessingQueue();
 
-    // Process each new file
+    // Queue all files for processing (don't await individual tasks)
+    // This allows the queue to process files concurrently up to the concurrency limit
+    const processingPromises: Promise<void>[] = [];
+
     for (const fileInfo of newFiles) {
-      await queue.add(async () => {
+      const promise = queue.add(async () => {
         // Each file gets its own correlation context that inherits from parent
         await withCorrelationAsync(async () => {
           const fileCorrelationId = getCorrelationId();
@@ -267,10 +270,12 @@ export async function scanFolder(folderId?: string): Promise<Result<ScanResult, 
           );
         }, { correlationId: generateCorrelationId(), fileId: fileInfo.id, fileName: fileInfo.name });
       });
+
+      processingPromises.push(promise);
     }
 
     // Wait for all processing to complete
-    await queue.onIdle();
+    await Promise.allSettled(processingPromises);
 
     // Run automatic matching after processing
     if (result.filesProcessed > 0) {

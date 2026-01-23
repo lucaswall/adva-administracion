@@ -78,11 +78,15 @@ export class ProcessingQueue {
 
   /**
    * Gets current queue statistics
+   *
+   * Note: p-queue API terminology:
+   * - queue.size = number of queued items waiting to run
+   * - queue.pending = number of promises being executed
    */
   getStats(): QueueStats {
     return {
-      pending: this.queue.pending,
-      running: this.queue.size - this.queue.pending,
+      pending: this.queue.size,
+      running: this.queue.pending,
       completed: this.completed,
       failed: this.failed,
     };
