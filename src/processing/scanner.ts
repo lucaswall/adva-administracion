@@ -14,6 +14,7 @@ import type {
   Pago,
   Recibo,
   ResumenBancario,
+  Retencion,
   ScanResult,
   DocumentType,
 } from '../types/index.js';
@@ -27,7 +28,7 @@ import { withCorrelationAsync, getCorrelationId, generateCorrelationId } from '.
 
 // Import from refactored modules
 import { processFile, hasValidDate } from './extractor.js';
-import { storeFactura, storePago, storeRecibo, getProcessedFileIds } from './storage/index.js';
+import { storeFactura, storePago, storeRecibo, storeRetencion, getProcessedFileIds } from './storage/index.js';
 import { runMatching } from './matching/index.js';
 
 // Re-export for backwards compatibility
@@ -327,7 +328,7 @@ export async function scanFolder(folderId?: string): Promise<Result<ScanResult, 
  * Helper to store and sort a document based on its type
  */
 async function storeAndSortDocument(
-  doc: Factura | Pago | Recibo | ResumenBancario,
+  doc: Factura | Pago | Recibo | ResumenBancario | Retencion,
   documentType: DocumentType,
   fileInfo: { id: string; name: string },
   controlCreditosId: string,
@@ -609,6 +610,54 @@ async function storeAndSortDocument(
         fileName: fileInfo.name,
         correlationId,
       });
+    }
+  } else if (documentType === 'certificado_retencion') {
+    // Tax withholding certificate -> goes to Control de Creditos
+    debug('Storing certificado de retencion', {
+      module: 'scanner',
+      phase: 'storage',
+      fileName: fileInfo.name,
+      spreadsheetId: controlCreditosId,
+      nroCertificado: (doc as Retencion).nroCertificado,
+      montoRetencion: (doc as Retencion).montoRetencion,
+      date: (doc as Retencion).fechaEmision,
+      correlationId,
+    });
+    const storeResult = await storeRetencion(doc as Retencion, controlCreditosId);
+    if (storeResult.ok) {
+      info('Retencion stored, moving to Creditos folder', {
+        module: 'scanner',
+        phase: 'storage',
+        fileName: fileInfo.name,
+        correlationId,
+      });
+      const sortResult = await sortAndRenameDocument(doc, 'creditos', 'certificado_retencion');
+      if (!sortResult.success) {
+        logError('Failed to move retencion to Creditos', {
+          module: 'scanner',
+          phase: 'storage',
+          fileName: fileInfo.name,
+          error: sortResult.error,
+          correlationId,
+        });
+        result.errors++;
+      } else {
+        info(`Moved to ${sortResult.targetPath}`, {
+          module: 'scanner',
+          phase: 'storage',
+          fileName: fileInfo.name,
+          correlationId,
+        });
+      }
+    } else {
+      logError('Failed to store retencion', {
+        module: 'scanner',
+        phase: 'storage',
+        fileName: fileInfo.name,
+        error: storeResult.error.message,
+        correlationId,
+      });
+      result.errors++;
     }
   }
 }

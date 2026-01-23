@@ -385,9 +385,10 @@ describe('FolderStructure service', () => {
       expect(mockGetSheetMetadata).toHaveBeenCalledWith('control-creditos-id');
       expect(mockGetSheetMetadata).toHaveBeenCalledWith('control-debitos-id');
       expect(mockGetSheetMetadata).toHaveBeenCalledWith('dashboard-operativo-id');
-      expect(mockCreateSheet).toHaveBeenCalledTimes(8);
+      expect(mockCreateSheet).toHaveBeenCalledTimes(9);
       expect(mockCreateSheet).toHaveBeenCalledWith('control-creditos-id', 'Facturas Emitidas');
       expect(mockCreateSheet).toHaveBeenCalledWith('control-creditos-id', 'Pagos Recibidos');
+      expect(mockCreateSheet).toHaveBeenCalledWith('control-creditos-id', 'Retenciones Recibidas');
       expect(mockCreateSheet).toHaveBeenCalledWith('control-debitos-id', 'Facturas Recibidas');
       expect(mockCreateSheet).toHaveBeenCalledWith('control-debitos-id', 'Pagos Enviados');
       expect(mockCreateSheet).toHaveBeenCalledWith('control-debitos-id', 'Recibos');
@@ -424,6 +425,7 @@ describe('FolderStructure service', () => {
           value: [
             { title: 'Facturas Emitidas', sheetId: 1 },
             { title: 'Pagos Recibidos', sheetId: 2 },
+            { title: 'Retenciones Recibidas', sheetId: 3 },
           ],
         })
         .mockResolvedValueOnce({
@@ -448,6 +450,7 @@ describe('FolderStructure service', () => {
       mockGetValues
         .mockResolvedValueOnce({ ok: true, value: [['fechaEmision', 'fileId', 'fileName']] }) // Facturas Emitidas headers
         .mockResolvedValueOnce({ ok: true, value: [['fechaPago', 'fileId', 'fileName']] }) // Pagos Recibidos headers
+        .mockResolvedValueOnce({ ok: true, value: [['fechaEmision', 'fileId', 'fileName']] }) // Retenciones Recibidas headers
         .mockResolvedValueOnce({ ok: true, value: [['fechaEmision', 'fileId', 'fileName']] }) // Facturas Recibidas headers
         .mockResolvedValueOnce({ ok: true, value: [['fechaPago', 'fileId', 'fileName']] }) // Pagos Enviados headers
         .mockResolvedValueOnce({ ok: true, value: [['fechaPago', 'fileId', 'fileName']] }) // Recibos headers
@@ -512,13 +515,14 @@ describe('FolderStructure service', () => {
         .mockResolvedValueOnce({ ok: true, value: [['fechaEmision', 'fileId', 'fileName']] }) // Facturas Recibidas
         .mockResolvedValueOnce({ ok: true, value: [['anio', 'mes', 'totalLlamadas']] }); // Resumen Mensual
 
-      // Mock creating missing sheets (1 for Creditos + 2 for Debitos + 2 for Dashboard = 5)
+      // Mock creating missing sheets (2 for Creditos + 2 for Debitos + 2 for Dashboard = 6)
       mockCreateSheet
         .mockResolvedValueOnce({ ok: true, value: 2 }) // Pagos Recibidos
-        .mockResolvedValueOnce({ ok: true, value: 3 }) // Pagos Enviados
-        .mockResolvedValueOnce({ ok: true, value: 4 }) // Recibos
-        .mockResolvedValueOnce({ ok: true, value: 5 }) // Pagos Pendientes
-        .mockResolvedValueOnce({ ok: true, value: 6 }); // Uso de API
+        .mockResolvedValueOnce({ ok: true, value: 3 }) // Retenciones Recibidas
+        .mockResolvedValueOnce({ ok: true, value: 4 }) // Pagos Enviados
+        .mockResolvedValueOnce({ ok: true, value: 5 }) // Recibos
+        .mockResolvedValueOnce({ ok: true, value: 6 }) // Pagos Pendientes
+        .mockResolvedValueOnce({ ok: true, value: 7 }); // Uso de API
 
       mockSetValues.mockResolvedValue({ ok: true, value: 17 });
 
@@ -527,8 +531,9 @@ describe('FolderStructure service', () => {
       expect(result.ok).toBe(true);
 
       // Verify only missing sheets were created
-      expect(mockCreateSheet).toHaveBeenCalledTimes(5);
+      expect(mockCreateSheet).toHaveBeenCalledTimes(6);
       expect(mockCreateSheet).toHaveBeenCalledWith('control-creditos-id', 'Pagos Recibidos');
+      expect(mockCreateSheet).toHaveBeenCalledWith('control-creditos-id', 'Retenciones Recibidas');
       expect(mockCreateSheet).toHaveBeenCalledWith('control-debitos-id', 'Pagos Enviados');
       expect(mockCreateSheet).toHaveBeenCalledWith('control-debitos-id', 'Recibos');
       expect(mockCreateSheet).toHaveBeenCalledWith('dashboard-operativo-id', 'Pagos Pendientes');
@@ -631,7 +636,7 @@ describe('FolderStructure service', () => {
       expect(result.ok).toBe(true);
 
       // Verify sheets were created for all spreadsheets
-      expect(mockCreateSheet).toHaveBeenCalledTimes(8);
+      expect(mockCreateSheet).toHaveBeenCalledTimes(9);
 
       // Verify Sheet1 was deleted from all spreadsheets
       expect(mockDeleteSheet).toHaveBeenCalledTimes(3);

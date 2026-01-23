@@ -8,6 +8,7 @@ import { getValues } from '../../services/sheets.js';
 export { storeFactura } from './factura-store.js';
 export { storePago } from './pago-store.js';
 export { storeRecibo } from './recibo-store.js';
+export { storeRetencion } from './retencion-store.js';
 
 /**
  * Gets list of already processed file IDs from both control spreadsheets
@@ -39,6 +40,7 @@ export async function getProcessedFileIds(
   // Get from Control de Creditos
   await extractFileIds(controlCreditosId, 'Facturas Emitidas');
   await extractFileIds(controlCreditosId, 'Pagos Recibidos');
+  await extractFileIds(controlCreditosId, 'Retenciones Recibidas');
 
   // Get from Control de Debitos
   await extractFileIds(controlDebitosId, 'Facturas Recibidas');

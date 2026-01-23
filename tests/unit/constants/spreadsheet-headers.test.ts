@@ -209,8 +209,8 @@ describe('spreadsheet-headers', () => {
   });
 
   describe('CONTROL_CREDITOS_SHEETS', () => {
-    it('has 2 sheet configurations', () => {
-      expect(CONTROL_CREDITOS_SHEETS).toHaveLength(2);
+    it('has 3 sheet configurations', () => {
+      expect(CONTROL_CREDITOS_SHEETS).toHaveLength(3);
     });
 
     it('contains Facturas Emitidas sheet with correct headers', () => {
