@@ -222,18 +222,17 @@ Unpaid invoices from Control de Debitos. Automatically synced after matching.
 
 Auto-synced from Facturas Recibidas where `pagada != "SI"`.
 
-### Resumen Mensual (8 columns, A:H)
+### Resumen Mensual (7 columns, A:G)
 
 | Column | Field | Type | Description |
 |--------|-------|------|-------------|
-| A | anio | number | Year |
-| B | mes | string | Month name |
-| C | totalLlamadas | number | Total API calls |
-| D | tokensEntrada | number | Input tokens |
-| E | tokensSalida | number | Output tokens |
-| F | costoTotalUSD | currency | Total cost USD |
-| G | tasaExito | number | Success rate |
-| H | duracionPromedio | number | Average duration |
+| A | fecha | string | Month in YYYY-MM format |
+| B | totalLlamadas | number | Total API calls |
+| C | tokensEntrada | number | Input tokens |
+| D | tokensSalida | number | Output tokens |
+| E | costoTotalUSD | currency | Total cost USD |
+| F | tasaExito | number | Success rate |
+| G | duracionPromedio | number | Average duration |
 
 ### Uso de API (12 columns, A:L)
 

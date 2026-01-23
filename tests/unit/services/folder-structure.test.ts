@@ -455,7 +455,7 @@ describe('FolderStructure service', () => {
         .mockResolvedValueOnce({ ok: true, value: [['fechaPago', 'fileId', 'fileName']] }) // Pagos Enviados headers
         .mockResolvedValueOnce({ ok: true, value: [['fechaPago', 'fileId', 'fileName']] }) // Recibos headers
         .mockResolvedValueOnce({ ok: true, value: [['fechaEmision', 'fileId', 'fileName']] }) // Pagos Pendientes headers
-        .mockResolvedValueOnce({ ok: true, value: [['anio', 'mes', 'totalLlamadas', 'tokensEntrada', 'tokensSalida', 'costoTotalUSD', 'tasaExito', 'duracionPromedio']] }) // Resumen Mensual headers
+        .mockResolvedValueOnce({ ok: true, value: [['fecha', 'totalLlamadas', 'tokensEntrada', 'tokensSalida', 'costoTotalUSD', 'tasaExito', 'duracionPromedio']] }) // Resumen Mensual headers
         .mockResolvedValueOnce({ ok: true, value: [['timestamp', 'requestId', 'fileId', 'fileName', 'model', 'promptTokens', 'outputTokens', 'totalTokens', 'estimatedCostUSD', 'durationMs', 'success', 'errorMessage']] }) // Uso de API headers
         .mockResolvedValueOnce({ ok: true, value: [[2026]] }); // Resumen Mensual A2:A2 (data exists)
 
@@ -513,7 +513,7 @@ describe('FolderStructure service', () => {
       mockGetValues
         .mockResolvedValueOnce({ ok: true, value: [['fechaEmision', 'fileId', 'fileName']] }) // Facturas Emitidas
         .mockResolvedValueOnce({ ok: true, value: [['fechaEmision', 'fileId', 'fileName']] }) // Facturas Recibidas
-        .mockResolvedValueOnce({ ok: true, value: [['anio', 'mes', 'totalLlamadas']] }); // Resumen Mensual
+        .mockResolvedValueOnce({ ok: true, value: [['fecha', 'totalLlamadas', 'tokensEntrada']] }); // Resumen Mensual
 
       // Mock creating missing sheets (2 for Creditos + 2 for Debitos + 2 for Dashboard = 6)
       mockCreateSheet
@@ -782,7 +782,7 @@ describe('FolderStructure service', () => {
       expect(mockSetValues).toHaveBeenCalledWith(
         'dashboard-operativo-id',
         'Resumen Mensual!A1',
-        [['anio', 'mes', 'totalLlamadas', 'tokensEntrada', 'tokensSalida', 'costoTotalUSD', 'tasaExito', 'duracionPromedio']]
+        [['fecha', 'totalLlamadas', 'tokensEntrada', 'tokensSalida', 'costoTotalUSD', 'tasaExito', 'duracionPromedio']]
       );
       expect(mockSetValues).toHaveBeenCalledWith(
         'dashboard-operativo-id',
@@ -790,27 +790,37 @@ describe('FolderStructure service', () => {
         [['timestamp', 'requestId', 'fileId', 'fileName', 'model', 'promptTokens', 'outputTokens', 'totalTokens', 'estimatedCostUSD', 'durationMs', 'success', 'errorMessage']]
       );
 
-      // Verify Resumen Mensual was initialized with current month only
-      const monthNames = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+      // Verify Resumen Mensual was initialized with current month and next month
       const now = new Date();
       const currentYear = now.getFullYear();
       const currentMonth = now.getMonth();
-      const currentMonthName = monthNames[currentMonth];
+      const nextMonth = currentMonth === 11 ? 0 : currentMonth + 1;
+      const yearForNextMonth = currentMonth === 11 ? currentYear + 1 : currentYear;
+      const currentMonthStr = `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}`;
+      const nextMonthStr = `${yearForNextMonth}-${String(nextMonth + 1).padStart(2, '0')}`;
 
-      // Verify current month row was initialized with formulas wrapped in IFERROR
+      // Verify current month and next month rows were initialized with formulas wrapped in IFERROR
       expect(mockSetValues).toHaveBeenCalledWith(
         'dashboard-operativo-id',
-        `Resumen Mensual!A2:H2`,
+        'Resumen Mensual!A2:G3',
         expect.arrayContaining([
           expect.arrayContaining([
-            currentYear,
-            currentMonthName,
+            currentMonthStr,
             expect.stringContaining('=IFERROR(COUNTIFS'), // totalLlamadas formula with IFERROR
             expect.stringContaining('=IFERROR(SUMIFS'),   // tokensEntrada formula with IFERROR
             expect.stringContaining('=IFERROR(SUMIFS'),   // tokensSalida formula with IFERROR
             expect.stringContaining('=IFERROR(SUMIFS'),   // costoTotalUSD formula with IFERROR
             expect.stringContaining('=IFERROR(IF'),       // tasaExito formula with IFERROR
             expect.stringContaining('=IFERROR(AVERAGEIFS'), // duracionPromedio formula with IFERROR
+          ]),
+          expect.arrayContaining([
+            nextMonthStr,
+            expect.stringContaining('=IFERROR(COUNTIFS'),
+            expect.stringContaining('=IFERROR(SUMIFS'),
+            expect.stringContaining('=IFERROR(SUMIFS'),
+            expect.stringContaining('=IFERROR(SUMIFS'),
+            expect.stringContaining('=IFERROR(IF'),
+            expect.stringContaining('=IFERROR(AVERAGEIFS'),
           ])
         ])
       );

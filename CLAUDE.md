@@ -149,7 +149,7 @@ See `SPREADSHEET_FORMAT.md` for complete schema.
 
 - **Control de Creditos**: Facturas Emitidas (18 cols), Pagos Recibidos (15 cols), Retenciones Recibidas (15 cols)
 - **Control de Debitos**: Facturas Recibidas (19 cols), Pagos Enviados (15 cols), Recibos (18 cols)
-- **Dashboard**: Pagos Pendientes (10 cols), Resumen Mensual (8 cols), Uso de API (12 cols)
+- **Dashboard**: Pagos Pendientes (10 cols), Resumen Mensual (7 cols), Uso de API (12 cols)
 
 **Key principle**: Store counterparty info only, ADVA's role is implicit.
 

@@ -197,8 +197,7 @@ export const CONTROL_DEBITOS_SHEETS: SheetConfig[] = [
 
 /** Headers for Resumen Mensual sheet */
 export const RESUMEN_MENSUAL_HEADERS = [
-  'anio',
-  'mes',
+  'fecha',
   'totalLlamadas',
   'tokensEntrada',
   'tokensSalida',
@@ -250,7 +249,7 @@ export const DASHBOARD_OPERATIVO_SHEETS: SheetConfig[] = [
   {
     title: 'Resumen Mensual',
     headers: RESUMEN_MENSUAL_HEADERS,
-    monetaryColumns: [5] // costoTotalUSD (0-indexed: 5)
+    monetaryColumns: [4] // costoTotalUSD (0-indexed: 4 after combining fecha)
   },
   {
     title: 'Uso de API',

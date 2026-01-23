@@ -315,40 +315,45 @@ async function initializeDashboardOperativo(
     return { ok: true, value: undefined };
   }
 
-  // Initialize Resumen Mensual with current month only
+  // Initialize Resumen Mensual with current month and next month
   const now = new Date();
   const currentYear = now.getFullYear();
   const currentMonth = now.getMonth(); // 0-indexed (0 = January, 11 = December)
-  const monthNames = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
-
-  const monthName = monthNames[currentMonth];
-  const rowNumber = 2; // Row 1 is headers, data starts at row 2
   const nextMonth = currentMonth === 11 ? 0 : currentMonth + 1;
   const yearForNextMonth = currentMonth === 11 ? currentYear + 1 : currentYear;
 
-  // Create formulas for current month only with IFERROR for "no data" handling
-  const row = [
-    currentYear,
-    monthName,
+  // Format: YYYY-MM
+  const currentMonthStr = `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}`;
+  const nextMonthStr = `${yearForNextMonth}-${String(nextMonth + 1).padStart(2, '0')}`;
+
+  // Create formula template that can be copied down
+  // Uses $A to make column A absolute, row number relative
+  const createRowFormulas = (rowNum: number) => [
     // totalLlamadas: Count all calls in this month
-    `=IFERROR(COUNTIFS('Uso de API'!A:A, ">="&DATE(${currentYear}, ${currentMonth + 1}, 1), 'Uso de API'!A:A, "<"&DATE(${yearForNextMonth}, ${nextMonth + 1}, 1)), "no data")`,
+    `=IFERROR(COUNTIFS('Uso de API'!$A:$A, ">="&DATE(VALUE(LEFT($A${rowNum},4)), VALUE(RIGHT($A${rowNum},2)), 1), 'Uso de API'!$A:$A, "<"&EDATE(DATE(VALUE(LEFT($A${rowNum},4)), VALUE(RIGHT($A${rowNum},2)), 1), 1)), "no data")`,
     // tokensEntrada: Sum of prompt tokens in this month
-    `=IFERROR(SUMIFS('Uso de API'!F:F, 'Uso de API'!A:A, ">="&DATE(${currentYear}, ${currentMonth + 1}, 1), 'Uso de API'!A:A, "<"&DATE(${yearForNextMonth}, ${nextMonth + 1}, 1)), "no data")`,
+    `=IFERROR(SUMIFS('Uso de API'!$F:$F, 'Uso de API'!$A:$A, ">="&DATE(VALUE(LEFT($A${rowNum},4)), VALUE(RIGHT($A${rowNum},2)), 1), 'Uso de API'!$A:$A, "<"&EDATE(DATE(VALUE(LEFT($A${rowNum},4)), VALUE(RIGHT($A${rowNum},2)), 1), 1)), "no data")`,
     // tokensSalida: Sum of output tokens in this month
-    `=IFERROR(SUMIFS('Uso de API'!G:G, 'Uso de API'!A:A, ">="&DATE(${currentYear}, ${currentMonth + 1}, 1), 'Uso de API'!A:A, "<"&DATE(${yearForNextMonth}, ${nextMonth + 1}, 1)), "no data")`,
+    `=IFERROR(SUMIFS('Uso de API'!$G:$G, 'Uso de API'!$A:$A, ">="&DATE(VALUE(LEFT($A${rowNum},4)), VALUE(RIGHT($A${rowNum},2)), 1), 'Uso de API'!$A:$A, "<"&EDATE(DATE(VALUE(LEFT($A${rowNum},4)), VALUE(RIGHT($A${rowNum},2)), 1), 1)), "no data")`,
     // costoTotalUSD: Sum of costs in this month
-    `=IFERROR(SUMIFS('Uso de API'!I:I, 'Uso de API'!A:A, ">="&DATE(${currentYear}, ${currentMonth + 1}, 1), 'Uso de API'!A:A, "<"&DATE(${yearForNextMonth}, ${nextMonth + 1}, 1)), "no data")`,
+    `=IFERROR(SUMIFS('Uso de API'!$I:$I, 'Uso de API'!$A:$A, ">="&DATE(VALUE(LEFT($A${rowNum},4)), VALUE(RIGHT($A${rowNum},2)), 1), 'Uso de API'!$A:$A, "<"&EDATE(DATE(VALUE(LEFT($A${rowNum},4)), VALUE(RIGHT($A${rowNum},2)), 1), 1)), "no data")`,
     // tasaExito: Success rate (successful calls / total calls)
-    `=IFERROR(IF(C${rowNumber}=0, 0, COUNTIFS('Uso de API'!A:A, ">="&DATE(${currentYear}, ${currentMonth + 1}, 1), 'Uso de API'!A:A, "<"&DATE(${yearForNextMonth}, ${nextMonth + 1}, 1), 'Uso de API'!K:K, "YES") / C${rowNumber}), "no data")`,
+    `=IFERROR(IF(B${rowNum}=0, 0, COUNTIFS('Uso de API'!$A:$A, ">="&DATE(VALUE(LEFT($A${rowNum},4)), VALUE(RIGHT($A${rowNum},2)), 1), 'Uso de API'!$A:$A, "<"&EDATE(DATE(VALUE(LEFT($A${rowNum},4)), VALUE(RIGHT($A${rowNum},2)), 1), 1), 'Uso de API'!$K:$K, "YES") / B${rowNum}), "no data")`,
     // duracionPromedio: Average duration in this month
-    `=IFERROR(AVERAGEIFS('Uso de API'!J:J, 'Uso de API'!A:A, ">="&DATE(${currentYear}, ${currentMonth + 1}, 1), 'Uso de API'!A:A, "<"&DATE(${yearForNextMonth}, ${nextMonth + 1}, 1)), "no data")`,
+    `=IFERROR(AVERAGEIFS('Uso de API'!$J:$J, 'Uso de API'!$A:$A, ">="&DATE(VALUE(LEFT($A${rowNum},4)), VALUE(RIGHT($A${rowNum},2)), 1), 'Uso de API'!$A:$A, "<"&EDATE(DATE(VALUE(LEFT($A${rowNum},4)), VALUE(RIGHT($A${rowNum},2)), 1), 1)), "no data")`,
   ];
 
-  // Set values for current month
+  // Create rows for current month and next month
+  const rows = [
+    [currentMonthStr, ...createRowFormulas(2)],
+    [nextMonthStr, ...createRowFormulas(3)],
+  ];
+
+  // Set values for both months
   const setResult = await setValues(
     spreadsheetId,
-    `Resumen Mensual!A${rowNumber}:H${rowNumber}`,
-    [row]
+    `Resumen Mensual!A2:G3`,
+    rows
   );
   if (!setResult.ok) return setResult;
 
