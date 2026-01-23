@@ -14,17 +14,24 @@ import {
 describe('parseArgDate', () => {
   it('parses DD/MM/YYYY format', () => {
     const result = parseArgDate('15/03/2024');
-    expect(result).toEqual(new Date(2024, 2, 15)); // Month is 0-indexed
+    // Uses UTC internally to avoid timezone issues
+    expect(result?.getUTCFullYear()).toBe(2024);
+    expect(result?.getUTCMonth()).toBe(2); // March (0-indexed)
+    expect(result?.getUTCDate()).toBe(15);
   });
 
   it('parses YYYY-MM-DD format', () => {
     const result = parseArgDate('2024-03-15');
-    expect(result).toEqual(new Date(2024, 2, 15));
+    expect(result?.getUTCFullYear()).toBe(2024);
+    expect(result?.getUTCMonth()).toBe(2);
+    expect(result?.getUTCDate()).toBe(15);
   });
 
   it('parses DD-MM-YYYY format', () => {
     const result = parseArgDate('15-03-2024');
-    expect(result).toEqual(new Date(2024, 2, 15));
+    expect(result?.getUTCFullYear()).toBe(2024);
+    expect(result?.getUTCMonth()).toBe(2);
+    expect(result?.getUTCDate()).toBe(15);
   });
 
   it('returns null for invalid date', () => {
@@ -39,7 +46,9 @@ describe('parseArgDate', () => {
 
   it('handles single digit day and month', () => {
     const result = parseArgDate('5/3/2024');
-    expect(result).toEqual(new Date(2024, 2, 5));
+    expect(result?.getUTCFullYear()).toBe(2024);
+    expect(result?.getUTCMonth()).toBe(2);
+    expect(result?.getUTCDate()).toBe(5);
   });
 
   // Date object handling (Google Sheets returns Date objects for date columns)

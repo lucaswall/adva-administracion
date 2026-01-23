@@ -14,6 +14,12 @@ import { debug, warn, error as logError } from '../utils/logger.js';
 let driveService: drive_v3.Drive | null = null;
 
 /**
+ * Maximum folder depth for recursive listing
+ * Prevents runaway recursion in deeply nested or circular folder structures
+ */
+const MAX_FOLDER_DEPTH = 20;
+
+/**
  * Gets or creates the Drive service
  */
 function getDriveService(): drive_v3.Drive {
@@ -31,11 +37,25 @@ function getDriveService(): drive_v3.Drive {
  * Lists PDF and image files in a folder (recursively)
  *
  * @param folderId - Google Drive folder ID
+ * @param currentDepth - Current recursion depth (internal use)
  * @returns Array of file metadata
  */
 export async function listFilesInFolder(
-  folderId: string
+  folderId: string,
+  currentDepth: number = 0
 ): Promise<Result<Array<Omit<FileInfo, 'content'>>, Error>> {
+  // Check depth limit to prevent infinite recursion
+  if (currentDepth >= MAX_FOLDER_DEPTH) {
+    warn('Maximum folder depth reached, skipping further recursion', {
+      module: 'drive',
+      phase: 'list-files',
+      folderId,
+      depth: currentDepth,
+      maxDepth: MAX_FOLDER_DEPTH
+    });
+    return { ok: true, value: [] };
+  }
+
   try {
     const drive = getDriveService();
     const files: Array<Omit<FileInfo, 'content'>> = [];
@@ -73,7 +93,7 @@ export async function listFilesInFolder(
 
         // Check if it's a folder - recurse into it
         if (item.mimeType === 'application/vnd.google-apps.folder') {
-          const subResult = await listFilesInFolder(item.id);
+          const subResult = await listFilesInFolder(item.id, currentDepth + 1);
 
           if (subResult.ok) {
             files.push(...subResult.value);
