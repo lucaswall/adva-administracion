@@ -217,6 +217,9 @@ export const USO_API_HEADERS = [
   'cachedTokens',
   'outputTokens',
   'totalTokens',
+  'promptCostPerToken',
+  'cachedCostPerToken',
+  'outputCostPerToken',
   'estimatedCostUSD',
   'durationMs',
   'success',
@@ -255,6 +258,6 @@ export const DASHBOARD_OPERATIVO_SHEETS: SheetConfig[] = [
   {
     title: 'Uso de API',
     headers: USO_API_HEADERS,
-    monetaryColumns: [9] // estimatedCostUSD (0-indexed: 9 after adding cachedTokens)
+    monetaryColumns: [9, 10, 11, 12] // cost columns and estimatedCostUSD (0-indexed: 9-12)
   },
 ];

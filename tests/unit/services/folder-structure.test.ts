@@ -787,7 +787,7 @@ describe('FolderStructure service', () => {
       expect(mockSetValues).toHaveBeenCalledWith(
         'dashboard-operativo-id',
         'Uso de API!A1',
-        [['timestamp', 'requestId', 'fileId', 'fileName', 'model', 'promptTokens', 'cachedTokens', 'outputTokens', 'totalTokens', 'estimatedCostUSD', 'durationMs', 'success', 'errorMessage']]
+        [['timestamp', 'requestId', 'fileId', 'fileName', 'model', 'promptTokens', 'cachedTokens', 'outputTokens', 'totalTokens', 'promptCostPerToken', 'cachedCostPerToken', 'outputCostPerToken', 'estimatedCostUSD', 'durationMs', 'success', 'errorMessage']]
       );
 
       // Verify Resumen Mensual was initialized with current month and next month

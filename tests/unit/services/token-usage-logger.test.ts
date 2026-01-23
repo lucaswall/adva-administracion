@@ -9,6 +9,7 @@ import * as sheetsService from '../../../src/services/sheets.js';
 // Mock sheets service
 vi.mock('../../../src/services/sheets.js', () => ({
   appendRowsWithFormatting: vi.fn(),
+  getValues: vi.fn(),
 }));
 
 describe('calculateCost', () => {
@@ -112,7 +113,11 @@ describe('logTokenUsage', () => {
 
   it('should log successful API call with all fields', async () => {
     const mockAppendRows = vi.mocked(sheetsService.appendRowsWithFormatting);
-    mockAppendRows.mockResolvedValue({ ok: true, value: undefined });
+    const mockGetValues = vi.mocked(sheetsService.getValues);
+
+    // Mock current row count (header + 1 existing row = 2 rows, so next row is 3)
+    mockGetValues.mockResolvedValue({ ok: true, value: [['header'], ['row1']] });
+    mockAppendRows.mockResolvedValue({ ok: true, value: 1 });
 
     const timestampStr = '2026-01-21T10:30:00.000Z';
     const data = {
@@ -125,7 +130,9 @@ describe('logTokenUsage', () => {
       cachedTokens: 500,
       outputTokens: 500,
       totalTokens: 2000,
-      estimatedCostUSD: 0.001565, // Updated cost with new pricing
+      promptCostPerToken: 0.0000003,
+      cachedCostPerToken: 0.00000003,
+      outputCostPerToken: 0.0000025,
       durationMs: 2500,
       success: true,
       errorMessage: '',
@@ -134,6 +141,7 @@ describe('logTokenUsage', () => {
     const result = await logTokenUsage('spreadsheet123', data);
 
     expect(result.ok).toBe(true);
+    expect(mockGetValues).toHaveBeenCalledWith('spreadsheet123', 'Uso de API!A:A');
     expect(mockAppendRows).toHaveBeenCalledWith(
       'spreadsheet123',
       'Uso de API',
@@ -147,7 +155,10 @@ describe('logTokenUsage', () => {
         500,
         500,
         2000,
-        0.001565,
+        0.0000003,
+        0.00000003,
+        0.0000025,
+        '=F3*J3+G3*K3+H3*L3', // Formula for row 3
         2500,
         'YES',
         '',
@@ -157,7 +168,11 @@ describe('logTokenUsage', () => {
 
   it('should log failed API call with error message', async () => {
     const mockAppendRows = vi.mocked(sheetsService.appendRowsWithFormatting);
-    mockAppendRows.mockResolvedValue({ ok: true, value: undefined });
+    const mockGetValues = vi.mocked(sheetsService.getValues);
+
+    // Mock empty sheet (only header)
+    mockGetValues.mockResolvedValue({ ok: true, value: [['header']] });
+    mockAppendRows.mockResolvedValue({ ok: true, value: 1 });
 
     const timestampStr = '2026-01-21T10:30:00.000Z';
     const data = {
@@ -170,7 +185,9 @@ describe('logTokenUsage', () => {
       cachedTokens: 0,
       outputTokens: 0,
       totalTokens: 0,
-      estimatedCostUSD: 0,
+      promptCostPerToken: 0.0000003,
+      cachedCostPerToken: 0.00000003,
+      outputCostPerToken: 0.0000025,
       durationMs: 1000,
       success: false,
       errorMessage: 'API rate limit exceeded',
@@ -192,7 +209,10 @@ describe('logTokenUsage', () => {
         0,
         0,
         0,
-        0,
+        0.0000003,
+        0.00000003,
+        0.0000025,
+        '=F2*J2+G2*K2+H2*L2', // Formula for row 2 (first data row)
         1000,
         'NO',
         'API rate limit exceeded',
@@ -202,6 +222,9 @@ describe('logTokenUsage', () => {
 
   it('should return error when appendRowsWithFormatting fails', async () => {
     const mockAppendRows = vi.mocked(sheetsService.appendRowsWithFormatting);
+    const mockGetValues = vi.mocked(sheetsService.getValues);
+
+    mockGetValues.mockResolvedValue({ ok: true, value: [['header']] });
     mockAppendRows.mockResolvedValue({
       ok: false,
       error: new Error('Failed to append row')
@@ -217,7 +240,9 @@ describe('logTokenUsage', () => {
       cachedTokens: 500,
       outputTokens: 500,
       totalTokens: 2000,
-      estimatedCostUSD: 0.001565,
+      promptCostPerToken: 0.0000003,
+      cachedCostPerToken: 0.00000003,
+      outputCostPerToken: 0.0000025,
       durationMs: 2500,
       success: true,
       errorMessage: '',
@@ -233,7 +258,10 @@ describe('logTokenUsage', () => {
 
   it('should handle missing optional fields', async () => {
     const mockAppendRows = vi.mocked(sheetsService.appendRowsWithFormatting);
-    mockAppendRows.mockResolvedValue({ ok: true, value: undefined });
+    const mockGetValues = vi.mocked(sheetsService.getValues);
+
+    mockGetValues.mockResolvedValue({ ok: true, value: [['header']] });
+    mockAppendRows.mockResolvedValue({ ok: true, value: 1 });
 
     const timestampStr = '2026-01-21T10:30:00.000Z';
     const data = {
@@ -246,7 +274,9 @@ describe('logTokenUsage', () => {
       cachedTokens: 0,
       outputTokens: 50,
       totalTokens: 150,
-      estimatedCostUSD: 0.000155, // Updated cost with new pricing
+      promptCostPerToken: 0.0000003,
+      cachedCostPerToken: 0.00000003,
+      outputCostPerToken: 0.0000025,
       durationMs: 500,
       success: true,
       errorMessage: '',
@@ -268,7 +298,10 @@ describe('logTokenUsage', () => {
         0,
         50,
         150,
-        0.000155,
+        0.0000003,
+        0.00000003,
+        0.0000025,
+        '=F2*J2+G2*K2+H2*L2',
         500,
         'YES',
         '',
@@ -276,9 +309,46 @@ describe('logTokenUsage', () => {
     );
   });
 
+  it('should return error when getValues fails', async () => {
+    const mockGetValues = vi.mocked(sheetsService.getValues);
+
+    mockGetValues.mockResolvedValue({
+      ok: false,
+      error: new Error('Failed to get values')
+    });
+
+    const data = {
+      timestamp: '2026-01-21T10:30:00.000Z',
+      requestId: '123e4567-e89b-12d3-a456-426614174000',
+      fileId: 'file123',
+      fileName: 'invoice.pdf',
+      model: 'gemini-2.5-flash' as const,
+      promptTokens: 1000,
+      cachedTokens: 500,
+      outputTokens: 500,
+      totalTokens: 2000,
+      promptCostPerToken: 0.0000003,
+      cachedCostPerToken: 0.00000003,
+      outputCostPerToken: 0.0000025,
+      durationMs: 2500,
+      success: true,
+      errorMessage: '',
+    };
+
+    const result = await logTokenUsage('spreadsheet123', data);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.message).toBe('Failed to get values');
+    }
+  });
+
   it('should handle Date object timestamps', async () => {
     const mockAppendRows = vi.mocked(sheetsService.appendRowsWithFormatting);
-    mockAppendRows.mockResolvedValue({ ok: true, value: undefined });
+    const mockGetValues = vi.mocked(sheetsService.getValues);
+
+    mockGetValues.mockResolvedValue({ ok: true, value: [['header']] });
+    mockAppendRows.mockResolvedValue({ ok: true, value: 1 });
 
     const timestampDate = new Date('2026-01-21T10:30:00.000Z');
     const data = {
@@ -291,7 +361,9 @@ describe('logTokenUsage', () => {
       cachedTokens: 500,
       outputTokens: 500,
       totalTokens: 2000,
-      estimatedCostUSD: 0.001565, // Updated cost with new pricing
+      promptCostPerToken: 0.0000003,
+      cachedCostPerToken: 0.00000003,
+      outputCostPerToken: 0.0000025,
       durationMs: 2500,
       success: true,
       errorMessage: '',
@@ -313,7 +385,10 @@ describe('logTokenUsage', () => {
         500,
         500,
         2000,
-        0.001565,
+        0.0000003,
+        0.00000003,
+        0.0000025,
+        '=F2*J2+G2*K2+H2*L2',
         2500,
         'YES',
         '',

@@ -33,8 +33,8 @@ import {
 } from '../gemini/parser.js';
 import { downloadFile } from '../services/drive.js';
 import { getCachedFolderStructure } from '../services/folder-structure.js';
-import { calculateCost, generateRequestId, logTokenUsage } from '../services/token-usage-logger.js';
-import { getConfig } from '../config.js';
+import { generateRequestId, logTokenUsage } from '../services/token-usage-logger.js';
+import { getConfig, GEMINI_PRICING } from '../config.js';
 import { debug, warn, error as logError } from '../utils/logger.js';
 import { getCorrelationId, updateCorrelationContext } from '../utils/correlation.js';
 import { getCircuitBreaker } from '../utils/circuit-breaker.js';
@@ -101,13 +101,8 @@ export async function processFile(
   // Create usage callback for token tracking
   const usageCallback = dashboardOperativoId
     ? (data: UsageCallbackData) => {
-        // Calculate estimated cost including cached tokens
-        const estimatedCostUSD = calculateCost(
-          data.model,
-          data.promptTokens,
-          data.cachedTokens,
-          data.outputTokens
-        );
+        // Get current pricing for this model
+        const pricing = GEMINI_PRICING[data.model];
 
         // Log usage to Dashboard Operativo Contable
         // Note: Fire and forget - don't await to avoid slowing down processing
@@ -121,7 +116,9 @@ export async function processFile(
           cachedTokens: data.cachedTokens,
           outputTokens: data.outputTokens,
           totalTokens: data.totalTokens,
-          estimatedCostUSD,
+          promptCostPerToken: pricing.inputPerToken,
+          cachedCostPerToken: pricing.cachedPerToken,
+          outputCostPerToken: pricing.outputPerToken,
           durationMs: data.durationMs,
           success: data.success,
           errorMessage: data.errorMessage || '',

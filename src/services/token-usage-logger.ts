@@ -5,7 +5,7 @@
 
 import { randomUUID } from 'crypto';
 import { GEMINI_PRICING } from '../config.js';
-import { appendRowsWithFormatting } from './sheets.js';
+import { appendRowsWithFormatting, getValues } from './sheets.js';
 import type { Result } from '../types/index.js';
 import { debug, error as logError } from '../utils/logger.js';
 
@@ -31,8 +31,12 @@ export interface TokenUsageData {
   outputTokens: number;
   /** Total tokens */
   totalTokens: number;
-  /** Estimated cost in USD */
-  estimatedCostUSD: number;
+  /** Cost per prompt token at time of request */
+  promptCostPerToken: number;
+  /** Cost per cached token at time of request */
+  cachedCostPerToken: number;
+  /** Cost per output token at time of request */
+  outputCostPerToken: number;
   /** Request duration in milliseconds */
   durationMs: number;
   /** Whether the request succeeded */
@@ -83,6 +87,15 @@ export async function logTokenUsage(
   spreadsheetId: string,
   data: TokenUsageData
 ): Promise<Result<void, Error>> {
+  // Get current row count to determine next row number for formula
+  const valuesResult = await getValues(spreadsheetId, 'Uso de API!A:A');
+  if (!valuesResult.ok) {
+    return { ok: false, error: valuesResult.error };
+  }
+
+  // Next row will be current row count + 1 (accounting for header row)
+  const nextRow = valuesResult.value.length + 1;
+
   // Convert timestamp to Date object if it's a string
   const timestamp = typeof data.timestamp === 'string'
     ? new Date(data.timestamp)
@@ -99,7 +112,11 @@ export async function logTokenUsage(
     data.cachedTokens,
     data.outputTokens,
     data.totalTokens,
-    data.estimatedCostUSD,
+    data.promptCostPerToken,
+    data.cachedCostPerToken,
+    data.outputCostPerToken,
+    // estimatedCostUSD formula: =F*J + G*K + H*L (promptTokens*promptCost + cachedTokens*cachedCost + outputTokens*outputCost)
+    `=F${nextRow}*J${nextRow}+G${nextRow}*K${nextRow}+H${nextRow}*L${nextRow}`,
     data.durationMs,
     data.success ? 'YES' : 'NO',
     data.errorMessage,
@@ -126,7 +143,9 @@ export async function logTokenUsage(
     fileId: data.fileId,
     model: data.model,
     totalTokens: data.totalTokens,
-    cost: data.estimatedCostUSD
+    promptCost: data.promptCostPerToken,
+    cachedCost: data.cachedCostPerToken,
+    outputCost: data.outputCostPerToken
   });
 
   return { ok: true, value: undefined };

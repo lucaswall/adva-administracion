@@ -234,7 +234,7 @@ Auto-synced from Facturas Recibidas where `pagada != "SI"`.
 | F | tasaExito | number | Success rate |
 | G | duracionPromedio | number | Average duration |
 
-### Uso de API (13 columns, A:M)
+### Uso de API (16 columns, A:P)
 
 | Column | Field | Type | Description |
 |--------|-------|------|-------------|
@@ -244,16 +244,20 @@ Auto-synced from Facturas Recibidas where `pagada != "SI"`.
 | D | fileName | string | Processed file name |
 | E | model | string | Gemini model used |
 | F | promptTokens | number | New input tokens |
-| G | cachedTokens | number | Cached content tokens (90% cheaper) |
+| G | cachedTokens | number | Cached content tokens |
 | H | outputTokens | number | Output tokens |
 | I | totalTokens | number | Total tokens (F+G+H) |
-| J | estimatedCostUSD | currency | Estimated cost using Standard tier pricing |
-| K | durationMs | number | Duration in ms |
-| L | success | boolean | Request succeeded |
-| M | errorMessage | string | Error message if failed |
+| J | promptCostPerToken | currency | Cost per prompt token at request time |
+| K | cachedCostPerToken | currency | Cost per cached token at request time |
+| L | outputCostPerToken | currency | Cost per output token at request time |
+| M | estimatedCostUSD | formula | `=F*J+G*K+H*L` (auto-calculated) |
+| N | durationMs | number | Duration in ms |
+| O | success | boolean | Request succeeded |
+| P | errorMessage | string | Error message if failed |
 
-**Pricing (Standard tier):** Input $0.30/1M, Cached $0.03/1M, Output $2.50/1M
+**Current Standard tier pricing:** Input $0.30/1M, Cached $0.03/1M, Output $2.50/1M
 **Source:** https://ai.google.dev/gemini-api/docs/pricing
+**Note:** Cost per token columns (J-L) preserve historical pricing for each request
 
 ---
 
