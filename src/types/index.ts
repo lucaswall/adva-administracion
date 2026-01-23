@@ -839,6 +839,10 @@ export interface FolderStructure {
   classificationFolders: Map<string, string>;
   /** Cache of month folders by year:destination:month key (e.g., "2024:ingresos:01 - Enero" -> folder ID) */
   monthFolders: Map<string, string>;
+  /** Cache of bank account folders by year:banco:cuenta:moneda key (e.g., "2024:Santander 1234567890 ARS" -> folder ID) */
+  bankAccountFolders: Map<string, string>;
+  /** Cache of bank account spreadsheets by year:banco:cuenta:moneda key (e.g., "2024:Santander 1234567890 ARS" -> spreadsheet ID) */
+  bankAccountSpreadsheets: Map<string, string>;
   /** When the structure was last refreshed */
   lastRefreshed: Date;
 }

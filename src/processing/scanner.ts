@@ -19,7 +19,7 @@ import type {
   DocumentType,
 } from '../types/index.js';
 import { listFilesInFolder } from '../services/drive.js';
-import { getCachedFolderStructure } from '../services/folder-structure.js';
+import { getCachedFolderStructure, getOrCreateBankAccountFolder, getOrCreateBankAccountSpreadsheet } from '../services/folder-structure.js';
 import { sortToSinProcesar, sortAndRenameDocument, moveToDuplicadoFolder } from '../services/document-sorter.js';
 import { getProcessingQueue } from './queue.js';
 import { getConfig } from '../config.js';
@@ -28,7 +28,7 @@ import { withCorrelationAsync, getCorrelationId, generateCorrelationId } from '.
 
 // Import from refactored modules
 import { processFile, hasValidDate } from './extractor.js';
-import { storeFactura, storePago, storeRecibo, storeRetencion, getProcessedFileIds } from './storage/index.js';
+import { storeFactura, storePago, storeRecibo, storeRetencion, storeResumen, getProcessedFileIds } from './storage/index.js';
 import { runMatching } from './matching/index.js';
 
 // Re-export for backwards compatibility
@@ -895,30 +895,120 @@ async function storeAndSortDocument(
       result.errors++;
     }
   } else if (documentType === 'resumen_bancario') {
-    // Bank statement -> goes to Bancos folder (TODO: store in bank spreadsheet)
-    info('Moving resumen bancario to Bancos folder', {
+    // Bank statement -> store in bank account-specific spreadsheet
+    const resumen = doc as ResumenBancario;
+    const year = resumen.fechaHasta.substring(0, 4);
+
+    debug('Storing resumen bancario', {
       module: 'scanner',
       phase: 'storage',
       fileName: fileInfo.name,
+      banco: resumen.banco,
+      numeroCuenta: resumen.numeroCuenta,
+      year,
       correlationId,
     });
-    const sortResult = await sortAndRenameDocument(doc, 'bancos', 'resumen_bancario');
-    if (!sortResult.success) {
-      logError('Failed to move resumen to Bancos', {
+
+    // Get or create bank account folder
+    const folderResult = await getOrCreateBankAccountFolder(
+      year,
+      resumen.banco,
+      resumen.numeroCuenta,
+      resumen.moneda
+    );
+
+    if (!folderResult.ok) {
+      logError('Failed to get bank account folder', {
         module: 'scanner',
         phase: 'storage',
         fileName: fileInfo.name,
-        error: sortResult.error,
+        error: folderResult.error.message,
         correlationId,
       });
       result.errors++;
     } else {
-      info(`Moved to ${sortResult.targetPath}`, {
-        module: 'scanner',
-        phase: 'storage',
-        fileName: fileInfo.name,
-        correlationId,
-      });
+      // Get or create bank account spreadsheet
+      const spreadsheetResult = await getOrCreateBankAccountSpreadsheet(
+        folderResult.value,
+        year,
+        resumen.banco,
+        resumen.numeroCuenta,
+        resumen.moneda
+      );
+
+      if (!spreadsheetResult.ok) {
+        logError('Failed to get bank account spreadsheet', {
+          module: 'scanner',
+          phase: 'storage',
+          fileName: fileInfo.name,
+          error: spreadsheetResult.error.message,
+          correlationId,
+        });
+        result.errors++;
+      } else {
+        // Store the resumen
+        const storeResult = await storeResumen(resumen, spreadsheetResult.value);
+
+        if (storeResult.ok) {
+          if (storeResult.value.stored) {
+            // Not a duplicate - move to bank account folder
+            const sortResult = await sortAndRenameDocument(doc, 'bancos', 'resumen_bancario');
+            if (!sortResult.success) {
+              logError('Failed to move resumen', {
+                module: 'scanner',
+                phase: 'storage',
+                fileName: fileInfo.name,
+                error: sortResult.error,
+                correlationId,
+              });
+              result.errors++;
+            } else {
+              info(`Stored and moved to ${sortResult.targetPath}`, {
+                module: 'scanner',
+                phase: 'storage',
+                fileName: fileInfo.name,
+                correlationId,
+              });
+            }
+          } else {
+            // Duplicate - move to Duplicado folder
+            info('Duplicate resumen detected, moving to Duplicado folder', {
+              module: 'scanner',
+              phase: 'storage',
+              fileName: fileInfo.name,
+              existingFileId: storeResult.value.existingFileId,
+              correlationId,
+            });
+            const moveResult = await moveToDuplicadoFolder(fileInfo.id, fileInfo.name);
+            if (!moveResult.ok) {
+              logError('Failed to move duplicate resumen to Duplicado', {
+                module: 'scanner',
+                phase: 'storage',
+                fileName: fileInfo.name,
+                error: moveResult.error.message,
+                correlationId,
+              });
+              result.errors++;
+            } else {
+              info('Moved duplicate resumen to Duplicado', {
+                module: 'scanner',
+                phase: 'storage',
+                fileName: fileInfo.name,
+                correlationId,
+              });
+            }
+          }
+        } else {
+          logError('Failed to store resumen', {
+            module: 'scanner',
+            phase: 'storage',
+            fileName: fileInfo.name,
+            error: storeResult.error.message,
+            correlationId,
+          });
+          result.errors++;
+        }
+      }
     }
   } else if (documentType === 'certificado_retencion') {
     // Tax withholding certificate -> goes to Control de Ingresos

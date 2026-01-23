@@ -262,12 +262,16 @@ export type NumberFormat =
   | { type: 'currency'; decimals: 2 }  // e.g., $1,234.56
   | { type: 'currency'; decimals: 8 }  // e.g., 0.00000123 (for cost-per-token)
   | { type: 'number'; decimals: 0 }    // e.g., 1,234 (for counts)
-  | { type: 'number'; decimals: 2 };   // e.g., 12.34 (for rates/percentages)
+  | { type: 'number'; decimals: 2 }    // e.g., 12.34 (for rates/percentages)
+  | { type: 'date' };                  // e.g., yyyy-mm-dd
 
 /**
  * Converts a NumberFormat to a Sheets number format pattern
  */
 function getNumberFormatPattern(format: NumberFormat): string {
+  if (format.type === 'date') {
+    return 'yyyy-mm-dd';
+  }
   if (format.decimals === 0) {
     return '#,##0';
   } else if (format.decimals === 2) {
@@ -277,6 +281,22 @@ function getNumberFormatPattern(format: NumberFormat): string {
   }
   // Default fallback
   return '#,##0.00';
+}
+
+/**
+ * Converts a date string (yyyy-mm-dd) to Google Sheets serial number
+ * Google Sheets uses December 30, 1899 as day 0 (epoch)
+ *
+ * @param dateStr - Date string in yyyy-mm-dd format
+ * @returns Serial number for Google Sheets
+ *
+ * @example
+ * dateStringToSerial('2024-01-15') // Returns serial number for Jan 15, 2024
+ */
+export function dateStringToSerial(dateStr: string): number {
+  const date = new Date(dateStr + 'T00:00:00Z');
+  const epoch = new Date(Date.UTC(1899, 11, 30));
+  return Math.floor((date.getTime() - epoch.getTime()) / (1000 * 60 * 60 * 24));
 }
 
 /**
@@ -373,7 +393,7 @@ export async function formatSheet(
             cell: {
               userEnteredFormat: {
                 numberFormat: {
-                  type: 'NUMBER',
+                  type: format.type === 'date' ? 'DATE' : 'NUMBER',
                   pattern: getNumberFormatPattern(format),
                 },
               },

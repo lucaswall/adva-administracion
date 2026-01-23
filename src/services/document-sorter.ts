@@ -4,7 +4,7 @@
  */
 
 import { moveFile, getParents, renameFile } from './drive.js';
-import { getOrCreateMonthFolder, getCachedFolderStructure } from './folder-structure.js';
+import { getOrCreateMonthFolder, getOrCreateBankAccountFolder, getCachedFolderStructure } from './folder-structure.js';
 import { formatMonthFolder } from '../utils/spanish-date.js';
 import {
   generateFacturaFileName,
@@ -116,8 +116,24 @@ export async function sortDocument(
   if (destination === 'sin_procesar') {
     // Sin Procesar stays at root level
     targetFolderId = structure.sinProcesarId;
+  } else if (destination === 'bancos' && 'banco' in doc && 'numeroCuenta' in doc) {
+    // ResumenBancario goes to bank account-specific folder
+    const resumen = doc as ResumenBancario;
+    const folderResult = await getOrCreateBankAccountFolder(
+      docDate.getFullYear().toString(),
+      resumen.banco,
+      resumen.numeroCuenta,
+      resumen.moneda
+    );
+    if (!folderResult.ok) {
+      return {
+        success: false,
+        error: folderResult.error.message,
+      };
+    }
+    targetFolderId = folderResult.value;
   } else {
-    // All other destinations (ingresos, egresos, bancos) use year-based structure
+    // All other destinations (ingresos, egresos) use month-based structure
     const monthFolderResult = await getOrCreateMonthFolder(destination, docDate);
     if (!monthFolderResult.ok) {
       return {
