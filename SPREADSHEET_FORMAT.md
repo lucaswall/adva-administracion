@@ -64,6 +64,30 @@ Payments TO ADVA (ADVA is beneficiario). ADVA info is implicit; only pagador (co
 
 Rows sorted by `fechaPago` descending after insert.
 
+### Retenciones Recibidas (15 columns, A:O)
+
+Tax withholding certificates received when ADVA is paid (ADVA is sujeto retenido). ADVA info is implicit; only agente de retencion (withholding agent) stored.
+
+| Column | Field | Type | Description |
+|--------|-------|------|-------------|
+| A | fechaEmision | date | Certificate issue date (YYYY-MM-DD) |
+| B | fileId | string | Google Drive file ID |
+| C | fileName | hyperlink | Link to Drive file |
+| D | nroCertificado | string | Certificate number |
+| E | cuitAgenteRetencion | string | Withholding agent CUIT (11 digits) |
+| F | razonSocialAgenteRetencion | string | Withholding agent business name |
+| G | impuesto | string | Tax type (e.g., "IVA", "Ganancias") |
+| H | regimen | string | Tax regime/code |
+| I | montoComprobante | currency | Original invoice amount |
+| J | montoRetencion | currency | Amount withheld |
+| K | processedAt | timestamp | Processing timestamp |
+| L | confidence | number | Extraction confidence (0.0-1.0) |
+| M | needsReview | boolean | Manual review needed |
+| N | matchedFacturaFileId | string | Linked Factura Emitida fileId |
+| O | matchConfidence | enum | HIGH\|MEDIUM\|LOW |
+
+Rows sorted by `fechaEmision` descending after insert.
+
 ---
 
 ## Control de Debitos (Money OUT)
@@ -240,6 +264,7 @@ Documents classified by ADVA's role (CUIT: 30709076783):
 | Factura Recibida | Receptor | OUT ← ADVA | Control de Debitos |
 | Pago Recibido | Beneficiario | IN → ADVA | Control de Creditos |
 | Pago Enviado | Pagador | OUT ← ADVA | Control de Debitos |
+| Certificado de Retencion | Sujeto Retenido | IN → ADVA | Control de Creditos |
 | Resumen Bancario | Account Holder | Both | Bancos/ folder |
 | Recibo | Empleador | OUT ← ADVA | Control de Debitos |
 

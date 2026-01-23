@@ -38,7 +38,7 @@ src/
 ├── services/{google-auth,drive,sheets,folder-structure,document-sorter,watch-manager,token-usage-logger,pagos-pendientes}.ts
 ├── processing/{queue,scanner,extractor}.ts
 ├── processing/matching/{index,factura-pago-matcher,recibo-pago-matcher}.ts
-├── processing/storage/{index,factura-store,pago-store,recibo-store}.ts
+├── processing/storage/{index,factura-store,pago-store,recibo-store,retencion-store}.ts
 ├── matching/{matcher,cascade-matcher}.ts
 ├── gemini/{client,prompts,parser,errors}.ts
 ├── utils/{date,numbers,currency,validation,file-naming,spanish-date,exchange-rate,drive-parser,logger,spreadsheet,circuit-breaker,concurrency,correlation}.ts
@@ -129,6 +129,7 @@ ADVA CUIT: 30709076783 | Direction determines routing:
 | factura_recibida | receptor | Debitos |
 | pago_enviado | pagador | Debitos |
 | pago_recibido | beneficiario | Creditos |
+| certificado_retencion | sujeto retenido | Creditos |
 | resumen_bancario | - | Bancos |
 | recibo | empleador | Debitos |
 
@@ -146,7 +147,7 @@ ROOT/
 ## SPREADSHEETS
 See `SPREADSHEET_FORMAT.md` for complete schema.
 
-- **Control de Creditos**: Facturas Emitidas (18 cols), Pagos Recibidos (15 cols)
+- **Control de Creditos**: Facturas Emitidas (18 cols), Pagos Recibidos (15 cols), Retenciones Recibidas (15 cols)
 - **Control de Debitos**: Facturas Recibidas (19 cols), Pagos Enviados (15 cols), Recibos (18 cols)
 - **Dashboard**: Pagos Pendientes (10 cols), Resumen Mensual (8 cols), Uso de API (12 cols)
 
