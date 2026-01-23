@@ -34,6 +34,29 @@ import { runMatching } from './matching/index.js';
 // Re-export for backwards compatibility
 export { processFile, hasValidDate, type ProcessFileResult } from './extractor.js';
 
+// Track files that have already been retried (to prevent infinite retries)
+// This is cleared at the end of each scan
+const retriedFileIds = new Set<string>();
+
+/**
+ * Checks if an error is a JSON parse error (transient Gemini API issue)
+ * These errors are often transient and worth retrying once
+ *
+ * Matches:
+ * - "No JSON found in response" (ParseError from extractJSON)
+ * - "Unexpected token" / "Unexpected end of JSON" (SyntaxError from JSON.parse)
+ * - "Expected ',' or ']' after array element in JSON" (SyntaxError from malformed response)
+ * - "Invalid or missing documentType" (truncated/malformed response)
+ */
+function isJsonParseError(error: Error): boolean {
+  const message = error.message.toLowerCase();
+  return message.includes('no json found') ||
+         message.includes('unexpected token') ||
+         message.includes('unexpected end') ||
+         message.includes('after array element in json') ||
+         message.includes('invalid or missing documenttype');
+}
+
 /**
  * Rematch result
  */
@@ -139,6 +162,8 @@ export async function scanFolder(folderId?: string): Promise<Result<ScanResult, 
     // Queue all files for processing (don't await individual tasks)
     // This allows the queue to process files concurrently up to the concurrency limit
     const processingPromises: Promise<void>[] = [];
+    // Track retry promises separately so we can wait for them after the main batch
+    const retryPromises: Promise<void>[] = [];
 
     for (const fileInfo of newFiles) {
       const promise = queue.add(async () => {
@@ -156,6 +181,155 @@ export async function scanFolder(folderId?: string): Promise<Result<ScanResult, 
           const processResult = await processFile(fileInfo);
 
           if (!processResult.ok) {
+            // Check if it's a JSON parse error and hasn't been retried yet
+            // JSON errors are often transient (API instability, rate limiting, etc.)
+            if (isJsonParseError(processResult.error) && !retriedFileIds.has(fileInfo.id)) {
+              // Mark as retried to prevent infinite retries
+              retriedFileIds.add(fileInfo.id);
+
+              warn('JSON parse error, re-queuing for retry', {
+                module: 'scanner',
+                phase: 'process-file',
+                fileId: fileInfo.id,
+                fileName: fileInfo.name,
+                error: processResult.error.message,
+                correlationId: fileCorrelationId,
+              });
+
+              // Re-queue at end of queue for retry
+              const retryPromise = queue.add(async () => {
+                await withCorrelationAsync(async () => {
+                  const retryCorrelationId = getCorrelationId();
+
+                  info(`Retrying file: ${fileInfo.name}`, {
+                    module: 'scanner',
+                    phase: 'process-file-retry',
+                    fileId: fileInfo.id,
+                    correlationId: retryCorrelationId,
+                  });
+
+                  const retryResult = await processFile(fileInfo);
+
+                  if (!retryResult.ok) {
+                    logError('Failed to process file on retry', {
+                      module: 'scanner',
+                      phase: 'process-file-retry',
+                      fileId: fileInfo.id,
+                      fileName: fileInfo.name,
+                      error: retryResult.error.message,
+                      correlationId: retryCorrelationId,
+                    });
+                    result.errors++;
+                    // Move failed file to Sin Procesar
+                    const sortResult = await sortToSinProcesar(fileInfo.id, fileInfo.name);
+                    if (!sortResult.success) {
+                      logError('Failed to move file to Sin Procesar', {
+                        module: 'scanner',
+                        phase: 'process-file-retry',
+                        fileName: fileInfo.name,
+                        error: sortResult.error,
+                        correlationId: retryCorrelationId,
+                      });
+                    } else {
+                      info(`Moved failed file to ${sortResult.targetPath}`, {
+                        module: 'scanner',
+                        phase: 'process-file-retry',
+                        fileName: fileInfo.name,
+                        correlationId: retryCorrelationId,
+                      });
+                    }
+                    return;
+                  }
+
+                  // Success on retry - process normally
+                  const processed = retryResult.value;
+                  result.filesProcessed++;
+                  info('File processed successfully on retry', {
+                    module: 'scanner',
+                    phase: 'complete',
+                    fileId: fileInfo.id,
+                    fileName: fileInfo.name,
+                    documentType: processed.documentType,
+                    correlationId: retryCorrelationId,
+                  });
+
+                  // Handle unrecognized/unknown documents
+                  if (processed.documentType === 'unrecognized' || processed.documentType === 'unknown') {
+                    info('Moving unrecognized file to Sin Procesar', {
+                      module: 'scanner',
+                      phase: 'process-file-retry',
+                      fileName: fileInfo.name,
+                      correlationId: retryCorrelationId,
+                    });
+                    const sortResult = await sortToSinProcesar(fileInfo.id, fileInfo.name);
+                    if (!sortResult.success) {
+                      logError('Failed to move file to Sin Procesar', {
+                        module: 'scanner',
+                        phase: 'process-file-retry',
+                        fileName: fileInfo.name,
+                        error: sortResult.error,
+                        correlationId: retryCorrelationId,
+                      });
+                    } else {
+                      info(`Moved to ${sortResult.targetPath}`, {
+                        module: 'scanner',
+                        phase: 'process-file-retry',
+                        fileName: fileInfo.name,
+                        correlationId: retryCorrelationId,
+                      });
+                    }
+                    return;
+                  }
+
+                  const doc = processed.document;
+                  if (!doc) return;
+
+                  // CRITICAL: Validate that document has required date field
+                  if (!hasValidDate(doc, processed.documentType)) {
+                    warn('No date extracted, moving to Sin Procesar', {
+                      module: 'scanner',
+                      phase: 'process-file-retry',
+                      fileName: fileInfo.name,
+                      correlationId: retryCorrelationId,
+                    });
+                    const sortResult = await sortToSinProcesar(fileInfo.id, fileInfo.name);
+                    if (!sortResult.success) {
+                      logError('Failed to move file to Sin Procesar', {
+                        module: 'scanner',
+                        phase: 'process-file-retry',
+                        fileName: fileInfo.name,
+                        error: sortResult.error,
+                        correlationId: retryCorrelationId,
+                      });
+                      result.errors++;
+                    } else {
+                      info(`Moved file without date to ${sortResult.targetPath}`, {
+                        module: 'scanner',
+                        phase: 'process-file-retry',
+                        fileName: fileInfo.name,
+                        correlationId: retryCorrelationId,
+                      });
+                    }
+                    return;
+                  }
+
+                  // Store and sort based on document type
+                  await storeAndSortDocument(
+                    doc,
+                    processed.documentType,
+                    fileInfo,
+                    controlIngresosId,
+                    controlEgresosId,
+                    result,
+                    retryCorrelationId
+                  );
+                }, { correlationId: generateCorrelationId(), fileId: fileInfo.id, fileName: fileInfo.name });
+              });
+              retryPromises.push(retryPromise);
+              return; // Don't move to Sin Procesar yet - will retry
+            }
+
+            // Already retried or not a JSON error - move to Sin Procesar
             logError('Failed to process file', {
               module: 'scanner',
               phase: 'process-file',
@@ -171,6 +345,7 @@ export async function scanFolder(folderId?: string): Promise<Result<ScanResult, 
               logError('Failed to move file to Sin Procesar', {
                 module: 'scanner',
                 phase: 'process-file',
+                fileId: fileInfo.id,
                 fileName: fileInfo.name,
                 error: sortResult.error,
                 correlationId: fileCorrelationId,
@@ -276,6 +451,19 @@ export async function scanFolder(folderId?: string): Promise<Result<ScanResult, 
 
     // Wait for all processing to complete
     await Promise.allSettled(processingPromises);
+
+    // Wait for any retry attempts to complete
+    if (retryPromises.length > 0) {
+      info(`Waiting for ${retryPromises.length} retry attempt(s)`, {
+        module: 'scanner',
+        phase: 'process-retries',
+        correlationId,
+      });
+      await Promise.allSettled(retryPromises);
+    }
+
+    // Clear retry tracking for next scan
+    retriedFileIds.clear();
 
     // Run automatic matching after processing
     if (result.filesProcessed > 0) {
