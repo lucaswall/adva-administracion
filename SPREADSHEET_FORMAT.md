@@ -177,25 +177,28 @@ Rows sorted by `fechaPago` descending after insert.
 
 ## Bancos (Bank Statements)
 
-Bank statements stored as files in `{YYYY}/Bancos/` folders (no month subfolders).
+Bank statements stored in account-specific folders: `{YYYY}/Bancos/{Bank Name} {Nro Cuenta} {Moneda}/`
 
-### ResumenBancario (13 columns, A:M)
+Each bank account folder contains a **Control de Resumenes** spreadsheet with a **Resumenes** sheet.
+
+### Control de Resumenes > Resumenes (9 columns, A:I)
 
 | Column | Field | Type | Description |
 |--------|-------|------|-------------|
-| A | fileId | string | Google Drive file ID |
-| B | fileName | hyperlink | Link to Drive file |
-| C | banco | string | Bank name |
-| D | numeroCuenta | string | Account number or card brand |
-| E | fechaDesde | date | Statement start date |
-| F | fechaHasta | date | Statement end date |
-| G | saldoInicial | currency | Opening balance |
-| H | saldoFinal | currency | Closing balance |
-| I | moneda | enum | ARS\|USD |
-| J | cantidadMovimientos | number | Movement count |
-| K | processedAt | timestamp | Processing timestamp |
-| L | confidence | number | Extraction confidence (0.0-1.0) |
-| M | needsReview | boolean | Manual review needed |
+| A | fechaDesde | date | Statement start date (serial format: yyyy-mm-dd) |
+| B | fechaHasta | date | Statement end date (serial format: yyyy-mm-dd) |
+| C | fileId | string | Google Drive file ID |
+| D | fileName | hyperlink | Link to Drive file |
+| E | banco | string | Bank name |
+| F | numeroCuenta | string | Account number |
+| G | moneda | enum | ARS\|USD |
+| H | saldoInicial | currency | Opening balance (2 decimals) |
+| I | saldoFinal | currency | Closing balance (2 decimals) |
+
+**Duplicate Detection**: 5-field composite key prevents duplicates:
+- banco + fechaDesde + fechaHasta + numeroCuenta + moneda
+
+Rows sorted by `fechaDesde` ascending (oldest first).
 
 ---
 

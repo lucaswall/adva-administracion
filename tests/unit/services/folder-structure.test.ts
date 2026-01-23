@@ -50,6 +50,8 @@ vi.mock('../../../src/config.js', () => ({
 import {
   discoverFolderStructure,
   getOrCreateMonthFolder,
+  getOrCreateBankAccountFolder,
+  getOrCreateBankAccountSpreadsheet,
   clearFolderStructureCache,
   getCachedFolderStructure,
 } from '../../../src/services/folder-structure.js';
@@ -1096,6 +1098,497 @@ describe('FolderStructure service', () => {
       // Should not search for or create any folders
       expect(mockFindByName).not.toHaveBeenCalled();
       expect(mockCreateFolder).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('getOrCreateBankAccountFolder', () => {
+    beforeEach(async () => {
+      // Setup cached structure for bank account tests
+      mockFindByName
+        .mockResolvedValueOnce({ ok: true, value: { id: 'entrada-id', name: 'Entrada', mimeType: 'application/vnd.google-apps.folder' } })
+        .mockResolvedValueOnce({ ok: true, value: { id: 'sin-procesar-id', name: 'Sin Procesar', mimeType: 'application/vnd.google-apps.folder' } })
+        .mockResolvedValueOnce({ ok: true, value: { id: 'duplicado-id', name: 'Duplicado', mimeType: 'application/vnd.google-apps.folder' } })
+        .mockResolvedValueOnce({ ok: true, value: { id: 'control-ingresos-id', name: 'Control de Ingresos', mimeType: 'application/vnd.google-apps.spreadsheet' } })
+        .mockResolvedValueOnce({ ok: true, value: { id: 'control-egresos-id', name: 'Control de Egresos', mimeType: 'application/vnd.google-apps.spreadsheet' } })
+        .mockResolvedValueOnce({ ok: true, value: { id: 'dashboard-operativo-id', name: 'Dashboard Operativo Contable', mimeType: 'application/vnd.google-apps.spreadsheet' } });
+      mockListByMimeType.mockResolvedValue({
+        ok: true,
+        value: [
+          { id: 'control-ingresos-id', name: 'Control de Ingresos', mimeType: 'application/vnd.google-apps.spreadsheet' },
+          { id: 'control-egresos-id', name: 'Control de Egresos', mimeType: 'application/vnd.google-apps.spreadsheet' },
+          { id: 'dashboard-operativo-id', name: 'Dashboard Operativo Contable', mimeType: 'application/vnd.google-apps.spreadsheet' },
+        ],
+      });
+
+      // Mock sheet operations for all spreadsheets (all sheets exist)
+      mockGetSheetMetadata
+        .mockResolvedValueOnce({
+          ok: true,
+          value: [
+            { title: 'Facturas Emitidas', sheetId: 1 },
+            { title: 'Pagos Recibidos', sheetId: 2 },
+          ],
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          value: [
+            { title: 'Facturas Recibidas', sheetId: 1 },
+            { title: 'Pagos Enviados', sheetId: 2 },
+            { title: 'Recibos', sheetId: 3 },
+          ],
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          value: [
+            { title: 'Resumen Mensual', sheetId: 1 },
+            { title: 'Uso de API', sheetId: 2 },
+          ],
+        });
+
+      await discoverFolderStructure();
+      vi.clearAllMocks();
+    });
+
+    it('creates year and bank account folders when first needed', async () => {
+      // Mock: year folder doesn't exist, needs to be created
+      mockFindByName
+        .mockResolvedValueOnce({ ok: true, value: null }) // Year folder not found
+        .mockResolvedValueOnce({ ok: true, value: null }) // Ingresos folder not found in year
+        .mockResolvedValueOnce({ ok: true, value: null }) // Egresos folder not found in year
+        .mockResolvedValueOnce({ ok: true, value: null }) // Bancos folder not found in year
+        .mockResolvedValueOnce({ ok: true, value: null }); // Bank account folder not found
+
+      mockCreateFolder
+        .mockResolvedValueOnce({ ok: true, value: { id: '2024-folder-id', name: '2024', mimeType: 'application/vnd.google-apps.folder' } }) // Year folder
+        .mockResolvedValueOnce({ ok: true, value: { id: '2024-ingresos-id', name: 'Ingresos', mimeType: 'application/vnd.google-apps.folder' } }) // Ingresos in year
+        .mockResolvedValueOnce({ ok: true, value: { id: '2024-egresos-id', name: 'Egresos', mimeType: 'application/vnd.google-apps.folder' } }) // Egresos in year
+        .mockResolvedValueOnce({ ok: true, value: { id: '2024-bancos-id', name: 'Bancos', mimeType: 'application/vnd.google-apps.folder' } }) // Bancos in year
+        .mockResolvedValueOnce({ ok: true, value: { id: 'santander-123-ars-id', name: 'Santander 123456 ARS', mimeType: 'application/vnd.google-apps.folder' } }); // Bank account folder
+
+      const result = await getOrCreateBankAccountFolder('2024', 'Santander', '123456', 'ARS');
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value).toBe('santander-123-ars-id');
+      }
+
+      // Verify year folder was created in root
+      expect(mockCreateFolder).toHaveBeenCalledWith('root-folder-id', '2024');
+      // Verify all classification folders were created in year
+      expect(mockCreateFolder).toHaveBeenCalledWith('2024-folder-id', 'Ingresos');
+      expect(mockCreateFolder).toHaveBeenCalledWith('2024-folder-id', 'Egresos');
+      expect(mockCreateFolder).toHaveBeenCalledWith('2024-folder-id', 'Bancos');
+      // Verify bank account folder was created in Bancos folder
+      expect(mockCreateFolder).toHaveBeenCalledWith('2024-bancos-id', 'Santander 123456 ARS');
+    });
+
+    it('reuses existing year and Bancos folders when they exist', async () => {
+      // Mock: year and Bancos folder exist, bank account folder doesn't
+      mockFindByName
+        .mockResolvedValueOnce({ ok: true, value: { id: '2024-folder-id', name: '2024', mimeType: 'application/vnd.google-apps.folder' } }) // Year found
+        .mockResolvedValueOnce({ ok: true, value: { id: '2024-ingresos-id', name: 'Ingresos', mimeType: 'application/vnd.google-apps.folder' } }) // Ingresos found
+        .mockResolvedValueOnce({ ok: true, value: { id: '2024-egresos-id', name: 'Egresos', mimeType: 'application/vnd.google-apps.folder' } }) // Egresos found
+        .mockResolvedValueOnce({ ok: true, value: { id: '2024-bancos-id', name: 'Bancos', mimeType: 'application/vnd.google-apps.folder' } }) // Bancos found
+        .mockResolvedValueOnce({ ok: true, value: null }); // Bank account folder not found
+
+      mockCreateFolder
+        .mockResolvedValueOnce({ ok: true, value: { id: 'galicia-789-usd-id', name: 'Galicia 789012 USD', mimeType: 'application/vnd.google-apps.folder' } }); // Bank account folder
+
+      const result = await getOrCreateBankAccountFolder('2024', 'Galicia', '789012', 'USD');
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value).toBe('galicia-789-usd-id');
+      }
+
+      // Verify year and Bancos folders were NOT created (already exist)
+      expect(mockCreateFolder).toHaveBeenCalledTimes(1);
+      expect(mockCreateFolder).toHaveBeenCalledWith('2024-bancos-id', 'Galicia 789012 USD');
+    });
+
+    it('reuses existing bank account folder when it exists', async () => {
+      // Mock: all folders exist
+      mockFindByName
+        .mockResolvedValueOnce({ ok: true, value: { id: '2024-folder-id', name: '2024', mimeType: 'application/vnd.google-apps.folder' } }) // Year found
+        .mockResolvedValueOnce({ ok: true, value: { id: '2024-ingresos-id', name: 'Ingresos', mimeType: 'application/vnd.google-apps.folder' } }) // Ingresos found
+        .mockResolvedValueOnce({ ok: true, value: { id: '2024-egresos-id', name: 'Egresos', mimeType: 'application/vnd.google-apps.folder' } }) // Egresos found
+        .mockResolvedValueOnce({ ok: true, value: { id: '2024-bancos-id', name: 'Bancos', mimeType: 'application/vnd.google-apps.folder' } }) // Bancos found
+        .mockResolvedValueOnce({ ok: true, value: { id: 'bbva-456-ars-id', name: 'BBVA 456789 ARS', mimeType: 'application/vnd.google-apps.folder' } }); // Bank account found
+
+      const result = await getOrCreateBankAccountFolder('2024', 'BBVA', '456789', 'ARS');
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value).toBe('bbva-456-ars-id');
+      }
+
+      // Should not create any folders (all exist)
+      expect(mockCreateFolder).not.toHaveBeenCalled();
+    });
+
+    it('caches bank account folders for subsequent requests', async () => {
+      // First request: create bank account folder
+      mockFindByName
+        .mockResolvedValueOnce({ ok: true, value: { id: '2024-folder-id', name: '2024', mimeType: 'application/vnd.google-apps.folder' } })
+        .mockResolvedValueOnce({ ok: true, value: { id: '2024-ingresos-id', name: 'Ingresos', mimeType: 'application/vnd.google-apps.folder' } })
+        .mockResolvedValueOnce({ ok: true, value: { id: '2024-egresos-id', name: 'Egresos', mimeType: 'application/vnd.google-apps.folder' } })
+        .mockResolvedValueOnce({ ok: true, value: { id: '2024-bancos-id', name: 'Bancos', mimeType: 'application/vnd.google-apps.folder' } })
+        .mockResolvedValueOnce({ ok: true, value: null }); // Not found
+
+      mockCreateFolder
+        .mockResolvedValueOnce({ ok: true, value: { id: 'santander-123-ars-id', name: 'Santander 123456 ARS', mimeType: 'application/vnd.google-apps.folder' } });
+
+      await getOrCreateBankAccountFolder('2024', 'Santander', '123456', 'ARS');
+
+      vi.clearAllMocks();
+
+      // Second request: should use cached folder ID
+      const result = await getOrCreateBankAccountFolder('2024', 'Santander', '123456', 'ARS');
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value).toBe('santander-123-ars-id');
+      }
+
+      // Should not search for or create any folders (uses cache)
+      expect(mockFindByName).not.toHaveBeenCalled();
+      expect(mockCreateFolder).not.toHaveBeenCalled();
+    });
+
+    it('handles Drive API errors gracefully', async () => {
+      // Mock error when finding year folder
+      mockFindByName.mockResolvedValueOnce({ ok: false, error: new Error('Drive API error') });
+
+      const result = await getOrCreateBankAccountFolder('2024', 'Santander', '123456', 'ARS');
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.error.message).toContain('Drive API error');
+      }
+    });
+
+    it('returns error if folder structure not initialized', async () => {
+      clearFolderStructureCache();
+
+      const result = await getOrCreateBankAccountFolder('2024', 'Santander', '123456', 'ARS');
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.error.message).toBe('Folder structure not initialized. Call discoverFolderStructure first.');
+      }
+    });
+
+    it('handles multiple bank accounts independently', async () => {
+      // First account
+      mockFindByName
+        .mockResolvedValueOnce({ ok: true, value: { id: '2024-folder-id', name: '2024', mimeType: 'application/vnd.google-apps.folder' } })
+        .mockResolvedValueOnce({ ok: true, value: { id: '2024-ingresos-id', name: 'Ingresos', mimeType: 'application/vnd.google-apps.folder' } })
+        .mockResolvedValueOnce({ ok: true, value: { id: '2024-egresos-id', name: 'Egresos', mimeType: 'application/vnd.google-apps.folder' } })
+        .mockResolvedValueOnce({ ok: true, value: { id: '2024-bancos-id', name: 'Bancos', mimeType: 'application/vnd.google-apps.folder' } })
+        .mockResolvedValueOnce({ ok: true, value: null });
+
+      mockCreateFolder
+        .mockResolvedValueOnce({ ok: true, value: { id: 'santander-123-ars-id', name: 'Santander 123456 ARS', mimeType: 'application/vnd.google-apps.folder' } });
+
+      const result1 = await getOrCreateBankAccountFolder('2024', 'Santander', '123456', 'ARS');
+      expect(result1.ok).toBe(true);
+
+      vi.clearAllMocks();
+
+      // Second account in same year - should use cached year and Bancos folders
+      mockFindByName
+        .mockResolvedValueOnce({ ok: true, value: null }); // Only bank account folder not found
+
+      mockCreateFolder
+        .mockResolvedValueOnce({ ok: true, value: { id: 'galicia-789-usd-id', name: 'Galicia 789012 USD', mimeType: 'application/vnd.google-apps.folder' } });
+
+      const result2 = await getOrCreateBankAccountFolder('2024', 'Galicia', '789012', 'USD');
+      expect(result2.ok).toBe(true);
+      if (result2.ok) {
+        expect(result2.value).toBe('galicia-789-usd-id');
+      }
+
+      // Should only create the second bank account folder
+      expect(mockFindByName).toHaveBeenCalledTimes(1);
+      expect(mockCreateFolder).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('getOrCreateBankAccountSpreadsheet', () => {
+    beforeEach(async () => {
+      // Setup cached structure for spreadsheet tests
+      mockFindByName
+        .mockResolvedValueOnce({ ok: true, value: { id: 'entrada-id', name: 'Entrada', mimeType: 'application/vnd.google-apps.folder' } })
+        .mockResolvedValueOnce({ ok: true, value: { id: 'sin-procesar-id', name: 'Sin Procesar', mimeType: 'application/vnd.google-apps.folder' } })
+        .mockResolvedValueOnce({ ok: true, value: { id: 'duplicado-id', name: 'Duplicado', mimeType: 'application/vnd.google-apps.folder' } })
+        .mockResolvedValueOnce({ ok: true, value: { id: 'control-ingresos-id', name: 'Control de Ingresos', mimeType: 'application/vnd.google-apps.spreadsheet' } })
+        .mockResolvedValueOnce({ ok: true, value: { id: 'control-egresos-id', name: 'Control de Egresos', mimeType: 'application/vnd.google-apps.spreadsheet' } })
+        .mockResolvedValueOnce({ ok: true, value: { id: 'dashboard-operativo-id', name: 'Dashboard Operativo Contable', mimeType: 'application/vnd.google-apps.spreadsheet' } });
+      mockListByMimeType.mockResolvedValue({
+        ok: true,
+        value: [
+          { id: 'control-ingresos-id', name: 'Control de Ingresos', mimeType: 'application/vnd.google-apps.spreadsheet' },
+          { id: 'control-egresos-id', name: 'Control de Egresos', mimeType: 'application/vnd.google-apps.spreadsheet' },
+          { id: 'dashboard-operativo-id', name: 'Dashboard Operativo Contable', mimeType: 'application/vnd.google-apps.spreadsheet' },
+        ],
+      });
+
+      // Mock sheet operations for all spreadsheets (all sheets exist)
+      mockGetSheetMetadata
+        .mockResolvedValueOnce({
+          ok: true,
+          value: [
+            { title: 'Facturas Emitidas', sheetId: 1 },
+            { title: 'Pagos Recibidos', sheetId: 2 },
+          ],
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          value: [
+            { title: 'Facturas Recibidas', sheetId: 1 },
+            { title: 'Pagos Enviados', sheetId: 2 },
+            { title: 'Recibos', sheetId: 3 },
+          ],
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          value: [
+            { title: 'Resumen Mensual', sheetId: 1 },
+            { title: 'Uso de API', sheetId: 2 },
+          ],
+        });
+
+      await discoverFolderStructure();
+      vi.clearAllMocks();
+    });
+
+    it('creates spreadsheet when it does not exist', async () => {
+      const folderId = 'santander-123-ars-id';
+
+      // Mock: spreadsheet doesn't exist
+      mockFindByName
+        .mockResolvedValueOnce({ ok: true, value: null }); // Spreadsheet not found
+
+      mockCreateSpreadsheet
+        .mockResolvedValueOnce({ ok: true, value: { id: 'resumenes-spreadsheet-id', name: 'Control de Resumenes', mimeType: 'application/vnd.google-apps.spreadsheet' } });
+
+      // Mock sheet metadata - newly created spreadsheet has only Sheet1
+      mockGetSheetMetadata
+        .mockResolvedValueOnce({
+          ok: true,
+          value: [{ title: 'Sheet1', sheetId: 0 }],
+        });
+
+      // Mock getValues to return empty for Sheet1 (no headers)
+      mockGetValues.mockResolvedValue({ ok: true, value: [[]] });
+
+      const result = await getOrCreateBankAccountSpreadsheet(folderId, '2024', 'Santander', '123456', 'ARS');
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value).toBe('resumenes-spreadsheet-id');
+      }
+
+      // Verify spreadsheet was created
+      expect(mockCreateSpreadsheet).toHaveBeenCalledWith(folderId, 'Control de Resumenes');
+
+      // Verify Resumenes sheet was created with headers
+      expect(mockCreateSheet).toHaveBeenCalledWith('resumenes-spreadsheet-id', 'Resumenes');
+      expect(mockSetValues).toHaveBeenCalledWith(
+        'resumenes-spreadsheet-id',
+        'Resumenes!A1',
+        [['fechaDesde', 'fechaHasta', 'fileId', 'fileName', 'banco', 'numeroCuenta', 'moneda', 'saldoInicial', 'saldoFinal']]
+      );
+
+      // Verify formatting was applied
+      expect(mockFormatSheet).toHaveBeenCalled();
+
+      // Verify Sheet1 was deleted
+      expect(mockDeleteSheet).toHaveBeenCalledWith('resumenes-spreadsheet-id', 0);
+    });
+
+    it('reuses existing spreadsheet when it exists', async () => {
+      const folderId = 'santander-123-ars-id';
+
+      // Mock: spreadsheet exists with proper sheets
+      mockFindByName
+        .mockResolvedValueOnce({ ok: true, value: { id: 'resumenes-spreadsheet-id', name: 'Control de Resumenes', mimeType: 'application/vnd.google-apps.spreadsheet' } });
+
+      // Mock sheet metadata - Resumenes sheet exists
+      mockGetSheetMetadata
+        .mockResolvedValueOnce({
+          ok: true,
+          value: [{ title: 'Resumenes', sheetId: 1 }],
+        });
+
+      // Mock getValues for existing sheet with correct headers
+      mockGetValues.mockResolvedValue({ ok: true, value: [['fechaDesde', 'fechaHasta', 'fileId']] });
+
+      const result = await getOrCreateBankAccountSpreadsheet(folderId, '2024', 'Santander', '123456', 'ARS');
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value).toBe('resumenes-spreadsheet-id');
+      }
+
+      // Should not create spreadsheet (already exists)
+      expect(mockCreateSpreadsheet).not.toHaveBeenCalled();
+
+      // Should not create sheet (already exists)
+      expect(mockCreateSheet).not.toHaveBeenCalled();
+    });
+
+    it('caches spreadsheet IDs for subsequent requests', async () => {
+      const folderId = 'santander-123-ars-id';
+
+      // First request: create spreadsheet
+      mockFindByName
+        .mockResolvedValueOnce({ ok: true, value: null });
+
+      mockCreateSpreadsheet
+        .mockResolvedValueOnce({ ok: true, value: { id: 'resumenes-spreadsheet-id', name: 'Control de Resumenes', mimeType: 'application/vnd.google-apps.spreadsheet' } });
+
+      mockGetSheetMetadata
+        .mockResolvedValueOnce({
+          ok: true,
+          value: [{ title: 'Sheet1', sheetId: 0 }],
+        });
+
+      mockGetValues.mockResolvedValue({ ok: true, value: [[]] });
+
+      await getOrCreateBankAccountSpreadsheet(folderId, '2024', 'Santander', '123456', 'ARS');
+
+      vi.clearAllMocks();
+
+      // Second request: should use cached spreadsheet ID
+      const result = await getOrCreateBankAccountSpreadsheet(folderId, '2024', 'Santander', '123456', 'ARS');
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value).toBe('resumenes-spreadsheet-id');
+      }
+
+      // Should not search for or create spreadsheet (uses cache)
+      expect(mockFindByName).not.toHaveBeenCalled();
+      expect(mockCreateSpreadsheet).not.toHaveBeenCalled();
+    });
+
+    it('handles multiple bank account spreadsheets independently', async () => {
+      const folderId1 = 'santander-123-ars-id';
+      const folderId2 = 'galicia-789-usd-id';
+
+      // First spreadsheet
+      mockFindByName
+        .mockResolvedValueOnce({ ok: true, value: null });
+
+      mockCreateSpreadsheet
+        .mockResolvedValueOnce({ ok: true, value: { id: 'resumenes-1-id', name: 'Control de Resumenes', mimeType: 'application/vnd.google-apps.spreadsheet' } });
+
+      mockGetSheetMetadata
+        .mockResolvedValueOnce({
+          ok: true,
+          value: [{ title: 'Sheet1', sheetId: 0 }],
+        });
+
+      mockGetValues.mockResolvedValue({ ok: true, value: [[]] });
+
+      const result1 = await getOrCreateBankAccountSpreadsheet(folderId1, '2024', 'Santander', '123456', 'ARS');
+      expect(result1.ok).toBe(true);
+
+      vi.clearAllMocks();
+
+      // Second spreadsheet
+      mockFindByName
+        .mockResolvedValueOnce({ ok: true, value: null });
+
+      mockCreateSpreadsheet
+        .mockResolvedValueOnce({ ok: true, value: { id: 'resumenes-2-id', name: 'Control de Resumenes', mimeType: 'application/vnd.google-apps.spreadsheet' } });
+
+      mockGetSheetMetadata
+        .mockResolvedValueOnce({
+          ok: true,
+          value: [{ title: 'Sheet1', sheetId: 0 }],
+        });
+
+      const result2 = await getOrCreateBankAccountSpreadsheet(folderId2, '2024', 'Galicia', '789012', 'USD');
+      expect(result2.ok).toBe(true);
+      if (result2.ok) {
+        expect(result2.value).toBe('resumenes-2-id');
+      }
+
+      // Verify both spreadsheets were created separately
+      expect(mockCreateSpreadsheet).toHaveBeenCalledTimes(1);
+    });
+
+    it('handles Drive API errors gracefully', async () => {
+      const folderId = 'santander-123-ars-id';
+
+      // Mock error when finding spreadsheet
+      mockFindByName.mockResolvedValueOnce({ ok: false, error: new Error('Drive API error') });
+
+      const result = await getOrCreateBankAccountSpreadsheet(folderId, '2024', 'Santander', '123456', 'ARS');
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.error.message).toContain('Drive API error');
+      }
+    });
+
+    it('returns error if folder structure not initialized', async () => {
+      clearFolderStructureCache();
+
+      const result = await getOrCreateBankAccountSpreadsheet('folder-id', '2024', 'Santander', '123456', 'ARS');
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.error.message).toBe('Folder structure not initialized. Call discoverFolderStructure first.');
+      }
+    });
+
+    it('ensures sheet configuration with proper headers and formatting', async () => {
+      const folderId = 'santander-123-ars-id';
+
+      // Mock: spreadsheet doesn't exist
+      mockFindByName
+        .mockResolvedValueOnce({ ok: true, value: null });
+
+      mockCreateSpreadsheet
+        .mockResolvedValueOnce({ ok: true, value: { id: 'resumenes-spreadsheet-id', name: 'Control de Resumenes', mimeType: 'application/vnd.google-apps.spreadsheet' } });
+
+      mockGetSheetMetadata
+        .mockResolvedValueOnce({
+          ok: true,
+          value: [{ title: 'Sheet1', sheetId: 0 }],
+        });
+
+      mockGetValues.mockResolvedValue({ ok: true, value: [[]] });
+
+      await getOrCreateBankAccountSpreadsheet(folderId, '2024', 'Santander', '123456', 'ARS');
+
+      // Verify sheet was created with correct title
+      expect(mockCreateSheet).toHaveBeenCalledWith('resumenes-spreadsheet-id', 'Resumenes');
+
+      // Verify headers were set with all 9 columns
+      expect(mockSetValues).toHaveBeenCalledWith(
+        'resumenes-spreadsheet-id',
+        'Resumenes!A1',
+        expect.arrayContaining([
+          expect.arrayContaining([
+            'fechaDesde',
+            'fechaHasta',
+            'fileId',
+            'fileName',
+            'banco',
+            'numeroCuenta',
+            'moneda',
+            'saldoInicial',
+            'saldoFinal',
+          ])
+        ])
+      );
+
+      // Verify formatting was applied (dates and currency)
+      expect(mockFormatSheet).toHaveBeenCalled();
     });
   });
 });
