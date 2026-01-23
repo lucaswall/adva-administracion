@@ -70,6 +70,18 @@ describe('classifyError', () => {
     });
   });
 
+  describe('Request Timeout (408)', () => {
+    it('classifies 408 Request Timeout as retryable', () => {
+      const error = new GeminiError(
+        'Request Timeout',
+        408
+      );
+
+      const category = classifyError(error);
+      expect(category).toBe('retryable');
+    });
+  });
+
   describe('Server Errors (5xx)', () => {
     it('classifies 500 Internal Server Error as retryable', () => {
       const error = new GeminiError(

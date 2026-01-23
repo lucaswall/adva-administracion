@@ -144,11 +144,57 @@ describe('Scan routes', () => {
         headers: {
           authorization: 'Bearer test-secret-123',
         },
-        payload: { folderId: 'custom-folder-id' },
+        // Use a valid Google Drive folder ID format (28-44 alphanumeric chars)
+        payload: { folderId: '1ABC2defGHIjklMNOpqrSTUvwxyz12' },
       });
 
       expect(response.statusCode).toBe(200);
-      expect(mockScanFolder).toHaveBeenCalledWith('custom-folder-id');
+      expect(mockScanFolder).toHaveBeenCalledWith('1ABC2defGHIjklMNOpqrSTUvwxyz12');
+    });
+
+    it('returns 400 for invalid folderId format', async () => {
+      const response = await server.inject({
+        method: 'POST',
+        url: '/api/scan',
+        headers: {
+          authorization: 'Bearer test-secret-123',
+        },
+        payload: { folderId: 'invalid-short-id' },
+      });
+
+      expect(response.statusCode).toBe(400);
+      const body = JSON.parse(response.payload);
+      expect(body.error).toBe('Invalid folderId format');
+      expect(body.details).toContain('valid Google Drive folder ID');
+      expect(mockScanFolder).not.toHaveBeenCalled();
+    });
+
+    it('extracts folderId from Google Drive URL', async () => {
+      mockScanFolder.mockResolvedValue({
+        ok: true,
+        value: {
+          filesProcessed: 1,
+          errors: 0,
+          facturasAdded: 0,
+          pagosAdded: 0,
+          recibosAdded: 0,
+          retencionesAdded: 0,
+          matchesFound: 0,
+        },
+      });
+
+      const response = await server.inject({
+        method: 'POST',
+        url: '/api/scan',
+        headers: {
+          authorization: 'Bearer test-secret-123',
+        },
+        // Full Google Drive URL with valid ID
+        payload: { folderId: 'https://drive.google.com/drive/folders/1ABC2defGHIjklMNOpqrSTUvwxyz12' },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(mockScanFolder).toHaveBeenCalledWith('1ABC2defGHIjklMNOpqrSTUvwxyz12');
     });
 
     it('returns 500 on scan failure', async () => {

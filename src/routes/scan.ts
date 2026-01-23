@@ -7,6 +7,7 @@ import type { ScanResult, BankAutoFillResult } from '../types/index.js';
 import { scanFolder, rematch, RematchResult } from '../processing/scanner.js';
 import { autoFillBankMovements } from '../bank/autofill.js';
 import { authMiddleware } from '../middleware/auth.js';
+import { extractDriveFolderId, isValidDriveId } from '../utils/drive-parser.js';
 
 /**
  * Scan request body
@@ -47,9 +48,26 @@ export async function scanRoutes(server: FastifyInstance) {
    * Protected with authentication
    */
   server.post<{ Body: ScanRequest }>('/scan', { onRequest: authMiddleware }, async (request, reply): Promise<ScanResult | ErrorResponse> => {
-    const { folderId } = request.body || {};
+    const { folderId: rawFolderId } = request.body || {};
 
-    server.log.info({ folderId }, 'Starting manual scan');
+    // Validate and extract folderId if provided
+    let folderId: string | undefined;
+    if (rawFolderId) {
+      // Extract ID from URL if needed, validate format
+      const extractedId = extractDriveFolderId(rawFolderId);
+
+      if (!extractedId || !isValidDriveId(extractedId)) {
+        reply.status(400);
+        return {
+          error: 'Invalid folderId format',
+          details: 'folderId must be a valid Google Drive folder ID (28-44 alphanumeric characters) or URL',
+        };
+      }
+
+      folderId = extractedId;
+    }
+
+    server.log.info({ folderId, rawFolderId }, 'Starting manual scan');
 
     const result = await scanFolder(folderId);
 

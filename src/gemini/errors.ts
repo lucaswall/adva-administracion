@@ -32,6 +32,7 @@ export function classifyError(error: GeminiError): ErrorCategory {
   }
 
   // Retryable errors - temporary issues that should be retried
+  if (code === 408) return 'retryable';  // Request Timeout
   if (code === 429) return 'retryable';  // Per-minute rate limit
   if (code === 500 || code === 502 || code === 503 || code === 504) {
     return 'retryable';  // Server errors

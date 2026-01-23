@@ -56,6 +56,39 @@ describe('isValidCuit', () => {
   it('returns false for non-numeric characters', () => {
     expect(isValidCuit('20-1234567A-6')).toBe(false);
   });
+
+  it('returns false for invalid prefix 10', () => {
+    // Valid checksum but invalid prefix
+    expect(isValidCuit('10-12345678-8')).toBe(false);
+  });
+
+  it('returns false for invalid prefix 25', () => {
+    expect(isValidCuit('25-12345678-4')).toBe(false);
+  });
+
+  it('returns true for valid prefix 23', () => {
+    // 23 is valid for unisex individuals
+    // Checksum: 2*5+3*4+1*3+2*2+3*7+4*6+5*5+6*4+7*3+8*2=160, 11-(160%11)=5
+    expect(isValidCuit('23-12345678-5')).toBe(true);
+  });
+
+  it('returns true for valid prefix 24', () => {
+    // 24 is valid for unisex individuals
+    // Checksum: 2*5+4*4+1*3+2*2+3*7+4*6+5*5+6*4+7*3+8*2=164, 11-(164%11)=1
+    expect(isValidCuit('24-12345678-1')).toBe(true);
+  });
+
+  it('returns true for valid prefix 33', () => {
+    // 33 is valid for companies
+    // Checksum: 3*5+3*4+1*3+2*2+3*7+4*6+5*5+6*4+7*3+8*2=165, 11-(165%11)=0
+    expect(isValidCuit('33-12345678-0')).toBe(true);
+  });
+
+  it('returns true for valid prefix 34', () => {
+    // 34 is valid for companies
+    // Checksum: 3*5+4*4+1*3+2*2+3*7+4*6+5*5+6*4+7*3+8*2=169, 11-(169%11)=7
+    expect(isValidCuit('34-12345678-7')).toBe(true);
+  });
 });
 
 describe('formatCuit', () => {

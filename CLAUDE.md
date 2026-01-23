@@ -9,6 +9,7 @@
 - **VERIFY**: code → bug-hunter → test-runner → builder → fix before commit
 - **BUILD**: Zero warnings required
 - **SYNC**: Update this file when architecture changes
+- **PLANS**: Must be fully executable by Claude - no manual human steps
 
 ## SUBAGENTS
 | Agent | Use For | Never |

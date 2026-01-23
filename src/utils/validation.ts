@@ -5,6 +5,15 @@
 import type { Factura, Pago, Recibo, ValidationResult, TipoComprobante, TipoRecibo, MatchConfidence, Moneda } from '../types/index.js';
 
 /**
+ * Valid CUIT/CUIL prefix types
+ * - 20: Male individual
+ * - 23, 24: Unisex individual (for certain DNI ranges or special cases)
+ * - 27: Female individual
+ * - 30, 33, 34: Legal entities (companies, organizations)
+ */
+const VALID_CUIT_PREFIXES = ['20', '23', '24', '27', '30', '33', '34'];
+
+/**
  * Validates an Argentine CUIT using the modulo 11 checksum algorithm
  *
  * Format: XX-XXXXXXXX-X (stored as 11 digits without dashes)
@@ -29,6 +38,10 @@ export function isValidCuit(cuit: string): boolean {
 
   // Must be all numeric
   if (!/^\d+$/.test(cleaned)) return false;
+
+  // Validate prefix (first 2 digits)
+  const prefix = cleaned.substring(0, 2);
+  if (!VALID_CUIT_PREFIXES.includes(prefix)) return false;
 
   // Extract digits
   const digits = cleaned.split('').map(Number);

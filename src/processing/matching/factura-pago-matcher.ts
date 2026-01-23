@@ -90,7 +90,7 @@ async function processCascadingFacturaDisplacements(
 
     // Find best remaining match (exclude already claimed facturas)
     const availableFacturas = facturas.filter(f => !claims.claimedFacturas.has(f.fileId));
-    const matches = matcher.findMatches(displacedPago, availableFacturas, true);
+    const matches = matcher.findMatches(displacedPago, availableFacturas, true, pagosMap);
 
     if (matches.length > 0) {
       const bestMatch = matches[0];
@@ -100,7 +100,7 @@ async function processCascadingFacturaDisplacements(
         const existingQuality: MatchQuality = {
           confidence: bestMatch.existingMatchConfidence || 'LOW',
           hasCuitMatch: bestMatch.factura.hasCuitMatch || false,
-          dateProximityDays: 999 // We don't have the exact date proximity for existing match
+          dateProximityDays: bestMatch.existingDateProximityDays ?? 999
         };
         const newQuality: MatchQuality = {
           confidence: bestMatch.confidence,
@@ -419,7 +419,7 @@ async function doMatchFacturasWithPagos(
 
   // Process unmatched pagos - try to match against ALL facturas (including matched ones)
   for (const pago of unmatchedPagos) {
-    const matches = matcher.findMatches(pago, facturas, true); // includeMatched=true
+    const matches = matcher.findMatches(pago, facturas, true, pagosMap); // includeMatched=true
 
     if (matches.length > 0) {
       const bestMatch = matches[0];
@@ -431,7 +431,7 @@ async function doMatchFacturasWithPagos(
           const existingQuality: MatchQuality = {
             confidence: bestMatch.existingMatchConfidence || 'LOW',
             hasCuitMatch: bestMatch.factura.hasCuitMatch || false,
-            dateProximityDays: 999
+            dateProximityDays: bestMatch.existingDateProximityDays ?? 999
           };
           const newQuality: MatchQuality = {
             confidence: bestMatch.confidence,
