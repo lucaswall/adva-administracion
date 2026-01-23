@@ -18,6 +18,8 @@ export interface UsageCallbackData {
   model: 'gemini-2.5-flash';
   /** Number of prompt tokens */
   promptTokens: number;
+  /** Number of cached content tokens */
+  cachedTokens: number;
   /** Number of output tokens */
   outputTokens: number;
   /** Total tokens */
@@ -245,6 +247,7 @@ export class GeminiClient {
       success,
       model: this.MODEL,
       promptTokens: usageMetadata?.promptTokenCount || 0,
+      cachedTokens: usageMetadata?.cachedContentTokenCount || 0,
       outputTokens: usageMetadata?.candidatesTokenCount || 0,
       totalTokens: usageMetadata?.totalTokenCount || 0,
       durationMs,
@@ -327,7 +330,8 @@ export class GeminiClient {
           parsedResponse.error.message,
           parsedResponse.error.code,
           parsedResponse.error
-        )
+        ),
+        usageMetadata: parsedResponse.usageMetadata
       };
     }
 

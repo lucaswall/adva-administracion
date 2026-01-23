@@ -13,46 +13,71 @@ vi.mock('../../../src/services/sheets.js', () => ({
 
 describe('calculateCost', () => {
   it('should calculate cost for gemini-2.5-flash with only prompt tokens', () => {
-    const cost = calculateCost('gemini-2.5-flash', 1000, 0);
-    // $0.15 per 1M tokens = $0.00000015 per token
-    // 1000 tokens * $0.00000015 = $0.00015
-    expect(cost).toBe(0.00015);
-  });
-
-  it('should calculate cost for gemini-2.5-flash with only output tokens', () => {
-    const cost = calculateCost('gemini-2.5-flash', 0, 500);
-    // $0.60 per 1M tokens = $0.0000006 per token
-    // 500 tokens * $0.0000006 = $0.0003
+    const cost = calculateCost('gemini-2.5-flash', 1000, 0, 0);
+    // $0.30 per 1M tokens = $0.0000003 per token
+    // 1000 tokens * $0.0000003 = $0.0003
     expect(cost).toBe(0.0003);
   });
 
-  it('should calculate cost for gemini-2.5-flash with both prompt and output tokens', () => {
-    const cost = calculateCost('gemini-2.5-flash', 1000, 500);
-    // Prompt: 1000 * $0.00000015 = $0.00015
-    // Output: 500 * $0.0000006 = $0.0003
-    // Total: $0.00045
-    expect(cost).toBe(0.00045);
+  it('should calculate cost for gemini-2.5-flash with only cached tokens', () => {
+    const cost = calculateCost('gemini-2.5-flash', 0, 1000, 0);
+    // $0.03 per 1M tokens = $0.00000003 per token
+    // 1000 tokens * $0.00000003 = $0.00003
+    expect(cost).toBeCloseTo(0.00003, 8);
+  });
+
+  it('should calculate cost for gemini-2.5-flash with only output tokens', () => {
+    const cost = calculateCost('gemini-2.5-flash', 0, 0, 500);
+    // $2.50 per 1M tokens = $0.0000025 per token
+    // 500 tokens * $0.0000025 = $0.00125
+    expect(cost).toBe(0.00125);
+  });
+
+  it('should calculate cost for gemini-2.5-flash with prompt and output tokens', () => {
+    const cost = calculateCost('gemini-2.5-flash', 1000, 0, 500);
+    // Prompt: 1000 * $0.0000003 = $0.0003
+    // Output: 500 * $0.0000025 = $0.00125
+    // Total: $0.00155
+    expect(cost).toBe(0.00155);
+  });
+
+  it('should calculate cost for gemini-2.5-flash with all token types', () => {
+    const cost = calculateCost('gemini-2.5-flash', 1000, 500, 300);
+    // Prompt: 1000 * $0.0000003 = $0.0003
+    // Cached: 500 * $0.00000003 = $0.000015
+    // Output: 300 * $0.0000025 = $0.00075
+    // Total: $0.001065
+    expect(cost).toBe(0.001065);
   });
 
   it('should handle zero tokens', () => {
-    const cost = calculateCost('gemini-2.5-flash', 0, 0);
+    const cost = calculateCost('gemini-2.5-flash', 0, 0, 0);
     expect(cost).toBe(0);
   });
 
   it('should handle large token counts', () => {
-    const cost = calculateCost('gemini-2.5-flash', 1_000_000, 1_000_000);
-    // Prompt: 1M * $0.00000015 = $0.15
-    // Output: 1M * $0.0000006 = $0.60
-    // Total: $0.75
-    expect(cost).toBe(0.75);
+    const cost = calculateCost('gemini-2.5-flash', 1_000_000, 500_000, 1_000_000);
+    // Prompt: 1M * $0.0000003 = $0.30
+    // Cached: 500K * $0.00000003 = $0.015
+    // Output: 1M * $0.0000025 = $2.50
+    // Total: $2.815
+    expect(cost).toBe(2.815);
   });
 
   it('should round to reasonable precision', () => {
-    const cost = calculateCost('gemini-2.5-flash', 333, 777);
-    // Prompt: 333 * $0.00000015 = $0.00004995
-    // Output: 777 * $0.0000006 = $0.0004662
-    // Total: $0.00051615
-    expect(cost).toBeCloseTo(0.00051615, 8);
+    const cost = calculateCost('gemini-2.5-flash', 333, 222, 777);
+    // Prompt: 333 * $0.0000003 = $0.0000999
+    // Cached: 222 * $0.00000003 = $0.00000666
+    // Output: 777 * $0.0000025 = $0.0019425
+    // Total: $0.00204906
+    expect(cost).toBeCloseTo(0.00204906, 8);
+  });
+
+  it('should show cached tokens are 90% cheaper than prompt tokens', () => {
+    const promptCost = calculateCost('gemini-2.5-flash', 1000, 0, 0);
+    const cachedCost = calculateCost('gemini-2.5-flash', 0, 1000, 0);
+    // Cached should be 10x cheaper (90% discount)
+    expect(promptCost / cachedCost).toBe(10);
   });
 });
 
@@ -97,9 +122,10 @@ describe('logTokenUsage', () => {
       fileName: 'invoice.pdf',
       model: 'gemini-2.5-flash' as const,
       promptTokens: 1000,
+      cachedTokens: 500,
       outputTokens: 500,
-      totalTokens: 1500,
-      estimatedCostUSD: 0.00045,
+      totalTokens: 2000,
+      estimatedCostUSD: 0.001565, // Updated cost with new pricing
       durationMs: 2500,
       success: true,
       errorMessage: '',
@@ -119,8 +145,9 @@ describe('logTokenUsage', () => {
         'gemini-2.5-flash',
         1000,
         500,
-        1500,
-        0.00045,
+        500,
+        2000,
+        0.001565,
         2500,
         'YES',
         '',
@@ -140,6 +167,7 @@ describe('logTokenUsage', () => {
       fileName: 'invoice.pdf',
       model: 'gemini-2.5-flash' as const,
       promptTokens: 0,
+      cachedTokens: 0,
       outputTokens: 0,
       totalTokens: 0,
       estimatedCostUSD: 0,
@@ -160,6 +188,7 @@ describe('logTokenUsage', () => {
         'file123',
         'invoice.pdf',
         'gemini-2.5-flash',
+        0,
         0,
         0,
         0,
@@ -185,9 +214,10 @@ describe('logTokenUsage', () => {
       fileName: 'invoice.pdf',
       model: 'gemini-2.5-flash' as const,
       promptTokens: 1000,
+      cachedTokens: 500,
       outputTokens: 500,
-      totalTokens: 1500,
-      estimatedCostUSD: 0.00045,
+      totalTokens: 2000,
+      estimatedCostUSD: 0.001565,
       durationMs: 2500,
       success: true,
       errorMessage: '',
@@ -213,9 +243,10 @@ describe('logTokenUsage', () => {
       fileName: '',
       model: 'gemini-2.5-flash' as const,
       promptTokens: 100,
+      cachedTokens: 0,
       outputTokens: 50,
       totalTokens: 150,
-      estimatedCostUSD: 0.000045,
+      estimatedCostUSD: 0.000155, // Updated cost with new pricing
       durationMs: 500,
       success: true,
       errorMessage: '',
@@ -234,9 +265,10 @@ describe('logTokenUsage', () => {
         '',
         'gemini-2.5-flash',
         100,
+        0,
         50,
         150,
-        0.000045,
+        0.000155,
         500,
         'YES',
         '',
@@ -256,9 +288,10 @@ describe('logTokenUsage', () => {
       fileName: 'invoice.pdf',
       model: 'gemini-2.5-flash' as const,
       promptTokens: 1000,
+      cachedTokens: 500,
       outputTokens: 500,
-      totalTokens: 1500,
-      estimatedCostUSD: 0.00045,
+      totalTokens: 2000,
+      estimatedCostUSD: 0.001565, // Updated cost with new pricing
       durationMs: 2500,
       success: true,
       errorMessage: '',
@@ -278,8 +311,9 @@ describe('logTokenUsage', () => {
         'gemini-2.5-flash',
         1000,
         500,
-        1500,
-        0.00045,
+        500,
+        2000,
+        0.001565,
         2500,
         'YES',
         '',

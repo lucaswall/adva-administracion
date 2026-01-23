@@ -234,7 +234,7 @@ Auto-synced from Facturas Recibidas where `pagada != "SI"`.
 | F | tasaExito | number | Success rate |
 | G | duracionPromedio | number | Average duration |
 
-### Uso de API (12 columns, A:L)
+### Uso de API (13 columns, A:M)
 
 | Column | Field | Type | Description |
 |--------|-------|------|-------------|
@@ -243,13 +243,17 @@ Auto-synced from Facturas Recibidas where `pagada != "SI"`.
 | C | fileId | string | Processed file ID |
 | D | fileName | string | Processed file name |
 | E | model | string | Gemini model used |
-| F | promptTokens | number | Input tokens |
-| G | outputTokens | number | Output tokens |
-| H | totalTokens | number | Total tokens |
-| I | estimatedCostUSD | currency | Estimated cost |
-| J | durationMs | number | Duration in ms |
-| K | success | boolean | Request succeeded |
-| L | errorMessage | string | Error message if failed |
+| F | promptTokens | number | New input tokens |
+| G | cachedTokens | number | Cached content tokens (90% cheaper) |
+| H | outputTokens | number | Output tokens |
+| I | totalTokens | number | Total tokens (F+G+H) |
+| J | estimatedCostUSD | currency | Estimated cost using Standard tier pricing |
+| K | durationMs | number | Duration in ms |
+| L | success | boolean | Request succeeded |
+| M | errorMessage | string | Error message if failed |
+
+**Pricing (Standard tier):** Input $0.30/1M, Cached $0.03/1M, Output $2.50/1M
+**Source:** https://ai.google.dev/gemini-api/docs/pricing
 
 ---
 

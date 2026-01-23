@@ -381,9 +381,11 @@ export interface ErrorRecord {
 export interface GeminiUsageMetadata {
   /** Number of input/prompt tokens */
   promptTokenCount: number;
+  /** Number of cached content tokens (if using prompt caching) */
+  cachedContentTokenCount?: number;
   /** Number of output/candidate tokens */
   candidatesTokenCount: number;
-  /** Total tokens (prompt + candidates) */
+  /** Total tokens (prompt + cached + candidates) */
   totalTokenCount: number;
 }
 

@@ -25,6 +25,8 @@ export interface TokenUsageData {
   model: 'gemini-2.5-flash';
   /** Number of input/prompt tokens */
   promptTokens: number;
+  /** Number of cached content tokens */
+  cachedTokens: number;
   /** Number of output/candidate tokens */
   outputTokens: number;
   /** Total tokens */
@@ -43,19 +45,22 @@ export interface TokenUsageData {
  * Calculate cost for Gemini API usage
  *
  * @param model - Gemini model name
- * @param promptTokens - Number of input tokens
+ * @param promptTokens - Number of new input tokens
+ * @param cachedTokens - Number of cached content tokens (cheaper)
  * @param outputTokens - Number of output tokens
  * @returns Estimated cost in USD
  */
 export function calculateCost(
   model: 'gemini-2.5-flash',
   promptTokens: number,
+  cachedTokens: number,
   outputTokens: number
 ): number {
   const pricing = GEMINI_PRICING[model];
   const promptCost = promptTokens * pricing.inputPerToken;
+  const cachedCost = cachedTokens * pricing.cachedPerToken;
   const outputCost = outputTokens * pricing.outputPerToken;
-  return promptCost + outputCost;
+  return promptCost + cachedCost + outputCost;
 }
 
 /**
@@ -91,6 +96,7 @@ export async function logTokenUsage(
     data.fileName,
     data.model,
     data.promptTokens,
+    data.cachedTokens,
     data.outputTokens,
     data.totalTokens,
     data.estimatedCostUSD,

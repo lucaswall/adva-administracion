@@ -101,8 +101,13 @@ export async function processFile(
   // Create usage callback for token tracking
   const usageCallback = dashboardOperativoId
     ? (data: UsageCallbackData) => {
-        // Calculate estimated cost
-        const estimatedCostUSD = calculateCost(data.model, data.promptTokens, data.outputTokens);
+        // Calculate estimated cost including cached tokens
+        const estimatedCostUSD = calculateCost(
+          data.model,
+          data.promptTokens,
+          data.cachedTokens,
+          data.outputTokens
+        );
 
         // Log usage to Dashboard Operativo Contable
         // Note: Fire and forget - don't await to avoid slowing down processing
@@ -113,6 +118,7 @@ export async function processFile(
           fileName: data.fileName,
           model: data.model,
           promptTokens: data.promptTokens,
+          cachedTokens: data.cachedTokens,
           outputTokens: data.outputTokens,
           totalTokens: data.totalTokens,
           estimatedCostUSD,
