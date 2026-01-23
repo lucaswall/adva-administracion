@@ -7,7 +7,7 @@ import { getConfig } from '../config.js';
 import { findByName, listByMimeType, createFolder, createSpreadsheet } from './drive.js';
 import { getSheetMetadata, createSheet, setValues, getValues, formatSheet, deleteSheet, moveSheetToFirst } from './sheets.js';
 import { formatMonthFolder } from '../utils/spanish-date.js';
-import { CONTROL_INGRESOS_SHEETS, CONTROL_EGRESOS_SHEETS, DASHBOARD_OPERATIVO_SHEETS, type SheetConfig } from '../constants/spreadsheet-headers.js';
+import { CONTROL_INGRESOS_SHEETS, CONTROL_EGRESOS_SHEETS, DASHBOARD_OPERATIVO_SHEETS, CONTROL_RESUMENES_SHEET, type SheetConfig } from '../constants/spreadsheet-headers.js';
 import type { FolderStructure, Result, SortDestination } from '../types/index.js';
 import { debug, info, error as logError } from '../utils/logger.js';
 import { withLock } from '../utils/concurrency.js';
@@ -441,6 +441,8 @@ export async function discoverFolderStructure(): Promise<Result<FolderStructure,
     yearFolders: new Map(),
     classificationFolders: new Map(),
     monthFolders: new Map(),
+    bankAccountFolders: new Map(),
+    bankAccountSpreadsheets: new Map(),
     lastRefreshed: new Date(),
   };
 
@@ -691,4 +693,213 @@ export async function getOrCreateMonthFolder(
   });
 
   return monthResult;
+}
+
+/**
+ * Gets or creates a bank account folder for storing bank statements
+ * Implements structure: {year}/Bancos/{Bank Name} {Nro Cuenta} {Moneda}/
+ *
+ * @param year - Year string (e.g., "2024")
+ * @param banco - Bank name (e.g., "Santander")
+ * @param numeroCuenta - Account number
+ * @param moneda - Currency (ARS or USD)
+ * @returns Folder ID for the bank account folder
+ */
+export async function getOrCreateBankAccountFolder(
+  year: string,
+  banco: string,
+  numeroCuenta: string,
+  moneda: string
+): Promise<Result<string, Error>> {
+  if (!cachedStructure) {
+    return {
+      ok: false,
+      error: new Error('Folder structure not initialized. Call discoverFolderStructure first.'),
+    };
+  }
+
+  // Create cache key: year:banco cuenta moneda
+  const folderName = `${banco} ${numeroCuenta} ${moneda}`;
+  const cacheKey = `${year}:${folderName}`;
+
+  // Check cache first
+  const cachedFolderId = cachedStructure.bankAccountFolders.get(cacheKey);
+  if (cachedFolderId) {
+    return { ok: true, value: cachedFolderId };
+  }
+
+  // Use lock to prevent concurrent creation
+  const lockKey = `folder:bank-account:${cacheKey}`;
+  const result = await withLock(lockKey, async () => {
+    // Check cache again inside lock
+    const cachedId = cachedStructure?.bankAccountFolders.get(cacheKey);
+    if (cachedId) {
+      return cachedId;
+    }
+
+    // Get or create year folder
+    let yearFolderId = cachedStructure!.yearFolders.get(year);
+    if (!yearFolderId) {
+      const yearLockKey = `folder:year:${year}`;
+      const yearResult = await withLock(yearLockKey, async () => {
+        const cachedYearId = cachedStructure?.yearFolders.get(year);
+        if (cachedYearId) return cachedYearId;
+
+        const findYearResult = await findByName(cachedStructure!.rootId, year, FOLDER_MIME);
+        if (!findYearResult.ok) throw findYearResult.error;
+
+        if (findYearResult.value) {
+          const foundId = findYearResult.value.id;
+          cachedStructure!.yearFolders.set(year, foundId);
+          return foundId;
+        }
+
+        const createYearResult = await createFolder(cachedStructure!.rootId, year);
+        if (!createYearResult.ok) throw createYearResult.error;
+
+        const createdId = createYearResult.value.id;
+        cachedStructure!.yearFolders.set(year, createdId);
+        info('Created year folder', {
+          module: 'folder-structure',
+          phase: 'bank-account-folder',
+          year,
+          folderId: createdId
+        });
+        return createdId;
+      });
+
+      if (!yearResult.ok) throw yearResult.error;
+      yearFolderId = yearResult.value;
+    }
+
+    // Ensure Bancos classification folder exists
+    const ensureResult = await ensureClassificationFolders(yearFolderId, year);
+    if (!ensureResult.ok) throw ensureResult.error;
+
+    const bancosFolderId = cachedStructure!.classificationFolders.get(`${year}:bancos`);
+    if (!bancosFolderId) {
+      throw new Error(`Bancos folder not found for year ${year}`);
+    }
+
+    // Find or create bank account subfolder
+    const findResult = await findByName(bancosFolderId, folderName, FOLDER_MIME);
+    if (!findResult.ok) throw findResult.error;
+
+    if (findResult.value) {
+      const foundId = findResult.value.id;
+      cachedStructure!.bankAccountFolders.set(cacheKey, foundId);
+      debug('Found existing bank account folder', {
+        module: 'folder-structure',
+        phase: 'bank-account-folder',
+        year,
+        folderName,
+        folderId: foundId
+      });
+      return foundId;
+    }
+
+    // Create new bank account folder
+    const createResult = await createFolder(bancosFolderId, folderName);
+    if (!createResult.ok) throw createResult.error;
+
+    const createdId = createResult.value.id;
+    cachedStructure!.bankAccountFolders.set(cacheKey, createdId);
+    info('Created bank account folder', {
+      module: 'folder-structure',
+      phase: 'bank-account-folder',
+      year,
+      folderName,
+      folderId: createdId
+    });
+    return createdId;
+  });
+
+  return result;
+}
+
+/**
+ * Gets or creates a Control de Resumenes spreadsheet for a bank account
+ * Creates the spreadsheet in the bank account folder if it doesn't exist
+ *
+ * @param folderId - Bank account folder ID
+ * @param year - Year string (e.g., "2024")
+ * @param banco - Bank name
+ * @param numeroCuenta - Account number
+ * @param moneda - Currency (ARS or USD)
+ * @returns Spreadsheet ID for Control de Resumenes
+ */
+export async function getOrCreateBankAccountSpreadsheet(
+  folderId: string,
+  year: string,
+  banco: string,
+  numeroCuenta: string,
+  moneda: string
+): Promise<Result<string, Error>> {
+  if (!cachedStructure) {
+    return {
+      ok: false,
+      error: new Error('Folder structure not initialized. Call discoverFolderStructure first.'),
+    };
+  }
+
+  const spreadsheetName = 'Control de Resumenes';
+  const folderName = `${banco} ${numeroCuenta} ${moneda}`;
+  const cacheKey = `${year}:${folderName}`;
+
+  // Check cache first
+  const cachedSpreadsheetId = cachedStructure.bankAccountSpreadsheets.get(cacheKey);
+  if (cachedSpreadsheetId) {
+    return { ok: true, value: cachedSpreadsheetId };
+  }
+
+  // Use lock to prevent concurrent creation
+  const lockKey = `spreadsheet:bank-account:${cacheKey}`;
+  const result = await withLock(lockKey, async () => {
+    // Check cache again inside lock
+    const cachedId = cachedStructure?.bankAccountSpreadsheets.get(cacheKey);
+    if (cachedId) {
+      return cachedId;
+    }
+
+    // Find or create spreadsheet
+    const findResult = await findByName(folderId, spreadsheetName, SPREADSHEET_MIME);
+    if (!findResult.ok) throw findResult.error;
+
+    let spreadsheetId: string;
+
+    if (findResult.value) {
+      spreadsheetId = findResult.value.id;
+      debug('Found existing Control de Resumenes spreadsheet', {
+        module: 'folder-structure',
+        phase: 'bank-account-spreadsheet',
+        year,
+        folderName,
+        spreadsheetId
+      });
+    } else {
+      // Create new spreadsheet
+      const createResult = await createSpreadsheet(folderId, spreadsheetName);
+      if (!createResult.ok) throw createResult.error;
+
+      spreadsheetId = createResult.value.id;
+      info('Created Control de Resumenes spreadsheet', {
+        module: 'folder-structure',
+        phase: 'bank-account-spreadsheet',
+        year,
+        folderName,
+        spreadsheetId
+      });
+    }
+
+    // Ensure the Resumenes sheet exists with proper headers and formatting
+    const ensureSheetResult = await ensureSheetsExist(spreadsheetId, [CONTROL_RESUMENES_SHEET]);
+    if (!ensureSheetResult.ok) throw ensureSheetResult.error;
+
+    // Cache the spreadsheet ID
+    cachedStructure!.bankAccountSpreadsheets.set(cacheKey, spreadsheetId);
+
+    return spreadsheetId;
+  });
+
+  return result;
 }

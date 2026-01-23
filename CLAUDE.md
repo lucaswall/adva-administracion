@@ -39,7 +39,7 @@ src/
 ├── services/{google-auth,drive,sheets,folder-structure,document-sorter,watch-manager,token-usage-logger,pagos-pendientes}.ts
 ├── processing/{queue,scanner,extractor}.ts
 ├── processing/matching/{index,factura-pago-matcher,recibo-pago-matcher,nc-factura-matcher}.ts
-├── processing/storage/{index,factura-store,pago-store,recibo-store,retencion-store}.ts
+├── processing/storage/{index,factura-store,pago-store,recibo-store,retencion-store,resumen-store}.ts
 ├── matching/{matcher,cascade-matcher}.ts
 ├── gemini/{client,prompts,parser,errors}.ts
 ├── utils/{date,numbers,currency,validation,file-naming,spanish-date,exchange-rate,drive-parser,logger,spreadsheet,circuit-breaker,concurrency,correlation}.ts
@@ -142,7 +142,7 @@ ROOT/
 ├── Entrada/, Sin Procesar/, Duplicado/
 └── {YYYY}/
     ├── Ingresos/{MM - Mes}/, Egresos/{MM - Mes}/
-    └── Bancos/  # No month subfolders
+    └── Bancos/{Bank Name} {Nro Cuenta} {Moneda}/
 ```
 
 ## SPREADSHEETS
@@ -150,6 +150,7 @@ See `SPREADSHEET_FORMAT.md` for complete schema.
 
 - **Control de Ingresos**: Facturas Emitidas (18 cols), Pagos Recibidos (15 cols), Retenciones Recibidas (15 cols)
 - **Control de Egresos**: Facturas Recibidas (19 cols), Pagos Enviados (15 cols), Recibos (18 cols)
+- **Control de Resumenes**: Resumenes Bancarios (9 cols) - stored in bank account-specific folders
 - **Dashboard**: Pagos Pendientes (10 cols), Resumen Mensual (7 cols), Uso de API (12 cols)
 
 **Key principle**: Store counterparty info only, ADVA's role is implicit.

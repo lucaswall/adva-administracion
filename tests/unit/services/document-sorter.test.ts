@@ -19,10 +19,12 @@ vi.mock('../../../src/services/drive.js', () => ({
 
 // Mock the folder-structure module
 const mockGetOrCreateMonthFolder = vi.fn();
+const mockGetOrCreateBankAccountFolder = vi.fn();
 const mockGetCachedFolderStructure = vi.fn();
 
 vi.mock('../../../src/services/folder-structure.js', () => ({
   getOrCreateMonthFolder: (...args: unknown[]) => mockGetOrCreateMonthFolder(...args),
+  getOrCreateBankAccountFolder: (...args: unknown[]) => mockGetOrCreateBankAccountFolder(...args),
   getCachedFolderStructure: () => mockGetCachedFolderStructure(),
   clearFolderStructureCache: vi.fn(),
 }));
@@ -42,10 +44,16 @@ describe('DocumentSorter service', () => {
     egresosId: 'egresos-id',
     sinProcesarId: 'sin-procesar-id',
     bancosId: 'bancos-id',
+    duplicadoId: 'duplicado-id',
     controlIngresosId: 'control-ingresos-id',
     controlEgresosId: 'control-egresos-id',
+    dashboardOperativoId: 'dashboard-id',
     bankSpreadsheets: new Map(),
+    yearFolders: new Map(),
+    classificationFolders: new Map(),
     monthFolders: new Map(),
+    bankAccountFolders: new Map(),
+    bankAccountSpreadsheets: new Map(),
     lastRefreshed: new Date(),
   };
 
@@ -523,6 +531,7 @@ describe('DocumentSorter service', () => {
       };
 
       mockGetParents.mockResolvedValue({ ok: true, value: ['entrada-id'] });
+      mockGetOrCreateBankAccountFolder.mockResolvedValue({ ok: true, value: 'bbva-account-folder-id' });
       mockMoveFile.mockResolvedValue({ ok: true, value: undefined });
       mockRenameFile.mockResolvedValue({ ok: true, value: undefined });
 
@@ -553,6 +562,7 @@ describe('DocumentSorter service', () => {
       };
 
       mockGetParents.mockResolvedValue({ ok: true, value: ['entrada-id'] });
+      mockGetOrCreateBankAccountFolder.mockResolvedValue({ ok: true, value: 'bbva-visa-folder-id' });
       mockMoveFile.mockResolvedValue({ ok: true, value: undefined });
       mockRenameFile.mockResolvedValue({ ok: true, value: undefined });
 

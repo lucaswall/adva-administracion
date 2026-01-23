@@ -38,6 +38,8 @@ describe('moveToDuplicadoFolder', () => {
       yearFolders: new Map(),
       classificationFolders: new Map(),
       monthFolders: new Map(),
+      bankAccountFolders: new Map(),
+      bankAccountSpreadsheets: new Map(),
       lastRefreshed: new Date(),
     });
     vi.mocked(getParents).mockResolvedValue({ ok: true, value: ['current-parent-id'] });
@@ -78,6 +80,8 @@ describe('moveToDuplicadoFolder', () => {
       yearFolders: new Map(),
       classificationFolders: new Map(),
       monthFolders: new Map(),
+      bankAccountFolders: new Map(),
+      bankAccountSpreadsheets: new Map(),
       lastRefreshed: new Date(),
     });
 
@@ -102,6 +106,8 @@ describe('moveToDuplicadoFolder', () => {
       yearFolders: new Map(),
       classificationFolders: new Map(),
       monthFolders: new Map(),
+      bankAccountFolders: new Map(),
+      bankAccountSpreadsheets: new Map(),
       lastRefreshed: new Date(),
     });
     vi.mocked(getParents).mockResolvedValue({ ok: false, error: new Error('API error') });
@@ -127,6 +133,8 @@ describe('moveToDuplicadoFolder', () => {
       yearFolders: new Map(),
       classificationFolders: new Map(),
       monthFolders: new Map(),
+      bankAccountFolders: new Map(),
+      bankAccountSpreadsheets: new Map(),
       lastRefreshed: new Date(),
     });
     vi.mocked(getParents).mockResolvedValue({ ok: true, value: [] });
@@ -152,6 +160,8 @@ describe('moveToDuplicadoFolder', () => {
       yearFolders: new Map(),
       classificationFolders: new Map(),
       monthFolders: new Map(),
+      bankAccountFolders: new Map(),
+      bankAccountSpreadsheets: new Map(),
       lastRefreshed: new Date(),
     });
     vi.mocked(getParents).mockResolvedValue({ ok: true, value: ['current-parent-id'] });

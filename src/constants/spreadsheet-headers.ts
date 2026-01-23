@@ -127,7 +127,7 @@ export const RECIBO_HEADERS = [
   'matchConfidence',
 ];
 
-/** Headers for Resumenes Bancarios sheet */
+/** Headers for Resumenes Bancarios sheet (legacy - not currently used) */
 export const RESUMEN_BANCARIO_HEADERS = [
   'fileId',
   'fileName',
@@ -144,12 +144,38 @@ export const RESUMEN_BANCARIO_HEADERS = [
   'needsReview',
 ];
 
+/**
+ * Sheet configuration for Control de Resumenes spreadsheet
+ * Stores bank statements in bank account-specific folders
+ */
+export const CONTROL_RESUMENES_SHEET: SheetConfig = {
+  title: 'Resumenes',
+  headers: [
+    'fechaDesde',
+    'fechaHasta',
+    'fileId',
+    'fileName',
+    'banco',
+    'numeroCuenta',
+    'moneda',
+    'saldoInicial',
+    'saldoFinal',
+  ],
+  numberFormats: new Map([
+    [0, { type: 'date' }],              // fechaDesde
+    [1, { type: 'date' }],              // fechaHasta
+    [7, { type: 'currency', decimals: 2 }],  // saldoInicial
+    [8, { type: 'currency', decimals: 2 }],  // saldoFinal
+  ]),
+};
+
 /** Number format patterns */
 export type NumberFormat =
   | { type: 'currency'; decimals: 2 }  // e.g., $1,234.56
   | { type: 'currency'; decimals: 8 }  // e.g., 0.00000123 (for cost-per-token)
   | { type: 'number'; decimals: 0 }    // e.g., 1,234 (for counts)
-  | { type: 'number'; decimals: 2 };   // e.g., 12.34 (for rates/percentages)
+  | { type: 'number'; decimals: 2 }    // e.g., 12.34 (for rates/percentages)
+  | { type: 'date' };                  // e.g., yyyy-mm-dd
 
 /** Sheet configuration */
 export interface SheetConfig {
