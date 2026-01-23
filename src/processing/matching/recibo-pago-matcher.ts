@@ -89,17 +89,18 @@ async function processCascadingReciboDisplacements(
 
     // Find best remaining match (exclude already claimed recibos)
     const availableRecibos = recibos.filter(r => !claims.claimedRecibos.has(r.fileId));
-    const matches = matcher.findMatches(displacedPago, availableRecibos, true);
+    const matches = matcher.findMatches(displacedPago, availableRecibos, true, pagosMap);
 
     if (matches.length > 0) {
       const bestMatch = matches[0];
 
       if (bestMatch.isUpgrade && bestMatch.existingPagoFileId) {
         // This match would displace another pago - check if it's strictly better
+        // hasCuitMatch for existing match: HIGH confidence implies CUIT match was present
         const existingQuality: MatchQuality = {
           confidence: bestMatch.existingMatchConfidence || 'LOW',
-          hasCuitMatch: bestMatch.recibo.matchConfidence === 'HIGH',
-          dateProximityDays: 999
+          hasCuitMatch: bestMatch.existingMatchConfidence === 'HIGH',
+          dateProximityDays: bestMatch.existingDateProximityDays ?? 999
         };
         const newQuality: MatchQuality = {
           confidence: bestMatch.confidence,
@@ -356,7 +357,7 @@ async function doMatchRecibosWithPagos(
 
   // Process unmatched pagos - try to match against ALL recibos (including matched ones)
   for (const pago of unmatchedPagos) {
-    const matches = matcher.findMatches(pago, recibos, true); // includeMatched=true
+    const matches = matcher.findMatches(pago, recibos, true, pagosMap); // includeMatched=true
 
     if (matches.length > 0) {
       const bestMatch = matches[0];
@@ -365,10 +366,11 @@ async function doMatchRecibosWithPagos(
       if (bestMatch.confidence === 'HIGH' || matches.length === 1) {
         // Check if this is an upgrade (recibo already matched)
         if (bestMatch.isUpgrade && bestMatch.existingPagoFileId) {
+          // hasCuitMatch for existing match: HIGH confidence implies CUIT match was present
           const existingQuality: MatchQuality = {
             confidence: bestMatch.existingMatchConfidence || 'LOW',
-            hasCuitMatch: bestMatch.recibo.matchConfidence === 'HIGH',
-            dateProximityDays: 999
+            hasCuitMatch: bestMatch.existingMatchConfidence === 'HIGH',
+            dateProximityDays: bestMatch.existingDateProximityDays ?? 999
           };
           const newQuality: MatchQuality = {
             confidence: bestMatch.confidence,

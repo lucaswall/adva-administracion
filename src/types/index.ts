@@ -507,6 +507,8 @@ export interface MatchCandidate {
   hasCuitMatch?: boolean;
   /** Date proximity in days from invoice date */
   dateProximityDays?: number;
+  /** Date proximity of existing match (if upgrade) */
+  existingDateProximityDays?: number;
 }
 
 /**
@@ -533,6 +535,8 @@ export interface ReciboMatchCandidate {
   hasCuilMatch?: boolean;
   /** Date proximity in days from recibo date */
   dateProximityDays?: number;
+  /** Date proximity of existing match (if upgrade) */
+  existingDateProximityDays?: number;
 }
 
 /**

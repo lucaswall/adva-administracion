@@ -15,7 +15,9 @@ import { debug, info, error as logError } from '../utils/logger.js';
  */
 let webhookUrl: string | null = null;
 let activeChannels: Map<string, WatchChannel> = new Map();
-let processedNotifications: Map<string, Set<string>> = new Map();
+// Map of channelId -> Map of messageNumber -> timestamp (ms)
+// Using timestamp allows proper cleanup of old entries
+let processedNotifications: Map<string, Map<string, number>> = new Map();
 let lastNotificationTime: Date | null = null;
 let lastScanTime: Date | null = null;
 let renewalJob: cron.ScheduledTask | null = null;
@@ -200,7 +202,24 @@ export function isNotificationDuplicate(
   }
 
   const channelNotifications = processedNotifications.get(channelId);
-  return channelNotifications?.has(messageNumber) ?? false;
+  if (!channelNotifications) {
+    return false;
+  }
+
+  const timestamp = channelNotifications.get(messageNumber);
+  if (timestamp === undefined) {
+    return false;
+  }
+
+  // Check if the notification is still within the valid age window
+  const now = Date.now();
+  if (now - timestamp > MAX_NOTIFICATION_AGE_MS) {
+    // Entry has expired, remove it and return false
+    channelNotifications.delete(messageNumber);
+    return false;
+  }
+
+  return true;
 }
 
 /**
@@ -214,22 +233,35 @@ export function markNotificationProcessed(
   channelId: string
 ): void {
   lastNotificationTime = new Date();
+  const now = Date.now();
 
   let channelNotifications = processedNotifications.get(channelId);
 
   if (!channelNotifications) {
-    channelNotifications = new Set();
+    channelNotifications = new Map();
     processedNotifications.set(channelId, channelNotifications);
   }
 
-  channelNotifications.add(messageNumber);
+  channelNotifications.set(messageNumber, now);
 
-  // Limit size to prevent memory growth
+  // Cleanup: remove old entries based on timestamp
   if (channelNotifications.size > MAX_NOTIFICATIONS_PER_CHANNEL) {
-    // Remove oldest entries (simple FIFO)
-    const entries = Array.from(channelNotifications);
-    const toRemove = entries.slice(0, channelNotifications.size - MAX_NOTIFICATIONS_PER_CHANNEL);
-    toRemove.forEach(entry => channelNotifications!.delete(entry));
+    // Remove entries older than MAX_NOTIFICATION_AGE_MS
+    for (const [msgNum, timestamp] of channelNotifications.entries()) {
+      if (now - timestamp > MAX_NOTIFICATION_AGE_MS) {
+        channelNotifications.delete(msgNum);
+      }
+    }
+
+    // If still over limit after timestamp cleanup, remove oldest by timestamp
+    if (channelNotifications.size > MAX_NOTIFICATIONS_PER_CHANNEL) {
+      const entries = Array.from(channelNotifications.entries());
+      // Sort by timestamp ascending (oldest first)
+      entries.sort((a, b) => a[1] - b[1]);
+      // Remove oldest entries to get back under limit
+      const toRemove = entries.slice(0, channelNotifications.size - MAX_NOTIFICATIONS_PER_CHANNEL);
+      toRemove.forEach(([msgNum]) => channelNotifications!.delete(msgNum));
+    }
   }
 }
 
