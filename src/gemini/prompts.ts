@@ -43,11 +43,61 @@ DOCUMENT TYPES:
 6. "recibo" - Salary slip
    - "RECIBO DE HABERES", employee CUIL, employer CUIT
 
-7. "unrecognized" - None of the above
+7. "certificado_retencion" - Tax withholding certificate
+   - "CERTIFICADO DE RETENCIÓN" in header
+   - "Agente de Retención" section (who withheld)
+   - "Sujeto Retenido" section (ADVA - who received less)
+   - ADVA's CUIT ${ADVA_CUIT} appears in "Sujeto Retenido" section
+   - Contains: Impuesto, Régimen, Monto de Retención
 
-DETERMINE DIRECTION BY FINDING CUIT ${ADVA_CUIT}:
-- If at TOP/header → ADVA is issuer/sender
-- If in client/beneficiary section → ADVA is receiver
+8. "unrecognized" - None of the above
+
+CRITICAL - HOW TO DETERMINE ADVA's POSITION IN FACTURAS:
+
+Argentine ARCA facturas have TWO distinct sections with CUITs. You MUST identify which section contains ADVA's CUIT ${ADVA_CUIT}.
+
+SECTION 1: ISSUER/EMISOR (Top Left Box)
+Contains these fields IN ORDER within the top left bordered box:
+- Company name (large text)
+- "Razón Social:" followed by company name
+- "Domicilio Comercial:" followed by address
+- "Condición frente al IVA:" followed by tax status
+- Later, there's a "CUIT:" field with 11-digit number
+
+SECTION 2: CLIENT/RECEPTOR (Middle of page)
+Contains these fields IN ORDER in the middle area of the document:
+- "CUIT:" followed by 11-digit number (appears FIRST in this section)
+- "Apellido y Nombre / Razón Social:" followed by client name
+- "Domicilio:" followed by client address
+- "Condición frente al IVA:" followed by tax status
+
+CRITICAL DECISION RULE:
+1. Find the line "Apellido y Nombre / Razón Social:" - this marks the CLIENT section
+2. Look ABOVE this line for "CUIT:" - this is the CLIENT's CUIT
+3. If that CUIT is ${ADVA_CUIT} → "factura_recibida" (ADVA is the client/buyer)
+4. If that CUIT is NOT ${ADVA_CUIT} → Check the top left box for ADVA's CUIT
+5. If ADVA's CUIT is in top left box → "factura_emitida" (ADVA is the issuer)
+
+KEY DISTINCTION:
+- "Razón Social:" (without "Apellido y Nombre /") = ISSUER
+- "Apellido y Nombre / Razón Social:" (with "Apellido y Nombre /") = CLIENT
+
+The CUIT that appears immediately ABOVE "Apellido y Nombre / Razón Social:" is ALWAYS the client's CUIT.
+
+RECOGNIZING ARCA FACTURAS:
+
+An ARCA factura (Argentina fiscal document) has these characteristics:
+- Large letter in header: "A", "B", "C", "E" (sometimes with "COD. 011" for C)
+- "FACTURA" text prominently displayed
+- "Punto de Venta" and "Comp. Nro" fields
+- "CAE N°:" or "CAE:" followed by 14-digit number
+- "Fecha de Vto. de CAE:"
+- ARCA/AFIP logo or text at bottom
+- "Comprobante Autorizado" text
+
+If a document has CAE authorization, it IS a factura (emitida or recibida based on ADVA position).
+
+NEVER classify a document with valid CAE as "unrecognized".
 
 Return ONLY valid JSON, no additional text:
 {
@@ -101,9 +151,26 @@ Correct extraction:
   cuitEmisor: "27130780259" (from TOP position)
   cuitReceptor: "30709076783" (from CLIENT position)
 
+## INSURANCE DOCUMENTS (Liquidación de Premio)
+
+Insurance companies in Argentina are exempt from standard AFIP invoice requirements
+(RG AFIP 1415/03, Inciso d, Anexo I). Their settlement documents use different numbering.
+
+DETECTING INSURANCE DOCUMENTS:
+- Header contains "SEGUROS", "ASEGURADORA", or insurance company name
+- Document labeled "LIQUIDACIÓN DE PREMIO", "ENDOSO", "PÓLIZA"
+- No CAE authorization code
+- Contains "PÓLIZA" number instead of standard invoice number
+
+FOR INSURANCE DOCUMENTS:
+- Extract the PÓLIZA number from the header
+- Format nroFactura as "POL-{poliza_number}" (e.g., "POL-10028114")
+- Set tipoComprobante to "LP" (Liquidación de Premio)
+- These are valid fiscal documents for accounting purposes
+
 Required fields to extract:
-- tipoComprobante: ONLY the single letter code (A, B, C, E) or two-letter code (NC for Nota de Crédito, ND for Nota de Débito). DO NOT include the word "FACTURA" - extract ONLY the letter code that follows it. Examples: if the document shows "FACTURA C", extract "C"; if it shows "FACTURA B", extract "B".
-- nroFactura: Full invoice number combining point of sale and invoice number (format: "XXXXX-XXXXXXXX" or "XXXX-XXXXXXXX"). Example: "00003-00001957" or "0003-00001957"
+- tipoComprobante: ONLY the single letter code (A, B, C, E) or two-letter code (NC for Nota de Crédito, ND for Nota de Débito, LP for Liquidación de Premio). DO NOT include the word "FACTURA" - extract ONLY the letter code that follows it. Examples: if the document shows "FACTURA C", extract "C"; if it shows "FACTURA B", extract "B".
+- nroFactura: Full invoice number combining point of sale and invoice number (format: "XXXXX-XXXXXXXX" or "XXXX-XXXXXXXX"). Example: "00003-00001957" or "0003-00001957". For insurance documents, use "POL-{poliza_number}" format.
 - fechaEmision: Issue date (format as YYYY-MM-DD)
 - cuitEmisor: Issuer CUIT - the CUIT of the company at the TOP billing for services (11 digits, no dashes). May be formatted as XX-XXXXXXXX-X or XXXXXXXXXXX.
 - razonSocialEmisor: Issuer business name - the company name at the TOP
@@ -271,4 +338,43 @@ Return ONLY valid JSON, no additional text:
   "saldoFinal": 185000.00,
   "moneda": "ARS",
   "cantidadMovimientos": 47
+}`;
+
+/**
+ * Prompt for extracting data from Argentine tax withholding certificates
+ */
+export const CERTIFICADO_RETENCION_PROMPT = `Extract data from this Argentine tax withholding certificate (Certificado de Retención).
+
+VALIDATION - ADVA IS THE SUBJECT OF WITHHOLDING:
+- cuitSujetoRetenido MUST be ${ADVA_CUIT} (ADVA is the one who had taxes withheld)
+- If cuitSujetoRetenido is different, this document is misclassified
+
+Required fields:
+- nroCertificado: Certificate number (e.g., "000000009185")
+- fechaEmision: Issue date (YYYY-MM-DD)
+- cuitAgenteRetencion: CUIT of withholding agent (11 digits, no dashes)
+- razonSocialAgenteRetencion: Name of withholding agent
+- cuitSujetoRetenido: CUIT of subject (should be ADVA: ${ADVA_CUIT})
+- impuesto: Tax type (e.g., "Impuesto a las Ganancias", "IVA", "IIBB")
+- regimen: Tax regime description
+- montoComprobante: Original invoice amount (number)
+- montoRetencion: Amount withheld (number)
+
+Optional fields:
+- ordenPago: Payment order number if present
+
+NUMBER FORMAT: "12.000.000,00" = 12000000.00 (dots=thousands, comma=decimal)
+
+Return ONLY valid JSON:
+{
+  "nroCertificado": "000000009185",
+  "fechaEmision": "2025-11-27",
+  "cuitAgenteRetencion": "30546659670",
+  "razonSocialAgenteRetencion": "CONSEJO FEDERAL DE INVERSIONES",
+  "cuitSujetoRetenido": "30709076783",
+  "impuesto": "Impuesto a las Ganancias",
+  "regimen": "Gcias. Alquileres de Bienes",
+  "ordenPago": "000000027295",
+  "montoComprobante": 12000000.00,
+  "montoRetencion": 719328.00
 }`;

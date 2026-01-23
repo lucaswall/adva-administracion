@@ -10,6 +10,7 @@ import type {
   Pago,
   Recibo,
   ResumenBancario,
+  Retencion,
   DocumentType,
   ClassificationResult,
 } from '../types/index.js';
@@ -20,6 +21,7 @@ import {
   PAGO_BBVA_PROMPT,
   RECIBO_PROMPT,
   RESUMEN_BANCARIO_PROMPT,
+  CERTIFICADO_RETENCION_PROMPT,
 } from '../gemini/prompts.js';
 import {
   parseClassificationResponse,
@@ -27,6 +29,7 @@ import {
   parsePagoResponse,
   parseReciboResponse,
   parseResumenBancarioResponse,
+  parseRetencionResponse,
 } from '../gemini/parser.js';
 import { downloadFile } from '../services/drive.js';
 import { getCachedFolderStructure } from '../services/folder-structure.js';
@@ -41,7 +44,7 @@ import { getCircuitBreaker } from '../utils/circuit-breaker.js';
  */
 export interface ProcessFileResult {
   documentType: DocumentType;
-  document?: Factura | Pago | Recibo | ResumenBancario;
+  document?: Factura | Pago | Recibo | ResumenBancario | Retencion;
   classification?: ClassificationResult;
   error?: string;
 }
@@ -69,6 +72,8 @@ export function hasValidDate(doc: unknown, documentType: DocumentType): boolean 
       // Validate that both date fields are present and non-empty
       // If dates cannot be parsed, file should go to Sin Procesar
       return !!d.fechaDesde && d.fechaDesde !== '' && !!d.fechaHasta && d.fechaHasta !== '';
+    case 'certificado_retencion':
+      return !!d.fechaEmision && d.fechaEmision !== '';
     default:
       return false;
   }
@@ -220,6 +225,9 @@ export async function processFile(
       break;
     case 'resumen_bancario':
       extractPrompt = RESUMEN_BANCARIO_PROMPT;
+      break;
+    case 'certificado_retencion':
+      extractPrompt = CERTIFICADO_RETENCION_PROMPT;
       break;
     default:
       return {
@@ -464,6 +472,40 @@ export async function processFile(
       value: {
         documentType: 'resumen_bancario',
         document: resumen,
+        classification,
+      },
+    };
+  }
+
+  if (classification.documentType === 'certificado_retencion') {
+    const parseResult = parseRetencionResponse(extractResult.value);
+    if (!parseResult.ok) {
+      return { ok: false, error: parseResult.error };
+    }
+
+    const retencion: Retencion = {
+      fileId: fileInfo.id,
+      fileName: fileInfo.name,
+      nroCertificado: parseResult.value.data.nroCertificado || '',
+      fechaEmision: parseResult.value.data.fechaEmision || '',
+      cuitAgenteRetencion: parseResult.value.data.cuitAgenteRetencion || '',
+      razonSocialAgenteRetencion: parseResult.value.data.razonSocialAgenteRetencion || '',
+      cuitSujetoRetenido: parseResult.value.data.cuitSujetoRetenido || '',
+      impuesto: parseResult.value.data.impuesto || '',
+      regimen: parseResult.value.data.regimen || '',
+      montoComprobante: parseResult.value.data.montoComprobante || 0,
+      montoRetencion: parseResult.value.data.montoRetencion || 0,
+      ordenPago: parseResult.value.data.ordenPago,
+      processedAt: now,
+      confidence: parseResult.value.confidence,
+      needsReview: parseResult.value.needsReview,
+    };
+
+    return {
+      ok: true,
+      value: {
+        documentType: 'certificado_retencion',
+        document: retencion,
         classification,
       },
     };

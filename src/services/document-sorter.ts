@@ -11,8 +11,9 @@ import {
   generatePagoFileName,
   generateReciboFileName,
   generateResumenFileName,
+  generateRetencionFileName,
 } from '../utils/file-naming.js';
-import type { Factura, Pago, Recibo, ResumenBancario, SortDestination, SortResult, DocumentType } from '../types/index.js';
+import type { Factura, Pago, Recibo, ResumenBancario, Retencion, SortDestination, SortResult, DocumentType } from '../types/index.js';
 
 /** Destination folder names for path building */
 const DESTINATION_NAMES: Record<SortDestination, string> = {
@@ -25,7 +26,7 @@ const DESTINATION_NAMES: Record<SortDestination, string> = {
 /**
  * Document with file info needed for sorting
  */
-type SortableDocument = Factura | Pago | Recibo | ResumenBancario;
+type SortableDocument = Factura | Pago | Recibo | ResumenBancario | Retencion;
 
 /**
  * Extracts the relevant date from a document for sorting
@@ -201,7 +202,7 @@ export async function sortToSinProcesar(
 /**
  * Document with file info needed for sorting and renaming
  */
-type SortableDocumentWithType = Factura | Pago | Recibo | ResumenBancario;
+type SortableDocumentWithType = Factura | Pago | Recibo | ResumenBancario | Retencion;
 
 /**
  * Sorts a document and renames it with a standardized name
@@ -247,6 +248,9 @@ export async function sortAndRenameDocument(
       break;
     case 'resumen_bancario':
       newFileName = generateResumenFileName(doc as ResumenBancario);
+      break;
+    case 'certificado_retencion':
+      newFileName = generateRetencionFileName(doc as Retencion);
       break;
     default:
       // For unrecognized or unknown types, keep the original name

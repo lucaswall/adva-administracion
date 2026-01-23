@@ -4,11 +4,56 @@
  */
 
 import type { Result, Pago } from '../../types/index.js';
-import { appendRowsWithLinks, sortSheet, type CellValueOrLink } from '../../services/sheets.js';
-import { formatUSCurrency } from '../../utils/numbers.js';
+import { appendRowsWithLinks, sortSheet, getValues, type CellValueOrLink } from '../../services/sheets.js';
+import { formatUSCurrency, parseNumber } from '../../utils/numbers.js';
 import { generatePagoFileName } from '../../utils/file-naming.js';
 import { info, warn } from '../../utils/logger.js';
 import { getCorrelationId } from '../../utils/correlation.js';
+
+/**
+ * Checks if a pago already exists in the sheet
+ *
+ * @param spreadsheetId - The spreadsheet ID
+ * @param sheetName - The sheet name
+ * @param fecha - Payment date
+ * @param importePagado - Amount paid
+ * @param cuit - CUIT of counterparty (pagador or beneficiario)
+ * @returns Duplicate check result
+ */
+async function isDuplicatePago(
+  spreadsheetId: string,
+  sheetName: string,
+  fecha: string,
+  importePagado: number,
+  cuit: string
+): Promise<{ isDuplicate: boolean; existingFileId?: string }> {
+  const rowsResult = await getValues(spreadsheetId, `${sheetName}!A:H`);
+  if (!rowsResult.ok || rowsResult.value.length <= 1) {
+    return { isDuplicate: false };
+  }
+
+  // Skip header row
+  for (let i = 1; i < rowsResult.value.length; i++) {
+    const row = rowsResult.value[i];
+    if (!row || row.length < 8) continue;
+
+    const rowFecha = row[0];        // Column A: fechaPago
+    const rowFileId = row[1];       // Column B: fileId
+    const rowImporteStr = row[4];   // Column E: importePagado
+    const rowCuit = row[7];         // Column H: cuitBeneficiario/cuitPagador
+
+    // Parse the Argentine-formatted number
+    const rowImporte = parseNumber(rowImporteStr) ?? 0;
+
+    // Match on fecha + importe + CUIT
+    if (rowFecha === fecha &&
+        Math.abs(rowImporte - importePagado) < 0.01 &&
+        rowCuit === cuit) {
+      return { isDuplicate: true, existingFileId: String(rowFileId) };
+    }
+  }
+  return { isDuplicate: false };
+}
 
 /**
  * Stores a pago in the appropriate Control spreadsheet
@@ -24,6 +69,32 @@ export async function storePago(
   sheetName: string,
   documentType: 'pago_enviado' | 'pago_recibido'
 ): Promise<Result<void, Error>> {
+  // Check for duplicates
+  const counterpartyCuit = documentType === 'pago_enviado'
+    ? (pago.cuitBeneficiario || '')
+    : (pago.cuitPagador || '');
+
+  const dupeCheck = await isDuplicatePago(
+    spreadsheetId,
+    sheetName,
+    pago.fechaPago,
+    pago.importePagado,
+    counterpartyCuit
+  );
+
+  if (dupeCheck.isDuplicate) {
+    warn('Duplicate pago detected, skipping', {
+      module: 'storage',
+      phase: 'pago',
+      fecha: pago.fechaPago,
+      importe: pago.importePagado,
+      existingFileId: dupeCheck.existingFileId,
+      newFileId: pago.fileId,
+      correlationId: getCorrelationId(),
+    });
+    return { ok: true, value: undefined };
+  }
+
   // Calculate the renamed filename that will be used when the file is moved
   const renamedFileName = generatePagoFileName(pago, documentType);
 

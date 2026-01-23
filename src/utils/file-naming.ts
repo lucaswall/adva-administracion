@@ -2,7 +2,7 @@
  * File naming utilities for standardized document names
  */
 
-import type { Factura, Pago, Recibo, ResumenBancario } from '../types/index.js';
+import type { Factura, Pago, Recibo, ResumenBancario, Retencion } from '../types/index.js';
 
 /**
  * Map of accented characters to their ASCII equivalents
@@ -197,4 +197,26 @@ export function generateResumenFileName(resumen: ResumenBancario): string {
   const moneda = resumen.moneda;
 
   return `${fecha} - Resumen - ${bankName} - ${numeroCuenta} ${moneda}.pdf`;
+}
+
+/**
+ * Generates a standardized file name for a certificado de retencion
+ *
+ * Format: YYYY-MM-DD - Certificado de Retencion - CERT-NNNNN - Agente Name.pdf
+ * Example: 2025-11-27 - Certificado de Retencion - CERT-000000009185 - CONSEJO FEDERAL DE INVERSIONES.pdf
+ *
+ * @param retencion - Retencion data
+ * @returns Standardized file name
+ */
+export function generateRetencionFileName(retencion: Retencion): string {
+  // Date (YYYY-MM-DD from fechaEmision)
+  const fecha = retencion.fechaEmision;
+
+  // Certificate number (prefixed with CERT-)
+  const certNumber = `CERT-${retencion.nroCertificado}`;
+
+  // Agente name (sanitized)
+  const agenteName = sanitizeFileName(retencion.razonSocialAgenteRetencion);
+
+  return `${fecha} - Certificado de Retencion - ${certNumber} - ${agenteName}.pdf`;
 }

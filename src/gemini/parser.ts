@@ -2,7 +2,7 @@
  * Gemini response parsing and validation
  */
 
-import type { Factura, Pago, Recibo, ResumenBancario, ParseResult, Result, ClassificationResult, AdvaRoleValidation } from '../types/index.js';
+import type { Factura, Pago, Recibo, ResumenBancario, Retencion, ParseResult, Result, ClassificationResult, AdvaRoleValidation } from '../types/index.js';
 import { ParseError } from '../types/index.js';
 import { warn } from '../utils/logger.js';
 
@@ -553,6 +553,7 @@ const VALID_DOCUMENT_TYPES = [
   'pago_recibido',
   'resumen_bancario',
   'recibo',
+  'certificado_retencion',
   'unrecognized',
 ] as const;
 
@@ -596,6 +597,96 @@ export function parseClassificationResponse(
         confidence,
         reason: data.reason || 'No reason provided',
         indicators: Array.isArray(data.indicators) ? data.indicators : []
+      }
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      error: new ParseError(
+        error instanceof Error ? error.message : 'Unknown parse error',
+        response
+      )
+    };
+  }
+}
+
+/**
+ * Parses a Gemini response for retencion data
+ *
+ * @param response - Raw Gemini response
+ * @returns Parse result with retencion data or error
+ */
+export function parseRetencionResponse(
+  response: string
+): Result<ParseResult<Partial<Retencion>>, ParseError> {
+  try {
+    // Extract JSON
+    const jsonStr = extractJSON(response);
+    if (!jsonStr) {
+      return {
+        ok: false,
+        error: new ParseError('No JSON found in response', response)
+      };
+    }
+
+    // Parse JSON
+    const data = JSON.parse(jsonStr) as Partial<Retencion>;
+
+    // Check for required fields
+    const requiredFields: (keyof Retencion)[] = [
+      'nroCertificado',
+      'fechaEmision',
+      'cuitAgenteRetencion',
+      'razonSocialAgenteRetencion',
+      'cuitSujetoRetenido',
+      'impuesto',
+      'regimen',
+      'montoComprobante',
+      'montoRetencion'
+    ];
+
+    // Check for missing or empty fields
+    const missingFields = requiredFields.filter(field => {
+      const value = data[field];
+      return value === undefined || value === null || value === '';
+    });
+
+    // Check for suspicious empty optional fields
+    const optionalFields: (keyof Retencion)[] = ['ordenPago'];
+    let hasSuspiciousEmptyFields = false;
+    for (const field of optionalFields) {
+      const value = data[field];
+      if (value === '') {
+        hasSuspiciousEmptyFields = true;
+        data[field] = undefined;
+      }
+    }
+
+    // Calculate confidence based on completeness
+    const completeness = (requiredFields.length - missingFields.length) / requiredFields.length;
+    const confidence = Math.max(0.5, completeness);
+
+    // If confidence > 0.9, no review needed; otherwise check for issues
+    const needsReview = confidence <= 0.9 && (missingFields.length > 0 || hasSuspiciousEmptyFields);
+
+    // Validate that cuitSujetoRetenido is ADVA
+    if (data.cuitSujetoRetenido && data.cuitSujetoRetenido !== ADVA_CUIT) {
+      return {
+        ok: false,
+        error: new ParseError(
+          `ADVA validation failed: Expected ADVA (${ADVA_CUIT}) as sujeto retenido but found ${data.cuitSujetoRetenido}`,
+          response
+        )
+      };
+    }
+
+    return {
+      ok: true,
+      value: {
+        data,
+        confidence,
+        needsReview,
+        missingFields: missingFields.length > 0 ? missingFields as string[] : undefined
       }
     };
   } catch (error) {

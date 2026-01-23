@@ -26,6 +26,7 @@ export type LogLevel = 'DEBUG' | 'INFO' | 'WARN' | 'ERROR';
  * - pago_recibido: Payment TO ADVA → goes to Creditos
  * - resumen_bancario: Bank statement → goes to Bancos
  * - recibo: Salary receipt → goes to Debitos
+ * - certificado_retencion: Tax withholding certificate → goes to Creditos
  */
 export type DocumentType =
   | 'factura_emitida'    // Invoice FROM ADVA (ADVA is emisor)
@@ -34,6 +35,7 @@ export type DocumentType =
   | 'pago_recibido'      // Payment TO ADVA
   | 'resumen_bancario'   // Bank statement
   | 'recibo'             // Salary receipt
+  | 'certificado_retencion' // Tax withholding certificate
   | 'unrecognized'
   | 'unknown';
 
@@ -49,8 +51,9 @@ export type MatchConfidence = 'HIGH' | 'MEDIUM' | 'LOW';
 
 /**
  * ARCA comprobante types
+ * LP = Liquidación de Premio (insurance documents)
  */
-export type TipoComprobante = 'A' | 'B' | 'C' | 'E' | 'NC' | 'ND';
+export type TipoComprobante = 'A' | 'B' | 'C' | 'E' | 'NC' | 'ND' | 'LP';
 
 /**
  * Currency types
@@ -278,6 +281,64 @@ export interface ResumenBancario {
 }
 
 /**
+ * Certificado de Retención (Tax Withholding Certificate)
+ * Issued when ADVA receives payment for Facturas Emitidas with tax withheld
+ */
+export interface Retencion {
+  // File tracking
+  /** Google Drive file ID */
+  fileId: string;
+  /** Original filename */
+  fileName: string;
+
+  // Certificate identification
+  /** Certificate number (e.g., "000000009185") */
+  nroCertificado: string;
+  /** Issue date (ISO format: YYYY-MM-DD) */
+  fechaEmision: string;
+
+  // Withholding agent (who withheld the tax)
+  /** CUIT of withholding agent (11 digits, no dashes) */
+  cuitAgenteRetencion: string;
+  /** Name of withholding agent */
+  razonSocialAgenteRetencion: string;
+
+  // Subject (ADVA - who had tax withheld)
+  /** CUIT of subject (should always be ADVA: 30709076783) */
+  cuitSujetoRetenido: string;
+
+  // Tax details
+  /** Tax type (e.g., "Impuesto a las Ganancias", "IVA", "IIBB") */
+  impuesto: string;
+  /** Tax regime description */
+  regimen: string;
+
+  // Amounts
+  /** Original invoice amount */
+  montoComprobante: number;
+  /** Amount withheld (tax credit for ADVA) */
+  montoRetencion: number;
+
+  // Optional
+  /** Payment order number if present */
+  ordenPago?: string;
+
+  // Processing metadata
+  /** When this record was processed (ISO timestamp) */
+  processedAt: string;
+  /** Extraction confidence (0.0 to 1.0) */
+  confidence: number;
+  /** Whether manual review is needed */
+  needsReview: boolean;
+
+  // Matching (future feature)
+  /** File ID of matched Factura Emitida (if any) */
+  matchedFacturaFileId?: string;
+  /** Match confidence level */
+  matchConfidence?: MatchConfidence;
+}
+
+/**
  * Processed file tracking record
  */
 export interface ProcessedFile {
@@ -393,6 +454,7 @@ export interface ParseResult<T> {
  * - pago_enviado/pago_recibido: Payment direction based on payer/beneficiary
  * - resumen_bancario: Bank statement
  * - recibo: Salary receipt (unchanged)
+ * - certificado_retencion: Tax withholding certificate
  */
 export interface ClassificationResult {
   /** Detected document type with direction */
@@ -403,6 +465,7 @@ export interface ClassificationResult {
     | 'pago_recibido'
     | 'resumen_bancario'
     | 'recibo'
+    | 'certificado_retencion'
     | 'unrecognized';
   /** Classification confidence (0.0 to 1.0) */
   confidence: number;

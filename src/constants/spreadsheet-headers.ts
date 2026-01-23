@@ -86,6 +86,25 @@ export const PAGO_RECIBIDO_HEADERS = [
   'matchConfidence',
 ];
 
+/** Headers for Retenciones Recibidas sheet - Tax withholding certificates (columns A:O) */
+export const RETENCIONES_RECIBIDAS_HEADERS = [
+  'fechaEmision',
+  'fileId',
+  'fileName',
+  'nroCertificado',
+  'cuitAgenteRetencion',
+  'razonSocialAgenteRetencion',
+  'impuesto',
+  'regimen',
+  'montoComprobante',
+  'montoRetencion',
+  'processedAt',
+  'confidence',
+  'needsReview',
+  'matchedFacturaFileId',
+  'matchConfidence',
+];
+
 /** Headers for Recibos sheet (columns A:R) */
 export const RECIBO_HEADERS = [
   'fechaPago',
@@ -134,7 +153,7 @@ export interface SheetConfig {
 
 /**
  * Required sheets for Control de Creditos spreadsheet
- * Creditos = money coming IN to ADVA (facturas emitidas, pagos recibidos)
+ * Creditos = money coming IN to ADVA (facturas emitidas, pagos recibidos, retenciones)
  */
 export const CONTROL_CREDITOS_SHEETS: SheetConfig[] = [
   {
@@ -146,6 +165,11 @@ export const CONTROL_CREDITOS_SHEETS: SheetConfig[] = [
     title: 'Pagos Recibidos',
     headers: PAGO_RECIBIDO_HEADERS,
     monetaryColumns: [4] // importePagado (0-indexed: 4)
+  },
+  {
+    title: 'Retenciones Recibidas',
+    headers: RETENCIONES_RECIBIDAS_HEADERS,
+    monetaryColumns: [8, 9] // montoComprobante, montoRetencion (0-indexed: 8, 9)
   },
 ];
 
