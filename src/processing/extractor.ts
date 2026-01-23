@@ -332,10 +332,13 @@ export async function processFile(
       needsReview: parseResult.value.needsReview,
     };
 
+    // Use actual document type from CUIT assignment if available (more reliable than classification)
+    const finalDocumentType = parseResult.value.actualDocumentType || classification.documentType;
+
     return {
       ok: true,
       value: {
-        documentType: classification.documentType,
+        documentType: finalDocumentType,
         document: factura,
         classification,
       },

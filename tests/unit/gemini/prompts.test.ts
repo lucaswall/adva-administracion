@@ -101,12 +101,16 @@ describe('FACTURA_PROMPT', () => {
     expect(FACTURA_PROMPT).toContain('fechaEmision');
   });
 
-  it('mentions required field: cuitEmisor', () => {
-    expect(FACTURA_PROMPT).toContain('cuitEmisor');
+  it('mentions required field: issuerName', () => {
+    expect(FACTURA_PROMPT).toContain('issuerName');
   });
 
-  it('mentions required field: razonSocialEmisor', () => {
-    expect(FACTURA_PROMPT).toContain('razonSocialEmisor');
+  it('mentions required field: clientName', () => {
+    expect(FACTURA_PROMPT).toContain('clientName');
+  });
+
+  it('mentions required field: allCuits', () => {
+    expect(FACTURA_PROMPT).toContain('allCuits');
   });
 
 
@@ -127,10 +131,6 @@ describe('FACTURA_PROMPT', () => {
     expect(FACTURA_PROMPT).toContain('moneda');
   });
 
-  it('mentions optional field: cuitReceptor', () => {
-    expect(FACTURA_PROMPT).toContain('cuitReceptor');
-  });
-
   it('mentions optional field: concepto', () => {
     expect(FACTURA_PROMPT).toContain('concepto');
   });
@@ -144,7 +144,8 @@ describe('FACTURA_PROMPT', () => {
 
   it('specifies CUIT should be 11 digits without dashes', () => {
     expect(FACTURA_PROMPT).toContain('11 digits');
-    expect(FACTURA_PROMPT).toContain('no dashes');
+    // Check for removal of formatting characters
+    expect(FACTURA_PROMPT.toLowerCase()).toContain('no dashes');
   });
 
 

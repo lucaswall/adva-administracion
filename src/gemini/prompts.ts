@@ -109,47 +109,29 @@ Return ONLY valid JSON, no additional text:
 
 /**
  * Prompt for extracting data from Argentine ARCA facturas
+ *
+ * IMPORTANT: This prompt extracts issuerName, clientName, and allCuits SEPARATELY.
+ * The code then assigns CUITs based on ADVA name matching, because Gemini
+ * correctly identifies names but cannot reliably pair CUITs with their names.
  */
 export const FACTURA_PROMPT = `You are analyzing an Argentine ARCA invoice (factura). Extract data and return it as JSON.
 
-IMPORTANT - ADVA IDENTIFICATION:
-ADVA's CUIT is ${ADVA_CUIT}. Based on the classification you received:
+CRITICAL - NAME AND CUIT EXTRACTION:
+Extract the NAMES of issuer and client based on their POSITION in the document.
+Extract ALL CUITs found as a separate list - do NOT try to pair them with names.
 
-FOR FACTURAS EMITIDAS (ADVA is emisor):
-- ADVA issued this invoice, so cuitEmisor MUST be ${ADVA_CUIT}
-- Extract ONLY receptor information: cuitReceptor, razonSocialReceptor
-- You may extract emisor fields to validate ADVA's position, but focus on receptor
-
-FOR FACTURAS RECIBIDAS (ADVA is receptor):
-- ADVA received this invoice, so cuitReceptor should be ${ADVA_CUIT}
-- Extract ONLY emisor information: cuitEmisor, razonSocialEmisor
-- You may extract receptor fields to validate ADVA's position, but focus on emisor
-
-VALIDATION:
-- Extract the CUIT from the position that should contain ADVA
-- If it's NOT ${ADVA_CUIT}, this document may be misclassified
-
-DOCUMENT STRUCTURE - Extract based on document POSITION:
+DOCUMENT STRUCTURE:
 1. ISSUER (Emisor): Company at TOP/HEADER section - the one ISSUING the invoice
    - LOCATION: Physically at the TOP of the document, in the header/letterhead area
-   - Extract cuitEmisor from the CUIT shown at the TOP of the document
-2. RECEPTOR (Cliente): Company in CLIENT section below - labeled "Razón Social", "Cliente", "Señor/es"
+   - Extract the NAME of this company/person
+
+2. CLIENT (Receptor): Company in CLIENT section below - labeled "Razón Social", "Cliente", "Señor/es", "Apellido y Nombre"
    - LOCATION: In the CLIENT/BUYER section below the header, typically mid-page
-   - Extract cuitReceptor from the CUIT shown in the CLIENT section
+   - Extract the NAME of this company/person
 
-CRITICAL EXTRACTION RULE - DO NOT SWAP CUITs:
-- The CUIT at the TOP of the document ALWAYS goes to cuitEmisor
-- The CUIT in the CLIENT section ALWAYS goes to cuitReceptor
-- This is true REGARDLESS of which company is ADVA
-- Even if ADVA appears in the client section, extract exactly as positioned
-
-EXAMPLE - Correct extraction when ADVA is receptor:
-Document shows:
-  TOP (Header): "MATARUCCO MARIA ANGELICA - CUIT 27-13078025-9"
-  CLIENT Section: "Razón Social: ADVA - CUIT 30-70907678-3"
-Correct extraction:
-  cuitEmisor: "27130780259" (from TOP position)
-  cuitReceptor: "30709076783" (from CLIENT position)
+3. ALL CUITs: Find ALL CUITs anywhere in the document
+   - List each unique CUIT found (11 digits, formatted as XX-XXXXXXXX-X or XXXXXXXXXXX)
+   - Do NOT assign CUITs to specific parties - just list them all
 
 ## INSURANCE DOCUMENTS (Liquidación de Premio)
 
@@ -169,30 +151,28 @@ FOR INSURANCE DOCUMENTS:
 - These are valid fiscal documents for accounting purposes
 
 Required fields to extract:
+- issuerName: The NAME of the company/person at the TOP of the document (issuer/emisor)
+- clientName: The NAME of the company/person in the CLIENT section (receptor)
+- allCuits: Array of ALL CUITs found in the document (as strings, 11 digits each, no dashes)
 - tipoComprobante: ONLY the single letter code (A, B, C, E) or two-letter code (NC for Nota de Crédito, ND for Nota de Débito, LP for Liquidación de Premio). DO NOT include the word "FACTURA" - extract ONLY the letter code that follows it. Examples: if the document shows "FACTURA C", extract "C"; if it shows "FACTURA B", extract "B".
 - nroFactura: Full invoice number combining point of sale and invoice number (format: "XXXXX-XXXXXXXX" or "XXXX-XXXXXXXX"). Example: "00003-00001957" or "0003-00001957". For insurance documents, use "POL-{poliza_number}" format.
 - fechaEmision: Issue date (format as YYYY-MM-DD)
-- cuitEmisor: Issuer CUIT - the CUIT of the company at the TOP billing for services (11 digits, no dashes). May be formatted as XX-XXXXXXXX-X or XXXXXXXXXXX.
-- razonSocialEmisor: Issuer business name - the company name at the TOP
 - importeNeto: Net amount before tax (number)
 - importeIva: IVA/VAT amount (number). For Type C invoices, set to 0 if not itemized.
 - importeTotal: Total amount (number)
 - moneda: Currency (ARS or USD)
 
 Optional fields:
-- cuitReceptor: Receptor CUIT - the CUIT in the "Razón Social" or client section (11 digits, no dashes). May be formatted as XX-XXXXXXXX-X or XXXXXXXXXXX.
-- razonSocialReceptor: Receptor business name - the company/person name in the "Razón Social" or client section
 - concepto: Brief one-line summary describing what the invoice is for. Analyze the line items/services listed in the invoice and summarize them (e.g., "Desarrollo de software para pagina web de ADVA", "Alojamiento y comidas para viaje a Tierra del Fuego", "Servicios de hosting y dominio para portal institucional"). IMPORTANT: Do NOT use tax category labels like "EXENTO", "GRAVADO", "NO GRAVADO" as the concepto - these are tax classifications, not descriptions.
 
 Return ONLY valid JSON in this exact format:
 {
+  "issuerName": "EMPRESA SA",
+  "clientName": "CLIENTE SA",
+  "allCuits": ["20123456786", "30712345678"],
   "tipoComprobante": "A",
   "nroFactura": "00001-00000123",
   "fechaEmision": "2024-01-15",
-  "cuitEmisor": "20123456786",
-  "razonSocialEmisor": "EMPRESA SA",
-  "cuitReceptor": "30712345678",
-  "razonSocialReceptor": "CLIENTE SA",
   "importeNeto": 1000.00,
   "importeIva": 210.00,
   "importeTotal": 1210.00,
@@ -205,13 +185,14 @@ Important:
 - If a field is not visible, omit it from the JSON (except importeIva - set to 0 if not itemized)
 - CRITICAL: tipoComprobante must be ONLY the letter code (A, B, C, E, NC, ND), NOT "FACTURA" or "FACTURA A" - just the letter(s)
 - Ensure all dates are in YYYY-MM-DD format
-- Remove dashes and spaces from CUIT numbers (accept formats: "30-71873398-3", "30 71873398 3", or "30718733983")
+- Remove dashes, spaces and slashes from CUIT numbers in allCuits array
 - CRITICAL: Argentine number format uses DOTS (.) as thousand separators and COMMA (,) as decimal separator
   Example: "2.917.310,00" or "2917310,00" both mean 2917310.00 (two million nine hundred seventeen thousand)
   Example: "439.200,00" or "439200,00" both mean 439200.00 (four hundred thirty-nine thousand)
 - Convert all amounts to standard numeric format (remove thousand separators, convert comma to decimal point)
 - Ensure numeric fields are numbers, not strings
-- REMEMBER: The issuer is at the TOP of the document, the receptor is in the client/buyer section below`;
+- REMEMBER: issuerName is at the TOP of the document, clientName is in the client/buyer section below
+- For allCuits: Include ALL CUITs found anywhere in the document, do not try to associate them with parties`;
 
 /**
  * Prompt for extracting data from BBVA and other bank payment slips

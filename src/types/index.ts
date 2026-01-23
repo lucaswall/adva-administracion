@@ -444,6 +444,12 @@ export interface ParseResult<T> {
   missingFields?: string[];
   /** ADVA role validation result */
   roleValidation?: AdvaRoleValidation;
+  /**
+   * Actual document type determined by extraction/parsing.
+   * May differ from classification when CUIT assignment overrides classification.
+   * Only set for facturas when the type is determined by name-based CUIT assignment.
+   */
+  actualDocumentType?: 'factura_emitida' | 'factura_recibida';
 }
 
 /**

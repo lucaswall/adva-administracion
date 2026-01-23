@@ -6,8 +6,119 @@ import type { Factura, Pago, Recibo, ResumenBancario, Retencion, ParseResult, Re
 import { ParseError } from '../types/index.js';
 import { warn } from '../utils/logger.js';
 
-/** ADVA's CUIT - used for role validation */
+/** ADVA's CUIT - used for role validation and CUIT assignment */
 const ADVA_CUIT = '30709076783';
+
+/**
+ * Flexible pattern to match ADVA's name in various forms.
+ * Handles OCR errors, abbreviations, and variations:
+ * - "ADVA"
+ * - "ASOCIACION CIVIL DE DESARROLLADORES DE VIDEOJUEGOS ARGENTINOS" (full name)
+ * - "ASOC CIVIL DESARROLLADORES..." (abbreviated)
+ * - "ASOCIACION CIVIL DE DESARROLLARODES..." (OCR error)
+ * - "...VIDEOJUEGOS ARGENTINO..." (keyword match)
+ */
+const ADVA_NAME_PATTERN = /ADVA|ASOC.*DESARROLL|VIDEOJUEGO/i;
+
+/**
+ * Normalizes a CUIT by removing dashes, spaces, and slashes.
+ *
+ * @param cuit - CUIT string that may contain formatting characters
+ * @returns Normalized 11-digit CUIT string
+ */
+export function normalizeCuit(cuit: string): string {
+  return cuit.replace(/[-\s/]/g, '');
+}
+
+/**
+ * Checks if a name matches ADVA's known name patterns.
+ *
+ * @param name - Name to check
+ * @returns True if the name matches ADVA
+ */
+export function isAdvaName(name: string): boolean {
+  return ADVA_NAME_PATTERN.test(name);
+}
+
+/**
+ * Result of CUIT assignment and classification
+ */
+interface CuitAssignmentResult {
+  /** Document type based on ADVA's position */
+  documentType: 'factura_emitida' | 'factura_recibida';
+  /** Issuer CUIT (11 digits, no dashes) */
+  cuitEmisor: string;
+  /** Issuer name */
+  razonSocialEmisor: string;
+  /** Receptor CUIT (may be empty for Consumidor Final) */
+  cuitReceptor: string;
+  /** Receptor name */
+  razonSocialReceptor: string;
+}
+
+/**
+ * Assigns CUITs to issuer/receptor based on ADVA's position and determines document type.
+ *
+ * Since Gemini correctly identifies names but cannot reliably pair CUITs with their
+ * corresponding names, this function uses name matching to determine ADVA's role
+ * and then assigns CUITs accordingly.
+ *
+ * @param issuerName - Name of the issuer (company at TOP of document)
+ * @param clientName - Name of the client (company in CLIENT section)
+ * @param allCuits - Array of all CUITs found in the document (should be pre-normalized, 11 digits each)
+ * @returns Assignment result with document type and properly paired CUIT/name combinations
+ * @throws Error if ADVA is not found in either issuer or client name
+ */
+export function assignCuitsAndClassify(
+  issuerName: string,
+  clientName: string,
+  allCuits: string[]
+): CuitAssignmentResult {
+  const advaIsIssuer = isAdvaName(issuerName);
+  const advaIsClient = isAdvaName(clientName);
+
+  // Find the "other" CUIT (not ADVA's) - CUITs should already be normalized by caller
+  const otherCuit = allCuits.find(c => c !== ADVA_CUIT) || '';
+
+  if (advaIsIssuer && !advaIsClient) {
+    // factura_emitida - ADVA created this invoice
+    return {
+      documentType: 'factura_emitida',
+      cuitEmisor: ADVA_CUIT,
+      razonSocialEmisor: issuerName,
+      cuitReceptor: otherCuit,
+      razonSocialReceptor: clientName,
+    };
+  } else if (advaIsClient && !advaIsIssuer) {
+    // factura_recibida - ADVA received this invoice
+    return {
+      documentType: 'factura_recibida',
+      cuitEmisor: otherCuit,
+      razonSocialEmisor: issuerName,
+      cuitReceptor: ADVA_CUIT,
+      razonSocialReceptor: clientName,
+    };
+  } else if (advaIsIssuer && advaIsClient) {
+    // Both match ADVA - unusual but could happen with internal documents
+    // Default to factura_emitida since ADVA is the issuer
+    warn('Both issuer and client names match ADVA pattern', {
+      module: 'gemini-parser',
+      phase: 'cuit-assignment',
+      issuerName,
+      clientName,
+    });
+    return {
+      documentType: 'factura_emitida',
+      cuitEmisor: ADVA_CUIT,
+      razonSocialEmisor: issuerName,
+      cuitReceptor: otherCuit,
+      razonSocialReceptor: clientName,
+    };
+  }
+
+  // ADVA not found in either name - this is an error
+  throw new Error(`ADVA not found in either issuer name "${issuerName}" or client name "${clientName}"`);
+}
 
 /**
  * Detects if a response appears to be truncated
@@ -204,15 +315,42 @@ function validateAdvaRole(
 }
 
 /**
+ * Raw extraction result from Gemini for facturas (new format)
+ * Contains issuerName, clientName, allCuits separately
+ */
+interface RawFacturaExtraction {
+  issuerName?: string;
+  clientName?: string;
+  allCuits?: string[];
+  tipoComprobante?: string;
+  nroFactura?: string;
+  fechaEmision?: string;
+  importeNeto?: number;
+  importeIva?: number;
+  importeTotal?: number;
+  moneda?: string;
+  concepto?: string;
+  // Legacy fields (for backwards compatibility)
+  cuitEmisor?: string;
+  razonSocialEmisor?: string;
+  cuitReceptor?: string;
+  razonSocialReceptor?: string;
+}
+
+/**
  * Parses a Gemini response for factura data
  *
+ * This function now handles the new extraction format where Gemini returns
+ * issuerName, clientName, and allCuits separately. It uses assignCuitsAndClassify
+ * to properly pair CUITs with names based on ADVA's position.
+ *
  * @param response - Raw Gemini response
- * @param documentType - Type of factura (emitida or recibida)
+ * @param expectedDocumentType - Expected type based on classification (may be overridden)
  * @returns Parse result with factura data or error
  */
 export function parseFacturaResponse(
   response: string,
-  documentType: 'factura_emitida' | 'factura_recibida'
+  expectedDocumentType: 'factura_emitida' | 'factura_recibida'
 ): Result<ParseResult<Partial<Factura>>, ParseError> {
   try {
     // Extract JSON
@@ -225,7 +363,80 @@ export function parseFacturaResponse(
     }
 
     // Parse JSON
-    const data = JSON.parse(jsonStr) as Partial<Factura>;
+    const rawData = JSON.parse(jsonStr) as RawFacturaExtraction;
+
+    // Check if using new format (has issuerName/clientName) or legacy format
+    const isNewFormat = rawData.issuerName !== undefined || rawData.clientName !== undefined;
+
+    let data: Partial<Factura>;
+    let actualDocumentType: 'factura_emitida' | 'factura_recibida' = expectedDocumentType;
+
+    if (isNewFormat) {
+      // New format: assign CUITs based on ADVA name matching
+      const issuerName = rawData.issuerName || '';
+      const clientName = rawData.clientName || '';
+      const allCuits = rawData.allCuits || [];
+
+      // Normalize CUITs that may still have dashes
+      const normalizedCuits = allCuits.map(normalizeCuit);
+
+      try {
+        const assignment = assignCuitsAndClassify(issuerName, clientName, normalizedCuits);
+        actualDocumentType = assignment.documentType;
+
+        data = {
+          tipoComprobante: rawData.tipoComprobante as Factura['tipoComprobante'],
+          nroFactura: rawData.nroFactura,
+          fechaEmision: rawData.fechaEmision,
+          cuitEmisor: assignment.cuitEmisor,
+          razonSocialEmisor: assignment.razonSocialEmisor,
+          cuitReceptor: assignment.cuitReceptor || undefined,
+          razonSocialReceptor: assignment.razonSocialReceptor || undefined,
+          importeNeto: rawData.importeNeto,
+          importeIva: rawData.importeIva,
+          importeTotal: rawData.importeTotal,
+          moneda: rawData.moneda as Factura['moneda'],
+          concepto: rawData.concepto,
+        };
+
+        // Log if document type differs from expected
+        if (actualDocumentType !== expectedDocumentType) {
+          warn('Document type determined by CUIT assignment differs from classification', {
+            module: 'gemini-parser',
+            phase: 'factura-parse',
+            expectedType: expectedDocumentType,
+            actualType: actualDocumentType,
+            issuerName,
+            clientName,
+          });
+        }
+      } catch (assignError) {
+        // CUIT assignment failed - ADVA not found in names
+        return {
+          ok: false,
+          error: new ParseError(
+            assignError instanceof Error ? assignError.message : 'CUIT assignment failed',
+            response
+          )
+        };
+      }
+    } else {
+      // Legacy format: use data as-is (backwards compatibility)
+      data = {
+        tipoComprobante: rawData.tipoComprobante as Factura['tipoComprobante'],
+        nroFactura: rawData.nroFactura,
+        fechaEmision: rawData.fechaEmision,
+        cuitEmisor: rawData.cuitEmisor ? normalizeCuit(rawData.cuitEmisor) : undefined,
+        razonSocialEmisor: rawData.razonSocialEmisor,
+        cuitReceptor: rawData.cuitReceptor ? normalizeCuit(rawData.cuitReceptor) : undefined,
+        razonSocialReceptor: rawData.razonSocialReceptor,
+        importeNeto: rawData.importeNeto,
+        importeIva: rawData.importeIva,
+        importeTotal: rawData.importeTotal,
+        moneda: rawData.moneda as Factura['moneda'],
+        concepto: rawData.concepto,
+      };
+    }
 
     // Check for required fields
     const requiredFields: (keyof Factura)[] = [
@@ -265,9 +476,9 @@ export function parseFacturaResponse(
     // If confidence > 0.9, no review needed; otherwise check for issues
     const needsReview = confidence <= 0.9 && (missingFields.length > 0 || hasSuspiciousEmptyFields);
 
-    // Validate ADVA role
-    const expectedRole = documentType === 'factura_emitida' ? 'emisor' : 'receptor';
-    const roleValidation = validateAdvaRole(data, expectedRole, documentType);
+    // Validate ADVA role using the actual document type (may differ from expected)
+    const expectedRole = actualDocumentType === 'factura_emitida' ? 'emisor' : 'receptor';
+    const roleValidation = validateAdvaRole(data, expectedRole, actualDocumentType);
 
     // If role validation fails critically, return error
     if (!roleValidation.isValid) {
@@ -287,7 +498,10 @@ export function parseFacturaResponse(
         confidence,
         needsReview,
         missingFields: missingFields.length > 0 ? missingFields as string[] : undefined,
-        roleValidation
+        roleValidation,
+        // Include actual document type if it was determined by CUIT assignment
+        // (which happens when using the new format with issuerName/clientName)
+        actualDocumentType: isNewFormat ? actualDocumentType : undefined,
       }
     };
   } catch (error) {
