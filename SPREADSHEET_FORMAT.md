@@ -222,19 +222,20 @@ Unpaid invoices from Control de Egresos. Automatically synced after matching.
 
 Auto-synced from Facturas Recibidas where `pagada != "SI"`.
 
-### Resumen Mensual (7 columns, A:G)
+### Resumen Mensual (8 columns, A:H)
 
 | Column | Field | Type | Description |
 |--------|-------|------|-------------|
 | A | fecha | string | Month in YYYY-MM format |
 | B | totalLlamadas | number | Total API calls |
 | C | tokensEntrada | number | Input tokens |
-| D | tokensSalida | number | Output tokens |
-| E | costoTotalUSD | currency | Total cost USD |
-| F | tasaExito | number | Success rate |
-| G | duracionPromedio | number | Average duration |
+| D | tokensCache | number | Cached tokens |
+| E | tokensSalida | number | Output tokens |
+| F | costoTotalUSD | currency | Total cost USD |
+| G | tasaExito | number | Success rate |
+| H | duracionPromedio | number | Average duration |
 
-### Uso de API (16 columns, A:P)
+### Uso de API (15 columns, A:O)
 
 | Column | Field | Type | Description |
 |--------|-------|------|-------------|
@@ -246,14 +247,13 @@ Auto-synced from Facturas Recibidas where `pagada != "SI"`.
 | F | promptTokens | number | New input tokens |
 | G | cachedTokens | number | Cached content tokens |
 | H | outputTokens | number | Output tokens |
-| I | totalTokens | number | Total tokens (F+G+H) |
-| J | promptCostPerToken | currency | Cost per prompt token at request time |
-| K | cachedCostPerToken | currency | Cost per cached token at request time |
-| L | outputCostPerToken | currency | Cost per output token at request time |
-| M | estimatedCostUSD | formula | `=F*J+G*K+H*L` (auto-calculated) |
-| N | durationMs | number | Duration in ms |
-| O | success | boolean | Request succeeded |
-| P | errorMessage | string | Error message if failed |
+| I | promptCostPerToken | currency | Cost per prompt token at request time |
+| J | cachedCostPerToken | currency | Cost per cached token at request time |
+| K | outputCostPerToken | currency | Cost per output token at request time |
+| L | estimatedCostUSD | formula | `=F*I+G*J+H*K` (auto-calculated) |
+| M | durationMs | number | Duration in ms |
+| N | success | boolean | Request succeeded |
+| O | errorMessage | string | Error message if failed |
 
 **Current Standard tier pricing:** Input $0.30/1M, Cached $0.03/1M, Output $2.50/1M
 **Source:** https://ai.google.dev/gemini-api/docs/pricing

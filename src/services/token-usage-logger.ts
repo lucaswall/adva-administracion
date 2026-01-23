@@ -111,12 +111,11 @@ export async function logTokenUsage(
     data.promptTokens,
     data.cachedTokens,
     data.outputTokens,
-    data.totalTokens,
     data.promptCostPerToken,
     data.cachedCostPerToken,
     data.outputCostPerToken,
-    // estimatedCostUSD formula: =F*J + G*K + H*L (promptTokens*promptCost + cachedTokens*cachedCost + outputTokens*outputCost)
-    `=F${nextRow}*J${nextRow}+G${nextRow}*K${nextRow}+H${nextRow}*L${nextRow}`,
+    // estimatedCostUSD formula: =F*I + G*J + H*K (promptTokens*promptCost + cachedTokens*cachedCost + outputTokens*outputCost)
+    `=F${nextRow}*I${nextRow}+G${nextRow}*J${nextRow}+H${nextRow}*K${nextRow}`,
     data.durationMs,
     data.success ? 'YES' : 'NO',
     data.errorMessage,

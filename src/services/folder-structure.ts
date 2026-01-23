@@ -330,17 +330,19 @@ async function initializeDashboardOperativo(
   // Uses $A to make column A absolute, row number relative
   const createRowFormulas = (rowNum: number) => [
     // totalLlamadas: Count all calls in this month
-    `=IFERROR(COUNTIFS('Uso de API'!$A:$A, ">="&DATE(VALUE(LEFT($A${rowNum},4)), VALUE(RIGHT($A${rowNum},2)), 1), 'Uso de API'!$A:$A, "<"&EDATE(DATE(VALUE(LEFT($A${rowNum},4)), VALUE(RIGHT($A${rowNum},2)), 1), 1)), "no data")`,
+    `=IFERROR(COUNTIFS('Uso de API'!$A:$A, ">="&DATE(VALUE(LEFT($A${rowNum},4)), VALUE(RIGHT($A${rowNum},2)), 1), 'Uso de API'!$A:$A, "<"&EDATE(DATE(VALUE(LEFT($A${rowNum},4)), VALUE(RIGHT($A${rowNum},2)), 1), 1)), 0)`,
     // tokensEntrada: Sum of prompt tokens in this month
-    `=IFERROR(SUMIFS('Uso de API'!$F:$F, 'Uso de API'!$A:$A, ">="&DATE(VALUE(LEFT($A${rowNum},4)), VALUE(RIGHT($A${rowNum},2)), 1), 'Uso de API'!$A:$A, "<"&EDATE(DATE(VALUE(LEFT($A${rowNum},4)), VALUE(RIGHT($A${rowNum},2)), 1), 1)), "no data")`,
+    `=IFERROR(SUMIFS('Uso de API'!$F:$F, 'Uso de API'!$A:$A, ">="&DATE(VALUE(LEFT($A${rowNum},4)), VALUE(RIGHT($A${rowNum},2)), 1), 'Uso de API'!$A:$A, "<"&EDATE(DATE(VALUE(LEFT($A${rowNum},4)), VALUE(RIGHT($A${rowNum},2)), 1), 1)), 0)`,
+    // tokensCache: Sum of cached tokens in this month
+    `=IFERROR(SUMIFS('Uso de API'!$G:$G, 'Uso de API'!$A:$A, ">="&DATE(VALUE(LEFT($A${rowNum},4)), VALUE(RIGHT($A${rowNum},2)), 1), 'Uso de API'!$A:$A, "<"&EDATE(DATE(VALUE(LEFT($A${rowNum},4)), VALUE(RIGHT($A${rowNum},2)), 1), 1)), 0)`,
     // tokensSalida: Sum of output tokens in this month
-    `=IFERROR(SUMIFS('Uso de API'!$G:$G, 'Uso de API'!$A:$A, ">="&DATE(VALUE(LEFT($A${rowNum},4)), VALUE(RIGHT($A${rowNum},2)), 1), 'Uso de API'!$A:$A, "<"&EDATE(DATE(VALUE(LEFT($A${rowNum},4)), VALUE(RIGHT($A${rowNum},2)), 1), 1)), "no data")`,
+    `=IFERROR(SUMIFS('Uso de API'!$H:$H, 'Uso de API'!$A:$A, ">="&DATE(VALUE(LEFT($A${rowNum},4)), VALUE(RIGHT($A${rowNum},2)), 1), 'Uso de API'!$A:$A, "<"&EDATE(DATE(VALUE(LEFT($A${rowNum},4)), VALUE(RIGHT($A${rowNum},2)), 1), 1)), 0)`,
     // costoTotalUSD: Sum of costs in this month
-    `=IFERROR(SUMIFS('Uso de API'!$I:$I, 'Uso de API'!$A:$A, ">="&DATE(VALUE(LEFT($A${rowNum},4)), VALUE(RIGHT($A${rowNum},2)), 1), 'Uso de API'!$A:$A, "<"&EDATE(DATE(VALUE(LEFT($A${rowNum},4)), VALUE(RIGHT($A${rowNum},2)), 1), 1)), "no data")`,
+    `=IFERROR(SUMIFS('Uso de API'!$L:$L, 'Uso de API'!$A:$A, ">="&DATE(VALUE(LEFT($A${rowNum},4)), VALUE(RIGHT($A${rowNum},2)), 1), 'Uso de API'!$A:$A, "<"&EDATE(DATE(VALUE(LEFT($A${rowNum},4)), VALUE(RIGHT($A${rowNum},2)), 1), 1)), 0)`,
     // tasaExito: Success rate (successful calls / total calls)
-    `=IFERROR(IF(B${rowNum}=0, 0, COUNTIFS('Uso de API'!$A:$A, ">="&DATE(VALUE(LEFT($A${rowNum},4)), VALUE(RIGHT($A${rowNum},2)), 1), 'Uso de API'!$A:$A, "<"&EDATE(DATE(VALUE(LEFT($A${rowNum},4)), VALUE(RIGHT($A${rowNum},2)), 1), 1), 'Uso de API'!$K:$K, "YES") / B${rowNum}), "no data")`,
+    `=IFERROR(IF(B${rowNum}=0, 0, COUNTIFS('Uso de API'!$A:$A, ">="&DATE(VALUE(LEFT($A${rowNum},4)), VALUE(RIGHT($A${rowNum},2)), 1), 'Uso de API'!$A:$A, "<"&EDATE(DATE(VALUE(LEFT($A${rowNum},4)), VALUE(RIGHT($A${rowNum},2)), 1), 1), 'Uso de API'!$N:$N, "YES") / B${rowNum}), 0)`,
     // duracionPromedio: Average duration in this month
-    `=IFERROR(AVERAGEIFS('Uso de API'!$J:$J, 'Uso de API'!$A:$A, ">="&DATE(VALUE(LEFT($A${rowNum},4)), VALUE(RIGHT($A${rowNum},2)), 1), 'Uso de API'!$A:$A, "<"&EDATE(DATE(VALUE(LEFT($A${rowNum},4)), VALUE(RIGHT($A${rowNum},2)), 1), 1)), "no data")`,
+    `=IFERROR(AVERAGEIFS('Uso de API'!$M:$M, 'Uso de API'!$A:$A, ">="&DATE(VALUE(LEFT($A${rowNum},4)), VALUE(RIGHT($A${rowNum},2)), 1), 'Uso de API'!$A:$A, "<"&EDATE(DATE(VALUE(LEFT($A${rowNum},4)), VALUE(RIGHT($A${rowNum},2)), 1), 1)), 0)`,
   ];
 
   // Create rows for current month and next month
@@ -352,7 +354,7 @@ async function initializeDashboardOperativo(
   // Set values for both months
   const setResult = await setValues(
     spreadsheetId,
-    `Resumen Mensual!A2:G3`,
+    `Resumen Mensual!A2:H3`,
     rows
   );
   if (!setResult.ok) return setResult;

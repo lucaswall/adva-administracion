@@ -200,6 +200,7 @@ export const RESUMEN_MENSUAL_HEADERS = [
   'fecha',
   'totalLlamadas',
   'tokensEntrada',
+  'tokensCache',
   'tokensSalida',
   'costoTotalUSD',
   'tasaExito',
@@ -216,7 +217,6 @@ export const USO_API_HEADERS = [
   'promptTokens',
   'cachedTokens',
   'outputTokens',
-  'totalTokens',
   'promptCostPerToken',
   'cachedCostPerToken',
   'outputCostPerToken',
@@ -253,11 +253,11 @@ export const DASHBOARD_OPERATIVO_SHEETS: SheetConfig[] = [
   {
     title: 'Resumen Mensual',
     headers: RESUMEN_MENSUAL_HEADERS,
-    monetaryColumns: [4] // costoTotalUSD (0-indexed: 4 after combining fecha)
+    monetaryColumns: [5] // costoTotalUSD (0-indexed: 5 after adding tokensCache)
   },
   {
     title: 'Uso de API',
     headers: USO_API_HEADERS,
-    monetaryColumns: [9, 10, 11, 12] // cost columns and estimatedCostUSD (0-indexed: 9-12)
+    monetaryColumns: [8, 9, 10, 11] // cost columns and estimatedCostUSD (0-indexed: 8-11)
   },
 ];

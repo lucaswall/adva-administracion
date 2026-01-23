@@ -455,8 +455,8 @@ describe('FolderStructure service', () => {
         .mockResolvedValueOnce({ ok: true, value: [['fechaPago', 'fileId', 'fileName']] }) // Pagos Enviados headers
         .mockResolvedValueOnce({ ok: true, value: [['fechaPago', 'fileId', 'fileName']] }) // Recibos headers
         .mockResolvedValueOnce({ ok: true, value: [['fechaEmision', 'fileId', 'fileName']] }) // Pagos Pendientes headers
-        .mockResolvedValueOnce({ ok: true, value: [['fecha', 'totalLlamadas', 'tokensEntrada', 'tokensSalida', 'costoTotalUSD', 'tasaExito', 'duracionPromedio']] }) // Resumen Mensual headers
-        .mockResolvedValueOnce({ ok: true, value: [['timestamp', 'requestId', 'fileId', 'fileName', 'model', 'promptTokens', 'outputTokens', 'totalTokens', 'estimatedCostUSD', 'durationMs', 'success', 'errorMessage']] }) // Uso de API headers
+        .mockResolvedValueOnce({ ok: true, value: [['fecha', 'totalLlamadas', 'tokensEntrada', 'tokensCache', 'tokensSalida', 'costoTotalUSD', 'tasaExito', 'duracionPromedio']] }) // Resumen Mensual headers
+        .mockResolvedValueOnce({ ok: true, value: [['timestamp', 'requestId', 'fileId', 'fileName', 'model', 'promptTokens', 'cachedTokens', 'outputTokens', 'promptCostPerToken', 'cachedCostPerToken', 'outputCostPerToken', 'estimatedCostUSD', 'durationMs', 'success', 'errorMessage']] }) // Uso de API headers
         .mockResolvedValueOnce({ ok: true, value: [[2026]] }); // Resumen Mensual A2:A2 (data exists)
 
       const result = await discoverFolderStructure();
@@ -782,12 +782,12 @@ describe('FolderStructure service', () => {
       expect(mockSetValues).toHaveBeenCalledWith(
         'dashboard-operativo-id',
         'Resumen Mensual!A1',
-        [['fecha', 'totalLlamadas', 'tokensEntrada', 'tokensSalida', 'costoTotalUSD', 'tasaExito', 'duracionPromedio']]
+        [['fecha', 'totalLlamadas', 'tokensEntrada', 'tokensCache', 'tokensSalida', 'costoTotalUSD', 'tasaExito', 'duracionPromedio']]
       );
       expect(mockSetValues).toHaveBeenCalledWith(
         'dashboard-operativo-id',
         'Uso de API!A1',
-        [['timestamp', 'requestId', 'fileId', 'fileName', 'model', 'promptTokens', 'cachedTokens', 'outputTokens', 'totalTokens', 'promptCostPerToken', 'cachedCostPerToken', 'outputCostPerToken', 'estimatedCostUSD', 'durationMs', 'success', 'errorMessage']]
+        [['timestamp', 'requestId', 'fileId', 'fileName', 'model', 'promptTokens', 'cachedTokens', 'outputTokens', 'promptCostPerToken', 'cachedCostPerToken', 'outputCostPerToken', 'estimatedCostUSD', 'durationMs', 'success', 'errorMessage']]
       );
 
       // Verify Resumen Mensual was initialized with current month and next month
@@ -802,12 +802,13 @@ describe('FolderStructure service', () => {
       // Verify current month and next month rows were initialized with formulas wrapped in IFERROR
       expect(mockSetValues).toHaveBeenCalledWith(
         'dashboard-operativo-id',
-        'Resumen Mensual!A2:G3',
+        'Resumen Mensual!A2:H3',
         expect.arrayContaining([
           expect.arrayContaining([
             currentMonthStr,
             expect.stringContaining('=IFERROR(COUNTIFS'), // totalLlamadas formula with IFERROR
             expect.stringContaining('=IFERROR(SUMIFS'),   // tokensEntrada formula with IFERROR
+            expect.stringContaining('=IFERROR(SUMIFS'),   // tokensCache formula with IFERROR
             expect.stringContaining('=IFERROR(SUMIFS'),   // tokensSalida formula with IFERROR
             expect.stringContaining('=IFERROR(SUMIFS'),   // costoTotalUSD formula with IFERROR
             expect.stringContaining('=IFERROR(IF'),       // tasaExito formula with IFERROR
@@ -816,6 +817,7 @@ describe('FolderStructure service', () => {
           expect.arrayContaining([
             nextMonthStr,
             expect.stringContaining('=IFERROR(COUNTIFS'),
+            expect.stringContaining('=IFERROR(SUMIFS'),
             expect.stringContaining('=IFERROR(SUMIFS'),
             expect.stringContaining('=IFERROR(SUMIFS'),
             expect.stringContaining('=IFERROR(SUMIFS'),
