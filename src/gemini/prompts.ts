@@ -15,13 +15,11 @@ DOCUMENT TYPES:
 
 1. "factura_emitida" - Invoice ISSUED BY ADVA (ARCA factura)
    - CUIT ${ADVA_CUIT} at TOP as issuer
-   - Has CAE authorization code
    - Money flows IN to ADVA
 
 2. "factura_recibida" - Invoice RECEIVED BY ADVA (ARCA factura)
    - Another company's CUIT at TOP
    - CUIT ${ADVA_CUIT} in client section
-   - Has CAE authorization code
    - Money flows OUT from ADVA
 
 3. "pago_enviado" - Payment SENT BY ADVA
@@ -84,20 +82,27 @@ KEY DISTINCTION:
 
 The CUIT that appears immediately ABOVE "Apellido y Nombre / Razón Social:" is ALWAYS the client's CUIT.
 
-RECOGNIZING ARCA FACTURAS:
+RECOGNIZING FACTURAS:
 
-An ARCA factura (Argentina fiscal document) has these characteristics:
+An Argentine factura (fiscal invoice document) typically has these characteristics:
 - Large letter in header: "A", "B", "C", "E" (sometimes with "COD. 011" for C)
-- "FACTURA" text prominently displayed
-- "Punto de Venta" and "Comp. Nro" fields
-- "CAE N°:" or "CAE:" followed by 14-digit number
-- "Fecha de Vto. de CAE:"
+- "FACTURA" or "FACTURA ORIGINAL" text prominently displayed
+- "Punto de Venta" and "Comp. Nro" fields (for standard ARCA facturas)
+- "CAE N°:" or "CAE:" followed by 14-digit number (most standard ARCA facturas)
+- "Fecha de Vto. de CAE:" (most standard ARCA facturas)
 - ARCA/AFIP logo or text at bottom
 - "Comprobante Autorizado" text
 
-If a document has CAE authorization, it IS a factura (emitida or recibida based on ADVA position).
+INSURANCE DOCUMENTS (Liquidación de Premio):
+Insurance companies are legally exempt from CAE requirement (RG AFIP 1415/03, Inciso d, Anexo I).
+Insurance invoices have:
+- "LIQUIDACIÓN DE PREMIO" or "FACTURA ORIGINAL" header
+- "PÓLIZA" number instead of standard invoice number
+- Text stating: "Las compañías de seguros se encuentran exceptuadas..."
+- Full CUIT structure with issuer and client sections
+These ARE valid facturas - classify based on ADVA's CUIT position (emitida or recibida).
 
-NEVER classify a document with valid CAE as "unrecognized".
+If a document has the factura characteristics above, classify it as factura_emitida or factura_recibida based on ADVA's position.
 
 Return ONLY valid JSON, no additional text:
 {
