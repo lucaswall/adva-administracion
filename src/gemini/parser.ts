@@ -2,7 +2,7 @@
  * Gemini response parsing and validation
  */
 
-import type { Factura, Pago, Recibo, ResumenBancario, ResumenTarjeta, ResumenBroker, Retencion, ParseResult, Result, ClassificationResult, AdvaRoleValidation } from '../types/index.js';
+import type { Factura, Pago, Recibo, ResumenBancario, ResumenTarjeta, ResumenBroker, Retencion, ParseResult, Result, ClassificationResult, AdvaRoleValidation, ResumenBancarioConMovimientos, ResumenTarjetaConMovimientos, ResumenBrokerConMovimientos } from '../types/index.js';
 import { ParseError } from '../types/index.js';
 import { warn } from '../utils/logger.js';
 
@@ -703,7 +703,7 @@ const VALID_CARD_TYPES = ['Visa', 'Mastercard', 'Amex', 'Naranja', 'Cabal'] as c
  * @param response - Raw Gemini response
  * @returns Parse result with resumen bancario data or error
  */
-export function parseResumenBancarioResponse(response: string): Result<ParseResult<Partial<ResumenBancario>>, ParseError> {
+export function parseResumenBancarioResponse(response: string): Result<ParseResult<Partial<ResumenBancarioConMovimientos>>, ParseError> {
   try {
     // Extract JSON
     const jsonStr = extractJSON(response);
@@ -714,8 +714,8 @@ export function parseResumenBancarioResponse(response: string): Result<ParseResu
       };
     }
 
-    // Parse JSON
-    const data = JSON.parse(jsonStr) as Partial<ResumenBancario>;
+    // Parse JSON - might include movimientos array
+    const data = JSON.parse(jsonStr) as Partial<ResumenBancarioConMovimientos>;
 
     // Check for required fields
     const requiredFields: (keyof ResumenBancario)[] = [
@@ -737,10 +737,30 @@ export function parseResumenBancarioResponse(response: string): Result<ParseResu
 
     // Calculate confidence based on completeness
     const completeness = (requiredFields.length - missingFields.length) / requiredFields.length;
-    const confidence = Math.max(0.5, completeness);
+    let confidence = Math.max(0.5, completeness);
 
-    // If confidence > 0.9, no review needed; otherwise check for issues
-    const needsReview = confidence <= 0.9 && missingFields.length > 0;
+    // Verify movimientos count if movimientos array is present
+    let needsReview = confidence <= 0.9 && missingFields.length > 0;
+
+    if (data.movimientos !== undefined && data.cantidadMovimientos !== undefined) {
+      const actualCount = data.movimientos.length;
+      const expectedCount = data.cantidadMovimientos;
+
+      // Check for > 10% discrepancy
+      if (expectedCount > 0) {
+        const discrepancy = Math.abs(actualCount - expectedCount) / expectedCount;
+        if (discrepancy > 0.1) {
+          needsReview = true;
+          warn('Movimientos count mismatch detected', {
+            module: 'gemini-parser',
+            phase: 'resumen-bancario-parse',
+            expectedCount,
+            actualCount,
+            discrepancy: `${(discrepancy * 100).toFixed(1)}%`
+          });
+        }
+      }
+    }
 
     return {
       ok: true,
@@ -768,7 +788,7 @@ export function parseResumenBancarioResponse(response: string): Result<ParseResu
  * @param response - Raw Gemini response
  * @returns Parse result with resumen tarjeta data or error
  */
-export function parseResumenTarjetaResponse(response: string): Result<ParseResult<Partial<ResumenTarjeta>>, ParseError> {
+export function parseResumenTarjetaResponse(response: string): Result<ParseResult<Partial<ResumenTarjetaConMovimientos>>, ParseError> {
   try {
     // Extract JSON
     const jsonStr = extractJSON(response);
@@ -779,8 +799,8 @@ export function parseResumenTarjetaResponse(response: string): Result<ParseResul
       };
     }
 
-    // Parse JSON
-    const data = JSON.parse(jsonStr) as Partial<ResumenTarjeta>;
+    // Parse JSON - might include movimientos array
+    const data = JSON.parse(jsonStr) as Partial<ResumenTarjetaConMovimientos>;
 
     // Validate tipoTarjeta
     if (data.tipoTarjeta !== undefined) {
@@ -815,10 +835,30 @@ export function parseResumenTarjetaResponse(response: string): Result<ParseResul
 
     // Calculate confidence based on completeness
     const completeness = (requiredFields.length - missingFields.length) / requiredFields.length;
-    const confidence = Math.max(0.5, completeness);
+    let confidence = Math.max(0.5, completeness);
 
-    // If confidence > 0.9, no review needed; otherwise check for issues
-    const needsReview = confidence <= 0.9 && missingFields.length > 0;
+    // Verify movimientos count if movimientos array is present
+    let needsReview = confidence <= 0.9 && missingFields.length > 0;
+
+    if (data.movimientos !== undefined && data.cantidadMovimientos !== undefined) {
+      const actualCount = data.movimientos.length;
+      const expectedCount = data.cantidadMovimientos;
+
+      // Check for > 10% discrepancy
+      if (expectedCount > 0) {
+        const discrepancy = Math.abs(actualCount - expectedCount) / expectedCount;
+        if (discrepancy > 0.1) {
+          needsReview = true;
+          warn('Movimientos count mismatch detected', {
+            module: 'gemini-parser',
+            phase: 'resumen-tarjeta-parse',
+            expectedCount,
+            actualCount,
+            discrepancy: `${(discrepancy * 100).toFixed(1)}%`
+          });
+        }
+      }
+    }
 
     return {
       ok: true,
@@ -846,7 +886,7 @@ export function parseResumenTarjetaResponse(response: string): Result<ParseResul
  * @param response - Raw Gemini response
  * @returns Parse result with resumen broker data or error
  */
-export function parseResumenBrokerResponse(response: string): Result<ParseResult<Partial<ResumenBroker>>, ParseError> {
+export function parseResumenBrokerResponse(response: string): Result<ParseResult<Partial<ResumenBrokerConMovimientos>>, ParseError> {
   try {
     // Extract JSON
     const jsonStr = extractJSON(response);
@@ -857,8 +897,8 @@ export function parseResumenBrokerResponse(response: string): Result<ParseResult
       };
     }
 
-    // Parse JSON
-    const data = JSON.parse(jsonStr) as Partial<ResumenBroker>;
+    // Parse JSON - might include movimientos array
+    const data = JSON.parse(jsonStr) as Partial<ResumenBrokerConMovimientos>;
 
     // Check for required fields (saldoARS and saldoUSD are optional)
     const requiredFields: (keyof ResumenBroker)[] = [
@@ -877,10 +917,30 @@ export function parseResumenBrokerResponse(response: string): Result<ParseResult
 
     // Calculate confidence based on completeness
     const completeness = (requiredFields.length - missingFields.length) / requiredFields.length;
-    const confidence = Math.max(0.5, completeness);
+    let confidence = Math.max(0.5, completeness);
 
-    // If confidence > 0.9, no review needed; otherwise check for issues
-    const needsReview = confidence <= 0.9 && missingFields.length > 0;
+    // Verify movimientos count if movimientos array is present
+    let needsReview = confidence <= 0.9 && missingFields.length > 0;
+
+    if (data.movimientos !== undefined && data.cantidadMovimientos !== undefined) {
+      const actualCount = data.movimientos.length;
+      const expectedCount = data.cantidadMovimientos;
+
+      // Check for > 10% discrepancy
+      if (expectedCount > 0) {
+        const discrepancy = Math.abs(actualCount - expectedCount) / expectedCount;
+        if (discrepancy > 0.1) {
+          needsReview = true;
+          warn('Movimientos count mismatch detected', {
+            module: 'gemini-parser',
+            phase: 'resumen-broker-parse',
+            expectedCount,
+            actualCount,
+            discrepancy: `${(discrepancy * 100).toFixed(1)}%`
+          });
+        }
+      }
+    }
 
     return {
       ok: true,
