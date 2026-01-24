@@ -5,7 +5,7 @@
 
 import { randomUUID } from 'crypto';
 import { GEMINI_PRICING } from '../config.js';
-import { appendRowsWithFormatting, getValues } from './sheets.js';
+import { appendRowsWithFormatting, getValues, getSpreadsheetTimezone } from './sheets.js';
 import type { Result } from '../types/index.js';
 import { debug, error as logError } from '../utils/logger.js';
 
@@ -87,6 +87,17 @@ export async function logTokenUsage(
   spreadsheetId: string,
   data: TokenUsageData
 ): Promise<Result<void, Error>> {
+  // Get spreadsheet timezone for proper timestamp formatting
+  const timezoneResult = await getSpreadsheetTimezone(spreadsheetId);
+  if (!timezoneResult.ok) {
+    debug('Failed to get spreadsheet timezone, timestamps will default to UTC', {
+      module: 'token-usage-logger',
+      phase: 'log-usage',
+      error: timezoneResult.error.message,
+    });
+  }
+  const timeZone = timezoneResult.ok ? timezoneResult.value : undefined;
+
   // Get current row count to determine next row number for formula
   const valuesResult = await getValues(spreadsheetId, 'Uso de API!A:A');
   if (!valuesResult.ok) {
@@ -122,7 +133,8 @@ export async function logTokenUsage(
   ];
 
   // Append row with explicit formatting to prevent bold inheritance
-  const result = await appendRowsWithFormatting(spreadsheetId, 'Uso de API', [row]);
+  // Pass timezone to ensure timestamps are written in spreadsheet's local time
+  const result = await appendRowsWithFormatting(spreadsheetId, 'Uso de API', [row], timeZone);
 
   if (!result.ok) {
     logError('Failed to log token usage', {

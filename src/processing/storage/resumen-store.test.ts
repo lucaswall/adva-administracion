@@ -11,6 +11,7 @@ vi.mock('../../services/sheets.js', () => ({
   appendRowsWithLinks: vi.fn(),
   sortSheet: vi.fn(),
   getValues: vi.fn(),
+  getSpreadsheetTimezone: vi.fn(() => Promise.resolve({ ok: true, value: 'America/Argentina/Buenos_Aires' })),
   dateStringToSerial: vi.fn((dateStr: string) => {
     // Mock implementation: simple serial number based on date
     const date = new Date(dateStr + 'T00:00:00Z');
@@ -344,7 +345,8 @@ describe('storeResumenBancario (bank accounts)', () => {
             { type: 'number', value: 10000 }, // saldoInicial as CellNumber
             { type: 'number', value: 15000 }, // saldoFinal as CellNumber
           ])
-        ])
+        ]),
+        'America/Argentina/Buenos_Aires' // Timezone parameter
       );
     });
 

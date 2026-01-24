@@ -233,6 +233,40 @@ export async function getSheetMetadata(
 }
 
 /**
+ * Gets the timezone of a spreadsheet
+ *
+ * @param spreadsheetId - Spreadsheet ID
+ * @returns Timezone string (e.g., 'America/Argentina/Buenos_Aires')
+ */
+export async function getSpreadsheetTimezone(
+  spreadsheetId: string
+): Promise<Result<string, Error>> {
+  try {
+    const sheets = getSheetsService();
+
+    const response = await sheets.spreadsheets.get({
+      spreadsheetId,
+      fields: 'properties.timeZone',
+    });
+
+    const timeZone = response.data.properties?.timeZone;
+    if (!timeZone) {
+      return {
+        ok: false,
+        error: new Error('Timezone not found in spreadsheet properties'),
+      };
+    }
+
+    return { ok: true, value: timeZone };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error : new Error(String(error)),
+    };
+  }
+}
+
+/**
  * Creates a new sheet in a spreadsheet
  *
  * @param spreadsheetId - Spreadsheet ID
@@ -317,6 +351,61 @@ export function dateStringToSerial(dateStr: string): number {
   const date = new Date(dateStr + 'T00:00:00Z');
   const epoch = new Date(Date.UTC(1899, 11, 30));
   return Math.floor((date.getTime() - epoch.getTime()) / (1000 * 60 * 60 * 24));
+}
+
+/**
+ * Converts a Date object to Google Sheets serial number in a specific timezone
+ *
+ * Google Sheets serial numbers are interpreted in the spreadsheet's local timezone.
+ * This function converts the UTC date to the specified timezone, then calculates
+ * the serial number for that local date/time.
+ *
+ * @param date - Date object (in UTC)
+ * @param timeZone - IANA timezone string (e.g., 'America/Argentina/Buenos_Aires')
+ * @returns Serial number representing the local date/time in the specified timezone
+ *
+ * @example
+ * // 2026-01-24 18:30:00 UTC = 2026-01-24 15:30:00 Argentina time
+ * const utcDate = new Date('2026-01-24T18:30:00.000Z');
+ * dateToSerialInTimezone(utcDate, 'America/Argentina/Buenos_Aires')
+ * // Returns serial number for 2026-01-24 15:30:00 (local time)
+ */
+export function dateToSerialInTimezone(date: Date, timeZone: string): number {
+  // Use Intl.DateTimeFormat to get the date/time components in the target timezone
+  const formatter = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  });
+
+  const parts = formatter.formatToParts(date);
+  const dateParts: Record<string, string> = {};
+  for (const part of parts) {
+    dateParts[part.type] = part.value;
+  }
+
+  // Extract components
+  const year = parseInt(dateParts.year);
+  const month = parseInt(dateParts.month) - 1; // JavaScript months are 0-indexed
+  const day = parseInt(dateParts.day);
+  const hour = parseInt(dateParts.hour);
+  const minute = parseInt(dateParts.minute);
+  const second = parseInt(dateParts.second);
+
+  // Create a date representing this local time (treating it as UTC for calculation purposes)
+  // This gives us the "absolute" time that this local time represents
+  const localDate = new Date(Date.UTC(year, month, day, hour, minute, second));
+
+  // Calculate serial number from the epoch (Dec 30, 1899 at midnight)
+  const epoch = new Date(Date.UTC(1899, 11, 30));
+  const serialNumber = (localDate.getTime() - epoch.getTime()) / (1000 * 60 * 60 * 24);
+
+  return serialNumber;
 }
 
 /**
@@ -705,10 +794,24 @@ function isCellNumber(value: CellValueOrLink): value is CellNumber {
 }
 
 /**
+ * Checks if a string is an ISO 8601 timestamp
+ * Matches formats like: 2026-01-24T18:30:00.000Z or 2026-01-24T18:30:00Z
+ */
+function isISOTimestamp(value: string): boolean {
+  // ISO 8601 format: YYYY-MM-DDTHH:mm:ss.sssZ or YYYY-MM-DDTHH:mm:ssZ
+  const isoRegex = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{3})?Z$/;
+  return isoRegex.test(value);
+}
+
+/**
  * Converts a CellValueOrLink to a Sheets API cell data object
+ *
+ * @param value - Cell value to convert
+ * @param timeZone - Optional IANA timezone for ISO timestamp conversion
  */
 function convertToSheetsCellData(
-  value: CellValueOrLink
+  value: CellValueOrLink,
+  timeZone?: string
 ): sheets_v4.Schema$CellData {
   if (value === null || value === undefined) {
     return {
@@ -759,6 +862,25 @@ function convertToSheetsCellData(
   }
 
   if (typeof value === 'string') {
+    // Check if string is an ISO timestamp and convert to datetime cell
+    if (isISOTimestamp(value)) {
+      const date = new Date(value);
+      const serialNumber = timeZone
+        ? dateToSerialInTimezone(date, timeZone)
+        : (date.getTime() - new Date(Date.UTC(1899, 11, 30)).getTime()) / (1000 * 60 * 60 * 24);
+
+      return {
+        userEnteredValue: { numberValue: serialNumber },
+        userEnteredFormat: {
+          numberFormat: {
+            type: 'DATE_TIME',
+            pattern: 'yyyy-mm-dd hh:mm:ss',
+          },
+        },
+      };
+    }
+
+    // Regular string
     return {
       userEnteredValue: { stringValue: value },
     };
@@ -788,9 +910,13 @@ function convertToSheetsCellData(
  * this function supports rich text formatting including hyperlinks
  * that appear as formatted text (not HYPERLINK formulas).
  *
+ * ISO timestamp strings (e.g., "2026-01-24T18:30:00.000Z") are automatically
+ * converted to datetime cells in the spreadsheet's timezone.
+ *
  * @param spreadsheetId - Spreadsheet ID
  * @param range - A1 notation for target sheet (e.g., 'Sheet1!A:Z')
  * @param values - 2D array of rows to append. Cells can be values or {text, url} objects for links
+ * @param timeZone - Optional IANA timezone string for ISO timestamp conversion
  * @returns Number of updated cells
  *
  * @example
@@ -800,12 +926,13 @@ function convertToSheetsCellData(
  *     { text: 'Document.pdf', url: 'https://drive.google.com/...' },
  *     'Path'
  *   ]
- * ]);
+ * ], 'America/Argentina/Buenos_Aires');
  */
 export async function appendRowsWithLinks(
   spreadsheetId: string,
   range: string,
-  values: CellValueOrLink[][]
+  values: CellValueOrLink[][],
+  timeZone?: string
 ): Promise<Result<number, Error>> {
   try {
     const sheets = getSheetsService();
@@ -829,7 +956,7 @@ export async function appendRowsWithLinks(
 
     // Convert rows to Sheets API format
     const rows: sheets_v4.Schema$RowData[] = values.map(rowValues => ({
-      values: rowValues.map(convertToSheetsCellData),
+      values: rowValues.map(value => convertToSheetsCellData(value, timeZone)),
     }));
 
     // Use batchUpdate with appendCells to support rich formatting
@@ -1020,12 +1147,14 @@ export async function moveSheetToFirst(
  * @param spreadsheetId - Spreadsheet ID
  * @param range - A1 notation for target sheet (e.g., 'Sheet1!A:Z')
  * @param values - 2D array of rows to append. Date objects are supported.
+ * @param timeZone - Optional IANA timezone string. When provided, Date objects are converted to this timezone.
  * @returns Number of updated cells
  */
 export async function appendRowsWithFormatting(
   spreadsheetId: string,
   range: string,
-  values: CellValue[][]
+  values: CellValue[][],
+  timeZone?: string
 ): Promise<Result<number, Error>> {
   try {
     const sheets = getSheetsService();
@@ -1062,9 +1191,10 @@ export async function appendRowsWithFormatting(
           cellData.userEnteredValue = { stringValue: '' };
         } else if (value instanceof Date) {
           // Convert Date to serial number for Sheets
-          // Google Sheets uses Dec 30, 1899 as day 0
-          const baseDate = new Date(Date.UTC(1899, 11, 30));
-          const serialNumber = (value.getTime() - baseDate.getTime()) / (1000 * 60 * 60 * 24);
+          // If timezone is provided, convert to that timezone first
+          const serialNumber = timeZone
+            ? dateToSerialInTimezone(value, timeZone)
+            : (value.getTime() - new Date(Date.UTC(1899, 11, 30)).getTime()) / (1000 * 60 * 60 * 24);
           cellData.userEnteredValue = { numberValue: serialNumber };
           cellData.userEnteredFormat!.numberFormat = {
             type: 'DATE_TIME',
@@ -1118,20 +1248,13 @@ export async function appendRowsWithFormatting(
 }
 
 /**
- * Clears the cached Sheets service (for testing)
- */
-export function clearSheetsCache(): void {
-  sheetsService = null;
-}
-
-/**
  * Gets or creates a month sheet in a spreadsheet
- * Creates sheet with headers if it doesn't exist
- * Month sheets are named in YYYY-MM format (e.g., "2025-01")
+ * If the sheet exists, returns its sheet ID
+ * If it doesn't exist, creates it with the provided headers
  *
  * @param spreadsheetId - Spreadsheet ID
- * @param monthName - Month name in YYYY-MM format
- * @param headers - Array of header strings
+ * @param monthName - Name of the month sheet (e.g., '2026-01')
+ * @param headers - Headers to use if creating the sheet
  * @returns Sheet ID
  */
 export async function getOrCreateMonthSheet(
@@ -1226,4 +1349,11 @@ export async function formatEmptyMonthSheet(
       error: error instanceof Error ? error : new Error(String(error)),
     };
   }
+}
+
+/**
+ * Clears the cached Sheets service (for testing)
+ */
+export function clearSheetsCache(): void {
+  sheetsService = null;
 }

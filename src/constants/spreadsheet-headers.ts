@@ -223,7 +223,7 @@ export const CONTROL_RESUMENES_BROKER_SHEET: SheetConfig = {
 
 /**
  * Sheet configuration for Movimientos - Bank Account Transactions
- * Stores individual bank transactions in per-month sheets
+ * Stores individual bank account transactions in per-month sheets
  * One sheet per month (e.g., "2025-01")
  */
 export const MOVIMIENTOS_BANCARIO_SHEET: SheetConfig = {

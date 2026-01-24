@@ -5,7 +5,10 @@ Dual control spreadsheets based on money flow direction:
 - **Control de Ingresos** - Money IN to ADVA (facturas emitidas, pagos recibidos)
 - **Control de Egresos** - Money OUT from ADVA (facturas recibidas, pagos enviados, recibos)
 
-All dates ISO format (YYYY-MM-DD), timestamps ISO datetime.
+**Date/Time Formatting:**
+- **Dates**: ISO format (YYYY-MM-DD) stored as DATE cells
+- **Timestamps**: Datetime cells formatted as "yyyy-mm-dd hh:mm:ss" in spreadsheet's timezone
+- All timestamps are automatically converted from UTC to the spreadsheet's configured timezone
 
 ---
 

@@ -377,16 +377,6 @@ Example: If current date is January and document shows "SALDO AL 30 DE DICIEMBRE
 
 NUMBER FORMAT: "2.917.310,00" = 2917310.00
 
-TRANSACTION EXTRACTION:
-Extract ALL individual transactions from the statement. Return as "movimientos" array:
-- fecha: Transaction date (YYYY-MM-DD format, converted from DD/MM shown in statement)
-- origenConcepto: Combined ORIGEN + CONCEPTO columns (e.g., "D 500 TRANSFERENCIA 20291679375")
-- debito: Debit amount (number or null if credit transaction)
-- credito: Credit amount (number or null if debit transaction)
-- saldo: Balance after this transaction (number)
-
-If no transactions (SIN MOVIMIENTOS), return "movimientos": []
-
 Return ONLY valid JSON:
 {
   "banco": "BBVA",
@@ -396,23 +386,7 @@ Return ONLY valid JSON:
   "saldoInicial": 150000.00,
   "saldoFinal": 185000.00,
   "moneda": "ARS",
-  "cantidadMovimientos": 47,
-  "movimientos": [
-    {
-      "fecha": "2024-01-02",
-      "origenConcepto": "D 500 TRANSFERENCIA RECIBIDA",
-      "debito": null,
-      "credito": 50000.00,
-      "saldo": 200000.00
-    },
-    {
-      "fecha": "2024-01-05",
-      "origenConcepto": "COMISION MANTENIMIENTO",
-      "debito": 1500.00,
-      "credito": null,
-      "saldo": 198500.00
-    }
-  ]
+  "cantidadMovimientos": 47
 }`;
 }
 
@@ -462,16 +436,6 @@ Example: If current date is January and document shows "CIERRE ACTUAL 30-Oct", O
 
 NUMBER FORMAT: "2.917.310,00" = 2917310.00
 
-TRANSACTION EXTRACTION:
-Extract ALL individual transactions from the statement. Return as "movimientos" array:
-- fecha: Transaction date (YYYY-MM-DD format, converted from DD-MMM-YY shown in statement)
-- descripcion: Transaction description (e.g., "ZOOM.COM 888-799 P38264908USD 16,99")
-- nroCupon: Coupon/receipt number (string or null if not present)
-- pesos: Amount in ARS (number or null if USD transaction)
-- dolares: Amount in USD (number or null if ARS transaction)
-
-If no transactions, return "movimientos": []
-
 Return ONLY valid JSON:
 {
   "banco": "BBVA",
@@ -481,23 +445,7 @@ Return ONLY valid JSON:
   "fechaHasta": "2024-01-31",
   "pagoMinimo": 25000.00,
   "saldoActual": 125000.00,
-  "cantidadMovimientos": 12,
-  "movimientos": [
-    {
-      "fecha": "2024-01-11",
-      "descripcion": "ZOOM.COM 888-799 P38264908USD 16,99",
-      "nroCupon": "12345678",
-      "pesos": 14500.00,
-      "dolares": null
-    },
-    {
-      "fecha": "2024-01-15",
-      "descripcion": "MERCADOLIBRE ARGENTINA",
-      "nroCupon": null,
-      "pesos": null,
-      "dolares": 50.00
-    }
-  ]
+  "cantidadMovimientos": 12
 }`;
 }
 
@@ -550,21 +498,6 @@ Example: If current date is January and document shows "del 1/12 al 31/12", Dece
 
 NUMBER FORMAT: "2.917.310,00" = 2917310.00
 
-TRANSACTION EXTRACTION:
-Extract ALL individual transactions from the statement. Return as "movimientos" array:
-- descripcion: Transaction description (e.g., "Boleto / 5863936 / VENTA / 1 / ZZC1O / $")
-- cantidadVN: Quantity/Nominal Value (number or null if not applicable)
-- saldo: Balance after this transaction (number)
-- precio: Price per unit (number or null if not applicable)
-- bruto: Gross amount (number or null if not applicable)
-- arancel: Fee/tariff amount (number or null if not applicable)
-- iva: VAT amount (number or null if not applicable)
-- neto: Net amount (number or null if not applicable)
-- fechaConcertacion: Settlement date (YYYY-MM-DD format, converted from D/M/YYYY)
-- fechaLiquidacion: Liquidation date (YYYY-MM-DD format, converted from D/M/YYYY)
-
-If no transactions, return "movimientos": []
-
 Return ONLY valid JSON:
 {
   "broker": "BALANZ CAPITAL VALORES SAU",
@@ -573,21 +506,7 @@ Return ONLY valid JSON:
   "fechaHasta": "2024-01-31",
   "saldoARS": 500000.00,
   "saldoUSD": 1500.00,
-  "cantidadMovimientos": 8,
-  "movimientos": [
-    {
-      "descripcion": "Boleto / 5863936 / VENTA / 1 / ZZC1O / $",
-      "cantidadVN": 1.0,
-      "saldo": 500000.00,
-      "precio": 100.50,
-      "bruto": 100.50,
-      "arancel": 0.20,
-      "iva": 0.04,
-      "neto": 100.26,
-      "fechaConcertacion": "2024-01-07",
-      "fechaLiquidacion": "2024-01-09"
-    }
-  ]
+  "cantidadMovimientos": 8
 }`;
 }
 

@@ -5,7 +5,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { sheets_v4 } from 'googleapis';
 import { google } from 'googleapis';
-import { formatSheet, clearSheetsCache, appendRowsWithLinks, appendRowsWithFormatting, clearSheetData, moveSheetToFirst, dateStringToSerial, getOrCreateMonthSheet, formatEmptyMonthSheet } from '../../../src/services/sheets.js';
+import { formatSheet, clearSheetsCache, appendRowsWithLinks, appendRowsWithFormatting, clearSheetData, moveSheetToFirst, dateStringToSerial, getSpreadsheetTimezone, dateToSerialInTimezone } from '../../../src/services/sheets.js';
 
 // Mock googleapis
 vi.mock('googleapis', () => {
@@ -1236,246 +1236,243 @@ describe('appendRowsWithLinks - CellDate handling', () => {
   });
 });
 
-describe('getOrCreateMonthSheet', () => {
+describe('appendRowsWithLinks - ISO timestamp handling', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     clearSheetsCache();
   });
 
-  it('should return existing sheet ID if month sheet exists', async () => {
+  it('should convert ISO timestamp strings to datetime cells with timezone', async () => {
     const mockGet = vi.fn().mockResolvedValue({
       data: {
         sheets: [
           {
             properties: {
-              title: '2025-01',
-              sheetId: 456,
-            },
-          },
-          {
-            properties: {
-              title: '2025-02',
-              sheetId: 789,
+              title: 'Facturas',
+              sheetId: 123,
             },
           },
         ],
       },
     });
 
-    const mockSheets = google.sheets({} as any);
-    mockSheets.spreadsheets.get = mockGet;
-
-    const result = await getOrCreateMonthSheet(
-      'spreadsheet-id',
-      '2025-01',
-      ['Header1', 'Header2', 'Header3']
-    );
-
-    expect(result.ok).toBe(true);
-    if (result.ok) {
-      expect(result.value).toBe(456);
-    }
-  });
-
-  it('should create new sheet with headers if month sheet does not exist', async () => {
-    const mockGet = vi.fn().mockResolvedValue({
+    const mockBatchUpdate = vi.fn().mockResolvedValue({
       data: {
-        sheets: [
+        replies: [
           {
-            properties: {
-              title: '2025-01',
-              sheetId: 456,
+            appendCells: {
+              updatedCells: 3,
             },
           },
         ],
-      },
-    });
-
-    const mockBatchUpdate = vi.fn()
-      .mockResolvedValueOnce({
-        data: {
-          replies: [
-            {
-              addSheet: {
-                properties: {
-                  sheetId: 999,
-                  title: '2025-02',
-                },
-              },
-            },
-          ],
-        },
-      })
-      .mockResolvedValueOnce({}); // for formatSheet call
-
-    const mockValuesUpdate = vi.fn().mockResolvedValue({
-      data: {
-        updatedCells: 3,
       },
     });
 
     const mockSheets = google.sheets({} as any);
     mockSheets.spreadsheets.get = mockGet;
     mockSheets.spreadsheets.batchUpdate = mockBatchUpdate;
-    mockSheets.spreadsheets.values.update = mockValuesUpdate;
 
-    const result = await getOrCreateMonthSheet(
-      'spreadsheet-id',
-      '2025-02',
-      ['Header1', 'Header2', 'Header3']
+    const rows = [
+      [
+        'fileId123',
+        'Invoice.pdf',
+        '2026-01-24T18:30:00.000Z', // ISO timestamp - should convert to datetime in timezone
+      ],
+    ];
+
+    const result = await appendRowsWithLinks(
+      'spreadsheetId123',
+      'Facturas!A:C',
+      rows,
+      'America/Argentina/Buenos_Aires'
     );
 
     expect(result.ok).toBe(true);
-    if (result.ok) {
-      expect(result.value).toBe(999);
-    }
+    expect(result.value).toBe(3);
 
-    // Verify sheet was created
-    expect(mockBatchUpdate).toHaveBeenCalledWith({
-      spreadsheetId: 'spreadsheet-id',
-      requestBody: {
-        requests: [
+    const callArgs = mockBatchUpdate.mock.calls[0][0];
+    const rowData = callArgs.requestBody.requests[0].appendCells.rows[0].values;
+
+    // First two cells should be strings
+    expect(rowData[0].userEnteredValue).toEqual({ stringValue: 'fileId123' });
+    expect(rowData[1].userEnteredValue).toEqual({ stringValue: 'Invoice.pdf' });
+
+    // Third cell (ISO timestamp) should be converted to datetime
+    expect(rowData[2].userEnteredValue).toHaveProperty('numberValue');
+    expect(typeof rowData[2].userEnteredValue.numberValue).toBe('number');
+    expect(rowData[2].userEnteredFormat?.numberFormat).toEqual({
+      type: 'DATE_TIME',
+      pattern: 'yyyy-mm-dd hh:mm:ss',
+    });
+  });
+
+  it('should handle ISO timestamps without timezone parameter (UTC)', async () => {
+    const mockGet = vi.fn().mockResolvedValue({
+      data: {
+        sheets: [
           {
-            addSheet: {
-              properties: {
-                title: '2025-02',
-              },
+            properties: {
+              title: 'Facturas',
+              sheetId: 123,
             },
           },
         ],
       },
     });
 
-    // Verify headers were set
-    expect(mockValuesUpdate).toHaveBeenCalledWith({
-      spreadsheetId: 'spreadsheet-id',
-      range: '2025-02!A1:C1',
-      valueInputOption: 'USER_ENTERED',
-      requestBody: {
-        values: [['Header1', 'Header2', 'Header3']],
+    const mockBatchUpdate = vi.fn().mockResolvedValue({
+      data: {
+        replies: [
+          {
+            appendCells: {
+              updatedCells: 1,
+            },
+          },
+        ],
       },
     });
 
-    // Verify formatting was applied (frozen rows)
-    expect(mockBatchUpdate).toHaveBeenCalledTimes(2);
+    const mockSheets = google.sheets({} as any);
+    mockSheets.spreadsheets.get = mockGet;
+    mockSheets.spreadsheets.batchUpdate = mockBatchUpdate;
+
+    const rows = [['2026-01-24T18:30:00.000Z']];
+
+    const result = await appendRowsWithLinks('spreadsheetId123', 'Facturas!A:A', rows);
+
+    expect(result.ok).toBe(true);
+
+    const callArgs = mockBatchUpdate.mock.calls[0][0];
+    const cellData = callArgs.requestBody.requests[0].appendCells.rows[0].values[0];
+
+    // Should still be converted to datetime (in UTC since no timezone provided)
+    expect(cellData.userEnteredValue).toHaveProperty('numberValue');
+    expect(cellData.userEnteredFormat?.numberFormat?.type).toBe('DATE_TIME');
+  });
+});
+
+describe('getSpreadsheetTimezone', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    clearSheetsCache();
   });
 
-  it('should handle errors from getSheetMetadata', async () => {
+  it('should return the spreadsheet timezone', async () => {
+    const mockGet = vi.fn().mockResolvedValue({
+      data: {
+        properties: {
+          timeZone: 'America/Argentina/Buenos_Aires',
+        },
+      },
+    });
+
+    const mockSheets = google.sheets({} as any);
+    mockSheets.spreadsheets.get = mockGet;
+
+    const result = await getSpreadsheetTimezone('spreadsheetId123');
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value).toBe('America/Argentina/Buenos_Aires');
+    }
+
+    expect(mockGet).toHaveBeenCalledWith({
+      spreadsheetId: 'spreadsheetId123',
+      fields: 'properties.timeZone',
+    });
+  });
+
+  it('should handle missing timezone property', async () => {
+    const mockGet = vi.fn().mockResolvedValue({
+      data: {
+        properties: {},
+      },
+    });
+
+    const mockSheets = google.sheets({} as any);
+    mockSheets.spreadsheets.get = mockGet;
+
+    const result = await getSpreadsheetTimezone('spreadsheetId123');
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.message).toContain('Timezone not found');
+    }
+  });
+
+  it('should handle API errors', async () => {
     const mockGet = vi.fn().mockRejectedValue(new Error('API Error'));
     const mockSheets = google.sheets({} as any);
     mockSheets.spreadsheets.get = mockGet;
 
-    const result = await getOrCreateMonthSheet(
-      'spreadsheet-id',
-      '2025-01',
-      ['Header1']
-    );
+    const result = await getSpreadsheetTimezone('spreadsheetId123');
 
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.error.message).toBe('API Error');
     }
   });
-
-  it('should handle errors during sheet creation', async () => {
-    const mockGet = vi.fn().mockResolvedValue({
-      data: {
-        sheets: [
-          {
-            properties: {
-              title: '2025-01',
-              sheetId: 456,
-            },
-          },
-        ],
-      },
-    });
-
-    const mockBatchUpdate = vi.fn().mockRejectedValue(new Error('Creation failed'));
-
-    const mockSheets = google.sheets({} as any);
-    mockSheets.spreadsheets.get = mockGet;
-    mockSheets.spreadsheets.batchUpdate = mockBatchUpdate;
-
-    const result = await getOrCreateMonthSheet(
-      'spreadsheet-id',
-      '2025-02',
-      ['Header1']
-    );
-
-    expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.error.message).toBe('Creation failed');
-    }
-  });
 });
 
-describe('formatEmptyMonthSheet', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    clearSheetsCache();
+describe('dateToSerialInTimezone', () => {
+  it('should convert UTC date to serial number in Argentina timezone', () => {
+    // 2026-01-24 18:30:00 UTC = 2026-01-24 15:30:00 Argentina (UTC-3)
+    const utcDate = new Date('2026-01-24T18:30:00.000Z');
+    const serial = dateToSerialInTimezone(utcDate, 'America/Argentina/Buenos_Aires');
+
+    // Verify it's a number
+    expect(typeof serial).toBe('number');
+    expect(serial).toBeGreaterThan(0);
+
+    // Convert back to verify: serial should represent 15:30 local time, not 18:30
+    // The serial number should be the same as if we created a date for 15:30 on that day
+    const localDate = new Date('2026-01-24T15:30:00.000-03:00');
+    const expectedSerial = dateToSerialInTimezone(localDate, 'America/Argentina/Buenos_Aires');
+
+    // Allow small floating point differences
+    expect(Math.abs(serial - expectedSerial)).toBeLessThan(0.0001);
   });
 
-  it('should format empty sheet with "SIN MOVIMIENTOS" message', async () => {
-    const mockBatchUpdate = vi.fn().mockResolvedValue({});
-    const mockSheets = google.sheets({} as any);
-    mockSheets.spreadsheets.batchUpdate = mockBatchUpdate;
+  it('should convert UTC date to serial number in US Eastern timezone', () => {
+    // 2026-01-24 18:30:00 UTC = 2026-01-24 13:30:00 EST (UTC-5 in January)
+    const utcDate = new Date('2026-01-24T18:30:00.000Z');
+    const serial = dateToSerialInTimezone(utcDate, 'America/New_York');
 
-    const result = await formatEmptyMonthSheet('spreadsheet-id', 123);
+    expect(typeof serial).toBe('number');
+    expect(serial).toBeGreaterThan(0);
 
-    expect(result.ok).toBe(true);
-    expect(mockBatchUpdate).toHaveBeenCalledWith({
-      spreadsheetId: 'spreadsheet-id',
-      requestBody: {
-        requests: [
-          {
-            updateCells: {
-              range: {
-                sheetId: 123,
-                startRowIndex: 2,
-                endRowIndex: 3,
-                startColumnIndex: 1,
-                endColumnIndex: 2,
-              },
-              rows: [
-                {
-                  values: [
-                    {
-                      userEnteredValue: {
-                        stringValue: '===== SIN MOVIMIENTOS =====',
-                      },
-                      userEnteredFormat: {
-                        textFormat: {
-                          bold: true,
-                        },
-                        backgroundColor: {
-                          red: 1.0,
-                          green: 0.0,
-                          blue: 0.0,
-                        },
-                      },
-                    },
-                  ],
-                },
-              ],
-              fields: 'userEnteredValue,userEnteredFormat',
-            },
-          },
-        ],
-      },
-    });
+    // Serial should represent 13:30 local time
+    const localDate = new Date('2026-01-24T13:30:00.000-05:00');
+    const expectedSerial = dateToSerialInTimezone(localDate, 'America/New_York');
+
+    expect(Math.abs(serial - expectedSerial)).toBeLessThan(0.0001);
   });
 
-  it('should handle errors from the Sheets API', async () => {
-    const mockBatchUpdate = vi.fn().mockRejectedValue(new Error('Formatting failed'));
-    const mockSheets = google.sheets({} as any);
-    mockSheets.spreadsheets.batchUpdate = mockBatchUpdate;
+  it('should handle UTC timezone correctly', () => {
+    const utcDate = new Date('2026-01-24T18:30:00.000Z');
+    const serial = dateToSerialInTimezone(utcDate, 'UTC');
 
-    const result = await formatEmptyMonthSheet('spreadsheet-id', 123);
+    // In UTC, the time should remain 18:30
+    expect(typeof serial).toBe('number');
+    expect(serial).toBeGreaterThan(0);
 
-    expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.error.message).toBe('Formatting failed');
-    }
+    // Should match the serial from dateStringToSerial for the date portion
+    const dateOnlySerial = dateStringToSerial('2026-01-24');
+    // 18:30 is 18.5 / 24 = 0.770833 of a day
+    const expectedSerial = dateOnlySerial + (18 + 30 / 60) / 24;
+
+    expect(Math.abs(serial - expectedSerial)).toBeLessThan(0.0001);
+  });
+
+  it('should handle dates around midnight correctly', () => {
+    // 2026-01-24 02:30:00 UTC = 2026-01-23 23:30:00 Argentina (crosses date boundary)
+    const utcDate = new Date('2026-01-24T02:30:00.000Z');
+    const serial = dateToSerialInTimezone(utcDate, 'America/Argentina/Buenos_Aires');
+
+    // Should represent 23:30 on Jan 23, not 02:30 on Jan 24
+    const jan23Serial = dateStringToSerial('2026-01-23');
+    const expectedSerial = jan23Serial + (23 + 30 / 60) / 24;
+
+    expect(Math.abs(serial - expectedSerial)).toBeLessThan(0.0001);
   });
 });

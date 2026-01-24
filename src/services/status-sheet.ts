@@ -8,7 +8,7 @@ import { getServerStartTime, formatUptime } from '../routes/status.js';
 import { getProcessingQueue } from '../processing/queue.js';
 import { getWatchManagerStatus } from './watch-manager.js';
 import { getConfig } from '../config.js';
-import { setValues, getSheetMetadata, applyConditionalFormat } from './sheets.js';
+import { setValues, getSheetMetadata, applyConditionalFormat, getSpreadsheetTimezone } from './sheets.js';
 import { debug, info, error as logError } from '../utils/logger.js';
 
 /**
@@ -61,12 +61,34 @@ export function collectStatusMetrics(): StatusMetrics {
 }
 
 /**
- * Formats a date for display in the spreadsheet
- * Uses ISO format without milliseconds for readability
+ * Formats a date for display in the spreadsheet, in the spreadsheet's timezone
+ *
+ * @param date - Date to format (or null)
+ * @param timeZone - IANA timezone string (e.g., 'America/Argentina/Buenos_Aires')
+ * @returns Formatted timestamp string (YYYY-MM-DD HH:MM:SS) in the specified timezone
  */
-function formatTimestamp(date: Date | null): string {
+export function formatTimestampInTimezone(date: Date | null, timeZone: string): string {
   if (!date) return '';
-  return date.toISOString().replace('T', ' ').split('.')[0];
+
+  // Use Intl.DateTimeFormat to convert to the spreadsheet's timezone
+  const formatter = new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  });
+
+  const parts = formatter.formatToParts(date);
+  const dateParts: Record<string, string> = {};
+  for (const part of parts) {
+    dateParts[part.type] = part.value;
+  }
+
+  return `${dateParts.year}-${dateParts.month}-${dateParts.day} ${dateParts.hour}:${dateParts.minute}:${dateParts.second}`;
 }
 
 /**
@@ -164,6 +186,17 @@ export async function updateStatusSheet(
       spreadsheetId,
     });
 
+    // Get the spreadsheet's timezone to format timestamps correctly
+    const timezoneResult = await getSpreadsheetTimezone(spreadsheetId);
+    if (!timezoneResult.ok) {
+      logError('Failed to get spreadsheet timezone, defaulting to UTC', {
+        module: 'status-sheet',
+        phase: 'update',
+        error: timezoneResult.error.message,
+      });
+    }
+    const timeZone = timezoneResult.ok ? timezoneResult.value : 'UTC';
+
     // Build the status data rows (Metrica, Valor)
     // Row 1 has a formula for ONLINE/OFFLINE status
     // Rows 2-13 have metric values
@@ -171,7 +204,7 @@ export async function updateStatusSheet(
       // Row 1: Estado - formula based on B2 (Ultimo Ping)
       ['Estado', '=IF((NOW()-B2)*24*60>6,"OFFLINE","ONLINE")'],
       // Row 2: Ultimo Ping - timestamp
-      ['Ultimo Ping', formatTimestamp(metrics.lastPing)],
+      ['Ultimo Ping', formatTimestampInTimezone(metrics.lastPing, timeZone)],
       // Row 3: Uptime
       ['Uptime', metrics.uptime],
       // Row 4: Version
@@ -193,7 +226,7 @@ export async function updateStatusSheet(
       // Row 12: Canales Activos
       ['Canales Activos', metrics.activeChannels.toString()],
       // Row 13: Ultimo Escaneo
-      ['Ultimo Escaneo', formatTimestamp(metrics.lastScan)],
+      ['Ultimo Escaneo', formatTimestampInTimezone(metrics.lastScan, timeZone)],
     ];
 
     // Write to Status sheet starting from A1

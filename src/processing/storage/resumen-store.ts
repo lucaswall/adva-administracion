@@ -4,7 +4,7 @@
  */
 
 import type { Result, ResumenBancario, ResumenTarjeta, ResumenBroker, StoreResult } from '../../types/index.js';
-import { appendRowsWithLinks, sortSheet, getValues, type CellValueOrLink, type CellDate, type CellNumber } from '../../services/sheets.js';
+import { appendRowsWithLinks, sortSheet, getValues, getSpreadsheetTimezone, type CellValueOrLink, type CellDate, type CellNumber } from '../../services/sheets.js';
 import { generateResumenFileName, generateResumenTarjetaFileName, generateResumenBrokerFileName } from '../../utils/file-naming.js';
 import { info, warn } from '../../utils/logger.js';
 import { getCorrelationId } from '../../utils/correlation.js';
@@ -216,11 +216,16 @@ export async function storeResumenBancario(
     saldoFinalNum,
   ];
 
+  // Get spreadsheet timezone for proper timestamp formatting
+  const timezoneResult = await getSpreadsheetTimezone(spreadsheetId);
+  const timeZone = timezoneResult.ok ? timezoneResult.value : undefined;
+
   // Append the row
   const appendResult = await appendRowsWithLinks(
     spreadsheetId,
     'Resumenes!A:I',
-    [row]
+    [row],
+    timeZone
   );
 
   if (!appendResult.ok) {
@@ -316,11 +321,16 @@ export async function storeResumenTarjeta(
     saldoActualNum,
   ];
 
+  // Get spreadsheet timezone for proper timestamp formatting
+  const timezoneResult = await getSpreadsheetTimezone(spreadsheetId);
+  const timeZone = timezoneResult.ok ? timezoneResult.value : undefined;
+
   // Append the row
   const appendResult = await appendRowsWithLinks(
     spreadsheetId,
     'Resumenes!A:I',
-    [row]
+    [row],
+    timeZone
   );
 
   if (!appendResult.ok) {
@@ -421,11 +431,16 @@ export async function storeResumenBroker(
     saldoUSDValue,
   ];
 
+  // Get spreadsheet timezone for proper timestamp formatting
+  const timezoneResult = await getSpreadsheetTimezone(spreadsheetId);
+  const timeZone = timezoneResult.ok ? timezoneResult.value : undefined;
+
   // Append the row
   const appendResult = await appendRowsWithLinks(
     spreadsheetId,
     'Resumenes!A:H',
-    [row]
+    [row],
+    timeZone
   );
 
   if (!appendResult.ok) {

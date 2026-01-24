@@ -9,8 +9,6 @@ import {
   isAdvaName,
   assignCuitsAndClassify,
   parseResumenBancarioResponse,
-  parseResumenTarjetaResponse,
-  parseResumenBrokerResponse,
 } from '../../../src/gemini/parser.js';
 
 describe('normalizeCuit', () => {
@@ -232,103 +230,6 @@ describe('parseResumenBancarioResponse', () => {
         expect(result.value.data.numeroCuenta).toBe('1234567890');
         expect(result.value.data.moneda).toBe('ARS');
         expect(result.value.confidence).toBeGreaterThan(0.9);
-      }
-    });
-  });
-
-  describe('movimientos parsing', () => {
-    it('parses response with movimientos array', () => {
-      const response = `\`\`\`json
-{
-  "banco": "BBVA",
-  "numeroCuenta": "1234567890",
-  "fechaDesde": "2024-01-01",
-  "fechaHasta": "2024-01-31",
-  "saldoInicial": 1000,
-  "saldoFinal": 2000,
-  "moneda": "ARS",
-  "cantidadMovimientos": 2,
-  "movimientos": [
-    {
-      "fecha": "2024-01-02",
-      "origenConcepto": "D 500 TRANSFERENCIA",
-      "debito": null,
-      "credito": 500.00,
-      "saldo": 1500.00
-    },
-    {
-      "fecha": "2024-01-05",
-      "origenConcepto": "COMISION",
-      "debito": 100.00,
-      "credito": null,
-      "saldo": 1400.00
-    }
-  ]
-}
-\`\`\``;
-
-      const result = parseResumenBancarioResponse(response);
-      expect(result.ok).toBe(true);
-      if (result.ok) {
-        expect(result.value.data.movimientos).toBeDefined();
-        expect(result.value.data.movimientos).toHaveLength(2);
-        expect(result.value.data.movimientos?.[0].fecha).toBe('2024-01-02');
-        expect(result.value.data.movimientos?.[0].credito).toBe(500.00);
-        expect(result.value.data.movimientos?.[1].debito).toBe(100.00);
-      }
-    });
-
-    it('parses response with empty movimientos array (SIN MOVIMIENTOS)', () => {
-      const response = `\`\`\`json
-{
-  "banco": "BBVA",
-  "numeroCuenta": "1234567890",
-  "fechaDesde": "2024-01-01",
-  "fechaHasta": "2024-01-31",
-  "saldoInicial": 1000,
-  "saldoFinal": 1000,
-  "moneda": "ARS",
-  "cantidadMovimientos": 0,
-  "movimientos": []
-}
-\`\`\``;
-
-      const result = parseResumenBancarioResponse(response);
-      expect(result.ok).toBe(true);
-      if (result.ok) {
-        expect(result.value.data.movimientos).toBeDefined();
-        expect(result.value.data.movimientos).toHaveLength(0);
-      }
-    });
-
-    it('sets needsReview when movimientos count mismatch > 10%', () => {
-      const response = `\`\`\`json
-{
-  "banco": "BBVA",
-  "numeroCuenta": "1234567890",
-  "fechaDesde": "2024-01-01",
-  "fechaHasta": "2024-01-31",
-  "saldoInicial": 1000,
-  "saldoFinal": 2000,
-  "moneda": "ARS",
-  "cantidadMovimientos": 100,
-  "movimientos": [
-    {
-      "fecha": "2024-01-02",
-      "origenConcepto": "TEST",
-      "debito": null,
-      "credito": 1000.00,
-      "saldo": 2000.00
-    }
-  ]
-}
-\`\`\``;
-
-      const result = parseResumenBancarioResponse(response);
-      expect(result.ok).toBe(true);
-      if (result.ok) {
-        // 1 vs 100 is > 10% mismatch, should trigger review
-        expect(result.value.needsReview).toBe(true);
       }
     });
   });
