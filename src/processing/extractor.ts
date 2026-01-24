@@ -22,9 +22,9 @@ import {
   FACTURA_PROMPT,
   PAGO_BBVA_PROMPT,
   RECIBO_PROMPT,
-  RESUMEN_BANCARIO_PROMPT,
-  RESUMEN_TARJETA_PROMPT,
-  RESUMEN_BROKER_PROMPT,
+  getResumenBancarioPrompt,
+  getResumenTarjetaPrompt,
+  getResumenBrokerPrompt,
   CERTIFICADO_RETENCION_PROMPT,
 } from '../gemini/prompts.js';
 import {
@@ -235,13 +235,13 @@ export async function processFile(
       extractPrompt = RECIBO_PROMPT;
       break;
     case 'resumen_bancario':
-      extractPrompt = RESUMEN_BANCARIO_PROMPT;
+      extractPrompt = getResumenBancarioPrompt();
       break;
     case 'resumen_tarjeta':
-      extractPrompt = RESUMEN_TARJETA_PROMPT;
+      extractPrompt = getResumenTarjetaPrompt();
       break;
     case 'resumen_broker':
-      extractPrompt = RESUMEN_BROKER_PROMPT;
+      extractPrompt = getResumenBrokerPrompt();
       break;
     case 'certificado_retencion':
       extractPrompt = CERTIFICADO_RETENCION_PROMPT;

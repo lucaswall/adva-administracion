@@ -6,6 +6,17 @@
 const ADVA_CUIT = '30709076783';
 
 /**
+ * Formats a date for use in prompts with month name, year, and month number
+ * @param date - Date to format
+ * @returns Formatted string like "January 2025 (month 1)"
+ */
+export function formatCurrentDateForPrompt(date: Date): string {
+  const months = ['January', 'February', 'March', 'April', 'May', 'June',
+                  'July', 'August', 'September', 'October', 'November', 'December'];
+  return `${months[date.getMonth()]} ${date.getFullYear()} (month ${date.getMonth() + 1})`;
+}
+
+/**
  * Prompt for classifying document type before extraction
  * Returns classification to determine which extraction prompt to use
  */
@@ -309,10 +320,16 @@ Return JSON only:
 }`;
 
 /**
- * Prompt for extracting data from bank account statements (Resumen/Extracto Bancario)
+ * Generates prompt for extracting data from bank account statements (Resumen/Extracto Bancario)
  * For bank accounts only - NOT credit cards or broker statements
+ *
+ * @param currentDate - Date to use for dynamic inference (defaults to now)
+ * @returns Prompt string with dynamic date for year inference
  */
-export const RESUMEN_BANCARIO_PROMPT = `Extract data from this Argentine bank account statement (Resumen/Extracto Bancario).
+export function getResumenBancarioPrompt(currentDate: Date = new Date()): string {
+  const dateInfo = formatCurrentDateForPrompt(currentDate);
+
+  return `Extract data from this Argentine bank account statement (Resumen/Extracto Bancario).
 
 This is a BANK ACCOUNT statement (not credit card, not broker).
 Look for: DÉBITO/CRÉDITO columns, Saldo Inicial/Final.
@@ -334,11 +351,29 @@ Required fields:
 - moneda: ARS or USD (look for "u$s", "USD", "U$S" for USD)
 - cantidadMovimientos: Count of transactions (0 if "SIN MOVIMIENTOS")
 
-DATE YEAR INFERENCE (when year not explicit):
-If month number is GREATER THAN the current month number, use LAST YEAR to avoid future dates.
-- Current date: January 2026 (month 1)
-- "30 DE DICIEMBRE" → December (month 12) > current month (month 1) → Use LAST YEAR → 2025-12-30
-- "20 DE ENERO" → January (month 1) = current month (1) → Use THIS YEAR → 2026-01-20
+DATE EXTRACTION (CRITICAL - THREE-TIER APPROACH):
+
+TIER 1 - CLEAR LABELS (always try this first):
+Look for explicit resumen period labels with years:
+- Period headers: "del 1/7/2025 al 31/7/2025" or "del: 01/11/2025 al: 30/11/2025"
+- Month-Year headers: "DICIEMBRE 2025", "NOVIEMBRE 2025"
+- Closing dates with year: "SALDO AL 28/11/2025"
+If you find ANY of these, use the year from the document directly.
+
+TIER 2 - TRANSACTION DATES (if no clear period label with year):
+Infer year from transaction dates in the document:
+- Full dates: DD/MM/YYYY (01/12/2025), D/M/YYYY (1/7/2025)
+- Short year dates: DD/MM/YY (01/12/25) → 25 = 2025
+- Tax lines: "IMP.LEY 25413 01/12/25" → year is 2025
+Use the most common year found in transactions.
+
+TIER 3 - DYNAMIC INFERENCE (only for statements without explicit years):
+ONLY use this if the document has NO year information (e.g., "SIN MOVIMIENTOS" statements):
+- Use the "SALDO AL" text for day and month (e.g., "SALDO AL 30 DE DICIEMBRE")
+- Current date: ${dateInfo}
+- If document month > current month → use previous year
+- If document month <= current month → use current year
+Example: In January 2025, "SALDO AL 30 DE DICIEMBRE" → 2024-12-30
 
 NUMBER FORMAT: "2.917.310,00" = 2917310.00
 
@@ -353,11 +388,18 @@ Return ONLY valid JSON:
   "moneda": "ARS",
   "cantidadMovimientos": 47
 }`;
+}
 
 /**
- * Prompt for extracting data from credit card statements (Resumen de Tarjeta)
+ * Generates prompt for extracting data from credit card statements (Resumen de Tarjeta)
+ *
+ * @param currentDate - Date to use for dynamic inference (defaults to now)
+ * @returns Prompt string with dynamic date for year inference
  */
-export const RESUMEN_TARJETA_PROMPT = `Extract data from this Argentine credit card statement (Resumen de Tarjeta de Crédito).
+export function getResumenTarjetaPrompt(currentDate: Date = new Date()): string {
+  const dateInfo = formatCurrentDateForPrompt(currentDate);
+
+  return `Extract data from this Argentine credit card statement (Resumen de Tarjeta de Crédito).
 
 Look for: card type (Visa, Mastercard, Amex, Naranja, Cabal), last 4-8 digits, PAGO MÍNIMO, SALDO ACTUAL.
 
@@ -370,8 +412,27 @@ Required fields:
 - saldoActual: Current balance owed (may be labeled "SALDO ACTUAL", "TOTAL A PAGAR")
 - cantidadMovimientos: Count of transactions
 
-DATE YEAR INFERENCE (when year not explicit):
-If month number is GREATER THAN the current month number, use LAST YEAR to avoid future dates.
+DATE EXTRACTION (CRITICAL - THREE-TIER APPROACH):
+
+TIER 1 - CLEAR LABELS (always try this first):
+Look for explicit closing dates with years:
+- CIERRE ACTUAL with year: "CIERRE ACTUAL 30-Oct-25" → 2025-10-30
+- CIERRE ANTERIOR with year: "CIERRE ANTERIOR 30-Sep-25" → 2025-09-30
+- Full date format: "02-Oct-25", "13-Oct-25" → 2025-10-02, 2025-10-13
+- Text dates: "1 de septiembre de 2025" → 2025-09-01
+If you find years in DD-MMM-YY format, YY = 20YY (e.g., 25 = 2025).
+
+TIER 2 - TRANSACTION DATES (if no clear closing date with year):
+Infer year from transaction dates in the document:
+- Transaction lines often show dates like "02-Oct-25" or "13/10/25"
+- Use the most common year found in transactions.
+
+TIER 3 - DYNAMIC INFERENCE (only for statements without explicit years):
+ONLY use this if the document has NO year information:
+- Current date: ${dateInfo}
+- If document month > current month → use previous year
+- If document month <= current month → use current year
+Example: In January 2025, "CIERRE ACTUAL 30-Oct" without year → 2024-10-30
 
 NUMBER FORMAT: "2.917.310,00" = 2917310.00
 
@@ -386,11 +447,18 @@ Return ONLY valid JSON:
   "saldoActual": 125000.00,
   "cantidadMovimientos": 12
 }`;
+}
 
 /**
- * Prompt for extracting data from broker/investment statements (Resumen de Broker)
+ * Generates prompt for extracting data from broker/investment statements (Resumen de Broker)
+ *
+ * @param currentDate - Date to use for dynamic inference (defaults to now)
+ * @returns Prompt string with dynamic date for year inference
  */
-export const RESUMEN_BROKER_PROMPT = `Extract data from this Argentine broker/investment account statement.
+export function getResumenBrokerPrompt(currentDate: Date = new Date()): string {
+  const dateInfo = formatCurrentDateForPrompt(currentDate);
+
+  return `Extract data from this Argentine broker/investment account statement.
 
 Look for: "Comitente" number, "Cartera disponible", portfolio instruments, multiple currency sections.
 
@@ -406,8 +474,27 @@ Optional fields (extract if visible):
 
 NOTE: Broker accounts are multi-currency. Extract both ARS and USD balances if available.
 
-DATE YEAR INFERENCE (when year not explicit):
-If month number is GREATER THAN the current month number, use LAST YEAR to avoid future dates.
+DATE EXTRACTION (CRITICAL - THREE-TIER APPROACH):
+
+TIER 1 - CLEAR LABELS (always try this first):
+Look for explicit Period headers with years:
+- Period headers: "del 1/7/2025 al 31/7/2025" or "del 1/12/2025 al 31/12/2025"
+- Balance dates: "Saldo al 31/07/2025", "Saldo al 31/12/2025"
+- Date ranges with D/M/YYYY or DD/MM/YYYY format
+If you find years in the document, use them directly.
+
+TIER 2 - TRANSACTION DATES (if no clear period label with year):
+Infer year from transaction dates or holdings dates:
+- Transaction dates in D/M/YYYY format
+- Settlement dates, purchase dates
+Use the most common year found.
+
+TIER 3 - DYNAMIC INFERENCE (only for statements without explicit years):
+ONLY use this if the document has NO year information:
+- Current date: ${dateInfo}
+- If document month > current month → use previous year
+- If document month <= current month → use current year
+Example: In January 2025, "del 1/12 al 31/12" without year → 2024-12-01 to 2024-12-31
 
 NUMBER FORMAT: "2.917.310,00" = 2917310.00
 
@@ -421,6 +508,7 @@ Return ONLY valid JSON:
   "saldoUSD": 1500.00,
   "cantidadMovimientos": 8
 }`;
+}
 
 /**
  * Prompt for extracting data from Argentine tax withholding certificates
