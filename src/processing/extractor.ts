@@ -9,9 +9,9 @@ import type {
   Factura,
   Pago,
   Recibo,
-  ResumenBancario,
-  ResumenTarjeta,
-  ResumenBroker,
+  ResumenBancarioConMovimientos,
+  ResumenTarjetaConMovimientos,
+  ResumenBrokerConMovimientos,
   Retencion,
   DocumentType,
   ClassificationResult,
@@ -50,7 +50,7 @@ import { getCircuitBreaker } from '../utils/circuit-breaker.js';
  */
 export interface ProcessFileResult {
   documentType: DocumentType;
-  document?: Factura | Pago | Recibo | ResumenBancario | ResumenTarjeta | ResumenBroker | Retencion;
+  document?: Factura | Pago | Recibo | ResumenBancarioConMovimientos | ResumenTarjetaConMovimientos | ResumenBrokerConMovimientos | Retencion;
   classification?: ClassificationResult;
   error?: string;
 }
@@ -471,7 +471,7 @@ export async function processFile(
       return { ok: false, error: parseResult.error };
     }
 
-    const resumen: ResumenBancario = {
+    const resumen: ResumenBancarioConMovimientos = {
       fileId: fileInfo.id,
       fileName: fileInfo.name,
       banco: parseResult.value.data.banco || 'Desconocido',
@@ -485,6 +485,7 @@ export async function processFile(
       processedAt: now,
       confidence: parseResult.value.confidence,
       needsReview: parseResult.value.needsReview,
+      movimientos: parseResult.value.data.movimientos || [],
     };
 
     return {
@@ -503,7 +504,7 @@ export async function processFile(
       return { ok: false, error: parseResult.error };
     }
 
-    const resumen: ResumenTarjeta = {
+    const resumen: ResumenTarjetaConMovimientos = {
       fileId: fileInfo.id,
       fileName: fileInfo.name,
       banco: parseResult.value.data.banco || 'Desconocido',
@@ -517,6 +518,7 @@ export async function processFile(
       processedAt: now,
       confidence: parseResult.value.confidence,
       needsReview: parseResult.value.needsReview,
+      movimientos: parseResult.value.data.movimientos || [],
     };
 
     return {
@@ -535,7 +537,7 @@ export async function processFile(
       return { ok: false, error: parseResult.error };
     }
 
-    const resumen: ResumenBroker = {
+    const resumen: ResumenBrokerConMovimientos = {
       fileId: fileInfo.id,
       fileName: fileInfo.name,
       broker: parseResult.value.data.broker || 'Desconocido',
@@ -548,6 +550,7 @@ export async function processFile(
       processedAt: now,
       confidence: parseResult.value.confidence,
       needsReview: parseResult.value.needsReview,
+      movimientos: parseResult.value.data.movimientos || [],
     };
 
     return {

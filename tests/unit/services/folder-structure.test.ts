@@ -56,6 +56,7 @@ import {
   getOrCreateMonthFolder,
   getOrCreateBankAccountFolder,
   getOrCreateBankAccountSpreadsheet,
+  getOrCreateMovimientosSpreadsheet,
   clearFolderStructureCache,
   getCachedFolderStructure,
 } from '../../../src/services/folder-structure.js';
@@ -1714,6 +1715,219 @@ describe('FolderStructure service', () => {
 
       // Verify formatting was applied (dates and currency)
       expect(mockFormatSheet).toHaveBeenCalled();
+    });
+  });
+
+  describe('getOrCreateMovimientosSpreadsheet', () => {
+    it('creates new Movimientos spreadsheet when it does not exist', async () => {
+      // Setup: discover structure first
+      mockFindByName
+        .mockResolvedValueOnce({ ok: true, value: { id: 'entrada-id', name: 'Entrada', mimeType: 'application/vnd.google-apps.folder' } })
+        .mockResolvedValueOnce({ ok: true, value: { id: 'sin-procesar-id', name: 'Sin Procesar', mimeType: 'application/vnd.google-apps.folder' } })
+        .mockResolvedValueOnce({ ok: true, value: { id: 'duplicado-id', name: 'Duplicado', mimeType: 'application/vnd.google-apps.folder' } })
+        .mockResolvedValueOnce({ ok: true, value: { id: 'control-ingresos-id', name: 'Control de Ingresos', mimeType: 'application/vnd.google-apps.spreadsheet' } })
+        .mockResolvedValueOnce({ ok: true, value: { id: 'control-egresos-id', name: 'Control de Egresos', mimeType: 'application/vnd.google-apps.spreadsheet' } })
+        .mockResolvedValueOnce({ ok: true, value: { id: 'dashboard-id', name: 'Dashboard Operativo Contable', mimeType: 'application/vnd.google-apps.spreadsheet' } });
+
+      mockListByMimeType.mockResolvedValue({ ok: true, value: [] });
+      mockGetSheetMetadata.mockResolvedValue({ ok: true, value: [{ title: 'Sheet1', sheetId: 0 }] });
+
+      await discoverFolderStructure();
+
+      // Mock spreadsheet not found, then creation
+      mockFindByName.mockResolvedValueOnce({ ok: true, value: null });
+      mockCreateSpreadsheet.mockResolvedValue({
+        ok: true,
+        value: { id: 'movimientos-spreadsheet-id', name: 'Movimientos - BBVA 1234567890 ARS' }
+      });
+
+      const result = await getOrCreateMovimientosSpreadsheet(
+        'bank-account-folder-id',
+        'BBVA 1234567890 ARS',
+        'bancario'
+      );
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value).toBe('movimientos-spreadsheet-id');
+      }
+
+      expect(mockFindByName).toHaveBeenCalledWith(
+        'bank-account-folder-id',
+        'Movimientos - BBVA 1234567890 ARS',
+        'application/vnd.google-apps.spreadsheet'
+      );
+      expect(mockCreateSpreadsheet).toHaveBeenCalledWith(
+        'bank-account-folder-id',
+        'Movimientos - BBVA 1234567890 ARS'
+      );
+    });
+
+    it('reuses existing Movimientos spreadsheet when it exists', async () => {
+      // Setup: discover structure first
+      mockFindByName
+        .mockResolvedValueOnce({ ok: true, value: { id: 'entrada-id', name: 'Entrada', mimeType: 'application/vnd.google-apps.folder' } })
+        .mockResolvedValueOnce({ ok: true, value: { id: 'sin-procesar-id', name: 'Sin Procesar', mimeType: 'application/vnd.google-apps.folder' } })
+        .mockResolvedValueOnce({ ok: true, value: { id: 'duplicado-id', name: 'Duplicado', mimeType: 'application/vnd.google-apps.folder' } })
+        .mockResolvedValueOnce({ ok: true, value: { id: 'control-ingresos-id', name: 'Control de Ingresos', mimeType: 'application/vnd.google-apps.spreadsheet' } })
+        .mockResolvedValueOnce({ ok: true, value: { id: 'control-egresos-id', name: 'Control de Egresos', mimeType: 'application/vnd.google-apps.spreadsheet' } })
+        .mockResolvedValueOnce({ ok: true, value: { id: 'dashboard-id', name: 'Dashboard Operativo Contable', mimeType: 'application/vnd.google-apps.spreadsheet' } });
+
+      mockListByMimeType.mockResolvedValue({ ok: true, value: [] });
+      mockGetSheetMetadata.mockResolvedValue({ ok: true, value: [{ title: 'Sheet1', sheetId: 0 }] });
+
+      await discoverFolderStructure();
+
+      // Mock finding existing spreadsheet
+      mockFindByName.mockResolvedValueOnce({
+        ok: true,
+        value: { id: 'existing-movimientos-id', name: 'Movimientos - BBVA Visa 4563', mimeType: 'application/vnd.google-apps.spreadsheet' }
+      });
+
+      const result = await getOrCreateMovimientosSpreadsheet(
+        'credit-card-folder-id',
+        'BBVA Visa 4563',
+        'tarjeta'
+      );
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value).toBe('existing-movimientos-id');
+      }
+
+      expect(mockCreateSpreadsheet).not.toHaveBeenCalled();
+    });
+
+    it('handles all three resumen types', async () => {
+      // Setup: discover structure first
+      mockFindByName
+        .mockResolvedValueOnce({ ok: true, value: { id: 'entrada-id', name: 'Entrada', mimeType: 'application/vnd.google-apps.folder' } })
+        .mockResolvedValueOnce({ ok: true, value: { id: 'sin-procesar-id', name: 'Sin Procesar', mimeType: 'application/vnd.google-apps.folder' } })
+        .mockResolvedValueOnce({ ok: true, value: { id: 'duplicado-id', name: 'Duplicado', mimeType: 'application/vnd.google-apps.folder' } })
+        .mockResolvedValueOnce({ ok: true, value: { id: 'control-ingresos-id', name: 'Control de Ingresos', mimeType: 'application/vnd.google-apps.spreadsheet' } })
+        .mockResolvedValueOnce({ ok: true, value: { id: 'control-egresos-id', name: 'Control de Egresos', mimeType: 'application/vnd.google-apps.spreadsheet' } })
+        .mockResolvedValueOnce({ ok: true, value: { id: 'dashboard-id', name: 'Dashboard Operativo Contable', mimeType: 'application/vnd.google-apps.spreadsheet' } });
+
+      mockListByMimeType.mockResolvedValue({ ok: true, value: [] });
+      mockGetSheetMetadata.mockResolvedValue({ ok: true, value: [{ title: 'Sheet1', sheetId: 0 }] });
+
+      await discoverFolderStructure();
+
+      // Test bancario
+      mockFindByName.mockResolvedValueOnce({ ok: true, value: null });
+      mockCreateSpreadsheet.mockResolvedValueOnce({
+        ok: true,
+        value: { id: 'bancario-id', name: 'Movimientos - Bank Account' }
+      });
+
+      const bancarioResult = await getOrCreateMovimientosSpreadsheet(
+        'folder-id-1',
+        'Bank Account',
+        'bancario'
+      );
+      expect(bancarioResult.ok).toBe(true);
+
+      // Test tarjeta
+      mockFindByName.mockResolvedValueOnce({ ok: true, value: null });
+      mockCreateSpreadsheet.mockResolvedValueOnce({
+        ok: true,
+        value: { id: 'tarjeta-id', name: 'Movimientos - Credit Card' }
+      });
+
+      const tarjetaResult = await getOrCreateMovimientosSpreadsheet(
+        'folder-id-2',
+        'Credit Card',
+        'tarjeta'
+      );
+      expect(tarjetaResult.ok).toBe(true);
+
+      // Test broker
+      mockFindByName.mockResolvedValueOnce({ ok: true, value: null });
+      mockCreateSpreadsheet.mockResolvedValueOnce({
+        ok: true,
+        value: { id: 'broker-id', name: 'Movimientos - Broker Account' }
+      });
+
+      const brokerResult = await getOrCreateMovimientosSpreadsheet(
+        'folder-id-3',
+        'Broker Account',
+        'broker'
+      );
+      expect(brokerResult.ok).toBe(true);
+    });
+
+    it('returns error if folder structure not initialized', async () => {
+      const result = await getOrCreateMovimientosSpreadsheet(
+        'folder-id',
+        'BBVA 1234567890 ARS',
+        'bancario'
+      );
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.error.message).toContain('Folder structure not initialized');
+      }
+    });
+
+    it('handles Drive API errors during spreadsheet lookup', async () => {
+      // Setup: discover structure first
+      mockFindByName
+        .mockResolvedValueOnce({ ok: true, value: { id: 'entrada-id', name: 'Entrada', mimeType: 'application/vnd.google-apps.folder' } })
+        .mockResolvedValueOnce({ ok: true, value: { id: 'sin-procesar-id', name: 'Sin Procesar', mimeType: 'application/vnd.google-apps.folder' } })
+        .mockResolvedValueOnce({ ok: true, value: { id: 'duplicado-id', name: 'Duplicado', mimeType: 'application/vnd.google-apps.folder' } })
+        .mockResolvedValueOnce({ ok: true, value: { id: 'control-ingresos-id', name: 'Control de Ingresos', mimeType: 'application/vnd.google-apps.spreadsheet' } })
+        .mockResolvedValueOnce({ ok: true, value: { id: 'control-egresos-id', name: 'Control de Egresos', mimeType: 'application/vnd.google-apps.spreadsheet' } })
+        .mockResolvedValueOnce({ ok: true, value: { id: 'dashboard-id', name: 'Dashboard Operativo Contable', mimeType: 'application/vnd.google-apps.spreadsheet' } });
+
+      mockListByMimeType.mockResolvedValue({ ok: true, value: [] });
+      mockGetSheetMetadata.mockResolvedValue({ ok: true, value: [{ title: 'Sheet1', sheetId: 0 }] });
+
+      await discoverFolderStructure();
+
+      // Mock error during lookup
+      mockFindByName.mockResolvedValueOnce({ ok: false, error: new Error('Drive API error') });
+
+      const result = await getOrCreateMovimientosSpreadsheet(
+        'folder-id',
+        'BBVA 1234567890 ARS',
+        'bancario'
+      );
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.error.message).toBe('Drive API error');
+      }
+    });
+
+    it('handles errors during spreadsheet creation', async () => {
+      // Setup: discover structure first
+      mockFindByName
+        .mockResolvedValueOnce({ ok: true, value: { id: 'entrada-id', name: 'Entrada', mimeType: 'application/vnd.google-apps.folder' } })
+        .mockResolvedValueOnce({ ok: true, value: { id: 'sin-procesar-id', name: 'Sin Procesar', mimeType: 'application/vnd.google-apps.folder' } })
+        .mockResolvedValueOnce({ ok: true, value: { id: 'duplicado-id', name: 'Duplicado', mimeType: 'application/vnd.google-apps.folder' } })
+        .mockResolvedValueOnce({ ok: true, value: { id: 'control-ingresos-id', name: 'Control de Ingresos', mimeType: 'application/vnd.google-apps.spreadsheet' } })
+        .mockResolvedValueOnce({ ok: true, value: { id: 'control-egresos-id', name: 'Control de Egresos', mimeType: 'application/vnd.google-apps.spreadsheet' } })
+        .mockResolvedValueOnce({ ok: true, value: { id: 'dashboard-id', name: 'Dashboard Operativo Contable', mimeType: 'application/vnd.google-apps.spreadsheet' } });
+
+      mockListByMimeType.mockResolvedValue({ ok: true, value: [] });
+      mockGetSheetMetadata.mockResolvedValue({ ok: true, value: [{ title: 'Sheet1', sheetId: 0 }] });
+
+      await discoverFolderStructure();
+
+      // Mock not found, then creation error
+      mockFindByName.mockResolvedValueOnce({ ok: true, value: null });
+      mockCreateSpreadsheet.mockResolvedValue({ ok: false, error: new Error('Creation failed') });
+
+      const result = await getOrCreateMovimientosSpreadsheet(
+        'folder-id',
+        'BBVA 1234567890 ARS',
+        'bancario'
+      );
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.error.message).toBe('Creation failed');
+      }
     });
   });
 });
