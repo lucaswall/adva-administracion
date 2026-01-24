@@ -10,6 +10,7 @@ export { storePago } from './pago-store.js';
 export { storeRecibo } from './recibo-store.js';
 export { storeRetencion } from './retencion-store.js';
 export { storeResumenBancario, storeResumenTarjeta, storeResumenBroker } from './resumen-store.js';
+export { storeMovimientosBancario, storeMovimientosTarjeta, storeMovimientosBroker } from './movimientos-store.js';
 
 /**
  * Gets list of already processed file IDs from both control spreadsheets

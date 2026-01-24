@@ -1354,3 +1354,66 @@ export async function getOrCreateBrokerSpreadsheet(
 
   return result;
 }
+/**
+ * Gets or creates a Movimientos spreadsheet for storing individual transactions
+ * Creates a spreadsheet named "Movimientos - {folderName}" in the entity folder
+ *
+ * @param folderId - Entity folder ID (bank account, credit card, or broker folder)
+ * @param folderName - Entity folder name (e.g., "BBVA 007-009364/1 ARS")
+ * @param type - Type of resumen (bancario, tarjeta, or broker)
+ * @returns Spreadsheet ID for Movimientos spreadsheet
+ */
+export async function getOrCreateMovimientosSpreadsheet(
+  folderId: string,
+  folderName: string,
+  type: 'bancario' | 'tarjeta' | 'broker'
+): Promise<Result<string, Error>> {
+  if (!cachedStructure) {
+    return {
+      ok: false,
+      error: new Error('Folder structure not initialized. Call discoverFolderStructure first.'),
+    };
+  }
+
+  const spreadsheetName = `Movimientos - ${folderName}`;
+  const cacheKey = `movimientos:${folderName}`;
+
+  // Use lock to prevent concurrent creation
+  const lockKey = `spreadsheet:movimientos:${cacheKey}`;
+  const result = await withLock(lockKey, async () => {
+    const findResult = await findByName(folderId, spreadsheetName, SPREADSHEET_MIME);
+    if (!findResult.ok) throw findResult.error;
+
+    let spreadsheetId: string;
+
+    if (findResult.value) {
+      spreadsheetId = findResult.value.id;
+      debug('Found existing Movimientos spreadsheet', {
+        module: 'folder-structure',
+        phase: 'movimientos-spreadsheet',
+        folderName,
+        type,
+        spreadsheetId
+      });
+    } else {
+      const createResult = await createSpreadsheet(folderId, spreadsheetName);
+      if (!createResult.ok) throw createResult.error;
+
+      spreadsheetId = createResult.value.id;
+      info('Created Movimientos spreadsheet', {
+        module: 'folder-structure',
+        phase: 'movimientos-spreadsheet',
+        folderName,
+        type,
+        spreadsheetId
+      });
+    }
+
+    // Note: We don't create sheets here - they're created per-month when storing transactions
+    // The sheet creation is handled by the storage layer in movimientos-store.ts
+
+    return spreadsheetId;
+  });
+
+  return result;
+}
