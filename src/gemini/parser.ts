@@ -5,6 +5,7 @@
 import type { Factura, Pago, Recibo, ResumenBancario, ResumenTarjeta, ResumenBroker, Retencion, ParseResult, Result, ClassificationResult, AdvaRoleValidation, ResumenBancarioConMovimientos, ResumenTarjetaConMovimientos, ResumenBrokerConMovimientos } from '../types/index.js';
 import { ParseError } from '../types/index.js';
 import { warn } from '../utils/logger.js';
+import { normalizeBankName } from '../utils/bank-names.js';
 
 /** ADVA's CUIT - used for role validation and CUIT assignment */
 const ADVA_CUIT = '30709076783';
@@ -717,6 +718,11 @@ export function parseResumenBancarioResponse(response: string): Result<ParseResu
     // Parse JSON - might include movimientos array
     const data = JSON.parse(jsonStr) as Partial<ResumenBancarioConMovimientos>;
 
+    // Normalize bank name to prevent duplicate folders
+    if (data.banco) {
+      data.banco = normalizeBankName(data.banco);
+    }
+
     // Check for required fields
     const requiredFields: (keyof ResumenBancario)[] = [
       'banco',
@@ -801,6 +807,11 @@ export function parseResumenTarjetaResponse(response: string): Result<ParseResul
 
     // Parse JSON - might include movimientos array
     const data = JSON.parse(jsonStr) as Partial<ResumenTarjetaConMovimientos>;
+
+    // Normalize bank name to prevent duplicate folders
+    if (data.banco) {
+      data.banco = normalizeBankName(data.banco);
+    }
 
     // Validate tipoTarjeta
     if (data.tipoTarjeta !== undefined) {

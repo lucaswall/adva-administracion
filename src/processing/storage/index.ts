@@ -2,7 +2,10 @@
  * Storage module index - exports all storage functions
  */
 
-import { getValues } from '../../services/sheets.js';
+import { getValues, appendRowsWithLinks, batchUpdate } from '../../services/sheets.js';
+import type { Result, DocumentType } from '../../types/index.js';
+import { info as logInfo, error as logError } from '../../utils/logger.js';
+import { getCorrelationId } from '../../utils/correlation.js';
 
 // Re-export storage functions
 export { storeFactura } from './factura-store.js';
@@ -13,41 +16,148 @@ export { storeResumenBancario, storeResumenTarjeta, storeResumenBroker } from '.
 export { storeMovimientosBancario, storeMovimientosTarjeta, storeMovimientosBroker } from './movimientos-store.js';
 
 /**
- * Gets list of already processed file IDs from both control spreadsheets
+ * Marks a file as processing in the centralized tracking sheet
  *
- * @param controlIngresosId - Control de Ingresos spreadsheet ID
- * @param controlEgresosId - Control de Egresos spreadsheet ID
+ * @param dashboardId - Dashboard Operativo Contable spreadsheet ID
+ * @param fileId - Google Drive file ID
+ * @param fileName - File name
+ * @param documentType - Document type after classification
  */
-export async function getProcessedFileIds(
-  controlIngresosId: string,
-  controlEgresosId: string
-): Promise<Set<string>> {
+export async function markFileProcessing(
+  dashboardId: string,
+  fileId: string,
+  fileName: string,
+  documentType: DocumentType
+): Promise<Result<void, Error>> {
+  const correlationId = getCorrelationId();
+  const processedAt = new Date().toISOString();
+
+  const result = await appendRowsWithLinks(
+    dashboardId,
+    'Archivos Procesados',
+    [[fileId, fileName, processedAt, documentType, 'processing']]
+  );
+
+  if (!result.ok) {
+    logError('Failed to mark file as processing', {
+      module: 'storage',
+      fileId,
+      fileName,
+      error: result.error.message,
+      correlationId,
+    });
+    return { ok: false, error: result.error };
+  }
+
+  logInfo('Marked file as processing', {
+    module: 'storage',
+    fileId,
+    fileName,
+    documentType,
+    correlationId,
+  });
+
+  return { ok: true, value: undefined };
+}
+
+/**
+ * Updates the status of a file in the centralized tracking sheet
+ *
+ * @param dashboardId - Dashboard Operativo Contable spreadsheet ID
+ * @param fileId - Google Drive file ID
+ * @param status - New status ('success' or 'failed')
+ * @param errorMessage - Optional error message for failed status
+ */
+export async function updateFileStatus(
+  dashboardId: string,
+  fileId: string,
+  status: 'success' | 'failed',
+  errorMessage?: string
+): Promise<Result<void, Error>> {
+  const correlationId = getCorrelationId();
+
+  // Get all file IDs from the tracking sheet to find the row
+  const valuesResult = await getValues(dashboardId, 'Archivos Procesados!A:A');
+
+  if (!valuesResult.ok) {
+    logError('Failed to read tracking sheet for status update', {
+      module: 'storage',
+      fileId,
+      error: valuesResult.error.message,
+      correlationId,
+    });
+    return { ok: false, error: valuesResult.error };
+  }
+
+  // Find the row index for this file (skip header row)
+  let rowIndex = -1;
+  for (let i = 1; i < valuesResult.value.length; i++) {
+    const row = valuesResult.value[i];
+    if (row && row[0] === fileId) {
+      rowIndex = i + 1; // +1 for 1-indexed sheet rows
+      break;
+    }
+  }
+
+  if (rowIndex === -1) {
+    const error = new Error(`File ${fileId} not found in tracking sheet`);
+    logError('File not found in tracking sheet', {
+      module: 'storage',
+      fileId,
+      correlationId,
+    });
+    return { ok: false, error };
+  }
+
+  // Update the status column (E)
+  const statusValue = status === 'failed' && errorMessage ? `failed: ${errorMessage}` : status;
+  const updateResult = await batchUpdate(dashboardId, [
+    {
+      range: `Archivos Procesados!E${rowIndex}`,
+      values: [[statusValue]],
+    },
+  ]);
+
+  if (!updateResult.ok) {
+    logError('Failed to update file status', {
+      module: 'storage',
+      fileId,
+      status,
+      error: updateResult.error.message,
+      correlationId,
+    });
+    return { ok: false, error: updateResult.error };
+  }
+
+  logInfo('Updated file status', {
+    module: 'storage',
+    fileId,
+    status,
+    correlationId,
+  });
+
+  return { ok: true, value: undefined };
+}
+
+/**
+ * Gets list of already processed file IDs from centralized tracking sheet
+ *
+ * @param dashboardId - Dashboard Operativo Contable spreadsheet ID
+ */
+export async function getProcessedFileIds(dashboardId: string): Promise<Set<string>> {
   const processedIds = new Set<string>();
 
-  /**
-   * Helper to extract file IDs from a sheet's second column (B - fileId)
-   */
-  const extractFileIds = async (spreadsheetId: string, sheetName: string) => {
-    const result = await getValues(spreadsheetId, `${sheetName}!B:B`);
-    if (result.ok && result.value.length > 1) {
-      for (let i = 1; i < result.value.length; i++) {
-        const row = result.value[i];
-        if (row && row[0]) {
-          processedIds.add(String(row[0]));
-        }
+  const result = await getValues(dashboardId, 'Archivos Procesados!A:A');
+
+  if (result.ok && result.value.length > 1) {
+    // Skip header row (index 0)
+    for (let i = 1; i < result.value.length; i++) {
+      const row = result.value[i];
+      if (row && row[0]) {
+        processedIds.add(String(row[0]));
       }
     }
-  };
-
-  // Get from Control de Ingresos
-  await extractFileIds(controlIngresosId, 'Facturas Emitidas');
-  await extractFileIds(controlIngresosId, 'Pagos Recibidos');
-  await extractFileIds(controlIngresosId, 'Retenciones Recibidas');
-
-  // Get from Control de Egresos
-  await extractFileIds(controlEgresosId, 'Facturas Recibidas');
-  await extractFileIds(controlEgresosId, 'Pagos Enviados');
-  await extractFileIds(controlEgresosId, 'Recibos');
+  }
 
   return processedIds;
 }

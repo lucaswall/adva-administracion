@@ -393,6 +393,27 @@ export const STATUS_SHEET: SheetConfig = {
   headers: STATUS_HEADERS,
 };
 
+/** Headers for Archivos Procesados sheet - centralized file tracking */
+export const ARCHIVOS_PROCESADOS_HEADERS = [
+  'fileId',
+  'fileName',
+  'processedAt',
+  'documentType',
+  'status',
+];
+
+/**
+ * Sheet configuration for Archivos Procesados sheet in Dashboard Operativo Contable
+ * Centralized tracking of all processed files to prevent duplicate processing
+ */
+export const ARCHIVOS_PROCESADOS_SHEET: SheetConfig = {
+  title: 'Archivos Procesados',
+  headers: ARCHIVOS_PROCESADOS_HEADERS,
+  numberFormats: new Map([
+    [2, { type: 'date' }], // processedAt
+  ]),
+};
+
 /** Headers for Resumen Mensual sheet */
 export const RESUMEN_MENSUAL_HEADERS = [
   'fecha',
@@ -472,4 +493,5 @@ export const DASHBOARD_OPERATIVO_SHEETS: SheetConfig[] = [
     ])
   },
   STATUS_SHEET,
+  ARCHIVOS_PROCESADOS_SHEET,
 ];

@@ -301,8 +301,8 @@ describe('spreadsheet-headers', () => {
   });
 
   describe('DASHBOARD_OPERATIVO_SHEETS', () => {
-    it('has 4 sheet configurations', () => {
-      expect(DASHBOARD_OPERATIVO_SHEETS).toHaveLength(4);
+    it('has 5 sheet configurations', () => {
+      expect(DASHBOARD_OPERATIVO_SHEETS).toHaveLength(5);
     });
 
     it('contains Status sheet', () => {

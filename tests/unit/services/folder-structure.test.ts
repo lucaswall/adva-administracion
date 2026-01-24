@@ -446,7 +446,7 @@ describe('FolderStructure service', () => {
       expect(mockGetSheetMetadata).toHaveBeenCalledWith('control-ingresos-id');
       expect(mockGetSheetMetadata).toHaveBeenCalledWith('control-egresos-id');
       expect(mockGetSheetMetadata).toHaveBeenCalledWith('dashboard-operativo-id');
-      expect(mockCreateSheet).toHaveBeenCalledTimes(10);
+      expect(mockCreateSheet).toHaveBeenCalledTimes(11);
       expect(mockCreateSheet).toHaveBeenCalledWith('control-ingresos-id', 'Facturas Emitidas');
       expect(mockCreateSheet).toHaveBeenCalledWith('control-ingresos-id', 'Pagos Recibidos');
       expect(mockCreateSheet).toHaveBeenCalledWith('control-ingresos-id', 'Retenciones Recibidas');
@@ -457,6 +457,7 @@ describe('FolderStructure service', () => {
       expect(mockCreateSheet).toHaveBeenCalledWith('dashboard-operativo-id', 'Resumen Mensual');
       expect(mockCreateSheet).toHaveBeenCalledWith('dashboard-operativo-id', 'Uso de API');
       expect(mockCreateSheet).toHaveBeenCalledWith('dashboard-operativo-id', 'Status');
+      expect(mockCreateSheet).toHaveBeenCalledWith('dashboard-operativo-id', 'Archivos Procesados');
 
       // Verify headers were set
       expect(mockSetValues).toHaveBeenCalled();
@@ -512,6 +513,7 @@ describe('FolderStructure service', () => {
               { title: 'Resumen Mensual', sheetId: 2 },
               { title: 'Uso de API', sheetId: 3 },
               { title: 'Status', sheetId: 4 },
+              { title: 'Archivos Procesados', sheetId: 5 },
             ],
           });
         }
@@ -555,6 +557,9 @@ describe('FolderStructure service', () => {
         }
         if (range.includes('Status')) {
           return Promise.resolve({ ok: true, value: [['Metrica']] });
+        }
+        if (range.includes('Archivos Procesados')) {
+          return Promise.resolve({ ok: true, value: [['fileId']] });
         }
         return Promise.resolve({ ok: true, value: [[]] });
       });
@@ -638,7 +643,7 @@ describe('FolderStructure service', () => {
       expect(result.ok).toBe(true);
 
       // Verify only missing sheets were created
-      expect(mockCreateSheet).toHaveBeenCalledTimes(7);
+      expect(mockCreateSheet).toHaveBeenCalledTimes(8);
       expect(mockCreateSheet).toHaveBeenCalledWith('control-ingresos-id', 'Pagos Recibidos');
       expect(mockCreateSheet).toHaveBeenCalledWith('control-ingresos-id', 'Retenciones Recibidas');
       expect(mockCreateSheet).toHaveBeenCalledWith('control-egresos-id', 'Pagos Enviados');
@@ -646,6 +651,7 @@ describe('FolderStructure service', () => {
       expect(mockCreateSheet).toHaveBeenCalledWith('dashboard-operativo-id', 'Pagos Pendientes');
       expect(mockCreateSheet).toHaveBeenCalledWith('dashboard-operativo-id', 'Uso de API');
       expect(mockCreateSheet).toHaveBeenCalledWith('dashboard-operativo-id', 'Status');
+      expect(mockCreateSheet).toHaveBeenCalledWith('dashboard-operativo-id', 'Archivos Procesados');
       expect(mockCreateSheet).not.toHaveBeenCalledWith('control-ingresos-id', 'Facturas Emitidas');
       expect(mockCreateSheet).not.toHaveBeenCalledWith('control-egresos-id', 'Facturas Recibidas');
       expect(mockCreateSheet).not.toHaveBeenCalledWith('dashboard-operativo-id', 'Resumen Mensual');
@@ -753,7 +759,7 @@ describe('FolderStructure service', () => {
       expect(result.ok).toBe(true);
 
       // Verify sheets were created for all spreadsheets
-      expect(mockCreateSheet).toHaveBeenCalledTimes(10);
+      expect(mockCreateSheet).toHaveBeenCalledTimes(11);
 
       // Verify Sheet1 was deleted from all spreadsheets
       expect(mockDeleteSheet).toHaveBeenCalledTimes(3);

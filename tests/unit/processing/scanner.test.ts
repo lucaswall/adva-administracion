@@ -126,14 +126,17 @@ describe('Scanner module', () => {
   const mockFolderStructure = {
     rootId: 'root-id',
     entradaId: 'entrada-id',
-    ingresosId: 'ingresos-id',
-    egresosId: 'egresos-id',
     sinProcesarId: 'sin-procesar-id',
-    bancosId: 'bancos-id',
+    duplicadoId: 'duplicado-id',
     controlIngresosId: 'control-ingresos-id',
     controlEgresosId: 'control-egresos-id',
+    dashboardOperativoId: 'dashboard-operativo-id',
     bankSpreadsheets: new Map(),
+    yearFolders: new Map(),
+    classificationFolders: new Map(),
     monthFolders: new Map(),
+    bankAccountFolders: new Map(),
+    bankAccountSpreadsheets: new Map(),
     lastRefreshed: new Date(),
   };
 
@@ -153,6 +156,8 @@ describe('Scanner module', () => {
     mockGetOrCreateBankAccountSpreadsheet.mockResolvedValue({ ok: true, value: 'default-bank-spreadsheet-id' });
     // Default mock for getSpreadsheetTimezone
     mockGetSpreadsheetTimezone.mockResolvedValue({ ok: true, value: 'America/Argentina/Buenos_Aires' });
+    // Default mock for batchUpdate (used by updateFileStatus)
+    mockBatchUpdate.mockResolvedValue({ ok: true, value: undefined });
   });
 
   afterEach(() => {
