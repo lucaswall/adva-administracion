@@ -8,6 +8,8 @@ import { scanFolder, rematch, RematchResult } from '../processing/scanner.js';
 import { autoFillBankMovements } from '../bank/autofill.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { extractDriveFolderId, isValidDriveId } from '../utils/drive-parser.js';
+import { updateStatusSheet } from '../services/status-sheet.js';
+import { getCachedFolderStructure } from '../services/folder-structure.js';
 
 /**
  * Scan request body
@@ -76,6 +78,12 @@ export async function scanRoutes(server: FastifyInstance) {
       return {
         error: result.error.message,
       };
+    }
+
+    // Update status sheet after scan
+    const folderStructure = getCachedFolderStructure();
+    if (folderStructure?.dashboardOperativoId) {
+      void updateStatusSheet(folderStructure.dashboardOperativoId);
     }
 
     return result.value;

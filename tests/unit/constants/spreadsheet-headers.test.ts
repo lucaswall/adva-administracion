@@ -301,8 +301,14 @@ describe('spreadsheet-headers', () => {
   });
 
   describe('DASHBOARD_OPERATIVO_SHEETS', () => {
-    it('has 3 sheet configurations', () => {
-      expect(DASHBOARD_OPERATIVO_SHEETS).toHaveLength(3);
+    it('has 4 sheet configurations', () => {
+      expect(DASHBOARD_OPERATIVO_SHEETS).toHaveLength(4);
+    });
+
+    it('contains Status sheet', () => {
+      const sheet = DASHBOARD_OPERATIVO_SHEETS.find(s => s.title === 'Status');
+      expect(sheet).toBeDefined();
+      expect(sheet?.headers).toEqual(['Metrica', 'Valor']);
     });
 
     it('has Pagos Pendientes as the first sheet', () => {

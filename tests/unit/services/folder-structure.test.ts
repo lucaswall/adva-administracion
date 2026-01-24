@@ -28,6 +28,7 @@ const mockFormatSheet = vi.fn();
 const mockDeleteSheet = vi.fn();
 const mockGetValues = vi.fn();
 const mockMoveSheetToFirst = vi.fn();
+const mockApplyConditionalFormat = vi.fn();
 
 vi.mock('../../../src/services/sheets.js', () => ({
   getSheetMetadata: (...args: unknown[]) => mockGetSheetMetadata(...args),
@@ -37,6 +38,7 @@ vi.mock('../../../src/services/sheets.js', () => ({
   deleteSheet: (...args: unknown[]) => mockDeleteSheet(...args),
   getValues: (...args: unknown[]) => mockGetValues(...args),
   moveSheetToFirst: (...args: unknown[]) => mockMoveSheetToFirst(...args),
+  applyConditionalFormat: (...args: unknown[]) => mockApplyConditionalFormat(...args),
   clearSheetsCache: vi.fn(),
 }));
 
@@ -72,6 +74,8 @@ describe('FolderStructure service', () => {
     mockCreateSheet.mockResolvedValue({ ok: true, value: 0 });
     // Mock moveSheetToFirst to always succeed by default
     mockMoveSheetToFirst.mockResolvedValue({ ok: true, value: undefined });
+    // Mock applyConditionalFormat to always succeed by default
+    mockApplyConditionalFormat.mockResolvedValue({ ok: true, value: undefined });
   });
 
   afterEach(() => {
@@ -125,6 +129,14 @@ describe('FolderStructure service', () => {
           value: [
             { title: 'Resumen Mensual', sheetId: 1 },
             { title: 'Uso de API', sheetId: 2 },
+            { title: 'Status', sheetId: 3 },
+          ],
+        })
+        // Status sheet metadata for initializeStatusSheet
+        .mockResolvedValueOnce({
+          ok: true,
+          value: [
+            { title: 'Status', sheetId: 3 },
           ],
         });
 
@@ -199,6 +211,14 @@ describe('FolderStructure service', () => {
           value: [
             { title: 'Resumen Mensual', sheetId: 1 },
             { title: 'Uso de API', sheetId: 2 },
+            { title: 'Status', sheetId: 3 },
+          ],
+        })
+        // Status sheet metadata for initializeStatusSheet
+        .mockResolvedValueOnce({
+          ok: true,
+          value: [
+            { title: 'Status', sheetId: 3 },
           ],
         });
 
@@ -261,6 +281,14 @@ describe('FolderStructure service', () => {
           value: [
             { title: 'Resumen Mensual', sheetId: 1 },
             { title: 'Uso de API', sheetId: 2 },
+            { title: 'Status', sheetId: 3 },
+          ],
+        })
+        // Status sheet metadata for initializeStatusSheet
+        .mockResolvedValueOnce({
+          ok: true,
+          value: [
+            { title: 'Status', sheetId: 3 },
           ],
         });
 
@@ -332,6 +360,14 @@ describe('FolderStructure service', () => {
           value: [
             { title: 'Resumen Mensual', sheetId: 1 },
             { title: 'Uso de API', sheetId: 2 },
+            { title: 'Status', sheetId: 3 },
+          ],
+        })
+        // Status sheet metadata for initializeStatusSheet
+        .mockResolvedValueOnce({
+          ok: true,
+          value: [
+            { title: 'Status', sheetId: 3 },
           ],
         });
 
@@ -368,19 +404,32 @@ describe('FolderStructure service', () => {
         ],
       });
 
-      // Mock sheet metadata - all spreadsheets have no sheets
-      mockGetSheetMetadata.mockResolvedValue({ ok: true, value: [] });
+      // Mock sheet metadata - all spreadsheets have no sheets initially
+      mockGetSheetMetadata
+        // Control de Ingresos - no sheets
+        .mockResolvedValueOnce({ ok: true, value: [] })
+        // Control de Egresos - no sheets
+        .mockResolvedValueOnce({ ok: true, value: [] })
+        // Dashboard Operativo - no sheets
+        .mockResolvedValueOnce({ ok: true, value: [] })
+        // Status sheet metadata for initializeStatusSheet
+        .mockResolvedValueOnce({
+          ok: true,
+          value: [{ title: 'Status', sheetId: 10 }],
+        });
 
-      // Mock creating sheets (2 for Ingresos + 3 for Egresos + 3 for Dashboard = 8 total)
+      // Mock creating sheets (3 for Ingresos + 3 for Egresos + 4 for Dashboard = 10 total)
       mockCreateSheet
         .mockResolvedValueOnce({ ok: true, value: 1 }) // Facturas Emitidas
         .mockResolvedValueOnce({ ok: true, value: 2 }) // Pagos Recibidos
-        .mockResolvedValueOnce({ ok: true, value: 3 }) // Facturas Recibidas
-        .mockResolvedValueOnce({ ok: true, value: 4 }) // Pagos Enviados
-        .mockResolvedValueOnce({ ok: true, value: 5 }) // Recibos
-        .mockResolvedValueOnce({ ok: true, value: 6 }) // Pagos Pendientes
-        .mockResolvedValueOnce({ ok: true, value: 7 }) // Resumen Mensual
-        .mockResolvedValueOnce({ ok: true, value: 8 }); // Uso de API
+        .mockResolvedValueOnce({ ok: true, value: 3 }) // Retenciones Recibidas
+        .mockResolvedValueOnce({ ok: true, value: 4 }) // Facturas Recibidas
+        .mockResolvedValueOnce({ ok: true, value: 5 }) // Pagos Enviados
+        .mockResolvedValueOnce({ ok: true, value: 6 }) // Recibos
+        .mockResolvedValueOnce({ ok: true, value: 7 }) // Pagos Pendientes
+        .mockResolvedValueOnce({ ok: true, value: 8 }) // Resumen Mensual
+        .mockResolvedValueOnce({ ok: true, value: 9 }) // Uso de API
+        .mockResolvedValueOnce({ ok: true, value: 10 }); // Status
 
       // Mock setting header values
       mockSetValues.mockResolvedValue({ ok: true, value: 23 });
@@ -393,7 +442,7 @@ describe('FolderStructure service', () => {
       expect(mockGetSheetMetadata).toHaveBeenCalledWith('control-ingresos-id');
       expect(mockGetSheetMetadata).toHaveBeenCalledWith('control-egresos-id');
       expect(mockGetSheetMetadata).toHaveBeenCalledWith('dashboard-operativo-id');
-      expect(mockCreateSheet).toHaveBeenCalledTimes(9);
+      expect(mockCreateSheet).toHaveBeenCalledTimes(10);
       expect(mockCreateSheet).toHaveBeenCalledWith('control-ingresos-id', 'Facturas Emitidas');
       expect(mockCreateSheet).toHaveBeenCalledWith('control-ingresos-id', 'Pagos Recibidos');
       expect(mockCreateSheet).toHaveBeenCalledWith('control-ingresos-id', 'Retenciones Recibidas');
@@ -403,6 +452,7 @@ describe('FolderStructure service', () => {
       expect(mockCreateSheet).toHaveBeenCalledWith('dashboard-operativo-id', 'Pagos Pendientes');
       expect(mockCreateSheet).toHaveBeenCalledWith('dashboard-operativo-id', 'Resumen Mensual');
       expect(mockCreateSheet).toHaveBeenCalledWith('dashboard-operativo-id', 'Uso de API');
+      expect(mockCreateSheet).toHaveBeenCalledWith('dashboard-operativo-id', 'Status');
 
       // Verify headers were set
       expect(mockSetValues).toHaveBeenCalled();
@@ -428,45 +478,82 @@ describe('FolderStructure service', () => {
       });
 
       // Mock sheet metadata - all sheets already exist for all spreadsheets
-      mockGetSheetMetadata
-        .mockResolvedValueOnce({
-          ok: true,
-          value: [
-            { title: 'Facturas Emitidas', sheetId: 1 },
-            { title: 'Pagos Recibidos', sheetId: 2 },
-            { title: 'Retenciones Recibidas', sheetId: 3 },
-          ],
-        })
-        .mockResolvedValueOnce({
-          ok: true,
-          value: [
-            { title: 'Facturas Recibidas', sheetId: 1 },
-            { title: 'Pagos Enviados', sheetId: 2 },
-            { title: 'Recibos', sheetId: 3 },
-          ],
-        })
-        .mockResolvedValueOnce({
-          ok: true,
-          value: [
-            { title: 'Pagos Pendientes', sheetId: 1 },
-            { title: 'Resumen Mensual', sheetId: 2 },
-            { title: 'Uso de API', sheetId: 3 },
-          ],
-        });
+      mockGetSheetMetadata.mockReset();
+      mockGetSheetMetadata.mockImplementation((spreadsheetId: string) => {
+        if (spreadsheetId === 'control-ingresos-id') {
+          return Promise.resolve({
+            ok: true,
+            value: [
+              { title: 'Facturas Emitidas', sheetId: 1 },
+              { title: 'Pagos Recibidos', sheetId: 2 },
+              { title: 'Retenciones Recibidas', sheetId: 3 },
+            ],
+          });
+        }
+        if (spreadsheetId === 'control-egresos-id') {
+          return Promise.resolve({
+            ok: true,
+            value: [
+              { title: 'Facturas Recibidas', sheetId: 1 },
+              { title: 'Pagos Enviados', sheetId: 2 },
+              { title: 'Recibos', sheetId: 3 },
+            ],
+          });
+        }
+        if (spreadsheetId === 'dashboard-operativo-id') {
+          return Promise.resolve({
+            ok: true,
+            value: [
+              { title: 'Pagos Pendientes', sheetId: 1 },
+              { title: 'Resumen Mensual', sheetId: 2 },
+              { title: 'Uso de API', sheetId: 3 },
+              { title: 'Status', sheetId: 4 },
+            ],
+          });
+        }
+        return Promise.resolve({ ok: true, value: [] });
+      });
 
       // Mock getValues for existing sheets with correct headers
-      // Facturas start with 'fechaEmision', Pagos/Recibos start with 'fechaPago', Dashboard has specific headers
-      mockGetValues
-        .mockResolvedValueOnce({ ok: true, value: [['fechaEmision', 'fileId', 'fileName']] }) // Facturas Emitidas headers
-        .mockResolvedValueOnce({ ok: true, value: [['fechaPago', 'fileId', 'fileName']] }) // Pagos Recibidos headers
-        .mockResolvedValueOnce({ ok: true, value: [['fechaEmision', 'fileId', 'fileName']] }) // Retenciones Recibidas headers
-        .mockResolvedValueOnce({ ok: true, value: [['fechaEmision', 'fileId', 'fileName']] }) // Facturas Recibidas headers
-        .mockResolvedValueOnce({ ok: true, value: [['fechaPago', 'fileId', 'fileName']] }) // Pagos Enviados headers
-        .mockResolvedValueOnce({ ok: true, value: [['fechaPago', 'fileId', 'fileName']] }) // Recibos headers
-        .mockResolvedValueOnce({ ok: true, value: [['fechaEmision', 'fileId', 'fileName']] }) // Pagos Pendientes headers
-        .mockResolvedValueOnce({ ok: true, value: [['fecha', 'totalLlamadas', 'tokensEntrada', 'tokensCache', 'tokensSalida', 'costoTotalUSD', 'tasaExito', 'duracionPromedio']] }) // Resumen Mensual headers
-        .mockResolvedValueOnce({ ok: true, value: [['timestamp', 'requestId', 'fileId', 'fileName', 'model', 'promptTokens', 'cachedTokens', 'outputTokens', 'promptCostPerToken', 'cachedCostPerToken', 'outputCostPerToken', 'estimatedCostUSD', 'durationMs', 'success', 'errorMessage']] }) // Uso de API headers
-        .mockResolvedValueOnce({ ok: true, value: [[2026]] }); // Resumen Mensual A2:A2 (data exists)
+      mockGetValues.mockReset();
+      mockGetValues.mockImplementation((spreadsheetId: string, range: string) => {
+        // For Resumen Mensual A2:A2, return data to indicate it exists
+        if (range.includes('A2:A2')) {
+          return Promise.resolve({ ok: true, value: [[2026]] });
+        }
+        // Return appropriate headers based on sheet name
+        if (range.includes('Facturas Emitidas')) {
+          return Promise.resolve({ ok: true, value: [['fechaEmision']] });
+        }
+        if (range.includes('Pagos Recibidos')) {
+          return Promise.resolve({ ok: true, value: [['fechaPago']] });
+        }
+        if (range.includes('Retenciones Recibidas')) {
+          return Promise.resolve({ ok: true, value: [['fechaEmision']] });
+        }
+        if (range.includes('Facturas Recibidas')) {
+          return Promise.resolve({ ok: true, value: [['fechaEmision']] });
+        }
+        if (range.includes('Pagos Enviados')) {
+          return Promise.resolve({ ok: true, value: [['fechaPago']] });
+        }
+        if (range.includes('Recibos')) {
+          return Promise.resolve({ ok: true, value: [['fechaPago']] });
+        }
+        if (range.includes('Pagos Pendientes')) {
+          return Promise.resolve({ ok: true, value: [['fechaEmision']] });
+        }
+        if (range.includes('Resumen Mensual')) {
+          return Promise.resolve({ ok: true, value: [['fecha']] });
+        }
+        if (range.includes('Uso de API')) {
+          return Promise.resolve({ ok: true, value: [['timestamp']] });
+        }
+        if (range.includes('Status')) {
+          return Promise.resolve({ ok: true, value: [['Metrica']] });
+        }
+        return Promise.resolve({ ok: true, value: [[]] });
+      });
 
       const result = await discoverFolderStructure();
 
@@ -516,6 +603,11 @@ describe('FolderStructure service', () => {
         .mockResolvedValueOnce({
           ok: true,
           value: [{ title: 'Resumen Mensual', sheetId: 1 }],
+        })
+        // Status sheet metadata for initializeStatusSheet
+        .mockResolvedValueOnce({
+          ok: true,
+          value: [{ title: 'Status', sheetId: 8 }],
         });
 
       // Mock getValues for existing sheets with correct headers
@@ -525,14 +617,15 @@ describe('FolderStructure service', () => {
         .mockResolvedValueOnce({ ok: true, value: [['fechaEmision', 'fileId', 'fileName']] }) // Facturas Recibidas
         .mockResolvedValueOnce({ ok: true, value: [['fecha', 'totalLlamadas', 'tokensEntrada']] }); // Resumen Mensual
 
-      // Mock creating missing sheets (2 for Ingresos + 2 for Egresos + 2 for Dashboard = 6)
+      // Mock creating missing sheets (2 for Ingresos + 2 for Egresos + 3 for Dashboard = 7)
       mockCreateSheet
         .mockResolvedValueOnce({ ok: true, value: 2 }) // Pagos Recibidos
         .mockResolvedValueOnce({ ok: true, value: 3 }) // Retenciones Recibidas
         .mockResolvedValueOnce({ ok: true, value: 4 }) // Pagos Enviados
         .mockResolvedValueOnce({ ok: true, value: 5 }) // Recibos
         .mockResolvedValueOnce({ ok: true, value: 6 }) // Pagos Pendientes
-        .mockResolvedValueOnce({ ok: true, value: 7 }); // Uso de API
+        .mockResolvedValueOnce({ ok: true, value: 7 }) // Uso de API
+        .mockResolvedValueOnce({ ok: true, value: 8 }); // Status
 
       mockSetValues.mockResolvedValue({ ok: true, value: 17 });
 
@@ -541,13 +634,14 @@ describe('FolderStructure service', () => {
       expect(result.ok).toBe(true);
 
       // Verify only missing sheets were created
-      expect(mockCreateSheet).toHaveBeenCalledTimes(6);
+      expect(mockCreateSheet).toHaveBeenCalledTimes(7);
       expect(mockCreateSheet).toHaveBeenCalledWith('control-ingresos-id', 'Pagos Recibidos');
       expect(mockCreateSheet).toHaveBeenCalledWith('control-ingresos-id', 'Retenciones Recibidas');
       expect(mockCreateSheet).toHaveBeenCalledWith('control-egresos-id', 'Pagos Enviados');
       expect(mockCreateSheet).toHaveBeenCalledWith('control-egresos-id', 'Recibos');
       expect(mockCreateSheet).toHaveBeenCalledWith('dashboard-operativo-id', 'Pagos Pendientes');
       expect(mockCreateSheet).toHaveBeenCalledWith('dashboard-operativo-id', 'Uso de API');
+      expect(mockCreateSheet).toHaveBeenCalledWith('dashboard-operativo-id', 'Status');
       expect(mockCreateSheet).not.toHaveBeenCalledWith('control-ingresos-id', 'Facturas Emitidas');
       expect(mockCreateSheet).not.toHaveBeenCalledWith('control-egresos-id', 'Facturas Recibidas');
       expect(mockCreateSheet).not.toHaveBeenCalledWith('dashboard-operativo-id', 'Resumen Mensual');
@@ -621,18 +715,25 @@ describe('FolderStructure service', () => {
         .mockResolvedValueOnce({
           ok: true,
           value: [{ title: 'Sheet1', sheetId: 0 }],
+        })
+        // Status sheet metadata for initializeStatusSheet
+        .mockResolvedValueOnce({
+          ok: true,
+          value: [{ title: 'Status', sheetId: 10 }],
         });
 
-      // Mock creating sheets (2 for Ingresos + 3 for Egresos + 3 for Dashboard = 8 total)
+      // Mock creating sheets (3 for Ingresos + 3 for Egresos + 4 for Dashboard = 10 total)
       mockCreateSheet
         .mockResolvedValueOnce({ ok: true, value: 1 }) // Facturas Emitidas
         .mockResolvedValueOnce({ ok: true, value: 2 }) // Pagos Recibidos
-        .mockResolvedValueOnce({ ok: true, value: 3 }) // Facturas Recibidas
-        .mockResolvedValueOnce({ ok: true, value: 4 }) // Pagos Enviados
-        .mockResolvedValueOnce({ ok: true, value: 5 }) // Recibos
-        .mockResolvedValueOnce({ ok: true, value: 6 }) // Pagos Pendientes
-        .mockResolvedValueOnce({ ok: true, value: 7 }) // Resumen Mensual
-        .mockResolvedValueOnce({ ok: true, value: 8 }); // Uso de API
+        .mockResolvedValueOnce({ ok: true, value: 3 }) // Retenciones Recibidas
+        .mockResolvedValueOnce({ ok: true, value: 4 }) // Facturas Recibidas
+        .mockResolvedValueOnce({ ok: true, value: 5 }) // Pagos Enviados
+        .mockResolvedValueOnce({ ok: true, value: 6 }) // Recibos
+        .mockResolvedValueOnce({ ok: true, value: 7 }) // Pagos Pendientes
+        .mockResolvedValueOnce({ ok: true, value: 8 }) // Resumen Mensual
+        .mockResolvedValueOnce({ ok: true, value: 9 }) // Uso de API
+        .mockResolvedValueOnce({ ok: true, value: 10 }); // Status
 
       // Mock setting header values
       mockSetValues.mockResolvedValue({ ok: true, value: 23 });
@@ -648,7 +749,7 @@ describe('FolderStructure service', () => {
       expect(result.ok).toBe(true);
 
       // Verify sheets were created for all spreadsheets
-      expect(mockCreateSheet).toHaveBeenCalledTimes(9);
+      expect(mockCreateSheet).toHaveBeenCalledTimes(10);
 
       // Verify Sheet1 was deleted from all spreadsheets
       expect(mockDeleteSheet).toHaveBeenCalledTimes(3);
@@ -698,7 +799,13 @@ describe('FolderStructure service', () => {
           value: [
             { title: 'Resumen Mensual', sheetId: 1 },
             { title: 'Uso de API', sheetId: 2 },
+            { title: 'Status', sheetId: 3 },
           ],
+        })
+        // Status sheet metadata for initializeStatusSheet
+        .mockResolvedValueOnce({
+          ok: true,
+          value: [{ title: 'Status', sheetId: 3 }],
         });
 
       // Mock getValues for existing sheets with correct headers (starting with 'fileId')
@@ -738,32 +845,42 @@ describe('FolderStructure service', () => {
         ],
       });
 
-      // Mock sheet metadata for control spreadsheets
-      mockGetSheetMetadata
-        .mockResolvedValueOnce({
-          ok: true,
-          value: [
-            { title: 'Facturas Emitidas', sheetId: 1 },
-            { title: 'Pagos Recibidos', sheetId: 2 },
-          ],
-        })
-        .mockResolvedValueOnce({
-          ok: true,
-          value: [
-            { title: 'Facturas Recibidas', sheetId: 1 },
-            { title: 'Pagos Enviados', sheetId: 2 },
-            { title: 'Recibos', sheetId: 3 },
-          ],
-        })
-        // Dashboard Operativo Contable - default Sheet1 only
-        .mockResolvedValueOnce({
-          ok: true,
-          value: [
-            { title: 'Sheet1', sheetId: 0 },
-          ],
-        });
+      // Mock sheet metadata for control spreadsheets (all sheets exist) and Dashboard (Sheet1 only)
+      mockGetSheetMetadata.mockReset();
+      mockGetSheetMetadata.mockImplementation((spreadsheetId: string) => {
+        if (spreadsheetId === 'control-ingresos-id') {
+          return Promise.resolve({
+            ok: true,
+            value: [
+              { title: 'Facturas Emitidas', sheetId: 1 },
+              { title: 'Pagos Recibidos', sheetId: 2 },
+              { title: 'Retenciones Recibidas', sheetId: 3 },
+            ],
+          });
+        }
+        if (spreadsheetId === 'control-egresos-id') {
+          return Promise.resolve({
+            ok: true,
+            value: [
+              { title: 'Facturas Recibidas', sheetId: 1 },
+              { title: 'Pagos Enviados', sheetId: 2 },
+              { title: 'Recibos', sheetId: 3 },
+            ],
+          });
+        }
+        if (spreadsheetId === 'dashboard-operativo-id') {
+          // First call returns Sheet1 only (newly created spreadsheet)
+          // After sheets are created, Status sheet will exist
+          return Promise.resolve({
+            ok: true,
+            value: [{ title: 'Sheet1', sheetId: 0 }],
+          });
+        }
+        return Promise.resolve({ ok: true, value: [] });
+      });
 
       // Mock getValues for existing sheets (headers check)
+      mockGetValues.mockReset();
       mockGetValues.mockImplementation((spreadsheetId: string, range: string) => {
         // For data check (A2:A2), return empty to indicate no existing data
         if (range.includes('A2:A2')) {
@@ -773,10 +890,12 @@ describe('FolderStructure service', () => {
         return Promise.resolve({ ok: true, value: [['fileId', 'fileName', 'folderPath']] });
       });
 
-      // Mock createSheet for Dashboard Operativo sheets
+      // Mock createSheet for Dashboard Operativo sheets (4 sheets created for new Dashboard)
       mockCreateSheet
-        .mockResolvedValueOnce({ ok: true, value: 1 }) // Resumen Mensual
-        .mockResolvedValueOnce({ ok: true, value: 2 }); // Uso de API
+        .mockResolvedValueOnce({ ok: true, value: 1 }) // Pagos Pendientes
+        .mockResolvedValueOnce({ ok: true, value: 2 }) // Resumen Mensual
+        .mockResolvedValueOnce({ ok: true, value: 3 }) // Uso de API
+        .mockResolvedValueOnce({ ok: true, value: 4 }); // Status
 
       const result = await discoverFolderStructure();
 
@@ -788,9 +907,11 @@ describe('FolderStructure service', () => {
       // Verify Dashboard Operativo Contable was created fresh
       expect(mockCreateSpreadsheet).toHaveBeenCalledWith('root-folder-id', 'Dashboard Operativo Contable');
 
-      // Verify both sheets were created
+      // Verify all 4 Dashboard sheets were created
+      expect(mockCreateSheet).toHaveBeenCalledWith('dashboard-operativo-id', 'Pagos Pendientes');
       expect(mockCreateSheet).toHaveBeenCalledWith('dashboard-operativo-id', 'Resumen Mensual');
       expect(mockCreateSheet).toHaveBeenCalledWith('dashboard-operativo-id', 'Uso de API');
+      expect(mockCreateSheet).toHaveBeenCalledWith('dashboard-operativo-id', 'Status');
 
       // Verify headers were set for both sheets
       expect(mockSetValues).toHaveBeenCalledWith(

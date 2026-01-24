@@ -306,6 +306,18 @@ export const CONTROL_EGRESOS_SHEETS: SheetConfig[] = [
   },
 ];
 
+/** Headers for Status sheet - system health metrics */
+export const STATUS_HEADERS = ['Metrica', 'Valor'];
+
+/**
+ * Sheet configuration for Status sheet in Dashboard Operativo Contable
+ * Displays real-time server health metrics
+ */
+export const STATUS_SHEET: SheetConfig = {
+  title: 'Status',
+  headers: STATUS_HEADERS,
+};
+
 /** Headers for Resumen Mensual sheet */
 export const RESUMEN_MENSUAL_HEADERS = [
   'fecha',
@@ -384,4 +396,5 @@ export const DASHBOARD_OPERATIVO_SHEETS: SheetConfig[] = [
       [11, { type: 'currency', decimals: 8 }], // estimatedCostUSD - 8 decimals
     ])
   },
+  STATUS_SHEET,
 ];
