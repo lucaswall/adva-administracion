@@ -354,6 +354,61 @@ export function dateStringToSerial(dateStr: string): number {
 }
 
 /**
+ * Converts a Date object to Google Sheets serial number in a specific timezone
+ *
+ * Google Sheets serial numbers are interpreted in the spreadsheet's local timezone.
+ * This function converts the UTC date to the specified timezone, then calculates
+ * the serial number for that local date/time.
+ *
+ * @param date - Date object (in UTC)
+ * @param timeZone - IANA timezone string (e.g., 'America/Argentina/Buenos_Aires')
+ * @returns Serial number representing the local date/time in the specified timezone
+ *
+ * @example
+ * // 2026-01-24 18:30:00 UTC = 2026-01-24 15:30:00 Argentina time
+ * const utcDate = new Date('2026-01-24T18:30:00.000Z');
+ * dateToSerialInTimezone(utcDate, 'America/Argentina/Buenos_Aires')
+ * // Returns serial number for 2026-01-24 15:30:00 (local time)
+ */
+export function dateToSerialInTimezone(date: Date, timeZone: string): number {
+  // Use Intl.DateTimeFormat to get the date/time components in the target timezone
+  const formatter = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  });
+
+  const parts = formatter.formatToParts(date);
+  const dateParts: Record<string, string> = {};
+  for (const part of parts) {
+    dateParts[part.type] = part.value;
+  }
+
+  // Extract components
+  const year = parseInt(dateParts.year);
+  const month = parseInt(dateParts.month) - 1; // JavaScript months are 0-indexed
+  const day = parseInt(dateParts.day);
+  const hour = parseInt(dateParts.hour);
+  const minute = parseInt(dateParts.minute);
+  const second = parseInt(dateParts.second);
+
+  // Create a date representing this local time (treating it as UTC for calculation purposes)
+  // This gives us the "absolute" time that this local time represents
+  const localDate = new Date(Date.UTC(year, month, day, hour, minute, second));
+
+  // Calculate serial number from the epoch (Dec 30, 1899 at midnight)
+  const epoch = new Date(Date.UTC(1899, 11, 30));
+  const serialNumber = (localDate.getTime() - epoch.getTime()) / (1000 * 60 * 60 * 24);
+
+  return serialNumber;
+}
+
+/**
  * Formats a sheet with bold headers, frozen rows, and number formatting
  *
  * @param spreadsheetId - Spreadsheet ID
@@ -1054,12 +1109,14 @@ export async function moveSheetToFirst(
  * @param spreadsheetId - Spreadsheet ID
  * @param range - A1 notation for target sheet (e.g., 'Sheet1!A:Z')
  * @param values - 2D array of rows to append. Date objects are supported.
+ * @param timeZone - Optional IANA timezone string. When provided, Date objects are converted to this timezone.
  * @returns Number of updated cells
  */
 export async function appendRowsWithFormatting(
   spreadsheetId: string,
   range: string,
-  values: CellValue[][]
+  values: CellValue[][],
+  timeZone?: string
 ): Promise<Result<number, Error>> {
   try {
     const sheets = getSheetsService();
@@ -1096,9 +1153,10 @@ export async function appendRowsWithFormatting(
           cellData.userEnteredValue = { stringValue: '' };
         } else if (value instanceof Date) {
           // Convert Date to serial number for Sheets
-          // Google Sheets uses Dec 30, 1899 as day 0
-          const baseDate = new Date(Date.UTC(1899, 11, 30));
-          const serialNumber = (value.getTime() - baseDate.getTime()) / (1000 * 60 * 60 * 24);
+          // If timezone is provided, convert to that timezone first
+          const serialNumber = timeZone
+            ? dateToSerialInTimezone(value, timeZone)
+            : (value.getTime() - new Date(Date.UTC(1899, 11, 30)).getTime()) / (1000 * 60 * 60 * 24);
           cellData.userEnteredValue = { numberValue: serialNumber };
           cellData.userEnteredFormat!.numberFormat = {
             type: 'DATE_TIME',

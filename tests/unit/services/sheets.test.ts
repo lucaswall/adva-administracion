@@ -5,7 +5,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { sheets_v4 } from 'googleapis';
 import { google } from 'googleapis';
-import { formatSheet, clearSheetsCache, appendRowsWithLinks, appendRowsWithFormatting, clearSheetData, moveSheetToFirst, dateStringToSerial, getSpreadsheetTimezone } from '../../../src/services/sheets.js';
+import { formatSheet, clearSheetsCache, appendRowsWithLinks, appendRowsWithFormatting, clearSheetData, moveSheetToFirst, dateStringToSerial, getSpreadsheetTimezone, dateToSerialInTimezone } from '../../../src/services/sheets.js';
 
 // Mock googleapis
 vi.mock('googleapis', () => {
@@ -1296,5 +1296,68 @@ describe('getSpreadsheetTimezone', () => {
     if (!result.ok) {
       expect(result.error.message).toBe('API Error');
     }
+  });
+});
+
+describe('dateToSerialInTimezone', () => {
+  it('should convert UTC date to serial number in Argentina timezone', () => {
+    // 2026-01-24 18:30:00 UTC = 2026-01-24 15:30:00 Argentina (UTC-3)
+    const utcDate = new Date('2026-01-24T18:30:00.000Z');
+    const serial = dateToSerialInTimezone(utcDate, 'America/Argentina/Buenos_Aires');
+
+    // Verify it's a number
+    expect(typeof serial).toBe('number');
+    expect(serial).toBeGreaterThan(0);
+
+    // Convert back to verify: serial should represent 15:30 local time, not 18:30
+    // The serial number should be the same as if we created a date for 15:30 on that day
+    const localDate = new Date('2026-01-24T15:30:00.000-03:00');
+    const expectedSerial = dateToSerialInTimezone(localDate, 'America/Argentina/Buenos_Aires');
+
+    // Allow small floating point differences
+    expect(Math.abs(serial - expectedSerial)).toBeLessThan(0.0001);
+  });
+
+  it('should convert UTC date to serial number in US Eastern timezone', () => {
+    // 2026-01-24 18:30:00 UTC = 2026-01-24 13:30:00 EST (UTC-5 in January)
+    const utcDate = new Date('2026-01-24T18:30:00.000Z');
+    const serial = dateToSerialInTimezone(utcDate, 'America/New_York');
+
+    expect(typeof serial).toBe('number');
+    expect(serial).toBeGreaterThan(0);
+
+    // Serial should represent 13:30 local time
+    const localDate = new Date('2026-01-24T13:30:00.000-05:00');
+    const expectedSerial = dateToSerialInTimezone(localDate, 'America/New_York');
+
+    expect(Math.abs(serial - expectedSerial)).toBeLessThan(0.0001);
+  });
+
+  it('should handle UTC timezone correctly', () => {
+    const utcDate = new Date('2026-01-24T18:30:00.000Z');
+    const serial = dateToSerialInTimezone(utcDate, 'UTC');
+
+    // In UTC, the time should remain 18:30
+    expect(typeof serial).toBe('number');
+    expect(serial).toBeGreaterThan(0);
+
+    // Should match the serial from dateStringToSerial for the date portion
+    const dateOnlySerial = dateStringToSerial('2026-01-24');
+    // 18:30 is 18.5 / 24 = 0.770833 of a day
+    const expectedSerial = dateOnlySerial + (18 + 30 / 60) / 24;
+
+    expect(Math.abs(serial - expectedSerial)).toBeLessThan(0.0001);
+  });
+
+  it('should handle dates around midnight correctly', () => {
+    // 2026-01-24 02:30:00 UTC = 2026-01-23 23:30:00 Argentina (crosses date boundary)
+    const utcDate = new Date('2026-01-24T02:30:00.000Z');
+    const serial = dateToSerialInTimezone(utcDate, 'America/Argentina/Buenos_Aires');
+
+    // Should represent 23:30 on Jan 23, not 02:30 on Jan 24
+    const jan23Serial = dateStringToSerial('2026-01-23');
+    const expectedSerial = jan23Serial + (23 + 30 / 60) / 24;
+
+    expect(Math.abs(serial - expectedSerial)).toBeLessThan(0.0001);
   });
 });
