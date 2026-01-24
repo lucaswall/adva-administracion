@@ -10,6 +10,7 @@ import { authMiddleware } from '../middleware/auth.js';
 import { extractDriveFolderId, isValidDriveId } from '../utils/drive-parser.js';
 import { updateStatusSheet } from '../services/status-sheet.js';
 import { getCachedFolderStructure } from '../services/folder-structure.js';
+import { updateLastScanTime } from '../services/watch-manager.js';
 
 /**
  * Scan request body
@@ -80,7 +81,8 @@ export async function scanRoutes(server: FastifyInstance) {
       };
     }
 
-    // Update status sheet after scan
+    // Update last scan time and status sheet after successful scan
+    updateLastScanTime();
     const folderStructure = getCachedFolderStructure();
     if (folderStructure?.dashboardOperativoId) {
       void updateStatusSheet(folderStructure.dashboardOperativoId);

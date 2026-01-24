@@ -358,6 +358,14 @@ export function triggerScan(folderId?: string): void {
 }
 
 /**
+ * Updates the last scan timestamp
+ * Called by external scan triggers (API, startup) to keep status in sync
+ */
+export function updateLastScanTime(): void {
+  lastScanTime = new Date();
+}
+
+/**
  * Get watch manager status for health checks
  *
  * @returns Current status

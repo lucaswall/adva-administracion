@@ -9,8 +9,9 @@ import { statusRoutes, setServerStartTime } from './routes/status.js';
 import { scanRoutes } from './routes/scan.js';
 import { webhookRoutes } from './routes/webhooks.js';
 import { discoverFolderStructure, getCachedFolderStructure } from './services/folder-structure.js';
-import { initWatchManager, startWatching, shutdownWatchManager } from './services/watch-manager.js';
+import { initWatchManager, startWatching, shutdownWatchManager, updateLastScanTime } from './services/watch-manager.js';
 import { scanFolder } from './processing/scanner.js';
+import { updateStatusSheet } from './services/status-sheet.js';
 import { info, error as logError } from './utils/logger.js';
 
 /**
@@ -146,6 +147,13 @@ async function performStartupScan(): Promise<void> {
       pagosAdded: result.value.pagosAdded,
       errors: result.value.errors
     });
+
+    // Update last scan time and status sheet after successful scan
+    updateLastScanTime();
+    const folderStructure = getCachedFolderStructure();
+    if (folderStructure?.dashboardOperativoId) {
+      await updateStatusSheet(folderStructure.dashboardOperativoId);
+    }
   } else {
     logError('Startup scan failed', {
       module: 'server',
@@ -185,6 +193,16 @@ async function start() {
 
     // Start real-time monitoring (if configured)
     await initializeRealTimeMonitoring();
+
+    // Update status sheet with initial server state
+    const folderStructure = getCachedFolderStructure();
+    if (folderStructure?.dashboardOperativoId) {
+      await updateStatusSheet(folderStructure.dashboardOperativoId);
+      info('Initial status sheet updated', {
+        module: 'server',
+        phase: 'startup'
+      });
+    }
 
     // Perform startup scan
     await performStartupScan();

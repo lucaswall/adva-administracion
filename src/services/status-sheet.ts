@@ -8,8 +8,8 @@ import { getServerStartTime, formatUptime } from '../routes/status.js';
 import { getProcessingQueue } from '../processing/queue.js';
 import { getWatchManagerStatus } from './watch-manager.js';
 import { getConfig } from '../config.js';
-import { setValues } from './sheets.js';
-import { debug, error as logError } from '../utils/logger.js';
+import { setValues, getSheetMetadata, applyConditionalFormat } from './sheets.js';
+import { debug, info, error as logError } from '../utils/logger.js';
 
 /**
  * Status metrics collected from the system
@@ -67,6 +67,83 @@ export function collectStatusMetrics(): StatusMetrics {
 function formatTimestamp(date: Date | null): string {
   if (!date) return '';
   return date.toISOString().replace('T', ' ').split('.')[0];
+}
+
+/**
+ * Track if conditional formatting has been applied to avoid redundant API calls
+ */
+let conditionalFormattingApplied = false;
+
+/**
+ * Applies conditional formatting to the Status sheet
+ * - ONLINE: Green text, non-bold
+ * - OFFLINE: Red text, bold
+ *
+ * @param spreadsheetId - Dashboard Operativo Contable spreadsheet ID
+ * @returns Success or error
+ */
+async function applyStatusConditionalFormatting(
+  spreadsheetId: string
+): Promise<Result<void, Error>> {
+  try {
+    // Get sheet metadata to find Status sheet ID
+    const metadataResult = await getSheetMetadata(spreadsheetId);
+    if (!metadataResult.ok) {
+      return metadataResult;
+    }
+
+    const statusSheet = metadataResult.value.find(s => s.title === 'Status');
+    if (!statusSheet) {
+      return {
+        ok: false,
+        error: new Error('Status sheet not found'),
+      };
+    }
+
+    // Apply conditional formatting for ONLINE (green) and OFFLINE (red/bold)
+    const result = await applyConditionalFormat(spreadsheetId, [
+      {
+        sheetId: statusSheet.sheetId,
+        startRowIndex: 0,
+        endRowIndex: 1,
+        startColumnIndex: 1, // Column B (Estado value)
+        endColumnIndex: 2,
+        text: 'ONLINE',
+        textColor: { red: 0, green: 0.6, blue: 0 }, // Green
+        bold: false,
+      },
+      {
+        sheetId: statusSheet.sheetId,
+        startRowIndex: 0,
+        endRowIndex: 1,
+        startColumnIndex: 1, // Column B (Estado value)
+        endColumnIndex: 2,
+        text: 'OFFLINE',
+        textColor: { red: 0.8, green: 0, blue: 0 }, // Red
+        bold: true,
+      },
+    ]);
+
+    if (result.ok) {
+      info('Conditional formatting applied to Status sheet', {
+        module: 'status-sheet',
+        phase: 'format',
+      });
+      conditionalFormattingApplied = true;
+    }
+
+    return result;
+  } catch (error) {
+    logError('Error applying conditional formatting', {
+      module: 'status-sheet',
+      phase: 'format',
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return {
+      ok: false,
+      error: error instanceof Error ? error : new Error(String(error)),
+    };
+  }
 }
 
 /**
@@ -140,6 +217,19 @@ export async function updateStatusSheet(
       phase: 'update',
       cellsUpdated: result.value,
     });
+
+    // Apply conditional formatting on first update
+    if (!conditionalFormattingApplied) {
+      const formatResult = await applyStatusConditionalFormatting(spreadsheetId);
+      if (!formatResult.ok) {
+        // Log error but don't fail the update
+        logError('Failed to apply conditional formatting (non-fatal)', {
+          module: 'status-sheet',
+          phase: 'update',
+          error: formatResult.error.message,
+        });
+      }
+    }
 
     return { ok: true, value: undefined };
   } catch (error) {
