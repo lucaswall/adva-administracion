@@ -25,7 +25,10 @@ This server processes Argentine invoices and payment documents using AI, automat
 - **Facturas Recibidas**: Invoices TO ADVA (ADVA is receptor) → Egresos
 - **Pagos Enviados**: Payments BY ADVA (ADVA is ordenante) → Egresos
 - **Pagos Recibidos**: Payments TO ADVA (ADVA is beneficiario) → Ingresos
-- **Resumenes Bancarios**: Bank statements → Bancos
+- **Certificados de Retención**: Tax withholding certificates (ADVA is sujeto retenido) → Ingresos
+- **Resumenes Bancarios**: Bank account statements → Bancos
+- **Resumenes de Tarjeta**: Credit card statements → Bancos
+- **Resumenes de Broker**: Investment/broker statements → Bancos
 - **Recibos**: Employee salary receipts → Egresos
 
 ---
@@ -337,7 +340,10 @@ ADVA Root Folder/
 │   ├── Egresos/                    # Money OUT documents for 2024
 │   │   ├── 01 - Enero/
 │   │   └── ... (12 months, auto-created as needed)
-│   └── Bancos/                     # Bank statements for 2024 (no month subfolders)
+│   └── Bancos/                     # Bank/financial statements (no month subfolders)
+│       ├── BBVA 1234567890 ARS/    # Bank account folder (resumen_bancario)
+│       ├── BBVA Visa 4563/         # Credit card folder (resumen_tarjeta)
+│       └── BALANZ 123456/          # Broker folder (resumen_broker)
 ├── 2025/                           # Next year (created when first document arrives)
 │   ├── Ingresos/
 │   ├── Egresos/
@@ -349,9 +355,21 @@ ADVA Root Folder/
 - Year folders are created dynamically when the first document for that year is processed
 - Classification folders (Ingresos, Egresos, Bancos) are auto-created inside each year folder
 - Month subfolders are created inside Ingresos and Egresos as documents arrive
-- Bancos has no month subfolders - bank statements go directly into the year's Bancos folder
+- Bancos has no month subfolders - statements go into account-specific subfolders
 - Entrada and Sin Procesar remain at the root level for easy access
 - Direction-aware classification routes documents based on ADVA's role (emisor/receptor/ordenante/beneficiario)
+
+### Bancos Folder Organization
+
+The Bancos folder contains three types of financial statements, each with its own folder naming convention:
+
+| Document Type | Folder Format | Example |
+|---------------|---------------|---------|
+| **resumen_bancario** (Bank statements) | `{Bank} {Account Number} {Currency}` | `BBVA 1234567890 ARS` |
+| **resumen_tarjeta** (Credit cards) | `{Bank} {Card Type} {Last Digits}` | `BBVA Visa 4563` |
+| **resumen_broker** (Investment) | `{Broker} {Comitente Number}` | `BALANZ CAPITAL VALORES SAU 123456` |
+
+**Credit card types:** Visa, Mastercard, Amex, Naranja, Cabal
 
 ---
 

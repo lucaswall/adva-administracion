@@ -1,88 +1,212 @@
 # ADVA Administración Server
 
 ## STATUS: DEVELOPMENT
-- Breaking changes OK, delete unused code immediately
-- Update all refs when changing APIs/configs
+Breaking changes OK. Delete unused code immediately. Update refs when changing APIs/configs.
 
-## RULES
-- **BUILD**: Zero warnings required
-- **SYNC**: Update this file when architecture changes
-- **PLANS**: Fully executable by Claude - no manual human steps
+## CRITICAL RULES (ALWAYS FOLLOW)
 
-## TDD WORKFLOW (MANDATORY)
+1. **TDD is mandatory** - Write test BEFORE implementation code. No exceptions.
+2. **Zero warnings** - Build must have zero warnings
+3. **No console.log** - Use Pino logger from `utils/logger.ts`
+4. **ESM imports** - Always use `.js` extensions in imports
+5. **Result<T,E> pattern** - Use for all error-prone operations
+6. **Update this file** - When architecture changes
 
-**For every new function/feature, follow this sequence:**
+## TDD WORKFLOW
 
-1. **Write test first** - Create failing test that defines expected behavior
-2. **Run test-runner** - Confirm test fails (red)
-3. **Write implementation** - Minimal code to pass the test
-4. **Run test-runner** - Confirm test passes (green)
-5. **Refactor** - Clean up while keeping tests green
+Every new function/feature follows this sequence:
 
-**NEVER write implementation code before its test exists.**
+1. Write failing test that defines expected behavior
+2. Run `test-runner` agent - confirm test fails (red)
+3. Write minimal implementation code
+4. Run `test-runner` agent - confirm test passes (green)
+5. Refactor while keeping tests green
 
-Coverage requirement: >=80%
+**Coverage requirement:** >=80%
 
-**Post-implementation verification:**
-`bug-hunter` → `test-runner` → `builder` → fix any issues
+### Post-Implementation Checklist
+
+After completing work, run these agents in order:
+1. `bug-hunter` - Review git changes for bugs - Fix any issues found
+2. `test-runner` - Verify all tests pass - Fix any failures
+3. `builder` - Verify zero warnings - Fix any warnings
+
+### TDD in Plans
+
+Each implementation task MUST include writing tests as its first step. Example:
+```
+Task: Add parseResumenBroker function
+1. Write test in parser.test.ts for parseResumenBrokerResponse
+2. Run test-runner (expect fail)
+3. Implement parseResumenBrokerResponse in parser.ts
+4. Run test-runner (expect pass)
+```
 
 ## SUBAGENTS
 
-| Agent | Purpose | Replaces |
-|-------|---------|----------|
-| `bug-hunter` (opus) | Find bugs in git changes | - |
-| `test-runner` (haiku) | Run tests | `npm test` |
-| `builder` (haiku) | Build project | `npm run build` |
-| `commit-bot` (haiku) | Commit to current branch | `git commit` |
-| `pr-creator` (haiku) | Branch + commit + push + PR | `gh pr create` |
+| Agent | Purpose | When to Use |
+|-------|---------|-------------|
+| `bug-hunter` (opus) | Find bugs in git changes | After implementation, before commit |
+| `test-runner` (haiku) | Run tests | After writing/changing code |
+| `builder` (haiku) | Build project | Before commit to verify no warnings |
+| `commit-bot` (haiku) | Commit to current branch | Only when user requests commit |
+| `pr-creator` (haiku) | Branch + commit + push + PR | Only when user requests PR |
 
-**Git agents**: Only use if explicitly requested. If PR requested, use `pr-creator` only (it includes commit). Never use both.
+**Git agents rule:** Only use `commit-bot` or `pr-creator` if explicitly requested. If PR requested, use `pr-creator` only (it includes commit).
 
 ## MCP SERVERS
 
-**Railway MCP** (READ-ONLY): `get-logs`, `list-deployments`, `list-services`, `list-variables`, `check-railway-status`
-- NEVER: `deploy`, `create-environment`, `set-variables`, `create-project-and-link`, `deploy-template`, `link-environment`, `link-service`, `generate-domain`
+### Railway MCP (READ-ONLY)
+Allowed: `get-logs`, `list-deployments`, `list-services`, `list-variables`, `check-railway-status`
 
-**Google Drive MCP** (`gdrive`): `gdrive_search`, `gdrive_read_file`, `gdrive_list_folder`, `gdrive_get_pdf`, `gsheets_read`
+**FORBIDDEN - NEVER USE:**
+- `deploy`
+- `create-environment`
+- `set-variables`
+- `create-project-and-link`
+- `deploy-template`
+- `link-environment`
+- `link-service`
+- `generate-domain`
 
-**Gemini MCP** (`gemini`): `gemini_analyze_pdf` - For testing prompts only; production uses `src/gemini/`
+### Google Drive MCP
+`gdrive_search`, `gdrive_read_file`, `gdrive_list_folder`, `gdrive_get_pdf`, `gsheets_read`
+
+### Gemini MCP
+`gemini_analyze_pdf` - For testing prompts only; production uses `src/gemini/`
+
+## STYLE GUIDE
+
+**TypeScript:**
+- Strict mode enabled
+- Use `interface` over `type` for object shapes
+- Use `Result<T,E>` pattern for fallible operations
+- JSDoc comments on all exported functions
+
+**Naming:**
+- Files: `kebab-case.ts`
+- Types/Interfaces: `PascalCase`
+- Functions/variables: `camelCase`
+- Constants: `UPPER_SNAKE_CASE`
+
+**Imports:**
+- ESM with `.js` extensions: `import { foo } from './bar.js'`
+
+## LOGGING
+
+Use Pino logger from `utils/logger.ts`. NEVER use `console.log`.
+
+```typescript
+import { debug, info, warn, error as logError } from '../utils/logger.js';
+info('Message', { module: 'scanner', phase: 'process', fileId: 'abc' });
+```
+
+**Levels:**
+- `debug()` - Dev details
+- `info()` - State changes
+- `warn()` - Handled issues
+- `error()` - Failures
+
+Routes use Fastify logger: `server.log.info({ data }, 'message')`
 
 ## STRUCTURE
+
 ```
 src/
-├── server.ts, config.ts, types/index.ts  # TipoTarjeta type in types/
-├── constants/spreadsheet-headers.ts
-├── routes/{status,scan,webhooks}.ts
-├── middleware/auth.ts          # Bearer token auth
-├── services/{google-auth,drive,sheets,folder-structure,document-sorter,watch-manager,token-usage-logger,pagos-pendientes}.ts
-├── processing/{queue,scanner,extractor}.ts
-├── processing/matching/{index,factura-pago-matcher,recibo-pago-matcher,nc-factura-matcher}.ts
-├── processing/storage/{index,factura-store,pago-store,recibo-store,retencion-store,resumen-store}.ts
-├── matching/{matcher,cascade-matcher}.ts
-├── gemini/{client,prompts,parser,errors}.ts  # TipoTarjeta validation
-├── utils/{date,numbers,currency,validation,file-naming,spanish-date,exchange-rate,drive-parser,logger,spreadsheet,circuit-breaker,concurrency,correlation}.ts
-└── bank/{matcher,autofill,subdiario-matcher}.ts
+├── server.ts              # Fastify server setup
+├── config.ts              # Configuration constants
+├── types/index.ts         # Shared types (includes TipoTarjeta)
+├── constants/
+│   └── spreadsheet-headers.ts
+├── routes/
+│   ├── status.ts
+│   ├── scan.ts
+│   └── webhooks.ts
+├── middleware/
+│   └── auth.ts            # Bearer token authentication
+├── services/
+│   ├── google-auth.ts
+│   ├── drive.ts
+│   ├── sheets.ts
+│   ├── folder-structure.ts
+│   ├── document-sorter.ts
+│   ├── watch-manager.ts
+│   ├── token-usage-logger.ts
+│   └── pagos-pendientes.ts
+├── processing/
+│   ├── queue.ts
+│   ├── scanner.ts
+│   ├── extractor.ts
+│   ├── matching/
+│   │   ├── index.ts
+│   │   ├── factura-pago-matcher.ts
+│   │   ├── recibo-pago-matcher.ts
+│   │   └── nc-factura-matcher.ts
+│   └── storage/
+│       ├── index.ts
+│       ├── factura-store.ts
+│       ├── pago-store.ts
+│       ├── recibo-store.ts
+│       ├── retencion-store.ts
+│       └── resumen-store.ts
+├── matching/
+│   ├── matcher.ts
+│   └── cascade-matcher.ts
+├── gemini/
+│   ├── client.ts
+│   ├── prompts.ts
+│   ├── parser.ts          # TipoTarjeta validation here
+│   └── errors.ts
+├── utils/
+│   ├── date.ts
+│   ├── numbers.ts
+│   ├── currency.ts
+│   ├── validation.ts
+│   ├── file-naming.ts
+│   ├── spanish-date.ts
+│   ├── exchange-rate.ts
+│   ├── drive-parser.ts
+│   ├── logger.ts          # Pino logger - use this, not console.log
+│   ├── spreadsheet.ts
+│   ├── circuit-breaker.ts
+│   ├── concurrency.ts
+│   └── correlation.ts
+└── bank/
+    ├── matcher.ts
+    ├── autofill.ts
+    └── subdiario-matcher.ts
 
-apps-script/   # Dashboard ADVA menu (bound script)
-├── src/{main.ts,config.template.ts}
-├── build.js   # Injects API_BASE_URL + API_SECRET from .env
-└── dist/      # Compiled output (clasp pushes from here)
+apps-script/              # Dashboard ADVA menu (bound script)
+├── src/
+│   ├── main.ts
+│   └── config.template.ts
+├── build.js              # Injects API_BASE_URL + API_SECRET from .env
+└── dist/                 # Compiled output (clasp pushes from here)
 ```
+
+**Test files:** Colocated with source as `*.test.ts`:
+- `src/services/document-sorter.test.ts`
+- `src/processing/queue.test.ts`
+- `src/processing/matching/nc-factura-matcher.test.ts`
+- `src/processing/storage/factura-store.test.ts`
+- `src/processing/storage/pago-store.test.ts`
+- `src/processing/storage/resumen-store.test.ts`
 
 ## SECURITY
 
 All endpoints except `/health` and `/webhooks/drive` require Bearer token: `Authorization: Bearer <API_SECRET>`
 
-**Adding endpoints**: Always use `{ onRequest: authMiddleware }`:
+**Adding endpoints:** Always use `{ onRequest: authMiddleware }`:
 ```typescript
 server.post('/api/new', { onRequest: authMiddleware }, handler);
 ```
 
-**Webhook endpoint**: `/webhooks/drive` is public (no auth) - Google Drive cannot send custom headers. Security via channel ID validation.
+**Webhook endpoint:** `/webhooks/drive` is public (no auth) - Google Drive cannot send custom headers. Security via channel ID validation.
 
-**Secret rotation**: Update `.env`, run `npm run deploy:script`, restart server.
+**Secret rotation:** Update `.env`, run `npm run deploy:script`, restart server.
 
 ## COMMANDS
+
 ```bash
 npm run dev           # Dev with watch
 npm test              # Vitest (use test-runner agent)
@@ -92,6 +216,7 @@ npm run deploy:script # Build + deploy to Dashboard
 ```
 
 ## ENV VARS
+
 | Var | Required | Default |
 |-----|----------|---------|
 | GOOGLE_SERVICE_ACCOUNT_KEY | Yes | - |
@@ -108,6 +233,7 @@ npm run deploy:script # Build + deploy to Dashboard
 **Note:** `API_BASE_URL` enables webhooks (URL + `/webhooks/drive`) and Apps Script (domain extracted at build)
 
 ## API ENDPOINTS
+
 | Method | Endpoint | Auth | Description |
 |--------|----------|------|-------------|
 | GET | /health | No | Health check |
@@ -117,38 +243,17 @@ npm run deploy:script # Build + deploy to Dashboard
 | POST | /api/autofill-bank | Yes | Auto-fill bank |
 | POST | /webhooks/drive | No | Drive notifications |
 
-## STYLE
-- TS strict mode, `interface`, JSDoc, `Result<T,E>`
-- Names: kebab-files, PascalTypes, camelFuncs, UPPER_CONSTS
-- ESM imports with `.js` extensions
-
-## LOGGING
-Use Pino logger from `utils/logger.ts`. NEVER use `console.log`.
-
-```typescript
-import { debug, info, warn, error as logError } from '../utils/logger.js';
-info('Message', { module: 'scanner', phase: 'process', fileId: 'abc' });
-```
-
-Levels: `debug()` dev details, `info()` state changes, `warn()` handled issues, `error()` failures.
-Routes use Fastify logger: `server.log.info({ data }, 'message')`
-
 ## TESTING
-- Framework: Vitest
+
+**Framework:** Vitest
+
+**Test Data:**
 - Fake CUITs: `20123456786`, `27234567891`, `20111111119`
-- ADVA CUIT `30709076783` OK
+- ADVA CUIT `30709076783` is OK to use
 - Fictional names: "TEST SA", "EMPRESA UNO SA", "Juan Perez"
 
-**In plans:** Each implementation task MUST include writing tests as its first step. Example:
-```
-Task: Add parseResumenBroker function
-1. Write test in parser.test.ts for parseResumenBrokerResponse
-2. Run test-runner (expect fail)
-3. Implement parseResumenBrokerResponse in parser.ts
-4. Run test-runner (expect pass)
-```
-
 ## DOCUMENT CLASSIFICATION
+
 ADVA CUIT: 30709076783 | Direction determines routing:
 
 | Type | ADVA Role | Destination |
@@ -169,17 +274,22 @@ ADVA CUIT: 30709076783 | Direction determines routing:
 - `resumen_broker`: Broker/investment statements (Comitente number, instruments list, multi-currency)
 
 ## FOLDER STRUCTURE
+
 ```
 ROOT/
-├── Control de Ingresos.gsheet, Control de Egresos.gsheet
+├── Control de Ingresos.gsheet
+├── Control de Egresos.gsheet
 ├── Dashboard Operativo Contable.gsheet
-├── Entrada/, Sin Procesar/, Duplicado/
+├── Entrada/
+├── Sin Procesar/
+├── Duplicado/
 └── {YYYY}/
-    ├── Ingresos/{MM - Mes}/, Egresos/{MM - Mes}/
+    ├── Ingresos/{MM - Mes}/
+    ├── Egresos/{MM - Mes}/
     └── Bancos/
-        ├── {Bank} {Account} {Currency}/     # Bank accounts (resumen_bancario)
-        ├── {Bank} {CardType} {LastDigits}/  # Credit cards (resumen_tarjeta)
-        └── {Broker} {Comitente}/            # Brokers (resumen_broker)
+        ├── {Bank} {Account} {Currency}/     # resumen_bancario
+        ├── {Bank} {CardType} {LastDigits}/  # resumen_tarjeta
+        └── {Broker} {Comitente}/            # resumen_broker
 ```
 
 **Bank account folder naming (resumen_bancario):**
@@ -197,6 +307,7 @@ ROOT/
 - Example: `BALANZ CAPITAL VALORES SAU 123456`
 
 ## SPREADSHEETS
+
 See `SPREADSHEET_FORMAT.md` for complete schema.
 
 - **Control de Ingresos**: Facturas Emitidas (18 cols), Pagos Recibidos (15 cols), Retenciones Recibidas (15 cols)
@@ -221,7 +332,7 @@ See `SPREADSHEET_FORMAT.md` for complete schema.
 ### Cascading Displacement
 Better matches replace existing ones. Quality comparison: confidence → CUIT match → date proximity.
 
-**Termination**: max depth (10), cycle detection, timeout (30s), no better candidates.
+**Termination:** max depth (10), cycle detection, timeout (30s), no better candidates.
 
 Config: `MAX_CASCADE_DEPTH = 10`, `CASCADE_TIMEOUT_MS = 30000` in `src/config.ts`
 
