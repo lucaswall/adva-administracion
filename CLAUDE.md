@@ -342,6 +342,7 @@ See `SPREADSHEET_FORMAT.md` for complete schema.
 - Store counterparty info only, ADVA's role is implicit
 - Use `CellDate` type for proper date formatting in spreadsheets
 - Use `CellNumber` type for proper monetary formatting in spreadsheets (displays as #,##0.00)
+- **Spreadsheet timestamps** - All timestamps written to spreadsheets MUST use the spreadsheet's timezone. Fetch timezone with `getSpreadsheetTimezone(spreadsheetId)` and pass it to `appendRowsWithLinks` as the 4th parameter. This ensures timestamps display in the correct local time (typically `America/Argentina/Buenos_Aires`) rather than UTC.
 
 ## MATCHING
 

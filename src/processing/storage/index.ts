@@ -2,7 +2,7 @@
  * Storage module index - exports all storage functions
  */
 
-import { getValues, appendRowsWithLinks, batchUpdate } from '../../services/sheets.js';
+import { getValues, appendRowsWithLinks, batchUpdate, getSpreadsheetTimezone } from '../../services/sheets.js';
 import type { Result, DocumentType } from '../../types/index.js';
 import { info as logInfo, error as logError } from '../../utils/logger.js';
 import { getCorrelationId } from '../../utils/correlation.js';
@@ -45,10 +45,15 @@ export async function markFileProcessing(
   const correlationId = getCorrelationId();
   const processedAt = new Date().toISOString();
 
+  // Get spreadsheet timezone for proper timestamp formatting
+  const timezoneResult = await getSpreadsheetTimezone(dashboardId);
+  const timeZone = timezoneResult.ok ? timezoneResult.value : undefined;
+
   const result = await appendRowsWithLinks(
     dashboardId,
     'Archivos Procesados',
-    [[fileId, fileName, processedAt, documentType, 'processing']]
+    [[fileId, fileName, processedAt, documentType, 'processing']],
+    timeZone
   );
 
   if (!result.ok) {
