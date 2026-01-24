@@ -8,7 +8,7 @@ import {
   CLASSIFICATION_PROMPT,
   FACTURA_PROMPT,
   PAGO_BBVA_PROMPT,
-  RESUMEN_BANCARIO_PROMPT,
+  getResumenBancarioPrompt,
   RECIBO_PROMPT
 } from '../../../src/gemini/prompts';
 
@@ -253,85 +253,82 @@ describe('PAGO_BBVA_PROMPT', () => {
   });
 });
 
-describe('RESUMEN_BANCARIO_PROMPT', () => {
-  it('exists and is a non-empty string', () => {
-    expect(RESUMEN_BANCARIO_PROMPT).toBeDefined();
-    expect(typeof RESUMEN_BANCARIO_PROMPT).toBe('string');
-    expect(RESUMEN_BANCARIO_PROMPT.length).toBeGreaterThan(0);
+describe('getResumenBancarioPrompt', () => {
+  it('returns a non-empty string', () => {
+    const prompt = getResumenBancarioPrompt();
+    expect(prompt).toBeDefined();
+    expect(typeof prompt).toBe('string');
+    expect(prompt.length).toBeGreaterThan(0);
   });
 
   it('mentions bank statement terminology', () => {
-    expect(RESUMEN_BANCARIO_PROMPT).toContain('bank account statement');
-    expect(RESUMEN_BANCARIO_PROMPT).toContain('Resumen');
-    expect(RESUMEN_BANCARIO_PROMPT).toContain('Extracto');
+    const prompt = getResumenBancarioPrompt();
+    expect(prompt).toContain('bank account statement');
+    expect(prompt).toContain('Resumen');
+    expect(prompt).toContain('Extracto');
   });
 
   it('requests JSON format output', () => {
-    expect(RESUMEN_BANCARIO_PROMPT).toContain('JSON');
+    const prompt = getResumenBancarioPrompt();
+    expect(prompt).toContain('JSON');
   });
 
   it('specifies date format as YYYY-MM-DD', () => {
-    expect(RESUMEN_BANCARIO_PROMPT).toContain('YYYY-MM-DD');
+    const prompt = getResumenBancarioPrompt();
+    expect(prompt).toContain('YYYY-MM-DD');
   });
 
-  describe('year inference logic', () => {
-    it('instructs to use LAST YEAR when month number is GREATER THAN current month', () => {
-      // When processing in January 2026, months like February-December should use 2025
-      expect(RESUMEN_BANCARIO_PROMPT).toContain('GREATER THAN the current month number');
-      expect(RESUMEN_BANCARIO_PROMPT).toContain('LAST YEAR');
+  describe('three-tier year extraction approach', () => {
+    it('mentions TIER 1 for clear labels', () => {
+      const prompt = getResumenBancarioPrompt();
+      expect(prompt).toContain('TIER 1');
+      expect(prompt).toContain('CLEAR LABELS');
     });
 
-    it('provides correct example for month number > current month (December in January)', () => {
-      // December (month 12) > January (month 1) numerically
-      // So it should use LAST YEAR to avoid future dates
-      expect(RESUMEN_BANCARIO_PROMPT).toContain('30 DE DICIEMBRE');
-      expect(RESUMEN_BANCARIO_PROMPT).toContain('2025-12-30');
-      // Should show the numerical comparison
-      expect(RESUMEN_BANCARIO_PROMPT).toContain('month 12');
-      expect(RESUMEN_BANCARIO_PROMPT).toContain('month 1');
+    it('mentions TIER 2 for transaction dates', () => {
+      const prompt = getResumenBancarioPrompt();
+      expect(prompt).toContain('TIER 2');
+      expect(prompt).toContain('TRANSACTION DATES');
     });
 
-    it('provides correct example for month equal to current month (January in January)', () => {
-      // January equals current month, should use THIS YEAR
-      expect(RESUMEN_BANCARIO_PROMPT).toContain('20 DE ENERO');
-      expect(RESUMEN_BANCARIO_PROMPT).toContain('2026-01-20');
+    it('mentions TIER 3 for dynamic inference', () => {
+      const prompt = getResumenBancarioPrompt();
+      expect(prompt).toContain('TIER 3');
+      expect(prompt).toContain('DYNAMIC INFERENCE');
     });
 
-    it('does NOT provide contradictory February example', () => {
-      // February is AFTER current month (January), so it should use LAST YEAR (2025)
-      // If the prompt shows "2026-02-15", that's a contradiction
-      const hasFebruaryExample = RESUMEN_BANCARIO_PROMPT.includes('15 DE FEBRERO');
-
-      if (hasFebruaryExample) {
-        // If February example exists, it must use 2025, not 2026
-        expect(RESUMEN_BANCARIO_PROMPT).not.toContain('2026-02-15');
-        expect(RESUMEN_BANCARIO_PROMPT).toContain('2025-02-15');
-      }
+    it('explains month comparison rule in TIER 3', () => {
+      const prompt = getResumenBancarioPrompt();
+      expect(prompt).toContain('document month > current month');
+      expect(prompt).toContain('previous year');
+      expect(prompt).toContain('current year');
     });
 
-    it('explains the rule clearly with numerical comparison', () => {
-      // The rule should use clear numerical comparison
-      expect(RESUMEN_BANCARIO_PROMPT).toContain('current month number');
+    it('injects dynamic current date', () => {
+      const jan2025Prompt = getResumenBancarioPrompt(new Date('2025-01-15'));
+      const dec2024Prompt = getResumenBancarioPrompt(new Date('2024-12-20'));
 
-      // Should not have confusing "BEFORE/AFTER" language for chronological ordering
-      const hasConfusingLanguage = RESUMEN_BANCARIO_PROMPT.includes('December is BEFORE current month');
-      expect(hasConfusingLanguage).toBe(false);
+      expect(jan2025Prompt).toMatch(/Current date: January 2025/);
+      expect(dec2024Prompt).toMatch(/Current date: December 2024/);
     });
   });
 
   it('mentions alternative balance terminology', () => {
-    expect(RESUMEN_BANCARIO_PROMPT).toContain('Saldo Inicial');
-    expect(RESUMEN_BANCARIO_PROMPT).toContain('Saldo Final');
-    expect(RESUMEN_BANCARIO_PROMPT).toContain('Saldo Anterior');
-    expect(RESUMEN_BANCARIO_PROMPT).toContain('Saldo al');
+    const prompt = getResumenBancarioPrompt();
+    expect(prompt).toContain('Saldo Inicial');
+    expect(prompt).toContain('Saldo Final');
+    expect(prompt).toContain('Saldo Anterior');
+    expect(prompt).toContain('Saldo al');
   });
 
   it('handles SIN MOVIMIENTOS case', () => {
-    expect(RESUMEN_BANCARIO_PROMPT).toContain('SIN MOVIMIENTOS');
+    const prompt = getResumenBancarioPrompt();
+    expect(prompt).toContain('SIN MOVIMIENTOS');
   });
 
   it('mentions USD currency detection', () => {
-    expect(RESUMEN_BANCARIO_PROMPT).toContain('USD');
-    expect(RESUMEN_BANCARIO_PROMPT).toContain('u$s');
+    const prompt = getResumenBancarioPrompt();
+    expect(prompt).toContain('USD');
+    expect(prompt).toContain('u$s');
   });
 });
