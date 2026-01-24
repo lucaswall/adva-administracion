@@ -37,7 +37,7 @@ DOCUMENT TYPES:
 5. "resumen_bancario" - Bank account statement
    - "Movimientos en cuentas", "CC $", "CA $"
    - DÉBITO/CRÉDITO/SALDO columns
-   - Account numbers (typically 10+ digits)
+   - Account numbers with formatting (e.g., "007-009364/1", "0003043/0")
    - Banks: BBVA, Santander, Galicia, Banco Ciudad, Credicoop
 
 6. "resumen_tarjeta" - Credit card statement
@@ -315,11 +315,20 @@ Return JSON only:
 export const RESUMEN_BANCARIO_PROMPT = `Extract data from this Argentine bank account statement (Resumen/Extracto Bancario).
 
 This is a BANK ACCOUNT statement (not credit card, not broker).
-Look for: account numbers (10+ digits), DÉBITO/CRÉDITO columns, Saldo Inicial/Final.
+Look for: DÉBITO/CRÉDITO columns, Saldo Inicial/Final.
 
 Required fields:
 - banco: Bank name (e.g., "BBVA", "Santander", "Galicia", "Banco Ciudad", "Credicoop")
-- numeroCuenta: Bank account number (typically 10+ digits)
+- numeroCuenta: Bank account number WITH its formatting (NOT the CBU!)
+  - CRITICAL: CBU is 22 digits - DO NOT extract this as the account number
+  - Account numbers are SHORT (4-10 digits) and include slashes, dots, dashes - preserve these!
+  - Examples of what TO extract:
+    - BBVA: "CC $ 007-009364/1" → extract "007-009364/1"
+    - Banco Ciudad: "CUENTA NÚMERO: 0003043/0" → extract "0003043/0"
+    - Credicoop: "Cta. 191.001.066458.4" → extract "191.001.066458.4"
+    - Santander: "Nro. Cuenta: 123-456789/0" → extract "123-456789/0"
+  - Look for labels like "Cta.", "CUENTA", "CC $", "CA $", "Nro. Cuenta"
+  - The CBU is usually labeled separately as "CBU" - ignore it
 - fechaDesde, fechaHasta: YYYY-MM-DD (statement period)
 - saldoInicial, saldoFinal: Numbers (may be labeled "Saldo Inicial", "Saldo Final", "Saldo Anterior", "Saldo al")
 - moneda: ARS or USD (look for "u$s", "USD", "U$S" for USD)
@@ -336,7 +345,7 @@ NUMBER FORMAT: "2.917.310,00" = 2917310.00
 Return ONLY valid JSON:
 {
   "banco": "BBVA",
-  "numeroCuenta": "1234567890",
+  "numeroCuenta": "007-009364/1",
   "fechaDesde": "2024-01-01",
   "fechaHasta": "2024-01-31",
   "saldoInicial": 150000.00,

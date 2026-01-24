@@ -4,7 +4,7 @@
  */
 
 import type { Result, ResumenBancario, ResumenTarjeta, ResumenBroker, StoreResult } from '../../types/index.js';
-import { appendRowsWithLinks, sortSheet, getValues, type CellValueOrLink, type CellDate } from '../../services/sheets.js';
+import { appendRowsWithLinks, sortSheet, getValues, type CellValueOrLink, type CellDate, type CellNumber } from '../../services/sheets.js';
 import { generateResumenFileName, generateResumenTarjetaFileName, generateResumenBrokerFileName } from '../../utils/file-naming.js';
 import { info, warn } from '../../utils/logger.js';
 import { getCorrelationId } from '../../utils/correlation.js';
@@ -194,10 +194,12 @@ export async function storeResumenBancario(
     };
   }
 
-  // Build the row with CellDate for proper date formatting
+  // Build the row with CellDate for proper date formatting and CellNumber for monetary values
   const fileName = generateResumenFileName(resumen);
   const fechaDesdeDate: CellDate = { type: 'date', value: resumen.fechaDesde };
   const fechaHastaDate: CellDate = { type: 'date', value: resumen.fechaHasta };
+  const saldoInicialNum: CellNumber = { type: 'number', value: resumen.saldoInicial };
+  const saldoFinalNum: CellNumber = { type: 'number', value: resumen.saldoFinal };
 
   const row: CellValueOrLink[] = [
     fechaDesdeDate,
@@ -210,8 +212,8 @@ export async function storeResumenBancario(
     resumen.banco,
     resumen.numeroCuenta,
     resumen.moneda,
-    resumen.saldoInicial,
-    resumen.saldoFinal,
+    saldoInicialNum,
+    saldoFinalNum,
   ];
 
   // Append the row
@@ -292,10 +294,12 @@ export async function storeResumenTarjeta(
     };
   }
 
-  // Build the row with CellDate for proper date formatting
+  // Build the row with CellDate for proper date formatting and CellNumber for monetary values
   const fileName = generateResumenTarjetaFileName(resumen);
   const fechaDesdeDate: CellDate = { type: 'date', value: resumen.fechaDesde };
   const fechaHastaDate: CellDate = { type: 'date', value: resumen.fechaHasta };
+  const pagoMinimoNum: CellNumber = { type: 'number', value: resumen.pagoMinimo };
+  const saldoActualNum: CellNumber = { type: 'number', value: resumen.saldoActual };
 
   const row: CellValueOrLink[] = [
     fechaDesdeDate,
@@ -308,8 +312,8 @@ export async function storeResumenTarjeta(
     resumen.banco,
     resumen.numeroCuenta,
     resumen.tipoTarjeta,
-    resumen.pagoMinimo,
-    resumen.saldoActual,
+    pagoMinimoNum,
+    saldoActualNum,
   ];
 
   // Append the row
@@ -390,10 +394,18 @@ export async function storeResumenBroker(
     };
   }
 
-  // Build the row with CellDate for proper date formatting
+  // Build the row with CellDate for proper date formatting and CellNumber for monetary values
   const fileName = generateResumenBrokerFileName(resumen);
   const fechaDesdeDate: CellDate = { type: 'date', value: resumen.fechaDesde };
   const fechaHastaDate: CellDate = { type: 'date', value: resumen.fechaHasta };
+
+  // Build CellNumber for optional saldos, or empty string if not present
+  const saldoARSValue: CellNumber | '' = resumen.saldoARS !== undefined
+    ? { type: 'number', value: resumen.saldoARS }
+    : '';
+  const saldoUSDValue: CellNumber | '' = resumen.saldoUSD !== undefined
+    ? { type: 'number', value: resumen.saldoUSD }
+    : '';
 
   const row: CellValueOrLink[] = [
     fechaDesdeDate,
@@ -405,8 +417,8 @@ export async function storeResumenBroker(
     },
     resumen.broker,
     resumen.numeroCuenta,
-    resumen.saldoARS ?? '',  // Optional - empty string if not present
-    resumen.saldoUSD ?? '',  // Optional - empty string if not present
+    saldoARSValue,
+    saldoUSDValue,
   ];
 
   // Append the row

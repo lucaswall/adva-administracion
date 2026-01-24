@@ -42,6 +42,15 @@ Task: Add parseResumenBroker function
 4. Run test-runner (expect pass)
 ```
 
+### Plan Requirements
+
+**No manual steps:** Plans must NEVER include manual verification steps for humans. All verification must be automated through agents:
+- Testing: Use `test-runner` agent
+- Bug detection: Use `bug-hunter` agent
+- Build validation: Use `builder` agent
+
+**Every plan must end with the post-implementation checklist** (see below).
+
 ## SUBAGENTS
 
 | Agent | Purpose | When to Use |
@@ -52,7 +61,7 @@ Task: Add parseResumenBroker function
 | `commit-bot` (haiku) | Commit to current branch | Only when user requests commit |
 | `pr-creator` (haiku) | Branch + commit + push + PR | Only when user requests PR |
 
-**Git agents rule:** Only use `commit-bot` or `pr-creator` if explicitly requested. If PR requested, use `pr-creator` only (it includes commit).
+**Git agents rule:** Only use `commit-bot` or `pr-creator` if explicitly requested. If PR requested, use `pr-creator` only (it handles branch creation, commit, push, and PR creation).
 
 ## MCP SERVERS
 
@@ -321,6 +330,7 @@ See `SPREADSHEET_FORMAT.md` for complete schema.
 **Principles:**
 - Store counterparty info only, ADVA's role is implicit
 - Use `CellDate` type for proper date formatting in spreadsheets
+- Use `CellNumber` type for proper monetary formatting in spreadsheets (displays as #,##0.00)
 
 ## MATCHING
 
