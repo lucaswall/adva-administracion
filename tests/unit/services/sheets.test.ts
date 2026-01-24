@@ -978,6 +978,130 @@ describe('dateStringToSerial', () => {
   });
 });
 
+describe('appendRowsWithLinks - CellNumber handling', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    clearSheetsCache();
+  });
+
+  it('should format CellNumber values with number formatting', async () => {
+    const mockGet = vi.fn().mockResolvedValue({
+      data: {
+        sheets: [
+          {
+            properties: {
+              title: 'Resumenes',
+              sheetId: 123,
+            },
+          },
+        ],
+      },
+    });
+
+    const mockBatchUpdate = vi.fn().mockResolvedValue({
+      data: {
+        replies: [
+          {
+            appendCells: {
+              updatedCells: 3,
+            },
+          },
+        ],
+      },
+    });
+
+    const mockSheets = google.sheets({} as any);
+    mockSheets.spreadsheets.get = mockGet;
+    mockSheets.spreadsheets.batchUpdate = mockBatchUpdate;
+
+    const rows = [
+      [
+        { type: 'number' as const, value: 247881.00 },
+        { type: 'number' as const, value: 15255411.26 },
+        'Other value',
+      ],
+    ];
+
+    const result = await appendRowsWithLinks('spreadsheetId123', 'Resumenes!A:C', rows);
+
+    expect(result.ok).toBe(true);
+    expect(result.value).toBe(3);
+
+    const callArgs = mockBatchUpdate.mock.calls[0][0];
+    const rowData = callArgs.requestBody.requests[0].appendCells.rows[0].values;
+
+    // Check first CellNumber
+    expect(rowData[0].userEnteredValue).toEqual({ numberValue: 247881.00 });
+    expect(rowData[0].userEnteredFormat?.numberFormat).toEqual({
+      type: 'NUMBER',
+      pattern: '#,##0.00',
+    });
+
+    // Check second CellNumber
+    expect(rowData[1].userEnteredValue).toEqual({ numberValue: 15255411.26 });
+    expect(rowData[1].userEnteredFormat?.numberFormat).toEqual({
+      type: 'NUMBER',
+      pattern: '#,##0.00',
+    });
+
+    // Check non-number value
+    expect(rowData[2].userEnteredValue).toEqual({ stringValue: 'Other value' });
+  });
+
+  it('should handle mixed CellNumber and regular numbers differently', async () => {
+    const mockGet = vi.fn().mockResolvedValue({
+      data: {
+        sheets: [
+          {
+            properties: {
+              title: 'Sheet1',
+              sheetId: 123,
+            },
+          },
+        ],
+      },
+    });
+
+    const mockBatchUpdate = vi.fn().mockResolvedValue({
+      data: {
+        replies: [
+          {
+            appendCells: {
+              updatedCells: 2,
+            },
+          },
+        ],
+      },
+    });
+
+    const mockSheets = google.sheets({} as any);
+    mockSheets.spreadsheets.get = mockGet;
+    mockSheets.spreadsheets.batchUpdate = mockBatchUpdate;
+
+    const rows = [
+      [
+        { type: 'number' as const, value: 1234.56 },  // CellNumber - formatted
+        5678.90,  // Regular number - NOT formatted
+      ],
+    ];
+
+    const result = await appendRowsWithLinks('spreadsheetId123', 'Sheet1!A:B', rows);
+
+    expect(result.ok).toBe(true);
+
+    const callArgs = mockBatchUpdate.mock.calls[0][0];
+    const rowData = callArgs.requestBody.requests[0].appendCells.rows[0].values;
+
+    // CellNumber - should have formatting
+    expect(rowData[0].userEnteredFormat?.numberFormat).toBeDefined();
+    expect(rowData[0].userEnteredFormat?.numberFormat?.pattern).toBe('#,##0.00');
+
+    // Regular number - should NOT have formatting
+    expect(rowData[1].userEnteredValue).toEqual({ numberValue: 5678.90 });
+    expect(rowData[1].userEnteredFormat?.numberFormat).toBeUndefined();
+  });
+});
+
 describe('appendRowsWithLinks - CellDate handling', () => {
   beforeEach(() => {
     vi.clearAllMocks();

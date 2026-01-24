@@ -50,9 +50,19 @@ export interface CellDate {
 }
 
 /**
+ * Cell number type - represents a numeric value with formatting
+ * Use this for monetary values to get proper number formatting (#,##0.00) in spreadsheets
+ */
+export interface CellNumber {
+  type: 'number';
+  /** Numeric value */
+  value: number;
+}
+
+/**
  * Cell value or link type
  */
-export type CellValueOrLink = CellValue | CellLink | CellDate;
+export type CellValueOrLink = CellValue | CellLink | CellDate | CellNumber;
 
 /**
  * Gets values from a range
@@ -516,6 +526,18 @@ function isCellDate(value: CellValueOrLink): value is CellDate {
 }
 
 /**
+ * Helper to check if a value is a CellNumber
+ */
+function isCellNumber(value: CellValueOrLink): value is CellNumber {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'type' in value &&
+    value.type === 'number'
+  );
+}
+
+/**
  * Converts a CellValueOrLink to a Sheets API cell data object
  */
 function convertToSheetsCellData(
@@ -536,6 +558,19 @@ function convertToSheetsCellData(
         numberFormat: {
           type: 'DATE',
           pattern: 'yyyy-mm-dd',
+        },
+      },
+    };
+  }
+
+  if (isCellNumber(value)) {
+    // Apply number format for monetary values
+    return {
+      userEnteredValue: { numberValue: value.value },
+      userEnteredFormat: {
+        numberFormat: {
+          type: 'NUMBER',
+          pattern: '#,##0.00',
         },
       },
     };

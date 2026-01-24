@@ -38,8 +38,11 @@ export function sanitizeFileName(name: string): string {
     result = result.replaceAll(accented, ascii);
   }
 
-  // Remove invalid file system characters: / \ : * ? " < > |
-  result = result.replace(/[/\\:*?"<>|]/g, '');
+  // Replace forward slashes with dashes (for account numbers like "007-009364/1")
+  result = result.replace(/\//g, '-');
+
+  // Remove other invalid file system characters: \ : * ? " < > |
+  result = result.replace(/[\\:*?"<>|]/g, '');
 
   // Replace multiple spaces with single space
   result = result.replace(/\s+/g, ' ');

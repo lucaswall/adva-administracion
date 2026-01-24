@@ -16,8 +16,14 @@ import {
 import type { Factura, Pago, Recibo, ResumenBancario, ResumenTarjeta, ResumenBroker } from '../../../src/types/index.js';
 
 describe('sanitizeFileName', () => {
-  it('removes invalid characters', () => {
-    expect(sanitizeFileName('test/file:name*.pdf')).toBe('testfilename.pdf');
+  it('replaces slashes with dashes for account numbers', () => {
+    // Account numbers like "007-009364/1" should become "007-009364-1"
+    expect(sanitizeFileName('007-009364/1')).toBe('007-009364-1');
+    expect(sanitizeFileName('0003043/0')).toBe('0003043-0');
+  });
+
+  it('removes other invalid characters but keeps slashes as dashes', () => {
+    expect(sanitizeFileName('test/file:name*.pdf')).toBe('test-filename.pdf');
   });
 
   it('replaces accented characters', () => {
@@ -344,9 +350,9 @@ describe('generateResumenBrokerFileName', () => {
     expect(result).toBe('2024-01-15 - Resumen Broker - BALANZ CAPITAL VALORES SAU - 123456.pdf');
   });
 
-  it('handles broker name with special characters', () => {
+  it('handles broker name with special characters (slash becomes dash)', () => {
     const broker: ResumenBroker = { ...baseBroker, broker: 'IOL Invertir/Online S.A.' };
     const result = generateResumenBrokerFileName(broker);
-    expect(result).toBe('2024-01-15 - Resumen Broker - IOL InvertirOnline S.A. - 123456.pdf');
+    expect(result).toBe('2024-01-15 - Resumen Broker - IOL Invertir-Online S.A. - 123456.pdf');
   });
 });

@@ -308,7 +308,7 @@ describe('storeResumenBancario (bank accounts)', () => {
   });
 
   describe('row formatting', () => {
-    it('stores row with correct column order and date serials', async () => {
+    it('stores row with correct column order using CellDate and CellNumber types', async () => {
       vi.mocked(getValues).mockResolvedValue({ ok: true, value: [['Header']] });
       vi.mocked(appendRowsWithLinks).mockResolvedValue({ ok: true, value: 9 });
       vi.mocked(sortSheet).mockResolvedValue({ ok: true, value: undefined });
@@ -331,8 +331,8 @@ describe('storeResumenBancario (bank accounts)', () => {
         'Resumenes!A:I',
         expect.arrayContaining([
           expect.arrayContaining([
-            expect.any(Number), // fechaDesde as serial
-            expect.any(Number), // fechaHasta as serial
+            { type: 'date', value: '2024-01-01' }, // fechaDesde as CellDate
+            { type: 'date', value: '2024-01-31' }, // fechaHasta as CellDate
             'test-id-123',
             expect.objectContaining({
               text: expect.stringContaining('2024-01-01'),
@@ -341,8 +341,8 @@ describe('storeResumenBancario (bank accounts)', () => {
             'Santander',
             '1234567890',
             'ARS',
-            10000,
-            15000,
+            { type: 'number', value: 10000 }, // saldoInicial as CellNumber
+            { type: 'number', value: 15000 }, // saldoFinal as CellNumber
           ])
         ])
       );
