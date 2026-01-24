@@ -373,7 +373,7 @@ ONLY use this if the document has NO year information (e.g., "SIN MOVIMIENTOS" s
 - Current date: ${dateInfo}
 - If document month > current month → use previous year
 - If document month <= current month → use current year
-Example: In January 2025, "SALDO AL 30 DE DICIEMBRE" → 2024-12-30
+Example: If current date is January and document shows "SALDO AL 30 DE DICIEMBRE", December > January, so use previous year.
 
 NUMBER FORMAT: "2.917.310,00" = 2917310.00
 
@@ -432,7 +432,7 @@ ONLY use this if the document has NO year information:
 - Current date: ${dateInfo}
 - If document month > current month → use previous year
 - If document month <= current month → use current year
-Example: In January 2025, "CIERRE ACTUAL 30-Oct" without year → 2024-10-30
+Example: If current date is January and document shows "CIERRE ACTUAL 30-Oct", October > January, so use previous year.
 
 NUMBER FORMAT: "2.917.310,00" = 2917310.00
 
@@ -494,7 +494,7 @@ ONLY use this if the document has NO year information:
 - Current date: ${dateInfo}
 - If document month > current month → use previous year
 - If document month <= current month → use current year
-Example: In January 2025, "del 1/12 al 31/12" without year → 2024-12-01 to 2024-12-31
+Example: If current date is January and document shows "del 1/12 al 31/12", December > January, so use previous year.
 
 NUMBER FORMAT: "2.917.310,00" = 2917310.00
 
