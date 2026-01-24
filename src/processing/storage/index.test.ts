@@ -36,11 +36,6 @@ describe('File Tracking Functions', () => {
     });
 
     it('marks a file as processing in the Archivos Procesados sheet', async () => {
-      vi.mocked(getValues).mockResolvedValue({
-        ok: true,
-        value: [['fileId', 'fileName', 'processedAt', 'documentType', 'status']],
-      });
-
       vi.mocked(appendRowsWithLinks).mockResolvedValue({ ok: true, value: 1 });
 
       const result = await markFileProcessing(
@@ -67,11 +62,6 @@ describe('File Tracking Functions', () => {
     });
 
     it('returns error when appendRowsWithLinks fails', async () => {
-      vi.mocked(getValues).mockResolvedValue({
-        ok: true,
-        value: [['fileId', 'fileName', 'processedAt', 'documentType', 'status']],
-      });
-
       vi.mocked(appendRowsWithLinks).mockResolvedValue({
         ok: false,
         error: new Error('Sheets API error'),
@@ -269,6 +259,84 @@ describe('File Tracking Functions', () => {
       expect(result2.ok).toBe(true);
       // getValues should be called again after cache clear
       expect(getValues).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  describe('Race Condition Prevention', () => {
+    beforeEach(() => {
+      clearFileStatusCache();
+    });
+
+    it('does not cache row index during markFileProcessing to avoid race conditions', async () => {
+      // Simulate concurrent scenario: two files being processed
+      // markFileProcessing no longer calls getValues - only updateFileStatus does
+      vi.mocked(getValues)
+        .mockResolvedValueOnce({
+          // First updateFileStatus for file A - should find it in row 2
+          ok: true,
+          value: [
+            ['fileId', 'fileName', 'processedAt', 'documentType', 'status'],
+            ['file-a', 'doc-a.pdf', '2025-01-15T10:00:00Z', 'factura_emitida', 'processing'],
+          ],
+        })
+        .mockResolvedValueOnce({
+          // First updateFileStatus for file B - should find it in row 3
+          ok: true,
+          value: [
+            ['fileId', 'fileName', 'processedAt', 'documentType', 'status'],
+            ['file-a', 'doc-a.pdf', '2025-01-15T10:00:00Z', 'factura_emitida', 'processing'],
+            ['file-b', 'doc-b.pdf', '2025-01-15T10:00:01Z', 'pago_enviado', 'processing'],
+          ],
+        });
+
+      vi.mocked(appendRowsWithLinks).mockResolvedValue({ ok: true, value: 1 });
+      vi.mocked(batchUpdate).mockResolvedValue({ ok: true, value: 1 });
+
+      // Mark both files as processing (simulating concurrent processing)
+      await markFileProcessing('dashboard-id', 'file-a', 'doc-a.pdf', 'factura_emitida');
+      await markFileProcessing('dashboard-id', 'file-b', 'doc-b.pdf', 'pago_enviado');
+
+      // Update file A status - should look up and find row 2
+      await updateFileStatus('dashboard-id', 'file-a', 'success');
+      expect(batchUpdate).toHaveBeenNthCalledWith(1, 'dashboard-id', [
+        { range: 'Archivos Procesados!E2', values: [['success']] },
+      ]);
+
+      // Update file B status - should look up and find row 3 (not row 2!)
+      await updateFileStatus('dashboard-id', 'file-b', 'success');
+      expect(batchUpdate).toHaveBeenNthCalledWith(2, 'dashboard-id', [
+        { range: 'Archivos Procesados!E3', values: [['success']] },
+      ]);
+
+      // Verify that getValues was called only for updateFileStatus (not markFileProcessing)
+      expect(getValues).toHaveBeenCalledTimes(2); // 2 for updateFileStatus lookups
+    });
+
+    it('always looks up row index on updateFileStatus after markFileProcessing', async () => {
+      // markFileProcessing no longer calls getValues - only updateFileStatus does
+      vi.mocked(getValues).mockResolvedValueOnce({
+        // updateFileStatus lookup
+        ok: true,
+        value: [
+          ['fileId', 'fileName', 'processedAt', 'documentType', 'status'],
+          ['test-file', 'test.pdf', '2025-01-15T10:00:00Z', 'factura_emitida', 'processing'],
+        ],
+      });
+
+      vi.mocked(appendRowsWithLinks).mockResolvedValue({ ok: true, value: 1 });
+      vi.mocked(batchUpdate).mockResolvedValue({ ok: true, value: 1 });
+
+      // Mark file as processing
+      await markFileProcessing('dashboard-id', 'test-file', 'test.pdf', 'factura_emitida');
+
+      // Update status - should always look up row index
+      await updateFileStatus('dashboard-id', 'test-file', 'success');
+
+      // Verify getValues was called only for updateFileStatus (not markFileProcessing)
+      expect(getValues).toHaveBeenCalledTimes(1); // 1 for update lookup only
+      expect(batchUpdate).toHaveBeenCalledWith('dashboard-id', [
+        { range: 'Archivos Procesados!E2', values: [['success']] },
+      ]);
     });
   });
 

@@ -45,10 +45,6 @@ export async function markFileProcessing(
   const correlationId = getCorrelationId();
   const processedAt = new Date().toISOString();
 
-  // Get current row count to know where new row will be
-  const valuesResult = await getValues(dashboardId, 'Archivos Procesados!A:A');
-  const currentRowCount = valuesResult.ok ? valuesResult.value.length : 0;
-
   const result = await appendRowsWithLinks(
     dashboardId,
     'Archivos Procesados',
@@ -66,17 +62,11 @@ export async function markFileProcessing(
     return { ok: false, error: result.error };
   }
 
-  // Cache row index for this file
-  const newRowIndex = currentRowCount + 1;
-  const cacheKey = `${dashboardId}:${fileId}`;
-  fileRowIndexCache.set(cacheKey, newRowIndex);
-
   logInfo('Marked file as processing', {
     module: 'storage',
     fileId,
     fileName,
     documentType,
-    rowIndex: newRowIndex,
     correlationId,
   });
 
