@@ -262,10 +262,39 @@ describe('generateResumenFileName', () => {
     expect(result).toBe('2024-01-15 - Resumen - BBVA - 1234567890 USD.pdf');
   });
 
-  it('generates resumen with credit card brand', () => {
-    const resumenVisa: ResumenBancario = { ...baseResumen, numeroCuenta: 'VISA', moneda: 'USD' };
+  it('generates resumen with credit card type (no currency suffix)', () => {
+    const resumenVisa: ResumenBancario = {
+      ...baseResumen,
+      numeroCuenta: '4563',
+      tipoTarjeta: 'Visa',
+      moneda: 'USD'
+    };
     const result = generateResumenFileName(resumenVisa);
-    expect(result).toBe('2024-01-15 - Resumen - BBVA - VISA USD.pdf');
+    expect(result).toBe('2024-01-15 - Resumen - BBVA - Visa 4563.pdf');
+  });
+
+  it('generates resumen for different card types', () => {
+    const cards: Array<{ tipo: 'Visa' | 'Mastercard' | 'Amex' | 'Naranja' | 'Cabal', digitos: string }> = [
+      { tipo: 'Visa', digitos: '1234' },
+      { tipo: 'Mastercard', digitos: '5678' },
+      { tipo: 'Amex', digitos: '9012' },
+      { tipo: 'Naranja', digitos: '3456' },
+      { tipo: 'Cabal', digitos: '7890' },
+    ];
+
+    for (const card of cards) {
+      const resumen: ResumenBancario = {
+        ...baseResumen,
+        numeroCuenta: card.digitos,
+        tipoTarjeta: card.tipo,
+        moneda: 'ARS',
+      };
+      const result = generateResumenFileName(resumen);
+      expect(result).toBe(`2024-01-15 - Resumen - BBVA - ${card.tipo} ${card.digitos}.pdf`);
+      // Verify no currency suffix for credit cards
+      expect(result).not.toContain('ARS');
+      expect(result).not.toContain('USD');
+    }
   });
 
   it('handles bank name with accents', () => {

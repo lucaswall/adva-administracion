@@ -35,16 +35,16 @@
 ## STRUCTURE
 ```
 src/
-├── server.ts, config.ts, types/index.ts
+├── server.ts, config.ts, types/index.ts  # TipoTarjeta type in types/
 ├── constants/spreadsheet-headers.ts
 ├── routes/{status,scan,webhooks}.ts
-├── middleware/auth.ts          # Bearer token authentication
+├── middleware/auth.ts          # Bearer token auth
 ├── services/{google-auth,drive,sheets,folder-structure,document-sorter,watch-manager,token-usage-logger,pagos-pendientes}.ts
 ├── processing/{queue,scanner,extractor}.ts
 ├── processing/matching/{index,factura-pago-matcher,recibo-pago-matcher,nc-factura-matcher}.ts
 ├── processing/storage/{index,factura-store,pago-store,recibo-store,retencion-store,resumen-store}.ts
 ├── matching/{matcher,cascade-matcher}.ts
-├── gemini/{client,prompts,parser,errors}.ts
+├── gemini/{client,prompts,parser,errors}.ts  # TipoTarjeta validation
 ├── utils/{date,numbers,currency,validation,file-naming,spanish-date,exchange-rate,drive-parser,logger,spreadsheet,circuit-breaker,concurrency,correlation}.ts
 └── bank/{matcher,autofill,subdiario-matcher}.ts
 
@@ -137,6 +137,11 @@ ADVA CUIT: 30709076783 | Direction determines routing:
 | resumen_bancario | - | Bancos |
 | recibo | empleador | Egresos |
 
+**Resumenes Bancarios:**
+- Gemini extracts `tipoTarjeta` (Visa, Mastercard, Amex, Naranja, Cabal) if credit card
+- Invalid values cleared with warning, marked for review
+- Folder/file naming differs: credit cards omit currency, bank accounts include it
+
 ## FOLDER STRUCTURE
 ```
 ROOT/
@@ -145,18 +150,33 @@ ROOT/
 ├── Entrada/, Sin Procesar/, Duplicado/
 └── {YYYY}/
     ├── Ingresos/{MM - Mes}/, Egresos/{MM - Mes}/
-    └── Bancos/{Bank Name} {Nro Cuenta} {Moneda}/
+    └── Bancos/
+        ├── {Bank} {Account} {Currency}/     # Bank accounts
+        └── {Bank} {CardType} {LastDigits}/  # Credit cards (no currency)
 ```
+
+**Bank account folder naming:**
+- Format: `{Bank} {Account Number} {Currency}`
+- Example: `BBVA 1234567890 ARS`
+
+**Credit card folder naming:**
+- Format: `{Bank} {Card Type} {Last Digits}`
+- Example: `BBVA Visa 4563`
+- No currency suffix (cards can process both ARS and USD)
+- Valid card types: Visa, Mastercard, Amex, Naranja, Cabal
 
 ## SPREADSHEETS
 See `SPREADSHEET_FORMAT.md` for complete schema.
 
 - **Control de Ingresos**: Facturas Emitidas (18 cols), Pagos Recibidos (15 cols), Retenciones Recibidas (15 cols)
 - **Control de Egresos**: Facturas Recibidas (19 cols), Pagos Enviados (15 cols), Recibos (18 cols)
-- **Control de Resumenes**: Resumenes Bancarios (9 cols) - stored in bank account-specific folders
+- **Control de Resumenes**: Resumenes (9 cols) - stored in bank/card account folders
+  - Column 7: `tipoTarjeta` for credit cards OR `moneda` for bank accounts
 - **Dashboard**: Pagos Pendientes (10 cols), Resumen Mensual (7 cols), Uso de API (12 cols)
 
-**Key principle**: Store counterparty info only, ADVA's role is implicit.
+**Principles:**
+- Store counterparty info only, ADVA's role is implicit
+- Use `CellDate` type for proper date formatting in spreadsheets
 
 ## MATCHING
 

@@ -5,7 +5,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { sheets_v4 } from 'googleapis';
 import { google } from 'googleapis';
-import { formatSheet, clearSheetsCache, appendRowsWithLinks, appendRowsWithFormatting, clearSheetData, moveSheetToFirst } from '../../../src/services/sheets.js';
+import { formatSheet, clearSheetsCache, appendRowsWithLinks, appendRowsWithFormatting, clearSheetData, moveSheetToFirst, dateStringToSerial } from '../../../src/services/sheets.js';
 
 // Mock googleapis
 vi.mock('googleapis', () => {
@@ -944,5 +944,170 @@ describe('moveSheetToFirst', () => {
     if (!result.ok) {
       expect(result.error.message).toBe('API Error');
     }
+  });
+});
+
+describe('dateStringToSerial', () => {
+  it('converts date string to Google Sheets serial number', () => {
+    // Jan 1, 1900 should be serial number 2 (day 0 is Dec 30, 1899, day 1 is Dec 31, 1899)
+    expect(dateStringToSerial('1900-01-01')).toBe(2);
+
+    // Jan 15, 2024
+    const serial2024 = dateStringToSerial('2024-01-15');
+    expect(serial2024).toBeGreaterThan(45000); // Rough sanity check
+
+    // Known value: Jan 1, 2020 is serial number 43831
+    expect(dateStringToSerial('2020-01-01')).toBe(43831);
+  });
+
+  it('handles leap years correctly', () => {
+    const feb28_2024 = dateStringToSerial('2024-02-28');
+    const feb29_2024 = dateStringToSerial('2024-02-29');
+    const mar01_2024 = dateStringToSerial('2024-03-01');
+
+    expect(feb29_2024).toBe(feb28_2024 + 1);
+    expect(mar01_2024).toBe(feb29_2024 + 1);
+  });
+
+  it('handles dates in different years', () => {
+    const jan01_2023 = dateStringToSerial('2023-01-01');
+    const jan01_2024 = dateStringToSerial('2024-01-01');
+
+    // 2023 has 365 days
+    expect(jan01_2024).toBe(jan01_2023 + 365);
+  });
+});
+
+describe('appendRowsWithLinks - CellDate handling', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    clearSheetsCache();
+  });
+
+  it('should convert CellDate to serial number with date formatting', async () => {
+    const mockGet = vi.fn().mockResolvedValue({
+      data: {
+        sheets: [
+          {
+            properties: {
+              title: 'Resumenes',
+              sheetId: 123,
+            },
+          },
+        ],
+      },
+    });
+
+    const mockBatchUpdate = vi.fn().mockResolvedValue({
+      data: {
+        replies: [
+          {
+            appendCells: {
+              updatedCells: 3,
+            },
+          },
+        ],
+      },
+    });
+
+    const mockSheets = google.sheets({} as any);
+    mockSheets.spreadsheets.get = mockGet;
+    mockSheets.spreadsheets.batchUpdate = mockBatchUpdate;
+
+    const rows = [
+      [
+        { type: 'date' as const, value: '2024-01-15' },
+        { type: 'date' as const, value: '2024-01-31' },
+        'Other value',
+      ],
+    ];
+
+    const result = await appendRowsWithLinks('spreadsheetId123', 'Resumenes!A:C', rows);
+
+    expect(result.ok).toBe(true);
+    expect(result.value).toBe(3);
+
+    const callArgs = mockBatchUpdate.mock.calls[0][0];
+    const rowData = callArgs.requestBody.requests[0].appendCells.rows[0].values;
+
+    // Check first CellDate
+    expect(rowData[0].userEnteredValue).toHaveProperty('numberValue');
+    expect(typeof rowData[0].userEnteredValue.numberValue).toBe('number');
+    expect(rowData[0].userEnteredFormat?.numberFormat).toEqual({
+      type: 'DATE',
+      pattern: 'yyyy-mm-dd',
+    });
+
+    // Check second CellDate
+    expect(rowData[1].userEnteredValue).toHaveProperty('numberValue');
+    expect(typeof rowData[1].userEnteredValue.numberValue).toBe('number');
+    expect(rowData[1].userEnteredFormat?.numberFormat).toEqual({
+      type: 'DATE',
+      pattern: 'yyyy-mm-dd',
+    });
+
+    // Check non-date value
+    expect(rowData[2].userEnteredValue).toEqual({ stringValue: 'Other value' });
+  });
+
+  it('should handle mixed CellDate, CellLink, and regular values', async () => {
+    const mockGet = vi.fn().mockResolvedValue({
+      data: {
+        sheets: [
+          {
+            properties: {
+              title: 'Resumenes',
+              sheetId: 123,
+            },
+          },
+        ],
+      },
+    });
+
+    const mockBatchUpdate = vi.fn().mockResolvedValue({
+      data: {
+        replies: [
+          {
+            appendCells: {
+              updatedCells: 4,
+            },
+          },
+        ],
+      },
+    });
+
+    const mockSheets = google.sheets({} as any);
+    mockSheets.spreadsheets.get = mockGet;
+    mockSheets.spreadsheets.batchUpdate = mockBatchUpdate;
+
+    const rows = [
+      [
+        { type: 'date' as const, value: '2024-01-15' },
+        'fileId123',
+        { text: 'Document.pdf', url: 'https://drive.google.com/file/d/fileId123/view' },
+        1234.56,
+      ],
+    ];
+
+    const result = await appendRowsWithLinks('spreadsheetId123', 'Resumenes!A:D', rows);
+
+    expect(result.ok).toBe(true);
+
+    const callArgs = mockBatchUpdate.mock.calls[0][0];
+    const rowData = callArgs.requestBody.requests[0].appendCells.rows[0].values;
+
+    // CellDate
+    expect(rowData[0].userEnteredValue).toHaveProperty('numberValue');
+    expect(rowData[0].userEnteredFormat?.numberFormat?.type).toBe('DATE');
+
+    // String
+    expect(rowData[1].userEnteredValue).toEqual({ stringValue: 'fileId123' });
+
+    // CellLink
+    expect(rowData[2].userEnteredValue).toEqual({ stringValue: 'Document.pdf' });
+    expect(rowData[2].textFormatRuns).toBeDefined();
+
+    // Number
+    expect(rowData[3].userEnteredValue).toEqual({ numberValue: 1234.56 });
   });
 });

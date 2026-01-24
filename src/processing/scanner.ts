@@ -914,7 +914,8 @@ async function storeAndSortDocument(
       year,
       resumen.banco,
       resumen.numeroCuenta,
-      resumen.moneda
+      resumen.moneda,
+      resumen.tipoTarjeta
     );
 
     if (!folderResult.ok) {
@@ -933,7 +934,8 @@ async function storeAndSortDocument(
         year,
         resumen.banco,
         resumen.numeroCuenta,
-        resumen.moneda
+        resumen.moneda,
+        resumen.tipoTarjeta
       );
 
       if (!spreadsheetResult.ok) {

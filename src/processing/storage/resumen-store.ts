@@ -4,14 +4,14 @@
  */
 
 import type { Result, ResumenBancario, StoreResult } from '../../types/index.js';
-import { appendRowsWithLinks, sortSheet, getValues, dateStringToSerial, type CellValueOrLink } from '../../services/sheets.js';
+import { appendRowsWithLinks, sortSheet, getValues, type CellValueOrLink, type CellDate } from '../../services/sheets.js';
 import { generateResumenFileName } from '../../utils/file-naming.js';
 import { info, warn } from '../../utils/logger.js';
 import { getCorrelationId } from '../../utils/correlation.js';
 
 /**
  * Checks if a resumen already exists in the sheet
- * Duplicate key: (banco, fechaDesde, fechaHasta, numeroCuenta, moneda)
+ * Duplicate key: (banco, fechaDesde, fechaHasta, numeroCuenta, tipoTarjeta_o_moneda)
  *
  * @param spreadsheetId - The spreadsheet ID
  * @param resumen - The resumen to check
@@ -26,18 +26,21 @@ async function isDuplicateResumen(
     return { isDuplicate: false };
   }
 
+  // For comparison: use tipoTarjeta for credit cards, moneda for bank accounts
+  const tipoTarjetaOMoneda = resumen.tipoTarjeta || resumen.moneda;
+
   // Skip header row
   for (let i = 1; i < rowsResult.value.length; i++) {
     const row = rowsResult.value[i];
     if (!row || row.length < 7) continue;
 
-    // Columns: fechaDesde, fechaHasta, fileId, fileName, banco, numeroCuenta, moneda, saldoInicial, saldoFinal
+    // Columns: fechaDesde, fechaHasta, fileId, fileName, banco, numeroCuenta, tipoTarjeta_o_moneda, saldoInicial, saldoFinal
     const rowFechaDesde = row[0];    // Column A: fechaDesde (serial number or date string)
     const rowFechaHasta = row[1];    // Column B: fechaHasta (serial number or date string)
     const rowFileId = row[2];        // Column C: fileId
     const rowBanco = row[4];         // Column E: banco
     const rowNumeroCuenta = row[5];  // Column F: numeroCuenta
-    const rowMoneda = row[6];        // Column G: moneda
+    const rowTipoTarjetaOMoneda = row[6];  // Column G: tipoTarjeta or moneda
 
     // Convert serial numbers to date strings for comparison (if needed)
     const rowFechaDesdeStr = typeof rowFechaDesde === 'number'
@@ -47,12 +50,12 @@ async function isDuplicateResumen(
       ? serialToDateString(rowFechaHasta)
       : String(rowFechaHasta);
 
-    // Match on all 5 fields
+    // Match on all 5 fields (including tipoTarjeta or moneda)
     if (rowBanco === resumen.banco &&
         rowFechaDesdeStr === resumen.fechaDesde &&
         rowFechaHastaStr === resumen.fechaHasta &&
         rowNumeroCuenta === resumen.numeroCuenta &&
-        rowMoneda === resumen.moneda) {
+        rowTipoTarjetaOMoneda === tipoTarjetaOMoneda) {
       return { isDuplicate: true, existingFileId: String(rowFileId) };
     }
   }
@@ -108,11 +111,17 @@ export async function storeResumen(
     };
   }
 
-  // Build the row with serial dates and hyperlink
+  // Build the row with CellDate for proper date formatting
   const fileName = generateResumenFileName(resumen);
+  const fechaDesdeDate: CellDate = { type: 'date', value: resumen.fechaDesde };
+  const fechaHastaDate: CellDate = { type: 'date', value: resumen.fechaHasta };
+
+  // For credit cards: use tipoTarjeta, for bank accounts: use moneda
+  const tipoTarjetaOMoneda = resumen.tipoTarjeta || resumen.moneda;
+
   const row: CellValueOrLink[] = [
-    dateStringToSerial(resumen.fechaDesde),
-    dateStringToSerial(resumen.fechaHasta),
+    fechaDesdeDate,   // proper date cell
+    fechaHastaDate,   // proper date cell
     resumen.fileId,
     {
       text: fileName,
@@ -120,7 +129,7 @@ export async function storeResumen(
     },
     resumen.banco,
     resumen.numeroCuenta,
-    resumen.moneda,
+    tipoTarjetaOMoneda,  // Credit cards: tipoTarjeta | Bank accounts: moneda
     resumen.saldoInicial,
     resumen.saldoFinal,
   ];

@@ -147,6 +147,7 @@ export const RESUMEN_BANCARIO_HEADERS = [
 /**
  * Sheet configuration for Control de Resumenes spreadsheet
  * Stores bank statements in bank account-specific folders
+ * For credit cards, tipoTarjeta column replaces moneda
  */
 export const CONTROL_RESUMENES_SHEET: SheetConfig = {
   title: 'Resumenes',
@@ -157,7 +158,7 @@ export const CONTROL_RESUMENES_SHEET: SheetConfig = {
     'fileName',
     'banco',
     'numeroCuenta',
-    'moneda',
+    'tipoTarjeta_o_moneda', // Credit cards: tipoTarjeta | Bank accounts: moneda
     'saldoInicial',
     'saldoFinal',
   ],
@@ -193,17 +194,29 @@ export const CONTROL_INGRESOS_SHEETS: SheetConfig[] = [
   {
     title: 'Facturas Emitidas',
     headers: FACTURA_EMITIDA_HEADERS,
-    monetaryColumns: [7, 8, 9] // importeNeto, importeIva, importeTotal (0-indexed: 7, 8, 9)
+    numberFormats: new Map([
+      [0, { type: 'date' }],                    // fechaEmision
+      [7, { type: 'currency', decimals: 2 }],   // importeNeto
+      [8, { type: 'currency', decimals: 2 }],   // importeIva
+      [9, { type: 'currency', decimals: 2 }],   // importeTotal
+    ]),
   },
   {
     title: 'Pagos Recibidos',
     headers: PAGO_RECIBIDO_HEADERS,
-    monetaryColumns: [4] // importePagado (0-indexed: 4)
+    numberFormats: new Map([
+      [0, { type: 'date' }],                    // fechaPago
+      [4, { type: 'currency', decimals: 2 }],   // importePagado
+    ]),
   },
   {
     title: 'Retenciones Recibidas',
     headers: RETENCIONES_RECIBIDAS_HEADERS,
-    monetaryColumns: [8, 9] // montoComprobante, montoRetencion (0-indexed: 8, 9)
+    numberFormats: new Map([
+      [0, { type: 'date' }],                    // fechaEmision
+      [8, { type: 'currency', decimals: 2 }],   // montoComprobante
+      [9, { type: 'currency', decimals: 2 }],   // montoRetencion
+    ]),
   },
 ];
 
@@ -215,17 +228,30 @@ export const CONTROL_EGRESOS_SHEETS: SheetConfig[] = [
   {
     title: 'Facturas Recibidas',
     headers: FACTURA_RECIBIDA_HEADERS,
-    monetaryColumns: [7, 8, 9] // importeNeto, importeIva, importeTotal (0-indexed: 7, 8, 9)
+    numberFormats: new Map([
+      [0, { type: 'date' }],                    // fechaEmision
+      [7, { type: 'currency', decimals: 2 }],   // importeNeto
+      [8, { type: 'currency', decimals: 2 }],   // importeIva
+      [9, { type: 'currency', decimals: 2 }],   // importeTotal
+    ]),
   },
   {
     title: 'Pagos Enviados',
     headers: PAGO_ENVIADO_HEADERS,
-    monetaryColumns: [4] // importePagado (0-indexed: 4)
+    numberFormats: new Map([
+      [0, { type: 'date' }],                    // fechaPago
+      [4, { type: 'currency', decimals: 2 }],   // importePagado
+    ]),
   },
   {
     title: 'Recibos',
     headers: RECIBO_HEADERS,
-    monetaryColumns: [10, 11, 12] // subtotalRemuneraciones, subtotalDescuentos, totalNeto (0-indexed: 10, 11, 12)
+    numberFormats: new Map([
+      [0, { type: 'date' }],                    // fechaPago
+      [10, { type: 'currency', decimals: 2 }],  // subtotalRemuneraciones
+      [11, { type: 'currency', decimals: 2 }],  // subtotalDescuentos
+      [12, { type: 'currency', decimals: 2 }],  // totalNeto
+    ]),
   },
 ];
 

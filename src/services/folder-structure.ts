@@ -697,19 +697,23 @@ export async function getOrCreateMonthFolder(
 
 /**
  * Gets or creates a bank account folder for storing bank statements
- * Implements structure: {year}/Bancos/{Bank Name} {Nro Cuenta} {Moneda}/
+ * Implements structure:
+ * - Bank accounts: {year}/Bancos/{Bank Name} {Nro Cuenta} {Moneda}/
+ * - Credit cards: {year}/Bancos/{Bank Name} {Card Type} {Card Number}/ (no currency)
  *
  * @param year - Year string (e.g., "2024")
  * @param banco - Bank name (e.g., "Santander")
- * @param numeroCuenta - Account number
- * @param moneda - Currency (ARS or USD)
+ * @param numeroCuenta - Account number (bank) or last digits (credit card)
+ * @param moneda - Currency (ARS or USD) - used only for bank accounts
+ * @param tipoTarjeta - Optional credit card type (Visa, Mastercard, etc.)
  * @returns Folder ID for the bank account folder
  */
 export async function getOrCreateBankAccountFolder(
   year: string,
   banco: string,
   numeroCuenta: string,
-  moneda: string
+  moneda: string,
+  tipoTarjeta?: string
 ): Promise<Result<string, Error>> {
   if (!cachedStructure) {
     return {
@@ -718,8 +722,12 @@ export async function getOrCreateBankAccountFolder(
     };
   }
 
-  // Create cache key: year:banco cuenta moneda
-  const folderName = `${banco} ${numeroCuenta} ${moneda}`;
+  // Create folder name based on account type
+  // Credit cards: no currency (single card can have ARS + USD transactions)
+  // Bank accounts: include currency
+  const folderName = tipoTarjeta
+    ? `${banco} ${tipoTarjeta} ${numeroCuenta}`
+    : `${banco} ${numeroCuenta} ${moneda}`;
   const cacheKey = `${year}:${folderName}`;
 
   // Check cache first
@@ -824,8 +832,9 @@ export async function getOrCreateBankAccountFolder(
  * @param folderId - Bank account folder ID
  * @param year - Year string (e.g., "2024")
  * @param banco - Bank name
- * @param numeroCuenta - Account number
- * @param moneda - Currency (ARS or USD)
+ * @param numeroCuenta - Account number (bank) or last digits (credit card)
+ * @param moneda - Currency (ARS or USD) - used only for bank accounts
+ * @param tipoTarjeta - Optional credit card type (Visa, Mastercard, etc.)
  * @returns Spreadsheet ID for Control de Resumenes
  */
 export async function getOrCreateBankAccountSpreadsheet(
@@ -833,7 +842,8 @@ export async function getOrCreateBankAccountSpreadsheet(
   year: string,
   banco: string,
   numeroCuenta: string,
-  moneda: string
+  moneda: string,
+  tipoTarjeta?: string
 ): Promise<Result<string, Error>> {
   if (!cachedStructure) {
     return {
@@ -843,7 +853,10 @@ export async function getOrCreateBankAccountSpreadsheet(
   }
 
   const spreadsheetName = 'Control de Resumenes';
-  const folderName = `${banco} ${numeroCuenta} ${moneda}`;
+  // Create cache key based on account type (same logic as folder naming)
+  const folderName = tipoTarjeta
+    ? `${banco} ${tipoTarjeta} ${numeroCuenta}`
+    : `${banco} ${numeroCuenta} ${moneda}`;
   const cacheKey = `${year}:${folderName}`;
 
   // Check cache first

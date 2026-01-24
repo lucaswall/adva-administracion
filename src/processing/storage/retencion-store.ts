@@ -4,7 +4,7 @@
  */
 
 import type { Result, Retencion } from '../../types/index.js';
-import { appendRowsWithLinks, sortSheet, type CellValueOrLink } from '../../services/sheets.js';
+import { appendRowsWithLinks, sortSheet, type CellValueOrLink, type CellDate } from '../../services/sheets.js';
 import { formatUSCurrency } from '../../utils/numbers.js';
 import { info } from '../../utils/logger.js';
 import { getCorrelationId } from '../../utils/correlation.js';
@@ -21,9 +21,12 @@ export async function storeRetencion(
 ): Promise<Result<void, Error>> {
   const sheetName = 'Retenciones Recibidas';
 
+  // Create CellDate for proper date formatting
+  const fechaEmisionDate: CellDate = { type: 'date', value: retencion.fechaEmision };
+
   // Build row (columns A:O)
   const row: CellValueOrLink[] = [
-    retencion.fechaEmision,                    // A
+    fechaEmisionDate,                          // A - proper date cell
     retencion.fileId,                          // B
     { text: retencion.fileName, url: `https://drive.google.com/file/d/${retencion.fileId}/view` }, // C
     retencion.nroCertificado,                  // D

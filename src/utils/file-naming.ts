@@ -175,10 +175,12 @@ export function generateReciboFileName(recibo: Recibo): string {
 /**
  * Generates a standardized file name for a resumen bancario
  *
- * Format: YYYY-MM-DD - Resumen - Bank Name - Account Number CURRENCY.pdf
- * Example ARS: 2024-01-15 - Resumen - BBVA - 1234567890 ARS.pdf
- * Example USD: 2024-01-15 - Resumen - BBVA - 1234567890 USD.pdf
- * Example Credit Card: 2024-01-15 - Resumen - BBVA - VISA USD.pdf
+ * Format for bank accounts: YYYY-MM-DD - Resumen - Bank Name - Account Number CURRENCY.pdf
+ * Format for credit cards: YYYY-MM-DD - Resumen - Bank Name - CardType CardNumber.pdf
+ *
+ * Example bank account ARS: 2024-01-15 - Resumen - BBVA - 1234567890 ARS.pdf
+ * Example bank account USD: 2024-01-15 - Resumen - BBVA - 1234567890 USD.pdf
+ * Example credit card: 2024-01-15 - Resumen - BBVA - Visa 65656454.pdf
  *
  * @param resumen - Resumen bancario data
  * @returns Standardized file name
@@ -190,13 +192,16 @@ export function generateResumenFileName(resumen: ResumenBancario): string {
   // Bank name (sanitized)
   const bankName = sanitizeFileName(resumen.banco);
 
-  // Account number or card brand (sanitized)
+  // Account number or card last digits (sanitized)
   const numeroCuenta = sanitizeFileName(resumen.numeroCuenta);
 
-  // Currency
-  const moneda = resumen.moneda;
-
-  return `${fecha} - Resumen - ${bankName} - ${numeroCuenta} ${moneda}.pdf`;
+  // Credit cards: no currency suffix (single card can have ARS + USD transactions)
+  // Bank accounts: include currency suffix
+  if (resumen.tipoTarjeta) {
+    return `${fecha} - Resumen - ${bankName} - ${resumen.tipoTarjeta} ${numeroCuenta}.pdf`;
+  } else {
+    return `${fecha} - Resumen - ${bankName} - ${numeroCuenta} ${resumen.moneda}.pdf`;
+  }
 }
 
 /**

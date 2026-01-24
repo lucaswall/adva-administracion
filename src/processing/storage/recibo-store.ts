@@ -4,7 +4,7 @@
  */
 
 import type { Result, Recibo } from '../../types/index.js';
-import { appendRowsWithLinks, sortSheet, type CellValueOrLink } from '../../services/sheets.js';
+import { appendRowsWithLinks, sortSheet, type CellValueOrLink, type CellDate } from '../../services/sheets.js';
 import { formatUSCurrency } from '../../utils/numbers.js';
 import { generateReciboFileName } from '../../utils/file-naming.js';
 import { info, warn } from '../../utils/logger.js';
@@ -23,8 +23,11 @@ export async function storeRecibo(
   // Calculate the renamed filename that will be used when the file is moved
   const renamedFileName = generateReciboFileName(recibo);
 
+  // Create CellDate for proper date formatting
+  const fechaPagoDate: CellDate = { type: 'date', value: recibo.fechaPago };
+
   const row: CellValueOrLink[] = [
-    recibo.fechaPago,
+    fechaPagoDate,  // proper date cell
     recibo.fileId,
     {
       text: renamedFileName,

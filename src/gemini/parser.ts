@@ -694,6 +694,9 @@ export function parseReciboResponse(response: string): Result<ParseResult<Partia
   }
 }
 
+/** Valid credit card types */
+const VALID_CARD_TYPES = ['Visa', 'Mastercard', 'Amex', 'Naranja', 'Cabal'] as const;
+
 /**
  * Parses a Gemini response for resumen bancario data
  *
@@ -713,6 +716,19 @@ export function parseResumenBancarioResponse(response: string): Result<ParseResu
 
     // Parse JSON
     const data = JSON.parse(jsonStr) as Partial<ResumenBancario>;
+
+    // Validate tipoTarjeta if present
+    if (data.tipoTarjeta !== undefined) {
+      if (!VALID_CARD_TYPES.includes(data.tipoTarjeta as typeof VALID_CARD_TYPES[number])) {
+        // Invalid card type - clear it and mark for review
+        warn('Invalid tipoTarjeta value, clearing', {
+          module: 'gemini-parser',
+          phase: 'resumen-parse',
+          tipoTarjeta: data.tipoTarjeta,
+        });
+        data.tipoTarjeta = undefined;
+      }
+    }
 
     // Check for required fields
     const requiredFields: (keyof ResumenBancario)[] = [

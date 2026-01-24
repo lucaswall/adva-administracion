@@ -4,7 +4,7 @@
  */
 
 import type { Result, Pago, StoreResult } from '../../types/index.js';
-import { appendRowsWithLinks, sortSheet, getValues, type CellValueOrLink } from '../../services/sheets.js';
+import { appendRowsWithLinks, sortSheet, getValues, type CellValueOrLink, type CellDate } from '../../services/sheets.js';
 import { formatUSCurrency, parseNumber } from '../../utils/numbers.js';
 import { generatePagoFileName } from '../../utils/file-naming.js';
 import { info, warn } from '../../utils/logger.js';
@@ -102,10 +102,13 @@ export async function storePago(
   let row: CellValueOrLink[];
   let range: string;
 
+  // Create CellDate for proper date formatting
+  const fechaPagoDate: CellDate = { type: 'date', value: pago.fechaPago };
+
   if (documentType === 'pago_enviado') {
     // Pagos Enviados: Only beneficiario info (columns A:O)
     row = [
-      pago.fechaPago,                      // A
+      fechaPagoDate,                       // A - proper date cell
       pago.fileId,                         // B
       { text: renamedFileName, url: `https://drive.google.com/file/d/${pago.fileId}/view` }, // C
       pago.banco,                          // D
@@ -125,7 +128,7 @@ export async function storePago(
   } else {
     // Pagos Recibidos: Only pagador info (columns A:O)
     row = [
-      pago.fechaPago,                      // A
+      fechaPagoDate,                       // A - proper date cell
       pago.fileId,                         // B
       { text: renamedFileName, url: `https://drive.google.com/file/d/${pago.fileId}/view` }, // C
       pago.banco,                          // D
