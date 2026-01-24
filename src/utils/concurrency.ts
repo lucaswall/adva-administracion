@@ -337,6 +337,91 @@ export function checkVersion(
 }
 
 /**
+ * Configuration for quota-aware retries (Google Sheets API)
+ * Quota resets every 60 seconds
+ */
+export const SHEETS_QUOTA_RETRY_CONFIG: RetryConfig = {
+  maxRetries: 5,
+  baseDelayMs: 15000,      // Start at 15 seconds
+  maxDelayMs: 65000,       // Max 65 seconds (full quota reset + buffer)
+};
+
+/**
+ * Checks if an error is a Google API quota error
+ *
+ * @param error - Error object to check
+ * @returns true if the error is quota-related
+ */
+export function isQuotaError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  const message = error.message.toLowerCase();
+  // Check for quota exceeded messages
+  if (message.includes('quota exceeded')) return true;
+  if (message.includes('rate limit')) return true;
+  if (message.includes('too many requests')) return true;
+  // Check for HTTP 429 status
+  if (message.includes('429')) return true;
+  return false;
+}
+
+/**
+ * Executes a function with quota-aware retry
+ * Uses longer delays for quota errors, standard delays for others
+ *
+ * @param fn - Function to execute
+ * @param standardConfig - Retry config for non-quota errors
+ * @param quotaConfig - Retry config for quota errors
+ * @returns Result with the function return value or error
+ */
+export async function withQuotaRetry<T>(
+  fn: () => Promise<T>,
+  standardConfig: Partial<RetryConfig> = {},
+  quotaConfig: Partial<RetryConfig> = SHEETS_QUOTA_RETRY_CONFIG
+): Promise<Result<T, Error>> {
+  const standard = { ...DEFAULT_RETRY_CONFIG, ...standardConfig };
+  const quota = { ...SHEETS_QUOTA_RETRY_CONFIG, ...quotaConfig };
+  const correlationId = getCorrelationId();
+
+  let lastError: Error | null = null;
+  let attempt = 0;
+  const maxAttempts = Math.max(standard.maxRetries, quota.maxRetries);
+
+  while (attempt <= maxAttempts) {
+    try {
+      const result = await fn();
+      return { ok: true, value: result };
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+
+      if (attempt < maxAttempts) {
+        const config = isQuotaError(lastError) ? quota : standard;
+        const delay = Math.min(
+          config.baseDelayMs * Math.pow(2, attempt) + Math.random() * config.baseDelayMs,
+          config.maxDelayMs
+        );
+
+        debug('Retrying after error', {
+          module: 'concurrency',
+          attempt: attempt + 1,
+          isQuotaError: isQuotaError(lastError),
+          delayMs: Math.round(delay),
+          error: lastError.message,
+          correlationId,
+        });
+
+        await new Promise((resolve) => setTimeout(resolve, delay));
+      }
+      attempt++;
+    }
+  }
+
+  return {
+    ok: false,
+    error: lastError || new Error('Unknown error after retries'),
+  };
+}
+
+/**
  * Clears all locks (for testing)
  */
 export function clearAllLocks(): void {

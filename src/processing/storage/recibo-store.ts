@@ -4,11 +4,51 @@
  */
 
 import type { Result, Recibo } from '../../types/index.js';
-import { appendRowsWithLinks, sortSheet, getSpreadsheetTimezone, type CellValueOrLink, type CellDate } from '../../services/sheets.js';
-import { formatUSCurrency } from '../../utils/numbers.js';
+import { appendRowsWithLinks, sortSheet, getSpreadsheetTimezone, getValues, type CellValueOrLink, type CellDate } from '../../services/sheets.js';
+import { formatUSCurrency, parseNumber } from '../../utils/numbers.js';
 import { generateReciboFileName } from '../../utils/file-naming.js';
 import { info, warn } from '../../utils/logger.js';
 import { getCorrelationId } from '../../utils/correlation.js';
+
+/**
+ * Duplicate key: (cuilEmpleado, periodoAbonado, totalNeto)
+ * Checks for duplicate recibo based on exact business key
+ *
+ * @returns Duplicate check result
+ */
+async function isDuplicateRecibo(
+  spreadsheetId: string,
+  cuilEmpleado: string,
+  periodoAbonado: string,
+  totalNeto: number
+): Promise<{ isDuplicate: boolean; existingFileId?: string }> {
+  const rowsResult = await getValues(spreadsheetId, 'Recibos!A:R');
+  if (!rowsResult.ok || rowsResult.value.length <= 1) {
+    return { isDuplicate: false };
+  }
+
+  // Skip header row
+  for (let i = 1; i < rowsResult.value.length; i++) {
+    const row = rowsResult.value[i];
+    if (!row || row.length < 13) continue;
+
+    const rowFileId = row[1];           // Column B: fileId
+    const rowCuilEmpleado = row[5];     // Column F: cuilEmpleado
+    const rowPeriodoAbonado = row[9];   // Column J: periodoAbonado
+    const rowTotalNetoStr = row[12];    // Column M: totalNeto
+
+    // Parse the Argentine-formatted number
+    const rowTotalNeto = parseNumber(rowTotalNetoStr) ?? 0;
+
+    // Exact match on all three key fields
+    if (rowCuilEmpleado === cuilEmpleado &&
+        rowPeriodoAbonado === periodoAbonado &&
+        Math.abs(rowTotalNeto - totalNeto) < 0.01) {
+      return { isDuplicate: true, existingFileId: String(rowFileId) };
+    }
+  }
+  return { isDuplicate: false };
+}
 
 /**
  * Stores a recibo in the Control de Egresos spreadsheet
@@ -19,7 +59,29 @@ import { getCorrelationId } from '../../utils/correlation.js';
 export async function storeRecibo(
   recibo: Recibo,
   spreadsheetId: string
-): Promise<Result<void, Error>> {
+): Promise<Result<{ stored: boolean; existingFileId?: string }, Error>> {
+  const correlationId = getCorrelationId();
+
+  // Check for duplicates
+  const dupeCheck = await isDuplicateRecibo(
+    spreadsheetId,
+    recibo.cuilEmpleado,
+    recibo.periodoAbonado,
+    recibo.totalNeto
+  );
+
+  if (dupeCheck.isDuplicate) {
+    warn('Duplicate recibo detected, skipping', {
+      module: 'storage',
+      phase: 'recibo',
+      fileId: recibo.fileId,
+      cuilEmpleado: recibo.cuilEmpleado,
+      periodoAbonado: recibo.periodoAbonado,
+      existingFileId: dupeCheck.existingFileId,
+      correlationId,
+    });
+    return { ok: true, value: { stored: false, existingFileId: dupeCheck.existingFileId } };
+  }
   // Calculate the renamed filename that will be used when the file is moved
   const renamedFileName = generateReciboFileName(recibo);
 
@@ -78,5 +140,5 @@ export async function storeRecibo(
     // Don't fail the operation if sorting fails
   }
 
-  return { ok: true, value: undefined };
+  return { ok: true, value: { stored: true } };
 }
