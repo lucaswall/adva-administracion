@@ -11,6 +11,7 @@ vi.mock('../../services/sheets.js', () => ({
   appendRowsWithLinks: vi.fn(),
   sortSheet: vi.fn(),
   getValues: vi.fn(),
+  getSpreadsheetTimezone: vi.fn(() => Promise.resolve({ ok: true, value: 'America/Argentina/Buenos_Aires' })),
 }));
 
 vi.mock('../../utils/logger.js', () => ({

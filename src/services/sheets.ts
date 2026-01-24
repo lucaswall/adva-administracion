@@ -794,10 +794,24 @@ function isCellNumber(value: CellValueOrLink): value is CellNumber {
 }
 
 /**
+ * Checks if a string is an ISO 8601 timestamp
+ * Matches formats like: 2026-01-24T18:30:00.000Z or 2026-01-24T18:30:00Z
+ */
+function isISOTimestamp(value: string): boolean {
+  // ISO 8601 format: YYYY-MM-DDTHH:mm:ss.sssZ or YYYY-MM-DDTHH:mm:ssZ
+  const isoRegex = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{3})?Z$/;
+  return isoRegex.test(value);
+}
+
+/**
  * Converts a CellValueOrLink to a Sheets API cell data object
+ *
+ * @param value - Cell value to convert
+ * @param timeZone - Optional IANA timezone for ISO timestamp conversion
  */
 function convertToSheetsCellData(
-  value: CellValueOrLink
+  value: CellValueOrLink,
+  timeZone?: string
 ): sheets_v4.Schema$CellData {
   if (value === null || value === undefined) {
     return {
@@ -848,6 +862,25 @@ function convertToSheetsCellData(
   }
 
   if (typeof value === 'string') {
+    // Check if string is an ISO timestamp and convert to datetime cell
+    if (isISOTimestamp(value)) {
+      const date = new Date(value);
+      const serialNumber = timeZone
+        ? dateToSerialInTimezone(date, timeZone)
+        : (date.getTime() - new Date(Date.UTC(1899, 11, 30)).getTime()) / (1000 * 60 * 60 * 24);
+
+      return {
+        userEnteredValue: { numberValue: serialNumber },
+        userEnteredFormat: {
+          numberFormat: {
+            type: 'DATE_TIME',
+            pattern: 'yyyy-mm-dd hh:mm:ss',
+          },
+        },
+      };
+    }
+
+    // Regular string
     return {
       userEnteredValue: { stringValue: value },
     };
@@ -877,9 +910,13 @@ function convertToSheetsCellData(
  * this function supports rich text formatting including hyperlinks
  * that appear as formatted text (not HYPERLINK formulas).
  *
+ * ISO timestamp strings (e.g., "2026-01-24T18:30:00.000Z") are automatically
+ * converted to datetime cells in the spreadsheet's timezone.
+ *
  * @param spreadsheetId - Spreadsheet ID
  * @param range - A1 notation for target sheet (e.g., 'Sheet1!A:Z')
  * @param values - 2D array of rows to append. Cells can be values or {text, url} objects for links
+ * @param timeZone - Optional IANA timezone string for ISO timestamp conversion
  * @returns Number of updated cells
  *
  * @example
@@ -889,12 +926,13 @@ function convertToSheetsCellData(
  *     { text: 'Document.pdf', url: 'https://drive.google.com/...' },
  *     'Path'
  *   ]
- * ]);
+ * ], 'America/Argentina/Buenos_Aires');
  */
 export async function appendRowsWithLinks(
   spreadsheetId: string,
   range: string,
-  values: CellValueOrLink[][]
+  values: CellValueOrLink[][],
+  timeZone?: string
 ): Promise<Result<number, Error>> {
   try {
     const sheets = getSheetsService();
@@ -918,7 +956,7 @@ export async function appendRowsWithLinks(
 
     // Convert rows to Sheets API format
     const rows: sheets_v4.Schema$RowData[] = values.map(rowValues => ({
-      values: rowValues.map(convertToSheetsCellData),
+      values: rowValues.map(value => convertToSheetsCellData(value, timeZone)),
     }));
 
     // Use batchUpdate with appendCells to support rich formatting

@@ -4,7 +4,7 @@
  */
 
 import type { Result, Recibo } from '../../types/index.js';
-import { appendRowsWithLinks, sortSheet, type CellValueOrLink, type CellDate } from '../../services/sheets.js';
+import { appendRowsWithLinks, sortSheet, getSpreadsheetTimezone, type CellValueOrLink, type CellDate } from '../../services/sheets.js';
 import { formatUSCurrency } from '../../utils/numbers.js';
 import { generateReciboFileName } from '../../utils/file-naming.js';
 import { info, warn } from '../../utils/logger.js';
@@ -50,7 +50,11 @@ export async function storeRecibo(
     recibo.matchConfidence || '',
   ];
 
-  const result = await appendRowsWithLinks(spreadsheetId, 'Recibos!A:R', [row]);
+  // Get spreadsheet timezone for proper timestamp formatting
+  const timezoneResult = await getSpreadsheetTimezone(spreadsheetId);
+  const timeZone = timezoneResult.ok ? timezoneResult.value : undefined;
+
+  const result = await appendRowsWithLinks(spreadsheetId, 'Recibos!A:R', [row], timeZone);
   if (!result.ok) {
     return result;
   }

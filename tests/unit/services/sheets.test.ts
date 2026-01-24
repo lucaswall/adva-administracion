@@ -1236,6 +1236,121 @@ describe('appendRowsWithLinks - CellDate handling', () => {
   });
 });
 
+describe('appendRowsWithLinks - ISO timestamp handling', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    clearSheetsCache();
+  });
+
+  it('should convert ISO timestamp strings to datetime cells with timezone', async () => {
+    const mockGet = vi.fn().mockResolvedValue({
+      data: {
+        sheets: [
+          {
+            properties: {
+              title: 'Facturas',
+              sheetId: 123,
+            },
+          },
+        ],
+      },
+    });
+
+    const mockBatchUpdate = vi.fn().mockResolvedValue({
+      data: {
+        replies: [
+          {
+            appendCells: {
+              updatedCells: 3,
+            },
+          },
+        ],
+      },
+    });
+
+    const mockSheets = google.sheets({} as any);
+    mockSheets.spreadsheets.get = mockGet;
+    mockSheets.spreadsheets.batchUpdate = mockBatchUpdate;
+
+    const rows = [
+      [
+        'fileId123',
+        'Invoice.pdf',
+        '2026-01-24T18:30:00.000Z', // ISO timestamp - should convert to datetime in timezone
+      ],
+    ];
+
+    const result = await appendRowsWithLinks(
+      'spreadsheetId123',
+      'Facturas!A:C',
+      rows,
+      'America/Argentina/Buenos_Aires'
+    );
+
+    expect(result.ok).toBe(true);
+    expect(result.value).toBe(3);
+
+    const callArgs = mockBatchUpdate.mock.calls[0][0];
+    const rowData = callArgs.requestBody.requests[0].appendCells.rows[0].values;
+
+    // First two cells should be strings
+    expect(rowData[0].userEnteredValue).toEqual({ stringValue: 'fileId123' });
+    expect(rowData[1].userEnteredValue).toEqual({ stringValue: 'Invoice.pdf' });
+
+    // Third cell (ISO timestamp) should be converted to datetime
+    expect(rowData[2].userEnteredValue).toHaveProperty('numberValue');
+    expect(typeof rowData[2].userEnteredValue.numberValue).toBe('number');
+    expect(rowData[2].userEnteredFormat?.numberFormat).toEqual({
+      type: 'DATE_TIME',
+      pattern: 'yyyy-mm-dd hh:mm:ss',
+    });
+  });
+
+  it('should handle ISO timestamps without timezone parameter (UTC)', async () => {
+    const mockGet = vi.fn().mockResolvedValue({
+      data: {
+        sheets: [
+          {
+            properties: {
+              title: 'Facturas',
+              sheetId: 123,
+            },
+          },
+        ],
+      },
+    });
+
+    const mockBatchUpdate = vi.fn().mockResolvedValue({
+      data: {
+        replies: [
+          {
+            appendCells: {
+              updatedCells: 1,
+            },
+          },
+        ],
+      },
+    });
+
+    const mockSheets = google.sheets({} as any);
+    mockSheets.spreadsheets.get = mockGet;
+    mockSheets.spreadsheets.batchUpdate = mockBatchUpdate;
+
+    const rows = [['2026-01-24T18:30:00.000Z']];
+
+    const result = await appendRowsWithLinks('spreadsheetId123', 'Facturas!A:A', rows);
+
+    expect(result.ok).toBe(true);
+
+    const callArgs = mockBatchUpdate.mock.calls[0][0];
+    const cellData = callArgs.requestBody.requests[0].appendCells.rows[0].values[0];
+
+    // Should still be converted to datetime (in UTC since no timezone provided)
+    expect(cellData.userEnteredValue).toHaveProperty('numberValue');
+    expect(cellData.userEnteredFormat?.numberFormat?.type).toBe('DATE_TIME');
+  });
+});
+
 describe('getSpreadsheetTimezone', () => {
   beforeEach(() => {
     vi.clearAllMocks();

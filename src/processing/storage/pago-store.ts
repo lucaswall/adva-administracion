@@ -4,7 +4,7 @@
  */
 
 import type { Result, Pago, StoreResult } from '../../types/index.js';
-import { appendRowsWithLinks, sortSheet, getValues, type CellValueOrLink, type CellDate } from '../../services/sheets.js';
+import { appendRowsWithLinks, sortSheet, getValues, getSpreadsheetTimezone, type CellValueOrLink, type CellDate } from '../../services/sheets.js';
 import { formatUSCurrency, parseNumber } from '../../utils/numbers.js';
 import { generatePagoFileName } from '../../utils/file-naming.js';
 import { info, warn } from '../../utils/logger.js';
@@ -147,7 +147,11 @@ export async function storePago(
     range = `${sheetName}!A:O`;
   }
 
-  const result = await appendRowsWithLinks(spreadsheetId, range, [row]);
+  // Get spreadsheet timezone for proper timestamp formatting
+  const timezoneResult = await getSpreadsheetTimezone(spreadsheetId);
+  const timeZone = timezoneResult.ok ? timezoneResult.value : undefined;
+
+  const result = await appendRowsWithLinks(spreadsheetId, range, [row], timeZone);
   if (!result.ok) {
     return { ok: false, error: result.error };
   }

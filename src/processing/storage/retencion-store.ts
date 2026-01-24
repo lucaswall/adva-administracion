@@ -4,7 +4,7 @@
  */
 
 import type { Result, Retencion } from '../../types/index.js';
-import { appendRowsWithLinks, sortSheet, type CellValueOrLink, type CellDate } from '../../services/sheets.js';
+import { appendRowsWithLinks, sortSheet, getSpreadsheetTimezone, type CellValueOrLink, type CellDate } from '../../services/sheets.js';
 import { formatUSCurrency } from '../../utils/numbers.js';
 import { info } from '../../utils/logger.js';
 import { getCorrelationId } from '../../utils/correlation.js';
@@ -57,7 +57,11 @@ export async function storeRetencion(
   });
 
   try {
-    await appendRowsWithLinks(spreadsheetId, range, [row]);
+    // Get spreadsheet timezone for proper timestamp formatting
+    const timezoneResult = await getSpreadsheetTimezone(spreadsheetId);
+    const timeZone = timezoneResult.ok ? timezoneResult.value : undefined;
+
+    await appendRowsWithLinks(spreadsheetId, range, [row], timeZone);
 
     info('Retencion stored successfully', {
       module: 'retencion-store',
