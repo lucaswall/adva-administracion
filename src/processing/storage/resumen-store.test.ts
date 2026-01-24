@@ -1,9 +1,9 @@
 /**
- * Tests for resumen bancario storage operations
+ * Tests for resumen storage operations (bank accounts, credit cards, brokers)
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { storeResumen } from './resumen-store.js';
+import { storeResumenBancario } from './resumen-store.js';
 import type { ResumenBancario } from '../../types/index.js';
 
 // Mock dependencies
@@ -54,7 +54,7 @@ const createTestResumen = (overrides: Partial<ResumenBancario> = {}): ResumenBan
   ...overrides,
 });
 
-describe('storeResumen', () => {
+describe('storeResumenBancario (bank accounts)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
@@ -66,7 +66,7 @@ describe('storeResumen', () => {
       vi.mocked(sortSheet).mockResolvedValue({ ok: true, value: undefined });
 
       const resumen = createTestResumen();
-      const result = await storeResumen(resumen, 'spreadsheet-id');
+      const result = await storeResumenBancario(resumen, 'spreadsheet-id');
 
       expect(result.ok).toBe(true);
       if (result.ok) {
@@ -86,7 +86,7 @@ describe('storeResumen', () => {
       });
 
       const resumen = createTestResumen();
-      const result = await storeResumen(resumen, 'spreadsheet-id');
+      const result = await storeResumenBancario(resumen, 'spreadsheet-id');
 
       expect(result.ok).toBe(true);
       if (result.ok) {
@@ -104,7 +104,7 @@ describe('storeResumen', () => {
       });
 
       const resumen = createTestResumen();
-      const result = await storeResumen(resumen, 'spreadsheet-id');
+      const result = await storeResumenBancario(resumen, 'spreadsheet-id');
 
       expect(result.ok).toBe(false);
       if (!result.ok) {
@@ -131,7 +131,7 @@ describe('storeResumen', () => {
         moneda: 'ARS',
       });
 
-      const result = await storeResumen(resumen, 'spreadsheet-id');
+      const result = await storeResumenBancario(resumen, 'spreadsheet-id');
 
       expect(result.ok).toBe(true);
       if (result.ok) {
@@ -159,7 +159,7 @@ describe('storeResumen', () => {
         moneda: 'ARS',
       });
 
-      const result = await storeResumen(resumen, 'spreadsheet-id');
+      const result = await storeResumenBancario(resumen, 'spreadsheet-id');
 
       expect(result.ok).toBe(true);
       if (result.ok) {
@@ -187,7 +187,7 @@ describe('storeResumen', () => {
         moneda: 'ARS',
       });
 
-      const result = await storeResumen(resumen, 'spreadsheet-id');
+      const result = await storeResumenBancario(resumen, 'spreadsheet-id');
 
       expect(result.ok).toBe(true);
       if (result.ok) {
@@ -215,7 +215,7 @@ describe('storeResumen', () => {
         moneda: 'ARS',
       });
 
-      const result = await storeResumen(resumen, 'spreadsheet-id');
+      const result = await storeResumenBancario(resumen, 'spreadsheet-id');
 
       expect(result.ok).toBe(true);
       if (result.ok) {
@@ -243,7 +243,7 @@ describe('storeResumen', () => {
         moneda: 'ARS',
       });
 
-      const result = await storeResumen(resumen, 'spreadsheet-id');
+      const result = await storeResumenBancario(resumen, 'spreadsheet-id');
 
       expect(result.ok).toBe(true);
       if (result.ok) {
@@ -271,7 +271,7 @@ describe('storeResumen', () => {
         moneda: 'USD',
       });
 
-      const result = await storeResumen(resumen, 'spreadsheet-id');
+      const result = await storeResumenBancario(resumen, 'spreadsheet-id');
 
       expect(result.ok).toBe(true);
       if (result.ok) {
@@ -298,7 +298,7 @@ describe('storeResumen', () => {
         moneda: 'ARS',
       });
 
-      const result = await storeResumen(resumen, 'spreadsheet-id');
+      const result = await storeResumenBancario(resumen, 'spreadsheet-id');
 
       expect(result.ok).toBe(true);
       if (result.ok) {
@@ -324,7 +324,7 @@ describe('storeResumen', () => {
         saldoFinal: 15000,
       });
 
-      await storeResumen(resumen, 'spreadsheet-id');
+      await storeResumenBancario(resumen, 'spreadsheet-id');
 
       expect(appendRowsWithLinks).toHaveBeenCalledWith(
         'spreadsheet-id',
@@ -357,7 +357,7 @@ describe('storeResumen', () => {
         fileId: 'abc123',
       });
 
-      await storeResumen(resumen, 'spreadsheet-id');
+      await storeResumenBancario(resumen, 'spreadsheet-id');
 
       const calls = vi.mocked(appendRowsWithLinks).mock.calls;
       expect(calls.length).toBe(1);
@@ -376,7 +376,7 @@ describe('storeResumen', () => {
       vi.mocked(sortSheet).mockResolvedValue({ ok: true, value: undefined });
 
       const resumen = createTestResumen();
-      await storeResumen(resumen, 'spreadsheet-id');
+      await storeResumenBancario(resumen, 'spreadsheet-id');
 
       expect(sortSheet).toHaveBeenCalledWith(
         'spreadsheet-id',
@@ -395,7 +395,7 @@ describe('storeResumen', () => {
       });
 
       const resumen = createTestResumen();
-      const result = await storeResumen(resumen, 'spreadsheet-id');
+      const result = await storeResumenBancario(resumen, 'spreadsheet-id');
 
       // Should still succeed even if sort fails
       expect(result.ok).toBe(true);

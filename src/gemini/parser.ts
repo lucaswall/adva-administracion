@@ -2,7 +2,7 @@
  * Gemini response parsing and validation
  */
 
-import type { Factura, Pago, Recibo, ResumenBancario, Retencion, ParseResult, Result, ClassificationResult, AdvaRoleValidation } from '../types/index.js';
+import type { Factura, Pago, Recibo, ResumenBancario, ResumenTarjeta, ResumenBroker, Retencion, ParseResult, Result, ClassificationResult, AdvaRoleValidation } from '../types/index.js';
 import { ParseError } from '../types/index.js';
 import { warn } from '../utils/logger.js';
 
@@ -698,7 +698,7 @@ export function parseReciboResponse(response: string): Result<ParseResult<Partia
 const VALID_CARD_TYPES = ['Visa', 'Mastercard', 'Amex', 'Naranja', 'Cabal'] as const;
 
 /**
- * Parses a Gemini response for resumen bancario data
+ * Parses a Gemini response for resumen bancario (bank account) data
  *
  * @param response - Raw Gemini response
  * @returns Parse result with resumen bancario data or error
@@ -716,19 +716,6 @@ export function parseResumenBancarioResponse(response: string): Result<ParseResu
 
     // Parse JSON
     const data = JSON.parse(jsonStr) as Partial<ResumenBancario>;
-
-    // Validate tipoTarjeta if present
-    if (data.tipoTarjeta !== undefined) {
-      if (!VALID_CARD_TYPES.includes(data.tipoTarjeta as typeof VALID_CARD_TYPES[number])) {
-        // Invalid card type - clear it and mark for review
-        warn('Invalid tipoTarjeta value, clearing', {
-          module: 'gemini-parser',
-          phase: 'resumen-parse',
-          tipoTarjeta: data.tipoTarjeta,
-        });
-        data.tipoTarjeta = undefined;
-      }
-    }
 
     // Check for required fields
     const requiredFields: (keyof ResumenBancario)[] = [
@@ -775,6 +762,146 @@ export function parseResumenBancarioResponse(response: string): Result<ParseResu
   }
 }
 
+/**
+ * Parses a Gemini response for resumen tarjeta (credit card) data
+ *
+ * @param response - Raw Gemini response
+ * @returns Parse result with resumen tarjeta data or error
+ */
+export function parseResumenTarjetaResponse(response: string): Result<ParseResult<Partial<ResumenTarjeta>>, ParseError> {
+  try {
+    // Extract JSON
+    const jsonStr = extractJSON(response);
+    if (!jsonStr) {
+      return {
+        ok: false,
+        error: new ParseError('No JSON found in response', response)
+      };
+    }
+
+    // Parse JSON
+    const data = JSON.parse(jsonStr) as Partial<ResumenTarjeta>;
+
+    // Validate tipoTarjeta
+    if (data.tipoTarjeta !== undefined) {
+      if (!VALID_CARD_TYPES.includes(data.tipoTarjeta as typeof VALID_CARD_TYPES[number])) {
+        // Invalid card type - mark for review
+        warn('Invalid tipoTarjeta value in credit card statement', {
+          module: 'gemini-parser',
+          phase: 'resumen-tarjeta-parse',
+          tipoTarjeta: data.tipoTarjeta,
+        });
+        data.tipoTarjeta = undefined;
+      }
+    }
+
+    // Check for required fields
+    const requiredFields: (keyof ResumenTarjeta)[] = [
+      'banco',
+      'tipoTarjeta',
+      'numeroCuenta',
+      'fechaDesde',
+      'fechaHasta',
+      'pagoMinimo',
+      'saldoActual',
+      'cantidadMovimientos'
+    ];
+
+    // Check for missing or empty fields
+    const missingFields = requiredFields.filter(field => {
+      const value = data[field];
+      return value === undefined || value === null || value === '';
+    });
+
+    // Calculate confidence based on completeness
+    const completeness = (requiredFields.length - missingFields.length) / requiredFields.length;
+    const confidence = Math.max(0.5, completeness);
+
+    // If confidence > 0.9, no review needed; otherwise check for issues
+    const needsReview = confidence <= 0.9 && missingFields.length > 0;
+
+    return {
+      ok: true,
+      value: {
+        data,
+        confidence,
+        needsReview,
+        missingFields: missingFields.length > 0 ? missingFields as string[] : undefined
+      }
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      error: new ParseError(
+        error instanceof Error ? error.message : 'Unknown parse error',
+        response
+      )
+    };
+  }
+}
+
+/**
+ * Parses a Gemini response for resumen broker (investment) data
+ *
+ * @param response - Raw Gemini response
+ * @returns Parse result with resumen broker data or error
+ */
+export function parseResumenBrokerResponse(response: string): Result<ParseResult<Partial<ResumenBroker>>, ParseError> {
+  try {
+    // Extract JSON
+    const jsonStr = extractJSON(response);
+    if (!jsonStr) {
+      return {
+        ok: false,
+        error: new ParseError('No JSON found in response', response)
+      };
+    }
+
+    // Parse JSON
+    const data = JSON.parse(jsonStr) as Partial<ResumenBroker>;
+
+    // Check for required fields (saldoARS and saldoUSD are optional)
+    const requiredFields: (keyof ResumenBroker)[] = [
+      'broker',
+      'numeroCuenta',
+      'fechaDesde',
+      'fechaHasta',
+      'cantidadMovimientos'
+    ];
+
+    // Check for missing or empty fields
+    const missingFields = requiredFields.filter(field => {
+      const value = data[field];
+      return value === undefined || value === null || value === '';
+    });
+
+    // Calculate confidence based on completeness
+    const completeness = (requiredFields.length - missingFields.length) / requiredFields.length;
+    const confidence = Math.max(0.5, completeness);
+
+    // If confidence > 0.9, no review needed; otherwise check for issues
+    const needsReview = confidence <= 0.9 && missingFields.length > 0;
+
+    return {
+      ok: true,
+      value: {
+        data,
+        confidence,
+        needsReview,
+        missingFields: missingFields.length > 0 ? missingFields as string[] : undefined
+      }
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      error: new ParseError(
+        error instanceof Error ? error.message : 'Unknown parse error',
+        response
+      )
+    };
+  }
+}
+
 /** Valid document types for classification */
 const VALID_DOCUMENT_TYPES = [
   'factura_emitida',
@@ -782,6 +909,8 @@ const VALID_DOCUMENT_TYPES = [
   'pago_enviado',
   'pago_recibido',
   'resumen_bancario',
+  'resumen_tarjeta',
+  'resumen_broker',
   'recibo',
   'certificado_retencion',
   'unrecognized',

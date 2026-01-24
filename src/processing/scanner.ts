@@ -14,12 +14,14 @@ import type {
   Pago,
   Recibo,
   ResumenBancario,
+  ResumenTarjeta,
+  ResumenBroker,
   Retencion,
   ScanResult,
   DocumentType,
 } from '../types/index.js';
 import { listFilesInFolder } from '../services/drive.js';
-import { getCachedFolderStructure, getOrCreateBankAccountFolder, getOrCreateBankAccountSpreadsheet } from '../services/folder-structure.js';
+import { getCachedFolderStructure, getOrCreateBankAccountFolder, getOrCreateBankAccountSpreadsheet, getOrCreateCreditCardFolder, getOrCreateCreditCardSpreadsheet, getOrCreateBrokerFolder, getOrCreateBrokerSpreadsheet } from '../services/folder-structure.js';
 import { sortToSinProcesar, sortAndRenameDocument, moveToDuplicadoFolder } from '../services/document-sorter.js';
 import { getProcessingQueue } from './queue.js';
 import { getConfig } from '../config.js';
@@ -28,7 +30,7 @@ import { withCorrelationAsync, getCorrelationId, generateCorrelationId } from '.
 
 // Import from refactored modules
 import { processFile, hasValidDate } from './extractor.js';
-import { storeFactura, storePago, storeRecibo, storeRetencion, storeResumen, getProcessedFileIds } from './storage/index.js';
+import { storeFactura, storePago, storeRecibo, storeRetencion, storeResumenBancario, storeResumenTarjeta, storeResumenBroker, getProcessedFileIds } from './storage/index.js';
 import { runMatching } from './matching/index.js';
 
 // Re-export for backwards compatibility
@@ -521,7 +523,7 @@ export async function scanFolder(folderId?: string): Promise<Result<ScanResult, 
  * Helper to store and sort a document based on its type
  */
 async function storeAndSortDocument(
-  doc: Factura | Pago | Recibo | ResumenBancario | Retencion,
+  doc: Factura | Pago | Recibo | ResumenBancario | ResumenTarjeta | ResumenBroker | Retencion,
   documentType: DocumentType,
   fileInfo: { id: string; name: string },
   controlIngresosId: string,
@@ -895,7 +897,7 @@ async function storeAndSortDocument(
       result.errors++;
     }
   } else if (documentType === 'resumen_bancario') {
-    // Bank statement -> store in bank account-specific spreadsheet
+    // Bank account statement -> store in bank account-specific spreadsheet
     const resumen = doc as ResumenBancario;
     const year = resumen.fechaHasta.substring(0, 4);
 
@@ -914,8 +916,7 @@ async function storeAndSortDocument(
       year,
       resumen.banco,
       resumen.numeroCuenta,
-      resumen.moneda,
-      resumen.tipoTarjeta
+      resumen.moneda
     );
 
     if (!folderResult.ok) {
@@ -934,8 +935,7 @@ async function storeAndSortDocument(
         year,
         resumen.banco,
         resumen.numeroCuenta,
-        resumen.moneda,
-        resumen.tipoTarjeta
+        resumen.moneda
       );
 
       if (!spreadsheetResult.ok) {
@@ -949,7 +949,7 @@ async function storeAndSortDocument(
         result.errors++;
       } else {
         // Store the resumen
-        const storeResult = await storeResumen(resumen, spreadsheetResult.value);
+        const storeResult = await storeResumenBancario(resumen, spreadsheetResult.value);
 
         if (storeResult.ok) {
           if (storeResult.value.stored) {
@@ -1002,6 +1002,219 @@ async function storeAndSortDocument(
           }
         } else {
           logError('Failed to store resumen', {
+            module: 'scanner',
+            phase: 'storage',
+            fileName: fileInfo.name,
+            error: storeResult.error.message,
+            correlationId,
+          });
+          result.errors++;
+        }
+      }
+    }
+  } else if (documentType === 'resumen_tarjeta') {
+    // Credit card statement -> store in credit card-specific spreadsheet
+    const resumen = doc as ResumenTarjeta;
+    const year = resumen.fechaHasta.substring(0, 4);
+
+    debug('Storing resumen tarjeta', {
+      module: 'scanner',
+      phase: 'storage',
+      fileName: fileInfo.name,
+      banco: resumen.banco,
+      tipoTarjeta: resumen.tipoTarjeta,
+      numeroCuenta: resumen.numeroCuenta,
+      year,
+      correlationId,
+    });
+
+    // Get or create credit card folder
+    const folderResult = await getOrCreateCreditCardFolder(
+      year,
+      resumen.banco,
+      resumen.tipoTarjeta,
+      resumen.numeroCuenta
+    );
+
+    if (!folderResult.ok) {
+      logError('Failed to get credit card folder', {
+        module: 'scanner',
+        phase: 'storage',
+        fileName: fileInfo.name,
+        error: folderResult.error.message,
+        correlationId,
+      });
+      result.errors++;
+    } else {
+      // Get or create credit card spreadsheet
+      const spreadsheetResult = await getOrCreateCreditCardSpreadsheet(
+        folderResult.value,
+        year,
+        resumen.banco,
+        resumen.tipoTarjeta,
+        resumen.numeroCuenta
+      );
+
+      if (!spreadsheetResult.ok) {
+        logError('Failed to get credit card spreadsheet', {
+          module: 'scanner',
+          phase: 'storage',
+          fileName: fileInfo.name,
+          error: spreadsheetResult.error.message,
+          correlationId,
+        });
+        result.errors++;
+      } else {
+        // Store the resumen
+        const storeResult = await storeResumenTarjeta(resumen, spreadsheetResult.value);
+
+        if (storeResult.ok) {
+          if (storeResult.value.stored) {
+            const sortResult = await sortAndRenameDocument(doc, 'bancos', 'resumen_tarjeta');
+            if (!sortResult.success) {
+              logError('Failed to move resumen tarjeta', {
+                module: 'scanner',
+                phase: 'storage',
+                fileName: fileInfo.name,
+                error: sortResult.error,
+                correlationId,
+              });
+              result.errors++;
+            } else {
+              info(`Stored and moved to ${sortResult.targetPath}`, {
+                module: 'scanner',
+                phase: 'storage',
+                fileName: fileInfo.name,
+                correlationId,
+              });
+            }
+          } else {
+            info('Duplicate resumen tarjeta detected, moving to Duplicado folder', {
+              module: 'scanner',
+              phase: 'storage',
+              fileName: fileInfo.name,
+              existingFileId: storeResult.value.existingFileId,
+              correlationId,
+            });
+            const moveResult = await moveToDuplicadoFolder(fileInfo.id, fileInfo.name);
+            if (!moveResult.ok) {
+              logError('Failed to move duplicate resumen tarjeta to Duplicado', {
+                module: 'scanner',
+                phase: 'storage',
+                fileName: fileInfo.name,
+                error: moveResult.error.message,
+                correlationId,
+              });
+              result.errors++;
+            }
+          }
+        } else {
+          logError('Failed to store resumen tarjeta', {
+            module: 'scanner',
+            phase: 'storage',
+            fileName: fileInfo.name,
+            error: storeResult.error.message,
+            correlationId,
+          });
+          result.errors++;
+        }
+      }
+    }
+  } else if (documentType === 'resumen_broker') {
+    // Broker statement -> store in broker-specific spreadsheet
+    const resumen = doc as ResumenBroker;
+    const year = resumen.fechaHasta.substring(0, 4);
+
+    debug('Storing resumen broker', {
+      module: 'scanner',
+      phase: 'storage',
+      fileName: fileInfo.name,
+      broker: resumen.broker,
+      numeroCuenta: resumen.numeroCuenta,
+      year,
+      correlationId,
+    });
+
+    // Get or create broker folder
+    const folderResult = await getOrCreateBrokerFolder(
+      year,
+      resumen.broker,
+      resumen.numeroCuenta
+    );
+
+    if (!folderResult.ok) {
+      logError('Failed to get broker folder', {
+        module: 'scanner',
+        phase: 'storage',
+        fileName: fileInfo.name,
+        error: folderResult.error.message,
+        correlationId,
+      });
+      result.errors++;
+    } else {
+      // Get or create broker spreadsheet
+      const spreadsheetResult = await getOrCreateBrokerSpreadsheet(
+        folderResult.value,
+        year,
+        resumen.broker,
+        resumen.numeroCuenta
+      );
+
+      if (!spreadsheetResult.ok) {
+        logError('Failed to get broker spreadsheet', {
+          module: 'scanner',
+          phase: 'storage',
+          fileName: fileInfo.name,
+          error: spreadsheetResult.error.message,
+          correlationId,
+        });
+        result.errors++;
+      } else {
+        // Store the resumen
+        const storeResult = await storeResumenBroker(resumen, spreadsheetResult.value);
+
+        if (storeResult.ok) {
+          if (storeResult.value.stored) {
+            const sortResult = await sortAndRenameDocument(doc, 'bancos', 'resumen_broker');
+            if (!sortResult.success) {
+              logError('Failed to move resumen broker', {
+                module: 'scanner',
+                phase: 'storage',
+                fileName: fileInfo.name,
+                error: sortResult.error,
+                correlationId,
+              });
+              result.errors++;
+            } else {
+              info(`Stored and moved to ${sortResult.targetPath}`, {
+                module: 'scanner',
+                phase: 'storage',
+                fileName: fileInfo.name,
+                correlationId,
+              });
+            }
+          } else {
+            info('Duplicate resumen broker detected, moving to Duplicado folder', {
+              module: 'scanner',
+              phase: 'storage',
+              fileName: fileInfo.name,
+              existingFileId: storeResult.value.existingFileId,
+              correlationId,
+            });
+            const moveResult = await moveToDuplicadoFolder(fileInfo.id, fileInfo.name);
+            if (!moveResult.ok) {
+              logError('Failed to move duplicate resumen broker to Duplicado', {
+                module: 'scanner',
+                phase: 'storage',
+                fileName: fileInfo.name,
+                error: moveResult.error.message,
+                correlationId,
+              });
+              result.errors++;
+            }
+          }
+        } else {
+          logError('Failed to store resumen broker', {
             module: 'scanner',
             phase: 'storage',
             fileName: fileInfo.name,

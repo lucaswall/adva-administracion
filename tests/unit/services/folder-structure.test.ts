@@ -1397,7 +1397,7 @@ describe('FolderStructure service', () => {
       expect(mockSetValues).toHaveBeenCalledWith(
         'resumenes-spreadsheet-id',
         'Resumenes!A1',
-        [['fechaDesde', 'fechaHasta', 'fileId', 'fileName', 'banco', 'numeroCuenta', 'tipoTarjeta_o_moneda', 'saldoInicial', 'saldoFinal']]
+        [['fechaDesde', 'fechaHasta', 'fileId', 'fileName', 'banco', 'numeroCuenta', 'moneda', 'saldoInicial', 'saldoFinal']]
       );
 
       // Verify formatting was applied
@@ -1580,7 +1580,7 @@ describe('FolderStructure service', () => {
             'fileName',
             'banco',
             'numeroCuenta',
-            'tipoTarjeta_o_moneda',
+            'moneda',
             'saldoInicial',
             'saldoFinal',
           ])

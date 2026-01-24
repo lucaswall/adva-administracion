@@ -145,11 +145,11 @@ export const RESUMEN_BANCARIO_HEADERS = [
 ];
 
 /**
- * Sheet configuration for Control de Resumenes spreadsheet
- * Stores bank statements in bank account-specific folders
- * For credit cards, tipoTarjeta column replaces moneda
+ * Sheet configuration for Control de Resumenes spreadsheet - Bank Accounts
+ * Stores bank account statements in bank account-specific folders
+ * Folder: {YYYY}/Bancos/{Bank} {Account} {Currency}/
  */
-export const CONTROL_RESUMENES_SHEET: SheetConfig = {
+export const CONTROL_RESUMENES_BANCARIO_SHEET: SheetConfig = {
   title: 'Resumenes',
   headers: [
     'fechaDesde',
@@ -158,7 +158,7 @@ export const CONTROL_RESUMENES_SHEET: SheetConfig = {
     'fileName',
     'banco',
     'numeroCuenta',
-    'tipoTarjeta_o_moneda', // Credit cards: tipoTarjeta | Bank accounts: moneda
+    'moneda',          // ARS|USD
     'saldoInicial',
     'saldoFinal',
   ],
@@ -167,6 +167,57 @@ export const CONTROL_RESUMENES_SHEET: SheetConfig = {
     [1, { type: 'date' }],              // fechaHasta
     [7, { type: 'currency', decimals: 2 }],  // saldoInicial
     [8, { type: 'currency', decimals: 2 }],  // saldoFinal
+  ]),
+};
+
+/**
+ * Sheet configuration for Control de Resumenes spreadsheet - Credit Cards
+ * Stores credit card statements in card-specific folders
+ * Folder: {YYYY}/Bancos/{Bank} {CardType} {LastDigits}/
+ */
+export const CONTROL_RESUMENES_TARJETA_SHEET: SheetConfig = {
+  title: 'Resumenes',
+  headers: [
+    'fechaDesde',
+    'fechaHasta',
+    'fileId',
+    'fileName',
+    'banco',
+    'numeroCuenta',
+    'tipoTarjeta',     // Visa|Mastercard|Amex|Naranja|Cabal
+    'pagoMinimo',
+    'saldoActual',
+  ],
+  numberFormats: new Map([
+    [0, { type: 'date' }],              // fechaDesde
+    [1, { type: 'date' }],              // fechaHasta
+    [7, { type: 'currency', decimals: 2 }],  // pagoMinimo
+    [8, { type: 'currency', decimals: 2 }],  // saldoActual
+  ]),
+};
+
+/**
+ * Sheet configuration for Control de Resumenes spreadsheet - Broker/Investment
+ * Stores broker statements in broker-specific folders
+ * Folder: {YYYY}/Bancos/{Broker} {Comitente}/
+ */
+export const CONTROL_RESUMENES_BROKER_SHEET: SheetConfig = {
+  title: 'Resumenes',
+  headers: [
+    'fechaDesde',
+    'fechaHasta',
+    'fileId',
+    'fileName',
+    'broker',
+    'numeroCuenta',
+    'saldoARS',        // Balance in ARS (optional)
+    'saldoUSD',        // Balance in USD (optional)
+  ],
+  numberFormats: new Map([
+    [0, { type: 'date' }],              // fechaDesde
+    [1, { type: 'date' }],              // fechaHasta
+    [6, { type: 'currency', decimals: 2 }],  // saldoARS
+    [7, { type: 'currency', decimals: 2 }],  // saldoUSD
   ]),
 };
 

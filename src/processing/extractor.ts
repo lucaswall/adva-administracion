@@ -10,6 +10,8 @@ import type {
   Pago,
   Recibo,
   ResumenBancario,
+  ResumenTarjeta,
+  ResumenBroker,
   Retencion,
   DocumentType,
   ClassificationResult,
@@ -21,6 +23,8 @@ import {
   PAGO_BBVA_PROMPT,
   RECIBO_PROMPT,
   RESUMEN_BANCARIO_PROMPT,
+  RESUMEN_TARJETA_PROMPT,
+  RESUMEN_BROKER_PROMPT,
   CERTIFICADO_RETENCION_PROMPT,
 } from '../gemini/prompts.js';
 import {
@@ -29,6 +33,8 @@ import {
   parsePagoResponse,
   parseReciboResponse,
   parseResumenBancarioResponse,
+  parseResumenTarjetaResponse,
+  parseResumenBrokerResponse,
   parseRetencionResponse,
 } from '../gemini/parser.js';
 import { downloadFile } from '../services/drive.js';
@@ -44,7 +50,7 @@ import { getCircuitBreaker } from '../utils/circuit-breaker.js';
  */
 export interface ProcessFileResult {
   documentType: DocumentType;
-  document?: Factura | Pago | Recibo | ResumenBancario | Retencion;
+  document?: Factura | Pago | Recibo | ResumenBancario | ResumenTarjeta | ResumenBroker | Retencion;
   classification?: ClassificationResult;
   error?: string;
 }
@@ -69,6 +75,8 @@ export function hasValidDate(doc: unknown, documentType: DocumentType): boolean 
     case 'recibo':
       return !!d.fechaPago && d.fechaPago !== '';
     case 'resumen_bancario':
+    case 'resumen_tarjeta':
+    case 'resumen_broker':
       // Validate that both date fields are present and non-empty
       // If dates cannot be parsed, file should go to Sin Procesar
       return !!d.fechaDesde && d.fechaDesde !== '' && !!d.fechaHasta && d.fechaHasta !== '';
@@ -228,6 +236,12 @@ export async function processFile(
       break;
     case 'resumen_bancario':
       extractPrompt = RESUMEN_BANCARIO_PROMPT;
+      break;
+    case 'resumen_tarjeta':
+      extractPrompt = RESUMEN_TARJETA_PROMPT;
+      break;
+    case 'resumen_broker':
+      extractPrompt = RESUMEN_BROKER_PROMPT;
       break;
     case 'certificado_retencion':
       extractPrompt = CERTIFICADO_RETENCION_PROMPT;
@@ -477,6 +491,69 @@ export async function processFile(
       ok: true,
       value: {
         documentType: 'resumen_bancario',
+        document: resumen,
+        classification,
+      },
+    };
+  }
+
+  if (classification.documentType === 'resumen_tarjeta') {
+    const parseResult = parseResumenTarjetaResponse(extractResult.value);
+    if (!parseResult.ok) {
+      return { ok: false, error: parseResult.error };
+    }
+
+    const resumen: ResumenTarjeta = {
+      fileId: fileInfo.id,
+      fileName: fileInfo.name,
+      banco: parseResult.value.data.banco || 'Desconocido',
+      numeroCuenta: parseResult.value.data.numeroCuenta || '',
+      tipoTarjeta: parseResult.value.data.tipoTarjeta || 'Visa',
+      fechaDesde: parseResult.value.data.fechaDesde || '',
+      fechaHasta: parseResult.value.data.fechaHasta || '',
+      pagoMinimo: parseResult.value.data.pagoMinimo || 0,
+      saldoActual: parseResult.value.data.saldoActual || 0,
+      cantidadMovimientos: parseResult.value.data.cantidadMovimientos || 0,
+      processedAt: now,
+      confidence: parseResult.value.confidence,
+      needsReview: parseResult.value.needsReview,
+    };
+
+    return {
+      ok: true,
+      value: {
+        documentType: 'resumen_tarjeta',
+        document: resumen,
+        classification,
+      },
+    };
+  }
+
+  if (classification.documentType === 'resumen_broker') {
+    const parseResult = parseResumenBrokerResponse(extractResult.value);
+    if (!parseResult.ok) {
+      return { ok: false, error: parseResult.error };
+    }
+
+    const resumen: ResumenBroker = {
+      fileId: fileInfo.id,
+      fileName: fileInfo.name,
+      broker: parseResult.value.data.broker || 'Desconocido',
+      numeroCuenta: parseResult.value.data.numeroCuenta || '',
+      fechaDesde: parseResult.value.data.fechaDesde || '',
+      fechaHasta: parseResult.value.data.fechaHasta || '',
+      saldoARS: parseResult.value.data.saldoARS,
+      saldoUSD: parseResult.value.data.saldoUSD,
+      cantidadMovimientos: parseResult.value.data.cantidadMovimientos || 0,
+      processedAt: now,
+      confidence: parseResult.value.confidence,
+      needsReview: parseResult.value.needsReview,
+    };
+
+    return {
+      ok: true,
+      value: {
+        documentType: 'resumen_broker',
         document: resumen,
         classification,
       },

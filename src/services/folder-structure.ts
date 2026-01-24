@@ -7,7 +7,7 @@ import { getConfig } from '../config.js';
 import { findByName, listByMimeType, createFolder, createSpreadsheet } from './drive.js';
 import { getSheetMetadata, createSheet, setValues, getValues, formatSheet, deleteSheet, moveSheetToFirst } from './sheets.js';
 import { formatMonthFolder } from '../utils/spanish-date.js';
-import { CONTROL_INGRESOS_SHEETS, CONTROL_EGRESOS_SHEETS, DASHBOARD_OPERATIVO_SHEETS, CONTROL_RESUMENES_SHEET, type SheetConfig } from '../constants/spreadsheet-headers.js';
+import { CONTROL_INGRESOS_SHEETS, CONTROL_EGRESOS_SHEETS, DASHBOARD_OPERATIVO_SHEETS, CONTROL_RESUMENES_BANCARIO_SHEET, CONTROL_RESUMENES_TARJETA_SHEET, CONTROL_RESUMENES_BROKER_SHEET, type SheetConfig } from '../constants/spreadsheet-headers.js';
 import type { FolderStructure, Result, SortDestination } from '../types/index.js';
 import { debug, info, error as logError } from '../utils/logger.js';
 import { withLock } from '../utils/concurrency.js';
@@ -697,23 +697,19 @@ export async function getOrCreateMonthFolder(
 
 /**
  * Gets or creates a bank account folder for storing bank statements
- * Implements structure:
- * - Bank accounts: {year}/Bancos/{Bank Name} {Nro Cuenta} {Moneda}/
- * - Credit cards: {year}/Bancos/{Bank Name} {Card Type} {Card Number}/ (no currency)
+ * Implements structure: {year}/Bancos/{Bank Name} {Nro Cuenta} {Moneda}/
  *
  * @param year - Year string (e.g., "2024")
  * @param banco - Bank name (e.g., "Santander")
- * @param numeroCuenta - Account number (bank) or last digits (credit card)
- * @param moneda - Currency (ARS or USD) - used only for bank accounts
- * @param tipoTarjeta - Optional credit card type (Visa, Mastercard, etc.)
+ * @param numeroCuenta - Account number (10+ digits)
+ * @param moneda - Currency (ARS or USD)
  * @returns Folder ID for the bank account folder
  */
 export async function getOrCreateBankAccountFolder(
   year: string,
   banco: string,
   numeroCuenta: string,
-  moneda: string,
-  tipoTarjeta?: string
+  moneda: string
 ): Promise<Result<string, Error>> {
   if (!cachedStructure) {
     return {
@@ -722,12 +718,7 @@ export async function getOrCreateBankAccountFolder(
     };
   }
 
-  // Create folder name based on account type
-  // Credit cards: no currency (single card can have ARS + USD transactions)
-  // Bank accounts: include currency
-  const folderName = tipoTarjeta
-    ? `${banco} ${tipoTarjeta} ${numeroCuenta}`
-    : `${banco} ${numeroCuenta} ${moneda}`;
+  const folderName = `${banco} ${numeroCuenta} ${moneda}`;
   const cacheKey = `${year}:${folderName}`;
 
   // Check cache first
@@ -826,15 +817,238 @@ export async function getOrCreateBankAccountFolder(
 }
 
 /**
+ * Gets or creates a credit card folder for storing card statements
+ * Implements structure: {year}/Bancos/{Bank Name} {Card Type} {Card Number}/
+ *
+ * @param year - Year string (e.g., "2024")
+ * @param banco - Bank name (e.g., "BBVA")
+ * @param tipoTarjeta - Card type (Visa, Mastercard, etc.)
+ * @param numeroCuenta - Last 4-8 digits of card number
+ * @returns Folder ID for the credit card folder
+ */
+export async function getOrCreateCreditCardFolder(
+  year: string,
+  banco: string,
+  tipoTarjeta: string,
+  numeroCuenta: string
+): Promise<Result<string, Error>> {
+  if (!cachedStructure) {
+    return {
+      ok: false,
+      error: new Error('Folder structure not initialized. Call discoverFolderStructure first.'),
+    };
+  }
+
+  const folderName = `${banco} ${tipoTarjeta} ${numeroCuenta}`;
+  const cacheKey = `${year}:${folderName}`;
+
+  // Check cache first
+  const cachedFolderId = cachedStructure.bankAccountFolders.get(cacheKey);
+  if (cachedFolderId) {
+    return { ok: true, value: cachedFolderId };
+  }
+
+  // Use lock to prevent concurrent creation
+  const lockKey = `folder:credit-card:${cacheKey}`;
+  const result = await withLock(lockKey, async () => {
+    const cachedId = cachedStructure?.bankAccountFolders.get(cacheKey);
+    if (cachedId) {
+      return cachedId;
+    }
+
+    // Get or create year folder
+    let yearFolderId = cachedStructure!.yearFolders.get(year);
+    if (!yearFolderId) {
+      const yearLockKey = `folder:year:${year}`;
+      const yearResult = await withLock(yearLockKey, async () => {
+        const cachedYearId = cachedStructure?.yearFolders.get(year);
+        if (cachedYearId) return cachedYearId;
+
+        const findYearResult = await findByName(cachedStructure!.rootId, year, FOLDER_MIME);
+        if (!findYearResult.ok) throw findYearResult.error;
+
+        if (findYearResult.value) {
+          const foundId = findYearResult.value.id;
+          cachedStructure!.yearFolders.set(year, foundId);
+          return foundId;
+        }
+
+        const createYearResult = await createFolder(cachedStructure!.rootId, year);
+        if (!createYearResult.ok) throw createYearResult.error;
+
+        const createdId = createYearResult.value.id;
+        cachedStructure!.yearFolders.set(year, createdId);
+        return createdId;
+      });
+
+      if (!yearResult.ok) throw yearResult.error;
+      yearFolderId = yearResult.value;
+    }
+
+    // Ensure Bancos classification folder exists
+    const ensureResult = await ensureClassificationFolders(yearFolderId, year);
+    if (!ensureResult.ok) throw ensureResult.error;
+
+    const bancosFolderId = cachedStructure!.classificationFolders.get(`${year}:bancos`);
+    if (!bancosFolderId) {
+      throw new Error(`Bancos folder not found for year ${year}`);
+    }
+
+    // Find or create credit card subfolder
+    const findResult = await findByName(bancosFolderId, folderName, FOLDER_MIME);
+    if (!findResult.ok) throw findResult.error;
+
+    if (findResult.value) {
+      const foundId = findResult.value.id;
+      cachedStructure!.bankAccountFolders.set(cacheKey, foundId);
+      debug('Found existing credit card folder', {
+        module: 'folder-structure',
+        phase: 'credit-card-folder',
+        year,
+        folderName,
+        folderId: foundId
+      });
+      return foundId;
+    }
+
+    const createResult = await createFolder(bancosFolderId, folderName);
+    if (!createResult.ok) throw createResult.error;
+
+    const createdId = createResult.value.id;
+    cachedStructure!.bankAccountFolders.set(cacheKey, createdId);
+    info('Created credit card folder', {
+      module: 'folder-structure',
+      phase: 'credit-card-folder',
+      year,
+      folderName,
+      folderId: createdId
+    });
+    return createdId;
+  });
+
+  return result;
+}
+
+/**
+ * Gets or creates a broker folder for storing investment statements
+ * Implements structure: {year}/Bancos/{Broker Name} {Comitente}/
+ *
+ * @param year - Year string (e.g., "2024")
+ * @param broker - Broker name (e.g., "BALANZ")
+ * @param numeroCuenta - Comitente number
+ * @returns Folder ID for the broker folder
+ */
+export async function getOrCreateBrokerFolder(
+  year: string,
+  broker: string,
+  numeroCuenta: string
+): Promise<Result<string, Error>> {
+  if (!cachedStructure) {
+    return {
+      ok: false,
+      error: new Error('Folder structure not initialized. Call discoverFolderStructure first.'),
+    };
+  }
+
+  const folderName = `${broker} ${numeroCuenta}`;
+  const cacheKey = `${year}:${folderName}`;
+
+  // Check cache first
+  const cachedFolderId = cachedStructure.bankAccountFolders.get(cacheKey);
+  if (cachedFolderId) {
+    return { ok: true, value: cachedFolderId };
+  }
+
+  // Use lock to prevent concurrent creation
+  const lockKey = `folder:broker:${cacheKey}`;
+  const result = await withLock(lockKey, async () => {
+    const cachedId = cachedStructure?.bankAccountFolders.get(cacheKey);
+    if (cachedId) {
+      return cachedId;
+    }
+
+    // Get or create year folder
+    let yearFolderId = cachedStructure!.yearFolders.get(year);
+    if (!yearFolderId) {
+      const yearLockKey = `folder:year:${year}`;
+      const yearResult = await withLock(yearLockKey, async () => {
+        const cachedYearId = cachedStructure?.yearFolders.get(year);
+        if (cachedYearId) return cachedYearId;
+
+        const findYearResult = await findByName(cachedStructure!.rootId, year, FOLDER_MIME);
+        if (!findYearResult.ok) throw findYearResult.error;
+
+        if (findYearResult.value) {
+          const foundId = findYearResult.value.id;
+          cachedStructure!.yearFolders.set(year, foundId);
+          return foundId;
+        }
+
+        const createYearResult = await createFolder(cachedStructure!.rootId, year);
+        if (!createYearResult.ok) throw createYearResult.error;
+
+        const createdId = createYearResult.value.id;
+        cachedStructure!.yearFolders.set(year, createdId);
+        return createdId;
+      });
+
+      if (!yearResult.ok) throw yearResult.error;
+      yearFolderId = yearResult.value;
+    }
+
+    // Ensure Bancos classification folder exists
+    const ensureResult = await ensureClassificationFolders(yearFolderId, year);
+    if (!ensureResult.ok) throw ensureResult.error;
+
+    const bancosFolderId = cachedStructure!.classificationFolders.get(`${year}:bancos`);
+    if (!bancosFolderId) {
+      throw new Error(`Bancos folder not found for year ${year}`);
+    }
+
+    // Find or create broker subfolder
+    const findResult = await findByName(bancosFolderId, folderName, FOLDER_MIME);
+    if (!findResult.ok) throw findResult.error;
+
+    if (findResult.value) {
+      const foundId = findResult.value.id;
+      cachedStructure!.bankAccountFolders.set(cacheKey, foundId);
+      debug('Found existing broker folder', {
+        module: 'folder-structure',
+        phase: 'broker-folder',
+        year,
+        folderName,
+        folderId: foundId
+      });
+      return foundId;
+    }
+
+    const createResult = await createFolder(bancosFolderId, folderName);
+    if (!createResult.ok) throw createResult.error;
+
+    const createdId = createResult.value.id;
+    cachedStructure!.bankAccountFolders.set(cacheKey, createdId);
+    info('Created broker folder', {
+      module: 'folder-structure',
+      phase: 'broker-folder',
+      year,
+      folderName,
+      folderId: createdId
+    });
+    return createdId;
+  });
+
+  return result;
+}
+
+/**
  * Gets or creates a Control de Resumenes spreadsheet for a bank account
  * Creates the spreadsheet in the bank account folder if it doesn't exist
  *
  * @param folderId - Bank account folder ID
  * @param year - Year string (e.g., "2024")
  * @param banco - Bank name
- * @param numeroCuenta - Account number (bank) or last digits (credit card)
- * @param moneda - Currency (ARS or USD) - used only for bank accounts
- * @param tipoTarjeta - Optional credit card type (Visa, Mastercard, etc.)
+ * @param numeroCuenta - Account number (10+ digits)
+ * @param moneda - Currency (ARS or USD)
  * @returns Spreadsheet ID for Control de Resumenes
  */
 export async function getOrCreateBankAccountSpreadsheet(
@@ -842,8 +1056,7 @@ export async function getOrCreateBankAccountSpreadsheet(
   year: string,
   banco: string,
   numeroCuenta: string,
-  moneda: string,
-  tipoTarjeta?: string
+  moneda: string
 ): Promise<Result<string, Error>> {
   if (!cachedStructure) {
     return {
@@ -853,10 +1066,7 @@ export async function getOrCreateBankAccountSpreadsheet(
   }
 
   const spreadsheetName = 'Control de Resumenes';
-  // Create cache key based on account type (same logic as folder naming)
-  const folderName = tipoTarjeta
-    ? `${banco} ${tipoTarjeta} ${numeroCuenta}`
-    : `${banco} ${numeroCuenta} ${moneda}`;
+  const folderName = `${banco} ${numeroCuenta} ${moneda}`;
   const cacheKey = `${year}:${folderName}`;
 
   // Check cache first
@@ -868,13 +1078,11 @@ export async function getOrCreateBankAccountSpreadsheet(
   // Use lock to prevent concurrent creation
   const lockKey = `spreadsheet:bank-account:${cacheKey}`;
   const result = await withLock(lockKey, async () => {
-    // Check cache again inside lock
     const cachedId = cachedStructure?.bankAccountSpreadsheets.get(cacheKey);
     if (cachedId) {
       return cachedId;
     }
 
-    // Find or create spreadsheet
     const findResult = await findByName(folderId, spreadsheetName, SPREADSHEET_MIME);
     if (!findResult.ok) throw findResult.error;
 
@@ -890,7 +1098,6 @@ export async function getOrCreateBankAccountSpreadsheet(
         spreadsheetId
       });
     } else {
-      // Create new spreadsheet
       const createResult = await createSpreadsheet(folderId, spreadsheetName);
       if (!createResult.ok) throw createResult.error;
 
@@ -905,10 +1112,149 @@ export async function getOrCreateBankAccountSpreadsheet(
     }
 
     // Ensure the Resumenes sheet exists with proper headers and formatting
-    const ensureSheetResult = await ensureSheetsExist(spreadsheetId, [CONTROL_RESUMENES_SHEET]);
+    const ensureSheetResult = await ensureSheetsExist(spreadsheetId, [CONTROL_RESUMENES_BANCARIO_SHEET]);
     if (!ensureSheetResult.ok) throw ensureSheetResult.error;
 
-    // Cache the spreadsheet ID
+    cachedStructure!.bankAccountSpreadsheets.set(cacheKey, spreadsheetId);
+
+    return spreadsheetId;
+  });
+
+  return result;
+}
+
+/**
+ * Gets or creates a Control de Resumenes spreadsheet for a credit card
+ *
+ * @param folderId - Credit card folder ID
+ * @param year - Year string (e.g., "2024")
+ * @param banco - Bank name
+ * @param tipoTarjeta - Card type (Visa, Mastercard, etc.)
+ * @param numeroCuenta - Last 4-8 digits of card number
+ * @returns Spreadsheet ID for Control de Resumenes
+ */
+export async function getOrCreateCreditCardSpreadsheet(
+  folderId: string,
+  year: string,
+  banco: string,
+  tipoTarjeta: string,
+  numeroCuenta: string
+): Promise<Result<string, Error>> {
+  if (!cachedStructure) {
+    return {
+      ok: false,
+      error: new Error('Folder structure not initialized. Call discoverFolderStructure first.'),
+    };
+  }
+
+  const spreadsheetName = 'Control de Resumenes';
+  const folderName = `${banco} ${tipoTarjeta} ${numeroCuenta}`;
+  const cacheKey = `${year}:${folderName}`;
+
+  const cachedSpreadsheetId = cachedStructure.bankAccountSpreadsheets.get(cacheKey);
+  if (cachedSpreadsheetId) {
+    return { ok: true, value: cachedSpreadsheetId };
+  }
+
+  const lockKey = `spreadsheet:credit-card:${cacheKey}`;
+  const result = await withLock(lockKey, async () => {
+    const cachedId = cachedStructure?.bankAccountSpreadsheets.get(cacheKey);
+    if (cachedId) {
+      return cachedId;
+    }
+
+    const findResult = await findByName(folderId, spreadsheetName, SPREADSHEET_MIME);
+    if (!findResult.ok) throw findResult.error;
+
+    let spreadsheetId: string;
+
+    if (findResult.value) {
+      spreadsheetId = findResult.value.id;
+    } else {
+      const createResult = await createSpreadsheet(folderId, spreadsheetName);
+      if (!createResult.ok) throw createResult.error;
+      spreadsheetId = createResult.value.id;
+      info('Created Control de Resumenes spreadsheet for credit card', {
+        module: 'folder-structure',
+        phase: 'credit-card-spreadsheet',
+        year,
+        folderName,
+        spreadsheetId
+      });
+    }
+
+    const ensureSheetResult = await ensureSheetsExist(spreadsheetId, [CONTROL_RESUMENES_TARJETA_SHEET]);
+    if (!ensureSheetResult.ok) throw ensureSheetResult.error;
+
+    cachedStructure!.bankAccountSpreadsheets.set(cacheKey, spreadsheetId);
+
+    return spreadsheetId;
+  });
+
+  return result;
+}
+
+/**
+ * Gets or creates a Control de Resumenes spreadsheet for a broker
+ *
+ * @param folderId - Broker folder ID
+ * @param year - Year string (e.g., "2024")
+ * @param broker - Broker name
+ * @param numeroCuenta - Comitente number
+ * @returns Spreadsheet ID for Control de Resumenes
+ */
+export async function getOrCreateBrokerSpreadsheet(
+  folderId: string,
+  year: string,
+  broker: string,
+  numeroCuenta: string
+): Promise<Result<string, Error>> {
+  if (!cachedStructure) {
+    return {
+      ok: false,
+      error: new Error('Folder structure not initialized. Call discoverFolderStructure first.'),
+    };
+  }
+
+  const spreadsheetName = 'Control de Resumenes';
+  const folderName = `${broker} ${numeroCuenta}`;
+  const cacheKey = `${year}:${folderName}`;
+
+  const cachedSpreadsheetId = cachedStructure.bankAccountSpreadsheets.get(cacheKey);
+  if (cachedSpreadsheetId) {
+    return { ok: true, value: cachedSpreadsheetId };
+  }
+
+  const lockKey = `spreadsheet:broker:${cacheKey}`;
+  const result = await withLock(lockKey, async () => {
+    const cachedId = cachedStructure?.bankAccountSpreadsheets.get(cacheKey);
+    if (cachedId) {
+      return cachedId;
+    }
+
+    const findResult = await findByName(folderId, spreadsheetName, SPREADSHEET_MIME);
+    if (!findResult.ok) throw findResult.error;
+
+    let spreadsheetId: string;
+
+    if (findResult.value) {
+      spreadsheetId = findResult.value.id;
+    } else {
+      const createResult = await createSpreadsheet(folderId, spreadsheetName);
+      if (!createResult.ok) throw createResult.error;
+      spreadsheetId = createResult.value.id;
+      info('Created Control de Resumenes spreadsheet for broker', {
+        module: 'folder-structure',
+        phase: 'broker-spreadsheet',
+        year,
+        folderName,
+        spreadsheetId
+      });
+    }
+
+    const ensureSheetResult = await ensureSheetsExist(spreadsheetId, [CONTROL_RESUMENES_BROKER_SHEET]);
+    if (!ensureSheetResult.ok) throw ensureSheetResult.error;
+
     cachedStructure!.bankAccountSpreadsheets.set(cacheKey, spreadsheetId);
 
     return spreadsheetId;

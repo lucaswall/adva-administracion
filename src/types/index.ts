@@ -35,7 +35,9 @@ export interface StoreResult {
  * - factura_recibida: Invoice TO ADVA (ADVA is receptor) → goes to Egresos
  * - pago_enviado: Payment BY ADVA → goes to Egresos
  * - pago_recibido: Payment TO ADVA → goes to Ingresos
- * - resumen_bancario: Bank statement → goes to Bancos
+ * - resumen_bancario: Bank account statement → goes to Bancos
+ * - resumen_tarjeta: Credit card statement → goes to Bancos
+ * - resumen_broker: Broker/investment statement → goes to Bancos
  * - recibo: Salary receipt → goes to Egresos
  * - certificado_retencion: Tax withholding certificate → goes to Ingresos
  */
@@ -44,7 +46,9 @@ export type DocumentType =
   | 'factura_recibida'   // Invoice TO ADVA (ADVA is receptor)
   | 'pago_enviado'       // Payment BY ADVA
   | 'pago_recibido'      // Payment TO ADVA
-  | 'resumen_bancario'   // Bank statement
+  | 'resumen_bancario'   // Bank account statement
+  | 'resumen_tarjeta'    // Credit card statement
+  | 'resumen_broker'     // Broker/investment statement
   | 'recibo'             // Salary receipt
   | 'certificado_retencion' // Tax withholding certificate
   | 'unrecognized'
@@ -253,8 +257,8 @@ export interface Recibo {
 export type TipoTarjeta = 'Visa' | 'Mastercard' | 'Amex' | 'Naranja' | 'Cabal';
 
 /**
- * Bank Statement (Resumen Bancario)
- * Represents a monthly bank statement document
+ * Bank Account Statement (Resumen Bancario)
+ * Represents a monthly bank account statement document
  */
 export interface ResumenBancario {
   // File tracking
@@ -266,9 +270,7 @@ export interface ResumenBancario {
   // Bank info
   /** Bank name (e.g., "BBVA", "Santander", "Galicia") */
   banco: string;
-  /** Credit card type (Visa, Mastercard, etc.) - only for credit card statements */
-  tipoTarjeta?: TipoTarjeta;
-  /** Account number (bank) or last 4-8 digits (credit card) */
+  /** Account number (typically 10+ digits) */
   numeroCuenta: string;
 
   // Period
@@ -282,8 +284,94 @@ export interface ResumenBancario {
   saldoInicial: number;
   /** Closing balance at end of period */
   saldoFinal: number;
-  /** Currency */
+  /** Currency (ARS or USD) */
   moneda: Moneda;
+
+  // Summary
+  /** Number of movements in the period */
+  cantidadMovimientos: number;
+
+  // Processing metadata
+  /** When this record was processed (ISO timestamp) */
+  processedAt: string;
+  /** Extraction confidence (0.0 to 1.0) */
+  confidence: number;
+  /** Whether manual review is needed */
+  needsReview: boolean;
+}
+
+/**
+ * Credit Card Statement (Resumen de Tarjeta)
+ * Represents a monthly credit card statement document
+ */
+export interface ResumenTarjeta {
+  // File tracking
+  /** Google Drive file ID */
+  fileId: string;
+  /** Original filename */
+  fileName: string;
+
+  // Card info
+  /** Bank name (e.g., "BBVA", "Santander", "Galicia") */
+  banco: string;
+  /** Last 4-8 digits of card number */
+  numeroCuenta: string;
+  /** Card type (Visa, Mastercard, Amex, Naranja, Cabal) */
+  tipoTarjeta: TipoTarjeta;
+
+  // Period
+  /** Statement start date (ISO format: YYYY-MM-DD) */
+  fechaDesde: string;
+  /** Statement end date (ISO format: YYYY-MM-DD) */
+  fechaHasta: string;
+
+  // Amounts
+  /** Minimum payment due */
+  pagoMinimo: number;
+  /** Current balance (amount owed) */
+  saldoActual: number;
+
+  // Summary
+  /** Number of movements in the period */
+  cantidadMovimientos: number;
+
+  // Processing metadata
+  /** When this record was processed (ISO timestamp) */
+  processedAt: string;
+  /** Extraction confidence (0.0 to 1.0) */
+  confidence: number;
+  /** Whether manual review is needed */
+  needsReview: boolean;
+}
+
+/**
+ * Broker/Investment Statement (Resumen de Broker)
+ * Represents a monthly broker account statement document
+ */
+export interface ResumenBroker {
+  // File tracking
+  /** Google Drive file ID */
+  fileId: string;
+  /** Original filename */
+  fileName: string;
+
+  // Broker info
+  /** Broker name (e.g., "BALANZ", "IOL", "PPI") */
+  broker: string;
+  /** Comitente number (client account) */
+  numeroCuenta: string;
+
+  // Period
+  /** Statement start date (ISO format: YYYY-MM-DD) */
+  fechaDesde: string;
+  /** Statement end date (ISO format: YYYY-MM-DD) */
+  fechaHasta: string;
+
+  // Balances (multi-currency - both optional)
+  /** Balance in ARS (optional) */
+  saldoARS?: number;
+  /** Balance in USD (optional) */
+  saldoUSD?: number;
 
   // Summary
   /** Number of movements in the period */
@@ -478,7 +566,9 @@ export interface ParseResult<T> {
  * Extended classification (Phase 4) now includes direction:
  * - factura_emitida/factura_recibida: Invoice direction based on ADVA CUIT position
  * - pago_enviado/pago_recibido: Payment direction based on payer/beneficiary
- * - resumen_bancario: Bank statement
+ * - resumen_bancario: Bank account statement
+ * - resumen_tarjeta: Credit card statement
+ * - resumen_broker: Broker/investment statement
  * - recibo: Salary receipt (unchanged)
  * - certificado_retencion: Tax withholding certificate
  */
@@ -490,6 +580,8 @@ export interface ClassificationResult {
     | 'pago_enviado'
     | 'pago_recibido'
     | 'resumen_bancario'
+    | 'resumen_tarjeta'
+    | 'resumen_broker'
     | 'recibo'
     | 'certificado_retencion'
     | 'unrecognized';
