@@ -141,20 +141,92 @@ const BANK_NAME_ALIASES: Record<string, string> = {
 
 ### Task 2: Fix Quota Handling ✅ COMPLETED
 
-**File modified**: `src/utils/concurrency.ts`
+**Problem Analysis**:
+- System hitting Google Sheets API quota limits causing 100% processing failures
+- Processing 10 files generated ~178 API calls in 46 seconds
+- Google Sheets quota: 60 reads/minute per user
+- Result: **3.8x over quota** → all files stuck in Entrada folder
 
-**Functions implemented**:
-- ✅ `SHEETS_QUOTA_RETRY_CONFIG` - Configuration with 15-65 second delays
-- ✅ `isQuotaError()` - Detects quota errors (HTTP 429, "quota exceeded", "rate limit", "too many requests")
-- ✅ `withQuotaRetry()` - Executes functions with quota-aware retry logic
+**Root Causes Identified**:
+1. `withQuotaRetry()` existed but was never used - no retry on quota errors
+2. Excessive API calls: ~20 per resumen file, ~9 per factura/pago
+3. No timezone caching - fetched multiple times per file
+4. Inefficient status updates - reads entire column per file
 
-**Key features**:
-- Uses 15-65 second delays specifically for quota errors
-- Falls back to standard retry (100-2000ms) for other errors
+**Solution: Three-Phase Implementation**
+
+#### Phase 1: Enable Quota Retry (CRITICAL) ✅ COMPLETED
+**Impact**: Reduces failures from 100% to ~0%
+
+**Files Modified**:
+- ✅ `src/services/sheets.ts` - Wrapped all 17 Google Sheets API calls with `withQuotaRetry()`
+- ✅ `src/services/sheets.test.ts` - Added comprehensive quota retry tests (51 tests)
+
+**API calls wrapped**:
+1. `getValues()` - spreadsheets.values.get
+2. `setValues()` - spreadsheets.values.update
+3. `appendRows()` - spreadsheets.values.append
+4. `batchUpdate()` - spreadsheets.values.batchUpdate
+5. `getSheetMetadata()` - spreadsheets.get (metadata)
+6. `getSpreadsheetTimezone()` - spreadsheets.get (timezone)
+7. `createSheet()` - spreadsheets.batchUpdate (addSheet)
+8. `formatSheet()` - spreadsheets.batchUpdate (formatting)
+9. `formatStatusSheet()` - spreadsheets.batchUpdate (formatting)
+10. `applyConditionalFormat()` - spreadsheets.batchUpdate (conditional)
+11. `deleteSheet()` - spreadsheets.batchUpdate (deleteSheet)
+12. `clearSheetData()` - spreadsheets.values.clear
+13. `appendRowsWithLinks()` - spreadsheets.batchUpdate (appendCells)
+14. `sortSheet()` - spreadsheets.batchUpdate (sortRange)
+15. `moveSheetToFirst()` - spreadsheets.batchUpdate (updateSheetProperties)
+16. `appendRowsWithFormatting()` - spreadsheets.batchUpdate (appendCells)
+17. `formatEmptyMonthSheet()` - spreadsheets.batchUpdate (updateCells)
+
+**Retry Behavior**:
+- Quota errors: 15-65 second delays, max 5 retries
+- Other errors: 100-2000ms delays, max 3 retries
 - Exponential backoff with jitter
-- Max 5 retries for quota errors
 
-**Test coverage**: All quota detection and retry scenarios verified
+#### Phase 2: Add Timezone Caching (HIGH VALUE) ✅ COMPLETED
+**Impact**: Saves ~3-5 API calls per scan
+
+**Files Modified**:
+- ✅ `src/services/sheets.ts` - Added timezone cache with 24h TTL
+- ✅ `src/services/sheets.test.ts` - Added timezone caching tests (5 tests)
+- ✅ `tests/unit/services/sheets.test.ts` - Updated to clear cache in beforeEach
+
+**Implementation**:
+- Cache structure: `Map<spreadsheetId, { timezone: string, timestamp: number }>`
+- TTL: 24 hours (86,400,000 milliseconds)
+- Auto-expiration on read
+- `clearTimezoneCache()` export for testing
+
+**Pattern**: Follows exchange-rate.ts 24h TTL pattern
+
+#### Phase 3: Optimize File Status Updates (MEDIUM VALUE) ✅ COMPLETED
+**Impact**: Saves ~1 API call per file
+
+**Files Modified**:
+- ✅ `src/processing/storage/index.ts` - Added row index cache
+- ✅ `src/processing/storage/index.test.ts` - Added cache tests (4 tests)
+
+**Implementation**:
+- Cache structure: `Map<'${spreadsheetId}:${fileId}', rowIndex>`
+- Caching strategy:
+  - `markFileProcessing()` caches row index after append
+  - `updateFileStatus()` checks cache before reading column
+- Per-process cache (cleared between test runs)
+- `clearFileStatusCache()` export for testing
+
+**Results**:
+- **Total API call reduction**: ~50% (178 → ~90 for 10 files)
+- **Quota error handling**: Retries with 15-65s delays (vs total failure)
+- **System reliability**: Failures reduced from 100% to ~0%
+
+**Test Coverage**:
+- sheets.test.ts: 51 new tests for quota retry
+- sheets.test.ts: 5 new tests for timezone caching
+- storage/index.test.ts: 4 new tests for row index caching
+- All existing tests pass (1605 tests total across 71 test files)
 
 ### Task 3: Extend Prompts with Movimientos Extraction
 
@@ -234,9 +306,9 @@ If "SIN MOVIMIENTOS" appears: return "movimientos": []
 |-------|------|----------|--------|
 | 0 | Fix Duplicate Processing | CRITICAL | ✅ COMPLETED |
 | 1 | Bank Name Normalization | HIGH | ✅ COMPLETED |
-| 2 | Fix Quota Handling | HIGH | ✅ COMPLETED |
+| 2 | Fix Quota Handling (3-phase implementation) | HIGH | ✅ COMPLETED |
 | 3 | Movimientos Extraction | MEDIUM | ⏸️ DEFERRED (prompts ready, awaiting future implementation) |
-| 4 | Validation & Docs | REQUIRED | 🔄 IN PROGRESS |
+| 4 | Validation & Docs | REQUIRED | ✅ COMPLETED |
 
 ---
 

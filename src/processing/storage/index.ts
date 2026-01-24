@@ -7,6 +7,19 @@ import type { Result, DocumentType } from '../../types/index.js';
 import { info as logInfo, error as logError } from '../../utils/logger.js';
 import { getCorrelationId } from '../../utils/correlation.js';
 
+/**
+ * In-memory cache for file row indexes
+ * Key: `${spreadsheetId}:${fileId}`, Value: row index (1-based)
+ */
+const fileRowIndexCache = new Map<string, number>();
+
+/**
+ * Clears the file row index cache (for testing)
+ */
+export function clearFileStatusCache(): void {
+  fileRowIndexCache.clear();
+}
+
 // Re-export storage functions
 export { storeFactura } from './factura-store.js';
 export { storePago } from './pago-store.js';
@@ -32,6 +45,10 @@ export async function markFileProcessing(
   const correlationId = getCorrelationId();
   const processedAt = new Date().toISOString();
 
+  // Get current row count to know where new row will be
+  const valuesResult = await getValues(dashboardId, 'Archivos Procesados!A:A');
+  const currentRowCount = valuesResult.ok ? valuesResult.value.length : 0;
+
   const result = await appendRowsWithLinks(
     dashboardId,
     'Archivos Procesados',
@@ -49,11 +66,17 @@ export async function markFileProcessing(
     return { ok: false, error: result.error };
   }
 
+  // Cache row index for this file
+  const newRowIndex = currentRowCount + 1;
+  const cacheKey = `${dashboardId}:${fileId}`;
+  fileRowIndexCache.set(cacheKey, newRowIndex);
+
   logInfo('Marked file as processing', {
     module: 'storage',
     fileId,
     fileName,
     documentType,
+    rowIndex: newRowIndex,
     correlationId,
   });
 
@@ -75,47 +98,57 @@ export async function updateFileStatus(
   errorMessage?: string
 ): Promise<Result<void, Error>> {
   const correlationId = getCorrelationId();
+  const cacheKey = `${dashboardId}:${fileId}`;
+  const cacheHit = fileRowIndexCache.has(cacheKey);
 
-  // Get all file IDs from the tracking sheet to find the row
-  const valuesResult = await getValues(dashboardId, 'Archivos Procesados!A:A');
+  // Check cache first
+  let rowIndex = fileRowIndexCache.get(cacheKey);
 
-  if (!valuesResult.ok) {
-    logError('Failed to read tracking sheet for status update', {
-      module: 'storage',
-      fileId,
-      error: valuesResult.error.message,
-      correlationId,
-    });
-    return { ok: false, error: valuesResult.error };
-  }
+  if (rowIndex === undefined) {
+    // Cache miss - read column to find row
+    const valuesResult = await getValues(dashboardId, 'Archivos Procesados!A:A');
 
-  // Find the row index for this file (skip header row)
-  let rowIndex = -1;
-  for (let i = 1; i < valuesResult.value.length; i++) {
-    const row = valuesResult.value[i];
-    if (row && row[0] === fileId) {
-      rowIndex = i + 1; // +1 for 1-indexed sheet rows
-      break;
+    if (!valuesResult.ok) {
+      logError('Failed to read tracking sheet for status update', {
+        module: 'storage',
+        fileId,
+        error: valuesResult.error.message,
+        correlationId,
+      });
+      return { ok: false, error: valuesResult.error };
     }
+
+    // Find row index (skip header)
+    let foundIndex = -1;
+    for (let i = 1; i < valuesResult.value.length; i++) {
+      const row = valuesResult.value[i];
+      if (row && row[0] === fileId) {
+        foundIndex = i + 1; // 1-indexed
+        break;
+      }
+    }
+
+    if (foundIndex === -1) {
+      const error = new Error(`File ${fileId} not found in tracking sheet`);
+      logError('File not found in tracking sheet', {
+        module: 'storage',
+        fileId,
+        correlationId,
+      });
+      return { ok: false, error };
+    }
+
+    rowIndex = foundIndex;
+    fileRowIndexCache.set(cacheKey, rowIndex);
   }
 
-  if (rowIndex === -1) {
-    const error = new Error(`File ${fileId} not found in tracking sheet`);
-    logError('File not found in tracking sheet', {
-      module: 'storage',
-      fileId,
-      correlationId,
-    });
-    return { ok: false, error };
-  }
+  // Update status using cached row index
+  const statusValue = status === 'failed' && errorMessage
+    ? `failed: ${errorMessage}`
+    : status;
 
-  // Update the status column (E)
-  const statusValue = status === 'failed' && errorMessage ? `failed: ${errorMessage}` : status;
   const updateResult = await batchUpdate(dashboardId, [
-    {
-      range: `Archivos Procesados!E${rowIndex}`,
-      values: [[statusValue]],
-    },
+    { range: `Archivos Procesados!E${rowIndex}`, values: [[statusValue]] },
   ]);
 
   if (!updateResult.ok) {
@@ -133,6 +166,7 @@ export async function updateFileStatus(
     module: 'storage',
     fileId,
     status,
+    usedCache: cacheHit,
     correlationId,
   });
 

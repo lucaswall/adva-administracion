@@ -5,7 +5,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { sheets_v4 } from 'googleapis';
 import { google } from 'googleapis';
-import { formatSheet, clearSheetsCache, appendRowsWithLinks, appendRowsWithFormatting, clearSheetData, moveSheetToFirst, dateStringToSerial, getSpreadsheetTimezone, dateToSerialInTimezone } from '../../../src/services/sheets.js';
+import { formatSheet, clearSheetsCache, appendRowsWithLinks, appendRowsWithFormatting, clearSheetData, moveSheetToFirst, dateStringToSerial, getSpreadsheetTimezone, dateToSerialInTimezone, clearTimezoneCache } from '../../../src/services/sheets.js';
 
 // Mock googleapis
 vi.mock('googleapis', () => {
@@ -1355,6 +1355,7 @@ describe('getSpreadsheetTimezone', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     clearSheetsCache();
+    clearTimezoneCache();
   });
 
   it('should return the spreadsheet timezone', async () => {

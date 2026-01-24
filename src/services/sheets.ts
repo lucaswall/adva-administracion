@@ -6,11 +6,63 @@
 import { google, sheets_v4 } from 'googleapis';
 import { getGoogleAuth, getDefaultScopes } from './google-auth.js';
 import type { Result } from '../types/index.js';
+import { withQuotaRetry } from '../utils/concurrency.js';
 
 /**
  * Sheets service instance
  */
 let sheetsService: sheets_v4.Sheets | null = null;
+
+/**
+ * Cache TTL: 24 hours in milliseconds
+ */
+const TIMEZONE_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * In-memory cache entry for timezone
+ */
+interface TimezoneCacheEntry {
+  timezone: string;
+  timestamp: number;
+}
+
+/**
+ * Module-level cache for spreadsheet timezones
+ */
+const timezoneCache = new Map<string, TimezoneCacheEntry>();
+
+/**
+ * Gets cached timezone if valid (not expired)
+ */
+function getCachedTimezone(spreadsheetId: string): string | null {
+  const entry = timezoneCache.get(spreadsheetId);
+  if (!entry) return null;
+
+  const now = Date.now();
+  if (now - entry.timestamp > TIMEZONE_CACHE_TTL_MS) {
+    timezoneCache.delete(spreadsheetId);
+    return null;
+  }
+
+  return entry.timezone;
+}
+
+/**
+ * Sets cached timezone with current timestamp
+ */
+function setCachedTimezone(spreadsheetId: string, timezone: string): void {
+  timezoneCache.set(spreadsheetId, {
+    timezone,
+    timestamp: Date.now(),
+  });
+}
+
+/**
+ * Clears the timezone cache (for testing)
+ */
+export function clearTimezoneCache(): void {
+  timezoneCache.clear();
+}
 
 /**
  * Gets or creates the Sheets service
@@ -75,24 +127,19 @@ export async function getValues(
   spreadsheetId: string,
   range: string
 ): Promise<Result<CellValue[][], Error>> {
-  try {
+  return withQuotaRetry(async () => {
     const sheets = getSheetsService();
-
     const response = await sheets.spreadsheets.values.get({
       spreadsheetId,
       range,
       valueRenderOption: 'UNFORMATTED_VALUE',
       dateTimeRenderOption: 'SERIAL_NUMBER',
     });
-
-    const values = response.data.values || [];
-    return { ok: true, value: values as CellValue[][] };
-  } catch (error) {
-    return {
-      ok: false,
-      error: error instanceof Error ? error : new Error(String(error)),
-    };
-  }
+    return response.data.values || [];
+  }).then(result => {
+    if (!result.ok) return { ok: false, error: result.error };
+    return { ok: true, value: result.value as CellValue[][] };
+  });
 }
 
 /**
@@ -108,9 +155,8 @@ export async function setValues(
   range: string,
   values: CellValue[][]
 ): Promise<Result<number, Error>> {
-  try {
+  return withQuotaRetry(async () => {
     const sheets = getSheetsService();
-
     const response = await sheets.spreadsheets.values.update({
       spreadsheetId,
       range,
@@ -119,14 +165,11 @@ export async function setValues(
         values,
       },
     });
-
-    return { ok: true, value: response.data.updatedCells || 0 };
-  } catch (error) {
-    return {
-      ok: false,
-      error: error instanceof Error ? error : new Error(String(error)),
-    };
-  }
+    return response.data.updatedCells || 0;
+  }).then(result => {
+    if (!result.ok) return { ok: false, error: result.error };
+    return { ok: true, value: result.value };
+  });
 }
 
 /**
@@ -142,9 +185,8 @@ export async function appendRows(
   range: string,
   values: CellValue[][]
 ): Promise<Result<number, Error>> {
-  try {
+  return withQuotaRetry(async () => {
     const sheets = getSheetsService();
-
     const response = await sheets.spreadsheets.values.append({
       spreadsheetId,
       range,
@@ -154,14 +196,11 @@ export async function appendRows(
         values,
       },
     });
-
-    return { ok: true, value: response.data.updates?.updatedCells || 0 };
-  } catch (error) {
-    return {
-      ok: false,
-      error: error instanceof Error ? error : new Error(String(error)),
-    };
-  }
+    return response.data.updates?.updatedCells || 0;
+  }).then(result => {
+    if (!result.ok) return { ok: false, error: result.error };
+    return { ok: true, value: result.value };
+  });
 }
 
 /**
@@ -175,9 +214,8 @@ export async function batchUpdate(
   spreadsheetId: string,
   updates: Array<{ range: string; values: CellValue[][] }>
 ): Promise<Result<number, Error>> {
-  try {
+  return withQuotaRetry(async () => {
     const sheets = getSheetsService();
-
     const response = await sheets.spreadsheets.values.batchUpdate({
       spreadsheetId,
       requestBody: {
@@ -188,14 +226,11 @@ export async function batchUpdate(
         })),
       },
     });
-
-    return { ok: true, value: response.data.totalUpdatedCells || 0 };
-  } catch (error) {
-    return {
-      ok: false,
-      error: error instanceof Error ? error : new Error(String(error)),
-    };
-  }
+    return response.data.totalUpdatedCells || 0;
+  }).then(result => {
+    if (!result.ok) return { ok: false, error: result.error };
+    return { ok: true, value: result.value };
+  });
 }
 
 /**
@@ -207,29 +242,23 @@ export async function batchUpdate(
 export async function getSheetMetadata(
   spreadsheetId: string
 ): Promise<Result<Array<{ title: string; sheetId: number }>, Error>> {
-  try {
+  return withQuotaRetry(async () => {
     const sheets = getSheetsService();
-
     const response = await sheets.spreadsheets.get({
       spreadsheetId,
       fields: 'sheets.properties.title,sheets.properties.sheetId',
     });
-
     const sheetsList = response.data.sheets || [];
-    const result = sheetsList
+    return sheetsList
       .filter(s => s.properties?.title && s.properties?.sheetId !== undefined)
       .map(s => ({
         title: s.properties!.title!,
         sheetId: s.properties!.sheetId!,
       }));
-
-    return { ok: true, value: result };
-  } catch (error) {
-    return {
-      ok: false,
-      error: error instanceof Error ? error : new Error(String(error)),
-    };
-  }
+  }).then(result => {
+    if (!result.ok) return { ok: false, error: result.error };
+    return { ok: true, value: result.value };
+  });
 }
 
 /**
@@ -241,29 +270,30 @@ export async function getSheetMetadata(
 export async function getSpreadsheetTimezone(
   spreadsheetId: string
 ): Promise<Result<string, Error>> {
-  try {
-    const sheets = getSheetsService();
+  // Check cache first
+  const cachedTimezone = getCachedTimezone(spreadsheetId);
+  if (cachedTimezone) {
+    return { ok: true, value: cachedTimezone };
+  }
 
+  // Fetch from API (already wrapped with withQuotaRetry)
+  return withQuotaRetry(async () => {
+    const sheets = getSheetsService();
     const response = await sheets.spreadsheets.get({
       spreadsheetId,
       fields: 'properties.timeZone',
     });
-
     const timeZone = response.data.properties?.timeZone;
     if (!timeZone) {
-      return {
-        ok: false,
-        error: new Error('Timezone not found in spreadsheet properties'),
-      };
+      throw new Error('Timezone not found in spreadsheet properties');
     }
-
-    return { ok: true, value: timeZone };
-  } catch (error) {
-    return {
-      ok: false,
-      error: error instanceof Error ? error : new Error(String(error)),
-    };
-  }
+    // Cache the result
+    setCachedTimezone(spreadsheetId, timeZone);
+    return timeZone;
+  }).then(result => {
+    if (!result.ok) return { ok: false, error: result.error };
+    return { ok: true, value: result.value };
+  });
 }
 
 /**
@@ -277,9 +307,8 @@ export async function createSheet(
   spreadsheetId: string,
   title: string
 ): Promise<Result<number, Error>> {
-  try {
+  return withQuotaRetry(async () => {
     const sheets = getSheetsService();
-
     const response = await sheets.spreadsheets.batchUpdate({
       spreadsheetId,
       requestBody: {
@@ -294,19 +323,15 @@ export async function createSheet(
         ],
       },
     });
-
     const newSheet = response.data.replies?.[0]?.addSheet?.properties;
     if (!newSheet?.sheetId) {
-      return { ok: false, error: new Error('Failed to create sheet') };
+      throw new Error('Failed to create sheet');
     }
-
-    return { ok: true, value: newSheet.sheetId };
-  } catch (error) {
-    return {
-      ok: false,
-      error: error instanceof Error ? error : new Error(String(error)),
-    };
-  }
+    return newSheet.sheetId;
+  }).then(result => {
+    if (!result.ok) return { ok: false, error: result.error };
+    return { ok: true, value: result.value };
+  });
 }
 
 /**
@@ -428,10 +453,10 @@ export async function formatSheet(
     frozenRows?: number;
   } = {}
 ): Promise<Result<void, Error>> {
-  try {
-    const sheets = getSheetsService();
-    const { monetaryColumns = [], numberFormats, frozenRows = 1 } = options;
+  const { monetaryColumns = [], numberFormats, frozenRows = 1 } = options;
 
+  return withQuotaRetry(async () => {
+    const sheets = getSheetsService();
     const requests: sheets_v4.Schema$Request[] = [];
 
     // 1. Freeze header rows
@@ -544,14 +569,10 @@ export async function formatSheet(
         requests,
       },
     });
-
+  }).then(result => {
+    if (!result.ok) return { ok: false, error: result.error };
     return { ok: true, value: undefined };
-  } catch (error) {
-    return {
-      ok: false,
-      error: error instanceof Error ? error : new Error(String(error)),
-    };
-  }
+  });
 }
 
 /**
@@ -568,9 +589,8 @@ export async function formatStatusSheet(
   spreadsheetId: string,
   sheetId: number
 ): Promise<Result<void, Error>> {
-  try {
+  return withQuotaRetry(async () => {
     const sheets = getSheetsService();
-
     const requests: sheets_v4.Schema$Request[] = [];
 
     // 1. Bold only column A (all rows) - metric labels
@@ -632,14 +652,10 @@ export async function formatStatusSheet(
         requests,
       },
     });
-
+  }).then(result => {
+    if (!result.ok) return { ok: false, error: result.error };
     return { ok: true, value: undefined };
-  } catch (error) {
-    return {
-      ok: false,
-      error: error instanceof Error ? error : new Error(String(error)),
-    };
-  }
+  });
 }
 
 /**
@@ -675,7 +691,7 @@ export async function applyConditionalFormat(
   spreadsheetId: string,
   rules: ConditionalFormatRule[]
 ): Promise<Result<void, Error>> {
-  try {
+  return withQuotaRetry(async () => {
     const sheets = getSheetsService();
 
     const requests: sheets_v4.Schema$Request[] = rules.map(rule => ({
@@ -711,14 +727,10 @@ export async function applyConditionalFormat(
       spreadsheetId,
       requestBody: { requests },
     });
-
+  }).then(result => {
+    if (!result.ok) return { ok: false, error: result.error };
     return { ok: true, value: undefined };
-  } catch (error) {
-    return {
-      ok: false,
-      error: error instanceof Error ? error : new Error(String(error)),
-    };
-  }
+  });
 }
 
 /**
@@ -732,9 +744,8 @@ export async function deleteSheet(
   spreadsheetId: string,
   sheetId: number
 ): Promise<Result<void, Error>> {
-  try {
+  return withQuotaRetry(async () => {
     const sheets = getSheetsService();
-
     await sheets.spreadsheets.batchUpdate({
       spreadsheetId,
       requestBody: {
@@ -747,14 +758,10 @@ export async function deleteSheet(
         ],
       },
     });
-
+  }).then(result => {
+    if (!result.ok) return { ok: false, error: result.error };
     return { ok: true, value: undefined };
-  } catch (error) {
-    return {
-      ok: false,
-      error: error instanceof Error ? error : new Error(String(error)),
-    };
-  }
+  });
 }
 
 /**
@@ -934,32 +941,31 @@ export async function appendRowsWithLinks(
   values: CellValueOrLink[][],
   timeZone?: string
 ): Promise<Result<number, Error>> {
-  try {
+  // Parse sheet name from range (e.g., 'Sheet1!A:Z' -> 'Sheet1')
+  const sheetName = range.split('!')[0];
+
+  // Get sheet metadata to find the sheet ID
+  const metadataResult = await getSheetMetadata(spreadsheetId);
+  if (!metadataResult.ok) {
+    return metadataResult;
+  }
+
+  const sheet = metadataResult.value.find(s => s.title === sheetName);
+  if (!sheet) {
+    return {
+      ok: false,
+      error: new Error(`Sheet not found: ${sheetName}`),
+    };
+  }
+
+  // Convert rows to Sheets API format
+  const rows: sheets_v4.Schema$RowData[] = values.map(rowValues => ({
+    values: rowValues.map(value => convertToSheetsCellData(value, timeZone)),
+  }));
+
+  // Use batchUpdate with appendCells to support rich formatting
+  return withQuotaRetry(async () => {
     const sheets = getSheetsService();
-
-    // Parse sheet name from range (e.g., 'Sheet1!A:Z' -> 'Sheet1')
-    const sheetName = range.split('!')[0];
-
-    // Get sheet metadata to find the sheet ID
-    const metadataResult = await getSheetMetadata(spreadsheetId);
-    if (!metadataResult.ok) {
-      return metadataResult;
-    }
-
-    const sheet = metadataResult.value.find(s => s.title === sheetName);
-    if (!sheet) {
-      return {
-        ok: false,
-        error: new Error(`Sheet not found: ${sheetName}`),
-      };
-    }
-
-    // Convert rows to Sheets API format
-    const rows: sheets_v4.Schema$RowData[] = values.map(rowValues => ({
-      values: rowValues.map(value => convertToSheetsCellData(value, timeZone)),
-    }));
-
-    // Use batchUpdate with appendCells to support rich formatting
     await sheets.spreadsheets.batchUpdate({
       spreadsheetId,
       requestBody: {
@@ -976,17 +982,13 @@ export async function appendRowsWithLinks(
     });
 
     // Calculate total cells appended (rows * columns)
-    const cellsAppended = rows.reduce((total, row) => {
+    return rows.reduce((total, row) => {
       return total + (row.values?.length || 0);
     }, 0);
-
-    return { ok: true, value: cellsAppended };
-  } catch (error) {
-    return {
-      ok: false,
-      error: error instanceof Error ? error : new Error(String(error)),
-    };
-  }
+  }).then(result => {
+    if (!result.ok) return { ok: false, error: result.error };
+    return { ok: true, value: result.value };
+  });
 }
 
 /**
@@ -1004,24 +1006,23 @@ export async function sortSheet(
   columnIndex: number = 0,
   descending: boolean = true
 ): Promise<Result<void, Error>> {
-  try {
+  // First, get the sheet ID from the sheet name
+  const metadataResult = await getSheetMetadata(spreadsheetId);
+  if (!metadataResult.ok) {
+    return metadataResult;
+  }
+
+  const sheet = metadataResult.value.find(s => s.title === sheetName);
+  if (!sheet) {
+    return {
+      ok: false,
+      error: new Error(`Sheet "${sheetName}" not found`),
+    };
+  }
+
+  // Sort the sheet (excluding header row)
+  return withQuotaRetry(async () => {
     const sheets = getSheetsService();
-
-    // First, get the sheet ID from the sheet name
-    const metadataResult = await getSheetMetadata(spreadsheetId);
-    if (!metadataResult.ok) {
-      return metadataResult;
-    }
-
-    const sheet = metadataResult.value.find(s => s.title === sheetName);
-    if (!sheet) {
-      return {
-        ok: false,
-        error: new Error(`Sheet "${sheetName}" not found`),
-      };
-    }
-
-    // Sort the sheet (excluding header row)
     await sheets.spreadsheets.batchUpdate({
       spreadsheetId,
       requestBody: {
@@ -1044,14 +1045,10 @@ export async function sortSheet(
         ],
       },
     });
-
+  }).then(result => {
+    if (!result.ok) return { ok: false, error: result.error };
     return { ok: true, value: undefined };
-  } catch (error) {
-    return {
-      ok: false,
-      error: error instanceof Error ? error : new Error(String(error)),
-    };
-  }
+  });
 }
 
 /**
@@ -1065,24 +1062,18 @@ export async function clearSheetData(
   spreadsheetId: string,
   sheetName: string
 ): Promise<Result<void, Error>> {
-  try {
+  return withQuotaRetry(async () => {
     const sheets = getSheetsService();
-
     // Clear all data starting from row 2 (preserves header row)
     const range = `${sheetName}!A2:Z`;
-
     await sheets.spreadsheets.values.clear({
       spreadsheetId,
       range,
     });
-
+  }).then(result => {
+    if (!result.ok) return { ok: false, error: result.error };
     return { ok: true, value: undefined };
-  } catch (error) {
-    return {
-      ok: false,
-      error: error instanceof Error ? error : new Error(String(error)),
-    };
-  }
+  });
 }
 
 /**
@@ -1096,24 +1087,23 @@ export async function moveSheetToFirst(
   spreadsheetId: string,
   sheetName: string
 ): Promise<Result<void, Error>> {
-  try {
+  // Get sheet metadata to find the sheet ID
+  const metadataResult = await getSheetMetadata(spreadsheetId);
+  if (!metadataResult.ok) {
+    return metadataResult;
+  }
+
+  const sheet = metadataResult.value.find(s => s.title === sheetName);
+  if (!sheet) {
+    return {
+      ok: false,
+      error: new Error(`Sheet "${sheetName}" not found`),
+    };
+  }
+
+  // Update sheet properties to move it to index 0
+  return withQuotaRetry(async () => {
     const sheets = getSheetsService();
-
-    // Get sheet metadata to find the sheet ID
-    const metadataResult = await getSheetMetadata(spreadsheetId);
-    if (!metadataResult.ok) {
-      return metadataResult;
-    }
-
-    const sheet = metadataResult.value.find(s => s.title === sheetName);
-    if (!sheet) {
-      return {
-        ok: false,
-        error: new Error(`Sheet "${sheetName}" not found`),
-      };
-    }
-
-    // Update sheet properties to move it to index 0
     await sheets.spreadsheets.batchUpdate({
       spreadsheetId,
       requestBody: {
@@ -1130,14 +1120,10 @@ export async function moveSheetToFirst(
         ],
       },
     });
-
+  }).then(result => {
+    if (!result.ok) return { ok: false, error: result.error };
     return { ok: true, value: undefined };
-  } catch (error) {
-    return {
-      ok: false,
-      error: error instanceof Error ? error : new Error(String(error)),
-    };
-  }
+  });
 }
 
 /**
@@ -1156,68 +1142,67 @@ export async function appendRowsWithFormatting(
   values: CellValue[][],
   timeZone?: string
 ): Promise<Result<number, Error>> {
-  try {
-    const sheets = getSheetsService();
+  // Parse sheet name from range (e.g., 'Sheet1!A:Z' -> 'Sheet1')
+  const sheetName = range.split('!')[0];
 
-    // Parse sheet name from range (e.g., 'Sheet1!A:Z' -> 'Sheet1')
-    const sheetName = range.split('!')[0];
+  // Get sheet metadata to find the sheet ID
+  const metadataResult = await getSheetMetadata(spreadsheetId);
+  if (!metadataResult.ok) {
+    return metadataResult;
+  }
 
-    // Get sheet metadata to find the sheet ID
-    const metadataResult = await getSheetMetadata(spreadsheetId);
-    if (!metadataResult.ok) {
-      return metadataResult;
-    }
+  const sheet = metadataResult.value.find(s => s.title === sheetName);
+  if (!sheet) {
+    return {
+      ok: false,
+      error: new Error(`Sheet not found: ${sheetName}`),
+    };
+  }
 
-    const sheet = metadataResult.value.find(s => s.title === sheetName);
-    if (!sheet) {
-      return {
-        ok: false,
-        error: new Error(`Sheet not found: ${sheetName}`),
-      };
-    }
-
-    // Convert rows to Sheets API format with explicit non-bold formatting
-    const rows: sheets_v4.Schema$RowData[] = values.map(rowValues => ({
-      values: rowValues.map(value => {
-        const cellData: sheets_v4.Schema$CellData = {
-          userEnteredFormat: {
-            textFormat: {
-              bold: false,
-            },
+  // Convert rows to Sheets API format with explicit non-bold formatting
+  const rows: sheets_v4.Schema$RowData[] = values.map(rowValues => ({
+    values: rowValues.map(value => {
+      const cellData: sheets_v4.Schema$CellData = {
+        userEnteredFormat: {
+          textFormat: {
+            bold: false,
           },
+        },
+      };
+
+      if (value === null || value === undefined) {
+        cellData.userEnteredValue = { stringValue: '' };
+      } else if (value instanceof Date) {
+        // Convert Date to serial number for Sheets
+        // If timezone is provided, convert to that timezone first
+        const serialNumber = timeZone
+          ? dateToSerialInTimezone(value, timeZone)
+          : (value.getTime() - new Date(Date.UTC(1899, 11, 30)).getTime()) / (1000 * 60 * 60 * 24);
+        cellData.userEnteredValue = { numberValue: serialNumber };
+        cellData.userEnteredFormat!.numberFormat = {
+          type: 'DATE_TIME',
+          pattern: 'yyyy-mm-dd hh:mm:ss',
         };
-
-        if (value === null || value === undefined) {
-          cellData.userEnteredValue = { stringValue: '' };
-        } else if (value instanceof Date) {
-          // Convert Date to serial number for Sheets
-          // If timezone is provided, convert to that timezone first
-          const serialNumber = timeZone
-            ? dateToSerialInTimezone(value, timeZone)
-            : (value.getTime() - new Date(Date.UTC(1899, 11, 30)).getTime()) / (1000 * 60 * 60 * 24);
-          cellData.userEnteredValue = { numberValue: serialNumber };
-          cellData.userEnteredFormat!.numberFormat = {
-            type: 'DATE_TIME',
-            pattern: 'yyyy-mm-dd hh:mm:ss',
-          };
-        } else if (typeof value === 'string') {
-          // If string starts with =, it's a formula - use formulaValue instead of stringValue
-          if (value.startsWith('=')) {
-            cellData.userEnteredValue = { formulaValue: value };
-          } else {
-            cellData.userEnteredValue = { stringValue: value };
-          }
-        } else if (typeof value === 'number') {
-          cellData.userEnteredValue = { numberValue: value };
-        } else if (typeof value === 'boolean') {
-          cellData.userEnteredValue = { boolValue: value };
+      } else if (typeof value === 'string') {
+        // If string starts with =, it's a formula - use formulaValue instead of stringValue
+        if (value.startsWith('=')) {
+          cellData.userEnteredValue = { formulaValue: value };
+        } else {
+          cellData.userEnteredValue = { stringValue: value };
         }
+      } else if (typeof value === 'number') {
+        cellData.userEnteredValue = { numberValue: value };
+      } else if (typeof value === 'boolean') {
+        cellData.userEnteredValue = { boolValue: value };
+      }
 
-        return cellData;
-      }),
-    }));
+      return cellData;
+    }),
+  }));
 
-    // Use batchUpdate with appendCells to support formatting
+  // Use batchUpdate with appendCells to support formatting
+  return withQuotaRetry(async () => {
+    const sheets = getSheetsService();
     await sheets.spreadsheets.batchUpdate({
       spreadsheetId,
       requestBody: {
@@ -1234,17 +1219,13 @@ export async function appendRowsWithFormatting(
     });
 
     // Calculate total cells appended
-    const cellsAppended = rows.reduce((total, row) => {
+    return rows.reduce((total, row) => {
       return total + (row.values?.length || 0);
     }, 0);
-
-    return { ok: true, value: cellsAppended };
-  } catch (error) {
-    return {
-      ok: false,
-      error: error instanceof Error ? error : new Error(String(error)),
-    };
-  }
+  }).then(result => {
+    if (!result.ok) return { ok: false, error: result.error };
+    return { ok: true, value: result.value };
+  });
 }
 
 /**
@@ -1298,7 +1279,7 @@ export async function formatEmptyMonthSheet(
   spreadsheetId: string,
   sheetId: number
 ): Promise<Result<void, Error>> {
-  try {
+  return withQuotaRetry(async () => {
     const sheets = getSheetsService();
 
     const requests: sheets_v4.Schema$Request[] = [
@@ -1341,14 +1322,10 @@ export async function formatEmptyMonthSheet(
       spreadsheetId,
       requestBody: { requests },
     });
-
+  }).then(result => {
+    if (!result.ok) return { ok: false, error: result.error };
     return { ok: true, value: undefined };
-  } catch (error) {
-    return {
-      ok: false,
-      error: error instanceof Error ? error : new Error(String(error)),
-    };
-  }
+  });
 }
 
 /**
