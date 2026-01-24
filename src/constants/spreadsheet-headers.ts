@@ -147,6 +147,7 @@ export const RESUMEN_BANCARIO_HEADERS = [
 /**
  * Sheet configuration for Control de Resumenes spreadsheet
  * Stores bank statements in bank account-specific folders
+ * For credit cards, tipoTarjeta column replaces moneda
  */
 export const CONTROL_RESUMENES_SHEET: SheetConfig = {
   title: 'Resumenes',
@@ -157,7 +158,7 @@ export const CONTROL_RESUMENES_SHEET: SheetConfig = {
     'fileName',
     'banco',
     'numeroCuenta',
-    'moneda',
+    'tipoTarjeta_o_moneda', // Credit cards: tipoTarjeta | Bank accounts: moneda
     'saldoInicial',
     'saldoFinal',
   ],

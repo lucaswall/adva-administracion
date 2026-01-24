@@ -8,6 +8,7 @@ import {
   normalizeCuit,
   isAdvaName,
   assignCuitsAndClassify,
+  parseResumenBancarioResponse,
 } from '../../../src/gemini/parser.js';
 
 describe('normalizeCuit', () => {
@@ -202,6 +203,97 @@ describe('assignCuitsAndClassify', () => {
 
       expect(result1.cuitEmisor).toBe('20405354757');
       expect(result2.cuitEmisor).toBe('20405354757');
+    });
+  });
+});
+
+describe('parseResumenBancarioResponse', () => {
+  describe('tipoTarjeta validation', () => {
+    it('accepts valid credit card types', () => {
+      const validTypes = ['Visa', 'Mastercard', 'Amex', 'Naranja', 'Cabal'];
+
+      for (const cardType of validTypes) {
+        const response = `\`\`\`json
+{
+  "banco": "BBVA",
+  "numeroCuenta": "1234",
+  "fechaDesde": "2024-01-01",
+  "fechaHasta": "2024-01-31",
+  "saldoInicial": 1000,
+  "saldoFinal": 2000,
+  "moneda": "ARS",
+  "tipoTarjeta": "${cardType}"
+}
+\`\`\``;
+
+        const result = parseResumenBancarioResponse(response);
+        expect(result.ok).toBe(true);
+        if (result.ok) {
+          expect(result.value.data.tipoTarjeta).toBe(cardType);
+        }
+      }
+    });
+
+    it('clears invalid tipoTarjeta values', () => {
+      const response = `\`\`\`json
+{
+  "banco": "BBVA",
+  "numeroCuenta": "1234",
+  "fechaDesde": "2024-01-01",
+  "fechaHasta": "2024-01-31",
+  "saldoInicial": 1000,
+  "saldoFinal": 2000,
+  "moneda": "ARS",
+  "tipoTarjeta": "InvalidCard"
+}
+\`\`\``;
+
+      const result = parseResumenBancarioResponse(response);
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value.data.tipoTarjeta).toBeUndefined();
+      }
+    });
+
+    it('handles missing tipoTarjeta field', () => {
+      const response = `\`\`\`json
+{
+  "banco": "BBVA",
+  "numeroCuenta": "1234567890",
+  "fechaDesde": "2024-01-01",
+  "fechaHasta": "2024-01-31",
+  "saldoInicial": 1000,
+  "saldoFinal": 2000,
+  "moneda": "ARS"
+}
+\`\`\``;
+
+      const result = parseResumenBancarioResponse(response);
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value.data.tipoTarjeta).toBeUndefined();
+      }
+    });
+
+    it('clears empty string tipoTarjeta', () => {
+      const response = `\`\`\`json
+{
+  "banco": "BBVA",
+  "numeroCuenta": "1234",
+  "fechaDesde": "2024-01-01",
+  "fechaHasta": "2024-01-31",
+  "saldoInicial": 1000,
+  "saldoFinal": 2000,
+  "moneda": "ARS",
+  "tipoTarjeta": ""
+}
+\`\`\``;
+
+      const result = parseResumenBancarioResponse(response);
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value.data.tipoTarjeta).toBeUndefined();
+      }
     });
   });
 });
