@@ -248,6 +248,11 @@ export interface Recibo {
 }
 
 /**
+ * Credit card types
+ */
+export type TipoTarjeta = 'Visa' | 'Mastercard' | 'Amex' | 'Naranja' | 'Cabal';
+
+/**
  * Bank Statement (Resumen Bancario)
  * Represents a monthly bank statement document
  */
@@ -261,7 +266,9 @@ export interface ResumenBancario {
   // Bank info
   /** Bank name (e.g., "BBVA", "Santander", "Galicia") */
   banco: string;
-  /** Account number or card brand (e.g., "1234567890" or "VISA", "Mastercard") */
+  /** Credit card type (Visa, Mastercard, etc.) - only for credit card statements */
+  tipoTarjeta?: TipoTarjeta;
+  /** Account number (bank) or last 4-8 digits (credit card) */
   numeroCuenta: string;
 
   // Period

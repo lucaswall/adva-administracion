@@ -4,7 +4,7 @@
  */
 
 import type { Result, Factura, StoreResult } from '../../types/index.js';
-import { appendRowsWithLinks, sortSheet, getValues, type CellValueOrLink } from '../../services/sheets.js';
+import { appendRowsWithLinks, sortSheet, getValues, type CellValueOrLink, type CellDate } from '../../services/sheets.js';
 import { formatUSCurrency, parseNumber } from '../../utils/numbers.js';
 import { generateFacturaFileName } from '../../utils/file-naming.js';
 import { info, warn } from '../../utils/logger.js';
@@ -108,10 +108,13 @@ export async function storeFactura(
   let row: CellValueOrLink[];
   let range: string;
 
+  // Create CellDate for proper date formatting
+  const fechaEmisionDate: CellDate = { type: 'date', value: factura.fechaEmision };
+
   if (documentType === 'factura_emitida') {
     // Facturas Emitidas: Only receptor info (columns A:R)
     row = [
-      factura.fechaEmision,                 // A
+      fechaEmisionDate,                     // A - proper date cell
       factura.fileId,                       // B
       { text: renamedFileName, url: `https://drive.google.com/file/d/${factura.fileId}/view` }, // C
       factura.tipoComprobante,              // D
@@ -134,7 +137,7 @@ export async function storeFactura(
   } else {
     // Facturas Recibidas: Only emisor info (columns A:S)
     row = [
-      factura.fechaEmision,                 // A
+      fechaEmisionDate,                     // A - proper date cell
       factura.fileId,                       // B
       { text: renamedFileName, url: `https://drive.google.com/file/d/${factura.fileId}/view` }, // C
       factura.tipoComprobante,              // D

@@ -4,7 +4,7 @@
  */
 
 import type { Result, ResumenBancario, StoreResult } from '../../types/index.js';
-import { appendRowsWithLinks, sortSheet, getValues, dateStringToSerial, type CellValueOrLink } from '../../services/sheets.js';
+import { appendRowsWithLinks, sortSheet, getValues, type CellValueOrLink, type CellDate } from '../../services/sheets.js';
 import { generateResumenFileName } from '../../utils/file-naming.js';
 import { info, warn } from '../../utils/logger.js';
 import { getCorrelationId } from '../../utils/correlation.js';
@@ -108,11 +108,14 @@ export async function storeResumen(
     };
   }
 
-  // Build the row with serial dates and hyperlink
+  // Build the row with CellDate for proper date formatting
   const fileName = generateResumenFileName(resumen);
+  const fechaDesdeDate: CellDate = { type: 'date', value: resumen.fechaDesde };
+  const fechaHastaDate: CellDate = { type: 'date', value: resumen.fechaHasta };
+
   const row: CellValueOrLink[] = [
-    dateStringToSerial(resumen.fechaDesde),
-    dateStringToSerial(resumen.fechaHasta),
+    fechaDesdeDate,   // proper date cell
+    fechaHastaDate,   // proper date cell
     resumen.fileId,
     {
       text: fileName,

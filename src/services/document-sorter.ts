@@ -123,7 +123,8 @@ export async function sortDocument(
       docDate.getFullYear().toString(),
       resumen.banco,
       resumen.numeroCuenta,
-      resumen.moneda
+      resumen.moneda,
+      resumen.tipoTarjeta
     );
     if (!folderResult.ok) {
       return {

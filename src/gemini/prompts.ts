@@ -298,9 +298,14 @@ Return JSON only:
  */
 export const RESUMEN_BANCARIO_PROMPT = `Extract data from this Argentine bank statement (Resumen/Extracto Bancario).
 
+DOCUMENT TYPES:
+1. Bank account statements: Show account number (e.g., "1234567890"), typically 10+ digits
+2. Credit card statements: Show card type (Visa, Mastercard, Amex, Naranja, Cabal) and last 4-8 digits
+
 Required fields:
-- banco: Bank name
-- numeroCuenta: Account number or card brand (VISA, Mastercard, etc.)
+- banco: Bank name (e.g., "BBVA", "Santander", "Galicia")
+- tipoTarjeta: For CREDIT CARDS ONLY - one of: Visa, Mastercard, Amex, Naranja, Cabal. OMIT this field for bank account statements.
+- numeroCuenta: Bank account number (10+ digits) OR credit card last 4-8 digits (e.g., "65656454")
 - fechaDesde, fechaHasta: YYYY-MM-DD (statement period)
 - saldoInicial, saldoFinal: Numbers (may be labeled "Saldo Inicial", "Saldo Final", "Saldo Anterior", "Saldo al")
 - moneda: ARS or USD (look for "u$s", "USD", "U$S" for USD)
@@ -314,7 +319,9 @@ If month number is GREATER THAN the current month number, use LAST YEAR to avoid
 
 NUMBER FORMAT: "2.917.310,00" = 2917310.00
 
-Return ONLY valid JSON, no additional text:
+Return ONLY valid JSON, no additional text.
+
+Example for bank account:
 {
   "banco": "BBVA",
   "numeroCuenta": "1234567890",
@@ -324,6 +331,19 @@ Return ONLY valid JSON, no additional text:
   "saldoFinal": 185000.00,
   "moneda": "ARS",
   "cantidadMovimientos": 47
+}
+
+Example for credit card:
+{
+  "banco": "BBVA",
+  "tipoTarjeta": "Visa",
+  "numeroCuenta": "65656454",
+  "fechaDesde": "2024-01-01",
+  "fechaHasta": "2024-01-31",
+  "saldoInicial": 0.00,
+  "saldoFinal": 125000.00,
+  "moneda": "ARS",
+  "cantidadMovimientos": 12
 }`;
 
 /**

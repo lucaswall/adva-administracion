@@ -40,9 +40,19 @@ export interface CellLink {
 }
 
 /**
+ * Cell date type - represents a date value to be formatted as a proper Date cell
+ * Use this instead of raw date strings to get proper date formatting in spreadsheets
+ */
+export interface CellDate {
+  type: 'date';
+  /** Date string in ISO format: YYYY-MM-DD */
+  value: string;
+}
+
+/**
  * Cell value or link type
  */
-export type CellValueOrLink = CellValue | CellLink;
+export type CellValueOrLink = CellValue | CellLink | CellDate;
 
 /**
  * Gets values from a range
@@ -494,6 +504,18 @@ function isCellLink(value: CellValueOrLink): value is CellLink {
 }
 
 /**
+ * Helper to check if a value is a CellDate
+ */
+function isCellDate(value: CellValueOrLink): value is CellDate {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'type' in value &&
+    value.type === 'date'
+  );
+}
+
+/**
  * Converts a CellValueOrLink to a Sheets API cell data object
  */
 function convertToSheetsCellData(
@@ -502,6 +524,20 @@ function convertToSheetsCellData(
   if (value === null || value === undefined) {
     return {
       userEnteredValue: { stringValue: '' },
+    };
+  }
+
+  if (isCellDate(value)) {
+    // Convert date string to sheets serial number and apply date format
+    const serial = dateStringToSerial(value.value);
+    return {
+      userEnteredValue: { numberValue: serial },
+      userEnteredFormat: {
+        numberFormat: {
+          type: 'DATE',
+          pattern: 'yyyy-mm-dd',
+        },
+      },
     };
   }
 
