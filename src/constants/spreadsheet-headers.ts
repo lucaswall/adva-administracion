@@ -221,6 +221,81 @@ export const CONTROL_RESUMENES_BROKER_SHEET: SheetConfig = {
   ]),
 };
 
+/**
+ * Sheet configuration for Movimientos - Bank Account Transactions
+ * Stores individual bank transactions in per-month sheets
+ * One sheet per month (e.g., "2025-01")
+ */
+export const MOVIMIENTOS_BANCARIO_SHEET: SheetConfig = {
+  title: 'Movimientos',
+  headers: [
+    'fecha',
+    'origenConcepto',
+    'debito',
+    'credito',
+    'saldo',
+  ],
+  numberFormats: new Map([
+    [0, { type: 'date' }],                    // fecha
+    [2, { type: 'currency', decimals: 2 }],   // debito
+    [3, { type: 'currency', decimals: 2 }],   // credito
+    [4, { type: 'currency', decimals: 2 }],   // saldo
+  ]),
+};
+
+/**
+ * Sheet configuration for Movimientos - Credit Card Transactions
+ * Stores individual credit card transactions in per-month sheets
+ * One sheet per month (e.g., "2025-01")
+ */
+export const MOVIMIENTOS_TARJETA_SHEET: SheetConfig = {
+  title: 'Movimientos',
+  headers: [
+    'fecha',
+    'descripcion',
+    'nroCupon',
+    'pesos',
+    'dolares',
+  ],
+  numberFormats: new Map([
+    [0, { type: 'date' }],                    // fecha
+    [3, { type: 'currency', decimals: 2 }],   // pesos
+    [4, { type: 'currency', decimals: 2 }],   // dolares
+  ]),
+};
+
+/**
+ * Sheet configuration for Movimientos - Broker Transactions
+ * Stores individual broker transactions in per-month sheets
+ * One sheet per month (e.g., "2025-01")
+ */
+export const MOVIMIENTOS_BROKER_SHEET: SheetConfig = {
+  title: 'Movimientos',
+  headers: [
+    'descripcion',
+    'cantidadVN',
+    'saldo',
+    'precio',
+    'bruto',
+    'arancel',
+    'iva',
+    'neto',
+    'fechaConcertacion',
+    'fechaLiquidacion',
+  ],
+  numberFormats: new Map([
+    [1, { type: 'number', decimals: 2 }],     // cantidadVN
+    [2, { type: 'currency', decimals: 2 }],   // saldo
+    [3, { type: 'currency', decimals: 2 }],   // precio
+    [4, { type: 'currency', decimals: 2 }],   // bruto
+    [5, { type: 'currency', decimals: 2 }],   // arancel
+    [6, { type: 'currency', decimals: 2 }],   // iva
+    [7, { type: 'currency', decimals: 2 }],   // neto
+    [8, { type: 'date' }],                    // fechaConcertacion
+    [9, { type: 'date' }],                    // fechaLiquidacion
+  ]),
+};
+
 /** Number format patterns */
 export type NumberFormat =
   | { type: 'currency'; decimals: 2 }  // e.g., $1,234.56

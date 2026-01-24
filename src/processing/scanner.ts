@@ -16,12 +16,15 @@ import type {
   ResumenBancario,
   ResumenTarjeta,
   ResumenBroker,
+  ResumenBancarioConMovimientos,
+  ResumenTarjetaConMovimientos,
+  ResumenBrokerConMovimientos,
   Retencion,
   ScanResult,
   DocumentType,
 } from '../types/index.js';
 import { listFilesInFolder } from '../services/drive.js';
-import { getCachedFolderStructure, getOrCreateBankAccountFolder, getOrCreateBankAccountSpreadsheet, getOrCreateCreditCardFolder, getOrCreateCreditCardSpreadsheet, getOrCreateBrokerFolder, getOrCreateBrokerSpreadsheet } from '../services/folder-structure.js';
+import { getCachedFolderStructure, getOrCreateBankAccountFolder, getOrCreateBankAccountSpreadsheet, getOrCreateCreditCardFolder, getOrCreateCreditCardSpreadsheet, getOrCreateBrokerFolder, getOrCreateBrokerSpreadsheet, getOrCreateMovimientosSpreadsheet } from '../services/folder-structure.js';
 import { sortToSinProcesar, sortAndRenameDocument, moveToDuplicadoFolder } from '../services/document-sorter.js';
 import { getProcessingQueue } from './queue.js';
 import { getConfig } from '../config.js';
@@ -30,7 +33,7 @@ import { withCorrelationAsync, getCorrelationId, generateCorrelationId } from '.
 
 // Import from refactored modules
 import { processFile, hasValidDate } from './extractor.js';
-import { storeFactura, storePago, storeRecibo, storeRetencion, storeResumenBancario, storeResumenTarjeta, storeResumenBroker, getProcessedFileIds } from './storage/index.js';
+import { storeFactura, storePago, storeRecibo, storeRetencion, storeResumenBancario, storeResumenTarjeta, storeResumenBroker, storeMovimientosBancario, storeMovimientosTarjeta, storeMovimientosBroker, getProcessedFileIds } from './storage/index.js';
 import { runMatching } from './matching/index.js';
 
 // Re-export for backwards compatibility
@@ -953,6 +956,51 @@ async function storeAndSortDocument(
 
         if (storeResult.ok) {
           if (storeResult.value.stored) {
+            // Store movimientos if present
+            const resumenWithMovimientos = doc as ResumenBancarioConMovimientos;
+            if (resumenWithMovimientos.movimientos && resumenWithMovimientos.movimientos.length > 0) {
+              const folderName = `${resumen.banco} ${resumen.numeroCuenta} ${resumen.moneda}`;
+              const movSpreadsheetResult = await getOrCreateMovimientosSpreadsheet(
+                folderResult.value,
+                folderName,
+                'bancario'
+              );
+
+              if (movSpreadsheetResult.ok) {
+                const storeMovResult = await storeMovimientosBancario(
+                  resumenWithMovimientos.movimientos,
+                  movSpreadsheetResult.value,
+                  { fechaDesde: resumen.fechaDesde, fechaHasta: resumen.fechaHasta }
+                );
+
+                if (!storeMovResult.ok) {
+                  warn('Failed to store movimientos bancario', {
+                    module: 'scanner',
+                    phase: 'storage',
+                    fileName: fileInfo.name,
+                    error: storeMovResult.error.message,
+                    correlationId,
+                  });
+                } else {
+                  info('Stored movimientos bancario', {
+                    module: 'scanner',
+                    phase: 'storage',
+                    fileName: fileInfo.name,
+                    count: resumenWithMovimientos.movimientos.length,
+                    correlationId,
+                  });
+                }
+              } else {
+                warn('Failed to get movimientos spreadsheet', {
+                  module: 'scanner',
+                  phase: 'storage',
+                  fileName: fileInfo.name,
+                  error: movSpreadsheetResult.error.message,
+                  correlationId,
+                });
+              }
+            }
+
             // Not a duplicate - move to bank account folder
             const sortResult = await sortAndRenameDocument(doc, 'bancos', 'resumen_bancario');
             if (!sortResult.success) {
@@ -1070,6 +1118,51 @@ async function storeAndSortDocument(
 
         if (storeResult.ok) {
           if (storeResult.value.stored) {
+            // Store movimientos if present
+            const resumenWithMovimientos = doc as ResumenTarjetaConMovimientos;
+            if (resumenWithMovimientos.movimientos && resumenWithMovimientos.movimientos.length > 0) {
+              const folderName = `${resumen.banco} ${resumen.tipoTarjeta} ${resumen.numeroCuenta}`;
+              const movSpreadsheetResult = await getOrCreateMovimientosSpreadsheet(
+                folderResult.value,
+                folderName,
+                'tarjeta'
+              );
+
+              if (movSpreadsheetResult.ok) {
+                const storeMovResult = await storeMovimientosTarjeta(
+                  resumenWithMovimientos.movimientos,
+                  movSpreadsheetResult.value,
+                  { fechaDesde: resumen.fechaDesde, fechaHasta: resumen.fechaHasta }
+                );
+
+                if (!storeMovResult.ok) {
+                  warn('Failed to store movimientos tarjeta', {
+                    module: 'scanner',
+                    phase: 'storage',
+                    fileName: fileInfo.name,
+                    error: storeMovResult.error.message,
+                    correlationId,
+                  });
+                } else {
+                  info('Stored movimientos tarjeta', {
+                    module: 'scanner',
+                    phase: 'storage',
+                    fileName: fileInfo.name,
+                    count: resumenWithMovimientos.movimientos.length,
+                    correlationId,
+                  });
+                }
+              } else {
+                warn('Failed to get movimientos spreadsheet', {
+                  module: 'scanner',
+                  phase: 'storage',
+                  fileName: fileInfo.name,
+                  error: movSpreadsheetResult.error.message,
+                  correlationId,
+                });
+              }
+            }
+
             const sortResult = await sortAndRenameDocument(doc, 'bancos', 'resumen_tarjeta');
             if (!sortResult.success) {
               logError('Failed to move resumen tarjeta', {
@@ -1175,6 +1268,51 @@ async function storeAndSortDocument(
 
         if (storeResult.ok) {
           if (storeResult.value.stored) {
+            // Store movimientos if present
+            const resumenWithMovimientos = doc as ResumenBrokerConMovimientos;
+            if (resumenWithMovimientos.movimientos && resumenWithMovimientos.movimientos.length > 0) {
+              const folderName = `${resumen.broker} ${resumen.numeroCuenta}`;
+              const movSpreadsheetResult = await getOrCreateMovimientosSpreadsheet(
+                folderResult.value,
+                folderName,
+                'broker'
+              );
+
+              if (movSpreadsheetResult.ok) {
+                const storeMovResult = await storeMovimientosBroker(
+                  resumenWithMovimientos.movimientos,
+                  movSpreadsheetResult.value,
+                  { fechaDesde: resumen.fechaDesde, fechaHasta: resumen.fechaHasta }
+                );
+
+                if (!storeMovResult.ok) {
+                  warn('Failed to store movimientos broker', {
+                    module: 'scanner',
+                    phase: 'storage',
+                    fileName: fileInfo.name,
+                    error: storeMovResult.error.message,
+                    correlationId,
+                  });
+                } else {
+                  info('Stored movimientos broker', {
+                    module: 'scanner',
+                    phase: 'storage',
+                    fileName: fileInfo.name,
+                    count: resumenWithMovimientos.movimientos.length,
+                    correlationId,
+                  });
+                }
+              } else {
+                warn('Failed to get movimientos spreadsheet', {
+                  module: 'scanner',
+                  phase: 'storage',
+                  fileName: fileInfo.name,
+                  error: movSpreadsheetResult.error.message,
+                  correlationId,
+                });
+              }
+            }
+
             const sortResult = await sortAndRenameDocument(doc, 'bancos', 'resumen_broker');
             if (!sortResult.success) {
               logError('Failed to move resumen broker', {

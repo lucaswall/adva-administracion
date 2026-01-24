@@ -97,6 +97,22 @@ describe('getResumenBancarioPrompt', () => {
     expect(prompt).toContain('moneda');
     expect(prompt).toContain('cantidadMovimientos');
   });
+
+  it('should include movimientos extraction instructions', () => {
+    const prompt = getResumenBancarioPrompt();
+    expect(prompt).toContain('TRANSACTION EXTRACTION');
+    expect(prompt).toContain('movimientos');
+    expect(prompt).toContain('origenConcepto');
+    expect(prompt).toContain('debito');
+    expect(prompt).toContain('credito');
+    expect(prompt).toContain('saldo');
+  });
+
+  it('should handle SIN MOVIMIENTOS case in extraction', () => {
+    const prompt = getResumenBancarioPrompt();
+    expect(prompt).toContain('SIN MOVIMIENTOS');
+    expect(prompt).toMatch(/"movimientos": \[\]/);
+  });
 });
 
 describe('getResumenTarjetaPrompt', () => {
@@ -136,6 +152,21 @@ describe('getResumenTarjetaPrompt', () => {
     expect(prompt).toContain('pagoMinimo');
     expect(prompt).toContain('saldoActual');
   });
+
+  it('should include movimientos extraction instructions', () => {
+    const prompt = getResumenTarjetaPrompt();
+    expect(prompt).toContain('TRANSACTION EXTRACTION');
+    expect(prompt).toContain('movimientos');
+    expect(prompt).toContain('descripcion');
+    expect(prompt).toContain('nroCupon');
+    expect(prompt).toContain('pesos');
+    expect(prompt).toContain('dolares');
+  });
+
+  it('should handle empty transactions case', () => {
+    const prompt = getResumenTarjetaPrompt();
+    expect(prompt).toMatch(/"movimientos": \[\]/);
+  });
 });
 
 describe('getResumenBrokerPrompt', () => {
@@ -172,5 +203,22 @@ describe('getResumenBrokerPrompt', () => {
     expect(prompt).toContain('Comitente');
     expect(prompt).toContain('saldoARS');
     expect(prompt).toContain('saldoUSD');
+  });
+
+  it('should include movimientos extraction instructions', () => {
+    const prompt = getResumenBrokerPrompt();
+    expect(prompt).toContain('TRANSACTION EXTRACTION');
+    expect(prompt).toContain('movimientos');
+    expect(prompt).toContain('cantidadVN');
+    expect(prompt).toContain('precio');
+    expect(prompt).toContain('bruto');
+    expect(prompt).toContain('arancel');
+    expect(prompt).toContain('fechaConcertacion');
+    expect(prompt).toContain('fechaLiquidacion');
+  });
+
+  it('should handle empty transactions case', () => {
+    const prompt = getResumenBrokerPrompt();
+    expect(prompt).toMatch(/"movimientos": \[\]/);
   });
 });

@@ -257,6 +257,22 @@ export interface Recibo {
 export type TipoTarjeta = 'Visa' | 'Mastercard' | 'Amex' | 'Naranja' | 'Cabal';
 
 /**
+ * Individual transaction from a bank account statement
+ */
+export interface MovimientoBancario {
+  /** Transaction date (ISO format: YYYY-MM-DD) */
+  fecha: string;
+  /** Combined ORIGEN + CONCEPTO (e.g., "D 500 TRANSFERENCIA 20291679375") */
+  origenConcepto: string;
+  /** Debit amount (null if credit transaction) */
+  debito: number | null;
+  /** Credit amount (null if debit transaction) */
+  credito: number | null;
+  /** Balance after this transaction */
+  saldo: number;
+}
+
+/**
  * Bank Account Statement (Resumen Bancario)
  * Represents a monthly bank account statement document
  */
@@ -298,6 +314,30 @@ export interface ResumenBancario {
   confidence: number;
   /** Whether manual review is needed */
   needsReview: boolean;
+}
+
+/**
+ * Bank Account Statement with individual transactions
+ */
+export interface ResumenBancarioConMovimientos extends ResumenBancario {
+  /** Array of individual transactions */
+  movimientos: MovimientoBancario[];
+}
+
+/**
+ * Individual transaction from a credit card statement
+ */
+export interface MovimientoTarjeta {
+  /** Transaction date (ISO format: YYYY-MM-DD) */
+  fecha: string;
+  /** Transaction description (e.g., "ZOOM.COM 888-799 P38264908USD 16,99") */
+  descripcion: string;
+  /** Coupon/receipt number (null if not present) */
+  nroCupon: string | null;
+  /** Amount in ARS (null if USD transaction) */
+  pesos: number | null;
+  /** Amount in USD (null if ARS transaction) */
+  dolares: number | null;
 }
 
 /**
@@ -345,6 +385,40 @@ export interface ResumenTarjeta {
 }
 
 /**
+ * Credit Card Statement with individual transactions
+ */
+export interface ResumenTarjetaConMovimientos extends ResumenTarjeta {
+  /** Array of individual transactions */
+  movimientos: MovimientoTarjeta[];
+}
+
+/**
+ * Individual transaction from a broker/investment statement
+ */
+export interface MovimientoBroker {
+  /** Transaction description (e.g., "Boleto / 5863936 / VENTA / 1 / ZZC1O / $") */
+  descripcion: string;
+  /** Quantity/Nominal Value (null if not applicable) */
+  cantidadVN: number | null;
+  /** Balance after this transaction */
+  saldo: number;
+  /** Price per unit (null if not applicable) */
+  precio: number | null;
+  /** Gross amount (null if not applicable) */
+  bruto: number | null;
+  /** Fee/tariff amount (null if not applicable) */
+  arancel: number | null;
+  /** VAT amount (null if not applicable) */
+  iva: number | null;
+  /** Net amount (null if not applicable) */
+  neto: number | null;
+  /** Settlement date (ISO format: YYYY-MM-DD) */
+  fechaConcertacion: string;
+  /** Liquidation date (ISO format: YYYY-MM-DD) */
+  fechaLiquidacion: string;
+}
+
+/**
  * Broker/Investment Statement (Resumen de Broker)
  * Represents a monthly broker account statement document
  */
@@ -384,6 +458,14 @@ export interface ResumenBroker {
   confidence: number;
   /** Whether manual review is needed */
   needsReview: boolean;
+}
+
+/**
+ * Broker/Investment Statement with individual transactions
+ */
+export interface ResumenBrokerConMovimientos extends ResumenBroker {
+  /** Array of individual transactions */
+  movimientos: MovimientoBroker[];
 }
 
 /**
