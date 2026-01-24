@@ -5,7 +5,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { sheets_v4 } from 'googleapis';
 import { google } from 'googleapis';
-import { formatSheet, clearSheetsCache, appendRowsWithLinks, appendRowsWithFormatting, clearSheetData, moveSheetToFirst, dateStringToSerial } from '../../../src/services/sheets.js';
+import { formatSheet, clearSheetsCache, appendRowsWithLinks, appendRowsWithFormatting, clearSheetData, moveSheetToFirst, dateStringToSerial, getOrCreateMonthSheet, formatEmptyMonthSheet } from '../../../src/services/sheets.js';
 
 // Mock googleapis
 vi.mock('googleapis', () => {
@@ -1233,5 +1233,249 @@ describe('appendRowsWithLinks - CellDate handling', () => {
 
     // Number
     expect(rowData[3].userEnteredValue).toEqual({ numberValue: 1234.56 });
+  });
+});
+
+describe('getOrCreateMonthSheet', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    clearSheetsCache();
+  });
+
+  it('should return existing sheet ID if month sheet exists', async () => {
+    const mockGet = vi.fn().mockResolvedValue({
+      data: {
+        sheets: [
+          {
+            properties: {
+              title: '2025-01',
+              sheetId: 456,
+            },
+          },
+          {
+            properties: {
+              title: '2025-02',
+              sheetId: 789,
+            },
+          },
+        ],
+      },
+    });
+
+    const mockSheets = google.sheets({} as any);
+    mockSheets.spreadsheets.get = mockGet;
+
+    const result = await getOrCreateMonthSheet(
+      'spreadsheet-id',
+      '2025-01',
+      ['Header1', 'Header2', 'Header3']
+    );
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value).toBe(456);
+    }
+  });
+
+  it('should create new sheet with headers if month sheet does not exist', async () => {
+    const mockGet = vi.fn().mockResolvedValue({
+      data: {
+        sheets: [
+          {
+            properties: {
+              title: '2025-01',
+              sheetId: 456,
+            },
+          },
+        ],
+      },
+    });
+
+    const mockBatchUpdate = vi.fn()
+      .mockResolvedValueOnce({
+        data: {
+          replies: [
+            {
+              addSheet: {
+                properties: {
+                  sheetId: 999,
+                  title: '2025-02',
+                },
+              },
+            },
+          ],
+        },
+      })
+      .mockResolvedValueOnce({}); // for formatSheet call
+
+    const mockValuesUpdate = vi.fn().mockResolvedValue({
+      data: {
+        updatedCells: 3,
+      },
+    });
+
+    const mockSheets = google.sheets({} as any);
+    mockSheets.spreadsheets.get = mockGet;
+    mockSheets.spreadsheets.batchUpdate = mockBatchUpdate;
+    mockSheets.spreadsheets.values.update = mockValuesUpdate;
+
+    const result = await getOrCreateMonthSheet(
+      'spreadsheet-id',
+      '2025-02',
+      ['Header1', 'Header2', 'Header3']
+    );
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value).toBe(999);
+    }
+
+    // Verify sheet was created
+    expect(mockBatchUpdate).toHaveBeenCalledWith({
+      spreadsheetId: 'spreadsheet-id',
+      requestBody: {
+        requests: [
+          {
+            addSheet: {
+              properties: {
+                title: '2025-02',
+              },
+            },
+          },
+        ],
+      },
+    });
+
+    // Verify headers were set
+    expect(mockValuesUpdate).toHaveBeenCalledWith({
+      spreadsheetId: 'spreadsheet-id',
+      range: '2025-02!A1:C1',
+      valueInputOption: 'USER_ENTERED',
+      requestBody: {
+        values: [['Header1', 'Header2', 'Header3']],
+      },
+    });
+
+    // Verify formatting was applied (frozen rows)
+    expect(mockBatchUpdate).toHaveBeenCalledTimes(2);
+  });
+
+  it('should handle errors from getSheetMetadata', async () => {
+    const mockGet = vi.fn().mockRejectedValue(new Error('API Error'));
+    const mockSheets = google.sheets({} as any);
+    mockSheets.spreadsheets.get = mockGet;
+
+    const result = await getOrCreateMonthSheet(
+      'spreadsheet-id',
+      '2025-01',
+      ['Header1']
+    );
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.message).toBe('API Error');
+    }
+  });
+
+  it('should handle errors during sheet creation', async () => {
+    const mockGet = vi.fn().mockResolvedValue({
+      data: {
+        sheets: [
+          {
+            properties: {
+              title: '2025-01',
+              sheetId: 456,
+            },
+          },
+        ],
+      },
+    });
+
+    const mockBatchUpdate = vi.fn().mockRejectedValue(new Error('Creation failed'));
+
+    const mockSheets = google.sheets({} as any);
+    mockSheets.spreadsheets.get = mockGet;
+    mockSheets.spreadsheets.batchUpdate = mockBatchUpdate;
+
+    const result = await getOrCreateMonthSheet(
+      'spreadsheet-id',
+      '2025-02',
+      ['Header1']
+    );
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.message).toBe('Creation failed');
+    }
+  });
+});
+
+describe('formatEmptyMonthSheet', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    clearSheetsCache();
+  });
+
+  it('should format empty sheet with "SIN MOVIMIENTOS" message', async () => {
+    const mockBatchUpdate = vi.fn().mockResolvedValue({});
+    const mockSheets = google.sheets({} as any);
+    mockSheets.spreadsheets.batchUpdate = mockBatchUpdate;
+
+    const result = await formatEmptyMonthSheet('spreadsheet-id', 123);
+
+    expect(result.ok).toBe(true);
+    expect(mockBatchUpdate).toHaveBeenCalledWith({
+      spreadsheetId: 'spreadsheet-id',
+      requestBody: {
+        requests: [
+          {
+            updateCells: {
+              range: {
+                sheetId: 123,
+                startRowIndex: 2,
+                endRowIndex: 3,
+                startColumnIndex: 1,
+                endColumnIndex: 2,
+              },
+              rows: [
+                {
+                  values: [
+                    {
+                      userEnteredValue: {
+                        stringValue: '===== SIN MOVIMIENTOS =====',
+                      },
+                      userEnteredFormat: {
+                        textFormat: {
+                          bold: true,
+                        },
+                        backgroundColor: {
+                          red: 1.0,
+                          green: 0.0,
+                          blue: 0.0,
+                        },
+                      },
+                    },
+                  ],
+                },
+              ],
+              fields: 'userEnteredValue,userEnteredFormat',
+            },
+          },
+        ],
+      },
+    });
+  });
+
+  it('should handle errors from the Sheets API', async () => {
+    const mockBatchUpdate = vi.fn().mockRejectedValue(new Error('Formatting failed'));
+    const mockSheets = google.sheets({} as any);
+    mockSheets.spreadsheets.batchUpdate = mockBatchUpdate;
+
+    const result = await formatEmptyMonthSheet('spreadsheet-id', 123);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.message).toBe('Formatting failed');
+    }
   });
 });

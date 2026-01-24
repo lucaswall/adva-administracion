@@ -111,6 +111,12 @@ export async function storeMovimientosBancario(
 
 /**
  * Stores credit card transactions to Movimientos spreadsheet
+ * Groups transactions by month and creates per-month sheets
+ *
+ * @param movimientos - Array of credit card transactions
+ * @param spreadsheetId - Movimientos spreadsheet ID
+ * @param period - Statement period (for logging)
+ * @returns Success/failure result
  */
 export async function storeMovimientosTarjeta(
   movimientos: MovimientoTarjeta[],
@@ -184,6 +190,12 @@ export async function storeMovimientosTarjeta(
 
 /**
  * Stores broker transactions to Movimientos spreadsheet
+ * Groups transactions by month (fechaConcertacion) and creates per-month sheets
+ *
+ * @param movimientos - Array of broker transactions
+ * @param spreadsheetId - Movimientos spreadsheet ID
+ * @param period - Statement period (for logging)
+ * @returns Success/failure result
  */
 export async function storeMovimientosBroker(
   movimientos: MovimientoBroker[],
