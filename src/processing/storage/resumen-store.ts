@@ -1,23 +1,23 @@
 /**
- * Storage operations for resumenes bancarios
- * Handles writing bank statements to Control de Resumenes spreadsheets
+ * Storage operations for resumenes (bank accounts, credit cards, brokers)
+ * Handles writing statements to Control de Resumenes spreadsheets
  */
 
-import type { Result, ResumenBancario, StoreResult } from '../../types/index.js';
+import type { Result, ResumenBancario, ResumenTarjeta, ResumenBroker, StoreResult } from '../../types/index.js';
 import { appendRowsWithLinks, sortSheet, getValues, type CellValueOrLink, type CellDate } from '../../services/sheets.js';
-import { generateResumenFileName } from '../../utils/file-naming.js';
+import { generateResumenFileName, generateResumenTarjetaFileName, generateResumenBrokerFileName } from '../../utils/file-naming.js';
 import { info, warn } from '../../utils/logger.js';
 import { getCorrelationId } from '../../utils/correlation.js';
 
 /**
- * Checks if a resumen already exists in the sheet
- * Duplicate key: (banco, fechaDesde, fechaHasta, numeroCuenta, tipoTarjeta_o_moneda)
+ * Checks if a bank account resumen already exists in the sheet
+ * Duplicate key: (banco, numeroCuenta, fechaDesde, fechaHasta, moneda)
  *
  * @param spreadsheetId - The spreadsheet ID
  * @param resumen - The resumen to check
  * @returns Duplicate check result
  */
-async function isDuplicateResumen(
+async function isDuplicateResumenBancario(
   spreadsheetId: string,
   resumen: ResumenBancario
 ): Promise<{ isDuplicate: boolean; existingFileId?: string }> {
@@ -26,21 +26,18 @@ async function isDuplicateResumen(
     return { isDuplicate: false };
   }
 
-  // For comparison: use tipoTarjeta for credit cards, moneda for bank accounts
-  const tipoTarjetaOMoneda = resumen.tipoTarjeta || resumen.moneda;
-
   // Skip header row
   for (let i = 1; i < rowsResult.value.length; i++) {
     const row = rowsResult.value[i];
     if (!row || row.length < 7) continue;
 
-    // Columns: fechaDesde, fechaHasta, fileId, fileName, banco, numeroCuenta, tipoTarjeta_o_moneda, saldoInicial, saldoFinal
-    const rowFechaDesde = row[0];    // Column A: fechaDesde (serial number or date string)
-    const rowFechaHasta = row[1];    // Column B: fechaHasta (serial number or date string)
-    const rowFileId = row[2];        // Column C: fileId
-    const rowBanco = row[4];         // Column E: banco
-    const rowNumeroCuenta = row[5];  // Column F: numeroCuenta
-    const rowTipoTarjetaOMoneda = row[6];  // Column G: tipoTarjeta or moneda
+    // Columns: fechaDesde, fechaHasta, fileId, fileName, banco, numeroCuenta, moneda, saldoInicial, saldoFinal
+    const rowFechaDesde = row[0];
+    const rowFechaHasta = row[1];
+    const rowFileId = row[2];
+    const rowBanco = row[4];
+    const rowNumeroCuenta = row[5];
+    const rowMoneda = row[6];
 
     // Convert serial numbers to date strings for comparison (if needed)
     const rowFechaDesdeStr = typeof rowFechaDesde === 'number'
@@ -50,12 +47,98 @@ async function isDuplicateResumen(
       ? serialToDateString(rowFechaHasta)
       : String(rowFechaHasta);
 
-    // Match on all 5 fields (including tipoTarjeta or moneda)
+    // Match on all 5 fields
     if (rowBanco === resumen.banco &&
         rowFechaDesdeStr === resumen.fechaDesde &&
         rowFechaHastaStr === resumen.fechaHasta &&
         rowNumeroCuenta === resumen.numeroCuenta &&
-        rowTipoTarjetaOMoneda === tipoTarjetaOMoneda) {
+        rowMoneda === resumen.moneda) {
+      return { isDuplicate: true, existingFileId: String(rowFileId) };
+    }
+  }
+  return { isDuplicate: false };
+}
+
+/**
+ * Checks if a credit card resumen already exists in the sheet
+ * Duplicate key: (banco, tipoTarjeta, numeroCuenta, fechaDesde, fechaHasta)
+ */
+async function isDuplicateResumenTarjeta(
+  spreadsheetId: string,
+  resumen: ResumenTarjeta
+): Promise<{ isDuplicate: boolean; existingFileId?: string }> {
+  const rowsResult = await getValues(spreadsheetId, 'Resumenes!A:I');
+  if (!rowsResult.ok || rowsResult.value.length <= 1) {
+    return { isDuplicate: false };
+  }
+
+  // Skip header row
+  for (let i = 1; i < rowsResult.value.length; i++) {
+    const row = rowsResult.value[i];
+    if (!row || row.length < 7) continue;
+
+    // Columns: fechaDesde, fechaHasta, fileId, fileName, banco, numeroCuenta, tipoTarjeta, pagoMinimo, saldoActual
+    const rowFechaDesde = row[0];
+    const rowFechaHasta = row[1];
+    const rowFileId = row[2];
+    const rowBanco = row[4];
+    const rowNumeroCuenta = row[5];
+    const rowTipoTarjeta = row[6];
+
+    const rowFechaDesdeStr = typeof rowFechaDesde === 'number'
+      ? serialToDateString(rowFechaDesde)
+      : String(rowFechaDesde);
+    const rowFechaHastaStr = typeof rowFechaHasta === 'number'
+      ? serialToDateString(rowFechaHasta)
+      : String(rowFechaHasta);
+
+    if (rowBanco === resumen.banco &&
+        rowFechaDesdeStr === resumen.fechaDesde &&
+        rowFechaHastaStr === resumen.fechaHasta &&
+        rowNumeroCuenta === resumen.numeroCuenta &&
+        rowTipoTarjeta === resumen.tipoTarjeta) {
+      return { isDuplicate: true, existingFileId: String(rowFileId) };
+    }
+  }
+  return { isDuplicate: false };
+}
+
+/**
+ * Checks if a broker resumen already exists in the sheet
+ * Duplicate key: (broker, numeroCuenta, fechaDesde, fechaHasta)
+ */
+async function isDuplicateResumenBroker(
+  spreadsheetId: string,
+  resumen: ResumenBroker
+): Promise<{ isDuplicate: boolean; existingFileId?: string }> {
+  const rowsResult = await getValues(spreadsheetId, 'Resumenes!A:H');
+  if (!rowsResult.ok || rowsResult.value.length <= 1) {
+    return { isDuplicate: false };
+  }
+
+  // Skip header row
+  for (let i = 1; i < rowsResult.value.length; i++) {
+    const row = rowsResult.value[i];
+    if (!row || row.length < 6) continue;
+
+    // Columns: fechaDesde, fechaHasta, fileId, fileName, broker, numeroCuenta, saldoARS, saldoUSD
+    const rowFechaDesde = row[0];
+    const rowFechaHasta = row[1];
+    const rowFileId = row[2];
+    const rowBroker = row[4];
+    const rowNumeroCuenta = row[5];
+
+    const rowFechaDesdeStr = typeof rowFechaDesde === 'number'
+      ? serialToDateString(rowFechaDesde)
+      : String(rowFechaDesde);
+    const rowFechaHastaStr = typeof rowFechaHasta === 'number'
+      ? serialToDateString(rowFechaHasta)
+      : String(rowFechaHasta);
+
+    if (rowBroker === resumen.broker &&
+        rowFechaDesdeStr === resumen.fechaDesde &&
+        rowFechaHastaStr === resumen.fechaHasta &&
+        rowNumeroCuenta === resumen.numeroCuenta) {
       return { isDuplicate: true, existingFileId: String(rowFileId) };
     }
   }
@@ -76,23 +159,23 @@ function serialToDateString(serial: number): string {
 }
 
 /**
- * Stores a resumen bancario in the Control de Resumenes spreadsheet
+ * Stores a bank account resumen in the Control de Resumenes spreadsheet
  *
  * @param resumen - The resumen to store
  * @param spreadsheetId - The Control de Resumenes spreadsheet ID
  * @returns Store result indicating if stored or duplicate
  */
-export async function storeResumen(
+export async function storeResumenBancario(
   resumen: ResumenBancario,
   spreadsheetId: string
 ): Promise<Result<StoreResult, Error>> {
   // Check for duplicates
-  const dupeCheck = await isDuplicateResumen(spreadsheetId, resumen);
+  const dupeCheck = await isDuplicateResumenBancario(spreadsheetId, resumen);
 
   if (dupeCheck.isDuplicate) {
-    warn('Duplicate resumen detected, skipping', {
+    warn('Duplicate bank account resumen detected, skipping', {
       module: 'storage',
-      phase: 'resumen',
+      phase: 'resumen-bancario',
       banco: resumen.banco,
       numeroCuenta: resumen.numeroCuenta,
       fechaDesde: resumen.fechaDesde,
@@ -116,12 +199,9 @@ export async function storeResumen(
   const fechaDesdeDate: CellDate = { type: 'date', value: resumen.fechaDesde };
   const fechaHastaDate: CellDate = { type: 'date', value: resumen.fechaHasta };
 
-  // For credit cards: use tipoTarjeta, for bank accounts: use moneda
-  const tipoTarjetaOMoneda = resumen.tipoTarjeta || resumen.moneda;
-
   const row: CellValueOrLink[] = [
-    fechaDesdeDate,   // proper date cell
-    fechaHastaDate,   // proper date cell
+    fechaDesdeDate,
+    fechaHastaDate,
     resumen.fileId,
     {
       text: fileName,
@@ -129,7 +209,7 @@ export async function storeResumen(
     },
     resumen.banco,
     resumen.numeroCuenta,
-    tipoTarjetaOMoneda,  // Credit cards: tipoTarjeta | Bank accounts: moneda
+    resumen.moneda,
     resumen.saldoInicial,
     resumen.saldoFinal,
   ];
@@ -145,9 +225,9 @@ export async function storeResumen(
     return appendResult;
   }
 
-  info('Stored resumen bancario', {
+  info('Stored bank account resumen', {
     module: 'storage',
-    phase: 'resumen',
+    phase: 'resumen-bancario',
     banco: resumen.banco,
     numeroCuenta: resumen.numeroCuenta,
     fechaDesde: resumen.fechaDesde,
@@ -161,11 +241,205 @@ export async function storeResumen(
   if (!sortResult.ok) {
     warn('Failed to sort Resumenes sheet', {
       module: 'storage',
-      phase: 'resumen',
+      phase: 'resumen-bancario',
       error: sortResult.error.message,
       correlationId: getCorrelationId(),
     });
-    // Don't fail the operation if sort fails
+  }
+
+  return {
+    ok: true,
+    value: {
+      stored: true,
+    },
+  };
+}
+
+/**
+ * Stores a credit card resumen in the Control de Resumenes spreadsheet
+ *
+ * @param resumen - The resumen to store
+ * @param spreadsheetId - The Control de Resumenes spreadsheet ID
+ * @returns Store result indicating if stored or duplicate
+ */
+export async function storeResumenTarjeta(
+  resumen: ResumenTarjeta,
+  spreadsheetId: string
+): Promise<Result<StoreResult, Error>> {
+  // Check for duplicates
+  const dupeCheck = await isDuplicateResumenTarjeta(spreadsheetId, resumen);
+
+  if (dupeCheck.isDuplicate) {
+    warn('Duplicate credit card resumen detected, skipping', {
+      module: 'storage',
+      phase: 'resumen-tarjeta',
+      banco: resumen.banco,
+      tipoTarjeta: resumen.tipoTarjeta,
+      numeroCuenta: resumen.numeroCuenta,
+      fechaDesde: resumen.fechaDesde,
+      fechaHasta: resumen.fechaHasta,
+      existingFileId: dupeCheck.existingFileId,
+      newFileId: resumen.fileId,
+      correlationId: getCorrelationId(),
+    });
+
+    return {
+      ok: true,
+      value: {
+        stored: false,
+        existingFileId: dupeCheck.existingFileId,
+      },
+    };
+  }
+
+  // Build the row with CellDate for proper date formatting
+  const fileName = generateResumenTarjetaFileName(resumen);
+  const fechaDesdeDate: CellDate = { type: 'date', value: resumen.fechaDesde };
+  const fechaHastaDate: CellDate = { type: 'date', value: resumen.fechaHasta };
+
+  const row: CellValueOrLink[] = [
+    fechaDesdeDate,
+    fechaHastaDate,
+    resumen.fileId,
+    {
+      text: fileName,
+      url: `https://drive.google.com/file/d/${resumen.fileId}/view`,
+    },
+    resumen.banco,
+    resumen.numeroCuenta,
+    resumen.tipoTarjeta,
+    resumen.pagoMinimo,
+    resumen.saldoActual,
+  ];
+
+  // Append the row
+  const appendResult = await appendRowsWithLinks(
+    spreadsheetId,
+    'Resumenes!A:I',
+    [row]
+  );
+
+  if (!appendResult.ok) {
+    return appendResult;
+  }
+
+  info('Stored credit card resumen', {
+    module: 'storage',
+    phase: 'resumen-tarjeta',
+    banco: resumen.banco,
+    tipoTarjeta: resumen.tipoTarjeta,
+    numeroCuenta: resumen.numeroCuenta,
+    fechaDesde: resumen.fechaDesde,
+    fechaHasta: resumen.fechaHasta,
+    fileId: resumen.fileId,
+    correlationId: getCorrelationId(),
+  });
+
+  // Sort by fechaDesde (column 0) ascending (oldest first)
+  const sortResult = await sortSheet(spreadsheetId, 'Resumenes', 0, false);
+  if (!sortResult.ok) {
+    warn('Failed to sort Resumenes sheet', {
+      module: 'storage',
+      phase: 'resumen-tarjeta',
+      error: sortResult.error.message,
+      correlationId: getCorrelationId(),
+    });
+  }
+
+  return {
+    ok: true,
+    value: {
+      stored: true,
+    },
+  };
+}
+
+/**
+ * Stores a broker resumen in the Control de Resumenes spreadsheet
+ *
+ * @param resumen - The resumen to store
+ * @param spreadsheetId - The Control de Resumenes spreadsheet ID
+ * @returns Store result indicating if stored or duplicate
+ */
+export async function storeResumenBroker(
+  resumen: ResumenBroker,
+  spreadsheetId: string
+): Promise<Result<StoreResult, Error>> {
+  // Check for duplicates
+  const dupeCheck = await isDuplicateResumenBroker(spreadsheetId, resumen);
+
+  if (dupeCheck.isDuplicate) {
+    warn('Duplicate broker resumen detected, skipping', {
+      module: 'storage',
+      phase: 'resumen-broker',
+      broker: resumen.broker,
+      numeroCuenta: resumen.numeroCuenta,
+      fechaDesde: resumen.fechaDesde,
+      fechaHasta: resumen.fechaHasta,
+      existingFileId: dupeCheck.existingFileId,
+      newFileId: resumen.fileId,
+      correlationId: getCorrelationId(),
+    });
+
+    return {
+      ok: true,
+      value: {
+        stored: false,
+        existingFileId: dupeCheck.existingFileId,
+      },
+    };
+  }
+
+  // Build the row with CellDate for proper date formatting
+  const fileName = generateResumenBrokerFileName(resumen);
+  const fechaDesdeDate: CellDate = { type: 'date', value: resumen.fechaDesde };
+  const fechaHastaDate: CellDate = { type: 'date', value: resumen.fechaHasta };
+
+  const row: CellValueOrLink[] = [
+    fechaDesdeDate,
+    fechaHastaDate,
+    resumen.fileId,
+    {
+      text: fileName,
+      url: `https://drive.google.com/file/d/${resumen.fileId}/view`,
+    },
+    resumen.broker,
+    resumen.numeroCuenta,
+    resumen.saldoARS ?? '',  // Optional - empty string if not present
+    resumen.saldoUSD ?? '',  // Optional - empty string if not present
+  ];
+
+  // Append the row
+  const appendResult = await appendRowsWithLinks(
+    spreadsheetId,
+    'Resumenes!A:H',
+    [row]
+  );
+
+  if (!appendResult.ok) {
+    return appendResult;
+  }
+
+  info('Stored broker resumen', {
+    module: 'storage',
+    phase: 'resumen-broker',
+    broker: resumen.broker,
+    numeroCuenta: resumen.numeroCuenta,
+    fechaDesde: resumen.fechaDesde,
+    fechaHasta: resumen.fechaHasta,
+    fileId: resumen.fileId,
+    correlationId: getCorrelationId(),
+  });
+
+  // Sort by fechaDesde (column 0) ascending (oldest first)
+  const sortResult = await sortSheet(spreadsheetId, 'Resumenes', 0, false);
+  if (!sortResult.ok) {
+    warn('Failed to sort Resumenes sheet', {
+      module: 'storage',
+      phase: 'resumen-broker',
+      error: sortResult.error.message,
+      correlationId: getCorrelationId(),
+    });
   }
 
   return {

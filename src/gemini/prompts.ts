@@ -34,21 +34,36 @@ DOCUMENT TYPES:
    - Transferencia, Comprobante
    - Money flows IN to ADVA
 
-5. "resumen_bancario" - Bank statement
-   - Shows date range, balances, transactions
-   - "Extracto", "Resumen de Cuenta", "Estado de Cuenta"
+5. "resumen_bancario" - Bank account statement
+   - "Movimientos en cuentas", "CC $", "CA $"
+   - DÉBITO/CRÉDITO/SALDO columns
+   - Account numbers (typically 10+ digits)
+   - Banks: BBVA, Santander, Galicia, Banco Ciudad, Credicoop
 
-6. "recibo" - Salary slip
+6. "resumen_tarjeta" - Credit card statement
+   - "Tarjetas de Crédito", "Resumen de Tarjeta"
+   - Card type visible: Visa, Mastercard, Amex, Naranja, Cabal
+   - CIERRE ACTUAL, VENCIMIENTO, PAGO MÍNIMO, SALDO ACTUAL
+   - Last 4-8 digits of card number
+
+7. "resumen_broker" - Broker/investment statement
+   - "Cuenta Corriente por Concertación"
+   - "Comitente" number (client account)
+   - "Cartera disponible" (available portfolio)
+   - Instruments list (bonds, stocks, FCI)
+   - Multiple currency sections (Pesos and Dólar MEP)
+
+8. "recibo" - Salary slip
    - "RECIBO DE HABERES", employee CUIL, employer CUIT
 
-7. "certificado_retencion" - Tax withholding certificate
+9. "certificado_retencion" - Tax withholding certificate
    - "CERTIFICADO DE RETENCIÓN" in header
    - "Agente de Retención" section (who withheld)
    - "Sujeto Retenido" section (ADVA - who received less)
    - ADVA's CUIT ${ADVA_CUIT} appears in "Sujeto Retenido" section
    - Contains: Impuesto, Régimen, Monto de Retención
 
-8. "unrecognized" - None of the above
+10. "unrecognized" - None of the above
 
 CRITICAL - HOW TO DETERMINE ADVA's POSITION IN FACTURAS:
 
@@ -294,18 +309,17 @@ Return JSON only:
 }`;
 
 /**
- * Prompt for extracting data from bank statements (Resumen/Extracto Bancario)
+ * Prompt for extracting data from bank account statements (Resumen/Extracto Bancario)
+ * For bank accounts only - NOT credit cards or broker statements
  */
-export const RESUMEN_BANCARIO_PROMPT = `Extract data from this Argentine bank statement (Resumen/Extracto Bancario).
+export const RESUMEN_BANCARIO_PROMPT = `Extract data from this Argentine bank account statement (Resumen/Extracto Bancario).
 
-DOCUMENT TYPES:
-1. Bank account statements: Show account number (e.g., "1234567890"), typically 10+ digits
-2. Credit card statements: Show card type (Visa, Mastercard, Amex, Naranja, Cabal) and last 4-8 digits
+This is a BANK ACCOUNT statement (not credit card, not broker).
+Look for: account numbers (10+ digits), DÉBITO/CRÉDITO columns, Saldo Inicial/Final.
 
 Required fields:
-- banco: Bank name (e.g., "BBVA", "Santander", "Galicia")
-- tipoTarjeta: For CREDIT CARDS ONLY - one of: Visa, Mastercard, Amex, Naranja, Cabal. OMIT this field for bank account statements.
-- numeroCuenta: Bank account number (10+ digits) OR credit card last 4-8 digits (e.g., "65656454")
+- banco: Bank name (e.g., "BBVA", "Santander", "Galicia", "Banco Ciudad", "Credicoop")
+- numeroCuenta: Bank account number (typically 10+ digits)
 - fechaDesde, fechaHasta: YYYY-MM-DD (statement period)
 - saldoInicial, saldoFinal: Numbers (may be labeled "Saldo Inicial", "Saldo Final", "Saldo Anterior", "Saldo al")
 - moneda: ARS or USD (look for "u$s", "USD", "U$S" for USD)
@@ -319,9 +333,7 @@ If month number is GREATER THAN the current month number, use LAST YEAR to avoid
 
 NUMBER FORMAT: "2.917.310,00" = 2917310.00
 
-Return ONLY valid JSON, no additional text.
-
-Example for bank account:
+Return ONLY valid JSON:
 {
   "banco": "BBVA",
   "numeroCuenta": "1234567890",
@@ -331,19 +343,74 @@ Example for bank account:
   "saldoFinal": 185000.00,
   "moneda": "ARS",
   "cantidadMovimientos": 47
-}
+}`;
 
-Example for credit card:
+/**
+ * Prompt for extracting data from credit card statements (Resumen de Tarjeta)
+ */
+export const RESUMEN_TARJETA_PROMPT = `Extract data from this Argentine credit card statement (Resumen de Tarjeta de Crédito).
+
+Look for: card type (Visa, Mastercard, Amex, Naranja, Cabal), last 4-8 digits, PAGO MÍNIMO, SALDO ACTUAL.
+
+Required fields:
+- banco: Bank name (e.g., "BBVA", "Santander", "Galicia")
+- tipoTarjeta: One of: Visa, Mastercard, Amex, Naranja, Cabal
+- numeroCuenta: Last 4-8 digits of card number (e.g., "65656454")
+- fechaDesde, fechaHasta: YYYY-MM-DD (statement period - look for "CIERRE ANTERIOR" and "CIERRE ACTUAL")
+- pagoMinimo: Minimum payment due (may be labeled "PAGO MÍNIMO")
+- saldoActual: Current balance owed (may be labeled "SALDO ACTUAL", "TOTAL A PAGAR")
+- cantidadMovimientos: Count of transactions
+
+DATE YEAR INFERENCE (when year not explicit):
+If month number is GREATER THAN the current month number, use LAST YEAR to avoid future dates.
+
+NUMBER FORMAT: "2.917.310,00" = 2917310.00
+
+Return ONLY valid JSON:
 {
   "banco": "BBVA",
   "tipoTarjeta": "Visa",
   "numeroCuenta": "65656454",
   "fechaDesde": "2024-01-01",
   "fechaHasta": "2024-01-31",
-  "saldoInicial": 0.00,
-  "saldoFinal": 125000.00,
-  "moneda": "ARS",
+  "pagoMinimo": 25000.00,
+  "saldoActual": 125000.00,
   "cantidadMovimientos": 12
+}`;
+
+/**
+ * Prompt for extracting data from broker/investment statements (Resumen de Broker)
+ */
+export const RESUMEN_BROKER_PROMPT = `Extract data from this Argentine broker/investment account statement.
+
+Look for: "Comitente" number, "Cartera disponible", portfolio instruments, multiple currency sections.
+
+Required fields:
+- broker: Broker name (e.g., "BALANZ CAPITAL VALORES SAU", "IOL INVERTIRONLINE", "PPI")
+- numeroCuenta: Comitente number (client account number)
+- fechaDesde, fechaHasta: YYYY-MM-DD (statement period)
+- cantidadMovimientos: Count of movements/transactions
+
+Optional fields (extract if visible):
+- saldoARS: Balance in ARS (Pesos) - look for "Saldo en Pesos", "ARS"
+- saldoUSD: Balance in USD (Dólares) - look for "Saldo en Dólares", "USD", "Dólar MEP"
+
+NOTE: Broker accounts are multi-currency. Extract both ARS and USD balances if available.
+
+DATE YEAR INFERENCE (when year not explicit):
+If month number is GREATER THAN the current month number, use LAST YEAR to avoid future dates.
+
+NUMBER FORMAT: "2.917.310,00" = 2917310.00
+
+Return ONLY valid JSON:
+{
+  "broker": "BALANZ CAPITAL VALORES SAU",
+  "numeroCuenta": "123456",
+  "fechaDesde": "2024-01-01",
+  "fechaHasta": "2024-01-31",
+  "saldoARS": 500000.00,
+  "saldoUSD": 1500.00,
+  "cantidadMovimientos": 8
 }`;
 
 /**

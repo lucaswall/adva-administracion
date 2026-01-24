@@ -175,30 +175,65 @@ Rows sorted by `fechaPago` descending after insert.
 
 ---
 
-## Bancos (Bank Statements)
+## Bancos (Bank Statements, Credit Cards, Brokers)
 
-Bank statements stored in account-specific folders: `{YYYY}/Bancos/{Bank Name} {Nro Cuenta} {Moneda}/`
+Three types of financial statements, each with its own schema and folder structure.
 
-Each bank account folder contains a **Control de Resumenes** spreadsheet with a **Resumenes** sheet.
+### 1. Resumen Bancario (Bank Account) - 9 columns, A:I
 
-### Control de Resumenes > Resumenes (9 columns, A:I)
+Folder: `{YYYY}/Bancos/{Bank} {Account} {Currency}/`
 
 | Column | Field | Type | Description |
 |--------|-------|------|-------------|
-| A | fechaDesde | date | Statement start date (serial format: yyyy-mm-dd) |
-| B | fechaHasta | date | Statement end date (serial format: yyyy-mm-dd) |
+| A | fechaDesde | date | Statement start date (serial format) |
+| B | fechaHasta | date | Statement end date (serial format) |
 | C | fileId | string | Google Drive file ID |
 | D | fileName | hyperlink | Link to Drive file |
-| E | banco | string | Bank name |
-| F | numeroCuenta | string | Account number |
+| E | banco | string | Bank name (BBVA, Santander, etc.) |
+| F | numeroCuenta | string | Account number (10+ digits) |
 | G | moneda | enum | ARS\|USD |
 | H | saldoInicial | currency | Opening balance (2 decimals) |
 | I | saldoFinal | currency | Closing balance (2 decimals) |
 
-**Duplicate Detection**: 5-field composite key prevents duplicates:
-- banco + fechaDesde + fechaHasta + numeroCuenta + moneda
+**Duplicate Detection**: (banco, numeroCuenta, fechaDesde, fechaHasta, moneda)
 
-Rows sorted by `fechaDesde` ascending (oldest first).
+### 2. Resumen Tarjeta (Credit Card) - 9 columns, A:I
+
+Folder: `{YYYY}/Bancos/{Bank} {CardType} {LastDigits}/`
+
+| Column | Field | Type | Description |
+|--------|-------|------|-------------|
+| A | fechaDesde | date | Statement start date (serial format) |
+| B | fechaHasta | date | Statement end date (serial format) |
+| C | fileId | string | Google Drive file ID |
+| D | fileName | hyperlink | Link to Drive file |
+| E | banco | string | Bank name (BBVA, Santander, etc.) |
+| F | numeroCuenta | string | Last 4-8 digits of card |
+| G | tipoTarjeta | enum | Visa\|Mastercard\|Amex\|Naranja\|Cabal |
+| H | pagoMinimo | currency | Minimum payment due (2 decimals) |
+| I | saldoActual | currency | Current balance owed (2 decimals) |
+
+**Duplicate Detection**: (banco, tipoTarjeta, numeroCuenta, fechaDesde, fechaHasta)
+
+### 3. Resumen Broker (Broker/Investment) - 8 columns, A:H
+
+Folder: `{YYYY}/Bancos/{Broker} {Comitente}/`
+
+| Column | Field | Type | Description |
+|--------|-------|------|-------------|
+| A | fechaDesde | date | Statement start date (serial format) |
+| B | fechaHasta | date | Statement end date (serial format) |
+| C | fileId | string | Google Drive file ID |
+| D | fileName | hyperlink | Link to Drive file |
+| E | broker | string | Broker name (BALANZ, IOL, etc.) |
+| F | numeroCuenta | string | Comitente number |
+| G | saldoARS | currency | Balance in ARS (2 decimals, optional) |
+| H | saldoUSD | currency | Balance in USD (2 decimals, optional) |
+
+**Duplicate Detection**: (broker, numeroCuenta, fechaDesde, fechaHasta)
+**Note:** Multi-currency accounts - both ARS and USD balances can be present.
+
+All Resumen types sorted by `fechaDesde` ascending (oldest first).
 
 ---
 
@@ -276,6 +311,8 @@ Documents classified by ADVA's role (CUIT: 30709076783):
 | Pago Enviado | Pagador | OUT ← ADVA | Control de Egresos |
 | Certificado de Retencion | Sujeto Retenido | IN → ADVA | Control de Ingresos |
 | Resumen Bancario | Account Holder | Both | Bancos/ folder |
+| Resumen Tarjeta | Card Holder | Both | Bancos/ folder |
+| Resumen Broker | Investor | Both | Bancos/ folder |
 | Recibo | Empleador | OUT ← ADVA | Control de Egresos |
 
 ---

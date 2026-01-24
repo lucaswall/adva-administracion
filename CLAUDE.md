@@ -5,11 +5,26 @@
 - Update all refs when changing APIs/configs
 
 ## RULES
-- **TDD**: Write tests FIRST (red→green→refactor), coverage >=80%
-- **VERIFY**: `bug-hunter` → `test-runner` → `builder` → fix issues
 - **BUILD**: Zero warnings required
 - **SYNC**: Update this file when architecture changes
 - **PLANS**: Fully executable by Claude - no manual human steps
+
+## TDD WORKFLOW (MANDATORY)
+
+**For every new function/feature, follow this sequence:**
+
+1. **Write test first** - Create failing test that defines expected behavior
+2. **Run test-runner** - Confirm test fails (red)
+3. **Write implementation** - Minimal code to pass the test
+4. **Run test-runner** - Confirm test passes (green)
+5. **Refactor** - Clean up while keeping tests green
+
+**NEVER write implementation code before its test exists.**
+
+Coverage requirement: >=80%
+
+**Post-implementation verification:**
+`bug-hunter` → `test-runner` → `builder` → fix any issues
 
 ## SUBAGENTS
 
@@ -124,6 +139,15 @@ Routes use Fastify logger: `server.log.info({ data }, 'message')`
 - ADVA CUIT `30709076783` OK
 - Fictional names: "TEST SA", "EMPRESA UNO SA", "Juan Perez"
 
+**In plans:** Each implementation task MUST include writing tests as its first step. Example:
+```
+Task: Add parseResumenBroker function
+1. Write test in parser.test.ts for parseResumenBrokerResponse
+2. Run test-runner (expect fail)
+3. Implement parseResumenBrokerResponse in parser.ts
+4. Run test-runner (expect pass)
+```
+
 ## DOCUMENT CLASSIFICATION
 ADVA CUIT: 30709076783 | Direction determines routing:
 
@@ -134,13 +158,15 @@ ADVA CUIT: 30709076783 | Direction determines routing:
 | pago_enviado | pagador | Egresos |
 | pago_recibido | beneficiario | Ingresos |
 | certificado_retencion | sujeto retenido | Ingresos |
-| resumen_bancario | - | Bancos |
+| resumen_bancario | account holder | Bancos |
+| resumen_tarjeta | card holder | Bancos |
+| resumen_broker | investor | Bancos |
 | recibo | empleador | Egresos |
 
-**Resumenes Bancarios:**
-- Gemini extracts `tipoTarjeta` (Visa, Mastercard, Amex, Naranja, Cabal) if credit card
-- Invalid values cleared with warning, marked for review
-- Folder/file naming differs: credit cards omit currency, bank accounts include it
+**Three Resumen Types:**
+- `resumen_bancario`: Bank account statements (DÉBITO/CRÉDITO columns, 10+ digit account numbers)
+- `resumen_tarjeta`: Credit card statements (CIERRE, PAGO MÍNIMO, card type visible)
+- `resumen_broker`: Broker/investment statements (Comitente number, instruments list, multi-currency)
 
 ## FOLDER STRUCTURE
 ```
@@ -151,27 +177,34 @@ ROOT/
 └── {YYYY}/
     ├── Ingresos/{MM - Mes}/, Egresos/{MM - Mes}/
     └── Bancos/
-        ├── {Bank} {Account} {Currency}/     # Bank accounts
-        └── {Bank} {CardType} {LastDigits}/  # Credit cards (no currency)
+        ├── {Bank} {Account} {Currency}/     # Bank accounts (resumen_bancario)
+        ├── {Bank} {CardType} {LastDigits}/  # Credit cards (resumen_tarjeta)
+        └── {Broker} {Comitente}/            # Brokers (resumen_broker)
 ```
 
-**Bank account folder naming:**
+**Bank account folder naming (resumen_bancario):**
 - Format: `{Bank} {Account Number} {Currency}`
 - Example: `BBVA 1234567890 ARS`
 
-**Credit card folder naming:**
+**Credit card folder naming (resumen_tarjeta):**
 - Format: `{Bank} {Card Type} {Last Digits}`
 - Example: `BBVA Visa 4563`
 - No currency suffix (cards can process both ARS and USD)
 - Valid card types: Visa, Mastercard, Amex, Naranja, Cabal
+
+**Broker folder naming (resumen_broker):**
+- Format: `{Broker} {Comitente}`
+- Example: `BALANZ CAPITAL VALORES SAU 123456`
 
 ## SPREADSHEETS
 See `SPREADSHEET_FORMAT.md` for complete schema.
 
 - **Control de Ingresos**: Facturas Emitidas (18 cols), Pagos Recibidos (15 cols), Retenciones Recibidas (15 cols)
 - **Control de Egresos**: Facturas Recibidas (19 cols), Pagos Enviados (15 cols), Recibos (18 cols)
-- **Control de Resumenes**: Resumenes (9 cols) - stored in bank/card account folders
-  - Column 7: `tipoTarjeta` for credit cards OR `moneda` for bank accounts
+- **Control de Resumenes**: 3 distinct schemas based on document type:
+  - `resumen_bancario`: 9 cols with `moneda` (ARS/USD)
+  - `resumen_tarjeta`: 9 cols with `tipoTarjeta` (Visa/Mastercard/etc)
+  - `resumen_broker`: 8 cols with `saldoARS` + `saldoUSD` (multi-currency)
 - **Dashboard**: Pagos Pendientes (10 cols), Resumen Mensual (7 cols), Uso de API (12 cols)
 
 **Principles:**

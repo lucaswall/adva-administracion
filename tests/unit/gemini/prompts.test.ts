@@ -261,7 +261,7 @@ describe('RESUMEN_BANCARIO_PROMPT', () => {
   });
 
   it('mentions bank statement terminology', () => {
-    expect(RESUMEN_BANCARIO_PROMPT).toContain('bank statement');
+    expect(RESUMEN_BANCARIO_PROMPT).toContain('bank account statement');
     expect(RESUMEN_BANCARIO_PROMPT).toContain('Resumen');
     expect(RESUMEN_BANCARIO_PROMPT).toContain('Extracto');
   });

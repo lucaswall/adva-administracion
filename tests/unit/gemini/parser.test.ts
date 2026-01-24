@@ -208,54 +208,8 @@ describe('assignCuitsAndClassify', () => {
 });
 
 describe('parseResumenBancarioResponse', () => {
-  describe('tipoTarjeta validation', () => {
-    it('accepts valid credit card types', () => {
-      const validTypes = ['Visa', 'Mastercard', 'Amex', 'Naranja', 'Cabal'];
-
-      for (const cardType of validTypes) {
-        const response = `\`\`\`json
-{
-  "banco": "BBVA",
-  "numeroCuenta": "1234",
-  "fechaDesde": "2024-01-01",
-  "fechaHasta": "2024-01-31",
-  "saldoInicial": 1000,
-  "saldoFinal": 2000,
-  "moneda": "ARS",
-  "tipoTarjeta": "${cardType}"
-}
-\`\`\``;
-
-        const result = parseResumenBancarioResponse(response);
-        expect(result.ok).toBe(true);
-        if (result.ok) {
-          expect(result.value.data.tipoTarjeta).toBe(cardType);
-        }
-      }
-    });
-
-    it('clears invalid tipoTarjeta values', () => {
-      const response = `\`\`\`json
-{
-  "banco": "BBVA",
-  "numeroCuenta": "1234",
-  "fechaDesde": "2024-01-01",
-  "fechaHasta": "2024-01-31",
-  "saldoInicial": 1000,
-  "saldoFinal": 2000,
-  "moneda": "ARS",
-  "tipoTarjeta": "InvalidCard"
-}
-\`\`\``;
-
-      const result = parseResumenBancarioResponse(response);
-      expect(result.ok).toBe(true);
-      if (result.ok) {
-        expect(result.value.data.tipoTarjeta).toBeUndefined();
-      }
-    });
-
-    it('handles missing tipoTarjeta field', () => {
+  describe('basic parsing', () => {
+    it('parses complete bank account response', () => {
       const response = `\`\`\`json
 {
   "banco": "BBVA",
@@ -264,35 +218,18 @@ describe('parseResumenBancarioResponse', () => {
   "fechaHasta": "2024-01-31",
   "saldoInicial": 1000,
   "saldoFinal": 2000,
-  "moneda": "ARS"
-}
-\`\`\``;
-
-      const result = parseResumenBancarioResponse(response);
-      expect(result.ok).toBe(true);
-      if (result.ok) {
-        expect(result.value.data.tipoTarjeta).toBeUndefined();
-      }
-    });
-
-    it('clears empty string tipoTarjeta', () => {
-      const response = `\`\`\`json
-{
-  "banco": "BBVA",
-  "numeroCuenta": "1234",
-  "fechaDesde": "2024-01-01",
-  "fechaHasta": "2024-01-31",
-  "saldoInicial": 1000,
-  "saldoFinal": 2000,
   "moneda": "ARS",
-  "tipoTarjeta": ""
+  "cantidadMovimientos": 25
 }
 \`\`\``;
 
       const result = parseResumenBancarioResponse(response);
       expect(result.ok).toBe(true);
       if (result.ok) {
-        expect(result.value.data.tipoTarjeta).toBeUndefined();
+        expect(result.value.data.banco).toBe('BBVA');
+        expect(result.value.data.numeroCuenta).toBe('1234567890');
+        expect(result.value.data.moneda).toBe('ARS');
+        expect(result.value.confidence).toBeGreaterThan(0.9);
       }
     });
   });

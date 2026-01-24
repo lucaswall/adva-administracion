@@ -4,16 +4,18 @@
  */
 
 import { moveFile, getParents, renameFile } from './drive.js';
-import { getOrCreateMonthFolder, getOrCreateBankAccountFolder, getCachedFolderStructure } from './folder-structure.js';
+import { getOrCreateMonthFolder, getOrCreateBankAccountFolder, getOrCreateCreditCardFolder, getOrCreateBrokerFolder, getCachedFolderStructure } from './folder-structure.js';
 import { formatMonthFolder } from '../utils/spanish-date.js';
 import {
   generateFacturaFileName,
   generatePagoFileName,
   generateReciboFileName,
   generateResumenFileName,
+  generateResumenTarjetaFileName,
+  generateResumenBrokerFileName,
   generateRetencionFileName,
 } from '../utils/file-naming.js';
-import type { Factura, Pago, Recibo, ResumenBancario, Retencion, SortDestination, SortResult, DocumentType, Result } from '../types/index.js';
+import type { Factura, Pago, Recibo, ResumenBancario, ResumenTarjeta, ResumenBroker, Retencion, SortDestination, SortResult, DocumentType, Result } from '../types/index.js';
 
 /** Destination folder names for path building */
 const DESTINATION_NAMES: Record<SortDestination, string> = {
@@ -26,7 +28,7 @@ const DESTINATION_NAMES: Record<SortDestination, string> = {
 /**
  * Document with file info needed for sorting
  */
-type SortableDocument = Factura | Pago | Recibo | ResumenBancario | Retencion;
+type SortableDocument = Factura | Pago | Recibo | ResumenBancario | ResumenTarjeta | ResumenBroker | Retencion;
 
 /**
  * Extracts the relevant date from a document for sorting
@@ -116,15 +118,45 @@ export async function sortDocument(
   if (destination === 'sin_procesar') {
     // Sin Procesar stays at root level
     targetFolderId = structure.sinProcesarId;
-  } else if (destination === 'bancos' && 'banco' in doc && 'numeroCuenta' in doc) {
+  } else if (destination === 'bancos' && 'broker' in doc && 'numeroCuenta' in doc) {
+    // ResumenBroker goes to broker-specific folder
+    const resumen = doc as ResumenBroker;
+    const folderResult = await getOrCreateBrokerFolder(
+      docDate.getFullYear().toString(),
+      resumen.broker,
+      resumen.numeroCuenta
+    );
+    if (!folderResult.ok) {
+      return {
+        success: false,
+        error: folderResult.error.message,
+      };
+    }
+    targetFolderId = folderResult.value;
+  } else if (destination === 'bancos' && 'tipoTarjeta' in doc && 'numeroCuenta' in doc) {
+    // ResumenTarjeta goes to credit card-specific folder
+    const resumen = doc as ResumenTarjeta;
+    const folderResult = await getOrCreateCreditCardFolder(
+      docDate.getFullYear().toString(),
+      resumen.banco,
+      resumen.tipoTarjeta,
+      resumen.numeroCuenta
+    );
+    if (!folderResult.ok) {
+      return {
+        success: false,
+        error: folderResult.error.message,
+      };
+    }
+    targetFolderId = folderResult.value;
+  } else if (destination === 'bancos' && 'banco' in doc && 'numeroCuenta' in doc && 'moneda' in doc) {
     // ResumenBancario goes to bank account-specific folder
     const resumen = doc as ResumenBancario;
     const folderResult = await getOrCreateBankAccountFolder(
       docDate.getFullYear().toString(),
       resumen.banco,
       resumen.numeroCuenta,
-      resumen.moneda,
-      resumen.tipoTarjeta
+      resumen.moneda
     );
     if (!folderResult.ok) {
       return {
@@ -219,7 +251,7 @@ export async function sortToSinProcesar(
 /**
  * Document with file info needed for sorting and renaming
  */
-type SortableDocumentWithType = Factura | Pago | Recibo | ResumenBancario | Retencion;
+type SortableDocumentWithType = Factura | Pago | Recibo | ResumenBancario | ResumenTarjeta | ResumenBroker | Retencion;
 
 /**
  * Sorts a document and renames it with a standardized name
@@ -265,6 +297,12 @@ export async function sortAndRenameDocument(
       break;
     case 'resumen_bancario':
       newFileName = generateResumenFileName(doc as ResumenBancario);
+      break;
+    case 'resumen_tarjeta':
+      newFileName = generateResumenTarjetaFileName(doc as ResumenTarjeta);
+      break;
+    case 'resumen_broker':
+      newFileName = generateResumenBrokerFileName(doc as ResumenBroker);
       break;
     case 'certificado_retencion':
       newFileName = generateRetencionFileName(doc as Retencion);
