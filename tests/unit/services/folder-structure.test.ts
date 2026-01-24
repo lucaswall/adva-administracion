@@ -25,6 +25,7 @@ const mockGetSheetMetadata = vi.fn();
 const mockCreateSheet = vi.fn();
 const mockSetValues = vi.fn();
 const mockFormatSheet = vi.fn();
+const mockFormatStatusSheet = vi.fn();
 const mockDeleteSheet = vi.fn();
 const mockGetValues = vi.fn();
 const mockMoveSheetToFirst = vi.fn();
@@ -35,6 +36,7 @@ vi.mock('../../../src/services/sheets.js', () => ({
   createSheet: (...args: unknown[]) => mockCreateSheet(...args),
   setValues: (...args: unknown[]) => mockSetValues(...args),
   formatSheet: (...args: unknown[]) => mockFormatSheet(...args),
+  formatStatusSheet: (...args: unknown[]) => mockFormatStatusSheet(...args),
   deleteSheet: (...args: unknown[]) => mockDeleteSheet(...args),
   getValues: (...args: unknown[]) => mockGetValues(...args),
   moveSheetToFirst: (...args: unknown[]) => mockMoveSheetToFirst(...args),
@@ -64,6 +66,8 @@ describe('FolderStructure service', () => {
     vi.clearAllMocks();
     // Mock formatSheet to always succeed by default
     mockFormatSheet.mockResolvedValue({ ok: true, value: undefined });
+    // Mock formatStatusSheet to always succeed by default
+    mockFormatStatusSheet.mockResolvedValue({ ok: true, value: undefined });
     // Mock getValues to return empty by default (no headers)
     mockGetValues.mockResolvedValue({ ok: true, value: [[]] });
     // Mock deleteSheet to always succeed by default

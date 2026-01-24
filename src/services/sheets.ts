@@ -466,6 +466,94 @@ export async function formatSheet(
 }
 
 /**
+ * Formats the Status sheet with its unique formatting requirements
+ * - Only column A (metric labels) should be bold, not column B
+ * - No frozen rows or columns
+ * - Conditional formatting for ONLINE/OFFLINE is applied separately
+ *
+ * @param spreadsheetId - Spreadsheet ID
+ * @param sheetId - Sheet ID (not the name, the numeric ID)
+ * @returns Success or error
+ */
+export async function formatStatusSheet(
+  spreadsheetId: string,
+  sheetId: number
+): Promise<Result<void, Error>> {
+  try {
+    const sheets = getSheetsService();
+
+    const requests: sheets_v4.Schema$Request[] = [];
+
+    // 1. Bold only column A (all rows) - metric labels
+    requests.push({
+      repeatCell: {
+        range: {
+          sheetId,
+          startColumnIndex: 0,  // Column A
+          endColumnIndex: 1,    // Only column A
+        },
+        cell: {
+          userEnteredFormat: {
+            textFormat: {
+              bold: true,
+            },
+          },
+        },
+        fields: 'userEnteredFormat.textFormat.bold',
+      },
+    });
+
+    // 2. Column B should be non-bold (values)
+    requests.push({
+      repeatCell: {
+        range: {
+          sheetId,
+          startColumnIndex: 1,  // Column B
+          endColumnIndex: 2,    // Only column B
+        },
+        cell: {
+          userEnteredFormat: {
+            textFormat: {
+              bold: false,
+            },
+          },
+        },
+        fields: 'userEnteredFormat.textFormat.bold',
+      },
+    });
+
+    // 3. Ensure no frozen rows (set to 0)
+    requests.push({
+      updateSheetProperties: {
+        properties: {
+          sheetId,
+          gridProperties: {
+            frozenRowCount: 0,
+            frozenColumnCount: 0,
+          },
+        },
+        fields: 'gridProperties.frozenRowCount,gridProperties.frozenColumnCount',
+      },
+    });
+
+    // Execute all formatting requests in a single batch
+    await sheets.spreadsheets.batchUpdate({
+      spreadsheetId,
+      requestBody: {
+        requests,
+      },
+    });
+
+    return { ok: true, value: undefined };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error : new Error(String(error)),
+    };
+  }
+}
+
+/**
  * Conditional format rule for text matching
  */
 export interface ConditionalFormatRule {

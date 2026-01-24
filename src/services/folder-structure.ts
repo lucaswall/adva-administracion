@@ -5,7 +5,7 @@
 
 import { getConfig } from '../config.js';
 import { findByName, listByMimeType, createFolder, createSpreadsheet } from './drive.js';
-import { getSheetMetadata, createSheet, setValues, getValues, formatSheet, deleteSheet, moveSheetToFirst, applyConditionalFormat } from './sheets.js';
+import { getSheetMetadata, createSheet, setValues, getValues, formatSheet, formatStatusSheet, deleteSheet, moveSheetToFirst, applyConditionalFormat } from './sheets.js';
 import { formatMonthFolder } from '../utils/spanish-date.js';
 import { CONTROL_INGRESOS_SHEETS, CONTROL_EGRESOS_SHEETS, DASHBOARD_OPERATIVO_SHEETS, CONTROL_RESUMENES_BANCARIO_SHEET, CONTROL_RESUMENES_TARJETA_SHEET, CONTROL_RESUMENES_BROKER_SHEET, type SheetConfig } from '../constants/spreadsheet-headers.js';
 import type { FolderStructure, Result, SortDestination } from '../types/index.js';
@@ -251,14 +251,16 @@ async function ensureSheetsExist(
       }
     }
 
-    // Always apply formatting (bold headers, frozen rows, and number formats if specified)
-    const formatResult = await formatSheet(spreadsheetId, sheetId, {
-      monetaryColumns: config.monetaryColumns || [],
-      numberFormats: config.numberFormats,
-      frozenRows: 1,
-    });
-    if (!formatResult.ok) {
-      return formatResult;
+    // Apply formatting (skip for Status sheet - it has custom formatting)
+    if (config.title !== 'Status') {
+      const formatResult = await formatSheet(spreadsheetId, sheetId, {
+        monetaryColumns: config.monetaryColumns || [],
+        numberFormats: config.numberFormats,
+        frozenRows: 1,
+      });
+      if (!formatResult.ok) {
+        return formatResult;
+      }
     }
   }
 
@@ -377,8 +379,12 @@ async function initializeDashboardOperativo(
 }
 
 /**
- * Initializes the Status sheet with conditional formatting
- * Sets up ONLINE/OFFLINE conditional formatting for cell B1
+ * Initializes the Status sheet with custom formatting and conditional formatting
+ * Sets up:
+ * - Column A bold (metric labels)
+ * - Column B non-bold (values)
+ * - No frozen rows/columns
+ * - ONLINE/OFFLINE conditional formatting for cell B1
  *
  * @param spreadsheetId - Dashboard Operativo Contable spreadsheet ID
  * @returns Success or error
@@ -395,8 +401,20 @@ async function initializeStatusSheet(
     return { ok: false, error: new Error('Status sheet not found') };
   }
 
+  // Apply custom formatting for Status sheet
+  const customFormatResult = await formatStatusSheet(spreadsheetId, statusSheet.sheetId);
+  if (!customFormatResult.ok) {
+    debug('Failed to apply custom formatting to Status sheet', {
+      module: 'folder-structure',
+      phase: 'init-status',
+      error: customFormatResult.error.message,
+      spreadsheetId
+    });
+    // Don't fail initialization if formatting fails
+  }
+
   // Apply conditional formatting for ONLINE (green) and OFFLINE (red)
-  const formatResult = await applyConditionalFormat(spreadsheetId, [
+  const conditionalFormatResult = await applyConditionalFormat(spreadsheetId, [
     {
       sheetId: statusSheet.sheetId,
       startRowIndex: 0,
@@ -419,11 +437,11 @@ async function initializeStatusSheet(
     },
   ]);
 
-  if (!formatResult.ok) {
+  if (!conditionalFormatResult.ok) {
     debug('Failed to apply conditional formatting to Status sheet', {
       module: 'folder-structure',
       phase: 'init-status',
-      error: formatResult.error.message,
+      error: conditionalFormatResult.error.message,
       spreadsheetId
     });
     // Don't fail if conditional formatting fails
