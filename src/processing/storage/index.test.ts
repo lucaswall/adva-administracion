@@ -170,10 +170,13 @@ describe('File Tracking Functions', () => {
 
       const result = await getProcessedFileIds('dashboard-id');
 
-      expect(result.has('file-1')).toBe(true);
-      expect(result.has('file-2')).toBe(true);
-      expect(result.has('file-3')).toBe(true);
-      expect(result.size).toBe(3);
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value.has('file-1')).toBe(true);
+        expect(result.value.has('file-2')).toBe(true);
+        expect(result.value.has('file-3')).toBe(true);
+        expect(result.value.size).toBe(3);
+      }
       expect(getValues).toHaveBeenCalledWith('dashboard-id', 'Archivos Procesados!A:A');
     });
 
@@ -185,10 +188,13 @@ describe('File Tracking Functions', () => {
 
       const result = await getProcessedFileIds('dashboard-id');
 
-      expect(result.size).toBe(0);
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value.size).toBe(0);
+      }
     });
 
-    it('returns empty set when getValues fails', async () => {
+    it('returns error when getValues fails', async () => {
       vi.mocked(getValues).mockResolvedValue({
         ok: false,
         error: new Error('Sheets API error'),
@@ -196,7 +202,10 @@ describe('File Tracking Functions', () => {
 
       const result = await getProcessedFileIds('dashboard-id');
 
-      expect(result.size).toBe(0);
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.error.message).toBe('Sheets API error');
+      }
     });
 
     it('skips rows with empty fileId', async () => {
@@ -212,10 +221,13 @@ describe('File Tracking Functions', () => {
 
       const result = await getProcessedFileIds('dashboard-id');
 
-      expect(result.has('file-1')).toBe(true);
-      expect(result.has('file-3')).toBe(true);
-      expect(result.has('')).toBe(false);
-      expect(result.size).toBe(2);
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value.has('file-1')).toBe(true);
+        expect(result.value.has('file-3')).toBe(true);
+        expect(result.value.has('')).toBe(false);
+        expect(result.value.size).toBe(2);
+      }
     });
   });
 });

@@ -144,12 +144,16 @@ export async function updateFileStatus(
  *
  * @param dashboardId - Dashboard Operativo Contable spreadsheet ID
  */
-export async function getProcessedFileIds(dashboardId: string): Promise<Set<string>> {
+export async function getProcessedFileIds(dashboardId: string): Promise<Result<Set<string>, Error>> {
   const processedIds = new Set<string>();
 
   const result = await getValues(dashboardId, 'Archivos Procesados!A:A');
 
-  if (result.ok && result.value.length > 1) {
+  if (!result.ok) {
+    return result;
+  }
+
+  if (result.value.length > 1) {
     // Skip header row (index 0)
     for (let i = 1; i < result.value.length; i++) {
       const row = result.value[i];
@@ -159,5 +163,5 @@ export async function getProcessedFileIds(dashboardId: string): Promise<Set<stri
     }
   }
 
-  return processedIds;
+  return { ok: true, value: processedIds };
 }

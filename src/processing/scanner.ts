@@ -139,7 +139,18 @@ export async function scanFolder(folderId?: string): Promise<Result<ScanResult, 
     });
 
     // Get already processed file IDs from centralized tracking sheet
-    const processedIds = await getProcessedFileIds(dashboardOperativoId);
+    const processedIdsResult = await getProcessedFileIds(dashboardOperativoId);
+    if (!processedIdsResult.ok) {
+      logError('Failed to get processed file IDs', {
+        module: 'scanner',
+        phase: 'scan-start',
+        error: processedIdsResult.error.message,
+        correlationId,
+      });
+      return processedIdsResult;
+    }
+
+    const processedIds = processedIdsResult.value;
     info(`${processedIds.size} files already processed`, {
       module: 'scanner',
       phase: 'scan-start',
