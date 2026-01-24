@@ -23,6 +23,7 @@ const mockSetValues = vi.fn();
 const mockAppendRowsWithLinks = vi.fn();
 const mockBatchUpdate = vi.fn();
 const mockSortSheet = vi.fn();
+const mockGetSpreadsheetTimezone = vi.fn();
 
 vi.mock('../../../src/services/sheets.js', () => ({
   getValues: (...args: unknown[]) => mockGetValues(...args),
@@ -30,6 +31,7 @@ vi.mock('../../../src/services/sheets.js', () => ({
   appendRowsWithLinks: (...args: unknown[]) => mockAppendRowsWithLinks(...args),
   batchUpdate: (...args: unknown[]) => mockBatchUpdate(...args),
   sortSheet: (...args: unknown[]) => mockSortSheet(...args),
+  getSpreadsheetTimezone: (...args: unknown[]) => mockGetSpreadsheetTimezone(...args),
   clearSheetsCache: vi.fn(),
 }));
 
@@ -149,6 +151,8 @@ describe('Scanner module', () => {
     // Default mocks for bank account functions
     mockGetOrCreateBankAccountFolder.mockResolvedValue({ ok: true, value: 'default-bank-folder-id' });
     mockGetOrCreateBankAccountSpreadsheet.mockResolvedValue({ ok: true, value: 'default-bank-spreadsheet-id' });
+    // Default mock for getSpreadsheetTimezone
+    mockGetSpreadsheetTimezone.mockResolvedValue({ ok: true, value: 'America/Argentina/Buenos_Aires' });
   });
 
   afterEach(() => {
