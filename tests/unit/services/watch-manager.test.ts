@@ -506,8 +506,8 @@ describe('watch-manager', () => {
       initWatchManager('https://example.com/webhooks/drive');
       await shutdownWatchManager();
 
-      // Should stop both renewal and polling jobs
-      expect(mockStopFn).toHaveBeenCalledTimes(2);
+      // Should stop renewal, polling, and status update jobs
+      expect(mockStopFn).toHaveBeenCalledTimes(3);
     });
 
     it('stops all watch channels', async () => {

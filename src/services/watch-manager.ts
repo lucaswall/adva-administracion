@@ -9,6 +9,8 @@ import { watchFolder, stopWatching as driveStopWatching } from './drive.js';
 import { scanFolder } from '../processing/scanner.js';
 import type { WatchChannel, WatchManagerStatus, Result } from '../types/index.js';
 import { debug, info, error as logError } from '../utils/logger.js';
+import { updateStatusSheet } from './status-sheet.js';
+import { getCachedFolderStructure } from './folder-structure.js';
 
 /**
  * Watch manager state
@@ -22,6 +24,7 @@ let lastNotificationTime: Date | null = null;
 let lastScanTime: Date | null = null;
 let renewalJob: cron.ScheduledTask | null = null;
 let pollingJob: cron.ScheduledTask | null = null;
+let statusUpdateJob: cron.ScheduledTask | null = null;
 let runningScan: Promise<void> | null = null;
 let hasPendingScan: boolean = false;
 let pendingScanFolderId: string | undefined = undefined;
@@ -50,6 +53,15 @@ export function initWatchManager(url: string): void {
   pollingJob = cron.schedule('*/5 * * * *', () => {
     debug('Running fallback polling check', { module: 'watch-manager', phase: 'polling' });
     checkAndTriggerFallbackScan();
+  });
+
+  // Start status sheet update cron job (every 5 minutes)
+  statusUpdateJob = cron.schedule('*/5 * * * *', async () => {
+    debug('Running status sheet update', { module: 'watch-manager', phase: 'status-update' });
+    const folderStructure = getCachedFolderStructure();
+    if (folderStructure?.dashboardOperativoId) {
+      await updateStatusSheet(folderStructure.dashboardOperativoId);
+    }
   });
 
   info('Watch manager initialized', { module: 'watch-manager', phase: 'init' });
@@ -295,7 +307,7 @@ export function triggerScan(folderId?: string): void {
   // Run scan directly (not in queue) to avoid deadlock
   // The scanFolder function will use the queue for individual file processing
   runningScan = scanFolder(folderId)
-    .then(result => {
+    .then(async result => {
       if (result.ok) {
         lastScanTime = new Date();
         info('Scan complete', {
@@ -306,6 +318,12 @@ export function triggerScan(folderId?: string): void {
           facturasAdded: result.value.facturasAdded,
           pagosAdded: result.value.pagosAdded
         });
+
+        // Update status sheet after successful scan
+        const folderStructure = getCachedFolderStructure();
+        if (folderStructure?.dashboardOperativoId) {
+          await updateStatusSheet(folderStructure.dashboardOperativoId);
+        }
       } else {
         logError('Scan failed', {
           module: 'watch-manager',
@@ -445,6 +463,11 @@ export async function shutdownWatchManager(): Promise<void> {
   if (pollingJob) {
     pollingJob.stop();
     pollingJob = null;
+  }
+
+  if (statusUpdateJob) {
+    statusUpdateJob.stop();
+    statusUpdateJob = null;
   }
 
   // Stop all watch channels

@@ -466,6 +466,85 @@ export async function formatSheet(
 }
 
 /**
+ * Conditional format rule for text matching
+ */
+export interface ConditionalFormatRule {
+  /** Sheet ID to apply the rule to */
+  sheetId: number;
+  /** Starting row index (0-based) */
+  startRowIndex: number;
+  /** Ending row index (exclusive, 0-based) */
+  endRowIndex: number;
+  /** Starting column index (0-based) */
+  startColumnIndex: number;
+  /** Ending column index (exclusive, 0-based) */
+  endColumnIndex: number;
+  /** Text to match for the condition */
+  text: string;
+  /** Text color as RGB object */
+  textColor: { red: number; green: number; blue: number };
+  /** Whether to make text bold */
+  bold: boolean;
+}
+
+/**
+ * Applies conditional formatting rules to a sheet
+ *
+ * @param spreadsheetId - Spreadsheet ID
+ * @param rules - Array of conditional format rules
+ * @returns Success or error
+ */
+export async function applyConditionalFormat(
+  spreadsheetId: string,
+  rules: ConditionalFormatRule[]
+): Promise<Result<void, Error>> {
+  try {
+    const sheets = getSheetsService();
+
+    const requests: sheets_v4.Schema$Request[] = rules.map(rule => ({
+      addConditionalFormatRule: {
+        rule: {
+          ranges: [
+            {
+              sheetId: rule.sheetId,
+              startRowIndex: rule.startRowIndex,
+              endRowIndex: rule.endRowIndex,
+              startColumnIndex: rule.startColumnIndex,
+              endColumnIndex: rule.endColumnIndex,
+            },
+          ],
+          booleanRule: {
+            condition: {
+              type: 'TEXT_EQ',
+              values: [{ userEnteredValue: rule.text }],
+            },
+            format: {
+              textFormat: {
+                foregroundColor: rule.textColor,
+                bold: rule.bold,
+              },
+            },
+          },
+        },
+        index: 0,
+      },
+    }));
+
+    await sheets.spreadsheets.batchUpdate({
+      spreadsheetId,
+      requestBody: { requests },
+    });
+
+    return { ok: true, value: undefined };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error : new Error(String(error)),
+    };
+  }
+}
+
+/**
  * Deletes a sheet from a spreadsheet
  *
  * @param spreadsheetId - Spreadsheet ID

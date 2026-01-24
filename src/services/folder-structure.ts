@@ -5,7 +5,7 @@
 
 import { getConfig } from '../config.js';
 import { findByName, listByMimeType, createFolder, createSpreadsheet } from './drive.js';
-import { getSheetMetadata, createSheet, setValues, getValues, formatSheet, deleteSheet, moveSheetToFirst } from './sheets.js';
+import { getSheetMetadata, createSheet, setValues, getValues, formatSheet, deleteSheet, moveSheetToFirst, applyConditionalFormat } from './sheets.js';
 import { formatMonthFolder } from '../utils/spanish-date.js';
 import { CONTROL_INGRESOS_SHEETS, CONTROL_EGRESOS_SHEETS, DASHBOARD_OPERATIVO_SHEETS, CONTROL_RESUMENES_BANCARIO_SHEET, CONTROL_RESUMENES_TARJETA_SHEET, CONTROL_RESUMENES_BROKER_SHEET, type SheetConfig } from '../constants/spreadsheet-headers.js';
 import type { FolderStructure, Result, SortDestination } from '../types/index.js';
@@ -360,6 +360,80 @@ async function initializeDashboardOperativo(
     rows
   );
   if (!setResult.ok) return setResult;
+
+  // Initialize Status sheet with conditional formatting
+  const statusInitResult = await initializeStatusSheet(spreadsheetId);
+  if (!statusInitResult.ok) {
+    debug('Failed to initialize Status sheet', {
+      module: 'folder-structure',
+      phase: 'init-dashboard',
+      error: statusInitResult.error.message,
+      spreadsheetId
+    });
+    // Don't fail initialization if Status sheet formatting fails
+  }
+
+  return { ok: true, value: undefined };
+}
+
+/**
+ * Initializes the Status sheet with conditional formatting
+ * Sets up ONLINE/OFFLINE conditional formatting for cell B1
+ *
+ * @param spreadsheetId - Dashboard Operativo Contable spreadsheet ID
+ * @returns Success or error
+ */
+async function initializeStatusSheet(
+  spreadsheetId: string
+): Promise<Result<void, Error>> {
+  // Get sheet metadata to find Status sheet ID
+  const metadataResult = await getSheetMetadata(spreadsheetId);
+  if (!metadataResult.ok) return metadataResult;
+
+  const statusSheet = metadataResult.value.find(s => s.title === 'Status');
+  if (!statusSheet) {
+    return { ok: false, error: new Error('Status sheet not found') };
+  }
+
+  // Apply conditional formatting for ONLINE (green) and OFFLINE (red)
+  const formatResult = await applyConditionalFormat(spreadsheetId, [
+    {
+      sheetId: statusSheet.sheetId,
+      startRowIndex: 0,
+      endRowIndex: 1,
+      startColumnIndex: 1,
+      endColumnIndex: 2,
+      text: 'ONLINE',
+      textColor: { red: 0, green: 0.6, blue: 0 }, // Green
+      bold: false,
+    },
+    {
+      sheetId: statusSheet.sheetId,
+      startRowIndex: 0,
+      endRowIndex: 1,
+      startColumnIndex: 1,
+      endColumnIndex: 2,
+      text: 'OFFLINE',
+      textColor: { red: 0.8, green: 0, blue: 0 }, // Red
+      bold: true,
+    },
+  ]);
+
+  if (!formatResult.ok) {
+    debug('Failed to apply conditional formatting to Status sheet', {
+      module: 'folder-structure',
+      phase: 'init-status',
+      error: formatResult.error.message,
+      spreadsheetId
+    });
+    // Don't fail if conditional formatting fails
+  }
+
+  info('Status sheet initialized', {
+    module: 'folder-structure',
+    phase: 'init-status',
+    spreadsheetId
+  });
 
   return { ok: true, value: undefined };
 }

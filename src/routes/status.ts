@@ -20,9 +20,17 @@ export function setServerStartTime(): void {
 }
 
 /**
+ * Gets the server start time
+ * @returns The server start time or null if not yet started
+ */
+export function getServerStartTime(): Date | null {
+  return serverStartTime;
+}
+
+/**
  * Calculates server uptime in human-readable format
  */
-function formatUptime(startTime: Date): string {
+export function formatUptime(startTime: Date): string {
   const uptimeMs = Date.now() - startTime.getTime();
   const seconds = Math.floor(uptimeMs / 1000);
   const minutes = Math.floor(seconds / 60);
