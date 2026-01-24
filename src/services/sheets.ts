@@ -1248,6 +1248,110 @@ export async function appendRowsWithFormatting(
 }
 
 /**
+ * Gets or creates a month sheet in a spreadsheet
+ * If the sheet exists, returns its sheet ID
+ * If it doesn't exist, creates it with the provided headers
+ *
+ * @param spreadsheetId - Spreadsheet ID
+ * @param monthName - Name of the month sheet (e.g., '2026-01')
+ * @param headers - Headers to use if creating the sheet
+ * @returns Sheet ID
+ */
+export async function getOrCreateMonthSheet(
+  spreadsheetId: string,
+  monthName: string,
+  headers: string[]
+): Promise<Result<number, Error>> {
+  const metadataResult = await getSheetMetadata(spreadsheetId);
+  if (!metadataResult.ok) return metadataResult;
+
+  const existing = metadataResult.value.find(s => s.title === monthName);
+  if (existing) {
+    return { ok: true, value: existing.sheetId };
+  }
+
+  const createResult = await createSheet(spreadsheetId, monthName);
+  if (!createResult.ok) return createResult;
+
+  const sheetId = createResult.value;
+
+  const range = `${monthName}!A1:${String.fromCharCode(64 + headers.length)}1`;
+  const headerValues = [headers];
+  const setResult = await setValues(spreadsheetId, range, headerValues);
+  if (!setResult.ok) return { ok: false, error: setResult.error };
+
+  const formatResult = await formatSheet(spreadsheetId, sheetId, { frozenRows: 1 });
+  if (!formatResult.ok) return { ok: false, error: formatResult.error };
+
+  return { ok: true, value: sheetId };
+}
+
+/**
+ * Formats an empty month sheet with "SIN MOVIMIENTOS" message
+ * Sets cell B3 to "===== SIN MOVIMIENTOS =====" with red background and bold text
+ *
+ * @param spreadsheetId - Spreadsheet ID
+ * @param sheetId - Sheet ID
+ * @returns Success/failure result
+ */
+export async function formatEmptyMonthSheet(
+  spreadsheetId: string,
+  sheetId: number
+): Promise<Result<void, Error>> {
+  try {
+    const sheets = getSheetsService();
+
+    const requests: sheets_v4.Schema$Request[] = [
+      {
+        updateCells: {
+          range: {
+            sheetId,
+            startRowIndex: 2,
+            endRowIndex: 3,
+            startColumnIndex: 1,
+            endColumnIndex: 2,
+          },
+          rows: [
+            {
+              values: [
+                {
+                  userEnteredValue: {
+                    stringValue: '===== SIN MOVIMIENTOS =====',
+                  },
+                  userEnteredFormat: {
+                    textFormat: {
+                      bold: true,
+                    },
+                    backgroundColor: {
+                      red: 1.0,
+                      green: 0.0,
+                      blue: 0.0,
+                    },
+                  },
+                },
+              ],
+            },
+          ],
+          fields: 'userEnteredValue,userEnteredFormat',
+        },
+      },
+    ];
+
+    await sheets.spreadsheets.batchUpdate({
+      spreadsheetId,
+      requestBody: { requests },
+    });
+
+    return { ok: true, value: undefined };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error : new Error(String(error)),
+    };
+  }
+}
+
+/**
  * Clears the cached Sheets service (for testing)
  */
 export function clearSheetsCache(): void {
