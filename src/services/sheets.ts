@@ -233,6 +233,40 @@ export async function getSheetMetadata(
 }
 
 /**
+ * Gets the timezone of a spreadsheet
+ *
+ * @param spreadsheetId - Spreadsheet ID
+ * @returns Timezone string (e.g., 'America/Argentina/Buenos_Aires')
+ */
+export async function getSpreadsheetTimezone(
+  spreadsheetId: string
+): Promise<Result<string, Error>> {
+  try {
+    const sheets = getSheetsService();
+
+    const response = await sheets.spreadsheets.get({
+      spreadsheetId,
+      fields: 'properties.timeZone',
+    });
+
+    const timeZone = response.data.properties?.timeZone;
+    if (!timeZone) {
+      return {
+        ok: false,
+        error: new Error('Timezone not found in spreadsheet properties'),
+      };
+    }
+
+    return { ok: true, value: timeZone };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error : new Error(String(error)),
+    };
+  }
+}
+
+/**
  * Creates a new sheet in a spreadsheet
  *
  * @param spreadsheetId - Spreadsheet ID

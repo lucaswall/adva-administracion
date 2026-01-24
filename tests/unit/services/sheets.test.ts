@@ -5,7 +5,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { sheets_v4 } from 'googleapis';
 import { google } from 'googleapis';
-import { formatSheet, clearSheetsCache, appendRowsWithLinks, appendRowsWithFormatting, clearSheetData, moveSheetToFirst, dateStringToSerial } from '../../../src/services/sheets.js';
+import { formatSheet, clearSheetsCache, appendRowsWithLinks, appendRowsWithFormatting, clearSheetData, moveSheetToFirst, dateStringToSerial, getSpreadsheetTimezone } from '../../../src/services/sheets.js';
 
 // Mock googleapis
 vi.mock('googleapis', () => {
@@ -1233,5 +1233,68 @@ describe('appendRowsWithLinks - CellDate handling', () => {
 
     // Number
     expect(rowData[3].userEnteredValue).toEqual({ numberValue: 1234.56 });
+  });
+});
+
+describe('getSpreadsheetTimezone', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    clearSheetsCache();
+  });
+
+  it('should return the spreadsheet timezone', async () => {
+    const mockGet = vi.fn().mockResolvedValue({
+      data: {
+        properties: {
+          timeZone: 'America/Argentina/Buenos_Aires',
+        },
+      },
+    });
+
+    const mockSheets = google.sheets({} as any);
+    mockSheets.spreadsheets.get = mockGet;
+
+    const result = await getSpreadsheetTimezone('spreadsheetId123');
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value).toBe('America/Argentina/Buenos_Aires');
+    }
+
+    expect(mockGet).toHaveBeenCalledWith({
+      spreadsheetId: 'spreadsheetId123',
+      fields: 'properties.timeZone',
+    });
+  });
+
+  it('should handle missing timezone property', async () => {
+    const mockGet = vi.fn().mockResolvedValue({
+      data: {
+        properties: {},
+      },
+    });
+
+    const mockSheets = google.sheets({} as any);
+    mockSheets.spreadsheets.get = mockGet;
+
+    const result = await getSpreadsheetTimezone('spreadsheetId123');
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.message).toContain('Timezone not found');
+    }
+  });
+
+  it('should handle API errors', async () => {
+    const mockGet = vi.fn().mockRejectedValue(new Error('API Error'));
+    const mockSheets = google.sheets({} as any);
+    mockSheets.spreadsheets.get = mockGet;
+
+    const result = await getSpreadsheetTimezone('spreadsheetId123');
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.message).toBe('API Error');
+    }
   });
 });

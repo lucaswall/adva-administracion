@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { collectStatusMetrics } from './status-sheet.js';
+import { collectStatusMetrics, formatTimestampInTimezone } from './status-sheet.js';
 
 // Mock dependencies
 vi.mock('../routes/status.js', () => ({
@@ -83,6 +83,45 @@ describe('Status Sheet Service', () => {
       expect(metrics.watchEnabled).toBe(true);
       expect(metrics.activeChannels).toBe(1);
       expect(metrics.lastScan).toBeInstanceOf(Date);
+    });
+  });
+
+  describe('formatTimestampInTimezone', () => {
+    it('should format UTC timestamp in Argentina timezone', () => {
+      const utcDate = new Date('2026-01-24T18:30:00.000Z'); // 6:30 PM UTC
+      const formatted = formatTimestampInTimezone(utcDate, 'America/Argentina/Buenos_Aires');
+
+      // Argentina is UTC-3, so 18:30 UTC = 15:30 ART
+      expect(formatted).toBe('2026-01-24 15:30:00');
+    });
+
+    it('should format UTC timestamp in US Eastern timezone', () => {
+      const utcDate = new Date('2026-01-24T18:30:00.000Z'); // 6:30 PM UTC
+      const formatted = formatTimestampInTimezone(utcDate, 'America/New_York');
+
+      // US Eastern is UTC-5 in January, so 18:30 UTC = 13:30 EST
+      expect(formatted).toBe('2026-01-24 13:30:00');
+    });
+
+    it('should format UTC timestamp in UTC timezone', () => {
+      const utcDate = new Date('2026-01-24T18:30:00.000Z');
+      const formatted = formatTimestampInTimezone(utcDate, 'UTC');
+
+      expect(formatted).toBe('2026-01-24 18:30:00');
+    });
+
+    it('should return empty string for null date', () => {
+      const formatted = formatTimestampInTimezone(null, 'America/Argentina/Buenos_Aires');
+
+      expect(formatted).toBe('');
+    });
+
+    it('should handle dates around midnight correctly', () => {
+      const utcDate = new Date('2026-01-24T02:30:00.000Z'); // 2:30 AM UTC
+      const formatted = formatTimestampInTimezone(utcDate, 'America/Argentina/Buenos_Aires');
+
+      // Argentina is UTC-3, so 02:30 UTC = 23:30 previous day
+      expect(formatted).toBe('2026-01-23 23:30:00');
     });
   });
 });
