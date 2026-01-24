@@ -81,8 +81,18 @@ Allowed: `get-logs`, `list-deployments`, `list-services`, `list-variables`, `che
 ### Google Drive MCP
 `gdrive_search`, `gdrive_read_file`, `gdrive_list_folder`, `gdrive_get_pdf`, `gsheets_read`
 
-### Gemini MCP
-`gemini_analyze_pdf` - For testing prompts only; production uses `src/gemini/`
+### Gemini MCP (PROMPT TESTING ONLY)
+`gemini_analyze_pdf` - **NOT for document analysis.** The agent can read PDFs directly using the Read tool.
+
+**Purpose:** Test and iterate on prompts before updating `src/gemini/prompts.ts`.
+
+**Use cases:**
+- Test alternative prompt wording to improve extraction accuracy
+- Verify prompt changes don't introduce regressions
+- Compare outputs between prompt variations
+- Debug unexpected parsing results
+
+**NOT for:** Actual document analysis. If the agent needs to analyze a PDF, it should read the file directly with the Read tool.
 
 ## STYLE GUIDE
 
