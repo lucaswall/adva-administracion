@@ -181,6 +181,7 @@ src/
 │   ├── numbers.ts
 │   ├── currency.ts
 │   ├── validation.ts
+│   ├── bank-names.ts
 │   ├── file-naming.ts
 │   ├── spanish-date.ts
 │   ├── exchange-rate.ts

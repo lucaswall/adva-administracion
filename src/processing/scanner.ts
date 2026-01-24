@@ -625,7 +625,15 @@ async function storeAndSortDocument(
           });
           result.errors++;
           // Mark as failed in tracking sheet
-          await updateFileStatus(dashboardOperativoId, fileInfo.id, 'failed', sortResult.error);
+          const statusResult = await updateFileStatus(dashboardOperativoId, fileInfo.id, 'failed', sortResult.error);
+          if (!statusResult.ok) {
+            logError('Failed to update file status', {
+              module: 'scanner',
+              fileId: fileInfo.id,
+              error: statusResult.error.message,
+              correlationId,
+            });
+          }
         } else {
           info(`Moved to ${sortResult.targetPath}`, {
             module: 'scanner',
@@ -634,7 +642,15 @@ async function storeAndSortDocument(
             correlationId,
           });
           // Mark as success in tracking sheet
-          await updateFileStatus(dashboardOperativoId, fileInfo.id, 'success');
+          const statusResult = await updateFileStatus(dashboardOperativoId, fileInfo.id, 'success');
+          if (!statusResult.ok) {
+            logError('Failed to update file status', {
+              module: 'scanner',
+              fileId: fileInfo.id,
+              error: statusResult.error.message,
+              correlationId,
+            });
+          }
         }
       } else {
         // Duplicate detected - move to Duplicado folder
@@ -656,7 +672,15 @@ async function storeAndSortDocument(
           });
           result.errors++;
           // Mark as failed in tracking sheet
-          await updateFileStatus(dashboardOperativoId, fileInfo.id, 'failed', moveResult.error.message);
+          const statusResult = await updateFileStatus(dashboardOperativoId, fileInfo.id, 'failed', moveResult.error.message);
+          if (!statusResult.ok) {
+            logError('Failed to update file status', {
+              module: 'scanner',
+              fileId: fileInfo.id,
+              error: statusResult.error.message,
+              correlationId,
+            });
+          }
         } else {
           info(`Moved duplicate to ${moveResult.value.targetPath}`, {
             module: 'scanner',
@@ -665,7 +689,15 @@ async function storeAndSortDocument(
             correlationId,
           });
           // Mark as success in tracking sheet (duplicate is successfully handled)
-          await updateFileStatus(dashboardOperativoId, fileInfo.id, 'success');
+          const statusResult = await updateFileStatus(dashboardOperativoId, fileInfo.id, 'success');
+          if (!statusResult.ok) {
+            logError('Failed to update file status', {
+              module: 'scanner',
+              fileId: fileInfo.id,
+              error: statusResult.error.message,
+              correlationId,
+            });
+          }
         }
       }
     } else {
@@ -678,7 +710,15 @@ async function storeAndSortDocument(
       });
       result.errors++;
       // Mark as failed in tracking sheet
-      await updateFileStatus(dashboardOperativoId, fileInfo.id, 'failed', storeResult.error.message);
+      const statusResult = await updateFileStatus(dashboardOperativoId, fileInfo.id, 'failed', storeResult.error.message);
+      if (!statusResult.ok) {
+        logError('Failed to update file status', {
+          module: 'scanner',
+          fileId: fileInfo.id,
+          error: statusResult.error.message,
+          correlationId,
+        });
+      }
     }
   } else if (documentType === 'factura_recibida') {
     // Factura received BY ADVA -> goes to Control de Egresos
@@ -713,7 +753,15 @@ async function storeAndSortDocument(
           });
           result.errors++;
           // Mark as failed in tracking sheet
-          await updateFileStatus(dashboardOperativoId, fileInfo.id, 'failed', sortResult.error);
+          const statusResult = await updateFileStatus(dashboardOperativoId, fileInfo.id, 'failed', sortResult.error);
+          if (!statusResult.ok) {
+            logError('Failed to update file status', {
+              module: 'scanner',
+              fileId: fileInfo.id,
+              error: statusResult.error.message,
+              correlationId,
+            });
+          }
         } else {
           info(`Moved to ${sortResult.targetPath}`, {
             module: 'scanner',
@@ -722,7 +770,15 @@ async function storeAndSortDocument(
             correlationId,
           });
           // Mark as success in tracking sheet
-          await updateFileStatus(dashboardOperativoId, fileInfo.id, 'success');
+          const statusResult = await updateFileStatus(dashboardOperativoId, fileInfo.id, 'success');
+          if (!statusResult.ok) {
+            logError('Failed to update file status', {
+              module: 'scanner',
+              fileId: fileInfo.id,
+              error: statusResult.error.message,
+              correlationId,
+            });
+          }
         }
       } else {
         // Duplicate detected - move to Duplicado folder
@@ -744,7 +800,15 @@ async function storeAndSortDocument(
           });
           result.errors++;
           // Mark as failed in tracking sheet
-          await updateFileStatus(dashboardOperativoId, fileInfo.id, 'failed', moveResult.error.message);
+          const statusResult = await updateFileStatus(dashboardOperativoId, fileInfo.id, 'failed', moveResult.error.message);
+          if (!statusResult.ok) {
+            logError('Failed to update file status', {
+              module: 'scanner',
+              fileId: fileInfo.id,
+              error: statusResult.error.message,
+              correlationId,
+            });
+          }
         } else {
           info(`Moved duplicate to ${moveResult.value.targetPath}`, {
             module: 'scanner',
@@ -753,7 +817,15 @@ async function storeAndSortDocument(
             correlationId,
           });
           // Mark as success in tracking sheet (duplicate is successfully handled)
-          await updateFileStatus(dashboardOperativoId, fileInfo.id, 'success');
+          const statusResult = await updateFileStatus(dashboardOperativoId, fileInfo.id, 'success');
+          if (!statusResult.ok) {
+            logError('Failed to update file status', {
+              module: 'scanner',
+              fileId: fileInfo.id,
+              error: statusResult.error.message,
+              correlationId,
+            });
+          }
         }
       }
     } else {
@@ -766,7 +838,15 @@ async function storeAndSortDocument(
       });
       result.errors++;
       // Mark as failed in tracking sheet
-      await updateFileStatus(dashboardOperativoId, fileInfo.id, 'failed', storeResult.error.message);
+      const statusResult = await updateFileStatus(dashboardOperativoId, fileInfo.id, 'failed', storeResult.error.message);
+      if (!statusResult.ok) {
+        logError('Failed to update file status', {
+          module: 'scanner',
+          fileId: fileInfo.id,
+          error: statusResult.error.message,
+          correlationId,
+        });
+      }
     }
   } else if (documentType === 'pago_recibido') {
     // Payment received BY ADVA -> goes to Control de Ingresos
@@ -800,7 +880,15 @@ async function storeAndSortDocument(
             correlationId,
           });
           result.errors++;
-          await updateFileStatus(dashboardOperativoId, fileInfo.id, 'failed', sortResult.error);
+          const statusResult = await updateFileStatus(dashboardOperativoId, fileInfo.id, 'failed', sortResult.error);
+          if (!statusResult.ok) {
+            logError('Failed to update file status', {
+              module: 'scanner',
+              fileId: fileInfo.id,
+              error: statusResult.error.message,
+              correlationId,
+            });
+          }
         } else {
           info(`Moved to ${sortResult.targetPath}`, {
             module: 'scanner',
@@ -808,7 +896,15 @@ async function storeAndSortDocument(
             fileName: fileInfo.name,
             correlationId,
           });
-          await updateFileStatus(dashboardOperativoId, fileInfo.id, 'success');
+          const statusResult = await updateFileStatus(dashboardOperativoId, fileInfo.id, 'success');
+          if (!statusResult.ok) {
+            logError('Failed to update file status', {
+              module: 'scanner',
+              fileId: fileInfo.id,
+              error: statusResult.error.message,
+              correlationId,
+            });
+          }
         }
       } else {
         // Duplicate detected - move to Duplicado folder
@@ -829,7 +925,15 @@ async function storeAndSortDocument(
             correlationId,
           });
           result.errors++;
-          await updateFileStatus(dashboardOperativoId, fileInfo.id, 'failed', moveResult.error.message);
+          const statusResult = await updateFileStatus(dashboardOperativoId, fileInfo.id, 'failed', moveResult.error.message);
+          if (!statusResult.ok) {
+            logError('Failed to update file status', {
+              module: 'scanner',
+              fileId: fileInfo.id,
+              error: statusResult.error.message,
+              correlationId,
+            });
+          }
         } else {
           info(`Moved duplicate to ${moveResult.value.targetPath}`, {
             module: 'scanner',
@@ -837,7 +941,15 @@ async function storeAndSortDocument(
             fileName: fileInfo.name,
             correlationId,
           });
-          await updateFileStatus(dashboardOperativoId, fileInfo.id, 'success');
+          const statusResult = await updateFileStatus(dashboardOperativoId, fileInfo.id, 'success');
+          if (!statusResult.ok) {
+            logError('Failed to update file status', {
+              module: 'scanner',
+              fileId: fileInfo.id,
+              error: statusResult.error.message,
+              correlationId,
+            });
+          }
         }
       }
     } else {
@@ -849,7 +961,15 @@ async function storeAndSortDocument(
         correlationId,
       });
       result.errors++;
-      await updateFileStatus(dashboardOperativoId, fileInfo.id, 'failed', storeResult.error.message);
+      const statusResult = await updateFileStatus(dashboardOperativoId, fileInfo.id, 'failed', storeResult.error.message);
+      if (!statusResult.ok) {
+        logError('Failed to update file status', {
+          module: 'scanner',
+          fileId: fileInfo.id,
+          error: statusResult.error.message,
+          correlationId,
+        });
+      }
     }
   } else if (documentType === 'pago_enviado') {
     // Payment sent BY ADVA -> goes to Control de Egresos
@@ -883,7 +1003,15 @@ async function storeAndSortDocument(
             correlationId,
           });
           result.errors++;
-          await updateFileStatus(dashboardOperativoId, fileInfo.id, 'failed', sortResult.error);
+          const statusResult = await updateFileStatus(dashboardOperativoId, fileInfo.id, 'failed', sortResult.error);
+          if (!statusResult.ok) {
+            logError('Failed to update file status', {
+              module: 'scanner',
+              fileId: fileInfo.id,
+              error: statusResult.error.message,
+              correlationId,
+            });
+          }
         } else {
           info(`Moved to ${sortResult.targetPath}`, {
             module: 'scanner',
@@ -891,7 +1019,15 @@ async function storeAndSortDocument(
             fileName: fileInfo.name,
             correlationId,
           });
-          await updateFileStatus(dashboardOperativoId, fileInfo.id, 'success');
+          const statusResult = await updateFileStatus(dashboardOperativoId, fileInfo.id, 'success');
+          if (!statusResult.ok) {
+            logError('Failed to update file status', {
+              module: 'scanner',
+              fileId: fileInfo.id,
+              error: statusResult.error.message,
+              correlationId,
+            });
+          }
         }
       } else {
         // Duplicate detected - move to Duplicado folder
@@ -912,7 +1048,15 @@ async function storeAndSortDocument(
             correlationId,
           });
           result.errors++;
-          await updateFileStatus(dashboardOperativoId, fileInfo.id, 'failed', moveResult.error.message);
+          const statusResult = await updateFileStatus(dashboardOperativoId, fileInfo.id, 'failed', moveResult.error.message);
+          if (!statusResult.ok) {
+            logError('Failed to update file status', {
+              module: 'scanner',
+              fileId: fileInfo.id,
+              error: statusResult.error.message,
+              correlationId,
+            });
+          }
         } else {
           info(`Moved duplicate to ${moveResult.value.targetPath}`, {
             module: 'scanner',
@@ -920,7 +1064,15 @@ async function storeAndSortDocument(
             fileName: fileInfo.name,
             correlationId,
           });
-          await updateFileStatus(dashboardOperativoId, fileInfo.id, 'success');
+          const statusResult = await updateFileStatus(dashboardOperativoId, fileInfo.id, 'success');
+          if (!statusResult.ok) {
+            logError('Failed to update file status', {
+              module: 'scanner',
+              fileId: fileInfo.id,
+              error: statusResult.error.message,
+              correlationId,
+            });
+          }
         }
       }
     } else {
@@ -932,7 +1084,15 @@ async function storeAndSortDocument(
         correlationId,
       });
       result.errors++;
-      await updateFileStatus(dashboardOperativoId, fileInfo.id, 'failed', storeResult.error.message);
+      const statusResult = await updateFileStatus(dashboardOperativoId, fileInfo.id, 'failed', storeResult.error.message);
+      if (!statusResult.ok) {
+        logError('Failed to update file status', {
+          module: 'scanner',
+          fileId: fileInfo.id,
+          error: statusResult.error.message,
+          correlationId,
+        });
+      }
     }
   } else if (documentType === 'recibo') {
     // Salary receipt -> goes to Control de Egresos
@@ -966,7 +1126,15 @@ async function storeAndSortDocument(
             correlationId,
           });
           result.errors++;
-          await updateFileStatus(dashboardOperativoId, fileInfo.id, 'failed', sortResult.error);
+          const statusResult = await updateFileStatus(dashboardOperativoId, fileInfo.id, 'failed', sortResult.error);
+          if (!statusResult.ok) {
+            logError('Failed to update file status', {
+              module: 'scanner',
+              fileId: fileInfo.id,
+              error: statusResult.error.message,
+              correlationId,
+            });
+          }
         } else {
           info(`Moved to ${sortResult.targetPath}`, {
             module: 'scanner',
@@ -974,7 +1142,15 @@ async function storeAndSortDocument(
             fileName: fileInfo.name,
             correlationId,
           });
-          await updateFileStatus(dashboardOperativoId, fileInfo.id, 'success');
+          const statusResult = await updateFileStatus(dashboardOperativoId, fileInfo.id, 'success');
+          if (!statusResult.ok) {
+            logError('Failed to update file status', {
+              module: 'scanner',
+              fileId: fileInfo.id,
+              error: statusResult.error.message,
+              correlationId,
+            });
+          }
         }
       } else {
         // Duplicate detected - move to Duplicado folder
@@ -995,7 +1171,15 @@ async function storeAndSortDocument(
             correlationId,
           });
           result.errors++;
-          await updateFileStatus(dashboardOperativoId, fileInfo.id, 'failed', moveResult.error.message);
+          const statusResult = await updateFileStatus(dashboardOperativoId, fileInfo.id, 'failed', moveResult.error.message);
+          if (!statusResult.ok) {
+            logError('Failed to update file status', {
+              module: 'scanner',
+              fileId: fileInfo.id,
+              error: statusResult.error.message,
+              correlationId,
+            });
+          }
         } else {
           info(`Moved duplicate to ${moveResult.value.targetPath}`, {
             module: 'scanner',
@@ -1003,7 +1187,15 @@ async function storeAndSortDocument(
             fileName: fileInfo.name,
             correlationId,
           });
-          await updateFileStatus(dashboardOperativoId, fileInfo.id, 'success');
+          const statusResult = await updateFileStatus(dashboardOperativoId, fileInfo.id, 'success');
+          if (!statusResult.ok) {
+            logError('Failed to update file status', {
+              module: 'scanner',
+              fileId: fileInfo.id,
+              error: statusResult.error.message,
+              correlationId,
+            });
+          }
         }
       }
     } else {
@@ -1015,7 +1207,15 @@ async function storeAndSortDocument(
         correlationId,
       });
       result.errors++;
-      await updateFileStatus(dashboardOperativoId, fileInfo.id, 'failed', storeResult.error.message);
+      const statusResult = await updateFileStatus(dashboardOperativoId, fileInfo.id, 'failed', storeResult.error.message);
+      if (!statusResult.ok) {
+        logError('Failed to update file status', {
+          module: 'scanner',
+          fileId: fileInfo.id,
+          error: statusResult.error.message,
+          correlationId,
+        });
+      }
     }
   } else if (documentType === 'resumen_bancario') {
     // Bank account statement -> store in bank account-specific spreadsheet
@@ -1049,7 +1249,15 @@ async function storeAndSortDocument(
         correlationId,
       });
       result.errors++;
-      await updateFileStatus(dashboardOperativoId, fileInfo.id, 'failed', folderResult.error.message);
+      const statusResult = await updateFileStatus(dashboardOperativoId, fileInfo.id, 'failed', folderResult.error.message);
+      if (!statusResult.ok) {
+        logError('Failed to update file status', {
+          module: 'scanner',
+          fileId: fileInfo.id,
+          error: statusResult.error.message,
+          correlationId,
+        });
+      }
     } else {
       // Get or create bank account spreadsheet
       const spreadsheetResult = await getOrCreateBankAccountSpreadsheet(
@@ -1069,7 +1277,15 @@ async function storeAndSortDocument(
           correlationId,
         });
         result.errors++;
-        await updateFileStatus(dashboardOperativoId, fileInfo.id, 'failed', spreadsheetResult.error.message);
+        const statusResult = await updateFileStatus(dashboardOperativoId, fileInfo.id, 'failed', spreadsheetResult.error.message);
+        if (!statusResult.ok) {
+          logError('Failed to update file status', {
+            module: 'scanner',
+            fileId: fileInfo.id,
+            error: statusResult.error.message,
+            correlationId,
+          });
+        }
       } else {
         // Store the resumen
         const storeResult = await storeResumenBancario(resumen, spreadsheetResult.value);
@@ -1132,7 +1348,15 @@ async function storeAndSortDocument(
                 correlationId,
               });
               result.errors++;
-              await updateFileStatus(dashboardOperativoId, fileInfo.id, 'failed', sortResult.error);
+              const statusResult = await updateFileStatus(dashboardOperativoId, fileInfo.id, 'failed', sortResult.error);
+              if (!statusResult.ok) {
+                logError('Failed to update file status', {
+                  module: 'scanner',
+                  fileId: fileInfo.id,
+                  error: statusResult.error.message,
+                  correlationId,
+                });
+              }
             } else {
               info(`Stored and moved to ${sortResult.targetPath}`, {
                 module: 'scanner',
@@ -1140,7 +1364,15 @@ async function storeAndSortDocument(
                 fileName: fileInfo.name,
                 correlationId,
               });
-              await updateFileStatus(dashboardOperativoId, fileInfo.id, 'success');
+              const statusResult = await updateFileStatus(dashboardOperativoId, fileInfo.id, 'success');
+              if (!statusResult.ok) {
+                logError('Failed to update file status', {
+                  module: 'scanner',
+                  fileId: fileInfo.id,
+                  error: statusResult.error.message,
+                  correlationId,
+                });
+              }
             }
           } else {
             // Duplicate - move to Duplicado folder
@@ -1161,7 +1393,15 @@ async function storeAndSortDocument(
                 correlationId,
               });
               result.errors++;
-              await updateFileStatus(dashboardOperativoId, fileInfo.id, 'failed', moveResult.error.message);
+              const statusResult = await updateFileStatus(dashboardOperativoId, fileInfo.id, 'failed', moveResult.error.message);
+              if (!statusResult.ok) {
+                logError('Failed to update file status', {
+                  module: 'scanner',
+                  fileId: fileInfo.id,
+                  error: statusResult.error.message,
+                  correlationId,
+                });
+              }
             } else {
               info('Moved duplicate resumen to Duplicado', {
                 module: 'scanner',
@@ -1169,7 +1409,15 @@ async function storeAndSortDocument(
                 fileName: fileInfo.name,
                 correlationId,
               });
-              await updateFileStatus(dashboardOperativoId, fileInfo.id, 'success');
+              const statusResult = await updateFileStatus(dashboardOperativoId, fileInfo.id, 'success');
+              if (!statusResult.ok) {
+                logError('Failed to update file status', {
+                  module: 'scanner',
+                  fileId: fileInfo.id,
+                  error: statusResult.error.message,
+                  correlationId,
+                });
+              }
             }
           }
         } else {
@@ -1181,7 +1429,15 @@ async function storeAndSortDocument(
             correlationId,
           });
           result.errors++;
-          await updateFileStatus(dashboardOperativoId, fileInfo.id, 'failed', storeResult.error.message);
+          const statusResult = await updateFileStatus(dashboardOperativoId, fileInfo.id, 'failed', storeResult.error.message);
+          if (!statusResult.ok) {
+            logError('Failed to update file status', {
+              module: 'scanner',
+              fileId: fileInfo.id,
+              error: statusResult.error.message,
+              correlationId,
+            });
+          }
         }
       }
     }
@@ -1217,7 +1473,15 @@ async function storeAndSortDocument(
         error: folderResult.error.message,
         correlationId,
       });
-      await updateFileStatus(dashboardOperativoId, fileInfo.id, 'failed', folderResult.error.message);
+      const statusResult = await updateFileStatus(dashboardOperativoId, fileInfo.id, 'failed', folderResult.error.message);
+      if (!statusResult.ok) {
+        logError('Failed to update file status', {
+          module: 'scanner',
+          fileId: fileInfo.id,
+          error: statusResult.error.message,
+          correlationId,
+        });
+      }
       result.errors++;
     } else {
       // Get or create credit card spreadsheet
@@ -1237,7 +1501,15 @@ async function storeAndSortDocument(
           error: spreadsheetResult.error.message,
           correlationId,
         });
-        await updateFileStatus(dashboardOperativoId, fileInfo.id, 'failed', spreadsheetResult.error.message);
+        const statusResult = await updateFileStatus(dashboardOperativoId, fileInfo.id, 'failed', spreadsheetResult.error.message);
+        if (!statusResult.ok) {
+          logError('Failed to update file status', {
+            module: 'scanner',
+            fileId: fileInfo.id,
+            error: statusResult.error.message,
+            correlationId,
+          });
+        }
         result.errors++;
       } else {
         // Store the resumen
@@ -1299,7 +1571,15 @@ async function storeAndSortDocument(
                 error: sortResult.error,
                 correlationId,
               });
-              await updateFileStatus(dashboardOperativoId, fileInfo.id, 'failed', sortResult.error);
+              const statusResult = await updateFileStatus(dashboardOperativoId, fileInfo.id, 'failed', sortResult.error);
+              if (!statusResult.ok) {
+                logError('Failed to update file status', {
+                  module: 'scanner',
+                  fileId: fileInfo.id,
+                  error: statusResult.error.message,
+                  correlationId,
+                });
+              }
               result.errors++;
             } else {
               info(`Stored and moved to ${sortResult.targetPath}`, {
@@ -1308,7 +1588,15 @@ async function storeAndSortDocument(
                 fileName: fileInfo.name,
                 correlationId,
               });
-              await updateFileStatus(dashboardOperativoId, fileInfo.id, 'success');
+              const statusResult = await updateFileStatus(dashboardOperativoId, fileInfo.id, 'success');
+              if (!statusResult.ok) {
+                logError('Failed to update file status', {
+                  module: 'scanner',
+                  fileId: fileInfo.id,
+                  error: statusResult.error.message,
+                  correlationId,
+                });
+              }
             }
           } else {
             info('Duplicate resumen tarjeta detected, moving to Duplicado folder', {
@@ -1327,10 +1615,26 @@ async function storeAndSortDocument(
                 error: moveResult.error.message,
                 correlationId,
               });
-              await updateFileStatus(dashboardOperativoId, fileInfo.id, 'failed', moveResult.error.message);
+              const statusResult = await updateFileStatus(dashboardOperativoId, fileInfo.id, 'failed', moveResult.error.message);
+              if (!statusResult.ok) {
+                logError('Failed to update file status', {
+                  module: 'scanner',
+                  fileId: fileInfo.id,
+                  error: statusResult.error.message,
+                  correlationId,
+                });
+              }
               result.errors++;
             } else {
-              await updateFileStatus(dashboardOperativoId, fileInfo.id, 'success');
+              const statusResult = await updateFileStatus(dashboardOperativoId, fileInfo.id, 'success');
+              if (!statusResult.ok) {
+                logError('Failed to update file status', {
+                  module: 'scanner',
+                  fileId: fileInfo.id,
+                  error: statusResult.error.message,
+                  correlationId,
+                });
+              }
             }
           }
         } else {
@@ -1341,7 +1645,15 @@ async function storeAndSortDocument(
             error: storeResult.error.message,
             correlationId,
           });
-          await updateFileStatus(dashboardOperativoId, fileInfo.id, 'failed', storeResult.error.message);
+          const statusResult = await updateFileStatus(dashboardOperativoId, fileInfo.id, 'failed', storeResult.error.message);
+          if (!statusResult.ok) {
+            logError('Failed to update file status', {
+              module: 'scanner',
+              fileId: fileInfo.id,
+              error: statusResult.error.message,
+              correlationId,
+            });
+          }
           result.errors++;
         }
       }
@@ -1376,7 +1688,15 @@ async function storeAndSortDocument(
         error: folderResult.error.message,
         correlationId,
       });
-      await updateFileStatus(dashboardOperativoId, fileInfo.id, 'failed', folderResult.error.message);
+      const statusResult = await updateFileStatus(dashboardOperativoId, fileInfo.id, 'failed', folderResult.error.message);
+      if (!statusResult.ok) {
+        logError('Failed to update file status', {
+          module: 'scanner',
+          fileId: fileInfo.id,
+          error: statusResult.error.message,
+          correlationId,
+        });
+      }
       result.errors++;
     } else {
       // Get or create broker spreadsheet
@@ -1395,7 +1715,15 @@ async function storeAndSortDocument(
           error: spreadsheetResult.error.message,
           correlationId,
         });
-        await updateFileStatus(dashboardOperativoId, fileInfo.id, 'failed', spreadsheetResult.error.message);
+        const statusResult = await updateFileStatus(dashboardOperativoId, fileInfo.id, 'failed', spreadsheetResult.error.message);
+        if (!statusResult.ok) {
+          logError('Failed to update file status', {
+            module: 'scanner',
+            fileId: fileInfo.id,
+            error: statusResult.error.message,
+            correlationId,
+          });
+        }
         result.errors++;
       } else {
         // Store the resumen
@@ -1457,7 +1785,15 @@ async function storeAndSortDocument(
                 error: sortResult.error,
                 correlationId,
               });
-              await updateFileStatus(dashboardOperativoId, fileInfo.id, 'failed', sortResult.error);
+              const statusResult = await updateFileStatus(dashboardOperativoId, fileInfo.id, 'failed', sortResult.error);
+              if (!statusResult.ok) {
+                logError('Failed to update file status', {
+                  module: 'scanner',
+                  fileId: fileInfo.id,
+                  error: statusResult.error.message,
+                  correlationId,
+                });
+              }
               result.errors++;
             } else {
               info(`Stored and moved to ${sortResult.targetPath}`, {
@@ -1466,7 +1802,15 @@ async function storeAndSortDocument(
                 fileName: fileInfo.name,
                 correlationId,
               });
-              await updateFileStatus(dashboardOperativoId, fileInfo.id, 'success');
+              const statusResult = await updateFileStatus(dashboardOperativoId, fileInfo.id, 'success');
+              if (!statusResult.ok) {
+                logError('Failed to update file status', {
+                  module: 'scanner',
+                  fileId: fileInfo.id,
+                  error: statusResult.error.message,
+                  correlationId,
+                });
+              }
             }
           } else {
             info('Duplicate resumen broker detected, moving to Duplicado folder', {
@@ -1485,10 +1829,26 @@ async function storeAndSortDocument(
                 error: moveResult.error.message,
                 correlationId,
               });
-              await updateFileStatus(dashboardOperativoId, fileInfo.id, 'failed', moveResult.error.message);
+              const statusResult = await updateFileStatus(dashboardOperativoId, fileInfo.id, 'failed', moveResult.error.message);
+              if (!statusResult.ok) {
+                logError('Failed to update file status', {
+                  module: 'scanner',
+                  fileId: fileInfo.id,
+                  error: statusResult.error.message,
+                  correlationId,
+                });
+              }
               result.errors++;
             } else {
-              await updateFileStatus(dashboardOperativoId, fileInfo.id, 'success');
+              const statusResult = await updateFileStatus(dashboardOperativoId, fileInfo.id, 'success');
+              if (!statusResult.ok) {
+                logError('Failed to update file status', {
+                  module: 'scanner',
+                  fileId: fileInfo.id,
+                  error: statusResult.error.message,
+                  correlationId,
+                });
+              }
             }
           }
         } else {
@@ -1499,7 +1859,15 @@ async function storeAndSortDocument(
             error: storeResult.error.message,
             correlationId,
           });
-          await updateFileStatus(dashboardOperativoId, fileInfo.id, 'failed', storeResult.error.message);
+          const statusResult = await updateFileStatus(dashboardOperativoId, fileInfo.id, 'failed', storeResult.error.message);
+          if (!statusResult.ok) {
+            logError('Failed to update file status', {
+              module: 'scanner',
+              fileId: fileInfo.id,
+              error: statusResult.error.message,
+              correlationId,
+            });
+          }
           result.errors++;
         }
       }
@@ -1535,7 +1903,15 @@ async function storeAndSortDocument(
             correlationId,
           });
           result.errors++;
-          await updateFileStatus(dashboardOperativoId, fileInfo.id, 'failed', sortResult.error);
+          const statusResult = await updateFileStatus(dashboardOperativoId, fileInfo.id, 'failed', sortResult.error);
+          if (!statusResult.ok) {
+            logError('Failed to update file status', {
+              module: 'scanner',
+              fileId: fileInfo.id,
+              error: statusResult.error.message,
+              correlationId,
+            });
+          }
         } else {
           info(`Moved to ${sortResult.targetPath}`, {
             module: 'scanner',
@@ -1543,7 +1919,15 @@ async function storeAndSortDocument(
             fileName: fileInfo.name,
             correlationId,
           });
-          await updateFileStatus(dashboardOperativoId, fileInfo.id, 'success');
+          const statusResult = await updateFileStatus(dashboardOperativoId, fileInfo.id, 'success');
+          if (!statusResult.ok) {
+            logError('Failed to update file status', {
+              module: 'scanner',
+              fileId: fileInfo.id,
+              error: statusResult.error.message,
+              correlationId,
+            });
+          }
         }
       } else {
         // Duplicate detected - move to Duplicado folder
@@ -1564,7 +1948,15 @@ async function storeAndSortDocument(
             correlationId,
           });
           result.errors++;
-          await updateFileStatus(dashboardOperativoId, fileInfo.id, 'failed', moveResult.error.message);
+          const statusResult = await updateFileStatus(dashboardOperativoId, fileInfo.id, 'failed', moveResult.error.message);
+          if (!statusResult.ok) {
+            logError('Failed to update file status', {
+              module: 'scanner',
+              fileId: fileInfo.id,
+              error: statusResult.error.message,
+              correlationId,
+            });
+          }
         } else {
           info(`Moved duplicate to ${moveResult.value.targetPath}`, {
             module: 'scanner',
@@ -1572,7 +1964,15 @@ async function storeAndSortDocument(
             fileName: fileInfo.name,
             correlationId,
           });
-          await updateFileStatus(dashboardOperativoId, fileInfo.id, 'success');
+          const statusResult = await updateFileStatus(dashboardOperativoId, fileInfo.id, 'success');
+          if (!statusResult.ok) {
+            logError('Failed to update file status', {
+              module: 'scanner',
+              fileId: fileInfo.id,
+              error: statusResult.error.message,
+              correlationId,
+            });
+          }
         }
       }
     } else {
@@ -1584,7 +1984,15 @@ async function storeAndSortDocument(
         correlationId,
       });
       result.errors++;
-      await updateFileStatus(dashboardOperativoId, fileInfo.id, 'failed', storeResult.error.message);
+      const statusResult = await updateFileStatus(dashboardOperativoId, fileInfo.id, 'failed', storeResult.error.message);
+      if (!statusResult.ok) {
+        logError('Failed to update file status', {
+          module: 'scanner',
+          fileId: fileInfo.id,
+          error: statusResult.error.message,
+          correlationId,
+        });
+      }
     }
   }
 }
