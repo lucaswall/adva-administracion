@@ -1292,9 +1292,9 @@ async function storeAndSortDocument(
 
         if (storeResult.ok) {
           if (storeResult.value.stored) {
-            // Store movimientos if present
+            // Store movimientos (including empty "SIN MOVIMIENTOS" case)
             const resumenWithMovimientos = doc as ResumenBancarioConMovimientos;
-            if (resumenWithMovimientos.movimientos && resumenWithMovimientos.movimientos.length > 0) {
+            if (resumenWithMovimientos.movimientos) {
               const folderName = `${resumen.banco} ${resumen.numeroCuenta} ${resumen.moneda}`;
               const movSpreadsheetResult = await getOrCreateMovimientosSpreadsheet(
                 folderResult.value,
@@ -1517,9 +1517,9 @@ async function storeAndSortDocument(
 
         if (storeResult.ok) {
           if (storeResult.value.stored) {
-            // Store movimientos if present
+            // Store movimientos (including empty "SIN MOVIMIENTOS" case)
             const resumenWithMovimientos = doc as ResumenTarjetaConMovimientos;
-            if (resumenWithMovimientos.movimientos && resumenWithMovimientos.movimientos.length > 0) {
+            if (resumenWithMovimientos.movimientos) {
               const folderName = `${resumen.banco} ${resumen.tipoTarjeta} ${resumen.numeroCuenta}`;
               const movSpreadsheetResult = await getOrCreateMovimientosSpreadsheet(
                 folderResult.value,
@@ -1731,9 +1731,9 @@ async function storeAndSortDocument(
 
         if (storeResult.ok) {
           if (storeResult.value.stored) {
-            // Store movimientos if present
+            // Store movimientos (including empty "SIN MOVIMIENTOS" case)
             const resumenWithMovimientos = doc as ResumenBrokerConMovimientos;
-            if (resumenWithMovimientos.movimientos && resumenWithMovimientos.movimientos.length > 0) {
+            if (resumenWithMovimientos.movimientos) {
               const folderName = `${resumen.broker} ${resumen.numeroCuenta}`;
               const movSpreadsheetResult = await getOrCreateMovimientosSpreadsheet(
                 folderResult.value,

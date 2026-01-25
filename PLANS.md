@@ -353,3 +353,89 @@ After completing all tasks:
 **Next Steps:**
 - Test with actual PDF samples to verify extraction quality
 - Consider improving coverage for pre-existing untested modules (scanner, matching)
+
+---
+
+## COMPLETED: Fix Empty Movimientos Handling
+
+**Status:** ✅ COMPLETED on 2026-01-24
+
+### Issue Description
+
+During production verification of the transaction extraction feature, a bug was discovered where statements with zero transactions ("SIN MOVIMIENTOS") were not creating Movimientos spreadsheets or sheets as designed.
+
+**Affected Accounts:**
+- BBVA 007-401617/2 USD - No Movimientos spreadsheet created at all
+- BALANZ CAPITAL VALORES SAU 103597 - Missing December 2025 sheet
+
+### Root Cause
+
+**Location:** `src/processing/scanner.ts` lines 1297, 1522, 1736
+
+**Bug:** Scanner checked `movimientos.length > 0` before creating Movimientos spreadsheets, causing empty statements to be skipped entirely.
+
+```typescript
+// BUGGY CODE:
+if (resumenWithMovimientos.movimientos && resumenWithMovimientos.movimientos.length > 0) {
+  // Create spreadsheet and store movimientos
+}
+```
+
+**Design Intent:** The storage functions (`storeMovimientosBancario`, `storeMovimientosTarjeta`, `storeMovimientosBroker`) were already designed to handle empty arrays by:
+1. Creating a month sheet for the period
+2. Applying "SIN MOVIMIENTOS" formatting (red text in cell B3)
+3. Returning successfully
+
+The scanner's length check prevented this intended behavior from executing.
+
+### Fix Applied
+
+**File:** `src/processing/scanner.ts`
+
+**Changes:** Removed `&& movimientos.length > 0` check at three locations (lines 1297, 1522, 1736)
+
+```typescript
+// FIXED CODE:
+if (resumenWithMovimientos.movimientos) {
+  // Create spreadsheet and store movimientos (including empty case)
+}
+```
+
+Updated comments to clarify intent: "Store movimientos (including empty 'SIN MOVIMIENTOS' case)"
+
+### Verification Results
+
+**Quality Checks:**
+- ✅ bug-hunter (opus): No bugs found
+- ✅ test-runner (haiku): All 1,707 tests passing
+- ✅ builder (haiku): Zero warnings
+
+**Production Verification:**
+Six accounts checked in Bancos folder:
+- ✅ Banco Ciudad 0003043/0 ARS - Working correctly (3 transactions)
+- ✅ BBVA 007-009364/1 ARS - Working correctly (5 sheets, 100+ transactions)
+- ✅ BBVA Visa 41198918 - Working correctly (15 transactions)
+- ✅ Credicoop 191.001.066458.4 ARS - Working correctly (3 transactions)
+- ✅ BALANZ CAPITAL VALORES SAU 103597 - Working correctly (July: 8 transactions)
+- ❌ BBVA 007-401617/2 USD - Missing Movimientos spreadsheet (will be fixed on next scan)
+- ❌ BALANZ 103597 December - Missing 2025-12 sheet (will be fixed on next scan)
+
+### Impact
+
+**Before Fix:**
+- Statements with zero transactions were silently ignored
+- No Movimientos spreadsheet or sheet created
+- Incomplete transaction history for accounts with periodic inactivity
+
+**After Fix:**
+- All statements create appropriate Movimientos structures
+- Empty months properly marked with "SIN MOVIMIENTOS" formatting
+- Complete historical record maintained for all accounts
+
+### Next Actions
+
+To fully resolve the two affected accounts:
+1. Re-process BBVA USD December 2025 statement (or wait for next scan)
+2. Re-process BALANZ December 2025 statement (or wait for next scan)
+
+The fix ensures all future empty statements are handled correctly.
