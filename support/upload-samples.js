@@ -5,13 +5,9 @@
  * Usage: node support/upload-samples.js
  */
 
-import { readFileSync, readdirSync, statSync } from 'fs';
+import { createReadStream, readdirSync, statSync } from 'fs';
 import { join, basename } from 'path';
 import { google } from 'googleapis';
-import { config } from 'dotenv';
-
-// Load environment variables
-config();
 
 /**
  * Parse service account credentials from environment
@@ -110,7 +106,6 @@ function findPdfFiles(dir, fileList = []) {
  */
 async function uploadFile(drive, filePath, folderId) {
   const fileName = basename(filePath);
-  const fileContent = readFileSync(filePath);
 
   console.log(`Uploading: ${filePath}`);
 
@@ -121,7 +116,7 @@ async function uploadFile(drive, filePath, folderId) {
     },
     media: {
       mimeType: 'application/pdf',
-      body: fileContent,
+      body: createReadStream(filePath),
     },
     fields: 'id, name',
     supportsAllDrives: true,
