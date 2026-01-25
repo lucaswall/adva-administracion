@@ -699,6 +699,138 @@ export function parseReciboResponse(response: string): Result<ParseResult<Partia
 const VALID_CARD_TYPES = ['Visa', 'Mastercard', 'Amex', 'Naranja', 'Cabal'] as const;
 
 /**
+ * Validates if a date string is in YYYY-MM-DD format
+ * @param dateStr - Date string to validate
+ * @returns True if valid format
+ */
+function isValidDateFormat(dateStr: string): boolean {
+  const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+  return dateRegex.test(dateStr);
+}
+
+/**
+ * Validates movimientos for resumen bancario
+ * @param movimientos - Array of movimientos to validate
+ * @returns True if any validation issues found
+ */
+function validateMovimientosBancario(movimientos: Array<{
+  fecha: string;
+  origenConcepto: string;
+  debito: number | null;
+  credito: number | null;
+  saldo: number;
+}>): boolean {
+  let hasIssues = false;
+
+  for (const mov of movimientos) {
+    // Validate fecha format
+    if (!isValidDateFormat(mov.fecha)) {
+      warn('Invalid fecha format in movimiento bancario', {
+        module: 'gemini-parser',
+        phase: 'movimiento-validation',
+        fecha: mov.fecha,
+      });
+      hasIssues = true;
+    }
+
+    // Validate at least one of debito/credito has value
+    if (mov.debito === null && mov.credito === null) {
+      warn('Movimiento bancario has neither debito nor credito', {
+        module: 'gemini-parser',
+        phase: 'movimiento-validation',
+        origenConcepto: mov.origenConcepto,
+      });
+      hasIssues = true;
+    }
+  }
+
+  return hasIssues;
+}
+
+/**
+ * Validates movimientos for resumen tarjeta
+ * @param movimientos - Array of movimientos to validate
+ * @returns True if any validation issues found
+ */
+function validateMovimientosTarjeta(movimientos: Array<{
+  fecha: string;
+  descripcion: string;
+  nroCupon: string | null;
+  pesos: number | null;
+  dolares: number | null;
+}>): boolean {
+  let hasIssues = false;
+
+  for (const mov of movimientos) {
+    // Validate fecha format
+    if (!isValidDateFormat(mov.fecha)) {
+      warn('Invalid fecha format in movimiento tarjeta', {
+        module: 'gemini-parser',
+        phase: 'movimiento-validation',
+        fecha: mov.fecha,
+      });
+      hasIssues = true;
+    }
+
+    // Validate at least one of pesos/dolares has value
+    if (mov.pesos === null && mov.dolares === null) {
+      warn('Movimiento tarjeta has neither pesos nor dolares', {
+        module: 'gemini-parser',
+        phase: 'movimiento-validation',
+        descripcion: mov.descripcion,
+      });
+      hasIssues = true;
+    }
+  }
+
+  return hasIssues;
+}
+
+/**
+ * Validates movimientos for resumen broker
+ * @param movimientos - Array of movimientos to validate
+ * @returns True if any validation issues found
+ */
+function validateMovimientosBroker(movimientos: Array<{
+  descripcion: string;
+  cantidadVN: number | null;
+  saldo: number;
+  precio: number | null;
+  bruto: number | null;
+  arancel: number | null;
+  iva: number | null;
+  neto: number | null;
+  fechaConcertacion: string;
+  fechaLiquidacion: string;
+}>): boolean {
+  let hasIssues = false;
+
+  for (const mov of movimientos) {
+    // Validate fechaConcertacion format
+    if (!isValidDateFormat(mov.fechaConcertacion)) {
+      warn('Invalid fechaConcertacion format in movimiento broker', {
+        module: 'gemini-parser',
+        phase: 'movimiento-validation',
+        fechaConcertacion: mov.fechaConcertacion,
+      });
+      hasIssues = true;
+    }
+
+    // Validate fechaLiquidacion format
+    if (!isValidDateFormat(mov.fechaLiquidacion)) {
+      warn('Invalid fechaLiquidacion format in movimiento broker', {
+        module: 'gemini-parser',
+        phase: 'movimiento-validation',
+        fechaLiquidacion: mov.fechaLiquidacion,
+      });
+      hasIssues = true;
+    }
+  }
+
+  return hasIssues;
+}
+
+/**
  * Parses a Gemini response for resumen bancario (bank account) data
  *
  * @param response - Raw Gemini response
@@ -765,6 +897,14 @@ export function parseResumenBancarioResponse(response: string): Result<ParseResu
             discrepancy: `${(discrepancy * 100).toFixed(1)}%`
           });
         }
+      }
+    }
+
+    // Validate movimientos field integrity if present
+    if (data.movimientos !== undefined && data.movimientos.length > 0) {
+      const hasValidationIssues = validateMovimientosBancario(data.movimientos);
+      if (hasValidationIssues) {
+        needsReview = true;
       }
     }
 
@@ -871,6 +1011,14 @@ export function parseResumenTarjetaResponse(response: string): Result<ParseResul
       }
     }
 
+    // Validate movimientos field integrity if present
+    if (data.movimientos !== undefined && data.movimientos.length > 0) {
+      const hasValidationIssues = validateMovimientosTarjeta(data.movimientos);
+      if (hasValidationIssues) {
+        needsReview = true;
+      }
+    }
+
     return {
       ok: true,
       value: {
@@ -950,6 +1098,14 @@ export function parseResumenBrokerResponse(response: string): Result<ParseResult
             discrepancy: `${(discrepancy * 100).toFixed(1)}%`
           });
         }
+      }
+    }
+
+    // Validate movimientos field integrity if present
+    if (data.movimientos !== undefined && data.movimientos.length > 0) {
+      const hasValidationIssues = validateMovimientosBroker(data.movimientos);
+      if (hasValidationIssues) {
+        needsReview = true;
       }
     }
 

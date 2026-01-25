@@ -377,6 +377,24 @@ Example: If current date is January and document shows "SALDO AL 30 DE DICIEMBRE
 
 NUMBER FORMAT: "2.917.310,00" = 2917310.00
 
+TRANSACTION EXTRACTION:
+Extract ALL individual transactions from the movements table.
+
+For each transaction:
+- fecha: Transaction date (YYYY-MM-DD)
+- origenConcepto: Full description combining origin and concept (e.g., "D 500 TRANSFERENCIA RECIBIDA")
+- debito: Debit amount or null (if this is a credit transaction)
+- credito: Credit amount or null (if this is a debit transaction)
+- saldo: Running balance after this transaction
+
+Include in response:
+"movimientos": [
+  {"fecha": "2024-01-02", "origenConcepto": "D 500 TRANSFERENCIA RECIBIDA", "debito": null, "credito": 50000.00, "saldo": 200000.00},
+  {"fecha": "2024-01-05", "origenConcepto": "D 003 PAGO TARJETA VISA", "debito": 15000.00, "credito": null, "saldo": 185000.00}
+]
+
+If statement shows "SIN MOVIMIENTOS" or no transactions: return "movimientos": []
+
 Return ONLY valid JSON:
 {
   "banco": "BBVA",
@@ -386,7 +404,10 @@ Return ONLY valid JSON:
   "saldoInicial": 150000.00,
   "saldoFinal": 185000.00,
   "moneda": "ARS",
-  "cantidadMovimientos": 47
+  "cantidadMovimientos": 47,
+  "movimientos": [
+    {"fecha": "2024-01-02", "origenConcepto": "D 500 TRANSFERENCIA", "debito": null, "credito": 50000.00, "saldo": 200000.00}
+  ]
 }`;
 }
 
@@ -436,6 +457,24 @@ Example: If current date is January and document shows "CIERRE ACTUAL 30-Oct", O
 
 NUMBER FORMAT: "2.917.310,00" = 2917310.00
 
+TRANSACTION EXTRACTION:
+Extract ALL transactions from the credit card statement.
+
+For each transaction:
+- fecha: Transaction date (YYYY-MM-DD)
+- descripcion: Full description (e.g., "ZOOM.COM 888-799 P38264908USD 16,99")
+- nroCupon: Receipt/coupon number or null if not present
+- pesos: ARS amount or null (for USD transactions)
+- dolares: USD amount or null (for ARS transactions)
+
+Include in response:
+"movimientos": [
+  {"fecha": "2024-10-11", "descripcion": "ZOOM.COM 888-799", "nroCupon": "12345678", "pesos": 1500.00, "dolares": null},
+  {"fecha": "2024-10-13", "descripcion": "AMAZON.COM", "nroCupon": null, "pesos": null, "dolares": 25.99}
+]
+
+If no transactions or empty statement: return "movimientos": []
+
 Return ONLY valid JSON:
 {
   "banco": "BBVA",
@@ -445,7 +484,10 @@ Return ONLY valid JSON:
   "fechaHasta": "2024-01-31",
   "pagoMinimo": 25000.00,
   "saldoActual": 125000.00,
-  "cantidadMovimientos": 12
+  "cantidadMovimientos": 12,
+  "movimientos": [
+    {"fecha": "2024-10-11", "descripcion": "ZOOM.COM", "nroCupon": "12345678", "pesos": 1500.00, "dolares": null}
+  ]
 }`;
 }
 
@@ -498,6 +540,39 @@ Example: If current date is January and document shows "del 1/12 al 31/12", Dece
 
 NUMBER FORMAT: "2.917.310,00" = 2917310.00
 
+TRANSACTION EXTRACTION:
+Extract ALL movements from the broker statement.
+
+For each movement:
+- descripcion: Transaction description (e.g., "Boleto / VENTA / ZZC1O")
+- cantidadVN: Quantity/Nominal Value or null if not applicable
+- saldo: Balance after this transaction
+- precio: Price per unit or null if not applicable
+- bruto: Gross amount or null if not applicable
+- arancel: Fee/tariff amount or null if not applicable
+- iva: VAT amount or null if not applicable
+- neto: Net amount or null if not applicable
+- fechaConcertacion: Trade date (YYYY-MM-DD)
+- fechaLiquidacion: Settlement date (YYYY-MM-DD)
+
+Include in response:
+"movimientos": [
+  {
+    "descripcion": "Boleto / VENTA / ZZC1O",
+    "cantidadVN": 100.00,
+    "saldo": 500000.00,
+    "precio": 1250.00,
+    "bruto": 125000.00,
+    "arancel": 50.00,
+    "iva": 10.50,
+    "neto": 124939.50,
+    "fechaConcertacion": "2024-07-07",
+    "fechaLiquidacion": "2024-07-09"
+  }
+]
+
+If no movements or empty statement: return "movimientos": []
+
 Return ONLY valid JSON:
 {
   "broker": "BALANZ CAPITAL VALORES SAU",
@@ -506,7 +581,21 @@ Return ONLY valid JSON:
   "fechaHasta": "2024-01-31",
   "saldoARS": 500000.00,
   "saldoUSD": 1500.00,
-  "cantidadMovimientos": 8
+  "cantidadMovimientos": 8,
+  "movimientos": [
+    {
+      "descripcion": "Boleto / VENTA / ZZC1O",
+      "cantidadVN": 100.00,
+      "saldo": 500000.00,
+      "precio": 1250.00,
+      "bruto": 125000.00,
+      "arancel": 50.00,
+      "iva": 10.50,
+      "neto": 124939.50,
+      "fechaConcertacion": "2024-07-07",
+      "fechaLiquidacion": "2024-07-09"
+    }
+  ]
 }`;
 }
 
