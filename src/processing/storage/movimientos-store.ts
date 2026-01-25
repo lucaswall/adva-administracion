@@ -9,28 +9,12 @@ import { MOVIMIENTOS_BANCARIO_SHEET, MOVIMIENTOS_TARJETA_SHEET, MOVIMIENTOS_BROK
 import { info } from '../../utils/logger.js';
 
 /**
- * Groups movimientos by month (YYYY-MM format)
- */
-function groupByMonth<T extends { fecha: string }>(movimientos: T[]): Map<string, T[]> {
-  const groups = new Map<string, T[]>();
-
-  for (const mov of movimientos) {
-    const month = mov.fecha.substring(0, 7); // Extract YYYY-MM
-    const existing = groups.get(month) || [];
-    existing.push(mov);
-    groups.set(month, existing);
-  }
-
-  return groups;
-}
-
-/**
  * Stores bank account transactions to Movimientos spreadsheet
- * Groups transactions by month and creates per-month sheets
+ * All transactions are stored in the resumen's month (from fechaHasta)
  *
  * @param movimientos - Array of bank transactions
  * @param spreadsheetId - Movimientos spreadsheet ID
- * @param period - Statement period (for logging)
+ * @param period - Statement period (determines target month via fechaHasta)
  * @returns Success/failure result
  */
 export async function storeMovimientosBancario(
@@ -39,19 +23,19 @@ export async function storeMovimientosBancario(
   period: { fechaDesde: string; fechaHasta: string }
 ): Promise<Result<void, Error>> {
   try {
-    // Group by month
-    const monthGroups = groupByMonth(movimientos);
+    // Target month is determined by resumen's fechaHasta
+    const targetMonth = period.fechaHasta.substring(0, 7);
 
-    // If no movements at all, create empty sheet for the period start month
-    if (monthGroups.size === 0) {
-      const emptyMonth = period.fechaDesde.substring(0, 7);
-      const sheetResult = await getOrCreateMonthSheet(
-        spreadsheetId,
-        emptyMonth,
-        MOVIMIENTOS_BANCARIO_SHEET.headers
-      );
-      if (!sheetResult.ok) return sheetResult;
+    // Get or create the target month sheet
+    const sheetResult = await getOrCreateMonthSheet(
+      spreadsheetId,
+      targetMonth,
+      MOVIMIENTOS_BANCARIO_SHEET.headers
+    );
+    if (!sheetResult.ok) return sheetResult;
 
+    // If no movements, just format the empty sheet
+    if (movimientos.length === 0) {
       const formatResult = await formatEmptyMonthSheet(
         spreadsheetId,
         sheetResult.value,
@@ -62,47 +46,37 @@ export async function storeMovimientosBancario(
       info('Created empty month sheet for bank account', {
         module: 'movimientos-store',
         phase: 'store-bancario',
-        month: emptyMonth
+        month: targetMonth
       });
 
       return { ok: true, value: undefined };
     }
 
-    // Process each month
-    for (const [month, monthMovimientos] of monthGroups) {
-      const sheetResult = await getOrCreateMonthSheet(
-        spreadsheetId,
-        month,
-        MOVIMIENTOS_BANCARIO_SHEET.headers
-      );
-      if (!sheetResult.ok) return sheetResult;
+    // Sort all movimientos by fecha (preserving original dates)
+    const sorted = [...movimientos].sort((a, b) =>
+      a.fecha.localeCompare(b.fecha)
+    );
 
-      // Sort by date ascending
-      const sorted = [...monthMovimientos].sort((a, b) =>
-        a.fecha.localeCompare(b.fecha)
-      );
+    // Transform to spreadsheet rows
+    const rows = sorted.map(mov => [
+      { type: 'date', value: mov.fecha } as CellDate,
+      mov.origenConcepto,
+      mov.debito !== null ? { type: 'number', value: mov.debito } as CellNumber : null,
+      mov.credito !== null ? { type: 'number', value: mov.credito } as CellNumber : null,
+      { type: 'number', value: mov.saldo } as CellNumber
+    ]);
 
-      // Transform to spreadsheet rows
-      const rows = sorted.map(mov => [
-        { type: 'date', value: mov.fecha } as CellDate,
-        mov.origenConcepto,
-        mov.debito !== null ? { type: 'number', value: mov.debito } as CellNumber : null,
-        mov.credito !== null ? { type: 'number', value: mov.credito } as CellNumber : null,
-        { type: 'number', value: mov.saldo } as CellNumber
-      ]);
+    // Append all rows to target month
+    const range = `${targetMonth}!A:E`;
+    const appendResult = await appendRowsWithLinks(spreadsheetId, range, rows);
+    if (!appendResult.ok) return { ok: false, error: appendResult.error };
 
-      // Append rows
-      const range = `${month}!A:E`;
-      const appendResult = await appendRowsWithLinks(spreadsheetId, range, rows);
-      if (!appendResult.ok) return { ok: false, error: appendResult.error };
-
-      info('Stored bank account movimientos', {
-        module: 'movimientos-store',
-        phase: 'store-bancario',
-        month,
-        count: sorted.length
-      });
-    }
+    info('Stored bank account movimientos', {
+      module: 'movimientos-store',
+      phase: 'store-bancario',
+      month: targetMonth,
+      count: sorted.length
+    });
 
     return { ok: true, value: undefined };
   } catch (error) {
@@ -115,11 +89,11 @@ export async function storeMovimientosBancario(
 
 /**
  * Stores credit card transactions to Movimientos spreadsheet
- * Groups transactions by month and creates per-month sheets
+ * All transactions are stored in the resumen's month (from fechaHasta)
  *
  * @param movimientos - Array of credit card transactions
  * @param spreadsheetId - Movimientos spreadsheet ID
- * @param period - Statement period (for logging)
+ * @param period - Statement period (determines target month via fechaHasta)
  * @returns Success/failure result
  */
 export async function storeMovimientosTarjeta(
@@ -128,17 +102,19 @@ export async function storeMovimientosTarjeta(
   period: { fechaDesde: string; fechaHasta: string }
 ): Promise<Result<void, Error>> {
   try {
-    const monthGroups = groupByMonth(movimientos);
+    // Target month is determined by resumen's fechaHasta
+    const targetMonth = period.fechaHasta.substring(0, 7);
 
-    if (monthGroups.size === 0) {
-      const emptyMonth = period.fechaDesde.substring(0, 7);
-      const sheetResult = await getOrCreateMonthSheet(
-        spreadsheetId,
-        emptyMonth,
-        MOVIMIENTOS_TARJETA_SHEET.headers
-      );
-      if (!sheetResult.ok) return sheetResult;
+    // Get or create the target month sheet
+    const sheetResult = await getOrCreateMonthSheet(
+      spreadsheetId,
+      targetMonth,
+      MOVIMIENTOS_TARJETA_SHEET.headers
+    );
+    if (!sheetResult.ok) return sheetResult;
 
+    // If no movements, just format the empty sheet
+    if (movimientos.length === 0) {
       const formatResult = await formatEmptyMonthSheet(
         spreadsheetId,
         sheetResult.value,
@@ -149,43 +125,37 @@ export async function storeMovimientosTarjeta(
       info('Created empty month sheet for credit card', {
         module: 'movimientos-store',
         phase: 'store-tarjeta',
-        month: emptyMonth
+        month: targetMonth
       });
 
       return { ok: true, value: undefined };
     }
 
-    for (const [month, monthMovimientos] of monthGroups) {
-      const sheetResult = await getOrCreateMonthSheet(
-        spreadsheetId,
-        month,
-        MOVIMIENTOS_TARJETA_SHEET.headers
-      );
-      if (!sheetResult.ok) return sheetResult;
+    // Sort all movimientos by fecha (preserving original dates)
+    const sorted = [...movimientos].sort((a, b) =>
+      a.fecha.localeCompare(b.fecha)
+    );
 
-      const sorted = [...monthMovimientos].sort((a, b) =>
-        a.fecha.localeCompare(b.fecha)
-      );
+    // Transform to spreadsheet rows
+    const rows = sorted.map(mov => [
+      { type: 'date', value: mov.fecha } as CellDate,
+      mov.descripcion,
+      mov.nroCupon,
+      mov.pesos !== null ? { type: 'number', value: mov.pesos } as CellNumber : null,
+      mov.dolares !== null ? { type: 'number', value: mov.dolares } as CellNumber : null
+    ]);
 
-      const rows = sorted.map(mov => [
-        { type: 'date', value: mov.fecha } as CellDate,
-        mov.descripcion,
-        mov.nroCupon,
-        mov.pesos !== null ? { type: 'number', value: mov.pesos } as CellNumber : null,
-        mov.dolares !== null ? { type: 'number', value: mov.dolares } as CellNumber : null
-      ]);
+    // Append all rows to target month
+    const range = `${targetMonth}!A:E`;
+    const appendResult = await appendRowsWithLinks(spreadsheetId, range, rows);
+    if (!appendResult.ok) return { ok: false, error: appendResult.error };
 
-      const range = `${month}!A:E`;
-      const appendResult = await appendRowsWithLinks(spreadsheetId, range, rows);
-      if (!appendResult.ok) return { ok: false, error: appendResult.error };
-
-      info('Stored credit card movimientos', {
-        module: 'movimientos-store',
-        phase: 'store-tarjeta',
-        month,
-        count: sorted.length
-      });
-    }
+    info('Stored credit card movimientos', {
+      module: 'movimientos-store',
+      phase: 'store-tarjeta',
+      month: targetMonth,
+      count: sorted.length
+    });
 
     return { ok: true, value: undefined };
   } catch (error) {
@@ -198,11 +168,11 @@ export async function storeMovimientosTarjeta(
 
 /**
  * Stores broker transactions to Movimientos spreadsheet
- * Groups transactions by month (fechaConcertacion) and creates per-month sheets
+ * All transactions are stored in the resumen's month (from fechaHasta)
  *
  * @param movimientos - Array of broker transactions
  * @param spreadsheetId - Movimientos spreadsheet ID
- * @param period - Statement period (for logging)
+ * @param period - Statement period (determines target month via fechaHasta)
  * @returns Success/failure result
  */
 export async function storeMovimientosBroker(
@@ -211,25 +181,19 @@ export async function storeMovimientosBroker(
   period: { fechaDesde: string; fechaHasta: string }
 ): Promise<Result<void, Error>> {
   try {
-    // For broker, group by fechaConcertacion (settlement date)
-    const monthGroups = new Map<string, MovimientoBroker[]>();
+    // Target month is determined by resumen's fechaHasta
+    const targetMonth = period.fechaHasta.substring(0, 7);
 
-    for (const mov of movimientos) {
-      const month = mov.fechaConcertacion.substring(0, 7);
-      const existing = monthGroups.get(month) || [];
-      existing.push(mov);
-      monthGroups.set(month, existing);
-    }
+    // Get or create the target month sheet
+    const sheetResult = await getOrCreateMonthSheet(
+      spreadsheetId,
+      targetMonth,
+      MOVIMIENTOS_BROKER_SHEET.headers
+    );
+    if (!sheetResult.ok) return sheetResult;
 
-    if (monthGroups.size === 0) {
-      const emptyMonth = period.fechaDesde.substring(0, 7);
-      const sheetResult = await getOrCreateMonthSheet(
-        spreadsheetId,
-        emptyMonth,
-        MOVIMIENTOS_BROKER_SHEET.headers
-      );
-      if (!sheetResult.ok) return sheetResult;
-
+    // If no movements, just format the empty sheet
+    if (movimientos.length === 0) {
       const formatResult = await formatEmptyMonthSheet(
         spreadsheetId,
         sheetResult.value,
@@ -240,48 +204,42 @@ export async function storeMovimientosBroker(
       info('Created empty month sheet for broker', {
         module: 'movimientos-store',
         phase: 'store-broker',
-        month: emptyMonth
+        month: targetMonth
       });
 
       return { ok: true, value: undefined };
     }
 
-    for (const [month, monthMovimientos] of monthGroups) {
-      const sheetResult = await getOrCreateMonthSheet(
-        spreadsheetId,
-        month,
-        MOVIMIENTOS_BROKER_SHEET.headers
-      );
-      if (!sheetResult.ok) return sheetResult;
+    // Sort all movimientos by fechaConcertacion (preserving original dates)
+    const sorted = [...movimientos].sort((a, b) =>
+      a.fechaConcertacion.localeCompare(b.fechaConcertacion)
+    );
 
-      const sorted = [...monthMovimientos].sort((a, b) =>
-        a.fechaConcertacion.localeCompare(b.fechaConcertacion)
-      );
+    // Transform to spreadsheet rows
+    const rows = sorted.map(mov => [
+      mov.descripcion,
+      mov.cantidadVN !== null ? { type: 'number', value: mov.cantidadVN } as CellNumber : null,
+      { type: 'number', value: mov.saldo } as CellNumber,
+      mov.precio !== null ? { type: 'number', value: mov.precio } as CellNumber : null,
+      mov.bruto !== null ? { type: 'number', value: mov.bruto } as CellNumber : null,
+      mov.arancel !== null ? { type: 'number', value: mov.arancel } as CellNumber : null,
+      mov.iva !== null ? { type: 'number', value: mov.iva } as CellNumber : null,
+      mov.neto !== null ? { type: 'number', value: mov.neto } as CellNumber : null,
+      { type: 'date', value: mov.fechaConcertacion } as CellDate,
+      { type: 'date', value: mov.fechaLiquidacion } as CellDate
+    ]);
 
-      const rows = sorted.map(mov => [
-        mov.descripcion,
-        mov.cantidadVN !== null ? { type: 'number', value: mov.cantidadVN } as CellNumber : null,
-        { type: 'number', value: mov.saldo } as CellNumber,
-        mov.precio !== null ? { type: 'number', value: mov.precio } as CellNumber : null,
-        mov.bruto !== null ? { type: 'number', value: mov.bruto } as CellNumber : null,
-        mov.arancel !== null ? { type: 'number', value: mov.arancel } as CellNumber : null,
-        mov.iva !== null ? { type: 'number', value: mov.iva } as CellNumber : null,
-        mov.neto !== null ? { type: 'number', value: mov.neto } as CellNumber : null,
-        { type: 'date', value: mov.fechaConcertacion } as CellDate,
-        { type: 'date', value: mov.fechaLiquidacion } as CellDate
-      ]);
+    // Append all rows to target month
+    const range = `${targetMonth}!A:J`;
+    const appendResult = await appendRowsWithLinks(spreadsheetId, range, rows);
+    if (!appendResult.ok) return { ok: false, error: appendResult.error };
 
-      const range = `${month}!A:J`;
-      const appendResult = await appendRowsWithLinks(spreadsheetId, range, rows);
-      if (!appendResult.ok) return { ok: false, error: appendResult.error };
-
-      info('Stored broker movimientos', {
-        module: 'movimientos-store',
-        phase: 'store-broker',
-        month,
-        count: sorted.length
-      });
-    }
+    info('Stored broker movimientos', {
+      module: 'movimientos-store',
+      phase: 'store-broker',
+      month: targetMonth,
+      count: sorted.length
+    });
 
     return { ok: true, value: undefined };
   } catch (error) {

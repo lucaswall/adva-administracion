@@ -71,11 +71,11 @@ describe('storeMovimientosBancario', () => {
     vi.clearAllMocks();
   });
 
-  it('should store bank account movimientos grouped by month', async () => {
+  it('should store all movimientos in the resumen month (from fechaHasta), not by individual fecha', async () => {
     const movimientos: MovimientoBancario[] = [
-      createTestMovimientoBancario({ fecha: '2025-01-15', saldo: 1000 }),
-      createTestMovimientoBancario({ fecha: '2025-01-20', saldo: 2000 }),
-      createTestMovimientoBancario({ fecha: '2025-02-05', saldo: 3000 }),
+      createTestMovimientoBancario({ fecha: '2024-12-30', origenConcepto: 'Dec transaction', saldo: 1000 }),
+      createTestMovimientoBancario({ fecha: '2025-01-05', origenConcepto: 'Early Jan transaction', saldo: 2000 }),
+      createTestMovimientoBancario({ fecha: '2025-01-15', origenConcepto: 'Mid-Jan transaction', saldo: 3000 }),
     ];
 
     vi.mocked(getOrCreateMonthSheet).mockResolvedValue({ ok: true, value: 123 });
@@ -84,12 +84,32 @@ describe('storeMovimientosBancario', () => {
     const result = await storeMovimientosBancario(
       movimientos,
       'spreadsheet-id',
-      { fechaDesde: '2025-01-01', fechaHasta: '2025-02-28' }
+      { fechaDesde: '2024-12-30', fechaHasta: '2025-01-31' }
     );
 
     expect(result.ok).toBe(true);
-    expect(getOrCreateMonthSheet).toHaveBeenCalledTimes(2); // 2025-01 and 2025-02
-    expect(appendRowsWithLinks).toHaveBeenCalledTimes(2);
+
+    // Only one sheet created - the resumen's month
+    expect(getOrCreateMonthSheet).toHaveBeenCalledTimes(1);
+    expect(getOrCreateMonthSheet).toHaveBeenCalledWith(
+      'spreadsheet-id',
+      '2025-01',  // fechaHasta month, not individual fecha months
+      expect.any(Array)
+    );
+
+    // All movimientos in single append
+    expect(appendRowsWithLinks).toHaveBeenCalledTimes(1);
+
+    const appendCall = vi.mocked(appendRowsWithLinks).mock.calls[0];
+    const rows = appendCall[2] as any[];
+
+    // All 3 movimientos stored together
+    expect(rows).toHaveLength(3);
+
+    // Original fechas preserved (sorted order)
+    expect(rows[0][0]).toEqual({ type: 'date', value: '2024-12-30' });
+    expect(rows[1][0]).toEqual({ type: 'date', value: '2025-01-05' });
+    expect(rows[2][0]).toEqual({ type: 'date', value: '2025-01-15' });
   });
 
   it('should sort movimientos by date within each month', async () => {
@@ -123,13 +143,13 @@ describe('storeMovimientosBancario', () => {
     const result = await storeMovimientosBancario(
       [],
       'spreadsheet-id',
-      { fechaDesde: '2025-01-01', fechaHasta: '2025-01-31' }
+      { fechaDesde: '2024-12-30', fechaHasta: '2025-01-31' }
     );
 
     expect(result.ok).toBe(true);
     expect(getOrCreateMonthSheet).toHaveBeenCalledWith(
       'spreadsheet-id',
-      '2025-01',
+      '2025-01',  // Should use fechaHasta month, not fechaDesde
       expect.any(Array)
     );
     expect(formatEmptyMonthSheet).toHaveBeenCalledWith('spreadsheet-id', 123, 5);
@@ -208,11 +228,11 @@ describe('storeMovimientosTarjeta', () => {
     vi.clearAllMocks();
   });
 
-  it('should store credit card movimientos grouped by month', async () => {
+  it('should store all movimientos in the resumen month (from fechaHasta)', async () => {
     const movimientos: MovimientoTarjeta[] = [
-      createTestMovimientoTarjeta({ fecha: '2025-01-15' }),
-      createTestMovimientoTarjeta({ fecha: '2025-01-20' }),
-      createTestMovimientoTarjeta({ fecha: '2025-02-05' }),
+      createTestMovimientoTarjeta({ fecha: '2024-12-30', descripcion: 'Dec purchase' }),
+      createTestMovimientoTarjeta({ fecha: '2025-01-15', descripcion: 'Jan purchase' }),
+      createTestMovimientoTarjeta({ fecha: '2025-01-20', descripcion: 'Late Jan purchase' }),
     ];
 
     vi.mocked(getOrCreateMonthSheet).mockResolvedValue({ ok: true, value: 123 });
@@ -221,12 +241,32 @@ describe('storeMovimientosTarjeta', () => {
     const result = await storeMovimientosTarjeta(
       movimientos,
       'spreadsheet-id',
-      { fechaDesde: '2025-01-01', fechaHasta: '2025-02-28' }
+      { fechaDesde: '2024-12-30', fechaHasta: '2025-01-31' }
     );
 
     expect(result.ok).toBe(true);
-    expect(getOrCreateMonthSheet).toHaveBeenCalledTimes(2);
-    expect(appendRowsWithLinks).toHaveBeenCalledTimes(2);
+
+    // Only one sheet created - the resumen's month
+    expect(getOrCreateMonthSheet).toHaveBeenCalledTimes(1);
+    expect(getOrCreateMonthSheet).toHaveBeenCalledWith(
+      'spreadsheet-id',
+      '2025-01',  // fechaHasta month
+      expect.any(Array)
+    );
+
+    // All movimientos in single append
+    expect(appendRowsWithLinks).toHaveBeenCalledTimes(1);
+
+    const appendCall = vi.mocked(appendRowsWithLinks).mock.calls[0];
+    const rows = appendCall[2] as any[];
+
+    // All 3 movimientos stored together
+    expect(rows).toHaveLength(3);
+
+    // Original fechas preserved (sorted order)
+    expect(rows[0][0]).toEqual({ type: 'date', value: '2024-12-30' });
+    expect(rows[1][0]).toEqual({ type: 'date', value: '2025-01-15' });
+    expect(rows[2][0]).toEqual({ type: 'date', value: '2025-01-20' });
   });
 
   it('should sort movimientos by date within each month', async () => {
@@ -260,10 +300,15 @@ describe('storeMovimientosTarjeta', () => {
     const result = await storeMovimientosTarjeta(
       [],
       'spreadsheet-id',
-      { fechaDesde: '2025-01-01', fechaHasta: '2025-01-31' }
+      { fechaDesde: '2024-12-30', fechaHasta: '2025-01-31' }
     );
 
     expect(result.ok).toBe(true);
+    expect(getOrCreateMonthSheet).toHaveBeenCalledWith(
+      'spreadsheet-id',
+      '2025-01',  // Should use fechaHasta month
+      expect.any(Array)
+    );
     expect(formatEmptyMonthSheet).toHaveBeenCalledWith('spreadsheet-id', 123, 5);
     expect(appendRowsWithLinks).not.toHaveBeenCalled();
   });
@@ -319,11 +364,11 @@ describe('storeMovimientosBroker', () => {
     vi.clearAllMocks();
   });
 
-  it('should store broker movimientos grouped by fechaConcertacion month', async () => {
+  it('should store all movimientos in the resumen month (from fechaHasta)', async () => {
     const movimientos: MovimientoBroker[] = [
-      createTestMovimientoBroker({ fechaConcertacion: '2025-01-15', fechaLiquidacion: '2025-01-17' }),
-      createTestMovimientoBroker({ fechaConcertacion: '2025-01-20', fechaLiquidacion: '2025-01-22' }),
-      createTestMovimientoBroker({ fechaConcertacion: '2025-02-05', fechaLiquidacion: '2025-02-07' }),
+      createTestMovimientoBroker({ fechaConcertacion: '2024-12-30', fechaLiquidacion: '2025-01-02', descripcion: 'Dec trade' }),
+      createTestMovimientoBroker({ fechaConcertacion: '2025-01-15', fechaLiquidacion: '2025-01-17', descripcion: 'Jan trade' }),
+      createTestMovimientoBroker({ fechaConcertacion: '2025-01-20', fechaLiquidacion: '2025-01-22', descripcion: 'Late Jan trade' }),
     ];
 
     vi.mocked(getOrCreateMonthSheet).mockResolvedValue({ ok: true, value: 123 });
@@ -332,12 +377,32 @@ describe('storeMovimientosBroker', () => {
     const result = await storeMovimientosBroker(
       movimientos,
       'spreadsheet-id',
-      { fechaDesde: '2025-01-01', fechaHasta: '2025-02-28' }
+      { fechaDesde: '2024-12-30', fechaHasta: '2025-01-31' }
     );
 
     expect(result.ok).toBe(true);
-    expect(getOrCreateMonthSheet).toHaveBeenCalledTimes(2);
-    expect(appendRowsWithLinks).toHaveBeenCalledTimes(2);
+
+    // Only one sheet created - the resumen's month
+    expect(getOrCreateMonthSheet).toHaveBeenCalledTimes(1);
+    expect(getOrCreateMonthSheet).toHaveBeenCalledWith(
+      'spreadsheet-id',
+      '2025-01',  // fechaHasta month
+      expect.any(Array)
+    );
+
+    // All movimientos in single append
+    expect(appendRowsWithLinks).toHaveBeenCalledTimes(1);
+
+    const appendCall = vi.mocked(appendRowsWithLinks).mock.calls[0];
+    const rows = appendCall[2] as any[];
+
+    // All 3 movimientos stored together
+    expect(rows).toHaveLength(3);
+
+    // Original fechaConcertacion preserved (sorted order)
+    expect(rows[0][8]).toEqual({ type: 'date', value: '2024-12-30' });
+    expect(rows[1][8]).toEqual({ type: 'date', value: '2025-01-15' });
+    expect(rows[2][8]).toEqual({ type: 'date', value: '2025-01-20' });
   });
 
   it('should sort movimientos by fechaConcertacion within each month', async () => {
@@ -371,10 +436,15 @@ describe('storeMovimientosBroker', () => {
     const result = await storeMovimientosBroker(
       [],
       'spreadsheet-id',
-      { fechaDesde: '2025-01-01', fechaHasta: '2025-01-31' }
+      { fechaDesde: '2024-12-30', fechaHasta: '2025-01-31' }
     );
 
     expect(result.ok).toBe(true);
+    expect(getOrCreateMonthSheet).toHaveBeenCalledWith(
+      'spreadsheet-id',
+      '2025-01',  // Should use fechaHasta month
+      expect.any(Array)
+    );
     expect(formatEmptyMonthSheet).toHaveBeenCalledWith('spreadsheet-id', 123, 10);
     expect(appendRowsWithLinks).not.toHaveBeenCalled();
   });
