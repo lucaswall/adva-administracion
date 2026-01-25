@@ -323,7 +323,8 @@ export class GeminiClient {
       generationConfig: {
         temperature: 0.1, // Low temperature for factual extraction
         topP: 0.8,
-        maxOutputTokens: 65536 // Gemini 2.5 Flash maximum - needed for large bank statements with 100+ transactions
+        maxOutputTokens: 65536, // Gemini 2.5 Flash maximum - needed for large bank statements with 100+ transactions
+        responseMimeType: 'application/json' // Force valid JSON output to prevent parse errors
       }
     };
   }
