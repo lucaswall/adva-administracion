@@ -66,7 +66,7 @@ export class DuplicateCache {
 
     for (const [fileId, row] of sheetData) {
       const rowNroFactura = row[4];   // Column E
-      const rowFecha = normalizeSpreadsheetDate(String(row[0])); // Column A
+      const rowFecha = normalizeSpreadsheetDate(row[0]); // Column A
       const rowImporte = parseNumber(String(row[9])) ?? 0; // Column J
       const rowCuit = row[5]; // Column F
 
@@ -97,7 +97,7 @@ export class DuplicateCache {
     if (!sheetData) return { isDuplicate: false };
 
     for (const [fileId, row] of sheetData) {
-      const rowFecha = normalizeSpreadsheetDate(String(row[0])); // Column A
+      const rowFecha = normalizeSpreadsheetDate(row[0]); // Column A
       const rowImporte = parseNumber(String(row[4])) ?? 0; // Column E
       const rowCuit = row[7]; // Column H
 
@@ -156,7 +156,7 @@ export class DuplicateCache {
     if (!sheetData) return { isDuplicate: false };
 
     for (const [fileId, row] of sheetData) {
-      const rowFechaEmision = normalizeSpreadsheetDate(String(row[0])); // Column A
+      const rowFechaEmision = normalizeSpreadsheetDate(row[0]); // Column A
       const rowNroCertificado = row[3]; // Column D
       const rowCuitAgente = row[4]; // Column E
       const rowMontoRetencion = parseNumber(String(row[9])) ?? 0; // Column J
@@ -185,8 +185,8 @@ export class DuplicateCache {
     if (!sheetData) return { isDuplicate: false };
 
     for (const [fileId, row] of sheetData) {
-      const rowFechaDesde = normalizeSpreadsheetDate(String(row[0])); // Column A
-      const rowFechaHasta = normalizeSpreadsheetDate(String(row[1])); // Column B
+      const rowFechaDesde = normalizeSpreadsheetDate(row[0]); // Column A
+      const rowFechaHasta = normalizeSpreadsheetDate(row[1]); // Column B
       const rowBanco = row[4]; // Column E
       const rowNumeroCuenta = row[5]; // Column F
       const rowMoneda = row[6]; // Column G
@@ -216,8 +216,8 @@ export class DuplicateCache {
     if (!sheetData) return { isDuplicate: false };
 
     for (const [fileId, row] of sheetData) {
-      const rowFechaDesde = normalizeSpreadsheetDate(String(row[0])); // Column A
-      const rowFechaHasta = normalizeSpreadsheetDate(String(row[1])); // Column B
+      const rowFechaDesde = normalizeSpreadsheetDate(row[0]); // Column A
+      const rowFechaHasta = normalizeSpreadsheetDate(row[1]); // Column B
       const rowBanco = row[4]; // Column E
       const rowNumeroCuenta = row[5]; // Column F
       const rowTipoTarjeta = row[6]; // Column G
@@ -247,8 +247,8 @@ export class DuplicateCache {
     if (!sheetData) return { isDuplicate: false };
 
     for (const [fileId, row] of sheetData) {
-      const rowFechaDesde = normalizeSpreadsheetDate(String(row[0])); // Column A
-      const rowFechaHasta = normalizeSpreadsheetDate(String(row[1])); // Column B
+      const rowFechaDesde = normalizeSpreadsheetDate(row[0]); // Column A
+      const rowFechaHasta = normalizeSpreadsheetDate(row[1]); // Column B
       const rowBroker = row[4]; // Column E
       const rowNumeroCuenta = row[5]; // Column F
 

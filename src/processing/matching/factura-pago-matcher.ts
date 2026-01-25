@@ -17,6 +17,7 @@ import {
   buildUnmatchUpdate,
 } from '../../matching/cascade-matcher.js';
 import { parseNumber } from '../../utils/numbers.js';
+import { normalizeSpreadsheetDate } from '../../utils/date.js';
 import { debug, info, warn } from '../../utils/logger.js';
 import { getCorrelationId } from '../../utils/correlation.js';
 import { withLock, withRetry } from '../../utils/concurrency.js';
@@ -308,7 +309,7 @@ async function doMatchFacturasWithPagos(
       // Build factura object based on sheet type
       const factura: Factura & { row: number } = {
         row: i + 1, // Sheet rows are 1-indexed
-        fechaEmision: String(row[0] || ''),
+        fechaEmision: normalizeSpreadsheetDate(row[0]),
         fileId: String(row[1] || ''),
         fileName: String(row[2] || ''),
         tipoComprobante: (row[3] || 'A') as Factura['tipoComprobante'],
@@ -344,7 +345,7 @@ async function doMatchFacturasWithPagos(
       // Column 7 (H) and 8 (I) contain either pagador or beneficiario info depending on sheet
       const pago: Pago & { row: number } = {
         row: i + 1,
-        fechaPago: String(row[0] || ''),
+        fechaPago: normalizeSpreadsheetDate(row[0]),
         fileId: String(row[1] || ''),
         fileName: String(row[2] || ''),
         banco: String(row[3] || ''),
