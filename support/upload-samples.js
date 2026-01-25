@@ -8,6 +8,58 @@
 import { createReadStream, readdirSync, statSync } from 'fs';
 import { join, basename } from 'path';
 import { google } from 'googleapis';
+import { styleText } from 'node:util';
+import cliProgress from 'cli-progress';
+
+/**
+ * ASCII Art Banner
+ */
+function printBanner() {
+  const banner = `
+╔═══════════════════════════════════════════════════════════════╗
+║                                                               ║
+║     █████╗ ██████╗ ██╗   ██╗ █████╗     ██╗   ██╗██████╗    ║
+║    ██╔══██╗██╔══██╗██║   ██║██╔══██╗    ██║   ██║██╔══██╗   ║
+║    ███████║██║  ██║██║   ██║███████║    ██║   ██║██████╔╝   ║
+║    ██╔══██║██║  ██║╚██╗ ██╔╝██╔══██║    ██║   ██║██╔═══╝    ║
+║    ██║  ██║██████╔╝ ╚████╔╝ ██║  ██║    ╚██████╔╝██║        ║
+║    ╚═╝  ╚═╝╚═════╝   ╚═══╝  ╚═╝  ╚═╝     ╚═════╝ ╚═╝        ║
+║                                                               ║
+║              Sample PDF Upload to Google Drive               ║
+║                                                               ║
+╚═══════════════════════════════════════════════════════════════╝
+`;
+  console.log(styleText('cyan', banner));
+}
+
+/**
+ * Print a formatted step message
+ */
+function printStep(stepNum, message) {
+  const prefix = styleText('yellow', `[Step ${stepNum}]`);
+  console.log(`\n${prefix} ${message}`);
+}
+
+/**
+ * Print a success message
+ */
+function printSuccess(message) {
+  console.log(styleText('green', `✓ ${message}`));
+}
+
+/**
+ * Print an error message
+ */
+function printError(message) {
+  console.log(styleText('red', `✗ ${message}`));
+}
+
+/**
+ * Print an info message
+ */
+function printInfo(message) {
+  console.log(styleText('blue', `ℹ ${message}`));
+}
 
 /**
  * Parse service account credentials from environment
@@ -60,7 +112,7 @@ async function findEntradaFolder(drive) {
     throw new Error('DRIVE_ROOT_FOLDER_ID not found in environment');
   }
 
-  console.log(`Searching for Entrada folder in root: ${rootId}`);
+  printInfo(`Searching for Entrada folder in root: ${rootId}`);
 
   const response = await drive.files.list({
     q: `'${rootId}' in parents and name = 'Entrada' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`,
@@ -76,7 +128,7 @@ async function findEntradaFolder(drive) {
   }
 
   const entradaId = files[0].id;
-  console.log(`Found Entrada folder: ${entradaId}`);
+  printSuccess(`Found Entrada folder: ${entradaId}`);
 
   return entradaId;
 }
@@ -107,8 +159,6 @@ function findPdfFiles(dir, fileList = []) {
 async function uploadFile(drive, filePath, folderId) {
   const fileName = basename(filePath);
 
-  console.log(`Uploading: ${filePath}`);
-
   const response = await drive.files.create({
     requestBody: {
       name: fileName,
@@ -122,8 +172,6 @@ async function uploadFile(drive, filePath, folderId) {
     supportsAllDrives: true,
   });
 
-  console.log(`  ✓ Uploaded as: ${response.data.name} (${response.data.id})`);
-
   return response.data.id;
 }
 
@@ -132,46 +180,94 @@ async function uploadFile(drive, filePath, folderId) {
  */
 async function main() {
   try {
-    console.log('Starting upload process...\n');
+    // Print banner
+    printBanner();
 
-    // Initialize Drive client
+    // Step 1: Initialize Drive client
+    printStep(1, 'Authenticating with Google Drive');
     const drive = getDriveClient();
+    printSuccess('Authentication successful');
 
-    // Find Entrada folder
+    // Step 2: Find Entrada folder
+    printStep(2, 'Locating Entrada folder');
     const entradaId = await findEntradaFolder(drive);
 
-    // Find all PDF files in _samples
+    // Step 3: Find PDF files
+    printStep(3, 'Scanning for PDF files');
     const samplesDir = join(process.cwd(), '_samples');
-    console.log(`\nScanning directory: ${samplesDir}`);
+    printInfo(`Directory: ${samplesDir}`);
 
     const pdfFiles = findPdfFiles(samplesDir);
-    console.log(`Found ${pdfFiles.length} PDF files\n`);
+    printSuccess(`Found ${pdfFiles.length} PDF file${pdfFiles.length !== 1 ? 's' : ''}`);
 
     if (pdfFiles.length === 0) {
-      console.log('No PDF files to upload');
+      printInfo('No PDF files to upload');
       return;
     }
 
-    // Upload each file
+    // Step 4: Upload files with progress bar
+    printStep(4, 'Uploading files to Google Drive');
+    console.log(''); // Empty line before progress bar
+
+    const progressBar = new cliProgress.SingleBar({
+      format: `${styleText('cyan', 'Progress')} |{bar}| {percentage}% | {value}/{total} files | {filename}`,
+      barCompleteChar: '\u2588',
+      barIncompleteChar: '\u2591',
+      hideCursor: true,
+      clearOnComplete: false,
+      stopOnComplete: true,
+    });
+
+    progressBar.start(pdfFiles.length, 0, { filename: 'Initializing...' });
+
     let successCount = 0;
     let errorCount = 0;
+    const errors = [];
 
-    for (const filePath of pdfFiles) {
+    for (let i = 0; i < pdfFiles.length; i++) {
+      const filePath = pdfFiles[i];
+      const fileName = basename(filePath);
+
+      progressBar.update(i, { filename: fileName });
+
       try {
         await uploadFile(drive, filePath, entradaId);
         successCount++;
       } catch (error) {
-        console.error(`  ✗ Error uploading ${filePath}: ${error.message}`);
         errorCount++;
+        errors.push({ file: fileName, error: error.message });
       }
+
+      progressBar.update(i + 1, { filename: fileName });
     }
 
-    console.log(`\nUpload complete!`);
-    console.log(`  Success: ${successCount}`);
-    console.log(`  Errors: ${errorCount}`);
+    progressBar.stop();
+
+    // Summary
+    console.log('\n' + styleText('bold', '═'.repeat(63)));
+    console.log(styleText('bold', '                         UPLOAD SUMMARY'));
+    console.log(styleText('bold', '═'.repeat(63)));
+    console.log('');
+    console.log(`  ${styleText('green', '✓')} Successful: ${styleText('green', successCount.toString())}`);
+    console.log(`  ${styleText('red', '✗')} Failed:     ${styleText('red', errorCount.toString())}`);
+    console.log(`  ${styleText('blue', '━')} Total:      ${styleText('blue', pdfFiles.length.toString())}`);
+
+    if (errors.length > 0) {
+      console.log('\n' + styleText('red', 'Errors:'));
+      errors.forEach(({ file, error }) => {
+        console.log(`  ${styleText('red', '✗')} ${file}: ${error}`);
+      });
+    }
+
+    console.log('\n' + styleText('bold', '═'.repeat(63)));
+
+    if (errorCount > 0) {
+      process.exit(1);
+    }
 
   } catch (error) {
-    console.error(`Fatal error: ${error.message}`);
+    console.log('\n');
+    printError(`Fatal error: ${error.message}`);
     process.exit(1);
   }
 }
