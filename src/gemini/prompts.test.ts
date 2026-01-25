@@ -97,6 +97,39 @@ describe('getResumenBancarioPrompt', () => {
     expect(prompt).toContain('moneda');
     expect(prompt).toContain('cantidadMovimientos');
   });
+
+  describe('transaction extraction', () => {
+    const prompt = getResumenBancarioPrompt();
+
+    it('should include transaction extraction section', () => {
+      expect(prompt).toContain('TRANSACTION EXTRACTION');
+    });
+
+    it('should request movimientos array extraction', () => {
+      expect(prompt.toLowerCase()).toContain('movimientos');
+      expect(prompt).toContain('"movimientos"');
+    });
+
+    it('should specify all required movimiento fields', () => {
+      expect(prompt).toContain('origenConcepto');
+      expect(prompt).toContain('debito');
+      expect(prompt).toContain('credito');
+    });
+
+    it('should instruct movimiento fecha format as YYYY-MM-DD', () => {
+      const transactionSection = prompt.substring(prompt.indexOf('TRANSACTION EXTRACTION'));
+      expect(transactionSection).toContain('YYYY-MM-DD');
+    });
+
+    it('should handle empty case with movimientos: []', () => {
+      expect(prompt).toContain('"movimientos": []');
+    });
+
+    it('should show example movimiento structure', () => {
+      const exampleMatch = prompt.match(/"movimientos":\s*\[\s*{[^}]+}\s*\]/);
+      expect(exampleMatch).toBeTruthy();
+    });
+  });
 });
 
 describe('getResumenTarjetaPrompt', () => {
@@ -136,6 +169,49 @@ describe('getResumenTarjetaPrompt', () => {
     expect(prompt).toContain('pagoMinimo');
     expect(prompt).toContain('saldoActual');
   });
+
+  describe('transaction extraction', () => {
+    const prompt = getResumenTarjetaPrompt();
+
+    it('should include transaction extraction section', () => {
+      expect(prompt).toContain('TRANSACTION EXTRACTION');
+    });
+
+    it('should request movimientos array extraction', () => {
+      expect(prompt.toLowerCase()).toContain('movimientos');
+      expect(prompt).toContain('"movimientos"');
+    });
+
+    it('should specify all required movimiento fields', () => {
+      expect(prompt).toContain('descripcion');
+      expect(prompt).toContain('nroCupon');
+      expect(prompt).toContain('pesos');
+      expect(prompt).toContain('dolares');
+    });
+
+    it('should instruct movimiento fecha format as YYYY-MM-DD', () => {
+      const transactionSection = prompt.substring(prompt.indexOf('TRANSACTION EXTRACTION'));
+      expect(transactionSection).toContain('YYYY-MM-DD');
+    });
+
+    it('should show example movimiento structure', () => {
+      const exampleMatch = prompt.match(/"movimientos":\s*\[\s*{[^}]+}\s*\]/);
+      expect(exampleMatch).toBeTruthy();
+    });
+
+    it('should mention null handling for nroCupon', () => {
+      const transactionSection = prompt.substring(prompt.indexOf('TRANSACTION EXTRACTION'));
+      expect(transactionSection).toContain('nroCupon');
+      expect(transactionSection).toContain('null');
+    });
+
+    it('should mention null handling for currency fields', () => {
+      const transactionSection = prompt.substring(prompt.indexOf('TRANSACTION EXTRACTION'));
+      expect(transactionSection).toContain('pesos');
+      expect(transactionSection).toContain('dolares');
+      expect(transactionSection).toContain('null');
+    });
+  });
 });
 
 describe('getResumenBrokerPrompt', () => {
@@ -172,5 +248,45 @@ describe('getResumenBrokerPrompt', () => {
     expect(prompt).toContain('Comitente');
     expect(prompt).toContain('saldoARS');
     expect(prompt).toContain('saldoUSD');
+  });
+
+  describe('transaction extraction', () => {
+    const prompt = getResumenBrokerPrompt();
+
+    it('should include transaction extraction section', () => {
+      expect(prompt).toContain('TRANSACTION EXTRACTION');
+    });
+
+    it('should request movimientos array extraction', () => {
+      expect(prompt.toLowerCase()).toContain('movimientos');
+      expect(prompt).toContain('"movimientos"');
+    });
+
+    it('should specify all required movimiento fields', () => {
+      expect(prompt).toContain('descripcion');
+      expect(prompt).toContain('cantidadVN');
+      expect(prompt).toContain('precio');
+      expect(prompt).toContain('bruto');
+      expect(prompt).toContain('arancel');
+      expect(prompt).toContain('iva');
+      expect(prompt).toContain('neto');
+      expect(prompt).toContain('fechaConcertacion');
+      expect(prompt).toContain('fechaLiquidacion');
+    });
+
+    it('should instruct movimiento fecha format as YYYY-MM-DD', () => {
+      const transactionSection = prompt.substring(prompt.indexOf('TRANSACTION EXTRACTION'));
+      expect(transactionSection).toContain('YYYY-MM-DD');
+    });
+
+    it('should show example movimiento structure', () => {
+      const exampleMatch = prompt.match(/"movimientos":\s*\[\s*{[^}]+}\s*\]/);
+      expect(exampleMatch).toBeTruthy();
+    });
+
+    it('should mention null handling for optional numeric fields', () => {
+      const transactionSection = prompt.substring(prompt.indexOf('TRANSACTION EXTRACTION'));
+      expect(transactionSection).toContain('null');
+    });
   });
 });

@@ -379,7 +379,7 @@ describe('appendRowsWithLinks', () => {
 
     expect(mockGet).toHaveBeenCalledWith({
       spreadsheetId: 'spreadsheetId123',
-      fields: 'sheets.properties.title,sheets.properties.sheetId',
+      fields: 'sheets.properties.title,sheets.properties.sheetId,sheets.properties.index',
     });
 
     expect(mockBatchUpdate).toHaveBeenCalledWith({
@@ -888,7 +888,7 @@ describe('moveSheetToFirst', () => {
     expect(result.ok).toBe(true);
     expect(mockGet).toHaveBeenCalledWith({
       spreadsheetId: 'spreadsheetId123',
-      fields: 'sheets.properties.title,sheets.properties.sheetId',
+      fields: 'sheets.properties.title,sheets.properties.sheetId,sheets.properties.index',
     });
     expect(mockBatchUpdate).toHaveBeenCalledWith({
       spreadsheetId: 'spreadsheetId123',

@@ -241,12 +241,12 @@ export async function batchUpdate(
  */
 export async function getSheetMetadata(
   spreadsheetId: string
-): Promise<Result<Array<{ title: string; sheetId: number }>, Error>> {
+): Promise<Result<Array<{ title: string; sheetId: number; index: number }>, Error>> {
   return withQuotaRetry(async () => {
     const sheets = getSheetsService();
     const response = await sheets.spreadsheets.get({
       spreadsheetId,
-      fields: 'sheets.properties.title,sheets.properties.sheetId',
+      fields: 'sheets.properties.title,sheets.properties.sheetId,sheets.properties.index',
     });
     const sheetsList = response.data.sheets || [];
     return sheetsList
@@ -254,6 +254,7 @@ export async function getSheetMetadata(
       .map(s => ({
         title: s.properties!.title!,
         sheetId: s.properties!.sheetId!,
+        index: s.properties!.index ?? 0, // Default to 0 if not present (for test compatibility)
       }));
   }).then(result => {
     if (!result.ok) return { ok: false, error: result.error };
@@ -1229,6 +1230,79 @@ export async function appendRowsWithFormatting(
 }
 
 /**
+ * Gets the correct position index for a YYYY-MM sheet to maintain chronological order
+ *
+ * @param existingSheets - List of existing sheets with title and index
+ * @param newMonth - Month name in YYYY-MM format
+ * @returns Position index where the new sheet should be inserted
+ */
+export function getMonthSheetPosition(
+  existingSheets: Array<{title: string; index: number}>,
+  newMonth: string
+): number {
+  // Filter for YYYY-MM formatted sheets only
+  const monthSheets = existingSheets.filter(s => /^\d{4}-\d{2}$/.test(s.title));
+
+  if (monthSheets.length === 0) {
+    return 0;
+  }
+
+  // Sort month sheets by their title (YYYY-MM format sorts chronologically)
+  const sortedMonthSheets = monthSheets.sort((a, b) => a.title.localeCompare(b.title));
+
+  // Find the last month sheet that comes before the new month
+  let insertAfterIndex = -1;
+  for (let i = 0; i < sortedMonthSheets.length; i++) {
+    if (newMonth > sortedMonthSheets[i].title) {
+      insertAfterIndex = sortedMonthSheets[i].index;
+    } else {
+      break;
+    }
+  }
+
+  // Insert right after the last month that comes before it
+  return insertAfterIndex + 1;
+}
+
+/**
+ * Moves a sheet to a specific position
+ *
+ * @param spreadsheetId - Spreadsheet ID
+ * @param sheetId - Sheet ID to move
+ * @param position - Target position (0-based index)
+ * @returns Success/failure result
+ */
+export async function moveSheetToPosition(
+  spreadsheetId: string,
+  sheetId: number,
+  position: number
+): Promise<Result<void, Error>> {
+  return withQuotaRetry(async () => {
+    const sheets = getSheetsService();
+
+    const requests: sheets_v4.Schema$Request[] = [
+      {
+        updateSheetProperties: {
+          properties: {
+            sheetId,
+            index: position,
+          },
+          fields: 'index',
+        },
+      },
+    ];
+
+    await sheets.spreadsheets.batchUpdate({
+      spreadsheetId,
+      requestBody: { requests },
+    });
+  }).then(result => {
+    if (!result.ok) return { ok: false, error: result.error };
+    return { ok: true, value: undefined };
+  });
+}
+
+/**
  * Gets or creates a month sheet in a spreadsheet
  * If the sheet exists, returns its sheet ID
  * If it doesn't exist, creates it with the provided headers
@@ -1263,6 +1337,22 @@ export async function getOrCreateMonthSheet(
 
   const formatResult = await formatSheet(spreadsheetId, sheetId, { frozenRows: 1 });
   if (!formatResult.ok) return { ok: false, error: formatResult.error };
+
+  // Get updated metadata to determine correct position for chronological ordering
+  const updatedMetadataResult = await getSheetMetadata(spreadsheetId);
+  if (!updatedMetadataResult.ok) return updatedMetadataResult;
+
+  // Calculate correct position for this month sheet
+  const targetPosition = getMonthSheetPosition(updatedMetadataResult.value, monthName);
+
+  // Find current position of the newly created sheet
+  const currentSheet = updatedMetadataResult.value.find(s => s.sheetId === sheetId);
+
+  // Move sheet to correct position if needed
+  if (currentSheet && currentSheet.index !== targetPosition) {
+    const moveResult = await moveSheetToPosition(spreadsheetId, sheetId, targetPosition);
+    if (!moveResult.ok) return { ok: false, error: moveResult.error };
+  }
 
   return { ok: true, value: sheetId };
 }

@@ -25,6 +25,9 @@ import {
   formatEmptyMonthSheet,
   clearSheetsCache,
   clearTimezoneCache,
+  getMonthSheetPosition,
+  moveSheetToPosition,
+  getOrCreateMonthSheet,
 } from './sheets.js';
 
 // Mock googleapis
@@ -287,7 +290,7 @@ describe('Google Sheets API wrapper - quota retry tests', () => {
 
       expect(result.ok).toBe(true);
       if (result.ok) {
-        expect(result.value).toEqual([{ title: 'Sheet1', sheetId: 0 }]);
+        expect(result.value).toEqual([{ title: 'Sheet1', sheetId: 0, index: 0 }]);
       }
       expect(mockSheetsApi.spreadsheets.get).toHaveBeenCalledTimes(1);
     });
@@ -1061,6 +1064,235 @@ describe('Google Sheets API wrapper - quota retry tests', () => {
 
       // API should be called again after expiration
       expect(mockSheetsApi.spreadsheets.get).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  describe('Sheet chronological ordering', () => {
+    describe('getMonthSheetPosition', () => {
+      it('should return 0 for first sheet when no sheets exist', () => {
+        const existingSheets: Array<{title: string; index: number}> = [];
+        const position = getMonthSheetPosition(existingSheets, '2025-01');
+        expect(position).toBe(0);
+      });
+
+      it('should place Jan before Mar when Mar exists', () => {
+        const existingSheets = [
+          { title: '2025-03', index: 0 },
+        ];
+        const position = getMonthSheetPosition(existingSheets, '2025-01');
+        expect(position).toBe(0);
+      });
+
+      it('should place Mar after Jan when Jan exists', () => {
+        const existingSheets = [
+          { title: '2025-01', index: 0 },
+        ];
+        const position = getMonthSheetPosition(existingSheets, '2025-03');
+        expect(position).toBe(1);
+      });
+
+      it('should place Feb between Jan and Mar', () => {
+        const existingSheets = [
+          { title: '2025-01', index: 0 },
+          { title: '2025-03', index: 1 },
+        ];
+        const position = getMonthSheetPosition(existingSheets, '2025-02');
+        expect(position).toBe(1);
+      });
+
+      it('should place Dec after all other months', () => {
+        const existingSheets = [
+          { title: '2025-01', index: 0 },
+          { title: '2025-03', index: 1 },
+          { title: '2025-07', index: 2 },
+        ];
+        const position = getMonthSheetPosition(existingSheets, '2025-12');
+        expect(position).toBe(3);
+      });
+
+      it('should handle sheets out of order', () => {
+        const existingSheets = [
+          { title: '2025-12', index: 0 },
+          { title: '2025-01', index: 1 },
+          { title: '2025-03', index: 2 },
+        ];
+        const position = getMonthSheetPosition(existingSheets, '2025-02');
+        // Should be placed after 01 (index 1) and before 03 (index 2)
+        expect(position).toBe(2);
+      });
+
+      it('should ignore non-YYYY-MM formatted sheets', () => {
+        const existingSheets = [
+          { title: 'Summary', index: 0 },
+          { title: '2025-01', index: 1 },
+          { title: 'Other Sheet', index: 2 },
+          { title: '2025-03', index: 3 },
+        ];
+        const position = getMonthSheetPosition(existingSheets, '2025-02');
+        expect(position).toBe(2);
+      });
+
+      it('should handle multi-year sheets correctly', () => {
+        const existingSheets = [
+          { title: '2024-11', index: 0 },
+          { title: '2024-12', index: 1 },
+          { title: '2025-02', index: 2 },
+        ];
+        const position = getMonthSheetPosition(existingSheets, '2025-01');
+        expect(position).toBe(2); // After 2024 sheets, before 2025-02
+      });
+    });
+
+    describe('moveSheetToPosition', () => {
+      it('should move sheet to specified position', async () => {
+        mockSheetsApi.spreadsheets.batchUpdate.mockResolvedValue({ data: {} });
+
+        const resultPromise = moveSheetToPosition('spreadsheet123', 456, 2);
+        await vi.runAllTimersAsync();
+        const result = await resultPromise;
+
+        expect(result.ok).toBe(true);
+        expect(mockSheetsApi.spreadsheets.batchUpdate).toHaveBeenCalledWith({
+          spreadsheetId: 'spreadsheet123',
+          requestBody: {
+            requests: [
+              {
+                updateSheetProperties: {
+                  properties: {
+                    sheetId: 456,
+                    index: 2,
+                  },
+                  fields: 'index',
+                },
+              },
+            ],
+          },
+        });
+      });
+
+      it('should retry and succeed after quota error', async () => {
+        mockSheetsApi.spreadsheets.batchUpdate
+          .mockRejectedValueOnce(new Error('Quota exceeded'))
+          .mockResolvedValueOnce({ data: {} });
+
+        const resultPromise = moveSheetToPosition('spreadsheet123', 456, 1);
+        await vi.runAllTimersAsync();
+        const result = await resultPromise;
+
+        expect(result.ok).toBe(true);
+        expect(mockSheetsApi.spreadsheets.batchUpdate).toHaveBeenCalledTimes(2);
+      });
+
+      it('should return error after exhausting retries', async () => {
+        mockSheetsApi.spreadsheets.batchUpdate.mockRejectedValue(new Error('Quota exceeded'));
+
+        const resultPromise = moveSheetToPosition('spreadsheet123', 456, 1);
+        await vi.runAllTimersAsync();
+        const result = await resultPromise;
+
+        expect(result.ok).toBe(false);
+      });
+    });
+
+    describe('getOrCreateMonthSheet - chronological ordering integration', () => {
+      it('should create sheet and move to correct position', async () => {
+        // Mock getSheetMetadata to return existing sheets
+        mockSheetsApi.spreadsheets.get
+          .mockResolvedValueOnce({
+            // First call to getSheetMetadata in getOrCreateMonthSheet
+            data: {
+              sheets: [
+                { properties: { title: '2025-01', sheetId: 100, index: 0 } },
+                { properties: { title: '2025-03', sheetId: 102, index: 1 } },
+              ],
+            },
+          })
+          .mockResolvedValueOnce({
+            // Second call after createSheet to get updated metadata with index
+            data: {
+              sheets: [
+                { properties: { title: '2025-01', sheetId: 100, index: 0 } },
+                { properties: { title: '2025-03', sheetId: 102, index: 1 } },
+                { properties: { title: '2025-02', sheetId: 101, index: 2 } },
+              ],
+            },
+          });
+
+        // Mock createSheet
+        mockSheetsApi.spreadsheets.batchUpdate
+          .mockResolvedValueOnce({
+            data: {
+              replies: [{ addSheet: { properties: { sheetId: 101 } } }],
+            },
+          })
+          // Mock setValues (header)
+          .mockResolvedValueOnce({ data: {} })
+          // Mock formatSheet
+          .mockResolvedValueOnce({ data: {} })
+          // Mock moveSheetToPosition
+          .mockResolvedValueOnce({ data: {} });
+
+        mockSheetsApi.spreadsheets.values.update.mockResolvedValue({ data: {} });
+
+        const resultPromise = getOrCreateMonthSheet(
+          'spreadsheet123',
+          '2025-02',
+          ['fecha', 'descripcion', 'monto']
+        );
+        await vi.runAllTimersAsync();
+        const result = await resultPromise;
+
+        expect(result.ok).toBe(true);
+        if (result.ok) {
+          expect(result.value).toBe(101);
+        }
+
+        // Verify moveSheetToPosition was called with correct position (1, between Jan and Mar)
+        expect(mockSheetsApi.spreadsheets.batchUpdate).toHaveBeenCalledWith(
+          expect.objectContaining({
+            requestBody: expect.objectContaining({
+              requests: expect.arrayContaining([
+                expect.objectContaining({
+                  updateSheetProperties: expect.objectContaining({
+                    properties: expect.objectContaining({
+                      sheetId: 101,
+                      index: 1,
+                    }),
+                  }),
+                }),
+              ]),
+            }),
+          })
+        );
+      });
+
+      it('should not move sheet if it already exists', async () => {
+        // Mock getSheetMetadata to return sheet that already exists
+        mockSheetsApi.spreadsheets.get.mockResolvedValue({
+          data: {
+            sheets: [
+              { properties: { title: '2025-01', sheetId: 100, index: 0 } },
+              { properties: { title: '2025-02', sheetId: 101, index: 1 } },
+            ],
+          },
+        });
+
+        const resultPromise = getOrCreateMonthSheet(
+          'spreadsheet123',
+          '2025-02',
+          ['fecha', 'descripcion', 'monto']
+        );
+        await vi.runAllTimersAsync();
+        const result = await resultPromise;
+
+        expect(result.ok).toBe(true);
+        if (result.ok) {
+          expect(result.value).toBe(101);
+        }
+
+        // Should not call createSheet or moveSheetToPosition
+        expect(mockSheetsApi.spreadsheets.batchUpdate).not.toHaveBeenCalled();
+      });
     });
   });
 });
