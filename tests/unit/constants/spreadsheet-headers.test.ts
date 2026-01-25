@@ -316,8 +316,8 @@ describe('spreadsheet-headers', () => {
       expect(DASHBOARD_OPERATIVO_SHEETS[0].headers).toBe(PAGOS_PENDIENTES_HEADERS);
     });
 
-    it('contains Resumen Mensual sheet', () => {
-      const sheet = DASHBOARD_OPERATIVO_SHEETS.find(s => s.title === 'Resumen Mensual');
+    it('contains API Mensual sheet', () => {
+      const sheet = DASHBOARD_OPERATIVO_SHEETS.find(s => s.title === 'API Mensual');
       expect(sheet).toBeDefined();
     });
 
@@ -331,8 +331,8 @@ describe('spreadsheet-headers', () => {
       expect(sheet.monetaryColumns).toEqual([7]); // importeTotal
     });
 
-    it('Resumen Mensual has correct number formats', () => {
-      const sheet = DASHBOARD_OPERATIVO_SHEETS.find(s => s.title === 'Resumen Mensual');
+    it('API Mensual has correct number formats', () => {
+      const sheet = DASHBOARD_OPERATIVO_SHEETS.find(s => s.title === 'API Mensual');
       expect(sheet).toBeDefined();
       expect(sheet?.numberFormats).toBeDefined();
 

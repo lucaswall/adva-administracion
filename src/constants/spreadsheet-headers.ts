@@ -414,7 +414,7 @@ export const ARCHIVOS_PROCESADOS_SHEET: SheetConfig = {
   ]),
 };
 
-/** Headers for Resumen Mensual sheet */
+/** Headers for API Mensual sheet */
 export const RESUMEN_MENSUAL_HEADERS = [
   'fecha',
   'totalLlamadas',
@@ -470,7 +470,7 @@ export const DASHBOARD_OPERATIVO_SHEETS: SheetConfig[] = [
     monetaryColumns: [7] // importeTotal (0-indexed: 7)
   },
   {
-    title: 'Resumen Mensual',
+    title: 'API Mensual',
     headers: RESUMEN_MENSUAL_HEADERS,
     numberFormats: new Map([
       [1, { type: 'number', decimals: 0 }],  // totalLlamadas - thousands separator

@@ -131,7 +131,7 @@ describe('FolderStructure service', () => {
         .mockResolvedValueOnce({
           ok: true,
           value: [
-            { title: 'Resumen Mensual', sheetId: 1 },
+            { title: 'API Mensual', sheetId: 1 },
             { title: 'Uso de API', sheetId: 2 },
             { title: 'Status', sheetId: 3 },
           ],
@@ -213,7 +213,7 @@ describe('FolderStructure service', () => {
         .mockResolvedValueOnce({
           ok: true,
           value: [
-            { title: 'Resumen Mensual', sheetId: 1 },
+            { title: 'API Mensual', sheetId: 1 },
             { title: 'Uso de API', sheetId: 2 },
             { title: 'Status', sheetId: 3 },
           ],
@@ -283,7 +283,7 @@ describe('FolderStructure service', () => {
         .mockResolvedValueOnce({
           ok: true,
           value: [
-            { title: 'Resumen Mensual', sheetId: 1 },
+            { title: 'API Mensual', sheetId: 1 },
             { title: 'Uso de API', sheetId: 2 },
             { title: 'Status', sheetId: 3 },
           ],
@@ -362,7 +362,7 @@ describe('FolderStructure service', () => {
         .mockResolvedValueOnce({
           ok: true,
           value: [
-            { title: 'Resumen Mensual', sheetId: 1 },
+            { title: 'API Mensual', sheetId: 1 },
             { title: 'Uso de API', sheetId: 2 },
             { title: 'Status', sheetId: 3 },
           ],
@@ -431,7 +431,7 @@ describe('FolderStructure service', () => {
         .mockResolvedValueOnce({ ok: true, value: 5 }) // Pagos Enviados
         .mockResolvedValueOnce({ ok: true, value: 6 }) // Recibos
         .mockResolvedValueOnce({ ok: true, value: 7 }) // Pagos Pendientes
-        .mockResolvedValueOnce({ ok: true, value: 8 }) // Resumen Mensual
+        .mockResolvedValueOnce({ ok: true, value: 8 }) // API Mensual
         .mockResolvedValueOnce({ ok: true, value: 9 }) // Uso de API
         .mockResolvedValueOnce({ ok: true, value: 10 }); // Status
 
@@ -454,7 +454,7 @@ describe('FolderStructure service', () => {
       expect(mockCreateSheet).toHaveBeenCalledWith('control-egresos-id', 'Pagos Enviados');
       expect(mockCreateSheet).toHaveBeenCalledWith('control-egresos-id', 'Recibos');
       expect(mockCreateSheet).toHaveBeenCalledWith('dashboard-operativo-id', 'Pagos Pendientes');
-      expect(mockCreateSheet).toHaveBeenCalledWith('dashboard-operativo-id', 'Resumen Mensual');
+      expect(mockCreateSheet).toHaveBeenCalledWith('dashboard-operativo-id', 'API Mensual');
       expect(mockCreateSheet).toHaveBeenCalledWith('dashboard-operativo-id', 'Uso de API');
       expect(mockCreateSheet).toHaveBeenCalledWith('dashboard-operativo-id', 'Status');
       expect(mockCreateSheet).toHaveBeenCalledWith('dashboard-operativo-id', 'Archivos Procesados');
@@ -510,7 +510,7 @@ describe('FolderStructure service', () => {
             ok: true,
             value: [
               { title: 'Pagos Pendientes', sheetId: 1 },
-              { title: 'Resumen Mensual', sheetId: 2 },
+              { title: 'API Mensual', sheetId: 2 },
               { title: 'Uso de API', sheetId: 3 },
               { title: 'Status', sheetId: 4 },
               { title: 'Archivos Procesados', sheetId: 5 },
@@ -523,7 +523,7 @@ describe('FolderStructure service', () => {
       // Mock getValues for existing sheets with correct headers
       mockGetValues.mockReset();
       mockGetValues.mockImplementation((spreadsheetId: string, range: string) => {
-        // For Resumen Mensual A2:A2, return data to indicate it exists
+        // For API Mensual A2:A2, return data to indicate it exists
         if (range.includes('A2:A2')) {
           return Promise.resolve({ ok: true, value: [[2026]] });
         }
@@ -549,7 +549,7 @@ describe('FolderStructure service', () => {
         if (range.includes('Pagos Pendientes')) {
           return Promise.resolve({ ok: true, value: [['fechaEmision']] });
         }
-        if (range.includes('Resumen Mensual')) {
+        if (range.includes('API Mensual')) {
           return Promise.resolve({ ok: true, value: [['fecha']] });
         }
         if (range.includes('Uso de API')) {
@@ -574,7 +574,7 @@ describe('FolderStructure service', () => {
       expect(mockGetSheetMetadata).toHaveBeenCalledWith('dashboard-operativo-id');
       expect(mockCreateSheet).not.toHaveBeenCalled();
 
-      // Dashboard Operativo Contable's Resumen Mensual is skipped when data already exists
+      // Dashboard Operativo Contable's API Mensual is skipped when data already exists
       expect(mockSetValues).not.toHaveBeenCalled();
     });
 
@@ -599,7 +599,7 @@ describe('FolderStructure service', () => {
 
       // Mock sheet metadata - Control de Ingresos has only Facturas Emitidas
       // Control de Egresos has only Facturas Recibidas
-      // Dashboard Operativo has only Resumen Mensual
+      // Dashboard Operativo has only API Mensual
       mockGetSheetMetadata
         .mockResolvedValueOnce({
           ok: true,
@@ -611,7 +611,7 @@ describe('FolderStructure service', () => {
         })
         .mockResolvedValueOnce({
           ok: true,
-          value: [{ title: 'Resumen Mensual', sheetId: 1 }],
+          value: [{ title: 'API Mensual', sheetId: 1 }],
         })
         // Status sheet metadata for initializeStatusSheet
         .mockResolvedValueOnce({
@@ -624,7 +624,7 @@ describe('FolderStructure service', () => {
       mockGetValues
         .mockResolvedValueOnce({ ok: true, value: [['fechaEmision', 'fileId', 'fileName']] }) // Facturas Emitidas
         .mockResolvedValueOnce({ ok: true, value: [['fechaEmision', 'fileId', 'fileName']] }) // Facturas Recibidas
-        .mockResolvedValueOnce({ ok: true, value: [['fecha', 'totalLlamadas', 'tokensEntrada']] }); // Resumen Mensual
+        .mockResolvedValueOnce({ ok: true, value: [['fecha', 'totalLlamadas', 'tokensEntrada']] }); // API Mensual
 
       // Mock creating missing sheets (2 for Ingresos + 2 for Egresos + 3 for Dashboard = 7)
       mockCreateSheet
@@ -654,7 +654,7 @@ describe('FolderStructure service', () => {
       expect(mockCreateSheet).toHaveBeenCalledWith('dashboard-operativo-id', 'Archivos Procesados');
       expect(mockCreateSheet).not.toHaveBeenCalledWith('control-ingresos-id', 'Facturas Emitidas');
       expect(mockCreateSheet).not.toHaveBeenCalledWith('control-egresos-id', 'Facturas Recibidas');
-      expect(mockCreateSheet).not.toHaveBeenCalledWith('dashboard-operativo-id', 'Resumen Mensual');
+      expect(mockCreateSheet).not.toHaveBeenCalledWith('dashboard-operativo-id', 'API Mensual');
 
       // Verify headers were set only for new sheets
       expect(mockSetValues).toHaveBeenCalled();
@@ -741,7 +741,7 @@ describe('FolderStructure service', () => {
         .mockResolvedValueOnce({ ok: true, value: 5 }) // Pagos Enviados
         .mockResolvedValueOnce({ ok: true, value: 6 }) // Recibos
         .mockResolvedValueOnce({ ok: true, value: 7 }) // Pagos Pendientes
-        .mockResolvedValueOnce({ ok: true, value: 8 }) // Resumen Mensual
+        .mockResolvedValueOnce({ ok: true, value: 8 }) // API Mensual
         .mockResolvedValueOnce({ ok: true, value: 9 }) // Uso de API
         .mockResolvedValueOnce({ ok: true, value: 10 }); // Status
 
@@ -807,7 +807,7 @@ describe('FolderStructure service', () => {
         .mockResolvedValueOnce({
           ok: true,
           value: [
-            { title: 'Resumen Mensual', sheetId: 1 },
+            { title: 'API Mensual', sheetId: 1 },
             { title: 'Uso de API', sheetId: 2 },
             { title: 'Status', sheetId: 3 },
           ],
@@ -903,7 +903,7 @@ describe('FolderStructure service', () => {
       // Mock createSheet for Dashboard Operativo sheets (4 sheets created for new Dashboard)
       mockCreateSheet
         .mockResolvedValueOnce({ ok: true, value: 1 }) // Pagos Pendientes
-        .mockResolvedValueOnce({ ok: true, value: 2 }) // Resumen Mensual
+        .mockResolvedValueOnce({ ok: true, value: 2 }) // API Mensual
         .mockResolvedValueOnce({ ok: true, value: 3 }) // Uso de API
         .mockResolvedValueOnce({ ok: true, value: 4 }); // Status
 
@@ -919,14 +919,14 @@ describe('FolderStructure service', () => {
 
       // Verify all 4 Dashboard sheets were created
       expect(mockCreateSheet).toHaveBeenCalledWith('dashboard-operativo-id', 'Pagos Pendientes');
-      expect(mockCreateSheet).toHaveBeenCalledWith('dashboard-operativo-id', 'Resumen Mensual');
+      expect(mockCreateSheet).toHaveBeenCalledWith('dashboard-operativo-id', 'API Mensual');
       expect(mockCreateSheet).toHaveBeenCalledWith('dashboard-operativo-id', 'Uso de API');
       expect(mockCreateSheet).toHaveBeenCalledWith('dashboard-operativo-id', 'Status');
 
       // Verify headers were set for both sheets
       expect(mockSetValues).toHaveBeenCalledWith(
         'dashboard-operativo-id',
-        'Resumen Mensual!A1',
+        'API Mensual!A1',
         [['fecha', 'totalLlamadas', 'tokensEntrada', 'tokensCache', 'tokensSalida', 'costoTotalUSD', 'tasaExito', 'duracionPromedio']]
       );
       expect(mockSetValues).toHaveBeenCalledWith(
@@ -935,7 +935,7 @@ describe('FolderStructure service', () => {
         [['timestamp', 'requestId', 'fileId', 'fileName', 'model', 'promptTokens', 'cachedTokens', 'outputTokens', 'promptCostPerToken', 'cachedCostPerToken', 'outputCostPerToken', 'estimatedCostUSD', 'durationMs', 'success', 'errorMessage']]
       );
 
-      // Verify Resumen Mensual was initialized with current month and next month
+      // Verify API Mensual was initialized with current month and next month
       const now = new Date();
       const currentYear = now.getFullYear();
       const currentMonth = now.getMonth();
@@ -947,7 +947,7 @@ describe('FolderStructure service', () => {
       // Verify current month and next month rows were initialized with formulas wrapped in IFERROR
       expect(mockSetValues).toHaveBeenCalledWith(
         'dashboard-operativo-id',
-        'Resumen Mensual!A2:H3',
+        'API Mensual!A2:H3',
         expect.arrayContaining([
           expect.arrayContaining([
             currentMonthStr,
@@ -1016,7 +1016,7 @@ describe('FolderStructure service', () => {
         .mockResolvedValueOnce({
           ok: true,
           value: [
-            { title: 'Resumen Mensual', sheetId: 1 },
+            { title: 'API Mensual', sheetId: 1 },
             { title: 'Uso de API', sheetId: 2 },
           ],
         });
@@ -1271,7 +1271,7 @@ describe('FolderStructure service', () => {
         .mockResolvedValueOnce({
           ok: true,
           value: [
-            { title: 'Resumen Mensual', sheetId: 1 },
+            { title: 'API Mensual', sheetId: 1 },
             { title: 'Uso de API', sheetId: 2 },
           ],
         });
@@ -1484,7 +1484,7 @@ describe('FolderStructure service', () => {
         .mockResolvedValueOnce({
           ok: true,
           value: [
-            { title: 'Resumen Mensual', sheetId: 1 },
+            { title: 'API Mensual', sheetId: 1 },
             { title: 'Uso de API', sheetId: 2 },
           ],
         });

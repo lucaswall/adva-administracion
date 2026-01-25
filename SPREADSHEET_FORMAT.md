@@ -263,7 +263,7 @@ Unpaid invoices from Control de Egresos. Automatically synced after matching.
 
 Auto-synced from Facturas Recibidas where `pagada != "SI"`.
 
-### Resumen Mensual (8 columns, A:H)
+### API Mensual (8 columns, A:H)
 
 | Column | Field | Type | Description |
 |--------|-------|------|-------------|

@@ -336,7 +336,7 @@ See `SPREADSHEET_FORMAT.md` for complete schema.
   - `resumen_bancario`: 9 cols with `moneda` (ARS/USD)
   - `resumen_tarjeta`: 9 cols with `tipoTarjeta` (Visa/Mastercard/etc)
   - `resumen_broker`: 8 cols with `saldoARS` + `saldoUSD` (multi-currency)
-- **Dashboard**: Pagos Pendientes (10 cols), Resumen Mensual (7 cols), Uso de API (12 cols)
+- **Dashboard**: Pagos Pendientes (10 cols), API Mensual (7 cols), Uso de API (12 cols)
 
 **Principles:**
 - Store counterparty info only, ADVA's role is implicit
