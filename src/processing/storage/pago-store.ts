@@ -4,12 +4,14 @@
  */
 
 import type { Result, Pago, StoreResult } from '../../types/index.js';
+import type { ScanContext } from '../scanner.js';
 import { appendRowsWithLinks, sortSheet, getValues, getSpreadsheetTimezone, type CellValueOrLink, type CellDate } from '../../services/sheets.js';
 import { formatUSCurrency, parseNumber } from '../../utils/numbers.js';
 import { generatePagoFileName } from '../../utils/file-naming.js';
 import { normalizeSpreadsheetDate } from '../../utils/date.js';
 import { info, warn } from '../../utils/logger.js';
 import { getCorrelationId } from '../../utils/correlation.js';
+import { withLock } from '../../utils/concurrency.js';
 
 /**
  * Checks if a pago already exists in the sheet
@@ -66,38 +68,52 @@ async function isDuplicatePago(
  * @param spreadsheetId - The spreadsheet ID (Control de Ingresos or Control de Egresos)
  * @param sheetName - The sheet name ('Pagos Recibidos' or 'Pagos Enviados')
  * @param documentType - The document type for filename generation
+ * @param context - Optional scan context for cache optimization
  */
 export async function storePago(
   pago: Pago,
   spreadsheetId: string,
   sheetName: string,
-  documentType: 'pago_enviado' | 'pago_recibido'
+  documentType: 'pago_enviado' | 'pago_recibido',
+  context?: ScanContext
 ): Promise<Result<StoreResult, Error>> {
-  // Check for duplicates
+  // Create lock key from business key (prevents concurrent identical stores)
   const counterpartyCuit = documentType === 'pago_enviado'
     ? (pago.cuitBeneficiario || '')
     : (pago.cuitPagador || '');
 
-  const dupeCheck = await isDuplicatePago(
-    spreadsheetId,
-    sheetName,
-    pago.fechaPago,
-    pago.importePagado,
-    counterpartyCuit
-  );
+  const lockKey = `store:pago:${pago.fechaPago}:${pago.importePagado}:${counterpartyCuit}`;
 
-  if (dupeCheck.isDuplicate) {
-    warn('Duplicate pago detected, skipping', {
-      module: 'storage',
-      phase: 'pago',
-      fecha: pago.fechaPago,
-      importe: pago.importePagado,
-      existingFileId: dupeCheck.existingFileId,
-      newFileId: pago.fileId,
-      correlationId: getCorrelationId(),
-    });
-    return { ok: true, value: { stored: false, existingFileId: dupeCheck.existingFileId } };
-  }
+  return withLock(lockKey, async () => {
+    // Use cache if available, otherwise API
+    const dupeCheck = context?.duplicateCache
+      ? context.duplicateCache.isDuplicatePago(
+          spreadsheetId,
+          sheetName,
+          pago.fechaPago,
+          pago.importePagado,
+          counterpartyCuit
+        )
+      : await isDuplicatePago(
+          spreadsheetId,
+          sheetName,
+          pago.fechaPago,
+          pago.importePagado,
+          counterpartyCuit
+        );
+
+    if (dupeCheck.isDuplicate) {
+      warn('Duplicate pago detected, skipping', {
+        module: 'storage',
+        phase: 'pago',
+        fecha: pago.fechaPago,
+        importe: pago.importePagado,
+        existingFileId: dupeCheck.existingFileId,
+        newFileId: pago.fileId,
+        correlationId: getCorrelationId(),
+      });
+      return { stored: false, existingFileId: dupeCheck.existingFileId };
+    }
 
   // Calculate the renamed filename that will be used when the file is moved
   const renamedFileName = generatePagoFileName(pago, documentType);
@@ -155,31 +171,41 @@ export async function storePago(
   const timezoneResult = await getSpreadsheetTimezone(spreadsheetId);
   const timeZone = timezoneResult.ok ? timezoneResult.value : undefined;
 
-  const result = await appendRowsWithLinks(spreadsheetId, range, [row], timeZone);
-  if (!result.ok) {
-    return { ok: false, error: result.error };
-  }
+    const result = await appendRowsWithLinks(spreadsheetId, range, [row], timeZone, context?.metadataCache);
+    if (!result.ok) {
+      throw result.error;
+    }
 
-  info('Pago stored successfully', {
-    module: 'storage',
-    phase: 'pago',
-    fileId: pago.fileId,
-    documentType,
-    spreadsheet: sheetName,
-    correlationId: getCorrelationId(),
-  });
+    // Update cache if available
+    context?.duplicateCache.addEntry(spreadsheetId, sheetName, pago.fileId, row);
 
-  // Sort sheet by fechaPago (column A, index 0) in descending order (most recent first)
-  const sortResult = await sortSheet(spreadsheetId, sheetName, 0, true);
-  if (!sortResult.ok) {
-    warn(`Failed to sort sheet ${sheetName}`, {
+    info('Pago stored successfully', {
       module: 'storage',
       phase: 'pago',
-      error: sortResult.error.message,
+      fileId: pago.fileId,
+      documentType,
+      spreadsheet: sheetName,
       correlationId: getCorrelationId(),
     });
-    // Don't fail the operation if sorting fails
-  }
 
-  return { ok: true, value: { stored: true } };
+    // Defer sort if context available, otherwise sort immediately
+    if (context) {
+      // Sort sheet by fechaPago (column A, index 0) in descending order (most recent first)
+      context.sortBatch.addPendingSort(spreadsheetId, sheetName, 0, true);
+    } else {
+      // Sort sheet by fechaPago (column A, index 0) in descending order (most recent first)
+      const sortResult = await sortSheet(spreadsheetId, sheetName, 0, true);
+      if (!sortResult.ok) {
+        warn(`Failed to sort sheet ${sheetName}`, {
+          module: 'storage',
+          phase: 'pago',
+          error: sortResult.error.message,
+          correlationId: getCorrelationId(),
+        });
+        // Don't fail the operation if sorting fails
+      }
+    }
+
+    return { stored: true };
+  }, 10000); // 10 second timeout for lock
 }

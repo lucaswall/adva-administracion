@@ -94,7 +94,8 @@ export function hasValidDate(doc: unknown, documentType: DocumentType): boolean 
  * @returns Result with processed document or error
  */
 export async function processFile(
-  fileInfo: Omit<FileInfo, 'content'>
+  fileInfo: Omit<FileInfo, 'content'>,
+  context?: import('./scanner.js').ScanContext
 ): Promise<Result<ProcessFileResult, Error>> {
   const config = getConfig();
   const correlationId = getCorrelationId();
@@ -112,10 +113,9 @@ export async function processFile(
         // Get current pricing for this model
         const pricing = GEMINI_PRICING[data.model];
 
-        // Log usage to Dashboard Operativo Contable
-        // Note: Fire and forget - don't await to avoid slowing down processing
-        void logTokenUsage(dashboardOperativoId, {
-          timestamp: new Date().toISOString(),
+        // Build token usage entry
+        const entry = {
+          timestamp: new Date(),
           requestId: generateRequestId(),
           fileId: data.fileId,
           fileName: data.fileName,
@@ -130,18 +130,27 @@ export async function processFile(
           durationMs: data.durationMs,
           success: data.success,
           errorMessage: data.errorMessage || '',
-        }).then(result => {
-          if (!result.ok) {
-            warn('Failed to log token usage', {
-              module: 'extractor',
-              phase: 'token-logging',
-              fileId: data.fileId,
-              fileName: data.fileName,
-              error: result.error.message,
-              correlationId,
-            });
-          }
-        });
+        };
+
+        // If tokenBatch available, add to batch; otherwise log immediately
+        if (context?.tokenBatch) {
+          context.tokenBatch.add(entry);
+        } else {
+          // Log usage to Dashboard Operativo Contable
+          // Note: Fire and forget - don't await to avoid slowing down processing
+          void logTokenUsage(dashboardOperativoId, entry).then(result => {
+            if (!result.ok) {
+              warn('Failed to log token usage', {
+                module: 'extractor',
+                phase: 'token-logging',
+                fileId: data.fileId,
+                fileName: data.fileName,
+                error: result.error.message,
+                correlationId,
+              });
+            }
+          });
+        }
       }
     : undefined;
 

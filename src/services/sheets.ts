@@ -234,6 +234,38 @@ export async function batchUpdate(
 }
 
 /**
+ * Internal: Gets sheet metadata without retry wrapper.
+ * Used when caller has own retry logic.
+ *
+ * @param spreadsheetId - Spreadsheet ID
+ * @returns Array of sheet names and IDs
+ */
+export async function getSheetMetadataInternal(
+  spreadsheetId: string
+): Promise<Result<Array<{ title: string; sheetId: number; index: number }>, Error>> {
+  try {
+    const sheets = getSheetsService();
+    const response = await sheets.spreadsheets.get({
+      spreadsheetId,
+      fields: 'sheets.properties',
+    });
+
+    const sheetMetadata = (response.data.sheets || []).map((sheet) => ({
+      title: sheet.properties?.title || '',
+      sheetId: sheet.properties?.sheetId ?? 0,
+      index: sheet.properties?.index ?? 0,
+    }));
+
+    return { ok: true, value: sheetMetadata };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error : new Error(String(error)),
+    };
+  }
+}
+
+/**
  * Gets sheet metadata (list of sheets in spreadsheet)
  *
  * @param spreadsheetId - Spreadsheet ID
@@ -940,32 +972,34 @@ export async function appendRowsWithLinks(
   spreadsheetId: string,
   range: string,
   values: CellValueOrLink[][],
-  timeZone?: string
+  timeZone?: string,
+  metadataCache?: import('../processing/caches/index.js').MetadataCache
 ): Promise<Result<number, Error>> {
-  // Parse sheet name from range (e.g., 'Sheet1!A:Z' -> 'Sheet1')
-  const sheetName = range.split('!')[0];
-
-  // Get sheet metadata to find the sheet ID
-  const metadataResult = await getSheetMetadata(spreadsheetId);
-  if (!metadataResult.ok) {
-    return metadataResult;
-  }
-
-  const sheet = metadataResult.value.find(s => s.title === sheetName);
-  if (!sheet) {
-    return {
-      ok: false,
-      error: new Error(`Sheet not found: ${sheetName}`),
-    };
-  }
-
-  // Convert rows to Sheets API format
-  const rows: sheets_v4.Schema$RowData[] = values.map(rowValues => ({
-    values: rowValues.map(value => convertToSheetsCellData(value, timeZone)),
-  }));
-
-  // Use batchUpdate with appendCells to support rich formatting
+  // Single retry wrapper for ENTIRE operation
   return withQuotaRetry(async () => {
+    // Parse sheet name from range (e.g., 'Sheet1!A:Z' -> 'Sheet1')
+    const sheetName = range.split('!')[0];
+
+    // Step 1: Get metadata (NO retry wrapper)
+    // Use cache if provided, otherwise direct call
+    const metadataResult = metadataCache
+      ? await metadataCache.get(spreadsheetId)
+      : await getSheetMetadataInternal(spreadsheetId);
+    if (!metadataResult.ok) {
+      throw metadataResult.error; // Convert to exception for retry
+    }
+
+    const sheet = metadataResult.value.find(s => s.title === sheetName);
+    if (!sheet) {
+      throw new Error(`Sheet not found: ${sheetName}`);
+    }
+
+    // Convert rows to Sheets API format
+    const rows: sheets_v4.Schema$RowData[] = values.map(rowValues => ({
+      values: rowValues.map(value => convertToSheetsCellData(value, timeZone)),
+    }));
+
+    // Step 2: Append data (in same retry scope)
     const sheets = getSheetsService();
     await sheets.spreadsheets.batchUpdate({
       spreadsheetId,
@@ -1005,24 +1039,26 @@ export async function sortSheet(
   spreadsheetId: string,
   sheetName: string,
   columnIndex: number = 0,
-  descending: boolean = true
+  descending: boolean = true,
+  metadataCache?: import('../processing/caches/index.js').MetadataCache
 ): Promise<Result<void, Error>> {
-  // First, get the sheet ID from the sheet name
-  const metadataResult = await getSheetMetadata(spreadsheetId);
-  if (!metadataResult.ok) {
-    return metadataResult;
-  }
-
-  const sheet = metadataResult.value.find(s => s.title === sheetName);
-  if (!sheet) {
-    return {
-      ok: false,
-      error: new Error(`Sheet "${sheetName}" not found`),
-    };
-  }
-
-  // Sort the sheet (excluding header row)
+  // Single retry wrapper for ENTIRE operation
   return withQuotaRetry(async () => {
+    // Step 1: Get metadata (NO retry wrapper)
+    // Use cache if provided, otherwise direct call
+    const metadataResult = metadataCache
+      ? await metadataCache.get(spreadsheetId)
+      : await getSheetMetadataInternal(spreadsheetId);
+    if (!metadataResult.ok) {
+      throw metadataResult.error; // Convert to exception for retry
+    }
+
+    const sheet = metadataResult.value.find(s => s.title === sheetName);
+    if (!sheet) {
+      throw new Error(`Sheet "${sheetName}" not found`);
+    }
+
+    // Step 2: Sort the sheet (in same retry scope)
     const sheets = getSheetsService();
     await sheets.spreadsheets.batchUpdate({
       spreadsheetId,
@@ -1086,24 +1122,26 @@ export async function clearSheetData(
  */
 export async function moveSheetToFirst(
   spreadsheetId: string,
-  sheetName: string
+  sheetName: string,
+  metadataCache?: import('../processing/caches/index.js').MetadataCache
 ): Promise<Result<void, Error>> {
-  // Get sheet metadata to find the sheet ID
-  const metadataResult = await getSheetMetadata(spreadsheetId);
-  if (!metadataResult.ok) {
-    return metadataResult;
-  }
-
-  const sheet = metadataResult.value.find(s => s.title === sheetName);
-  if (!sheet) {
-    return {
-      ok: false,
-      error: new Error(`Sheet "${sheetName}" not found`),
-    };
-  }
-
-  // Update sheet properties to move it to index 0
+  // Single retry wrapper for ENTIRE operation
   return withQuotaRetry(async () => {
+    // Step 1: Get metadata (NO retry wrapper)
+    // Use cache if provided, otherwise direct call
+    const metadataResult = metadataCache
+      ? await metadataCache.get(spreadsheetId)
+      : await getSheetMetadataInternal(spreadsheetId);
+    if (!metadataResult.ok) {
+      throw metadataResult.error; // Convert to exception for retry
+    }
+
+    const sheet = metadataResult.value.find(s => s.title === sheetName);
+    if (!sheet) {
+      throw new Error(`Sheet "${sheetName}" not found`);
+    }
+
+    // Step 2: Update sheet properties to move it to index 0 (in same retry scope)
     const sheets = getSheetsService();
     await sheets.spreadsheets.batchUpdate({
       spreadsheetId,
@@ -1141,68 +1179,70 @@ export async function appendRowsWithFormatting(
   spreadsheetId: string,
   range: string,
   values: CellValue[][],
-  timeZone?: string
+  timeZone?: string,
+  metadataCache?: import('../processing/caches/index.js').MetadataCache
 ): Promise<Result<number, Error>> {
-  // Parse sheet name from range (e.g., 'Sheet1!A:Z' -> 'Sheet1')
-  const sheetName = range.split('!')[0];
-
-  // Get sheet metadata to find the sheet ID
-  const metadataResult = await getSheetMetadata(spreadsheetId);
-  if (!metadataResult.ok) {
-    return metadataResult;
-  }
-
-  const sheet = metadataResult.value.find(s => s.title === sheetName);
-  if (!sheet) {
-    return {
-      ok: false,
-      error: new Error(`Sheet not found: ${sheetName}`),
-    };
-  }
-
-  // Convert rows to Sheets API format with explicit non-bold formatting
-  const rows: sheets_v4.Schema$RowData[] = values.map(rowValues => ({
-    values: rowValues.map(value => {
-      const cellData: sheets_v4.Schema$CellData = {
-        userEnteredFormat: {
-          textFormat: {
-            bold: false,
-          },
-        },
-      };
-
-      if (value === null || value === undefined) {
-        cellData.userEnteredValue = { stringValue: '' };
-      } else if (value instanceof Date) {
-        // Convert Date to serial number for Sheets
-        // If timezone is provided, convert to that timezone first
-        const serialNumber = timeZone
-          ? dateToSerialInTimezone(value, timeZone)
-          : (value.getTime() - new Date(Date.UTC(1899, 11, 30)).getTime()) / (1000 * 60 * 60 * 24);
-        cellData.userEnteredValue = { numberValue: serialNumber };
-        cellData.userEnteredFormat!.numberFormat = {
-          type: 'DATE_TIME',
-          pattern: 'yyyy-mm-dd hh:mm:ss',
-        };
-      } else if (typeof value === 'string') {
-        // If string starts with =, it's a formula - use formulaValue instead of stringValue
-        if (value.startsWith('=')) {
-          cellData.userEnteredValue = { formulaValue: value };
-        } else {
-          cellData.userEnteredValue = { stringValue: value };
-        }
-      } else if (typeof value === 'number') {
-        cellData.userEnteredValue = { numberValue: value };
-      } else if (typeof value === 'boolean') {
-        cellData.userEnteredValue = { boolValue: value };
-      }
-
-      return cellData;
-    }),
-  }));
-
-  // Use batchUpdate with appendCells to support formatting
+  // Single retry wrapper for ENTIRE operation
   return withQuotaRetry(async () => {
+    // Parse sheet name from range (e.g., 'Sheet1!A:Z' -> 'Sheet1')
+    const sheetName = range.split('!')[0];
+
+    // Step 1: Get metadata (NO retry wrapper)
+    // Use cache if provided, otherwise direct call
+    const metadataResult = metadataCache
+      ? await metadataCache.get(spreadsheetId)
+      : await getSheetMetadataInternal(spreadsheetId);
+    if (!metadataResult.ok) {
+      throw metadataResult.error; // Convert to exception for retry
+    }
+
+    const sheet = metadataResult.value.find(s => s.title === sheetName);
+    if (!sheet) {
+      throw new Error(`Sheet not found: ${sheetName}`);
+    }
+
+    // Convert rows to Sheets API format with explicit non-bold formatting
+    const rows: sheets_v4.Schema$RowData[] = values.map(rowValues => ({
+      values: rowValues.map(value => {
+        const cellData: sheets_v4.Schema$CellData = {
+          userEnteredFormat: {
+            textFormat: {
+              bold: false,
+            },
+          },
+        };
+
+        if (value === null || value === undefined) {
+          cellData.userEnteredValue = { stringValue: '' };
+        } else if (value instanceof Date) {
+          // Convert Date to serial number for Sheets
+          // If timezone is provided, convert to that timezone first
+          const serialNumber = timeZone
+            ? dateToSerialInTimezone(value, timeZone)
+            : (value.getTime() - new Date(Date.UTC(1899, 11, 30)).getTime()) / (1000 * 60 * 60 * 24);
+          cellData.userEnteredValue = { numberValue: serialNumber };
+          cellData.userEnteredFormat!.numberFormat = {
+            type: 'DATE_TIME',
+            pattern: 'yyyy-mm-dd hh:mm:ss',
+          };
+        } else if (typeof value === 'string') {
+          // If string starts with =, it's a formula - use formulaValue instead of stringValue
+          if (value.startsWith('=')) {
+            cellData.userEnteredValue = { formulaValue: value };
+          } else {
+            cellData.userEnteredValue = { stringValue: value };
+          }
+        } else if (typeof value === 'number') {
+          cellData.userEnteredValue = { numberValue: value };
+        } else if (typeof value === 'boolean') {
+          cellData.userEnteredValue = { boolValue: value };
+        }
+
+        return cellData;
+      }),
+    }));
+
+    // Step 2: Use batchUpdate with appendCells to support formatting (in same retry scope)
     const sheets = getSheetsService();
     await sheets.spreadsheets.batchUpdate({
       spreadsheetId,
