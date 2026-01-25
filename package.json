@@ -13,7 +13,8 @@
     "test:coverage": "vitest run --coverage",
     "lint": "tsc --noEmit",
     "build:script": "node apps-script/build.js",
-    "deploy:script": "npm run build:script && cd apps-script && clasp push"
+    "deploy:script": "npm run build:script && cd apps-script && clasp push",
+    "upload:samples": "node --env-file=.env support/upload-samples.js"
   },
   "keywords": [
     "invoice",
