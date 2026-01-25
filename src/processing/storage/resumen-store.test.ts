@@ -346,7 +346,8 @@ describe('storeResumenBancario (bank accounts)', () => {
             { type: 'number', value: 15000 }, // saldoFinal as CellNumber
           ])
         ]),
-        'America/Argentina/Buenos_Aires' // Timezone parameter
+        'America/Argentina/Buenos_Aires', // Timezone parameter
+        undefined // metadataCache parameter
       );
     });
 

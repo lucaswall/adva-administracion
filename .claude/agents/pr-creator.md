@@ -6,22 +6,45 @@ model: haiku
 permissionMode: default
 ---
 
-Minimal PR creator. Branch → commit → push → PR.
+Create a complete PR from current changes: branch → commit → push → PR.
 
-Rules:
-- NEVER modify files, only git operations
-- NEVER use co-author attribution
+## Workflow
 
-Process:
-1. `git status --porcelain=v1` → if empty: `SUCCESS: Nothing to commit.` and stop
-2. `git checkout -b <branch-name>` (use type/description format: feat/, fix/, refactor/, chore/, docs/)
+1. `git status --porcelain=v1` → if empty, report "Nothing to commit" and stop
+2. `git checkout -b <branch-name>`
+   - Branch format: `<type>/<description>` (feat/, fix/, refactor/, chore/, docs/)
 3. `git add -A`
 4. `git diff --cached` → analyze changes
-5. Commit: `git commit -m "<type>: <summary>"` (imperative, <=72 chars, no period)
+5. `git commit -m "<type>: <summary>"` (imperative, ≤72 chars, no period)
 6. `git push -u origin <branch-name>`
-7. `gh pr create --title "<title>" --base main --body "<body>"`
-   - Body: ## Summary (bullets) + ## Changes (file list) + footer
+7. Create PR:
+   ```
+   gh pr create --title "<title>" --base main --body "<body>"
+   ```
+   Body structure:
+   - `## Summary` - bullet points
+   - `## Changes` - file list
+   - Footer line
 
-Output:
-- Success: `SUCCESS: PR created <url>`
-- Failure: `FAILURE: <step> failed.` + ERROR: <relevant lines>
+## Output Format
+
+**Success:**
+```
+SUCCESS: PR created <url>
+```
+
+**Nothing to commit:**
+```
+SUCCESS: Nothing to commit
+```
+
+**Failure:**
+```
+FAILURE: <step> failed
+ERROR: <relevant output>
+```
+
+## Rules
+
+- Use only git and gh commands
+- Omit co-author attribution

@@ -35,6 +35,8 @@ import { withCorrelationAsync, getCorrelationId, generateCorrelationId } from '.
 import { processFile, hasValidDate } from './extractor.js';
 import { storeFactura, storePago, storeRecibo, storeRetencion, storeResumenBancario, storeResumenTarjeta, storeResumenBroker, storeMovimientosBancario, storeMovimientosTarjeta, storeMovimientosBroker, getProcessedFileIds, markFileProcessing, updateFileStatus } from './storage/index.js';
 import { runMatching } from './matching/index.js';
+import { SortBatch, DuplicateCache, MetadataCache } from './caches/index.js';
+import { TokenUsageBatch } from '../services/token-usage-batch.js';
 
 // Re-export for backwards compatibility
 export { processFile, hasValidDate, type ProcessFileResult } from './extractor.js';
@@ -42,6 +44,16 @@ export { processFile, hasValidDate, type ProcessFileResult } from './extractor.j
 // Track files that have already been retried (to prevent infinite retries)
 // This is cleared at the end of each scan
 const retriedFileIds = new Set<string>();
+
+/**
+ * Scan context containing all caches for optimized batch operations
+ */
+export interface ScanContext {
+  sortBatch: SortBatch;
+  duplicateCache: DuplicateCache;
+  metadataCache: MetadataCache;
+  tokenBatch: TokenUsageBatch;
+}
 
 /**
  * Checks if an error is a JSON parse error (transient Gemini API issue)
@@ -109,6 +121,14 @@ export async function scanFolder(folderId?: string): Promise<Result<ScanResult, 
     const controlEgresosId = folderStructure.controlEgresosId;
     const dashboardOperativoId = folderStructure.dashboardOperativoId;
 
+    // Initialize caches for batch operations
+    const context: ScanContext = {
+      sortBatch: new SortBatch(),
+      duplicateCache: new DuplicateCache(),
+      metadataCache: new MetadataCache(),
+      tokenBatch: new TokenUsageBatch(),
+    };
+
     info('Scan configuration', {
       module: 'scanner',
       phase: 'scan-start',
@@ -119,72 +139,97 @@ export async function scanFolder(folderId?: string): Promise<Result<ScanResult, 
       correlationId,
     });
 
-    // List files in folder
-    const listResult = await listFilesInFolder(targetFolderId);
-    if (!listResult.ok) {
-      logError('Failed to list files in folder', {
+    try {
+      // Pre-load duplicate cache for all relevant sheets
+      debug('Pre-loading duplicate cache', {
         module: 'scanner',
-        phase: 'scan-start',
-        error: listResult.error.message,
+        phase: 'cache-init',
         correlationId,
       });
-      return listResult;
-    }
 
-    const allFiles = listResult.value;
-    info(`Found ${allFiles.length} total files in folder`, {
-      module: 'scanner',
-      phase: 'scan-start',
-      correlationId,
-    });
+      await Promise.all([
+        // Control de Ingresos sheets
+        context.duplicateCache.loadSheet(controlIngresosId, 'Facturas Emitidas', 'A:J'),
+        context.duplicateCache.loadSheet(controlIngresosId, 'Pagos Recibidos', 'A:H'),
+        context.duplicateCache.loadSheet(controlIngresosId, 'Retenciones Recibidas', 'A:O'),
+        // Control de Egresos sheets
+        context.duplicateCache.loadSheet(controlEgresosId, 'Facturas Recibidas', 'A:J'),
+        context.duplicateCache.loadSheet(controlEgresosId, 'Pagos Enviados', 'A:H'),
+        context.duplicateCache.loadSheet(controlEgresosId, 'Recibos', 'A:R'),
+      ]);
 
-    // Get already processed file IDs from centralized tracking sheet
-    const processedIdsResult = await getProcessedFileIds(dashboardOperativoId);
-    if (!processedIdsResult.ok) {
-      logError('Failed to get processed file IDs', {
+      info('Duplicate cache pre-loaded', {
         module: 'scanner',
-        phase: 'scan-start',
-        error: processedIdsResult.error.message,
+        phase: 'cache-init',
         correlationId,
       });
-      return processedIdsResult;
-    }
 
-    const processedIds = processedIdsResult.value;
-    info(`${processedIds.size} files already processed`, {
-      module: 'scanner',
-      phase: 'scan-start',
-      correlationId,
-    });
+      // List files in folder
+      const listResult = await listFilesInFolder(targetFolderId);
+      if (!listResult.ok) {
+        logError('Failed to list files in folder', {
+          module: 'scanner',
+          phase: 'scan-start',
+          error: listResult.error.message,
+          correlationId,
+        });
+        return listResult;
+      }
 
-    // Filter to only new files
-    const newFiles = allFiles.filter(f => !processedIds.has(f.id));
-    info(`${newFiles.length} new files to process`, {
-      module: 'scanner',
-      phase: 'scan-start',
-      correlationId,
-    });
+      const allFiles = listResult.value;
+      info(`Found ${allFiles.length} total files in folder`, {
+        module: 'scanner',
+        phase: 'scan-start',
+        correlationId,
+      });
 
-    const result: ScanResult = {
-      filesProcessed: 0,
-      facturasAdded: 0,
-      pagosAdded: 0,
-      recibosAdded: 0,
-      matchesFound: 0,
-      errors: 0,
-      duration: 0,
-    };
+      // Get already processed file IDs from centralized tracking sheet
+      const processedIdsResult = await getProcessedFileIds(dashboardOperativoId);
+      if (!processedIdsResult.ok) {
+        logError('Failed to get processed file IDs', {
+          module: 'scanner',
+          phase: 'scan-start',
+          error: processedIdsResult.error.message,
+          correlationId,
+        });
+        return processedIdsResult;
+      }
 
-    const queue = getProcessingQueue();
+      const processedIds = processedIdsResult.value;
+      info(`${processedIds.size} files already processed`, {
+        module: 'scanner',
+        phase: 'scan-start',
+        correlationId,
+      });
 
-    // Queue all files for processing (don't await individual tasks)
-    // This allows the queue to process files concurrently up to the concurrency limit
-    const processingPromises: Promise<void>[] = [];
-    // Track retry promises separately so we can wait for them after the main batch
-    const retryPromises: Promise<void>[] = [];
+      // Filter to only new files
+      const newFiles = allFiles.filter(f => !processedIds.has(f.id));
+      info(`${newFiles.length} new files to process`, {
+        module: 'scanner',
+        phase: 'scan-start',
+        correlationId,
+      });
 
-    for (const fileInfo of newFiles) {
-      const promise = queue.add(async () => {
+      const result: ScanResult = {
+        filesProcessed: 0,
+        facturasAdded: 0,
+        pagosAdded: 0,
+        recibosAdded: 0,
+        matchesFound: 0,
+        errors: 0,
+        duration: 0,
+      };
+
+      const queue = getProcessingQueue();
+
+      // Queue all files for processing (don't await individual tasks)
+      // This allows the queue to process files concurrently up to the concurrency limit
+      const processingPromises: Promise<void>[] = [];
+      // Track retry promises separately so we can wait for them after the main batch
+      const retryPromises: Promise<void>[] = [];
+
+      for (const fileInfo of newFiles) {
+        const promise = queue.add(async () => {
         // Each file gets its own correlation context that inherits from parent
         await withCorrelationAsync(async () => {
           const fileCorrelationId = getCorrelationId();
@@ -196,7 +241,7 @@ export async function scanFolder(folderId?: string): Promise<Result<ScanResult, 
             correlationId: fileCorrelationId,
           });
 
-          const processResult = await processFile(fileInfo);
+          const processResult = await processFile(fileInfo, context);
 
           if (!processResult.ok) {
             // Check if it's a JSON parse error and hasn't been retried yet
@@ -226,7 +271,7 @@ export async function scanFolder(folderId?: string): Promise<Result<ScanResult, 
                     correlationId: retryCorrelationId,
                   });
 
-                  const retryResult = await processFile(fileInfo);
+                  const retryResult = await processFile(fileInfo, context);
 
                   if (!retryResult.ok) {
                     logError('Failed to process file on retry', {
@@ -359,7 +404,8 @@ export async function scanFolder(folderId?: string): Promise<Result<ScanResult, 
                     controlEgresosId,
                     dashboardOperativoId,
                     result,
-                    retryCorrelationId
+                    retryCorrelationId,
+                    context
                   );
                 }, { correlationId: generateCorrelationId(), fileId: fileInfo.id, fileName: fileInfo.name });
               });
@@ -499,79 +545,114 @@ export async function scanFolder(folderId?: string): Promise<Result<ScanResult, 
             controlEgresosId,
             dashboardOperativoId,
             result,
-            fileCorrelationId
+            fileCorrelationId,
+            context
           );
         }, { correlationId: generateCorrelationId(), fileId: fileInfo.id, fileName: fileInfo.name });
-      });
+        });
 
-      processingPromises.push(promise);
-    }
+        processingPromises.push(promise);
+      }
 
-    // Wait for all processing to complete
-    await Promise.allSettled(processingPromises);
+      // Wait for all processing to complete
+      await Promise.allSettled(processingPromises);
 
-    // Wait for any retry attempts to complete
-    if (retryPromises.length > 0) {
-      info(`Waiting for ${retryPromises.length} retry attempt(s)`, {
-        module: 'scanner',
-        phase: 'process-retries',
-        correlationId,
-      });
-      await Promise.allSettled(retryPromises);
-    }
-
-    // Clear retry tracking for next scan
-    retriedFileIds.clear();
-
-    // Run automatic matching after processing
-    if (result.filesProcessed > 0) {
-      debug('Running automatic matching', {
-        module: 'scanner',
-        phase: 'auto-match',
-        filesProcessed: result.filesProcessed,
-        correlationId,
-      });
-
-      const matchResult = await runMatching(folderStructure, config);
-
-      if (matchResult.ok) {
-        result.matchesFound = matchResult.value;
-        info('Automatic matching complete', {
+      // Wait for any retry attempts to complete
+      if (retryPromises.length > 0) {
+        info(`Waiting for ${retryPromises.length} retry attempt(s)`, {
           module: 'scanner',
-          phase: 'auto-match',
-          matchesFound: result.matchesFound,
+          phase: 'process-retries',
           correlationId,
         });
+        await Promise.allSettled(retryPromises);
+      }
+
+      // Clear retry tracking for next scan
+      retriedFileIds.clear();
+
+      // Run automatic matching after processing
+      if (result.filesProcessed > 0) {
+        debug('Running automatic matching', {
+          module: 'scanner',
+          phase: 'auto-match',
+          filesProcessed: result.filesProcessed,
+          correlationId,
+        });
+
+        const matchResult = await runMatching(folderStructure, config);
+
+        if (matchResult.ok) {
+          result.matchesFound = matchResult.value;
+          info('Automatic matching complete', {
+            module: 'scanner',
+            phase: 'auto-match',
+            matchesFound: result.matchesFound,
+            correlationId,
+          });
+        } else {
+          // Log warning but don't fail scanFolder - matching is a best-effort operation
+          warn('Automatic matching failed', {
+            module: 'scanner',
+            phase: 'auto-match',
+            error: matchResult.error.message,
+            correlationId,
+          });
+          result.matchesFound = 0;
+        }
       } else {
-        // Log warning but don't fail scanFolder - matching is a best-effort operation
-        warn('Automatic matching failed', {
-          module: 'scanner',
-          phase: 'auto-match',
-          error: matchResult.error.message,
-          correlationId,
-        });
+        // No files processed, set matchesFound to 0
         result.matchesFound = 0;
       }
-    } else {
-      // No files processed, set matchesFound to 0
-      result.matchesFound = 0;
+
+      // Flush batched operations before calculating duration
+      debug('Flushing batched operations', {
+        module: 'scanner',
+        phase: 'flush-caches',
+        correlationId,
+      });
+
+      await context.sortBatch.flushSorts();
+      await context.tokenBatch.flush(dashboardOperativoId);
+
+      info('Batched operations flushed', {
+        module: 'scanner',
+        phase: 'flush-caches',
+        correlationId,
+      });
+
+      result.duration = Date.now() - startTime;
+
+      info('Scan complete', {
+        module: 'scanner',
+        phase: 'scan-complete',
+        duration: result.duration,
+        filesProcessed: result.filesProcessed,
+        facturasAdded: result.facturasAdded,
+        pagosAdded: result.pagosAdded,
+        recibosAdded: result.recibosAdded,
+        errors: result.errors,
+        correlationId,
+      });
+
+      return { ok: true, value: result };
+    } finally {
+      // Always clear caches to free memory
+      debug('Clearing caches', {
+        module: 'scanner',
+        phase: 'cleanup',
+        correlationId,
+      });
+
+      context.sortBatch.clear();
+      context.duplicateCache.clear();
+      context.metadataCache.clear();
+
+      info('Caches cleared', {
+        module: 'scanner',
+        phase: 'cleanup',
+        correlationId,
+      });
     }
-
-    result.duration = Date.now() - startTime;
-
-    info('Scan complete', {
-      module: 'scanner',
-      phase: 'scan-complete',
-      duration: result.duration,
-      filesProcessed: result.filesProcessed,
-      facturasAdded: result.facturasAdded,
-      pagosAdded: result.pagosAdded,
-      recibosAdded: result.recibosAdded,
-      errors: result.errors,
-      correlationId,
-    });
-
-    return { ok: true, value: result };
   }, { correlationId: generateCorrelationId() });
 }
 
@@ -586,7 +667,8 @@ async function storeAndSortDocument(
   controlEgresosId: string,
   dashboardOperativoId: string,
   result: ScanResult,
-  correlationId: string | undefined
+  correlationId: string | undefined,
+  context?: ScanContext
 ): Promise<void> {
   // Store in appropriate sheet based on document type
   // Ingresos (money IN): factura_emitida, pago_recibido -> Control de Ingresos -> Ingresos folder
@@ -604,7 +686,7 @@ async function storeAndSortDocument(
       date: (doc as Factura).fechaEmision,
       correlationId,
     });
-    const storeResult = await storeFactura(doc as Factura, controlIngresosId, 'Facturas Emitidas', 'factura_emitida');
+    const storeResult = await storeFactura(doc as Factura, controlIngresosId, 'Facturas Emitidas', 'factura_emitida', context);
     if (storeResult.ok) {
       if (storeResult.value.stored) {
         result.facturasAdded++;
@@ -732,7 +814,7 @@ async function storeAndSortDocument(
       date: (doc as Factura).fechaEmision,
       correlationId,
     });
-    const storeResult = await storeFactura(doc as Factura, controlEgresosId, 'Facturas Recibidas', 'factura_recibida');
+    const storeResult = await storeFactura(doc as Factura, controlEgresosId, 'Facturas Recibidas', 'factura_recibida', context);
     if (storeResult.ok) {
       if (storeResult.value.stored) {
         result.facturasAdded++;
@@ -860,7 +942,7 @@ async function storeAndSortDocument(
       date: (doc as Pago).fechaPago,
       correlationId,
     });
-    const storeResult = await storePago(doc as Pago, controlIngresosId, 'Pagos Recibidos', 'pago_recibido');
+    const storeResult = await storePago(doc as Pago, controlIngresosId, 'Pagos Recibidos', 'pago_recibido', context);
     if (storeResult.ok) {
       if (storeResult.value.stored) {
         result.pagosAdded++;
@@ -983,7 +1065,7 @@ async function storeAndSortDocument(
       date: (doc as Pago).fechaPago,
       correlationId,
     });
-    const storeResult = await storePago(doc as Pago, controlEgresosId, 'Pagos Enviados', 'pago_enviado');
+    const storeResult = await storePago(doc as Pago, controlEgresosId, 'Pagos Enviados', 'pago_enviado', context);
     if (storeResult.ok) {
       if (storeResult.value.stored) {
         result.pagosAdded++;
@@ -1106,7 +1188,7 @@ async function storeAndSortDocument(
       date: (doc as Recibo).fechaPago,
       correlationId,
     });
-    const storeResult = await storeRecibo(doc as Recibo, controlEgresosId);
+    const storeResult = await storeRecibo(doc as Recibo, controlEgresosId, context);
     if (storeResult.ok) {
       if (storeResult.value.stored) {
         result.recibosAdded++;
@@ -1288,7 +1370,7 @@ async function storeAndSortDocument(
         }
       } else {
         // Store the resumen
-        const storeResult = await storeResumenBancario(resumen, spreadsheetResult.value);
+        const storeResult = await storeResumenBancario(resumen, spreadsheetResult.value, context);
 
         if (storeResult.ok) {
           if (storeResult.value.stored) {
@@ -1513,7 +1595,7 @@ async function storeAndSortDocument(
         result.errors++;
       } else {
         // Store the resumen
-        const storeResult = await storeResumenTarjeta(resumen, spreadsheetResult.value);
+        const storeResult = await storeResumenTarjeta(resumen, spreadsheetResult.value, context);
 
         if (storeResult.ok) {
           if (storeResult.value.stored) {
@@ -1727,7 +1809,7 @@ async function storeAndSortDocument(
         result.errors++;
       } else {
         // Store the resumen
-        const storeResult = await storeResumenBroker(resumen, spreadsheetResult.value);
+        const storeResult = await storeResumenBroker(resumen, spreadsheetResult.value, context);
 
         if (storeResult.ok) {
           if (storeResult.value.stored) {
@@ -1884,7 +1966,7 @@ async function storeAndSortDocument(
       date: (doc as Retencion).fechaEmision,
       correlationId,
     });
-    const storeResult = await storeRetencion(doc as Retencion, controlIngresosId);
+    const storeResult = await storeRetencion(doc as Retencion, controlIngresosId, context);
     if (storeResult.ok) {
       if (storeResult.value.stored) {
         info('Retencion stored, moving to Ingresos folder', {

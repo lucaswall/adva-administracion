@@ -325,6 +325,60 @@ describe('Google Sheets API wrapper - quota retry tests', () => {
     });
   });
 
+  describe('getSheetMetadataInternal', () => {
+    it('should return metadata without retry wrapper', async () => {
+      mockSheetsApi.spreadsheets.get.mockResolvedValue({
+        data: {
+          sheets: [
+            { properties: { title: 'Sheet1', sheetId: 0, index: 0 } },
+            { properties: { title: 'Sheet2', sheetId: 1, index: 1 } },
+          ],
+        },
+      });
+
+      // Import the internal function - will need to export it
+      const { getSheetMetadataInternal } = await import('./sheets.js');
+      const result = await getSheetMetadataInternal('spreadsheet123');
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value).toEqual([
+          { title: 'Sheet1', sheetId: 0, index: 0 },
+          { title: 'Sheet2', sheetId: 1, index: 1 },
+        ]);
+      }
+      expect(mockSheetsApi.spreadsheets.get).toHaveBeenCalledTimes(1);
+    });
+
+    it('should propagate errors as Result without retrying', async () => {
+      mockSheetsApi.spreadsheets.get.mockRejectedValue(new Error('Quota exceeded'));
+
+      const { getSheetMetadataInternal } = await import('./sheets.js');
+      const result = await getSheetMetadataInternal('spreadsheet123');
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.error.message).toBe('Quota exceeded');
+      }
+      // Should NOT retry - only called once
+      expect(mockSheetsApi.spreadsheets.get).toHaveBeenCalledTimes(1);
+    });
+
+    it('should handle missing sheets gracefully', async () => {
+      mockSheetsApi.spreadsheets.get.mockResolvedValue({
+        data: {},
+      });
+
+      const { getSheetMetadataInternal } = await import('./sheets.js');
+      const result = await getSheetMetadataInternal('spreadsheet123');
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value).toEqual([]);
+      }
+    });
+  });
+
   describe('getSpreadsheetTimezone', () => {
     it('should succeed on first attempt', async () => {
       mockSheetsApi.spreadsheets.get.mockResolvedValue({
@@ -706,6 +760,60 @@ describe('Google Sheets API wrapper - quota retry tests', () => {
 
       expect(result.ok).toBe(false);
     });
+
+    it('should retry entire operation when metadata fetch fails with quota error', async () => {
+      // First call to spreadsheets.get fails, second succeeds
+      mockSheetsApi.spreadsheets.get
+        .mockRejectedValueOnce(new Error('Quota exceeded'))
+        .mockResolvedValueOnce({
+          data: {
+            sheets: [
+              { properties: { title: 'Sheet1', sheetId: 0 } },
+            ],
+          },
+        });
+      mockSheetsApi.spreadsheets.batchUpdate.mockResolvedValue({ data: {} });
+
+      const resultPromise = appendRowsWithLinks(
+        'spreadsheet123',
+        'Sheet1!A:C',
+        [[{ text: 'Link', url: 'https://example.com' }, 'B', 'C']]
+      );
+      await vi.runAllTimersAsync();
+      const result = await resultPromise;
+
+      expect(result.ok).toBe(true);
+      // Both metadata and append should have been called (retry includes both steps)
+      expect(mockSheetsApi.spreadsheets.get).toHaveBeenCalledTimes(2);
+      expect(mockSheetsApi.spreadsheets.batchUpdate).toHaveBeenCalledTimes(1);
+    });
+
+    it('should retry entire operation when append fails after successful metadata fetch', async () => {
+      // Metadata succeeds twice, but first append fails
+      mockSheetsApi.spreadsheets.get.mockResolvedValue({
+        data: {
+          sheets: [
+            { properties: { title: 'Sheet1', sheetId: 0 } },
+          ],
+        },
+      });
+      mockSheetsApi.spreadsheets.batchUpdate
+        .mockRejectedValueOnce(new Error('Quota exceeded'))
+        .mockResolvedValueOnce({ data: {} });
+
+      const resultPromise = appendRowsWithLinks(
+        'spreadsheet123',
+        'Sheet1!A:C',
+        [[{ text: 'Link', url: 'https://example.com' }, 'B', 'C']]
+      );
+      await vi.runAllTimersAsync();
+      const result = await resultPromise;
+
+      expect(result.ok).toBe(true);
+      // Metadata should be called twice (once per attempt)
+      expect(mockSheetsApi.spreadsheets.get).toHaveBeenCalledTimes(2);
+      expect(mockSheetsApi.spreadsheets.batchUpdate).toHaveBeenCalledTimes(2);
+    });
   });
 
   describe('sortSheet', () => {
@@ -766,6 +874,48 @@ describe('Google Sheets API wrapper - quota retry tests', () => {
 
       expect(result.ok).toBe(false);
     });
+
+    it('should retry entire operation when metadata fetch fails with quota error', async () => {
+      mockSheetsApi.spreadsheets.get
+        .mockRejectedValueOnce(new Error('Quota exceeded'))
+        .mockResolvedValueOnce({
+          data: {
+            sheets: [
+              { properties: { title: 'Sheet1', sheetId: 0 } },
+            ],
+          },
+        });
+      mockSheetsApi.spreadsheets.batchUpdate.mockResolvedValue({ data: {} });
+
+      const resultPromise = sortSheet('spreadsheet123', 'Sheet1', 0, true);
+      await vi.runAllTimersAsync();
+      const result = await resultPromise;
+
+      expect(result.ok).toBe(true);
+      expect(mockSheetsApi.spreadsheets.get).toHaveBeenCalledTimes(2);
+      expect(mockSheetsApi.spreadsheets.batchUpdate).toHaveBeenCalledTimes(1);
+    });
+
+    it('should retry entire operation when sort fails after successful metadata fetch', async () => {
+      mockSheetsApi.spreadsheets.get.mockResolvedValue({
+        data: {
+          sheets: [
+            { properties: { title: 'Sheet1', sheetId: 0 } },
+          ],
+        },
+      });
+      mockSheetsApi.spreadsheets.batchUpdate
+        .mockRejectedValueOnce(new Error('Quota exceeded'))
+        .mockResolvedValueOnce({ data: {} });
+
+      const resultPromise = sortSheet('spreadsheet123', 'Sheet1', 0, true);
+      await vi.runAllTimersAsync();
+      const result = await resultPromise;
+
+      expect(result.ok).toBe(true);
+      expect(mockSheetsApi.spreadsheets.get).toHaveBeenCalledTimes(2);
+      expect(mockSheetsApi.spreadsheets.batchUpdate).toHaveBeenCalledTimes(2);
+    });
   });
 
   describe('moveSheetToFirst', () => {
@@ -825,6 +975,48 @@ describe('Google Sheets API wrapper - quota retry tests', () => {
       const result = await resultPromise;
 
       expect(result.ok).toBe(false);
+    });
+
+    it('should retry entire operation when metadata fetch fails with quota error', async () => {
+      mockSheetsApi.spreadsheets.get
+        .mockRejectedValueOnce(new Error('Quota exceeded'))
+        .mockResolvedValueOnce({
+          data: {
+            sheets: [
+              { properties: { title: 'Sheet1', sheetId: 0 } },
+            ],
+          },
+        });
+      mockSheetsApi.spreadsheets.batchUpdate.mockResolvedValue({ data: {} });
+
+      const resultPromise = moveSheetToFirst('spreadsheet123', 'Sheet1');
+      await vi.runAllTimersAsync();
+      const result = await resultPromise;
+
+      expect(result.ok).toBe(true);
+      expect(mockSheetsApi.spreadsheets.get).toHaveBeenCalledTimes(2);
+      expect(mockSheetsApi.spreadsheets.batchUpdate).toHaveBeenCalledTimes(1);
+    });
+
+    it('should retry entire operation when move fails after successful metadata fetch', async () => {
+      mockSheetsApi.spreadsheets.get.mockResolvedValue({
+        data: {
+          sheets: [
+            { properties: { title: 'Sheet1', sheetId: 0 } },
+          ],
+        },
+      });
+      mockSheetsApi.spreadsheets.batchUpdate
+        .mockRejectedValueOnce(new Error('Quota exceeded'))
+        .mockResolvedValueOnce({ data: {} });
+
+      const resultPromise = moveSheetToFirst('spreadsheet123', 'Sheet1');
+      await vi.runAllTimersAsync();
+      const result = await resultPromise;
+
+      expect(result.ok).toBe(true);
+      expect(mockSheetsApi.spreadsheets.get).toHaveBeenCalledTimes(2);
+      expect(mockSheetsApi.spreadsheets.batchUpdate).toHaveBeenCalledTimes(2);
     });
   });
 
@@ -897,6 +1089,58 @@ describe('Google Sheets API wrapper - quota retry tests', () => {
       const result = await resultPromise;
 
       expect(result.ok).toBe(false);
+    });
+
+    it('should retry entire operation when metadata fetch fails with quota error', async () => {
+      // First call to spreadsheets.get fails, second succeeds
+      mockSheetsApi.spreadsheets.get
+        .mockRejectedValueOnce(new Error('Quota exceeded'))
+        .mockResolvedValueOnce({
+          data: {
+            sheets: [
+              { properties: { title: 'Sheet1', sheetId: 0 } },
+            ],
+          },
+        });
+      mockSheetsApi.spreadsheets.batchUpdate.mockResolvedValue({ data: {} });
+
+      const resultPromise = appendRowsWithFormatting(
+        'spreadsheet123',
+        'Sheet1!A:C',
+        [['A', 'B', 'C']]
+      );
+      await vi.runAllTimersAsync();
+      const result = await resultPromise;
+
+      expect(result.ok).toBe(true);
+      expect(mockSheetsApi.spreadsheets.get).toHaveBeenCalledTimes(2);
+      expect(mockSheetsApi.spreadsheets.batchUpdate).toHaveBeenCalledTimes(1);
+    });
+
+    it('should retry entire operation when append fails after successful metadata fetch', async () => {
+      // Metadata succeeds twice, but first append fails
+      mockSheetsApi.spreadsheets.get.mockResolvedValue({
+        data: {
+          sheets: [
+            { properties: { title: 'Sheet1', sheetId: 0 } },
+          ],
+        },
+      });
+      mockSheetsApi.spreadsheets.batchUpdate
+        .mockRejectedValueOnce(new Error('Quota exceeded'))
+        .mockResolvedValueOnce({ data: {} });
+
+      const resultPromise = appendRowsWithFormatting(
+        'spreadsheet123',
+        'Sheet1!A:C',
+        [['A', 'B', 'C']]
+      );
+      await vi.runAllTimersAsync();
+      const result = await resultPromise;
+
+      expect(result.ok).toBe(true);
+      expect(mockSheetsApi.spreadsheets.get).toHaveBeenCalledTimes(2);
+      expect(mockSheetsApi.spreadsheets.batchUpdate).toHaveBeenCalledTimes(2);
     });
   });
 

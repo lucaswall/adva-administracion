@@ -4,12 +4,14 @@
  */
 
 import type { Result, Factura, StoreResult } from '../../types/index.js';
+import type { ScanContext } from '../scanner.js';
 import { appendRowsWithLinks, sortSheet, getValues, getSpreadsheetTimezone, type CellValueOrLink, type CellDate } from '../../services/sheets.js';
 import { formatUSCurrency, parseNumber } from '../../utils/numbers.js';
 import { generateFacturaFileName } from '../../utils/file-naming.js';
 import { normalizeSpreadsheetDate } from '../../utils/date.js';
 import { info, warn } from '../../utils/logger.js';
 import { getCorrelationId } from '../../utils/correlation.js';
+import { withLock } from '../../utils/concurrency.js';
 
 /**
  * Checks if a factura already exists in the sheet
@@ -70,40 +72,55 @@ async function isDuplicateFactura(
  * @param spreadsheetId - The spreadsheet ID (Control de Ingresos or Control de Egresos)
  * @param sheetName - The sheet name ('Facturas Emitidas' or 'Facturas Recibidas')
  * @param documentType - The document type for filename generation
+ * @param context - Optional scan context for cache optimization
  */
 export async function storeFactura(
   factura: Factura,
   spreadsheetId: string,
   sheetName: string,
-  documentType: 'factura_emitida' | 'factura_recibida'
+  documentType: 'factura_emitida' | 'factura_recibida',
+  context?: ScanContext
 ): Promise<Result<StoreResult, Error>> {
-  // Check for duplicates
+  // Create lock key from business key (prevents concurrent identical stores)
   const counterpartyCuit = documentType === 'factura_emitida'
     ? (factura.cuitReceptor || '')
     : (factura.cuitEmisor || '');
 
-  const dupeCheck = await isDuplicateFactura(
-    spreadsheetId,
-    sheetName,
-    factura.nroFactura,
-    factura.fechaEmision,
-    factura.importeTotal,
-    counterpartyCuit
-  );
+  const lockKey = `store:factura:${factura.nroFactura}:${factura.fechaEmision}:${factura.importeTotal}:${counterpartyCuit}`;
 
-  if (dupeCheck.isDuplicate) {
-    warn('Duplicate factura detected, skipping', {
-      module: 'storage',
-      phase: 'factura',
-      nroFactura: factura.nroFactura,
-      fecha: factura.fechaEmision,
-      importe: factura.importeTotal,
-      existingFileId: dupeCheck.existingFileId,
-      newFileId: factura.fileId,
-      correlationId: getCorrelationId(),
-    });
-    return { ok: true, value: { stored: false, existingFileId: dupeCheck.existingFileId } };
-  }
+  return withLock(lockKey, async () => {
+    // Use cache if available, otherwise API
+    const dupeCheck = context?.duplicateCache
+      ? context.duplicateCache.isDuplicateFactura(
+          spreadsheetId,
+          sheetName,
+          factura.nroFactura,
+          factura.fechaEmision,
+          factura.importeTotal,
+          counterpartyCuit
+        )
+      : await isDuplicateFactura(
+          spreadsheetId,
+          sheetName,
+          factura.nroFactura,
+          factura.fechaEmision,
+          factura.importeTotal,
+          counterpartyCuit
+        );
+
+    if (dupeCheck.isDuplicate) {
+      warn('Duplicate factura detected, skipping', {
+        module: 'storage',
+        phase: 'factura',
+        nroFactura: factura.nroFactura,
+        fecha: factura.fechaEmision,
+        importe: factura.importeTotal,
+        existingFileId: dupeCheck.existingFileId,
+        newFileId: factura.fileId,
+        correlationId: getCorrelationId(),
+      });
+      return { stored: false, existingFileId: dupeCheck.existingFileId };
+    }
 
   // Calculate the renamed filename that will be used when the file is moved
   const renamedFileName = generateFacturaFileName(factura, documentType);
@@ -168,31 +185,41 @@ export async function storeFactura(
   const timezoneResult = await getSpreadsheetTimezone(spreadsheetId);
   const timeZone = timezoneResult.ok ? timezoneResult.value : undefined;
 
-  const result = await appendRowsWithLinks(spreadsheetId, range, [row], timeZone);
-  if (!result.ok) {
-    return { ok: false, error: result.error };
-  }
+    const result = await appendRowsWithLinks(spreadsheetId, range, [row], timeZone, context?.metadataCache);
+    if (!result.ok) {
+      throw result.error;
+    }
 
-  info('Factura stored successfully', {
-    module: 'storage',
-    phase: 'factura',
-    fileId: factura.fileId,
-    documentType,
-    spreadsheet: sheetName,
-    correlationId: getCorrelationId(),
-  });
+    // Update cache if available
+    context?.duplicateCache.addEntry(spreadsheetId, sheetName, factura.fileId, row);
 
-  // Sort sheet by fechaEmision (column A, index 0) in descending order (most recent first)
-  const sortResult = await sortSheet(spreadsheetId, sheetName, 0, true);
-  if (!sortResult.ok) {
-    warn(`Failed to sort sheet ${sheetName}`, {
+    info('Factura stored successfully', {
       module: 'storage',
       phase: 'factura',
-      error: sortResult.error.message,
+      fileId: factura.fileId,
+      documentType,
+      spreadsheet: sheetName,
       correlationId: getCorrelationId(),
     });
-    // Don't fail the operation if sorting fails
-  }
 
-  return { ok: true, value: { stored: true } };
+    // Defer sort if context available, otherwise sort immediately
+    if (context) {
+      // Sort sheet by fechaEmision (column A, index 0) in descending order (most recent first)
+      context.sortBatch.addPendingSort(spreadsheetId, sheetName, 0, true);
+    } else {
+      // Sort sheet by fechaEmision (column A, index 0) in descending order (most recent first)
+      const sortResult = await sortSheet(spreadsheetId, sheetName, 0, true);
+      if (!sortResult.ok) {
+        warn(`Failed to sort sheet ${sheetName}`, {
+          module: 'storage',
+          phase: 'factura',
+          error: sortResult.error.message,
+          correlationId: getCorrelationId(),
+        });
+        // Don't fail the operation if sorting fails
+      }
+    }
+
+    return { stored: true };
+  }, 10000); // 10 second timeout for lock
 }

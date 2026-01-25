@@ -6,6 +6,7 @@ import { getValues, appendRowsWithLinks, batchUpdate, getSpreadsheetTimezone } f
 import type { Result, DocumentType } from '../../types/index.js';
 import { info as logInfo, error as logError } from '../../utils/logger.js';
 import { getCorrelationId } from '../../utils/correlation.js';
+import { withQuotaRetry } from '../../utils/concurrency.js';
 
 /**
  * In-memory cache for file row indexes
@@ -42,40 +43,43 @@ export async function markFileProcessing(
   fileName: string,
   documentType: DocumentType
 ): Promise<Result<void, Error>> {
-  const correlationId = getCorrelationId();
-  const processedAt = new Date().toISOString();
+  return withQuotaRetry(async () => {
+    const correlationId = getCorrelationId();
+    const processedAt = new Date().toISOString();
 
-  // Get spreadsheet timezone for proper timestamp formatting
-  const timezoneResult = await getSpreadsheetTimezone(dashboardId);
-  const timeZone = timezoneResult.ok ? timezoneResult.value : undefined;
+    // Get spreadsheet timezone for proper timestamp formatting
+    const timezoneResult = await getSpreadsheetTimezone(dashboardId);
+    const timeZone = timezoneResult.ok ? timezoneResult.value : undefined;
 
-  const result = await appendRowsWithLinks(
-    dashboardId,
-    'Archivos Procesados',
-    [[fileId, fileName, processedAt, documentType, 'processing']],
-    timeZone
-  );
+    const result = await appendRowsWithLinks(
+      dashboardId,
+      'Archivos Procesados',
+      [[fileId, fileName, processedAt, documentType, 'processing']],
+      timeZone
+    );
 
-  if (!result.ok) {
-    logError('Failed to mark file as processing', {
+    if (!result.ok) {
+      logError('Failed to mark file as processing', {
+        module: 'storage',
+        fileId,
+        fileName,
+        error: result.error.message,
+        correlationId,
+      });
+      throw result.error;
+    }
+
+    logInfo('Marked file as processing', {
       module: 'storage',
       fileId,
       fileName,
-      error: result.error.message,
+      documentType,
       correlationId,
     });
-    return { ok: false, error: result.error };
-  }
-
-  logInfo('Marked file as processing', {
-    module: 'storage',
-    fileId,
-    fileName,
-    documentType,
-    correlationId,
+  }).then(result => {
+    if (!result.ok) return { ok: false, error: result.error };
+    return { ok: true, value: undefined };
   });
-
-  return { ok: true, value: undefined };
 }
 
 /**

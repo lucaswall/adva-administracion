@@ -48,6 +48,24 @@ const createTestFactura = (overrides: Partial<Factura> = {}): Factura => ({
   ...overrides,
 });
 
+// Mock concurrency module
+vi.mock('../../utils/concurrency.js', async (importOriginal) => {
+  const actual = await importOriginal() as object;
+  return {
+    ...actual,
+    withLock: vi.fn(async (_key: string, fn: () => Promise<unknown>) => {
+      try {
+        const result = await fn();
+        return { ok: true, value: result };
+      } catch (error) {
+        return { ok: false, error: error instanceof Error ? error : new Error(String(error)) };
+      }
+    }),
+  };
+});
+
+import { withLock } from '../../utils/concurrency.js';
+
 describe('storeFactura', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -289,6 +307,40 @@ describe('storeFactura', () => {
       expect(result.ok).toBe(true);
       if (result.ok) {
         expect(result.value.stored).toBe(false); // Should detect duplicate
+      }
+    });
+  });
+
+  describe('TOCTOU race condition protection', () => {
+    it('uses locking to prevent concurrent stores of identical factura', async () => {
+      vi.mocked(getValues).mockResolvedValue({ ok: true, value: [['Header']] });
+      vi.mocked(appendRowsWithLinks).mockResolvedValue({ ok: true, value: 18 });
+      vi.mocked(sortSheet).mockResolvedValue({ ok: true, value: undefined });
+
+      const factura = createTestFactura();
+      await storeFactura(factura, 'spreadsheet-id', 'Facturas Emitidas', 'factura_emitida');
+
+      // Verify withLock was called with appropriate lock key
+      expect(vi.mocked(withLock)).toHaveBeenCalledWith(
+        expect.stringContaining('store:factura:0001-00001234:2025-01-15:1210:30709076783'),
+        expect.any(Function),
+        10000
+      );
+    });
+
+    it('returns error on lock timeout', async () => {
+      // Mock withLock to return timeout error
+      vi.mocked(withLock).mockResolvedValueOnce({
+        ok: false,
+        error: new Error('Failed to acquire lock within 10000ms'),
+      });
+
+      const factura = createTestFactura();
+      const result = await storeFactura(factura, 'spreadsheet-id', 'Facturas Emitidas', 'factura_emitida');
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.error.message).toContain('Failed to acquire lock');
       }
     });
   });

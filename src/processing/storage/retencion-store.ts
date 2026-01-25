@@ -4,11 +4,13 @@
  */
 
 import type { Result, Retencion } from '../../types/index.js';
+import type { ScanContext } from '../scanner.js';
 import { appendRowsWithLinks, sortSheet, getSpreadsheetTimezone, getValues, type CellValueOrLink, type CellDate } from '../../services/sheets.js';
 import { formatUSCurrency, parseNumber } from '../../utils/numbers.js';
 import { normalizeSpreadsheetDate } from '../../utils/date.js';
 import { info, warn } from '../../utils/logger.js';
 import { getCorrelationId } from '../../utils/correlation.js';
+import { withLock } from '../../utils/concurrency.js';
 
 /**
  * Duplicate key: (nroCertificado, cuitAgenteRetencion, fechaEmision, montoRetencion)
@@ -61,75 +63,94 @@ async function isDuplicateRetencion(
  *
  * @param retencion - The retencion to store
  * @param spreadsheetId - The Control de Ingresos spreadsheet ID
+ * @param context - Optional scan context for cache optimization
  */
 export async function storeRetencion(
   retencion: Retencion,
-  spreadsheetId: string
+  spreadsheetId: string,
+  context?: ScanContext
 ): Promise<Result<{ stored: boolean; existingFileId?: string }, Error>> {
-  const sheetName = 'Retenciones Recibidas';
-  const correlationId = getCorrelationId();
+  // Create lock key from business key (prevents concurrent identical stores)
+  const lockKey = `store:retencion:${retencion.nroCertificado}:${retencion.cuitAgenteRetencion}:${retencion.fechaEmision}:${retencion.montoRetencion}`;
 
-  // Check for duplicates
-  const dupeCheck = await isDuplicateRetencion(
-    spreadsheetId,
-    retencion.nroCertificado,
-    retencion.cuitAgenteRetencion,
-    retencion.fechaEmision,
-    retencion.montoRetencion
-  );
+  return withLock(lockKey, async () => {
+    const sheetName = 'Retenciones Recibidas';
+    const correlationId = getCorrelationId();
 
-  if (dupeCheck.isDuplicate) {
-    warn('Duplicate retencion detected, skipping', {
+    // Use cache if available, otherwise API
+    const dupeCheck = context?.duplicateCache
+      ? context.duplicateCache.isDuplicateRetencion(
+          spreadsheetId,
+          retencion.nroCertificado,
+          retencion.cuitAgenteRetencion,
+          retencion.fechaEmision,
+          retencion.montoRetencion
+        )
+      : await isDuplicateRetencion(
+          spreadsheetId,
+          retencion.nroCertificado,
+          retencion.cuitAgenteRetencion,
+          retencion.fechaEmision,
+          retencion.montoRetencion
+        );
+
+    if (dupeCheck.isDuplicate) {
+      warn('Duplicate retencion detected, skipping', {
+        module: 'retencion-store',
+        phase: 'store',
+        fileId: retencion.fileId,
+        nroCertificado: retencion.nroCertificado,
+        existingFileId: dupeCheck.existingFileId,
+        correlationId,
+      });
+      return { stored: false, existingFileId: dupeCheck.existingFileId };
+    }
+
+    // Create CellDate for proper date formatting
+    const fechaEmisionDate: CellDate = { type: 'date', value: retencion.fechaEmision };
+
+    // Build row (columns A:O)
+    const row: CellValueOrLink[] = [
+      fechaEmisionDate,                          // A - proper date cell
+      retencion.fileId,                          // B
+      { text: retencion.fileName, url: `https://drive.google.com/file/d/${retencion.fileId}/view` }, // C
+      retencion.nroCertificado,                  // D
+      retencion.cuitAgenteRetencion,             // E
+      retencion.razonSocialAgenteRetencion,      // F
+      retencion.impuesto,                        // G
+      retencion.regimen,                         // H
+      formatUSCurrency(retencion.montoComprobante), // I
+      formatUSCurrency(retencion.montoRetencion),   // J
+      retencion.processedAt,                     // K
+      retencion.confidence,                      // L
+      retencion.needsReview ? 'YES' : 'NO',      // M
+      retencion.matchedFacturaFileId || '',      // N
+      retencion.matchConfidence || '',           // O
+    ];
+
+    const range = `${sheetName}!A:O`;
+
+    info('Storing retencion', {
       module: 'retencion-store',
       phase: 'store',
+      correlationId,
       fileId: retencion.fileId,
       nroCertificado: retencion.nroCertificado,
-      existingFileId: dupeCheck.existingFileId,
-      correlationId,
+      spreadsheetId,
+      sheetName
     });
-    return { ok: true, value: { stored: false, existingFileId: dupeCheck.existingFileId } };
-  }
 
-  // Create CellDate for proper date formatting
-  const fechaEmisionDate: CellDate = { type: 'date', value: retencion.fechaEmision };
-
-  // Build row (columns A:O)
-  const row: CellValueOrLink[] = [
-    fechaEmisionDate,                          // A - proper date cell
-    retencion.fileId,                          // B
-    { text: retencion.fileName, url: `https://drive.google.com/file/d/${retencion.fileId}/view` }, // C
-    retencion.nroCertificado,                  // D
-    retencion.cuitAgenteRetencion,             // E
-    retencion.razonSocialAgenteRetencion,      // F
-    retencion.impuesto,                        // G
-    retencion.regimen,                         // H
-    formatUSCurrency(retencion.montoComprobante), // I
-    formatUSCurrency(retencion.montoRetencion),   // J
-    retencion.processedAt,                     // K
-    retencion.confidence,                      // L
-    retencion.needsReview ? 'YES' : 'NO',      // M
-    retencion.matchedFacturaFileId || '',      // N
-    retencion.matchConfidence || '',           // O
-  ];
-
-  const range = `${sheetName}!A:O`;
-
-  info('Storing retencion', {
-    module: 'retencion-store',
-    phase: 'store',
-    correlationId,
-    fileId: retencion.fileId,
-    nroCertificado: retencion.nroCertificado,
-    spreadsheetId,
-    sheetName
-  });
-
-  try {
     // Get spreadsheet timezone for proper timestamp formatting
     const timezoneResult = await getSpreadsheetTimezone(spreadsheetId);
     const timeZone = timezoneResult.ok ? timezoneResult.value : undefined;
 
-    await appendRowsWithLinks(spreadsheetId, range, [row], timeZone);
+    const appendResult = await appendRowsWithLinks(spreadsheetId, range, [row], timeZone, context?.metadataCache);
+    if (!appendResult.ok) {
+      throw appendResult.error;
+    }
+
+    // Update cache if available
+    context?.duplicateCache.addEntry(spreadsheetId, sheetName, retencion.fileId, row);
 
     info('Retencion stored successfully', {
       module: 'retencion-store',
@@ -139,14 +160,24 @@ export async function storeRetencion(
       nroCertificado: retencion.nroCertificado
     });
 
-    // Sort sheet by fechaEmision (column A) in descending order
-    await sortSheet(spreadsheetId, sheetName, 0, true);
+    // Defer sort if context available, otherwise sort immediately
+    if (context) {
+      // Sort sheet by fechaEmision (column A) in descending order
+      context.sortBatch.addPendingSort(spreadsheetId, sheetName, 0, true);
+    } else {
+      // Sort sheet by fechaEmision (column A) in descending order
+      const sortResult = await sortSheet(spreadsheetId, sheetName, 0, true);
+      if (!sortResult.ok) {
+        warn(`Failed to sort sheet ${sheetName}`, {
+          module: 'retencion-store',
+          phase: 'store',
+          error: sortResult.error.message,
+          correlationId: getCorrelationId(),
+        });
+        // Don't fail the operation if sorting fails
+      }
+    }
 
-    return { ok: true, value: { stored: true } };
-  } catch (error) {
-    return {
-      ok: false,
-      error: error instanceof Error ? error : new Error(String(error))
-    };
-  }
+    return { stored: true };
+  }, 10000); // 10 second timeout for lock
 }
