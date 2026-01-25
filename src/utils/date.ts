@@ -118,3 +118,42 @@ export function toDateString(value: unknown): string {
   // Fallback to String conversion
   return String(value);
 }
+
+/**
+ * Converts a Google Sheets serial number to date string (YYYY-MM-DD)
+ *
+ * Google Sheets uses December 30, 1899 as day 0 (epoch).
+ * This is useful when reading dates from spreadsheets with
+ * `valueRenderOption: 'UNFORMATTED_VALUE'` and `dateTimeRenderOption: 'SERIAL_NUMBER'`
+ *
+ * @param serial - Google Sheets serial number
+ * @returns ISO date string (YYYY-MM-DD)
+ *
+ * @example
+ * serialToDateString(45993) // Returns '2025-12-23'
+ */
+export function serialToDateString(serial: number): string {
+  const epoch = new Date(Date.UTC(1899, 11, 30));
+  const date = new Date(epoch.getTime() + serial * 24 * 60 * 60 * 1000);
+  const year = date.getUTCFullYear();
+  const month = String(date.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(date.getUTCDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+/**
+ * Normalizes a spreadsheet date value to a date string
+ *
+ * Handles both serial numbers (from UNFORMATTED_VALUE reads) and
+ * existing date strings. Use this for duplicate detection when
+ * comparing dates read from spreadsheets.
+ *
+ * @param value - Cell value (serial number or date string)
+ * @returns ISO date string (YYYY-MM-DD)
+ */
+export function normalizeSpreadsheetDate(value: unknown): string {
+  if (typeof value === 'number') {
+    return serialToDateString(value);
+  }
+  return String(value ?? '');
+}

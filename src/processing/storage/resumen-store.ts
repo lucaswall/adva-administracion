@@ -6,6 +6,7 @@
 import type { Result, ResumenBancario, ResumenTarjeta, ResumenBroker, StoreResult } from '../../types/index.js';
 import { appendRowsWithLinks, sortSheet, getValues, getSpreadsheetTimezone, type CellValueOrLink, type CellDate, type CellNumber } from '../../services/sheets.js';
 import { generateResumenFileName, generateResumenTarjetaFileName, generateResumenBrokerFileName } from '../../utils/file-naming.js';
+import { normalizeSpreadsheetDate } from '../../utils/date.js';
 import { info, warn } from '../../utils/logger.js';
 import { getCorrelationId } from '../../utils/correlation.js';
 
@@ -39,13 +40,9 @@ async function isDuplicateResumenBancario(
     const rowNumeroCuenta = row[5];
     const rowMoneda = row[6];
 
-    // Convert serial numbers to date strings for comparison (if needed)
-    const rowFechaDesdeStr = typeof rowFechaDesde === 'number'
-      ? serialToDateString(rowFechaDesde)
-      : String(rowFechaDesde);
-    const rowFechaHastaStr = typeof rowFechaHasta === 'number'
-      ? serialToDateString(rowFechaHasta)
-      : String(rowFechaHasta);
+    // Convert serial numbers to date strings for comparison
+    const rowFechaDesdeStr = normalizeSpreadsheetDate(rowFechaDesde);
+    const rowFechaHastaStr = normalizeSpreadsheetDate(rowFechaHasta);
 
     // Match on all 5 fields
     if (rowBanco === resumen.banco &&
@@ -85,12 +82,8 @@ async function isDuplicateResumenTarjeta(
     const rowNumeroCuenta = row[5];
     const rowTipoTarjeta = row[6];
 
-    const rowFechaDesdeStr = typeof rowFechaDesde === 'number'
-      ? serialToDateString(rowFechaDesde)
-      : String(rowFechaDesde);
-    const rowFechaHastaStr = typeof rowFechaHasta === 'number'
-      ? serialToDateString(rowFechaHasta)
-      : String(rowFechaHasta);
+    const rowFechaDesdeStr = normalizeSpreadsheetDate(rowFechaDesde);
+    const rowFechaHastaStr = normalizeSpreadsheetDate(rowFechaHasta);
 
     if (rowBanco === resumen.banco &&
         rowFechaDesdeStr === resumen.fechaDesde &&
@@ -128,12 +121,8 @@ async function isDuplicateResumenBroker(
     const rowBroker = row[4];
     const rowNumeroCuenta = row[5];
 
-    const rowFechaDesdeStr = typeof rowFechaDesde === 'number'
-      ? serialToDateString(rowFechaDesde)
-      : String(rowFechaDesde);
-    const rowFechaHastaStr = typeof rowFechaHasta === 'number'
-      ? serialToDateString(rowFechaHasta)
-      : String(rowFechaHasta);
+    const rowFechaDesdeStr = normalizeSpreadsheetDate(rowFechaDesde);
+    const rowFechaHastaStr = normalizeSpreadsheetDate(rowFechaHasta);
 
     if (rowBroker === resumen.broker &&
         rowFechaDesdeStr === resumen.fechaDesde &&
@@ -143,19 +132,6 @@ async function isDuplicateResumenBroker(
     }
   }
   return { isDuplicate: false };
-}
-
-/**
- * Converts a Google Sheets serial number to date string (yyyy-mm-dd)
- * Google Sheets uses December 30, 1899 as day 0 (epoch)
- */
-function serialToDateString(serial: number): string {
-  const epoch = new Date(Date.UTC(1899, 11, 30));
-  const date = new Date(epoch.getTime() + serial * 24 * 60 * 60 * 1000);
-  const year = date.getUTCFullYear();
-  const month = String(date.getUTCMonth() + 1).padStart(2, '0');
-  const day = String(date.getUTCDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
 }
 
 /**

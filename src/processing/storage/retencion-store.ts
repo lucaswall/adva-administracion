@@ -6,6 +6,7 @@
 import type { Result, Retencion } from '../../types/index.js';
 import { appendRowsWithLinks, sortSheet, getSpreadsheetTimezone, getValues, type CellValueOrLink, type CellDate } from '../../services/sheets.js';
 import { formatUSCurrency, parseNumber } from '../../utils/numbers.js';
+import { normalizeSpreadsheetDate } from '../../utils/date.js';
 import { info, warn } from '../../utils/logger.js';
 import { getCorrelationId } from '../../utils/correlation.js';
 
@@ -32,11 +33,14 @@ async function isDuplicateRetencion(
     const row = rowsResult.value[i];
     if (!row || row.length < 10) continue;
 
-    const rowFechaEmision = row[0];     // Column A: fechaEmision
+    const rowFechaEmisionRaw = row[0];  // Column A: fechaEmision (serial number or string)
     const rowFileId = row[1];           // Column B: fileId
     const rowNroCertificado = row[3];   // Column D: nroCertificado
     const rowCuitAgente = row[4];       // Column E: cuitAgenteRetencion
     const rowMontoRetencionStr = row[9];// Column J: montoRetencion
+
+    // Convert serial number to date string for comparison
+    const rowFechaEmision = normalizeSpreadsheetDate(rowFechaEmisionRaw);
 
     // Parse the Argentine-formatted number
     const rowMontoRetencion = parseNumber(rowMontoRetencionStr) ?? 0;

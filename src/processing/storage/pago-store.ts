@@ -7,6 +7,7 @@ import type { Result, Pago, StoreResult } from '../../types/index.js';
 import { appendRowsWithLinks, sortSheet, getValues, getSpreadsheetTimezone, type CellValueOrLink, type CellDate } from '../../services/sheets.js';
 import { formatUSCurrency, parseNumber } from '../../utils/numbers.js';
 import { generatePagoFileName } from '../../utils/file-naming.js';
+import { normalizeSpreadsheetDate } from '../../utils/date.js';
 import { info, warn } from '../../utils/logger.js';
 import { getCorrelationId } from '../../utils/correlation.js';
 
@@ -37,10 +38,13 @@ async function isDuplicatePago(
     const row = rowsResult.value[i];
     if (!row || row.length < 8) continue;
 
-    const rowFecha = row[0];        // Column A: fechaPago
+    const rowFechaRaw = row[0];     // Column A: fechaPago (serial number or string)
     const rowFileId = row[1];       // Column B: fileId
     const rowImporteStr = row[4];   // Column E: importePagado
     const rowCuit = row[7];         // Column H: cuitBeneficiario/cuitPagador
+
+    // Convert serial number to date string for comparison
+    const rowFecha = normalizeSpreadsheetDate(rowFechaRaw);
 
     // Parse the Argentine-formatted number
     const rowImporte = parseNumber(rowImporteStr) ?? 0;
