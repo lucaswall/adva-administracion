@@ -323,7 +323,7 @@ export class GeminiClient {
       generationConfig: {
         temperature: 0.1, // Low temperature for factual extraction
         topP: 0.8,
-        maxOutputTokens: 8192 // Increased from 2048 to prevent truncation of verbose responses
+        maxOutputTokens: 32768 // Gemini 2.5 Flash supports up to 65536, using 32768 for large bank statements with 100+ transactions
       }
     };
   }
