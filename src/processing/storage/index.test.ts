@@ -10,6 +10,7 @@ vi.mock('../../services/sheets.js', () => ({
   appendRowsWithLinks: vi.fn(),
   getValues: vi.fn(),
   batchUpdate: vi.fn(),
+  getSpreadsheetTimezone: vi.fn(() => Promise.resolve({ ok: true, value: 'America/Argentina/Buenos_Aires' })),
 }));
 
 vi.mock('../../utils/logger.js', () => ({
@@ -23,7 +24,7 @@ vi.mock('../../utils/correlation.js', () => ({
   getCorrelationId: () => 'test-correlation-id',
 }));
 
-import { appendRowsWithLinks, getValues, batchUpdate } from '../../services/sheets.js';
+import { appendRowsWithLinks, getValues, batchUpdate, getSpreadsheetTimezone } from '../../services/sheets.js';
 
 describe('File Tracking Functions', () => {
   beforeEach(() => {
@@ -57,7 +58,47 @@ describe('File Tracking Functions', () => {
             'factura_emitida',
             'processing',
           ],
-        ]
+        ],
+        'America/Argentina/Buenos_Aires' // timezone
+      );
+    });
+
+    it('fetches spreadsheet timezone for proper timestamp formatting', async () => {
+      vi.mocked(appendRowsWithLinks).mockResolvedValue({ ok: true, value: 1 });
+      vi.mocked(getSpreadsheetTimezone).mockResolvedValue({ ok: true, value: 'America/Argentina/Buenos_Aires' });
+
+      await markFileProcessing(
+        'dashboard-id',
+        'test-file-id',
+        'test-document.pdf',
+        'factura_emitida'
+      );
+
+      expect(getSpreadsheetTimezone).toHaveBeenCalledWith('dashboard-id');
+      expect(appendRowsWithLinks).toHaveBeenCalledWith(
+        'dashboard-id',
+        'Archivos Procesados',
+        expect.any(Array),
+        'America/Argentina/Buenos_Aires'
+      );
+    });
+
+    it('handles timezone fetch failure gracefully by passing undefined', async () => {
+      vi.mocked(appendRowsWithLinks).mockResolvedValue({ ok: true, value: 1 });
+      vi.mocked(getSpreadsheetTimezone).mockResolvedValue({ ok: false, error: new Error('Timezone fetch failed') });
+
+      await markFileProcessing(
+        'dashboard-id',
+        'test-file-id',
+        'test-document.pdf',
+        'factura_emitida'
+      );
+
+      expect(appendRowsWithLinks).toHaveBeenCalledWith(
+        'dashboard-id',
+        'Archivos Procesados',
+        expect.any(Array),
+        undefined // Falls back to undefined on timezone fetch error
       );
     });
 
