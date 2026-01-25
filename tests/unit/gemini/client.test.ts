@@ -540,7 +540,7 @@ describe('GeminiClient', () => {
       expect(parsedBody.generationConfig).toEqual({
         temperature: 0.1,
         topP: 0.8,
-        maxOutputTokens: 32768
+        maxOutputTokens: 65536
       });
     });
   });
