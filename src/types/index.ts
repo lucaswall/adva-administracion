@@ -306,6 +306,8 @@ export interface ResumenBancario {
   // Summary
   /** Number of movements in the period */
   cantidadMovimientos: number;
+  /** Array of individual transactions (optional, extracted when available) */
+  movimientos?: MovimientoBancario[];
 
   // Processing metadata
   /** When this record was processed (ISO timestamp) */
@@ -374,6 +376,8 @@ export interface ResumenTarjeta {
   // Summary
   /** Number of movements in the period */
   cantidadMovimientos: number;
+  /** Array of individual transactions (optional, extracted when available) */
+  movimientos?: MovimientoTarjeta[];
 
   // Processing metadata
   /** When this record was processed (ISO timestamp) */
@@ -450,6 +454,8 @@ export interface ResumenBroker {
   // Summary
   /** Number of movements in the period */
   cantidadMovimientos: number;
+  /** Array of individual transactions (optional, extracted when available) */
+  movimientos?: MovimientoBroker[];
 
   // Processing metadata
   /** When this record was processed (ISO timestamp) */
