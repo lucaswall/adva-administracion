@@ -1,8 +1,7 @@
 import { google } from 'googleapis';
-import { writeFile, mkdir } from 'fs/promises';
-import { join } from 'path';
-import { tmpdir } from 'os';
+import { writeFile } from 'fs/promises';
 import { GDriveGetPdfInput, ToolResponse } from './types.js';
+import { ensureCacheDir, getCachedFilePath, generateCacheFilePath } from '../cache.js';
 
 export const schema = {
   name: 'gdrive_get_pdf',
@@ -21,6 +20,23 @@ export const schema = {
 
 export async function getPdf(args: GDriveGetPdfInput): Promise<ToolResponse> {
   try {
+    // Ensure cache directory exists
+    await ensureCacheDir();
+
+    // Check if file is already cached
+    const cachedPath = await getCachedFilePath(args.fileId);
+    if (cachedPath) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `PDF file retrieved from cache.\n\nPath: ${cachedPath}\n\nYou can now read this PDF using the Read tool with the path above.`,
+          },
+        ],
+        isError: false,
+      };
+    }
+
     const drive = google.drive('v3');
 
     // Get file metadata
@@ -64,26 +80,18 @@ export async function getPdf(args: GDriveGetPdfInput): Promise<ToolResponse> {
       };
     }
 
-    // Save PDF to temporary directory
+    // Save PDF to persistent cache directory
     const sizeKB = (pdfContent.length / 1024).toFixed(2);
-    const tempDir = join(tmpdir(), 'mcp-gdrive-pdfs');
-
-    // Ensure temp directory exists
-    await mkdir(tempDir, { recursive: true });
-
-    // Create a safe filename (sanitize the original name)
-    const sanitizedFileName = fileName.replace(/[^a-zA-Z0-9._-]/g, '_');
-    const timestamp = Date.now();
-    const tempFilePath = join(tempDir, `${timestamp}_${sanitizedFileName}.pdf`);
+    const cacheFilePath = generateCacheFilePath(args.fileId, fileName);
 
     // Write PDF to disk
-    await writeFile(tempFilePath, pdfContent);
+    await writeFile(cacheFilePath, pdfContent);
 
     return {
       content: [
         {
           type: 'text',
-          text: `PDF file saved successfully.\n\nFile: ${fileName}\nSize: ${sizeKB} KB\nPath: ${tempFilePath}\n\nYou can now read this PDF using the Read tool with the path above.`,
+          text: `PDF file downloaded and cached successfully.\n\nFile: ${fileName}\nSize: ${sizeKB} KB\nPath: ${cacheFilePath}\n\nYou can now read this PDF using the Read tool with the path above. This file will be cached for ${5} days.`,
         },
       ],
       isError: false,

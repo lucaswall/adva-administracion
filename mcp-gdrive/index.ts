@@ -22,6 +22,7 @@ import {
 
 import { initializeGoogleApis } from './auth.js';
 import { tools } from './tools/index.js';
+import { cleanupOldCache } from './cache.js';
 
 // Initialize server
 const server = new Server(
@@ -71,6 +72,9 @@ async function main() {
     // Initialize Google APIs with service account auth
     initializeGoogleApis();
     console.error('Google APIs initialized with service account');
+
+    // Clean up old cached PDFs (older than 5 days)
+    await cleanupOldCache();
 
     // Connect to stdio transport
     const transport = new StdioServerTransport();
