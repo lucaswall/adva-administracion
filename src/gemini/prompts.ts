@@ -346,34 +346,46 @@ Required fields:
     - Santander: "Nro. Cuenta: 123-456789/0" → extract "123-456789/0"
   - Look for labels like "Cta.", "CUENTA", "CC $", "CA $", "Nro. Cuenta"
   - The CBU is usually labeled separately as "CBU" - ignore it
-- fechaDesde, fechaHasta: YYYY-MM-DD (statement period)
-- saldoInicial, saldoFinal: Numbers (may be labeled "Saldo Inicial", "Saldo Final", "Saldo Anterior", "Saldo al")
+- fechaDesde: YYYY-MM-DD - The date of the FIRST transaction in the FECHA column
+- fechaHasta: YYYY-MM-DD - The date from the "SALDO AL" closing line
+- saldoInicial: The "SALDO ANTERIOR" amount (balance before first transaction)
+- saldoFinal: The "SALDO AL" amount (closing balance)
 - moneda: ARS or USD (look for "u$s", "USD", "U$S" for USD)
 - cantidadMovimientos: Count of transactions (0 if "SIN MOVIMIENTOS")
 
-DATE EXTRACTION (CRITICAL - THREE-TIER APPROACH):
+CRITICAL DATE EXTRACTION RULES:
 
-TIER 1 - CLEAR LABELS (always try this first):
-Look for explicit resumen period labels with years:
-- Period headers: "del 1/7/2025 al 31/7/2025" or "del: 01/11/2025 al: 30/11/2025"
-- Month-Year headers: "DICIEMBRE 2025", "NOVIEMBRE 2025"
-- Closing dates with year: "SALDO AL 28/11/2025"
-If you find ANY of these, use the year from the document directly.
+1. fechaDesde = Date of the FIRST transaction in the movement table
+   - Look at the FECHA column in "Movimientos en cuentas" section
+   - Find the very first date listed AFTER "SALDO ANTERIOR"
+   - Example: If first transaction row shows "31/03" → fechaDesde is that date
+   - DO NOT use the first day of the month - use the ACTUAL first transaction date
 
-TIER 2 - TRANSACTION DATES (if no clear period label with year):
-Infer year from transaction dates in the document:
-- Full dates: DD/MM/YYYY (01/12/2025), D/M/YYYY (1/7/2025)
-- Short year dates: DD/MM/YY (01/12/25) → 25 = 2025
+2. fechaHasta = Date from the "SALDO AL" closing line
+   - Look for text like "SALDO AL 30 DE ABRIL" or "SALDO AL 31 DE MARZO"
+   - Extract this date exactly as stated
+   - Example: "SALDO AL 30 DE ABRIL" → fechaHasta is April 30
+
+3. For "SIN MOVIMIENTOS" statements (no transactions):
+   - fechaDesde: Use first day of the month from "SALDO AL" text
+   - fechaHasta: Use the "SALDO AL" date
+
+YEAR INFERENCE (when only DD/MM is shown):
+
+TIER 1 - Look for explicit years in document:
+- Barcode contains YYYYMMDD (e.g., "110074769202505052DIGITAL" → 20250505)
+- "información al:" dates (e.g., "información al: 01/04/2025")
+- Tax sections: "MARZO 2025", "ABRIL 2025"
+- Full dates: DD/MM/YYYY anywhere in document
+
+TIER 2 - Transaction dates with years:
 - Tax lines: "IMP.LEY 25413 01/12/25" → year is 2025
-Use the most common year found in transactions.
+- Short year format: DD/MM/YY where YY = 20YY
 
-TIER 3 - DYNAMIC INFERENCE (only for statements without explicit years):
-ONLY use this if the document has NO year information (e.g., "SIN MOVIMIENTOS" statements):
-- Use the "SALDO AL" text for day and month (e.g., "SALDO AL 30 DE DICIEMBRE")
+TIER 3 - Dynamic inference (only if NO year found):
 - Current date: ${dateInfo}
 - If document month > current month → use previous year
 - If document month <= current month → use current year
-Example: If current date is January and document shows "SALDO AL 30 DE DICIEMBRE", December > January, so use previous year.
 
 NUMBER FORMAT: "2.917.310,00" = 2917310.00
 
@@ -399,7 +411,7 @@ Return ONLY valid JSON:
 {
   "banco": "BBVA",
   "numeroCuenta": "007-009364/1",
-  "fechaDesde": "2024-01-01",
+  "fechaDesde": "2024-01-02",
   "fechaHasta": "2024-01-31",
   "saldoInicial": 150000.00,
   "saldoFinal": 185000.00,

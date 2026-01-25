@@ -49,7 +49,8 @@
       "mcp__Railway__list-variables",
       "WebFetch(domain:issuetracker.google.com)",
       "WebFetch(domain:medium.com)",
-      "Bash(pdftotext:*)"
+      "Bash(pdftotext:*)",
+      "Bash(md5:*)"
     ],
     "deny": [
       "Bash(rm -rf *)",

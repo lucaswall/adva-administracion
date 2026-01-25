@@ -279,22 +279,22 @@ describe('getResumenBancarioPrompt', () => {
   });
 
   describe('three-tier year extraction approach', () => {
-    it('mentions TIER 1 for clear labels', () => {
+    it('mentions TIER 1 for explicit year sources', () => {
       const prompt = getResumenBancarioPrompt();
       expect(prompt).toContain('TIER 1');
-      expect(prompt).toContain('CLEAR LABELS');
+      expect(prompt).toContain('Look for explicit years');
     });
 
-    it('mentions TIER 2 for transaction dates', () => {
+    it('mentions TIER 2 for transaction dates with years', () => {
       const prompt = getResumenBancarioPrompt();
       expect(prompt).toContain('TIER 2');
-      expect(prompt).toContain('TRANSACTION DATES');
+      expect(prompt).toContain('Transaction dates with years');
     });
 
     it('mentions TIER 3 for dynamic inference', () => {
       const prompt = getResumenBancarioPrompt();
       expect(prompt).toContain('TIER 3');
-      expect(prompt).toContain('DYNAMIC INFERENCE');
+      expect(prompt).toContain('Dynamic inference');
     });
 
     it('explains month comparison rule in TIER 3', () => {
@@ -313,12 +313,12 @@ describe('getResumenBancarioPrompt', () => {
     });
   });
 
-  it('mentions alternative balance terminology', () => {
+  it('mentions balance field names and source terminology', () => {
     const prompt = getResumenBancarioPrompt();
-    expect(prompt).toContain('Saldo Inicial');
-    expect(prompt).toContain('Saldo Final');
-    expect(prompt).toContain('Saldo Anterior');
-    expect(prompt).toContain('Saldo al');
+    expect(prompt).toContain('saldoInicial');
+    expect(prompt).toContain('saldoFinal');
+    expect(prompt).toContain('SALDO ANTERIOR');
+    expect(prompt).toContain('SALDO AL');
   });
 
   it('handles SIN MOVIMIENTOS case', () => {

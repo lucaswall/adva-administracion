@@ -29,28 +29,29 @@ describe('formatCurrentDateForPrompt', () => {
 });
 
 describe('getResumenBancarioPrompt', () => {
-  it('should mention three-tier approach', () => {
+  it('should mention three-tier approach for year inference', () => {
     const prompt = getResumenBancarioPrompt();
     expect(prompt).toContain('TIER 1');
     expect(prompt).toContain('TIER 2');
     expect(prompt).toContain('TIER 3');
   });
 
-  it('should prioritize clear labels first in tier 1', () => {
+  it('should include critical date extraction rules', () => {
     const prompt = getResumenBancarioPrompt();
-    expect(prompt).toContain('CLEAR LABELS');
-    expect(prompt).toContain('Period headers');
-    expect(prompt).toContain('Month-Year headers');
+    expect(prompt).toContain('CRITICAL DATE EXTRACTION RULES');
+    expect(prompt).toContain('fechaDesde');
+    expect(prompt).toContain('FIRST transaction');
+    expect(prompt).toContain('SALDO AL');
   });
 
-  it('should describe transaction dates in tier 2', () => {
+  it('should describe explicit year sources in tier 1', () => {
     const prompt = getResumenBancarioPrompt();
-    expect(prompt).toContain('TRANSACTION DATES');
+    expect(prompt).toContain('Look for explicit years');
+    expect(prompt).toContain('Barcode contains');
   });
 
-  it('should describe dynamic inference in tier 3', () => {
+  it('should handle SIN MOVIMIENTOS case', () => {
     const prompt = getResumenBancarioPrompt();
-    expect(prompt).toContain('DYNAMIC INFERENCE');
     expect(prompt).toContain('SIN MOVIMIENTOS');
   });
 
