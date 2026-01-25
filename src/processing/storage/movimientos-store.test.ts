@@ -132,7 +132,7 @@ describe('storeMovimientosBancario', () => {
       '2025-01',
       expect.any(Array)
     );
-    expect(formatEmptyMonthSheet).toHaveBeenCalledWith('spreadsheet-id', 123);
+    expect(formatEmptyMonthSheet).toHaveBeenCalledWith('spreadsheet-id', 123, 5);
     expect(appendRowsWithLinks).not.toHaveBeenCalled();
   });
 
@@ -264,7 +264,7 @@ describe('storeMovimientosTarjeta', () => {
     );
 
     expect(result.ok).toBe(true);
-    expect(formatEmptyMonthSheet).toHaveBeenCalledWith('spreadsheet-id', 123);
+    expect(formatEmptyMonthSheet).toHaveBeenCalledWith('spreadsheet-id', 123, 5);
     expect(appendRowsWithLinks).not.toHaveBeenCalled();
   });
 
@@ -375,7 +375,7 @@ describe('storeMovimientosBroker', () => {
     );
 
     expect(result.ok).toBe(true);
-    expect(formatEmptyMonthSheet).toHaveBeenCalledWith('spreadsheet-id', 123);
+    expect(formatEmptyMonthSheet).toHaveBeenCalledWith('spreadsheet-id', 123, 10);
     expect(appendRowsWithLinks).not.toHaveBeenCalled();
   });
 

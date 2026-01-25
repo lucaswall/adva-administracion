@@ -1374,18 +1374,53 @@ export async function getOrCreateMonthSheet(
 
 /**
  * Formats an empty month sheet with "SIN MOVIMIENTOS" message
- * Sets cell B3 to "===== SIN MOVIMIENTOS =====" with red background and bold text
+ * Sets row 3 with "===== SIN MOVIMIENTOS =====" in cell B3
+ * Red background extends from column A to the last header column
+ * Text is bold and white
  *
  * @param spreadsheetId - Spreadsheet ID
  * @param sheetId - Sheet ID
+ * @param numColumns - Number of columns with headers (determines red background extent)
  * @returns Success/failure result
  */
 export async function formatEmptyMonthSheet(
   spreadsheetId: string,
-  sheetId: number
+  sheetId: number,
+  numColumns: number
 ): Promise<Result<void, Error>> {
   return withQuotaRetry(async () => {
     const sheets = getSheetsService();
+
+    // Create row cells with red background
+    const cells: sheets_v4.Schema$CellData[] = [];
+    for (let i = 0; i < numColumns; i++) {
+      const cell: sheets_v4.Schema$CellData = {
+        userEnteredFormat: {
+          backgroundColor: {
+            red: 1.0,
+            green: 0.0,
+            blue: 0.0,
+          },
+          textFormat: {
+            bold: true,
+            foregroundColor: {
+              red: 1.0,
+              green: 1.0,
+              blue: 1.0,
+            },
+          },
+        },
+      };
+
+      // Add text to cell B (index 1)
+      if (i === 1) {
+        cell.userEnteredValue = {
+          stringValue: '===== SIN MOVIMIENTOS =====',
+        };
+      }
+
+      cells.push(cell);
+    }
 
     const requests: sheets_v4.Schema$Request[] = [
       {
@@ -1394,30 +1429,10 @@ export async function formatEmptyMonthSheet(
             sheetId,
             startRowIndex: 2,
             endRowIndex: 3,
-            startColumnIndex: 1,
-            endColumnIndex: 2,
+            startColumnIndex: 0,
+            endColumnIndex: numColumns,
           },
-          rows: [
-            {
-              values: [
-                {
-                  userEnteredValue: {
-                    stringValue: '===== SIN MOVIMIENTOS =====',
-                  },
-                  userEnteredFormat: {
-                    textFormat: {
-                      bold: true,
-                    },
-                    backgroundColor: {
-                      red: 1.0,
-                      green: 0.0,
-                      blue: 0.0,
-                    },
-                  },
-                },
-              ],
-            },
-          ],
+          rows: [{ values: cells }],
           fields: 'userEnteredValue,userEnteredFormat',
         },
       },

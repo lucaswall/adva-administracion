@@ -904,7 +904,7 @@ describe('Google Sheets API wrapper - quota retry tests', () => {
     it('should succeed on first attempt', async () => {
       mockSheetsApi.spreadsheets.batchUpdate.mockResolvedValue({ data: {} });
 
-      const resultPromise = formatEmptyMonthSheet('spreadsheet123', 0);
+      const resultPromise = formatEmptyMonthSheet('spreadsheet123', 0, 5);
       await vi.runAllTimersAsync();
       const result = await resultPromise;
 
@@ -917,7 +917,7 @@ describe('Google Sheets API wrapper - quota retry tests', () => {
         .mockRejectedValueOnce(new Error('Quota exceeded'))
         .mockResolvedValueOnce({ data: {} });
 
-      const resultPromise = formatEmptyMonthSheet('spreadsheet123', 0);
+      const resultPromise = formatEmptyMonthSheet('spreadsheet123', 0, 5);
       await vi.runAllTimersAsync();
       const result = await resultPromise;
 
@@ -928,7 +928,7 @@ describe('Google Sheets API wrapper - quota retry tests', () => {
     it('should return error after exhausting retries', async () => {
       mockSheetsApi.spreadsheets.batchUpdate.mockRejectedValue(new Error('Quota exceeded'));
 
-      const resultPromise = formatEmptyMonthSheet('spreadsheet123', 0);
+      const resultPromise = formatEmptyMonthSheet('spreadsheet123', 0, 5);
       await vi.runAllTimersAsync();
       const result = await resultPromise;
 

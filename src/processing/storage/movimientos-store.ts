@@ -52,7 +52,11 @@ export async function storeMovimientosBancario(
       );
       if (!sheetResult.ok) return sheetResult;
 
-      const formatResult = await formatEmptyMonthSheet(spreadsheetId, sheetResult.value);
+      const formatResult = await formatEmptyMonthSheet(
+        spreadsheetId,
+        sheetResult.value,
+        MOVIMIENTOS_BANCARIO_SHEET.headers.length
+      );
       if (!formatResult.ok) return formatResult;
 
       info('Created empty month sheet for bank account', {
@@ -135,7 +139,11 @@ export async function storeMovimientosTarjeta(
       );
       if (!sheetResult.ok) return sheetResult;
 
-      const formatResult = await formatEmptyMonthSheet(spreadsheetId, sheetResult.value);
+      const formatResult = await formatEmptyMonthSheet(
+        spreadsheetId,
+        sheetResult.value,
+        MOVIMIENTOS_TARJETA_SHEET.headers.length
+      );
       if (!formatResult.ok) return formatResult;
 
       info('Created empty month sheet for credit card', {
@@ -222,7 +230,11 @@ export async function storeMovimientosBroker(
       );
       if (!sheetResult.ok) return sheetResult;
 
-      const formatResult = await formatEmptyMonthSheet(spreadsheetId, sheetResult.value);
+      const formatResult = await formatEmptyMonthSheet(
+        spreadsheetId,
+        sheetResult.value,
+        MOVIMIENTOS_BROKER_SHEET.headers.length
+      );
       if (!formatResult.ok) return formatResult;
 
       info('Created empty month sheet for broker', {
