@@ -1225,8 +1225,6 @@ describe('Google Sheets API wrapper - quota retry tests', () => {
               replies: [{ addSheet: { properties: { sheetId: 101 } } }],
             },
           })
-          // Mock setValues (header)
-          .mockResolvedValueOnce({ data: {} })
           // Mock formatSheet
           .mockResolvedValueOnce({ data: {} })
           // Mock moveSheetToPosition
@@ -1292,6 +1290,200 @@ describe('Google Sheets API wrapper - quota retry tests', () => {
 
         // Should not call createSheet or moveSheetToPosition
         expect(mockSheetsApi.spreadsheets.batchUpdate).not.toHaveBeenCalled();
+      });
+
+      it('should delete Sheet1 when creating first month sheet', async () => {
+        // Mock getSheetMetadata to return only Sheet1 (default sheet in new spreadsheets)
+        mockSheetsApi.spreadsheets.get
+          .mockResolvedValueOnce({
+            // First call to getSheetMetadata in getOrCreateMonthSheet
+            data: {
+              sheets: [
+                { properties: { title: 'Sheet1', sheetId: 0, index: 0 } },
+              ],
+            },
+          })
+          .mockResolvedValueOnce({
+            // Second call after createSheet to get updated metadata with index
+            data: {
+              sheets: [
+                { properties: { title: 'Sheet1', sheetId: 0, index: 0 } },
+                { properties: { title: '2025-01', sheetId: 101, index: 1 } },
+              ],
+            },
+          });
+
+        // Mock createSheet, formatSheet, moveSheetToPosition, and deleteSheet
+        mockSheetsApi.spreadsheets.batchUpdate
+          .mockResolvedValueOnce({
+            // Mock createSheet
+            data: {
+              replies: [{ addSheet: { properties: { sheetId: 101 } } }],
+            },
+          })
+          .mockResolvedValueOnce({ data: {} }) // Mock formatSheet
+          .mockResolvedValueOnce({ data: {} }) // Mock moveSheetToPosition
+          .mockResolvedValueOnce({ data: {} }); // Mock deleteSheet
+
+        mockSheetsApi.spreadsheets.values.update.mockResolvedValue({ data: {} });
+
+        const resultPromise = getOrCreateMonthSheet(
+          'spreadsheet123',
+          '2025-01',
+          ['fecha', 'descripcion', 'monto']
+        );
+        await vi.runAllTimersAsync();
+        const result = await resultPromise;
+
+        expect(result.ok).toBe(true);
+        if (result.ok) {
+          expect(result.value).toBe(101);
+        }
+
+        // Verify deleteSheet was called with Sheet1's sheetId
+        expect(mockSheetsApi.spreadsheets.batchUpdate).toHaveBeenCalledWith(
+          expect.objectContaining({
+            requestBody: expect.objectContaining({
+              requests: expect.arrayContaining([
+                expect.objectContaining({
+                  deleteSheet: expect.objectContaining({
+                    sheetId: 0,
+                  }),
+                }),
+              ]),
+            }),
+          })
+        );
+      });
+
+      it('should delete Sheet1 even if other month sheets exist', async () => {
+        // Mock getSheetMetadata to return Sheet1 + existing month sheet
+        mockSheetsApi.spreadsheets.get
+          .mockResolvedValueOnce({
+            // First call to getSheetMetadata in getOrCreateMonthSheet
+            data: {
+              sheets: [
+                { properties: { title: 'Sheet1', sheetId: 0, index: 0 } },
+                { properties: { title: '2025-01', sheetId: 100, index: 1 } },
+              ],
+            },
+          })
+          .mockResolvedValueOnce({
+            // Second call after createSheet to get updated metadata with index
+            data: {
+              sheets: [
+                { properties: { title: 'Sheet1', sheetId: 0, index: 0 } },
+                { properties: { title: '2025-01', sheetId: 100, index: 1 } },
+                { properties: { title: '2025-02', sheetId: 101, index: 2 } },
+              ],
+            },
+          });
+
+        // Mock createSheet, formatSheet, moveSheetToPosition, and deleteSheet
+        mockSheetsApi.spreadsheets.batchUpdate
+          .mockResolvedValueOnce({
+            // Mock createSheet
+            data: {
+              replies: [{ addSheet: { properties: { sheetId: 101 } } }],
+            },
+          })
+          .mockResolvedValueOnce({ data: {} }) // Mock formatSheet
+          .mockResolvedValueOnce({ data: {} }) // Mock moveSheetToPosition
+          .mockResolvedValueOnce({ data: {} }); // Mock deleteSheet
+
+        mockSheetsApi.spreadsheets.values.update.mockResolvedValue({ data: {} });
+
+        const resultPromise = getOrCreateMonthSheet(
+          'spreadsheet123',
+          '2025-02',
+          ['fecha', 'descripcion', 'monto']
+        );
+        await vi.runAllTimersAsync();
+        const result = await resultPromise;
+
+        expect(result.ok).toBe(true);
+        if (result.ok) {
+          expect(result.value).toBe(101);
+        }
+
+        // Verify deleteSheet WAS called to remove Sheet1
+        expect(mockSheetsApi.spreadsheets.batchUpdate).toHaveBeenCalledWith(
+          expect.objectContaining({
+            requestBody: expect.objectContaining({
+              requests: expect.arrayContaining([
+                expect.objectContaining({
+                  deleteSheet: expect.objectContaining({
+                    sheetId: 0,
+                  }),
+                }),
+              ]),
+            }),
+          })
+        );
+      });
+
+      it('should not delete Sheet1 if non-month sheets exist', async () => {
+        // Mock getSheetMetadata to return Sheet1 + non-month sheet (e.g., "Summary")
+        mockSheetsApi.spreadsheets.get
+          .mockResolvedValueOnce({
+            // First call to getSheetMetadata in getOrCreateMonthSheet
+            data: {
+              sheets: [
+                { properties: { title: 'Sheet1', sheetId: 0, index: 0 } },
+                { properties: { title: 'Summary', sheetId: 50, index: 1 } },
+              ],
+            },
+          })
+          .mockResolvedValueOnce({
+            // Second call after createSheet to get updated metadata with index
+            data: {
+              sheets: [
+                { properties: { title: 'Sheet1', sheetId: 0, index: 0 } },
+                { properties: { title: 'Summary', sheetId: 50, index: 1 } },
+                { properties: { title: '2025-01', sheetId: 101, index: 2 } },
+              ],
+            },
+          });
+
+        // Mock createSheet, formatSheet, and moveSheetToPosition (no deleteSheet)
+        mockSheetsApi.spreadsheets.batchUpdate
+          .mockResolvedValueOnce({
+            // Mock createSheet
+            data: {
+              replies: [{ addSheet: { properties: { sheetId: 101 } } }],
+            },
+          })
+          .mockResolvedValueOnce({ data: {} }) // Mock formatSheet
+          .mockResolvedValueOnce({ data: {} }); // Mock moveSheetToPosition
+
+        mockSheetsApi.spreadsheets.values.update.mockResolvedValue({ data: {} });
+
+        const resultPromise = getOrCreateMonthSheet(
+          'spreadsheet123',
+          '2025-01',
+          ['fecha', 'descripcion', 'monto']
+        );
+        await vi.runAllTimersAsync();
+        const result = await resultPromise;
+
+        expect(result.ok).toBe(true);
+        if (result.ok) {
+          expect(result.value).toBe(101);
+        }
+
+        // Verify deleteSheet was NOT called (only 3 batchUpdate calls: create, format, move)
+        expect(mockSheetsApi.spreadsheets.batchUpdate).toHaveBeenCalledTimes(3);
+        expect(mockSheetsApi.spreadsheets.batchUpdate).not.toHaveBeenCalledWith(
+          expect.objectContaining({
+            requestBody: expect.objectContaining({
+              requests: expect.arrayContaining([
+                expect.objectContaining({
+                  deleteSheet: expect.anything(),
+                }),
+              ]),
+            }),
+          })
+        );
       });
     });
   });

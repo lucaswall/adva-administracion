@@ -1354,6 +1354,21 @@ export async function getOrCreateMonthSheet(
     if (!moveResult.ok) return { ok: false, error: moveResult.error };
   }
 
+  // Delete Sheet1 if it exists and is the only non-month sheet
+  // (This is the default sheet created with new spreadsheets)
+  const sheet1 = updatedMetadataResult.value.find(s => s.title === 'Sheet1');
+  if (sheet1) {
+    // Only delete Sheet1 if all other sheets are month sheets (YYYY-MM format)
+    const nonMonthSheets = updatedMetadataResult.value.filter(
+      s => s.title !== 'Sheet1' && !/^\d{4}-\d{2}$/.test(s.title)
+    );
+
+    if (nonMonthSheets.length === 0) {
+      const deleteResult = await deleteSheet(spreadsheetId, sheet1.sheetId);
+      if (!deleteResult.ok) return { ok: false, error: deleteResult.error };
+    }
+  }
+
   return { ok: true, value: sheetId };
 }
 
