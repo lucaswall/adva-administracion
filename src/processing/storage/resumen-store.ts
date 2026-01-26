@@ -153,10 +153,8 @@ export async function storeResumenBancario(
   const lockKey = `store:resumen-bancario:${resumen.banco}:${resumen.numeroCuenta}:${resumen.fechaDesde}:${resumen.fechaHasta}:${resumen.moneda}`;
 
   return withLock(lockKey, async () => {
-    // Use cache if available, otherwise API
-    const dupeCheck = context?.duplicateCache
-      ? context.duplicateCache.isDuplicateResumenBancario(spreadsheetId, resumen)
-      : await isDuplicateResumenBancario(spreadsheetId, resumen);
+    // Always use API-based check for resumenes (bank sheets not pre-loaded in cache)
+    const dupeCheck = await isDuplicateResumenBancario(spreadsheetId, resumen);
 
     if (dupeCheck.isDuplicate) {
       warn('Duplicate bank account resumen detected, skipping', {
@@ -270,10 +268,8 @@ export async function storeResumenTarjeta(
   const lockKey = `store:resumen-tarjeta:${resumen.banco}:${resumen.tipoTarjeta}:${resumen.numeroCuenta}:${resumen.fechaDesde}:${resumen.fechaHasta}`;
 
   return withLock(lockKey, async () => {
-    // Use cache if available, otherwise API
-    const dupeCheck = context?.duplicateCache
-      ? context.duplicateCache.isDuplicateResumenTarjeta(spreadsheetId, resumen)
-      : await isDuplicateResumenTarjeta(spreadsheetId, resumen);
+    // Always use API-based check for resumenes (bank sheets not pre-loaded in cache)
+    const dupeCheck = await isDuplicateResumenTarjeta(spreadsheetId, resumen);
 
     if (dupeCheck.isDuplicate) {
       warn('Duplicate credit card resumen detected, skipping', {
@@ -389,10 +385,8 @@ export async function storeResumenBroker(
   const lockKey = `store:resumen-broker:${resumen.broker}:${resumen.numeroCuenta}:${resumen.fechaDesde}:${resumen.fechaHasta}`;
 
   return withLock(lockKey, async () => {
-    // Use cache if available, otherwise API
-    const dupeCheck = context?.duplicateCache
-      ? context.duplicateCache.isDuplicateResumenBroker(spreadsheetId, resumen)
-      : await isDuplicateResumenBroker(spreadsheetId, resumen);
+    // Always use API-based check for resumenes (bank sheets not pre-loaded in cache)
+    const dupeCheck = await isDuplicateResumenBroker(spreadsheetId, resumen);
 
     if (dupeCheck.isDuplicate) {
       warn('Duplicate broker resumen detected, skipping', {
