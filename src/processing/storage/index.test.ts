@@ -36,7 +36,12 @@ describe('File Tracking Functions', () => {
       clearFileStatusCache();
     });
 
-    it('marks a file as processing in the Archivos Procesados sheet', async () => {
+    it('marks a new file as processing in the Archivos Procesados sheet', async () => {
+      // Mock no existing entry for this file
+      vi.mocked(getValues).mockResolvedValue({
+        ok: true,
+        value: [['fileId', 'fileName', 'processedAt', 'documentType', 'status']],
+      });
       vi.mocked(appendRowsWithLinks).mockResolvedValue({ ok: true, value: 1 });
 
       const result = await markFileProcessing(
@@ -63,7 +68,40 @@ describe('File Tracking Functions', () => {
       );
     });
 
+    it('updates existing row when file already exists (retry scenario)', async () => {
+      // Mock existing failed entry for this file
+      vi.mocked(getValues).mockResolvedValue({
+        ok: true,
+        value: [
+          ['fileId', 'fileName', 'processedAt', 'documentType', 'status'],
+          ['test-file-id', 'test-document.pdf', '2025-01-15T10:00:00Z', 'factura_emitida', 'failed: Lock timeout'],
+        ],
+      });
+      vi.mocked(batchUpdate).mockResolvedValue({ ok: true, value: 1 });
+
+      const result = await markFileProcessing(
+        'dashboard-id',
+        'test-file-id',
+        'test-document.pdf',
+        'factura_emitida'
+      );
+
+      expect(result.ok).toBe(true);
+      // Should update existing row, not append
+      expect(appendRowsWithLinks).not.toHaveBeenCalled();
+      expect(batchUpdate).toHaveBeenCalledWith('dashboard-id', [
+        {
+          range: 'Archivos Procesados!C2:E2',
+          values: [[expect.any(String), 'factura_emitida', 'processing']],
+        },
+      ]);
+    });
+
     it('fetches spreadsheet timezone for proper timestamp formatting', async () => {
+      vi.mocked(getValues).mockResolvedValue({
+        ok: true,
+        value: [['fileId', 'fileName', 'processedAt', 'documentType', 'status']],
+      });
       vi.mocked(appendRowsWithLinks).mockResolvedValue({ ok: true, value: 1 });
       vi.mocked(getSpreadsheetTimezone).mockResolvedValue({ ok: true, value: 'America/Argentina/Buenos_Aires' });
 
@@ -84,6 +122,10 @@ describe('File Tracking Functions', () => {
     });
 
     it('handles timezone fetch failure gracefully by passing undefined', async () => {
+      vi.mocked(getValues).mockResolvedValue({
+        ok: true,
+        value: [['fileId', 'fileName', 'processedAt', 'documentType', 'status']],
+      });
       vi.mocked(appendRowsWithLinks).mockResolvedValue({ ok: true, value: 1 });
       vi.mocked(getSpreadsheetTimezone).mockResolvedValue({ ok: false, error: new Error('Timezone fetch failed') });
 
@@ -103,6 +145,10 @@ describe('File Tracking Functions', () => {
     });
 
     it('returns error when appendRowsWithLinks fails', async () => {
+      vi.mocked(getValues).mockResolvedValue({
+        ok: true,
+        value: [['fileId', 'fileName', 'processedAt', 'documentType', 'status']],
+      });
       vi.mocked(appendRowsWithLinks).mockResolvedValue({
         ok: false,
         error: new Error('Sheets API error'),
@@ -118,6 +164,25 @@ describe('File Tracking Functions', () => {
       expect(result.ok).toBe(false);
       if (!result.ok) {
         expect(result.error.message).toBe('Sheets API error');
+      }
+    });
+
+    it('returns error when getValues fails', async () => {
+      vi.mocked(getValues).mockResolvedValue({
+        ok: false,
+        error: new Error('Failed to read tracking sheet'),
+      });
+
+      const result = await markFileProcessing(
+        'dashboard-id',
+        'test-file-id',
+        'test-document.pdf',
+        'factura_emitida'
+      );
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.error.message).toBe('Failed to read tracking sheet');
       }
     });
   });
@@ -308,12 +373,16 @@ describe('File Tracking Functions', () => {
       clearFileStatusCache();
     });
 
-    it('does not cache row index during markFileProcessing to avoid race conditions', async () => {
-      // Simulate concurrent scenario: two files being processed
-      // markFileProcessing no longer calls getValues - only updateFileStatus does
+    it('handles concurrent file processing correctly', async () => {
+      // Simulate concurrent scenario: two new files being processed
       vi.mocked(getValues)
         .mockResolvedValueOnce({
-          // First updateFileStatus for file A - should find it in row 2
+          // markFileProcessing for file A - no existing entry
+          ok: true,
+          value: [['fileId', 'fileName', 'processedAt', 'documentType', 'status']],
+        })
+        .mockResolvedValueOnce({
+          // markFileProcessing for file B - no existing entry (file A now exists)
           ok: true,
           value: [
             ['fileId', 'fileName', 'processedAt', 'documentType', 'status'],
@@ -321,7 +390,16 @@ describe('File Tracking Functions', () => {
           ],
         })
         .mockResolvedValueOnce({
-          // First updateFileStatus for file B - should find it in row 3
+          // updateFileStatus for file A - should find it in row 2
+          ok: true,
+          value: [
+            ['fileId', 'fileName', 'processedAt', 'documentType', 'status'],
+            ['file-a', 'doc-a.pdf', '2025-01-15T10:00:00Z', 'factura_emitida', 'processing'],
+            ['file-b', 'doc-b.pdf', '2025-01-15T10:00:01Z', 'pago_enviado', 'processing'],
+          ],
+        })
+        .mockResolvedValueOnce({
+          // updateFileStatus for file B - should find it in row 3
           ok: true,
           value: [
             ['fileId', 'fileName', 'processedAt', 'documentType', 'status'],
@@ -349,20 +427,25 @@ describe('File Tracking Functions', () => {
         { range: 'Archivos Procesados!E3', values: [['success']] },
       ]);
 
-      // Verify that getValues was called only for updateFileStatus (not markFileProcessing)
-      expect(getValues).toHaveBeenCalledTimes(2); // 2 for updateFileStatus lookups
+      // Verify getValues was called for both markFileProcessing and updateFileStatus
+      expect(getValues).toHaveBeenCalledTimes(4); // 2 for mark + 2 for update
     });
 
-    it('always looks up row index on updateFileStatus after markFileProcessing', async () => {
-      // markFileProcessing no longer calls getValues - only updateFileStatus does
-      vi.mocked(getValues).mockResolvedValueOnce({
-        // updateFileStatus lookup
-        ok: true,
-        value: [
-          ['fileId', 'fileName', 'processedAt', 'documentType', 'status'],
-          ['test-file', 'test.pdf', '2025-01-15T10:00:00Z', 'factura_emitida', 'processing'],
-        ],
-      });
+    it('looks up row index on updateFileStatus after markFileProcessing', async () => {
+      vi.mocked(getValues)
+        .mockResolvedValueOnce({
+          // markFileProcessing - no existing entry
+          ok: true,
+          value: [['fileId', 'fileName', 'processedAt', 'documentType', 'status']],
+        })
+        .mockResolvedValueOnce({
+          // updateFileStatus lookup
+          ok: true,
+          value: [
+            ['fileId', 'fileName', 'processedAt', 'documentType', 'status'],
+            ['test-file', 'test.pdf', '2025-01-15T10:00:00Z', 'factura_emitida', 'processing'],
+          ],
+        });
 
       vi.mocked(appendRowsWithLinks).mockResolvedValue({ ok: true, value: 1 });
       vi.mocked(batchUpdate).mockResolvedValue({ ok: true, value: 1 });
@@ -373,8 +456,8 @@ describe('File Tracking Functions', () => {
       // Update status - should always look up row index
       await updateFileStatus('dashboard-id', 'test-file', 'success');
 
-      // Verify getValues was called only for updateFileStatus (not markFileProcessing)
-      expect(getValues).toHaveBeenCalledTimes(1); // 1 for update lookup only
+      // Verify getValues was called for both operations
+      expect(getValues).toHaveBeenCalledTimes(2); // 1 for mark + 1 for update
       expect(batchUpdate).toHaveBeenCalledWith('dashboard-id', [
         { range: 'Archivos Procesados!E2', values: [['success']] },
       ]);
@@ -382,7 +465,7 @@ describe('File Tracking Functions', () => {
   });
 
   describe('getProcessedFileIds', () => {
-    it('returns file IDs from Archivos Procesados sheet', async () => {
+    it('returns only successful file IDs from Archivos Procesados sheet', async () => {
       vi.mocked(getValues).mockResolvedValue({
         ok: true,
         value: [
@@ -397,12 +480,39 @@ describe('File Tracking Functions', () => {
 
       expect(result.ok).toBe(true);
       if (result.ok) {
+        // Only success files are returned
         expect(result.value.has('file-1')).toBe(true);
         expect(result.value.has('file-2')).toBe(true);
-        expect(result.value.has('file-3')).toBe(true);
-        expect(result.value.size).toBe(3);
+        // Processing files are NOT included (so they can be retried)
+        expect(result.value.has('file-3')).toBe(false);
+        expect(result.value.size).toBe(2);
       }
-      expect(getValues).toHaveBeenCalledWith('dashboard-id', 'Archivos Procesados!A:A');
+      // Reads columns A:E to check status
+      expect(getValues).toHaveBeenCalledWith('dashboard-id', 'Archivos Procesados!A:E');
+    });
+
+    it('excludes failed files so they can be retried', async () => {
+      vi.mocked(getValues).mockResolvedValue({
+        ok: true,
+        value: [
+          ['fileId', 'fileName', 'processedAt', 'documentType', 'status'],
+          ['file-1', 'doc1.pdf', '2025-01-15T10:00:00Z', 'factura_emitida', 'success'],
+          ['file-2', 'doc2.pdf', '2025-01-15T11:00:00Z', 'pago_enviado', 'failed: Lock timeout'],
+          ['file-3', 'doc3.pdf', '2025-01-15T12:00:00Z', 'factura_recibida', 'failed: Extraction error'],
+        ],
+      });
+
+      const result = await getProcessedFileIds('dashboard-id');
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        // Only success files are returned
+        expect(result.value.has('file-1')).toBe(true);
+        // Failed files are NOT included (so they can be retried)
+        expect(result.value.has('file-2')).toBe(false);
+        expect(result.value.has('file-3')).toBe(false);
+        expect(result.value.size).toBe(1);
+      }
     });
 
     it('returns empty set when sheet has only headers', async () => {
@@ -440,7 +550,7 @@ describe('File Tracking Functions', () => {
           ['fileId', 'fileName', 'processedAt', 'documentType', 'status'],
           ['file-1', 'doc1.pdf', '2025-01-15T10:00:00Z', 'factura_emitida', 'success'],
           ['', 'doc2.pdf', '2025-01-15T11:00:00Z', 'pago_enviado', 'success'],
-          ['file-3', 'doc3.pdf', '2025-01-15T12:00:00Z', 'factura_recibida', 'processing'],
+          ['file-3', 'doc3.pdf', '2025-01-15T12:00:00Z', 'factura_recibida', 'success'],
         ],
       });
 

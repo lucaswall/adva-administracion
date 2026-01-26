@@ -31,6 +31,8 @@ export { storeMovimientosBancario, storeMovimientosTarjeta, storeMovimientosBrok
 
 /**
  * Marks a file as processing in the centralized tracking sheet
+ * If the file already exists with a non-success status (failed/processing),
+ * updates that row instead of creating a duplicate.
  *
  * @param dashboardId - Dashboard Operativo Contable spreadsheet ID
  * @param fileId - Google Drive file ID
@@ -47,26 +49,79 @@ export async function markFileProcessing(
     const correlationId = getCorrelationId();
     const processedAt = new Date().toISOString();
 
+    // Check if file already exists in tracking sheet (for retry scenarios)
+    const existingResult = await getValues(dashboardId, 'Archivos Procesados!A:E');
+    if (!existingResult.ok) {
+      logError('Failed to read tracking sheet', {
+        module: 'storage',
+        fileId,
+        error: existingResult.error.message,
+        correlationId,
+      });
+      throw existingResult.error;
+    }
+
+    // Find existing row for this file
+    let existingRowIndex = -1;
+    for (let i = 1; i < existingResult.value.length; i++) {
+      const row = existingResult.value[i];
+      if (row && row[0] === fileId) {
+        existingRowIndex = i + 1; // 1-indexed for spreadsheet
+        break;
+      }
+    }
+
     // Get spreadsheet timezone for proper timestamp formatting
     const timezoneResult = await getSpreadsheetTimezone(dashboardId);
     const timeZone = timezoneResult.ok ? timezoneResult.value : undefined;
 
-    const result = await appendRowsWithLinks(
-      dashboardId,
-      'Archivos Procesados',
-      [[fileId, fileName, processedAt, documentType, 'processing']],
-      timeZone
-    );
-
-    if (!result.ok) {
-      logError('Failed to mark file as processing', {
+    if (existingRowIndex > 0) {
+      // File exists - update the existing row (this is a retry)
+      logInfo('Updating existing tracking row for retry', {
         module: 'storage',
         fileId,
         fileName,
-        error: result.error.message,
+        rowIndex: existingRowIndex,
         correlationId,
       });
-      throw result.error;
+
+      const updateResult = await batchUpdate(dashboardId, [
+        { range: `Archivos Procesados!C${existingRowIndex}:E${existingRowIndex}`, values: [[processedAt, documentType, 'processing']] },
+      ]);
+
+      if (!updateResult.ok) {
+        logError('Failed to update tracking row for retry', {
+          module: 'storage',
+          fileId,
+          fileName,
+          error: updateResult.error.message,
+          correlationId,
+        });
+        throw updateResult.error;
+      }
+
+      // Update cache with row index
+      const cacheKey = `${dashboardId}:${fileId}`;
+      fileRowIndexCache.set(cacheKey, existingRowIndex);
+    } else {
+      // New file - append a new row
+      const result = await appendRowsWithLinks(
+        dashboardId,
+        'Archivos Procesados',
+        [[fileId, fileName, processedAt, documentType, 'processing']],
+        timeZone
+      );
+
+      if (!result.ok) {
+        logError('Failed to mark file as processing', {
+          module: 'storage',
+          fileId,
+          fileName,
+          error: result.error.message,
+          correlationId,
+        });
+        throw result.error;
+      }
     }
 
     logInfo('Marked file as processing', {
@@ -74,6 +129,7 @@ export async function markFileProcessing(
       fileId,
       fileName,
       documentType,
+      isRetry: existingRowIndex > 0,
       correlationId,
     });
   }).then(result => {
@@ -173,14 +229,16 @@ export async function updateFileStatus(
 }
 
 /**
- * Gets list of already processed file IDs from centralized tracking sheet
+ * Gets list of successfully processed file IDs from centralized tracking sheet
+ * Only returns file IDs with 'success' status - failed files will be retried
  *
  * @param dashboardId - Dashboard Operativo Contable spreadsheet ID
  */
 export async function getProcessedFileIds(dashboardId: string): Promise<Result<Set<string>, Error>> {
   const processedIds = new Set<string>();
 
-  const result = await getValues(dashboardId, 'Archivos Procesados!A:A');
+  // Read columns A (fileId) and E (status)
+  const result = await getValues(dashboardId, 'Archivos Procesados!A:E');
 
   if (!result.ok) {
     return result;
@@ -190,7 +248,9 @@ export async function getProcessedFileIds(dashboardId: string): Promise<Result<S
     // Skip header row (index 0)
     for (let i = 1; i < result.value.length; i++) {
       const row = result.value[i];
-      if (row && row[0]) {
+      // Only include files with 'success' status (column E, index 4)
+      // Files with 'failed' or 'processing' status will be retried
+      if (row && row[0] && row[4] === 'success') {
         processedIds.add(String(row[0]));
       }
     }
