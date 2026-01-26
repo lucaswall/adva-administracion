@@ -4,7 +4,5 @@ Bug #1: the test-runner still tries to access files. Maybe it does not have all 
 
 Improvement #1: New skill to check the implementation of a plan. Read PLANS.md, check implementation and update PLANS.md with what was done and what is missing. The skill should be created in the project. The new skill should be named "Review Done Plans".
 
-Improvement #2: New skill to get one, or more, items from the TODO.md and build a new plan in PLANS.md. Overwrite all the content of PLANS.md. Update TODO.md to remove the planed items. The skill should be created in the project. The new skill should be named "Plan Todo".
-
 
 
