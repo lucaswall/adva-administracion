@@ -1,6 +1,7 @@
 ---
 name: plan-todo
 description: Convert TODO.md items into implementation plans in PLANS.md
+argument-hint: [item-selector]
 allowed-tools: Read, Edit, Write
 ---
 
