@@ -1280,8 +1280,9 @@ export function getMonthSheetPosition(
   existingSheets: Array<{title: string; index: number}>,
   newMonth: string
 ): number {
-  // Filter for YYYY-MM formatted sheets only
-  const monthSheets = existingSheets.filter(s => /^\d{4}-\d{2}$/.test(s.title));
+  // Filter for YYYY-MM formatted sheets only, excluding the target month if it already exists
+  const monthSheets = existingSheets
+    .filter(s => /^\d{4}-\d{2}$/.test(s.title) && s.title !== newMonth);
 
   if (monthSheets.length === 0) {
     return 0;
@@ -1290,18 +1291,24 @@ export function getMonthSheetPosition(
   // Sort month sheets by their title (YYYY-MM format sorts chronologically)
   const sortedMonthSheets = monthSheets.sort((a, b) => a.title.localeCompare(b.title));
 
-  // Find the last month sheet that comes before the new month
-  let insertAfterIndex = -1;
+  // Find position where new month belongs in sorted list
+  let positionInSortedList = 0;
   for (let i = 0; i < sortedMonthSheets.length; i++) {
     if (newMonth > sortedMonthSheets[i].title) {
-      insertAfterIndex = sortedMonthSheets[i].index;
+      positionInSortedList = i + 1;
     } else {
       break;
     }
   }
 
-  // Insert right after the last month that comes before it
-  return insertAfterIndex + 1;
+  // If new month should be last, insert after the last month sheet
+  if (positionInSortedList === sortedMonthSheets.length) {
+    const lastMonthSheet = sortedMonthSheets[sortedMonthSheets.length - 1];
+    return lastMonthSheet.index + 1;
+  }
+
+  // Otherwise, insert BEFORE the sheet that should come after it chronologically
+  return sortedMonthSheets[positionInSortedList].index;
 }
 
 /**

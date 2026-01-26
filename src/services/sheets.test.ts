@@ -1373,7 +1373,8 @@ describe('Google Sheets API wrapper - quota retry tests', () => {
           { title: '2025-03', index: 3 },
         ];
         const position = getMonthSheetPosition(existingSheets, '2025-02');
-        expect(position).toBe(2);
+        // Should insert before 2025-03 (index 3), leaving Other Sheet in place
+        expect(position).toBe(3);
       });
 
       it('should handle multi-year sheets correctly', () => {
