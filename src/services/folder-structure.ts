@@ -1168,6 +1168,7 @@ export async function getOrCreateBankAccountSpreadsheet(
   }
 
   // Use lock to prevent concurrent creation
+  // 30 second timeout - creating spreadsheet + ensureSheetsExist requires multiple API calls
   const lockKey = `spreadsheet:bank-account:${cacheKey}`;
   const result = await withLock(lockKey, async () => {
     const cachedId = cachedStructure?.bankAccountSpreadsheets.get(cacheKey);
@@ -1210,7 +1211,7 @@ export async function getOrCreateBankAccountSpreadsheet(
     cachedStructure!.bankAccountSpreadsheets.set(cacheKey, spreadsheetId);
 
     return spreadsheetId;
-  });
+  }, 30000); // 30 second timeout for spreadsheet creation + setup
 
   return result;
 }
@@ -1248,6 +1249,7 @@ export async function getOrCreateCreditCardSpreadsheet(
     return { ok: true, value: cachedSpreadsheetId };
   }
 
+  // 30 second timeout - creating spreadsheet + ensureSheetsExist requires multiple API calls
   const lockKey = `spreadsheet:credit-card:${cacheKey}`;
   const result = await withLock(lockKey, async () => {
     const cachedId = cachedStructure?.bankAccountSpreadsheets.get(cacheKey);
@@ -1281,7 +1283,7 @@ export async function getOrCreateCreditCardSpreadsheet(
     cachedStructure!.bankAccountSpreadsheets.set(cacheKey, spreadsheetId);
 
     return spreadsheetId;
-  });
+  }, 30000); // 30 second timeout for spreadsheet creation + setup
 
   return result;
 }
@@ -1317,6 +1319,7 @@ export async function getOrCreateBrokerSpreadsheet(
     return { ok: true, value: cachedSpreadsheetId };
   }
 
+  // 30 second timeout - creating spreadsheet + ensureSheetsExist requires multiple API calls
   const lockKey = `spreadsheet:broker:${cacheKey}`;
   const result = await withLock(lockKey, async () => {
     const cachedId = cachedStructure?.bankAccountSpreadsheets.get(cacheKey);
@@ -1350,10 +1353,11 @@ export async function getOrCreateBrokerSpreadsheet(
     cachedStructure!.bankAccountSpreadsheets.set(cacheKey, spreadsheetId);
 
     return spreadsheetId;
-  });
+  }, 30000); // 30 second timeout for spreadsheet creation + setup
 
   return result;
 }
+
 /**
  * Gets or creates a Movimientos spreadsheet for storing individual transactions
  * Creates a spreadsheet named "Movimientos - {folderName}" in the entity folder
@@ -1379,6 +1383,7 @@ export async function getOrCreateMovimientosSpreadsheet(
   const cacheKey = `movimientos:${folderName}`;
 
   // Use lock to prevent concurrent creation
+  // 30 second timeout for spreadsheet creation
   const lockKey = `spreadsheet:movimientos:${cacheKey}`;
   const result = await withLock(lockKey, async () => {
     const findResult = await findByName(folderId, spreadsheetName, SPREADSHEET_MIME);
@@ -1413,7 +1418,7 @@ export async function getOrCreateMovimientosSpreadsheet(
     // The sheet creation is handled by the storage layer in movimientos-store.ts
 
     return spreadsheetId;
-  });
+  }, 30000); // 30 second timeout for spreadsheet creation
 
   return result;
 }
