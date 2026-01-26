@@ -1553,6 +1553,102 @@ describe('Google Sheets API wrapper - quota retry tests', () => {
           expect(result.error.message).toBe('Quota exceeded');
         }
       });
+
+      it('should delete Sheet1 if it exists and only month sheets remain', async () => {
+        mockSheetsApi.spreadsheets.get.mockResolvedValue({
+          data: {
+            sheets: [
+              { properties: { title: 'Sheet1', sheetId: 0, index: 0 } },
+              { properties: { title: '2025-02', sheetId: 101, index: 1 } },
+              { properties: { title: '2025-01', sheetId: 100, index: 2 } },
+            ],
+          },
+        });
+        mockSheetsApi.spreadsheets.batchUpdate.mockResolvedValue({ data: {} });
+
+        const resultPromise = reorderMonthSheets('spreadsheet123');
+        await vi.runAllTimersAsync();
+        const result = await resultPromise;
+
+        expect(result.ok).toBe(true);
+        // Should call batchUpdate: 1 delete for Sheet1 + 2 moves for month sheets
+        expect(mockSheetsApi.spreadsheets.batchUpdate).toHaveBeenCalledTimes(3);
+        // Verify first call was delete Sheet1
+        expect(mockSheetsApi.spreadsheets.batchUpdate).toHaveBeenNthCalledWith(1,
+          expect.objectContaining({
+            requestBody: expect.objectContaining({
+              requests: [
+                expect.objectContaining({
+                  deleteSheet: { sheetId: 0 },
+                }),
+              ],
+            }),
+          })
+        );
+      });
+
+      it('should delete Sheet1 even with only one month sheet', async () => {
+        mockSheetsApi.spreadsheets.get.mockResolvedValue({
+          data: {
+            sheets: [
+              { properties: { title: 'Sheet1', sheetId: 0, index: 0 } },
+              { properties: { title: '2025-01', sheetId: 100, index: 1 } },
+            ],
+          },
+        });
+        mockSheetsApi.spreadsheets.batchUpdate.mockResolvedValue({ data: {} });
+
+        const resultPromise = reorderMonthSheets('spreadsheet123');
+        await vi.runAllTimersAsync();
+        const result = await resultPromise;
+
+        expect(result.ok).toBe(true);
+        // Should call batchUpdate only 1 time for deleting Sheet1
+        // No reordering needed with only 1 month sheet
+        expect(mockSheetsApi.spreadsheets.batchUpdate).toHaveBeenCalledTimes(1);
+        expect(mockSheetsApi.spreadsheets.batchUpdate).toHaveBeenCalledWith(
+          expect.objectContaining({
+            requestBody: expect.objectContaining({
+              requests: [
+                expect.objectContaining({
+                  deleteSheet: { sheetId: 0 },
+                }),
+              ],
+            }),
+          })
+        );
+      });
+
+      it('should not delete Sheet1 if non-month sheets exist', async () => {
+        mockSheetsApi.spreadsheets.get.mockResolvedValue({
+          data: {
+            sheets: [
+              { properties: { title: 'Sheet1', sheetId: 0, index: 0 } },
+              { properties: { title: 'Summary', sheetId: 50, index: 1 } },
+              { properties: { title: '2025-02', sheetId: 101, index: 2 } },
+              { properties: { title: '2025-01', sheetId: 100, index: 3 } },
+            ],
+          },
+        });
+        mockSheetsApi.spreadsheets.batchUpdate.mockResolvedValue({ data: {} });
+
+        const resultPromise = reorderMonthSheets('spreadsheet123');
+        await vi.runAllTimersAsync();
+        const result = await resultPromise;
+
+        expect(result.ok).toBe(true);
+        // Should call batchUpdate only 2 times for moving the month sheets
+        // Sheet1 should NOT be deleted because 'Summary' is a non-month sheet
+        expect(mockSheetsApi.spreadsheets.batchUpdate).toHaveBeenCalledTimes(2);
+        // Verify no deleteSheet call was made
+        const calls = mockSheetsApi.spreadsheets.batchUpdate.mock.calls;
+        for (const call of calls) {
+          const requests = call[0]?.requestBody?.requests || [];
+          for (const req of requests) {
+            expect(req).not.toHaveProperty('deleteSheet');
+          }
+        }
+      });
     });
 
     describe('getOrCreateMonthSheet - chronological ordering integration', () => {

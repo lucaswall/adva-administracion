@@ -50,7 +50,8 @@
       "WebFetch(domain:issuetracker.google.com)",
       "WebFetch(domain:medium.com)",
       "Bash(pdftotext:*)",
-      "Bash(md5:*)"
+      "Bash(md5:*)",
+      "Bash(railway logs:*)"
     ],
     "deny": [
       "Bash(rm -rf *)",

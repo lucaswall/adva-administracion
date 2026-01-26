@@ -1518,6 +1518,22 @@ export async function reorderMonthSheets(
   const metadataResult = await getSheetMetadata(spreadsheetId);
   if (!metadataResult.ok) return metadataResult;
 
+  // Delete Sheet1 if it exists and is the only non-month sheet
+  // (This is the default sheet created with new spreadsheets)
+  // This cleanup is done here because getOrCreateMonthSheet skips it when using batch mode
+  const sheet1 = metadataResult.value.find(s => s.title === 'Sheet1');
+  if (sheet1) {
+    // Only delete Sheet1 if all other sheets are month sheets (YYYY-MM format)
+    const nonMonthSheets = metadataResult.value.filter(
+      s => s.title !== 'Sheet1' && !/^\d{4}-\d{2}$/.test(s.title)
+    );
+
+    if (nonMonthSheets.length === 0) {
+      const deleteResult = await deleteSheet(spreadsheetId, sheet1.sheetId);
+      if (!deleteResult.ok) return deleteResult;
+    }
+  }
+
   // Filter for YYYY-MM formatted sheets only
   const monthSheets = metadataResult.value.filter(s => /^\d{4}-\d{2}$/.test(s.title));
 
