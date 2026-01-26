@@ -3,64 +3,64 @@ name: plan-todo
 description: Convert TODO.md items into implementation plans in PLANS.md
 argument-hint: [item-selector]
 allowed-tools: Read, Edit, Write
+disable-model-invocation: true
 ---
 
-Convert TODO.md items into a structured implementation plan.
+Convert TODO.md items into a structured implementation plan in PLANS.md.
 
-## Item Selection
+## Pre-flight Check
 
-By default, plan the **first item** in TODO.md. User can specify different items via $ARGUMENTS:
-- `bug #2` - Specific bug by number
-- `improvement #5` - Specific improvement by number
-- `all bugs` - All bug items
-- `all improvements` - All improvement items
-- `all items` - Everything in TODO.md
-- Natural language: `the improvement about better naming files`
+**Before doing anything**, read PLANS.md and check if it contains incomplete work:
+- If PLANS.md has content but NO "Status: COMPLETE" at the end → **STOP**
+- Tell the user: "PLANS.md has incomplete work. Please review and clear it before planning new items."
+- Do not proceed.
+
+If PLANS.md is empty or has "Status: COMPLETE" → proceed with planning.
+
+## Arguments
+
+Default: plan the **first item** in TODO.md. Override with $ARGUMENTS:
+- `bug #2` or `improvement #5` - Specific item by number
+- `all bugs`, `all improvements`, `all items` - Multiple items
+- Natural language: `the improvement about file naming`
 
 ## Workflow
 
-1. **Read TODO.md** to get all items
-2. **Identify items to plan** based on user request (default: first item)
-3. **Read CLAUDE.md** to understand plan requirements
-4. **Generate plan** following project rules:
-   - Each task must start with writing tests (TDD)
-   - Include test-runner steps after test creation
-   - No manual verification steps
-   - End with post-implementation checklist
-5. **Write PLANS.md** - overwrite all content with new plan
-6. **Update TODO.md** - remove the planned items
+1. Read PLANS.md - check for incomplete work (see Pre-flight Check)
+2. Read TODO.md and identify items to plan
+3. Read CLAUDE.md for project rules (TDD, agents, plan format)
+4. Generate plan following TDD workflow
+5. Write PLANS.md with the structure below (overwrites existing)
+6. Remove planned items from TODO.md
 
-## Plan Format
+## PLANS.md Structure
 
 ```markdown
 # Implementation Plan
 
 **Created:** YYYY-MM-DD
+**Source:** [Which items from TODO.md]
 
-## Overview
-Brief description of what will be implemented.
-
-## Tasks
+## Original Plan
 
 ### Task 1: [Name]
-1. Write test in [file].test.ts for [function]
-2. Run test-runner (expect fail)
-3. Implement [function] in [file].ts
-4. Run test-runner (expect pass)
+1. Write test in [file].test.ts for [function/scenario]
+2. Implement [function] in [file].ts
 
-### Task 2: ...
+### Task 2: [Name]
+...
 
 ## Post-Implementation Checklist
-1. Run `bug-hunter` - Review git changes for bugs
-2. Run `test-runner` - Verify all tests pass
-3. Run `builder` - Verify zero warnings
+1. Run `bug-hunter` agent - Review changes for bugs
+2. Run `test-runner` agent - Verify all tests pass
+3. Run `builder` agent - Verify zero warnings
 ```
 
 ## Rules
 
-- Always read CLAUDE.md before generating plans
-- Every implementation task must include TDD steps (test first)
-- **No manual steps:** Plans are executed entirely by agents. Never include manual human testing, manual verification, or any step requiring human action. All validation is automated through `test-runner`, `bug-hunter`, and `builder` agents.
-- Always include post-implementation checklist at the end
-- Overwrite PLANS.md completely (no history preserved)
-- Remove only the items that were converted to plans from TODO.md
+- **Refuse to proceed if PLANS.md has incomplete work**
+- Every task must follow TDD (test first)
+- No manual steps - all validation through agents
+- Tasks must be self-contained (full file paths, clear descriptions)
+- Include enough detail that another model can implement without context
+- Always include post-implementation checklist
