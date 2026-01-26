@@ -35,7 +35,7 @@ import { withCorrelationAsync, getCorrelationId, generateCorrelationId } from '.
 import { processFile, hasValidDate } from './extractor.js';
 import { storeFactura, storePago, storeRecibo, storeRetencion, storeResumenBancario, storeResumenTarjeta, storeResumenBroker, storeMovimientosBancario, storeMovimientosTarjeta, storeMovimientosBroker, getProcessedFileIds, markFileProcessing, updateFileStatus } from './storage/index.js';
 import { runMatching } from './matching/index.js';
-import { SortBatch, DuplicateCache, MetadataCache } from './caches/index.js';
+import { SortBatch, DuplicateCache, MetadataCache, SheetOrderBatch } from './caches/index.js';
 import { TokenUsageBatch } from '../services/token-usage-batch.js';
 
 // Re-export for backwards compatibility
@@ -53,6 +53,7 @@ export interface ScanContext {
   duplicateCache: DuplicateCache;
   metadataCache: MetadataCache;
   tokenBatch: TokenUsageBatch;
+  sheetOrderBatch: SheetOrderBatch;
 }
 
 /**
@@ -127,6 +128,7 @@ export async function scanFolder(folderId?: string): Promise<Result<ScanResult, 
       duplicateCache: new DuplicateCache(),
       metadataCache: new MetadataCache(),
       tokenBatch: new TokenUsageBatch(),
+      sheetOrderBatch: new SheetOrderBatch(),
     };
 
     info('Scan configuration', {
@@ -612,6 +614,7 @@ export async function scanFolder(folderId?: string): Promise<Result<ScanResult, 
       });
 
       await context.sortBatch.flushSorts();
+      await context.sheetOrderBatch.flushReorders();
       await context.tokenBatch.flush(dashboardOperativoId);
 
       info('Batched operations flushed', {
@@ -644,6 +647,7 @@ export async function scanFolder(folderId?: string): Promise<Result<ScanResult, 
       });
 
       context.sortBatch.clear();
+      context.sheetOrderBatch.clear();
       context.duplicateCache.clear();
       context.metadataCache.clear();
 
@@ -1388,7 +1392,8 @@ async function storeAndSortDocument(
                 const storeMovResult = await storeMovimientosBancario(
                   resumenWithMovimientos.movimientos,
                   movSpreadsheetResult.value,
-                  { fechaDesde: resumen.fechaDesde, fechaHasta: resumen.fechaHasta }
+                  { fechaDesde: resumen.fechaDesde, fechaHasta: resumen.fechaHasta },
+                  context?.sheetOrderBatch
                 );
 
                 if (!storeMovResult.ok) {
@@ -1613,7 +1618,8 @@ async function storeAndSortDocument(
                 const storeMovResult = await storeMovimientosTarjeta(
                   resumenWithMovimientos.movimientos,
                   movSpreadsheetResult.value,
-                  { fechaDesde: resumen.fechaDesde, fechaHasta: resumen.fechaHasta }
+                  { fechaDesde: resumen.fechaDesde, fechaHasta: resumen.fechaHasta },
+                  context?.sheetOrderBatch
                 );
 
                 if (!storeMovResult.ok) {
@@ -1827,7 +1833,8 @@ async function storeAndSortDocument(
                 const storeMovResult = await storeMovimientosBroker(
                   resumenWithMovimientos.movimientos,
                   movSpreadsheetResult.value,
-                  { fechaDesde: resumen.fechaDesde, fechaHasta: resumen.fechaHasta }
+                  { fechaDesde: resumen.fechaDesde, fechaHasta: resumen.fechaHasta },
+                  context?.sheetOrderBatch
                 );
 
                 if (!storeMovResult.ok) {

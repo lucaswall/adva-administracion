@@ -7,6 +7,7 @@ import type { Result, MovimientoBancario, MovimientoTarjeta, MovimientoBroker } 
 import { getOrCreateMonthSheet, formatEmptyMonthSheet, appendRowsWithLinks, type CellDate, type CellNumber } from '../../services/sheets.js';
 import { MOVIMIENTOS_BANCARIO_SHEET, MOVIMIENTOS_TARJETA_SHEET, MOVIMIENTOS_BROKER_SHEET } from '../../constants/spreadsheet-headers.js';
 import { info } from '../../utils/logger.js';
+import type { SheetOrderBatch } from '../caches/index.js';
 
 /**
  * Stores bank account transactions to Movimientos spreadsheet
@@ -15,12 +16,14 @@ import { info } from '../../utils/logger.js';
  * @param movimientos - Array of bank transactions
  * @param spreadsheetId - Movimientos spreadsheet ID
  * @param period - Statement period (determines target month via fechaHasta)
+ * @param sheetOrderBatch - Optional batch collector to defer sheet reordering
  * @returns Success/failure result
  */
 export async function storeMovimientosBancario(
   movimientos: MovimientoBancario[],
   spreadsheetId: string,
-  period: { fechaDesde: string; fechaHasta: string }
+  period: { fechaDesde: string; fechaHasta: string },
+  sheetOrderBatch?: SheetOrderBatch
 ): Promise<Result<void, Error>> {
   try {
     // Target month is determined by resumen's fechaHasta
@@ -30,7 +33,8 @@ export async function storeMovimientosBancario(
     const sheetResult = await getOrCreateMonthSheet(
       spreadsheetId,
       targetMonth,
-      MOVIMIENTOS_BANCARIO_SHEET.headers
+      MOVIMIENTOS_BANCARIO_SHEET.headers,
+      sheetOrderBatch
     );
     if (!sheetResult.ok) return sheetResult;
 
@@ -94,12 +98,14 @@ export async function storeMovimientosBancario(
  * @param movimientos - Array of credit card transactions
  * @param spreadsheetId - Movimientos spreadsheet ID
  * @param period - Statement period (determines target month via fechaHasta)
+ * @param sheetOrderBatch - Optional batch collector to defer sheet reordering
  * @returns Success/failure result
  */
 export async function storeMovimientosTarjeta(
   movimientos: MovimientoTarjeta[],
   spreadsheetId: string,
-  period: { fechaDesde: string; fechaHasta: string }
+  period: { fechaDesde: string; fechaHasta: string },
+  sheetOrderBatch?: SheetOrderBatch
 ): Promise<Result<void, Error>> {
   try {
     // Target month is determined by resumen's fechaHasta
@@ -109,7 +115,8 @@ export async function storeMovimientosTarjeta(
     const sheetResult = await getOrCreateMonthSheet(
       spreadsheetId,
       targetMonth,
-      MOVIMIENTOS_TARJETA_SHEET.headers
+      MOVIMIENTOS_TARJETA_SHEET.headers,
+      sheetOrderBatch
     );
     if (!sheetResult.ok) return sheetResult;
 
@@ -173,12 +180,14 @@ export async function storeMovimientosTarjeta(
  * @param movimientos - Array of broker transactions
  * @param spreadsheetId - Movimientos spreadsheet ID
  * @param period - Statement period (determines target month via fechaHasta)
+ * @param sheetOrderBatch - Optional batch collector to defer sheet reordering
  * @returns Success/failure result
  */
 export async function storeMovimientosBroker(
   movimientos: MovimientoBroker[],
   spreadsheetId: string,
-  period: { fechaDesde: string; fechaHasta: string }
+  period: { fechaDesde: string; fechaHasta: string },
+  sheetOrderBatch?: SheetOrderBatch
 ): Promise<Result<void, Error>> {
   try {
     // Target month is determined by resumen's fechaHasta
@@ -188,7 +197,8 @@ export async function storeMovimientosBroker(
     const sheetResult = await getOrCreateMonthSheet(
       spreadsheetId,
       targetMonth,
-      MOVIMIENTOS_BROKER_SHEET.headers
+      MOVIMIENTOS_BROKER_SHEET.headers,
+      sheetOrderBatch
     );
     if (!sheetResult.ok) return sheetResult;
 

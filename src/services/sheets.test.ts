@@ -28,6 +28,7 @@ import {
   getMonthSheetPosition,
   moveSheetToPosition,
   getOrCreateMonthSheet,
+  reorderMonthSheets,
 } from './sheets.js';
 
 // Mock googleapis
@@ -1436,6 +1437,121 @@ describe('Google Sheets API wrapper - quota retry tests', () => {
         const result = await resultPromise;
 
         expect(result.ok).toBe(false);
+      });
+    });
+
+    describe('reorderMonthSheets', () => {
+      it('should do nothing when no month sheets exist', async () => {
+        mockSheetsApi.spreadsheets.get.mockResolvedValue({
+          data: {
+            sheets: [
+              { properties: { title: 'Summary', sheetId: 0, index: 0 } },
+            ],
+          },
+        });
+
+        const resultPromise = reorderMonthSheets('spreadsheet123');
+        await vi.runAllTimersAsync();
+        const result = await resultPromise;
+
+        expect(result.ok).toBe(true);
+        // No move calls should be made
+        expect(mockSheetsApi.spreadsheets.batchUpdate).not.toHaveBeenCalled();
+      });
+
+      it('should do nothing when only one month sheet exists', async () => {
+        mockSheetsApi.spreadsheets.get.mockResolvedValue({
+          data: {
+            sheets: [
+              { properties: { title: '2025-01', sheetId: 100, index: 0 } },
+            ],
+          },
+        });
+
+        const resultPromise = reorderMonthSheets('spreadsheet123');
+        await vi.runAllTimersAsync();
+        const result = await resultPromise;
+
+        expect(result.ok).toBe(true);
+        // No move calls should be made
+        expect(mockSheetsApi.spreadsheets.batchUpdate).not.toHaveBeenCalled();
+      });
+
+      it('should reorder month sheets chronologically', async () => {
+        mockSheetsApi.spreadsheets.get.mockResolvedValue({
+          data: {
+            sheets: [
+              { properties: { title: '2025-03', sheetId: 102, index: 0 } },
+              { properties: { title: '2025-01', sheetId: 100, index: 1 } },
+              { properties: { title: '2025-02', sheetId: 101, index: 2 } },
+            ],
+          },
+        });
+        mockSheetsApi.spreadsheets.batchUpdate.mockResolvedValue({ data: {} });
+
+        const resultPromise = reorderMonthSheets('spreadsheet123');
+        await vi.runAllTimersAsync();
+        const result = await resultPromise;
+
+        expect(result.ok).toBe(true);
+        // Should call moveSheetToPosition 3 times (once per month sheet)
+        expect(mockSheetsApi.spreadsheets.batchUpdate).toHaveBeenCalledTimes(3);
+        // First call should move 2025-01 to position 0
+        expect(mockSheetsApi.spreadsheets.batchUpdate).toHaveBeenNthCalledWith(1,
+          expect.objectContaining({
+            requestBody: expect.objectContaining({
+              requests: [
+                expect.objectContaining({
+                  updateSheetProperties: expect.objectContaining({
+                    properties: { sheetId: 100, index: 0 },
+                  }),
+                }),
+              ],
+            }),
+          })
+        );
+      });
+
+      it('should ignore non-YYYY-MM formatted sheets', async () => {
+        mockSheetsApi.spreadsheets.get.mockResolvedValue({
+          data: {
+            sheets: [
+              { properties: { title: 'Summary', sheetId: 0, index: 0 } },
+              { properties: { title: '2025-02', sheetId: 101, index: 1 } },
+              { properties: { title: '2025-01', sheetId: 100, index: 2 } },
+            ],
+          },
+        });
+        mockSheetsApi.spreadsheets.batchUpdate.mockResolvedValue({ data: {} });
+
+        const resultPromise = reorderMonthSheets('spreadsheet123');
+        await vi.runAllTimersAsync();
+        const result = await resultPromise;
+
+        expect(result.ok).toBe(true);
+        // Should call moveSheetToPosition only for month sheets (2 times)
+        expect(mockSheetsApi.spreadsheets.batchUpdate).toHaveBeenCalledTimes(2);
+      });
+
+      it('should handle API errors during reordering', async () => {
+        mockSheetsApi.spreadsheets.get.mockResolvedValue({
+          data: {
+            sheets: [
+              { properties: { title: '2025-02', sheetId: 101, index: 0 } },
+              { properties: { title: '2025-01', sheetId: 100, index: 1 } },
+            ],
+          },
+        });
+        mockSheetsApi.spreadsheets.batchUpdate.mockRejectedValue(new Error('Quota exceeded'));
+
+        const resultPromise = reorderMonthSheets('spreadsheet123');
+        await vi.runAllTimersAsync();
+        const result = await resultPromise;
+
+        expect(result.ok).toBe(false);
+        if (!result.ok) {
+          expect(result.error.message).toBe('Quota exceeded');
+        }
       });
     });
 

@@ -94,7 +94,8 @@ describe('storeMovimientosBancario', () => {
     expect(getOrCreateMonthSheet).toHaveBeenCalledWith(
       'spreadsheet-id',
       '2025-01',  // fechaHasta month, not individual fecha months
-      expect.any(Array)
+      expect.any(Array),
+      undefined  // sheetOrderBatch is optional
     );
 
     // All movimientos in single append
@@ -150,7 +151,8 @@ describe('storeMovimientosBancario', () => {
     expect(getOrCreateMonthSheet).toHaveBeenCalledWith(
       'spreadsheet-id',
       '2025-01',  // Should use fechaHasta month, not fechaDesde
-      expect.any(Array)
+      expect.any(Array),
+      undefined  // sheetOrderBatch is optional
     );
     expect(formatEmptyMonthSheet).toHaveBeenCalledWith('spreadsheet-id', 123, 5);
     expect(appendRowsWithLinks).not.toHaveBeenCalled();
@@ -251,7 +253,8 @@ describe('storeMovimientosTarjeta', () => {
     expect(getOrCreateMonthSheet).toHaveBeenCalledWith(
       'spreadsheet-id',
       '2025-01',  // fechaHasta month
-      expect.any(Array)
+      expect.any(Array),
+      undefined  // sheetOrderBatch is optional
     );
 
     // All movimientos in single append
@@ -307,7 +310,8 @@ describe('storeMovimientosTarjeta', () => {
     expect(getOrCreateMonthSheet).toHaveBeenCalledWith(
       'spreadsheet-id',
       '2025-01',  // Should use fechaHasta month
-      expect.any(Array)
+      expect.any(Array),
+      undefined  // sheetOrderBatch is optional
     );
     expect(formatEmptyMonthSheet).toHaveBeenCalledWith('spreadsheet-id', 123, 5);
     expect(appendRowsWithLinks).not.toHaveBeenCalled();
@@ -387,7 +391,8 @@ describe('storeMovimientosBroker', () => {
     expect(getOrCreateMonthSheet).toHaveBeenCalledWith(
       'spreadsheet-id',
       '2025-01',  // fechaHasta month
-      expect.any(Array)
+      expect.any(Array),
+      undefined  // sheetOrderBatch is optional
     );
 
     // All movimientos in single append
@@ -443,7 +448,8 @@ describe('storeMovimientosBroker', () => {
     expect(getOrCreateMonthSheet).toHaveBeenCalledWith(
       'spreadsheet-id',
       '2025-01',  // Should use fechaHasta month
-      expect.any(Array)
+      expect.any(Array),
+      undefined  // sheetOrderBatch is optional
     );
     expect(formatEmptyMonthSheet).toHaveBeenCalledWith('spreadsheet-id', 123, 10);
     expect(appendRowsWithLinks).not.toHaveBeenCalled();

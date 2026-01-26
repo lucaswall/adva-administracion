@@ -1357,12 +1357,14 @@ export async function moveSheetToPosition(
  * @param spreadsheetId - Spreadsheet ID
  * @param monthName - Name of the month sheet (e.g., '2026-01')
  * @param headers - Headers to use if creating the sheet
+ * @param sheetOrderBatch - Optional batch collector to defer sheet reordering
  * @returns Sheet ID
  */
 export async function getOrCreateMonthSheet(
   spreadsheetId: string,
   monthName: string,
-  headers: string[]
+  headers: string[],
+  sheetOrderBatch?: import('../processing/caches/index.js').SheetOrderBatch
 ): Promise<Result<number, Error>> {
   const metadataResult = await getSheetMetadata(spreadsheetId);
   if (!metadataResult.ok) return metadataResult;
@@ -1385,6 +1387,13 @@ export async function getOrCreateMonthSheet(
   const formatResult = await formatSheet(spreadsheetId, sheetId, { frozenRows: 1 });
   if (!formatResult.ok) return { ok: false, error: formatResult.error };
 
+  // If batch is provided, defer reordering to avoid race conditions during concurrent processing
+  if (sheetOrderBatch) {
+    sheetOrderBatch.addPendingReorder(spreadsheetId);
+    return { ok: true, value: sheetId };
+  }
+
+  // Immediate ordering mode (standalone calls without batch)
   // Get updated metadata to determine correct position for chronological ordering
   const updatedMetadataResult = await getSheetMetadata(spreadsheetId);
   if (!updatedMetadataResult.ok) return updatedMetadataResult;
@@ -1493,6 +1502,41 @@ export async function formatEmptyMonthSheet(
     if (!result.ok) return { ok: false, error: result.error };
     return { ok: true, value: undefined };
   });
+}
+
+/**
+ * Reorders all month sheets (YYYY-MM format) in a spreadsheet to be chronologically sorted.
+ * Call this at the end of batch processing to ensure correct ordering.
+ *
+ * @param spreadsheetId - Spreadsheet ID to reorder
+ * @returns Success/failure result
+ */
+export async function reorderMonthSheets(
+  spreadsheetId: string
+): Promise<Result<void, Error>> {
+  // Get all sheet metadata
+  const metadataResult = await getSheetMetadata(spreadsheetId);
+  if (!metadataResult.ok) return metadataResult;
+
+  // Filter for YYYY-MM formatted sheets only
+  const monthSheets = metadataResult.value.filter(s => /^\d{4}-\d{2}$/.test(s.title));
+
+  if (monthSheets.length <= 1) {
+    // Nothing to reorder
+    return { ok: true, value: undefined };
+  }
+
+  // Sort by title (YYYY-MM format sorts chronologically)
+  const sortedSheets = [...monthSheets].sort((a, b) => a.title.localeCompare(b.title));
+
+  // Move sheets to correct positions in order
+  for (let i = 0; i < sortedSheets.length; i++) {
+    const sheet = sortedSheets[i];
+    const moveResult = await moveSheetToPosition(spreadsheetId, sheet.sheetId, i);
+    if (!moveResult.ok) return moveResult;
+  }
+
+  return { ok: true, value: undefined };
 }
 
 /**
