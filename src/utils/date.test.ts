@@ -65,6 +65,12 @@ describe('normalizeSpreadsheetDate', () => {
   it('converts other types to string', () => {
     expect(normalizeSpreadsheetDate(true)).toBe('true');
   });
+
+  it('extracts value from CellDate objects', () => {
+    // CellDate is { type: 'date', value: string }
+    const cellDate = { type: 'date', value: '2025-11-30' };
+    expect(normalizeSpreadsheetDate(cellDate)).toBe('2025-11-30');
+  });
 });
 
 describe('parseArgDate', () => {

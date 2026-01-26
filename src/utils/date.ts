@@ -155,5 +155,12 @@ export function normalizeSpreadsheetDate(value: unknown): string {
   if (typeof value === 'number') {
     return serialToDateString(value);
   }
+  // Handle CellDate objects { type: 'date', value: string }
+  if (value && typeof value === 'object' && 'type' in value && 'value' in value) {
+    const cellDate = value as { type: string; value: unknown };
+    if (cellDate.type === 'date' && typeof cellDate.value === 'string') {
+      return cellDate.value;
+    }
+  }
   return String(value ?? '');
 }

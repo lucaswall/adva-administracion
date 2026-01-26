@@ -356,6 +356,245 @@ describe('DuplicateCache', () => {
         cache.addEntry('spreadsheet-1', 'Sheet1', 'file-new', ['2026-01-25', 'file-new', 'data']);
       }).not.toThrow();
     });
+
+    it('handles CellDate objects in added entries for duplicate detection', async () => {
+      const cache = new DuplicateCache();
+      const mockRows = [
+        ['Fecha', 'File ID', 'C', 'D', 'Nro Factura', 'CUIT', 'G', 'H', 'I', 'Importe Total'],
+      ];
+
+      vi.mocked(sheets.getValues).mockResolvedValue({ ok: true, value: mockRows });
+
+      await cache.loadSheet('spreadsheet-1', 'Facturas Emitidas', 'A1:Z1000');
+
+      // Simulate adding an entry with CellDate object (as happens in storeFactura)
+      const cellDate = { type: 'date', value: '2025-11-30' };
+      cache.addEntry('spreadsheet-1', 'Facturas Emitidas', 'file-1', [
+        cellDate, // Column A: fechaEmision as CellDate
+        'file-1', // Column B
+        '', // C
+        '', // D
+        '00001-00000214', // Column E: nroFactura
+        '27130780259', // Column F: CUIT
+        '', // G
+        '', // H
+        '', // I
+        '500,000.00', // Column J: importeTotal
+      ]);
+
+      // Now check for duplicate - should detect the CellDate entry
+      const result = cache.isDuplicateFactura(
+        'spreadsheet-1',
+        'Facturas Emitidas',
+        '00001-00000214',
+        '2025-11-30',
+        500000.00,
+        '27130780259'
+      );
+
+      expect(result.isDuplicate).toBe(true);
+      expect(result.existingFileId).toBe('file-1');
+    });
+
+    it('handles CellDate objects for pago duplicate detection', async () => {
+      const cache = new DuplicateCache();
+      const mockRows = [
+        ['Fecha', 'File ID', 'C', 'D', 'Importe Pagado', 'F', 'G', 'CUIT'],
+      ];
+
+      vi.mocked(sheets.getValues).mockResolvedValue({ ok: true, value: mockRows });
+
+      await cache.loadSheet('spreadsheet-1', 'Pagos Enviados', 'A1:Z1000');
+
+      const cellDate = { type: 'date', value: '2025-11-30' };
+      cache.addEntry('spreadsheet-1', 'Pagos Enviados', 'file-1', [
+        cellDate, // Column A: fechaPago as CellDate
+        'file-1', // Column B
+        '', // C
+        '', // D
+        '10,000.00', // Column E: importePagado
+        '', // F
+        '', // G
+        '20123456786', // Column H: CUIT
+      ]);
+
+      const result = cache.isDuplicatePago(
+        'spreadsheet-1',
+        'Pagos Enviados',
+        '2025-11-30',
+        10000.00,
+        '20123456786'
+      );
+
+      expect(result.isDuplicate).toBe(true);
+      expect(result.existingFileId).toBe('file-1');
+    });
+
+    it('handles CellDate objects for retencion duplicate detection', async () => {
+      const cache = new DuplicateCache();
+      const mockRows = [
+        ['Fecha', 'File ID', 'C', 'Nro Certificado', 'CUIT Agente', 'F', 'G', 'H', 'I', 'Monto Retencion'],
+      ];
+
+      vi.mocked(sheets.getValues).mockResolvedValue({ ok: true, value: mockRows });
+
+      await cache.loadSheet('spreadsheet-1', 'Retenciones Recibidas', 'A1:Z1000');
+
+      const cellDate = { type: 'date', value: '2025-11-30' };
+      cache.addEntry('spreadsheet-1', 'Retenciones Recibidas', 'file-1', [
+        cellDate, // Column A: fechaEmision as CellDate
+        'file-1', // Column B
+        '', // C
+        '12345678', // Column D: nroCertificado
+        '20123456786', // Column E: cuitAgente
+        '', // F
+        '', // G
+        '', // H
+        '', // I
+        '5,000.00', // Column J: montoRetencion
+      ]);
+
+      const result = cache.isDuplicateRetencion(
+        'spreadsheet-1',
+        '12345678',
+        '20123456786',
+        '2025-11-30',
+        5000.00
+      );
+
+      expect(result.isDuplicate).toBe(true);
+      expect(result.existingFileId).toBe('file-1');
+    });
+
+    it('handles CellDate objects for resumen bancario duplicate detection', async () => {
+      const cache = new DuplicateCache();
+      const mockRows = [
+        ['Fecha Desde', 'Fecha Hasta', 'C', 'D', 'Banco', 'Numero Cuenta', 'Moneda'],
+      ];
+
+      vi.mocked(sheets.getValues).mockResolvedValue({ ok: true, value: mockRows });
+
+      await cache.loadSheet('spreadsheet-1', 'Resumenes', 'A1:Z1000');
+
+      const cellDateDesde = { type: 'date', value: '2026-01-01' };
+      const cellDateHasta = { type: 'date', value: '2026-01-31' };
+      cache.addEntry('spreadsheet-1', 'Resumenes', 'file-1', [
+        cellDateDesde, // Column A: fechaDesde as CellDate
+        cellDateHasta, // Column B: fechaHasta as CellDate
+        'file-1', // Column C
+        '', // D
+        'BBVA', // Column E: banco
+        '1234567890', // Column F: numeroCuenta
+        'ARS', // Column G: moneda
+      ]);
+
+      const resumen: ResumenBancario = {
+        fileId: 'test-file-id',
+        fileName: 'test.pdf',
+        banco: 'BBVA',
+        numeroCuenta: '1234567890',
+        moneda: 'ARS',
+        fechaDesde: '2026-01-01',
+        fechaHasta: '2026-01-31',
+        saldoInicial: 0,
+        saldoFinal: 10000,
+        cantidadMovimientos: 10,
+        processedAt: '2026-01-25T10:00:00Z',
+        confidence: 0.95,
+        needsReview: false,
+      };
+
+      const result = cache.isDuplicateResumenBancario('spreadsheet-1', resumen);
+
+      expect(result.isDuplicate).toBe(true);
+      expect(result.existingFileId).toBe('file-1');
+    });
+
+    it('handles CellDate objects for resumen tarjeta duplicate detection', async () => {
+      const cache = new DuplicateCache();
+      const mockRows = [
+        ['Fecha Desde', 'Fecha Hasta', 'C', 'D', 'Banco', 'Numero Cuenta', 'Tipo Tarjeta'],
+      ];
+
+      vi.mocked(sheets.getValues).mockResolvedValue({ ok: true, value: mockRows });
+
+      await cache.loadSheet('spreadsheet-1', 'Resumenes', 'A1:Z1000');
+
+      const cellDateDesde = { type: 'date', value: '2026-01-01' };
+      const cellDateHasta = { type: 'date', value: '2026-01-31' };
+      cache.addEntry('spreadsheet-1', 'Resumenes', 'file-1', [
+        cellDateDesde, // Column A: fechaDesde as CellDate
+        cellDateHasta, // Column B: fechaHasta as CellDate
+        'file-1', // Column C
+        '', // D
+        'BBVA', // Column E: banco
+        '4563', // Column F: numeroCuenta (last 4 digits)
+        'Visa', // Column G: tipoTarjeta
+      ]);
+
+      const resumen: ResumenTarjeta = {
+        fileId: 'test-file-id',
+        fileName: 'test.pdf',
+        banco: 'BBVA',
+        numeroCuenta: '4563',
+        tipoTarjeta: 'Visa',
+        fechaDesde: '2026-01-01',
+        fechaHasta: '2026-01-31',
+        pagoMinimo: 1000,
+        saldoActual: 5000,
+        cantidadMovimientos: 10,
+        processedAt: '2026-01-25T10:00:00Z',
+        confidence: 0.95,
+        needsReview: false,
+      };
+
+      const result = cache.isDuplicateResumenTarjeta('spreadsheet-1', resumen);
+
+      expect(result.isDuplicate).toBe(true);
+      expect(result.existingFileId).toBe('file-1');
+    });
+
+    it('handles CellDate objects for resumen broker duplicate detection', async () => {
+      const cache = new DuplicateCache();
+      const mockRows = [
+        ['Fecha Desde', 'Fecha Hasta', 'C', 'D', 'Broker', 'Numero Cuenta'],
+      ];
+
+      vi.mocked(sheets.getValues).mockResolvedValue({ ok: true, value: mockRows });
+
+      await cache.loadSheet('spreadsheet-1', 'Resumenes', 'A1:Z1000');
+
+      const cellDateDesde = { type: 'date', value: '2026-01-01' };
+      const cellDateHasta = { type: 'date', value: '2026-01-31' };
+      cache.addEntry('spreadsheet-1', 'Resumenes', 'file-1', [
+        cellDateDesde, // Column A: fechaDesde as CellDate
+        cellDateHasta, // Column B: fechaHasta as CellDate
+        'file-1', // Column C
+        '', // D
+        'BALANZ CAPITAL VALORES SAU', // Column E: broker
+        '123456', // Column F: numeroCuenta (comitente)
+      ]);
+
+      const resumen: ResumenBroker = {
+        fileId: 'test-file-id',
+        fileName: 'test.pdf',
+        broker: 'BALANZ CAPITAL VALORES SAU',
+        numeroCuenta: '123456',
+        fechaDesde: '2026-01-01',
+        fechaHasta: '2026-01-31',
+        saldoARS: 10000,
+        saldoUSD: 500,
+        cantidadMovimientos: 10,
+        processedAt: '2026-01-25T10:00:00Z',
+        confidence: 0.95,
+        needsReview: false,
+      };
+
+      const result = cache.isDuplicateResumenBroker('spreadsheet-1', resumen);
+
+      expect(result.isDuplicate).toBe(true);
+      expect(result.existingFileId).toBe('file-1');
+    });
   });
 
   describe('clear', () => {
