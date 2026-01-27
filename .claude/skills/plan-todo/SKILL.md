@@ -66,7 +66,7 @@ Default: plan the **first item** in TODO.md. Override with $ARGUMENTS:
    - Extraction issues → Check current prompts, test with Gemini MCP
 6. **Generate plan** - Create TDD tasks with test-first approach
 7. **Write PLANS.md** - Overwrite with new plan
-8. **Update TODO.md** - Remove planned items
+8. **Update TODO.md** - Remove planned items and reformat remaining items
 
 ## Codebase Exploration Guidelines
 
@@ -173,6 +173,29 @@ Bad task example:
 - Extraction accuracy
 - Test prompt variations before planning changes
 
+## TODO.md Reformatting
+
+After removing planned items, **always reformat TODO.md** using the standard item format:
+
+```markdown
+## item #1 [tag]
+Description of first issue.
+
+## item #2 [tag]
+Description of second issue.
+```
+
+**Reformatting rules:**
+- Preserve the existing top-level heading (if any)
+- Renumber all remaining items sequentially starting from #1
+- Preserve relative order (priority ordering)
+- Keep original tags in brackets: `[security]`, `[bug]`, `[convention]`, etc.
+- Each item is a `## item #N [tag]` heading followed by a description paragraph
+- If original items had different formats, normalize them to this structure
+- If the item had no tag, infer one from context or use `[task]`
+
+This ensures TODO.md stays consistent regardless of how items were originally added.
+
 ## Rules
 
 - **Refuse to proceed if PLANS.md has incomplete work**
@@ -182,7 +205,7 @@ Bad task example:
 - No manual verification steps - use agents only
 - Tasks must be implementable without additional context
 - Always include post-implementation checklist
-- Remove planned items from TODO.md after writing PLANS.md
+- Remove planned items from TODO.md and reformat remaining items
 
 ## CRITICAL: Scope Boundaries
 
@@ -199,7 +222,7 @@ When you finish writing PLANS.md (and updating TODO.md), output this exact messa
 
 ```
 ✓ Plan created in PLANS.md
-✓ Planned items removed from TODO.md
+✓ TODO.md updated (planned items removed, remaining items renumbered)
 
 Next step: Run `plan-implement` to execute this plan.
 ```
