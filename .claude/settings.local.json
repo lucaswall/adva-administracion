@@ -51,7 +51,8 @@
       "WebFetch(domain:medium.com)",
       "Bash(pdftotext:*)",
       "Bash(md5:*)",
-      "Bash(railway logs:*)"
+      "Bash(railway logs:*)",
+      "Bash(wc:*)"
     ],
     "deny": [
       "Bash(rm -rf *)",
