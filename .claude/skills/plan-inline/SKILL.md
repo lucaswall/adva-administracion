@@ -198,3 +198,24 @@ Bad task example:
 - Tasks must be implementable without additional context
 - Always include post-implementation checklist
 - Do NOT modify TODO.md (this skill bypasses backlog management)
+
+## CRITICAL: Scope Boundaries
+
+**This skill creates plans. It does NOT implement them.**
+
+1. **NEVER ask to "exit plan mode"** - This skill doesn't use Claude Code's plan mode feature
+2. **NEVER implement code** - Your job ends when PLANS.md is written
+3. **NEVER ask ambiguous questions** like "should I proceed?" or "ready to continue?"
+4. **NEVER start implementing** after writing the plan, even if user says "yes" to something
+
+## Termination
+
+When you finish writing PLANS.md, output this exact message and STOP:
+
+```
+✓ Plan created in PLANS.md
+
+Next step: Run `plan-implement` to execute this plan.
+```
+
+Do not ask follow-up questions. Do not offer to implement. Just output the message and stop.
