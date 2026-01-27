@@ -72,18 +72,35 @@ Check project-specific rules. See [references/compliance-checklist.md](reference
 
 ### Step 4: Write TODO.md
 
-Format with numbered items ordered by priority:
+**Handle Existing Items:**
+1. If TODO.md already has items, extract them first
+2. Reformat each existing item to follow `## item #N [tag]` format
+   - If item lacks a tag, infer appropriate tag from content
+   - If item is a simple bullet, convert to proper format
+3. Keep existing items in their original order
+
+**Write Final TODO.md:**
 
 ```markdown
+# TODO
+
+## item #1 [tag]
+First existing item (reformatted if needed)
+
+## item #2 [tag]
+Second existing item (reformatted if needed)
+
+---
+
 # Code Audit Findings
 
-## item #1 [security]
+## item #3 [security]
 Description of the security issue.
 
-## item #2 [bug]
+## item #4 [bug]
 Description of the bug.
 
-## item #3 [convention]
+## item #5 [convention]
 Description of the CLAUDE.md violation.
 ```
 
@@ -91,8 +108,10 @@ Description of the CLAUDE.md violation.
 - Each item: `## item #N [tag]`
 - Content: Simple paragraph explaining the problem
 - NO solutions
-- Existing items are renumbered but preserved in relative order
-- New items inserted at appropriate priority positions
+- Existing items stay at top in original order (items #1-N)
+- Separator line (`---`) between existing and new items
+- New audit findings below separator, ordered by priority (items #N+1 onwards)
+- All items numbered sequentially
 
 ## Rules
 
