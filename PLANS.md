@@ -86,3 +86,32 @@ Create a new skill at `.claude/skills/plan-fix/SKILL.md` that enables investigat
 1. Run `bug-hunter` agent - Review changes for bugs
 2. Run `test-runner` agent - Verify all tests pass
 3. Run `builder` agent - Verify zero warnings
+
+---
+
+## Iteration 1
+
+**Implemented:** 2026-01-27
+
+### Completed
+- Task 1: Created `.claude/skills/plan-fix/` directory and `SKILL.md`
+  - Frontmatter with name, description, argument-hint, allowed-tools (including MCP tools)
+  - Pre-flight check section (refuse if PLANS.md has incomplete work)
+  - Arguments section (bug description with context)
+  - Context Gathering section (read CLAUDE.md for MCPs, folder structure, document types)
+  - Investigation Workflow (6 steps)
+  - PLANS.md Structure for bug fix plans
+  - Rules section
+
+### Bug-hunter Findings (First Run)
+- MCP tools not in allowed-tools → Fixed: added gdrive_search, gdrive_read_file, gdrive_list_folder, gdrive_get_pdf, gsheets_read
+- Invalid Explore subagent syntax → Fixed: clarified to use Task tool with subagent_type=Explore
+- WebFetch included but not documented → Fixed: removed from allowed-tools
+
+### Bug-hunter Findings (Second Run)
+- No bugs found
+
+### Checklist Results
+- bug-hunter: Passed (after fixes)
+- test-runner: Passed (389 tests, 0 failures)
+- builder: Passed (zero warnings)
