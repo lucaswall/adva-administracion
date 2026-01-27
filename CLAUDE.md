@@ -63,6 +63,21 @@ Task: Add parseResumenBroker function
 
 **Git agents rule:** Only use `commit-bot` or `pr-creator` if explicitly requested. If PR requested, use `pr-creator` only (it handles branch creation, commit, push, and PR creation).
 
+## SKILLS
+
+Skills are specialized workflows in `.claude/skills/`. Use them for planning and code quality tasks.
+
+| Skill | Purpose | When to Use |
+|-------|---------|-------------|
+| `plan-todo` | Convert TODO.md items into TDD plans | When TODO.md has items to implement |
+| `plan-inline` | Create TDD plans from direct requests | When user describes a feature directly |
+| `plan-fix` | Investigate bugs and create fix plans | When debugging extraction, deployment, or prompt issues |
+| `plan-implement` | Execute pending work from PLANS.md | After a plan is created |
+| `plan-review-implementation` | QA review of completed implementations | After plan-implement finishes |
+| `code-audit` | Comprehensive codebase audit | To find bugs, security issues, violations, dead code |
+
+**Code audit:** Use `code-audit` to analyze the entire codebase for issues. Writes findings to TODO.md with priority ordering. Analysis only - does not fix issues.
+
 ## MCP SERVERS
 
 ### Railway MCP (READ-ONLY)
