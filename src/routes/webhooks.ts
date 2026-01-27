@@ -9,6 +9,7 @@ import {
   markNotificationProcessed,
   triggerScan,
 } from '../services/watch-manager.js';
+import { createRateLimiter } from '../utils/rate-limiter.js';
 
 /**
  * Drive push notification headers
@@ -25,6 +26,9 @@ interface DriveNotificationHeaders {
  * Register webhook routes
  */
 export async function webhookRoutes(server: FastifyInstance) {
+  // Create rate limiter: 60 requests per minute per channelId
+  const rateLimiter = createRateLimiter(60000, 60);
+
   /**
    * POST /webhooks/drive - Handle Drive push notifications
    * Public endpoint (no authentication required)
@@ -76,6 +80,32 @@ export async function webhookRoutes(server: FastifyInstance) {
     if (!channel) {
       server.log.warn({ channelId }, 'Received notification for unknown channel');
       return reply.code(200).send({ status: 'ignored', reason: 'unknown_channel' });
+    }
+
+    // Validate resource ID matches the channel's resource ID
+    if (!resourceId || resourceId !== channel.resourceId) {
+      server.log.warn({
+        channelId,
+        expected: channel.resourceId,
+        received: resourceId
+      }, 'Resource ID mismatch');
+      return reply.code(200).send({ status: 'ignored', reason: 'resource_mismatch' });
+    }
+
+    // Check rate limit for this channel (after validation to prevent DoS)
+    const rateLimitResult = rateLimiter.check(channelId);
+    if (!rateLimitResult.allowed) {
+      server.log.warn({
+        channelId,
+        resetMs: rateLimitResult.resetMs
+      }, 'Rate limit exceeded for channel');
+      return reply
+        .code(429)
+        .header('Retry-After', Math.ceil(rateLimitResult.resetMs / 1000).toString())
+        .send({
+          error: 'Too Many Requests',
+          retryAfter: rateLimitResult.resetMs
+        });
     }
 
     // Check for duplicate notification

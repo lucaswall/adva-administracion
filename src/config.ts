@@ -89,9 +89,9 @@ export function loadConfig(): Config {
   const nodeEnv = (process.env.NODE_ENV || 'development') as Config['nodeEnv'];
   const logLevel = (process.env.LOG_LEVEL || 'INFO') as LogLevel;
 
-  // API Secret - required for production
+  // API Secret - required in all environments
   const apiSecret = process.env.API_SECRET || '';
-  if (!apiSecret && nodeEnv === 'production') {
+  if (!apiSecret) {
     throw new Error('API_SECRET is required');
   }
 

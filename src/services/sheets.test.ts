@@ -1944,4 +1944,165 @@ describe('Google Sheets API wrapper - quota retry tests', () => {
       });
     });
   });
+
+  describe('Formula injection sanitization', () => {
+    describe('appendRowsWithLinks', () => {
+      beforeEach(() => {
+        mockSheetsApi.spreadsheets.get.mockResolvedValue({
+          data: {
+            sheets: [
+              { properties: { sheetId: 123, title: 'TestSheet' } },
+            ],
+          },
+        });
+        mockSheetsApi.spreadsheets.batchUpdate.mockResolvedValue({ data: {} });
+      });
+
+      it('should sanitize strings starting with = in cell values', async () => {
+        const resultPromise = appendRowsWithLinks('spreadsheet123', 'TestSheet!A:C', [
+          ['Normal', '=SUM(A1:A10)', 'Safe'],
+        ]);
+        await vi.runAllTimersAsync();
+        const result = await resultPromise;
+
+        expect(result.ok).toBe(true);
+        expect(mockSheetsApi.spreadsheets.batchUpdate).toHaveBeenCalledWith(
+          expect.objectContaining({
+            requestBody: expect.objectContaining({
+              requests: expect.arrayContaining([
+                expect.objectContaining({
+                  appendCells: expect.objectContaining({
+                    rows: [
+                      {
+                        values: [
+                          { userEnteredValue: { stringValue: 'Normal' } },
+                          { userEnteredValue: { stringValue: "'=SUM(A1:A10)" } },
+                          { userEnteredValue: { stringValue: 'Safe' } },
+                        ],
+                      },
+                    ],
+                  }),
+                }),
+              ]),
+            }),
+          })
+        );
+      });
+
+      it('should sanitize strings starting with +, -, @', async () => {
+        const resultPromise = appendRowsWithLinks('spreadsheet123', 'TestSheet!A:D', [
+          ['+123', '-456', '@username', 'normal'],
+        ]);
+        await vi.runAllTimersAsync();
+        const result = await resultPromise;
+
+        expect(result.ok).toBe(true);
+        expect(mockSheetsApi.spreadsheets.batchUpdate).toHaveBeenCalledWith(
+          expect.objectContaining({
+            requestBody: expect.objectContaining({
+              requests: expect.arrayContaining([
+                expect.objectContaining({
+                  appendCells: expect.objectContaining({
+                    rows: [
+                      {
+                        values: [
+                          { userEnteredValue: { stringValue: "'+123" } },
+                          { userEnteredValue: { stringValue: "'-456" } },
+                          { userEnteredValue: { stringValue: "'@username" } },
+                          { userEnteredValue: { stringValue: 'normal' } },
+                        ],
+                      },
+                    ],
+                  }),
+                }),
+              ]),
+            }),
+          })
+        );
+      });
+
+      it('should not sanitize CellLink values', async () => {
+        const resultPromise = appendRowsWithLinks('spreadsheet123', 'TestSheet!A:B', [
+          [
+            { text: '=DANGEROUS', url: 'https://example.com' },
+            'normal',
+          ],
+        ]);
+        await vi.runAllTimersAsync();
+        const result = await resultPromise;
+
+        expect(result.ok).toBe(true);
+        expect(mockSheetsApi.spreadsheets.batchUpdate).toHaveBeenCalledWith(
+          expect.objectContaining({
+            requestBody: expect.objectContaining({
+              requests: expect.arrayContaining([
+                expect.objectContaining({
+                  appendCells: expect.objectContaining({
+                    rows: [
+                      {
+                        values: [
+                          {
+                            userEnteredValue: { stringValue: '=DANGEROUS' },
+                            textFormatRuns: [
+                              {
+                                format: {
+                                  link: {
+                                    uri: 'https://example.com',
+                                  },
+                                },
+                              },
+                            ],
+                          },
+                          { userEnteredValue: { stringValue: 'normal' } },
+                        ],
+                      },
+                    ],
+                  }),
+                }),
+              ]),
+            }),
+          })
+        );
+      });
+
+      it('should not sanitize CellDate values', async () => {
+        const resultPromise = appendRowsWithLinks('spreadsheet123', 'TestSheet!A:B', [
+          [
+            { type: 'date', value: '2025-01-27' },
+            'normal',
+          ],
+        ]);
+        await vi.runAllTimersAsync();
+        const result = await resultPromise;
+
+        expect(result.ok).toBe(true);
+        // CellDate is converted to number, not string, so no sanitization needed
+        expect(mockSheetsApi.spreadsheets.batchUpdate).toHaveBeenCalledWith(
+          expect.objectContaining({
+            requestBody: expect.objectContaining({
+              requests: expect.arrayContaining([
+                expect.objectContaining({
+                  appendCells: expect.objectContaining({
+                    rows: [
+                      {
+                        values: [
+                          {
+                            userEnteredValue: expect.objectContaining({
+                              numberValue: expect.any(Number),
+                            }),
+                            userEnteredFormat: expect.any(Object),
+                          },
+                          { userEnteredValue: { stringValue: 'normal' } },
+                        ],
+                      },
+                    ],
+                  }),
+                }),
+              ]),
+            }),
+          })
+        );
+      });
+    });
+  });
 });

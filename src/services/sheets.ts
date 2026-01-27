@@ -7,6 +7,7 @@ import { google, sheets_v4 } from 'googleapis';
 import { getGoogleAuth, getDefaultScopes } from './google-auth.js';
 import type { Result } from '../types/index.js';
 import { withQuotaRetry } from '../utils/concurrency.js';
+import { sanitizeForSpreadsheet } from '../utils/spreadsheet.js';
 
 /**
  * Sheets service instance
@@ -920,9 +921,10 @@ function convertToSheetsCellData(
       };
     }
 
-    // Regular string
+    // Regular string - sanitize to prevent formula injection
+    const sanitizedValue = sanitizeForSpreadsheet(value);
     return {
-      userEnteredValue: { stringValue: value },
+      userEnteredValue: { stringValue: sanitizedValue },
     };
   }
 
