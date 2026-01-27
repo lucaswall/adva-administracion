@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { serialToDateString, normalizeSpreadsheetDate, parseArgDate, formatISODate, isWithinDays } from './date.js';
+import { serialToDateString, normalizeSpreadsheetDate, parseArgDate, formatISODate, isWithinDays, isValidISODate } from './date.js';
 
 describe('serialToDateString', () => {
   it('handles epoch date (serial 0)', () => {
@@ -151,5 +151,53 @@ describe('isWithinDays', () => {
     const date1 = new Date('2025-12-15');
     const date2 = new Date('2025-12-30'); // 15 days after
     expect(isWithinDays(date1, date2, 10, 10)).toBe(false);
+  });
+});
+
+describe('isValidISODate', () => {
+  it('returns true for valid YYYY-MM-DD dates', () => {
+    expect(isValidISODate('2025-11-01')).toBe(true);
+    expect(isValidISODate('2025-01-15')).toBe(true);
+    expect(isValidISODate('2024-12-31')).toBe(true);
+  });
+
+  it('returns false for DD/MM/YYYY format', () => {
+    expect(isValidISODate('01/11/2025')).toBe(false);
+    expect(isValidISODate('15/01/2025')).toBe(false);
+  });
+
+  it('returns false for DD-MM-YYYY format', () => {
+    expect(isValidISODate('01-11-2025')).toBe(false);
+    expect(isValidISODate('15-01-2025')).toBe(false);
+  });
+
+  it('returns false for 2-digit year formats', () => {
+    expect(isValidISODate('11/13/25')).toBe(false);
+    expect(isValidISODate('2025-1-1')).toBe(false); // Not zero-padded
+  });
+
+  it('returns false for invalid date values', () => {
+    expect(isValidISODate('2025-13-01')).toBe(false); // Invalid month
+    expect(isValidISODate('2025-11-32')).toBe(false); // Invalid day
+    expect(isValidISODate('2025-02-30')).toBe(false); // Feb 30 doesn't exist
+  });
+
+  it('returns false for empty or invalid strings', () => {
+    expect(isValidISODate('')).toBe(false);
+    expect(isValidISODate('invalid')).toBe(false);
+    expect(isValidISODate('not-a-date')).toBe(false);
+  });
+
+  it('returns false for years outside reasonable range', () => {
+    expect(isValidISODate('1999-01-01')).toBe(false); // Before 2000
+    const farFuture = new Date().getFullYear() + 2;
+    expect(isValidISODate(`${farFuture}-01-01`)).toBe(false); // More than 1 year in future
+  });
+
+  it('returns true for years in reasonable range (2000 to current+1)', () => {
+    const currentYear = new Date().getFullYear();
+    expect(isValidISODate('2000-01-01')).toBe(true);
+    expect(isValidISODate(`${currentYear}-12-31`)).toBe(true);
+    expect(isValidISODate(`${currentYear + 1}-01-01`)).toBe(true);
   });
 });

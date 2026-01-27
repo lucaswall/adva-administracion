@@ -5,6 +5,7 @@
 
 import { moveFile, getParents, renameFile } from './drive.js';
 import { getOrCreateMonthFolder, getOrCreateBankAccountFolder, getOrCreateCreditCardFolder, getOrCreateBrokerFolder, getCachedFolderStructure } from './folder-structure.js';
+import { parseArgDate } from '../utils/date.js';
 import { formatMonthFolder } from '../utils/spanish-date.js';
 import {
   generateFacturaFileName,
@@ -32,20 +33,34 @@ type SortableDocument = Factura | Pago | Recibo | ResumenBancario | ResumenTarje
 
 /**
  * Extracts the relevant date from a document for sorting
+ * Uses parseArgDate for robust date parsing across formats
+ *
+ * @throws Error if date cannot be parsed (should not happen if hasValidDate() passed)
  */
-function getDocumentDate(doc: SortableDocument): Date {
-  if ('fechaEmision' in doc) {
-    // Factura - use emission date
-    return new Date(doc.fechaEmision);
-  } else if ('fechaPago' in doc) {
+export function getDocumentDate(doc: SortableDocument): Date {
+  let dateStr: string | undefined;
+
+  if ('fechaEmision' in doc && doc.fechaEmision) {
+    // Factura or Retencion - use emission date
+    dateStr = doc.fechaEmision;
+  } else if ('fechaPago' in doc && doc.fechaPago) {
     // Pago or Recibo - use payment date
-    return new Date(doc.fechaPago);
-  } else if ('fechaHasta' in doc) {
-    // ResumenBancario - use end date
-    return new Date(doc.fechaHasta);
+    dateStr = doc.fechaPago;
+  } else if ('fechaHasta' in doc && doc.fechaHasta) {
+    // ResumenBancario/Tarjeta/Broker - use end date
+    dateStr = doc.fechaHasta;
   }
-  // Fallback to current date
-  return new Date();
+
+  if (!dateStr) {
+    throw new Error('Document has no valid date field');
+  }
+
+  const parsed = parseArgDate(dateStr);
+  if (!parsed) {
+    throw new Error(`Invalid date format: ${dateStr}`);
+  }
+
+  return parsed;
 }
 
 /**

@@ -4,6 +4,48 @@
  */
 
 /**
+ * Validates that a string is a valid ISO date in YYYY-MM-DD format
+ * with a reasonable year (2000-2100)
+ *
+ * @param dateStr - String to validate
+ * @returns true if valid ISO date, false otherwise
+ */
+export function isValidISODate(dateStr: string): boolean {
+  if (!dateStr || typeof dateStr !== 'string') return false;
+
+  // Check format: must be exactly YYYY-MM-DD with 2-digit month/day
+  const match = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return false;
+
+  const [, yearStr, monthStr, dayStr] = match;
+  const year = parseInt(yearStr, 10);
+  const month = parseInt(monthStr, 10);
+  const day = parseInt(dayStr, 10);
+
+  // Validate year is in reasonable range (2000 to current year + 1)
+  const currentYear = new Date().getFullYear();
+  if (year < 2000 || year > currentYear + 1) return false;
+
+  // Validate month (1-12)
+  if (month < 1 || month > 12) return false;
+
+  // Validate day (1-31 max, but check actual month limits)
+  if (day < 1 || day > 31) return false;
+
+  // Create date and verify it parsed correctly (catches Feb 30, etc.)
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (
+    date.getUTCFullYear() !== year ||
+    date.getUTCMonth() !== month - 1 ||
+    date.getUTCDate() !== day
+  ) {
+    return false;
+  }
+
+  return true;
+}
+
+/**
  * Parses an Argentine date string to a Date object
  *
  * Supports formats:

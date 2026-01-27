@@ -15,6 +15,39 @@ import { withLock } from '../utils/concurrency.js';
 /** MIME type for Google Drive folders */
 const FOLDER_MIME = 'application/vnd.google-apps.folder';
 
+/** Minimum valid year for document folders */
+const MIN_YEAR = 2000;
+
+/**
+ * Validates that a year string represents a valid year
+ * Valid years are between 2000 and current year + 1
+ *
+ * @param year - Year string to validate
+ * @returns Result with parsed year number or error
+ */
+export function validateYear(year: string): Result<number, Error> {
+  const yearNum = parseInt(year, 10);
+
+  if (isNaN(yearNum)) {
+    return {
+      ok: false,
+      error: new Error(`Year "${year}" is invalid (not a number)`),
+    };
+  }
+
+  const currentYear = new Date().getFullYear();
+  const maxYear = currentYear + 1;
+
+  if (yearNum < MIN_YEAR || yearNum > maxYear) {
+    return {
+      ok: false,
+      error: new Error(`Year ${yearNum} is outside valid range (${MIN_YEAR}-${maxYear})`),
+    };
+  }
+
+  return { ok: true, value: yearNum };
+}
+
 /** MIME type for Google Sheets */
 const SPREADSHEET_MIME = 'application/vnd.google-apps.spreadsheet';
 
@@ -657,8 +690,12 @@ export async function getOrCreateMonthFolder(
     return { ok: true, value: cachedStructure.sinProcesarId };
   }
 
-  // Extract year from date
+  // Extract and validate year from date
   const year = date.getFullYear().toString();
+  const yearValidation = validateYear(year);
+  if (!yearValidation.ok) {
+    return yearValidation;
+  }
 
   // Get or create year folder with lock to prevent race conditions
   let yearFolderId = cachedStructure.yearFolders.get(year);
@@ -810,6 +847,12 @@ export async function getOrCreateBankAccountFolder(
     };
   }
 
+  // Validate year to prevent creating folders like "2029" or "NaN"
+  const yearValidation = validateYear(year);
+  if (!yearValidation.ok) {
+    return yearValidation;
+  }
+
   const folderName = `${banco} ${numeroCuenta} ${moneda}`;
   const cacheKey = `${year}:${folderName}`;
 
@@ -931,6 +974,12 @@ export async function getOrCreateCreditCardFolder(
     };
   }
 
+  // Validate year to prevent creating folders like "2029" or "NaN"
+  const yearValidation = validateYear(year);
+  if (!yearValidation.ok) {
+    return yearValidation;
+  }
+
   const folderName = `${banco} ${tipoTarjeta} ${numeroCuenta}`;
   const cacheKey = `${year}:${folderName}`;
 
@@ -1040,6 +1089,12 @@ export async function getOrCreateBrokerFolder(
       ok: false,
       error: new Error('Folder structure not initialized. Call discoverFolderStructure first.'),
     };
+  }
+
+  // Validate year to prevent creating folders like "2029" or "NaN"
+  const yearValidation = validateYear(year);
+  if (!yearValidation.ok) {
+    return yearValidation;
   }
 
   const folderName = `${broker} ${numeroCuenta}`;

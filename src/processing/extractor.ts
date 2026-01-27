@@ -44,6 +44,7 @@ import { getConfig, GEMINI_PRICING } from '../config.js';
 import { debug, warn, error as logError } from '../utils/logger.js';
 import { getCorrelationId, updateCorrelationContext } from '../utils/correlation.js';
 import { getCircuitBreaker } from '../utils/circuit-breaker.js';
+import { isValidISODate } from '../utils/date.js';
 
 /**
  * Result of processing a single file
@@ -68,20 +69,25 @@ export function hasValidDate(doc: unknown, documentType: DocumentType): boolean 
   switch (documentType) {
     case 'factura_emitida':
     case 'factura_recibida':
-      return !!d.fechaEmision && d.fechaEmision !== '';
+      return typeof d.fechaEmision === 'string' && isValidISODate(d.fechaEmision);
     case 'pago_enviado':
     case 'pago_recibido':
-      return !!d.fechaPago && d.fechaPago !== '';
+      return typeof d.fechaPago === 'string' && isValidISODate(d.fechaPago);
     case 'recibo':
-      return !!d.fechaPago && d.fechaPago !== '';
+      return typeof d.fechaPago === 'string' && isValidISODate(d.fechaPago);
     case 'resumen_bancario':
     case 'resumen_tarjeta':
     case 'resumen_broker':
-      // Validate that both date fields are present and non-empty
-      // If dates cannot be parsed, file should go to Sin Procesar
-      return !!d.fechaDesde && d.fechaDesde !== '' && !!d.fechaHasta && d.fechaHasta !== '';
+      // Validate that both date fields are present and in valid ISO format
+      // If dates cannot be parsed correctly, file should go to Sin Procesar
+      return (
+        typeof d.fechaDesde === 'string' &&
+        isValidISODate(d.fechaDesde) &&
+        typeof d.fechaHasta === 'string' &&
+        isValidISODate(d.fechaHasta)
+      );
     case 'certificado_retencion':
-      return !!d.fechaEmision && d.fechaEmision !== '';
+      return typeof d.fechaEmision === 'string' && isValidISODate(d.fechaEmision);
     default:
       return false;
   }
