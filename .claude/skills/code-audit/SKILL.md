@@ -47,7 +47,7 @@ Use Task tool with `subagent_type=Explore` to examine each area. If `$ARGUMENTS`
 
 ### Step 2: CLAUDE.md Compliance
 
-Check project-specific rules. See [compliance-checklist.md](compliance-checklist.md) for the complete list.
+Check project-specific rules. See [references/compliance-checklist.md](references/compliance-checklist.md) for the complete list.
 
 ### Step 3: Categorize Findings
 
