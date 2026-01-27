@@ -1,81 +1,119 @@
 ---
 name: plan-review-implementation
-description: Review implementation, create fix plan if needed
+description: Review completed implementation, identify issues, and either create fix plans or mark complete. Use after plan-implement has executed work.
 allowed-tools: Read, Edit, Glob, Grep
 disable-model-invocation: true
 ---
 
-Review the latest implementation and either create a fix plan or mark complete.
+Review the latest implementation iteration and either create a fix plan or mark complete.
 
-## Workflow
+## Pre-flight Check
 
-1. Read PLANS.md to understand the full plan and history
-2. Read CLAUDE.md for project standards
-3. Find the **latest "Iteration N"** section that has "Completed" but no "Review Findings"
-4. Identify all code that was implemented in that iteration
-5. Review that code thoroughly:
-   - Bugs and logic errors
-   - Missing edge cases
-   - Incorrect implementations vs plan intent
-   - Security vulnerabilities
-   - Error handling gaps
-   - Type safety issues
-   - Deviations from project conventions
-6. Update PLANS.md:
-   - Add "Review Findings" subsection to the current iteration
-   - If issues found → Add "Fix Plan" subsection with TDD tasks
-   - If no issues → Append "Status: COMPLETE" at the end of the file
+1. **Read PLANS.md** - Understand the full plan and iteration history
+2. **Read CLAUDE.md** - Understand project standards and conventions
 
-## Update Format - Issues Found
+## Identify What to Review
+
+Find the **latest "Iteration N"** section that has:
+- "Completed" subsection (implementation was done)
+- NO "Review Findings" subsection (not yet reviewed)
+
+If no iteration needs review → Inform user and stop.
+
+## Review Process
+
+### Step 1: Identify Implemented Code
+
+From the iteration's "Completed" section, list all files that were:
+- Created
+- Modified
+- Added tests to
+
+### Step 2: Thorough Code Review
+
+Read each implemented file and check for:
+
+| Category | What to Look For |
+|----------|------------------|
+| **BUG** | Logic errors, off-by-one, null handling, race conditions |
+| **EDGE CASE** | Unhandled scenarios, boundary conditions |
+| **SECURITY** | Injection vulnerabilities, exposed secrets, missing auth |
+| **TYPE** | Type mismatches, unsafe casts, missing type guards |
+| **ERROR** | Missing error handling, swallowed exceptions |
+| **CONVENTION** | Violations of CLAUDE.md rules |
+
+### Step 3: Evaluate Severity
+
+Not all findings require fixes. Consider:
+
+**Fix Required:**
+- Would cause runtime errors
+- Could corrupt data
+- Security vulnerability
+- Test doesn't actually test the behavior
+- Violates CLAUDE.md critical rules
+
+**Not a Fix (document but don't create fix plan):**
+- Style preferences not in CLAUDE.md
+- Theoretical edge cases that can't occur
+- "Nice to have" improvements
+- Future enhancements
+
+## Document Findings
+
+### If Issues Found
 
 Add to the current Iteration section:
 
 ```markdown
 ### Review Findings
-- BUG: [description] ([file]:[line])
-- EDGE CASE: [description] ([file]:[line])
-- SECURITY: [description] ([file]:[line])
+- BUG: [description] (`file.ts:line`)
+- EDGE CASE: [description] (`file.ts:line`)
+- SECURITY: [description] (`file.ts:line`)
 
 ### Fix Plan
 
-#### Fix 1: [Title matching the issue]
-1. Write test in [file].test.ts for [scenario]
+#### Fix 1: [Title matching the BUG above]
+1. Write test in [file].test.ts for [scenario that reproduces the bug]
 2. Implement fix in [file].ts
 
-#### Fix 2: [Title]
-...
+#### Fix 2: [Title matching the EDGE CASE above]
+1. Write test...
+2. Implement fix...
 ```
 
-## Update Format - No Issues
+### If No Issues Found
 
-Add to the current Iteration section, then append status:
+Add to the current Iteration section, then append final status:
 
 ```markdown
 ### Review Findings
-None - all implementations correct.
+None - all implementations are correct and follow project conventions.
 
 ---
 
 ## Status: COMPLETE
 
-All tasks and fixes implemented successfully. Ready for human review.
+All tasks implemented and reviewed successfully. Ready for human review.
 ```
 
-## Issue Categories
+## Issue Categories Reference
 
-- **BUG**: Logic errors, incorrect behavior
-- **EDGE CASE**: Unhandled scenarios
-- **SECURITY**: Vulnerabilities (injection, validation gaps)
-- **TYPE**: Type safety issues
-- **CONVENTION**: Deviations from CLAUDE.md rules
-- **ERROR HANDLING**: Missing or incorrect error handling
+| Tag | Description | Severity |
+|-----|-------------|----------|
+| `BUG` | Logic errors causing incorrect behavior | High |
+| `EDGE CASE` | Unhandled scenario that could occur | Medium |
+| `SECURITY` | Vulnerability or exposure risk | High |
+| `TYPE` | Type safety issues | Medium |
+| `ERROR` | Missing or incorrect error handling | Medium |
+| `CONVENTION` | Violation of CLAUDE.md rules | Low-Medium |
 
 ## Rules
 
-- **Do not modify source code** - review only
-- Read and analyze all implemented code thoroughly
-- Be specific: include file paths and line numbers
-- Each issue in Review Findings must have a corresponding Fix task
-- Fix Plan must follow TDD (test first for each fix)
-- **Never modify previous sections** - only add to current iteration or append status
-- If no iteration needs review, inform the user
+- **Do not modify source code** - Review only, document findings
+- **Be specific** - Include file paths and line numbers for every issue
+- **One fix per issue** - Each Review Finding must have a matching Fix task
+- **Fix Plan follows TDD** - Test first for each fix
+- **Never modify previous sections** - Only add to current iteration or append status
+- **Mark COMPLETE only when confident** - No known bugs, all conventions followed
+- If no iteration needs review, inform the user and stop
