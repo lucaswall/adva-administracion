@@ -6,7 +6,7 @@ import { getValues, appendRowsWithLinks, batchUpdate, getSpreadsheetTimezone } f
 import type { Result, DocumentType } from '../../types/index.js';
 import { info as logInfo, error as logError } from '../../utils/logger.js';
 import { getCorrelationId } from '../../utils/correlation.js';
-import { withQuotaRetry } from '../../utils/concurrency.js';
+import { withQuotaRetry, withLock } from '../../utils/concurrency.js';
 
 /**
  * In-memory cache for file row indexes
@@ -45,93 +45,104 @@ export async function markFileProcessing(
   fileName: string,
   documentType: DocumentType
 ): Promise<Result<void, Error>> {
+  const lockKey = `file-status:${dashboardId}:${fileId}`;
+
   return withQuotaRetry(async () => {
     const correlationId = getCorrelationId();
     const processedAt = new Date().toISOString();
+    const cacheKey = `${dashboardId}:${fileId}`;
 
-    // Check if file already exists in tracking sheet (for retry scenarios)
-    const existingResult = await getValues(dashboardId, 'Archivos Procesados!A:E');
-    if (!existingResult.ok) {
-      logError('Failed to read tracking sheet', {
-        module: 'storage',
-        fileId,
-        error: existingResult.error.message,
-        correlationId,
-      });
-      throw existingResult.error;
-    }
-
-    // Find existing row for this file
-    let existingRowIndex = -1;
-    for (let i = 1; i < existingResult.value.length; i++) {
-      const row = existingResult.value[i];
-      if (row && row[0] === fileId) {
-        existingRowIndex = i + 1; // 1-indexed for spreadsheet
-        break;
+    // Wrap in lock to serialize with updateFileStatus
+    const lockResult = await withLock(lockKey, async () => {
+      // Check if file already exists in tracking sheet (for retry scenarios)
+      const existingResult = await getValues(dashboardId, 'Archivos Procesados!A:E');
+      if (!existingResult.ok) {
+        logError('Failed to read tracking sheet', {
+          module: 'storage',
+          fileId,
+          error: existingResult.error.message,
+          correlationId,
+        });
+        throw existingResult.error;
       }
-    }
 
-    // Get spreadsheet timezone for proper timestamp formatting
-    const timezoneResult = await getSpreadsheetTimezone(dashboardId);
-    const timeZone = timezoneResult.ok ? timezoneResult.value : undefined;
+      // Find existing row for this file
+      let existingRowIndex = -1;
+      for (let i = 1; i < existingResult.value.length; i++) {
+        const row = existingResult.value[i];
+        if (row && row[0] === fileId) {
+          existingRowIndex = i + 1; // 1-indexed for spreadsheet
+          break;
+        }
+      }
 
-    if (existingRowIndex > 0) {
-      // File exists - update the existing row (this is a retry)
-      logInfo('Updating existing tracking row for retry', {
+      // Get spreadsheet timezone for proper timestamp formatting
+      const timezoneResult = await getSpreadsheetTimezone(dashboardId);
+      const timeZone = timezoneResult.ok ? timezoneResult.value : undefined;
+
+      if (existingRowIndex > 0) {
+        // File exists - update the existing row (this is a retry)
+        logInfo('Updating existing tracking row for retry', {
+          module: 'storage',
+          fileId,
+          fileName,
+          rowIndex: existingRowIndex,
+          correlationId,
+        });
+
+        const updateResult = await batchUpdate(dashboardId, [
+          { range: `Archivos Procesados!C${existingRowIndex}:E${existingRowIndex}`, values: [[processedAt, documentType, 'processing']] },
+        ]);
+
+        if (!updateResult.ok) {
+          logError('Failed to update tracking row for retry', {
+            module: 'storage',
+            fileId,
+            fileName,
+            error: updateResult.error.message,
+            correlationId,
+          });
+          throw updateResult.error;
+        }
+
+        // Update cache with row index
+        fileRowIndexCache.set(cacheKey, existingRowIndex);
+      } else {
+        // New file - append a new row
+        const result = await appendRowsWithLinks(
+          dashboardId,
+          'Archivos Procesados',
+          [[fileId, fileName, processedAt, documentType, 'processing']],
+          timeZone
+        );
+
+        if (!result.ok) {
+          logError('Failed to mark file as processing', {
+            module: 'storage',
+            fileId,
+            fileName,
+            error: result.error.message,
+            correlationId,
+          });
+          throw result.error;
+        }
+      }
+
+      logInfo('Marked file as processing', {
         module: 'storage',
         fileId,
         fileName,
-        rowIndex: existingRowIndex,
+        documentType,
+        isRetry: existingRowIndex > 0,
         correlationId,
       });
 
-      const updateResult = await batchUpdate(dashboardId, [
-        { range: `Archivos Procesados!C${existingRowIndex}:E${existingRowIndex}`, values: [[processedAt, documentType, 'processing']] },
-      ]);
-
-      if (!updateResult.ok) {
-        logError('Failed to update tracking row for retry', {
-          module: 'storage',
-          fileId,
-          fileName,
-          error: updateResult.error.message,
-          correlationId,
-        });
-        throw updateResult.error;
-      }
-
-      // Update cache with row index
-      const cacheKey = `${dashboardId}:${fileId}`;
-      fileRowIndexCache.set(cacheKey, existingRowIndex);
-    } else {
-      // New file - append a new row
-      const result = await appendRowsWithLinks(
-        dashboardId,
-        'Archivos Procesados',
-        [[fileId, fileName, processedAt, documentType, 'processing']],
-        timeZone
-      );
-
-      if (!result.ok) {
-        logError('Failed to mark file as processing', {
-          module: 'storage',
-          fileId,
-          fileName,
-          error: result.error.message,
-          correlationId,
-        });
-        throw result.error;
-      }
-    }
-
-    logInfo('Marked file as processing', {
-      module: 'storage',
-      fileId,
-      fileName,
-      documentType,
-      isRetry: existingRowIndex > 0,
-      correlationId,
+      return undefined;
     });
+
+    if (!lockResult.ok) {
+      throw lockResult.error;
+    }
   }).then(result => {
     if (!result.ok) return { ok: false, error: result.error };
     return { ok: true, value: undefined };
@@ -154,13 +165,15 @@ export async function updateFileStatus(
 ): Promise<Result<void, Error>> {
   const correlationId = getCorrelationId();
   const cacheKey = `${dashboardId}:${fileId}`;
-  const cacheHit = fileRowIndexCache.has(cacheKey);
+  const lockKey = `file-status:${dashboardId}:${fileId}`;
 
-  // Check cache first
-  let rowIndex = fileRowIndexCache.get(cacheKey);
+  // Wrap entire function body in lock to prevent TOCTOU race
+  return await withLock(lockKey, async () => {
+    // Invalidate cache at start of lock to ensure fresh data
+    // This prevents TOCTOU: always re-read within lock
+    fileRowIndexCache.delete(cacheKey);
 
-  if (rowIndex === undefined) {
-    // Cache miss - read column to find row
+    // Read fresh data from sheet
     const valuesResult = await getValues(dashboardId, 'Archivos Procesados!A:A');
 
     if (!valuesResult.ok) {
@@ -170,62 +183,62 @@ export async function updateFileStatus(
         error: valuesResult.error.message,
         correlationId,
       });
-      return { ok: false, error: valuesResult.error };
+      throw valuesResult.error;
     }
 
     // Find row index (skip header)
-    let foundIndex = -1;
+    let rowIndex = -1;
     for (let i = 1; i < valuesResult.value.length; i++) {
       const row = valuesResult.value[i];
       if (row && row[0] === fileId) {
-        foundIndex = i + 1; // 1-indexed
+        rowIndex = i + 1; // 1-indexed
         break;
       }
     }
 
-    if (foundIndex === -1) {
+    if (rowIndex === -1) {
       const error = new Error(`File ${fileId} not found in tracking sheet`);
       logError('File not found in tracking sheet', {
         module: 'storage',
         fileId,
         correlationId,
       });
-      return { ok: false, error };
+      throw error;
     }
 
-    rowIndex = foundIndex;
+    // Update cache with fresh row index
     fileRowIndexCache.set(cacheKey, rowIndex);
-  }
 
-  // Update status using cached row index
-  const statusValue = status === 'failed' && errorMessage
-    ? `failed: ${errorMessage}`
-    : status;
+    // Update status using fresh row index
+    const statusValue = status === 'failed' && errorMessage
+      ? `failed: ${errorMessage}`
+      : status;
 
-  const updateResult = await batchUpdate(dashboardId, [
-    { range: `Archivos Procesados!E${rowIndex}`, values: [[statusValue]] },
-  ]);
+    const updateResult = await batchUpdate(dashboardId, [
+      { range: `Archivos Procesados!E${rowIndex}`, values: [[statusValue]] },
+    ]);
 
-  if (!updateResult.ok) {
-    logError('Failed to update file status', {
+    if (!updateResult.ok) {
+      logError('Failed to update file status', {
+        module: 'storage',
+        fileId,
+        status,
+        error: updateResult.error.message,
+        correlationId,
+      });
+      throw updateResult.error;
+    }
+
+    logInfo('Updated file status', {
       module: 'storage',
       fileId,
       status,
-      error: updateResult.error.message,
+      usedCache: false, // Always fresh read within lock
       correlationId,
     });
-    return { ok: false, error: updateResult.error };
-  }
 
-  logInfo('Updated file status', {
-    module: 'storage',
-    fileId,
-    status,
-    usedCache: cacheHit,
-    correlationId,
+    return undefined;
   });
-
-  return { ok: true, value: undefined };
 }
 
 /**

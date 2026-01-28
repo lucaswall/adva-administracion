@@ -4,7 +4,7 @@
  */
 
 import { google, sheets_v4 } from 'googleapis';
-import { getGoogleAuth, getDefaultScopes } from './google-auth.js';
+import { getGoogleAuthAsync, getDefaultScopes } from './google-auth.js';
 import type { Result } from '../types/index.js';
 import { withQuotaRetry } from '../utils/concurrency.js';
 import { sanitizeForSpreadsheet } from '../utils/spreadsheet.js';
@@ -68,12 +68,12 @@ export function clearTimezoneCache(): void {
 /**
  * Gets or creates the Sheets service
  */
-function getSheetsService(): sheets_v4.Sheets {
+async function getSheetsService(): Promise<sheets_v4.Sheets> {
   if (sheetsService) {
     return sheetsService;
   }
 
-  const auth = getGoogleAuth(getDefaultScopes());
+  const auth = await getGoogleAuthAsync(getDefaultScopes());
   sheetsService = google.sheets({ version: 'v4', auth });
 
   return sheetsService;
@@ -129,7 +129,7 @@ export async function getValues(
   range: string
 ): Promise<Result<CellValue[][], Error>> {
   return withQuotaRetry(async () => {
-    const sheets = getSheetsService();
+    const sheets = await getSheetsService();
     const response = await sheets.spreadsheets.values.get({
       spreadsheetId,
       range,
@@ -157,7 +157,7 @@ export async function setValues(
   values: CellValue[][]
 ): Promise<Result<number, Error>> {
   return withQuotaRetry(async () => {
-    const sheets = getSheetsService();
+    const sheets = await getSheetsService();
     const response = await sheets.spreadsheets.values.update({
       spreadsheetId,
       range,
@@ -187,7 +187,7 @@ export async function appendRows(
   values: CellValue[][]
 ): Promise<Result<number, Error>> {
   return withQuotaRetry(async () => {
-    const sheets = getSheetsService();
+    const sheets = await getSheetsService();
     const response = await sheets.spreadsheets.values.append({
       spreadsheetId,
       range,
@@ -216,7 +216,7 @@ export async function batchUpdate(
   updates: Array<{ range: string; values: CellValue[][] }>
 ): Promise<Result<number, Error>> {
   return withQuotaRetry(async () => {
-    const sheets = getSheetsService();
+    const sheets = await getSheetsService();
     const response = await sheets.spreadsheets.values.batchUpdate({
       spreadsheetId,
       requestBody: {
@@ -245,7 +245,7 @@ export async function getSheetMetadataInternal(
   spreadsheetId: string
 ): Promise<Result<Array<{ title: string; sheetId: number; index: number }>, Error>> {
   try {
-    const sheets = getSheetsService();
+    const sheets = await getSheetsService();
     const response = await sheets.spreadsheets.get({
       spreadsheetId,
       fields: 'sheets.properties',
@@ -276,7 +276,7 @@ export async function getSheetMetadata(
   spreadsheetId: string
 ): Promise<Result<Array<{ title: string; sheetId: number; index: number }>, Error>> {
   return withQuotaRetry(async () => {
-    const sheets = getSheetsService();
+    const sheets = await getSheetsService();
     const response = await sheets.spreadsheets.get({
       spreadsheetId,
       fields: 'sheets.properties.title,sheets.properties.sheetId,sheets.properties.index',
@@ -312,7 +312,7 @@ export async function getSpreadsheetTimezone(
 
   // Fetch from API (already wrapped with withQuotaRetry)
   return withQuotaRetry(async () => {
-    const sheets = getSheetsService();
+    const sheets = await getSheetsService();
     const response = await sheets.spreadsheets.get({
       spreadsheetId,
       fields: 'properties.timeZone',
@@ -342,7 +342,7 @@ export async function createSheet(
   title: string
 ): Promise<Result<number, Error>> {
   return withQuotaRetry(async () => {
-    const sheets = getSheetsService();
+    const sheets = await getSheetsService();
     const response = await sheets.spreadsheets.batchUpdate({
       spreadsheetId,
       requestBody: {
@@ -490,7 +490,7 @@ export async function formatSheet(
   const { monetaryColumns = [], numberFormats, frozenRows = 1 } = options;
 
   return withQuotaRetry(async () => {
-    const sheets = getSheetsService();
+    const sheets = await getSheetsService();
     const requests: sheets_v4.Schema$Request[] = [];
 
     // 1. Freeze header rows
@@ -624,7 +624,7 @@ export async function formatStatusSheet(
   sheetId: number
 ): Promise<Result<void, Error>> {
   return withQuotaRetry(async () => {
-    const sheets = getSheetsService();
+    const sheets = await getSheetsService();
     const requests: sheets_v4.Schema$Request[] = [];
 
     // 1. Bold only column A (all rows) - metric labels
@@ -726,7 +726,7 @@ export async function applyConditionalFormat(
   rules: ConditionalFormatRule[]
 ): Promise<Result<void, Error>> {
   return withQuotaRetry(async () => {
-    const sheets = getSheetsService();
+    const sheets = await getSheetsService();
 
     const requests: sheets_v4.Schema$Request[] = rules.map(rule => ({
       addConditionalFormatRule: {
@@ -779,7 +779,7 @@ export async function deleteSheet(
   sheetId: number
 ): Promise<Result<void, Error>> {
   return withQuotaRetry(async () => {
-    const sheets = getSheetsService();
+    const sheets = await getSheetsService();
     await sheets.spreadsheets.batchUpdate({
       spreadsheetId,
       requestBody: {
@@ -1002,7 +1002,7 @@ export async function appendRowsWithLinks(
     }));
 
     // Step 2: Append data (in same retry scope)
-    const sheets = getSheetsService();
+    const sheets = await getSheetsService();
     await sheets.spreadsheets.batchUpdate({
       spreadsheetId,
       requestBody: {
@@ -1061,7 +1061,7 @@ export async function sortSheet(
     }
 
     // Step 2: Sort the sheet (in same retry scope)
-    const sheets = getSheetsService();
+    const sheets = await getSheetsService();
     await sheets.spreadsheets.batchUpdate({
       spreadsheetId,
       requestBody: {
@@ -1102,7 +1102,7 @@ export async function clearSheetData(
   sheetName: string
 ): Promise<Result<void, Error>> {
   return withQuotaRetry(async () => {
-    const sheets = getSheetsService();
+    const sheets = await getSheetsService();
     // Clear all data starting from row 2 (preserves header row)
     const range = `${sheetName}!A2:Z`;
     await sheets.spreadsheets.values.clear({
@@ -1144,7 +1144,7 @@ export async function moveSheetToFirst(
     }
 
     // Step 2: Update sheet properties to move it to index 0 (in same retry scope)
-    const sheets = getSheetsService();
+    const sheets = await getSheetsService();
     await sheets.spreadsheets.batchUpdate({
       spreadsheetId,
       requestBody: {
@@ -1245,7 +1245,7 @@ export async function appendRowsWithFormatting(
     }));
 
     // Step 2: Use batchUpdate with appendCells to support formatting (in same retry scope)
-    const sheets = getSheetsService();
+    const sheets = await getSheetsService();
     await sheets.spreadsheets.batchUpdate({
       spreadsheetId,
       requestBody: {
@@ -1327,7 +1327,7 @@ export async function moveSheetToPosition(
   position: number
 ): Promise<Result<void, Error>> {
   return withQuotaRetry(async () => {
-    const sheets = getSheetsService();
+    const sheets = await getSheetsService();
 
     const requests: sheets_v4.Schema$Request[] = [
       {
@@ -1447,7 +1447,7 @@ export async function formatEmptyMonthSheet(
   numColumns: number
 ): Promise<Result<void, Error>> {
   return withQuotaRetry(async () => {
-    const sheets = getSheetsService();
+    const sheets = await getSheetsService();
 
     // Create row cells with red background
     const cells: sheets_v4.Schema$CellData[] = [];

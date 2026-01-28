@@ -4,7 +4,7 @@
  */
 
 import { google, drive_v3 } from 'googleapis';
-import { getGoogleAuth, getDefaultScopes } from './google-auth.js';
+import { getGoogleAuthAsync, getDefaultScopes } from './google-auth.js';
 import type { FileInfo, Result } from '../types/index.js';
 import { debug, warn, error as logError } from '../utils/logger.js';
 
@@ -22,12 +22,12 @@ const MAX_FOLDER_DEPTH = 20;
 /**
  * Gets or creates the Drive service
  */
-function getDriveService(): drive_v3.Drive {
+async function getDriveService(): Promise<drive_v3.Drive> {
   if (driveService) {
     return driveService;
   }
 
-  const auth = getGoogleAuth(getDefaultScopes());
+  const auth = await getGoogleAuthAsync(getDefaultScopes());
   driveService = google.drive({ version: 'v3', auth });
 
   return driveService;
@@ -57,7 +57,7 @@ export async function listFilesInFolder(
   }
 
   try {
-    const drive = getDriveService();
+    const drive = await getDriveService();
     const files: Array<Omit<FileInfo, 'content'>> = [];
 
     // List files in this folder
@@ -141,7 +141,7 @@ export async function listFilesInFolder(
  */
 export async function downloadFile(fileId: string): Promise<Result<Buffer, Error>> {
   try {
-    const drive = getDriveService();
+    const drive = await getDriveService();
 
     const response = await drive.files.get(
       {
@@ -213,7 +213,7 @@ export async function watchFolder(
   expirationMs: number = 3600000 // 1 hour default
 ): Promise<Result<{ resourceId: string; expiration: string }, Error>> {
   try {
-    const drive = getDriveService();
+    const drive = await getDriveService();
 
     const expiration = Date.now() + expirationMs;
 
@@ -254,7 +254,7 @@ export async function stopWatching(
   resourceId: string
 ): Promise<Result<void, Error>> {
   try {
-    const drive = getDriveService();
+    const drive = await getDriveService();
 
     await drive.channels.stop({
       requestBody: {
@@ -302,7 +302,7 @@ export async function findByName(
   mimeType?: string
 ): Promise<Result<DriveFileInfo | null, Error>> {
   try {
-    const drive = getDriveService();
+    const drive = await getDriveService();
     const escapedName = name.replace(/'/g, "\\'");
 
     let query = `'${parentId}' in parents and name = '${escapedName}' and trashed = false`;
@@ -407,7 +407,7 @@ export async function listByMimeType(
   mimeType: string
 ): Promise<Result<DriveFileInfo[], Error>> {
   try {
-    const drive = getDriveService();
+    const drive = await getDriveService();
     const files: DriveFileInfo[] = [];
     let pageToken: string | undefined;
 
@@ -457,7 +457,7 @@ export async function createFolder(
   name: string
 ): Promise<Result<DriveFileInfo, Error>> {
   try {
-    const drive = getDriveService();
+    const drive = await getDriveService();
 
     debug('Creating folder', {
       module: 'drive',
@@ -532,7 +532,7 @@ export async function moveFile(
   toFolderId: string
 ): Promise<Result<void, Error>> {
   try {
-    const drive = getDriveService();
+    const drive = await getDriveService();
 
     await drive.files.update({
       fileId,
@@ -563,7 +563,7 @@ export async function renameFile(
   newName: string
 ): Promise<Result<void, Error>> {
   try {
-    const drive = getDriveService();
+    const drive = await getDriveService();
 
     await drive.files.update({
       fileId,
@@ -589,7 +589,7 @@ export async function renameFile(
  */
 export async function getParents(fileId: string): Promise<Result<string[], Error>> {
   try {
-    const drive = getDriveService();
+    const drive = await getDriveService();
 
     const response = await drive.files.get({
       fileId,
@@ -618,7 +618,7 @@ export async function createSpreadsheet(
   name: string
 ): Promise<Result<DriveFileInfo, Error>> {
   try {
-    const drive = getDriveService();
+    const drive = await getDriveService();
 
     const response = await drive.files.create({
       requestBody: {

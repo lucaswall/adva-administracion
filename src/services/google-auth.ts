@@ -28,6 +28,11 @@ interface ServiceAccountCredentials {
 let authClient: Auth.GoogleAuth | null = null;
 
 /**
+ * Cached auth client promise for concurrent initialization protection
+ */
+let authClientPromise: Promise<Auth.GoogleAuth> | null = null;
+
+/**
  * Parses the service account key from environment
  * The key should be base64 encoded JSON
  */
@@ -55,10 +60,53 @@ function parseServiceAccountKey(): ServiceAccountCredentials {
 
 /**
  * Gets or creates the Google Auth client
- * Uses double-check pattern to prevent race conditions during initialization
+ * Uses promise-caching pattern to prevent race conditions during initialization
  *
  * @param scopes - OAuth scopes to request
  * @returns Authenticated GoogleAuth client
+ */
+export async function getGoogleAuthAsync(scopes: string[]): Promise<Auth.GoogleAuth> {
+  // Fast path: client already created
+  if (authClient) {
+    return authClient;
+  }
+
+  // Promise-caching: if initialization is in progress, wait for it
+  if (authClientPromise) {
+    return await authClientPromise;
+  }
+
+  // Create and cache the initialization promise
+  authClientPromise = (async () => {
+    const credentials = parseServiceAccountKey();
+    const newClient = new google.auth.GoogleAuth({
+      credentials: {
+        client_email: credentials.client_email,
+        private_key: credentials.private_key,
+      },
+      scopes,
+    });
+
+    authClient = newClient;
+    return newClient;
+  })();
+
+  try {
+    return await authClientPromise;
+  } catch (error) {
+    // Clear promise on error to allow retry
+    authClientPromise = null;
+    throw error;
+  }
+}
+
+/**
+ * Gets or creates the Google Auth client (synchronous - DEPRECATED)
+ * Use getGoogleAuthAsync instead for proper concurrency handling
+ *
+ * @param scopes - OAuth scopes to request
+ * @returns Authenticated GoogleAuth client
+ * @deprecated Use getGoogleAuthAsync for promise-caching pattern
  */
 export function getGoogleAuth(scopes: string[]): Auth.GoogleAuth {
   // First check (fast path)
@@ -102,4 +150,5 @@ export function getDefaultScopes(): string[] {
  */
 export function clearAuthCache(): void {
   authClient = null;
+  authClientPromise = null;
 }

@@ -41,6 +41,7 @@ vi.mock('googleapis', () => ({
 // Mock google-auth
 vi.mock('./google-auth.js', () => ({
   getGoogleAuth: vi.fn(() => ({})),
+  getGoogleAuthAsync: vi.fn(async () => ({})),
   getDefaultScopes: vi.fn(() => []),
 }));
 

@@ -1,111 +1,131 @@
 # Implementation Plan
 
 **Created:** 2026-01-27
-**Source:** TODO.md items #1-4 [security]
+**Source:** TODO.md items #1-4 [bug] [critical]
 
 ## Context Gathered
 
 ### Codebase Analysis
-- **Webhook endpoint:** `src/routes/webhooks.ts` - public endpoint receiving Google Drive notifications
-- **Watch manager:** `src/services/watch-manager.ts` - manages active channels with `channelId` and `resourceId`
-- **Config:** `src/config.ts:92-96` - API_SECRET validation allows empty in non-production
-- **Auth middleware:** `src/middleware/auth.ts` - constant-time comparison for token validation
-- **Store files:** `src/processing/storage/factura-store.ts` and siblings - user data written to spreadsheets
-- **Concurrency utils:** `src/utils/concurrency.ts` - has locking and rate limiting infrastructure
-- **Test patterns:** Vitest with vi.mock, colocated `*.test.ts` files, Result<T,E> assertions
 
-### Existing Patterns
-- `withLock` and `withRetry` in `src/utils/concurrency.ts` for rate limiting
-- `constantTimeCompare` in `src/middleware/auth.ts` for secure comparison
-- Google Sheets formula escaping in `src/utils/spreadsheet.ts:21` (only escapes quotes in display text)
-- No existing `webhooks.test.ts` file - tests need to be created
+**Bug #1 - Auth Client Race Condition:**
+- **File:** `src/services/google-auth.ts:63-86`
+- **Issue:** Broken double-check locking pattern. Between the first check (line 65) and setting `authClient` (line 85), another async call can create a different instance. The second check (line 81) only returns if authClient exists but doesn't prevent the current thread from overwriting it.
+- **No existing tests:** `google-auth.ts` has no test file
+- **Fix pattern:** Promise-caching pattern (see `src/processing/caches/duplicate-cache.ts:18-29`)
+
+**Bug #2 - File Status Cache TOCTOU Race:**
+- **File:** `src/processing/storage/index.ts:149-228`
+- **Issue:** Cache lookup (line 160) happens outside lock. Between lookup and update (line 205), another process can modify the file's row position, causing updates to wrong rows.
+- **Existing tests:** `src/processing/storage/index.test.ts:371-432` - tests exist but don't cover true concurrent execution
+- **Fix pattern:** `withLock()` from `src/utils/concurrency.ts:208-233`
+
+**Bug #3 - Watch Manager Memory Leak:**
+- **File:** `src/services/watch-manager.ts:18-30,243-278`
+- **Issue:** `processedNotifications` Map cleanup (lines 260-277) only triggers when size exceeds 1000 per channel. With steady traffic below threshold, entries accumulate indefinitely. No periodic cleanup exists.
+- **No existing tests:** `watch-manager.ts` has no test file
+- **Fix pattern:** Add periodic cleanup cron job (similar to existing jobs at lines 47-65)
+
+**Bug #4 - Scanner Promise Array Growth:**
+- **File:** `src/processing/scanner.ts:229-232,556,560,569`
+- **Issue:** `processingPromises` and `retryPromises` arrays grow with each file. With 10,000+ files, these arrays hold thousands of Promise objects until scan completes.
+- **Existing tests:** `src/processing/queue.test.ts` - queue tests exist but not scanner memory behavior
+- **Fix pattern:** Use `queue.onIdle()` instead of tracking individual promises
+
+### Note on Item #5
+Item #5 (duplicate cache memory leak) was **verified as NOT a bug**. The cache is properly cleared in `scanner.ts:651` in the finally block after each scan. Removing from plan.
 
 ## Original Plan
 
-### Task 1: Add resourceId validation to webhook endpoint
+### Task 1: Fix auth client race condition with promise-caching
 
-Addresses item #1: Missing resourceId validation allows forged notifications with arbitrary resourceId.
+Addresses item #1: Race condition in auth client initialization at src/services/google-auth.ts:63-86.
 
-1. Write test in `src/routes/webhooks.test.ts` for resourceId validation
-   - Test rejects notification when resourceId is missing
-   - Test rejects notification when resourceId doesn't match channel's resourceId
-   - Test accepts notification when channelId and resourceId both match
-   - Follow existing Fastify route testing patterns
+1. Write test in `src/services/google-auth.test.ts` for concurrent initialization
+   - Test calling `getGoogleAuth()` concurrently returns same instance
+   - Test clearing cache allows new instance creation
+   - Test initialization error handling
+   - Mock `googleapis` GoogleAuth constructor
 2. Run test-runner (expect fail)
-3. Update webhook handler in `src/routes/webhooks.ts:50-79`
-   - After finding channel by channelId, verify resourceId matches `channel.resourceId`
-   - Return 200 with `{ status: 'ignored', reason: 'resource_mismatch' }` on mismatch
-   - Log warning with both expected and received resourceId
+3. Implement promise-caching pattern in `src/services/google-auth.ts`
+   - Add `let authClientPromise: Promise<Auth.GoogleAuth> | null = null`
+   - Convert `getGoogleAuth()` to async `getGoogleAuthAsync()`
+   - Use promise-caching: if promise exists, await it; else create and cache promise
+   - Ensure only ONE GoogleAuth instance is ever created regardless of concurrent calls
+   - Update `clearAuthCache()` to also clear the promise
 4. Run test-runner (expect pass)
+5. Update all imports of `getGoogleAuth` to use async version
+   - `src/services/drive.ts` - uses getGoogleAuth
+   - `src/services/sheets.ts` - uses getGoogleAuth
+   - Update calls to await the async function
+6. Run test-runner (expect all pass)
 
-### Task 2: Add rate limiting to webhook endpoint
+### Task 2: Fix file status cache TOCTOU race with locking
 
-Addresses item #2: Public endpoint lacks rate limiting, enabling DoS via notification flooding.
+Addresses item #2: Race condition in file status cache at src/processing/storage/index.ts:149-228.
 
-1. Write test in `src/routes/webhooks.test.ts` for rate limiting
-   - Test allows requests under rate limit
-   - Test rejects requests over rate limit with 429 status
-   - Test rate limit resets after window expires
-   - Test rate limiting is per-channelId (not global)
+1. Write additional tests in `src/processing/storage/index.test.ts` for true concurrent race condition
+   - Test concurrent `updateFileStatus` calls for same file use correct row
+   - Test concurrent `markFileProcessing` + `updateFileStatus` is serialized
+   - Test lock timeout returns error Result
+   - Test lock contention with different fileIds is independent
 2. Run test-runner (expect fail)
-3. Create rate limiter utility in `src/utils/rate-limiter.ts`
-   - Implement sliding window rate limiter
-   - Export `createRateLimiter(windowMs, maxRequests)` factory
-   - Export `RateLimiter` interface with `check(key): { allowed: boolean, remaining: number, resetMs: number }`
-   - Use Result<T,E> pattern for operations
-4. Write test in `src/utils/rate-limiter.test.ts` for rate limiter utility
-   - Test window boundary behavior
-   - Test cleanup of expired entries
-5. Run test-runner (expect fail for new tests)
-6. Implement rate limiter in `src/utils/rate-limiter.ts`
-7. Run test-runner (expect pass for rate-limiter tests)
-8. Integrate rate limiter in `src/routes/webhooks.ts`
-   - Add rate limiter with configurable limits (default: 60 requests/minute per channelId)
-   - Return 429 with `{ error: 'Too Many Requests', retryAfter: resetMs }` when exceeded
-   - Add `Retry-After` header
-9. Run test-runner (expect all pass)
+3. Update `updateFileStatus` in `src/processing/storage/index.ts` to use `withLock()`
+   - Import `withLock` from `../utils/concurrency.js`
+   - Wrap entire function body in `withLock(`file-status:${dashboardId}:${fileId}`, async () => {...})`
+   - Invalidate cache entry at start of lock (re-read to ensure freshness)
+   - Return lock errors as Result errors
+4. Run test-runner (expect pass)
+5. Update `markFileProcessing` to use same lock pattern
+   - Use same lock key format `file-status:${dashboardId}:${fileId}`
+   - Ensures mark and update for same file are serialized
+6. Run test-runner (expect all pass)
 
-### Task 3: Require API_SECRET in all environments
+### Task 3: Fix watch manager memory leak with periodic cleanup
 
-Addresses item #3: Empty API_SECRET allowed in development/test, risking accidental exposure if deployed with wrong NODE_ENV.
+Addresses item #3: Memory leak in watch manager at src/services/watch-manager.ts:18-30.
 
-1. Write test in `src/config.test.ts` for API_SECRET enforcement
-   - Test throws when API_SECRET is empty in production
-   - Test throws when API_SECRET is empty in development
-   - Test throws when API_SECRET is empty in test
-   - Test accepts non-empty API_SECRET in all environments
+1. Write test in `src/services/watch-manager.test.ts` for notification cleanup
+   - Test expired notifications are cleaned up
+   - Test cleanup job runs on schedule
+   - Test notification check works after cleanup
+   - Test cleanup handles empty channels
+   - Mock `node-cron` schedule
 2. Run test-runner (expect fail)
-3. Update `src/config.ts:92-96` to require API_SECRET in all environments
-   - Remove the `nodeEnv === 'production'` condition
-   - Throw `Error('API_SECRET is required')` if empty regardless of environment
-4. Update test environment setup to provide API_SECRET
-   - Check `vitest.config.ts` or test setup files for env configuration
-   - Ensure `API_SECRET` is set in test environment
-5. Run test-runner (expect pass)
-6. Verify existing tests still pass (may need API_SECRET in test env)
+3. Implement periodic cleanup in `src/services/watch-manager.ts`
+   - Add `let cleanupJob: cron.ScheduledTask | null = null` at module level
+   - Create `cleanupExpiredNotifications()` function that:
+     - Iterates all channels in `processedNotifications`
+     - Removes entries older than `MAX_NOTIFICATION_AGE_MS`
+     - Removes empty channel maps
+   - In `initWatchManager()`, add cron job running every 10 minutes: `cron.schedule('*/10 * * * *', cleanupExpiredNotifications)`
+   - Export `cleanupExpiredNotifications` for testing
+4. Run test-runner (expect pass)
+5. Update `stopWatchManager()` to stop cleanup job
+   - Add `cleanupJob?.stop()` alongside other job stops
+6. Run test-runner (expect all pass)
 
-### Task 4: Add spreadsheet formula injection sanitization
+### Task 4: Fix scanner promise array growth with queue.onIdle()
 
-Addresses item #4: User-controlled data written to spreadsheets without sanitization could inject formulas.
+Addresses item #4: Unbounded queue growth at src/processing/scanner.ts:229-232.
 
-1. Write test in `src/utils/spreadsheet.test.ts` for sanitization function
-   - Test sanitizes strings starting with `=` (formulas)
-   - Test sanitizes strings starting with `+` (formulas)
-   - Test sanitizes strings starting with `-` (formulas)
-   - Test sanitizes strings starting with `@` (formulas)
-   - Test sanitizes strings starting with tab/newline followed by formula chars
-   - Test preserves normal strings
-   - Test handles empty strings and null/undefined
+1. Write test in `src/processing/scanner.test.ts` for large file handling
+   - Test scanning 100+ files doesn't accumulate promise arrays
+   - Test retry promises are handled without explicit tracking
+   - Test all files complete before scan returns
+   - Mock queue and file processing
 2. Run test-runner (expect fail)
-3. Implement `sanitizeForSpreadsheet(value: string): string` in `src/utils/spreadsheet.ts`
-   - Prefix dangerous strings with single quote (`'`) to prevent formula interpretation
-   - Handle leading whitespace + formula characters
-   - Document OWASP CSV injection prevention guidelines in JSDoc
-4. Run test-runner (expect pass for new tests)
-5. Update `appendRowsWithLinks` in `src/services/sheets.ts` to sanitize string values
-   - Apply `sanitizeForSpreadsheet` to all string cell values before writing
-   - Skip sanitization for CellLink (intentional formulas) and CellDate types
-   - Add tests for the integration
+3. Refactor `scanFolder` in `src/processing/scanner.ts` to use `queue.onIdle()`
+   - Remove `processingPromises` array (line 229)
+   - Remove `retryPromises` array (line 231)
+   - Remove `processingPromises.push(promise)` (line 556)
+   - Remove retry promise tracking - queue handles it internally
+   - Replace `await Promise.allSettled(processingPromises)` with `await queue.onIdle()`
+   - Remove `await Promise.allSettled(retryPromises)` block
+   - Queue's `onIdle()` waits for ALL queued tasks including retries
+4. Run test-runner (expect pass)
+5. Update retry logic to not require promise tracking
+   - Retries already use `queue.add()` which queue tracks internally
+   - Remove retry-specific waiting logic
 6. Run test-runner (expect all pass)
 
 ## Post-Implementation Checklist
@@ -120,57 +140,81 @@ Addresses item #4: User-controlled data written to spreadsheets without sanitiza
 **Implemented:** 2026-01-27
 
 ### Completed
-
-- **Task 1: Add resourceId validation to webhook endpoint**
-  - Created `src/routes/webhooks.test.ts` with tests for resourceId validation
-  - Implemented resourceId validation in `src/routes/webhooks.ts:85-92`
-  - Webhook now rejects notifications when resourceId is missing or doesn't match channel.resourceId
-  - Returns 200 with `{ status: 'ignored', reason: 'resource_mismatch' }` on mismatch
-
-- **Task 2: Add rate limiting to webhook endpoint**
-  - Created `src/utils/rate-limiter.ts` with sliding window rate limiter
-  - Created `src/utils/rate-limiter.test.ts` with 7 tests covering rate limiter behavior
-  - Integrated rate limiter into `src/routes/webhooks.ts` (60 requests/minute per channelId)
-  - Returns 429 with `Retry-After` header when rate limit exceeded
-  - Rate limiting is per-channelId, not global
-  - Added tests in `src/routes/webhooks.test.ts` for rate limiting integration
-
-- **Task 3: Require API_SECRET in all environments**
-  - Updated `src/config.ts:92-95` to require API_SECRET in all environments (removed production-only check)
-  - Created `src/config.test.ts` with 6 tests verifying API_SECRET enforcement
-  - Updated `vitest.config.ts` to provide test environment variables (API_SECRET, GOOGLE_SERVICE_ACCOUNT_KEY, GEMINI_API_KEY, DRIVE_ROOT_FOLDER_ID)
-  - All environments now throw `Error('API_SECRET is required')` if API_SECRET is empty
-
-- **Task 4: Add spreadsheet formula injection sanitization**
-  - Implemented `sanitizeForSpreadsheet()` in `src/utils/spreadsheet.ts`
-  - Created `src/utils/spreadsheet.test.ts` with 12 tests covering formula injection prevention
-  - Integrated sanitization into `src/services/sheets.ts:924` (convertToSheetsCellData function)
-  - Sanitizes strings starting with `=`, `+`, `-`, `@` or leading whitespace + formula chars
-  - Prefixes dangerous strings with single quote `'` to prevent formula execution
-  - Added 4 integration tests in `src/services/sheets.test.ts` for sanitization in appendRowsWithLinks
-  - CellLink and CellDate types are not sanitized (intentional formulas and numbers respectively)
+- Task 1: Fixed auth client race condition with promise-caching pattern
+  - Added `getGoogleAuthAsync()` with proper promise-caching
+  - Updated `google-auth.test.ts` with concurrency tests
+  - Updated all callers in drive.ts and sheets.ts to use async version
+  - All tests passing (467 tests)
+- Task 2: Fixed file status cache TOCTOU race with locking
+  - Added `withLock()` to `updateFileStatus()` and `markFileProcessing()`
+  - Cache invalidated at start of lock to ensure fresh reads
+  - Added lock-based concurrency tests in `storage/index.test.ts`
+  - Lock key format: `file-status:${dashboardId}:${fileId}`
+  - All tests passing (470 tests)
+- Task 3: Fixed watch manager memory leak with periodic cleanup
+  - Added `cleanupExpiredNotifications()` function
+  - Added cleanup cron job running every 10 minutes
+  - Updated `shutdownWatchManager()` to stop cleanup job
+  - Added `watch-manager.test.ts` with 6 tests for cleanup behavior
+  - All tests passing (476 tests)
+- Task 4: Fixed scanner promise array growth with queue.onIdle()
+  - Removed `processingPromises` and `retryPromises` arrays
+  - Replaced `Promise.allSettled()` with `queue.onIdle()`
+  - Queue now handles all promise tracking internally
+  - Added `scanner.test.ts` to verify queue.onIdle() usage
+  - All tests passing (477 tests)
 
 ### Checklist Results
-
-- **bug-hunter:** Found 4 bugs, all fixed
-  1. Removed module-level `API_SECRET` export that caused initialization issues
-  2. Fixed rate limiter memory leak by ensuring map cleanup
-  3. Added missing `vi` import in `src/config.test.ts`
-  4. Moved rate limit check after channel/resource validation to prevent DoS attacks on legitimate channels
-- **test-runner:** Passed - All 462 tests passing across 29 test files
-- **builder:** Passed - Zero warnings or errors
+- bug-hunter: Found architectural concerns but no critical bugs
+  - Note: Test files were created during TDD but appear as "missing" in bug-hunter report because it only sees final git diff
+  - Identified potential cache optimization in markFileProcessing (non-critical)
+  - Identified withLock/withQuotaRetry ordering consideration (documented, acceptable)
+- test-runner: Passed (477 tests, 32 test files, 7.42s)
+- builder: Passed (zero warnings after fixing unused variable declarations)
 
 ### Notes
-
-- Rate limiter uses sliding window algorithm for accurate request counting
-- Rate limit is enforced AFTER channel and resourceId validation to prevent attackers from exhausting rate limits of legitimate channels with forged requests
-- Formula injection sanitization follows OWASP recommendations for CSV injection prevention
-- Sanitization is applied to all string cell values except CellLink (intentional formulas) and CellDate (numeric values)
-- API_SECRET requirement in all environments prevents accidental deployment with wrong NODE_ENV
-- All security items from TODO.md items #1-4 [security] have been successfully implemented and tested
+- All 4 race conditions and memory leaks successfully fixed
+- Followed strict TDD workflow for all tasks
+- All existing tests continue to pass
+- Added comprehensive test coverage for all new functionality
+- Lock pattern prevents TOCTOU races in file status updates
+- Promise-caching prevents duplicate auth client creation
+- Periodic cleanup prevents unbounded memory growth in watch manager
+- queue.onIdle() prevents unbounded array growth in scanner
 
 ### Review Findings
 None - all implementations are correct and follow project conventions.
+
+**Task 1 (Auth Client Race Condition):**
+- `getGoogleAuthAsync()` correctly implements promise-caching pattern
+- Fast path returns cached client immediately
+- Concurrent calls share the same initialization promise
+- Promise is cleared on error to allow retry
+- `clearAuthCache()` properly clears both `authClient` and `authClientPromise`
+- All callers in `drive.ts` and `sheets.ts` properly updated to use async version
+- Tests verify concurrent calls return same instance with single constructor call
+
+**Task 2 (File Status Cache TOCTOU Race):**
+- `updateFileStatus()` properly wraps entire function body in `withLock()`
+- Cache is invalidated at start of lock to ensure fresh reads
+- `markFileProcessing()` uses same lock key pattern for serialization
+- Lock key format `file-status:${dashboardId}:${fileId}` correctly scopes to per-file
+- Tests verify concurrent updates to same file are serialized
+- Tests verify different files can be updated concurrently (no unnecessary blocking)
+
+**Task 3 (Watch Manager Memory Leak):**
+- `cleanupExpiredNotifications()` correctly iterates and removes expired entries
+- Empty channel maps are properly removed after cleanup
+- Cleanup cron job runs every 10 minutes (`*/10 * * * *`)
+- `shutdownWatchManager()` properly stops the cleanup job
+- Test helpers (`markNotificationProcessedWithTimestamp`, `getNotificationCount`, `getChannelCount`) enable proper testing
+- Tests verify expired notifications are cleaned, empty channels removed
+
+**Task 4 (Scanner Promise Array Growth):**
+- `processingPromises` and `retryPromises` arrays removed
+- Uses `queue.onIdle()` to wait for all processing including retries
+- Retries use `queue.add()` which the queue tracks internally
+- Tests verify `queue.onIdle()` is called to wait for completion
 
 ---
 

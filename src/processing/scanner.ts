@@ -226,12 +226,10 @@ export async function scanFolder(folderId?: string): Promise<Result<ScanResult, 
 
       // Queue all files for processing (don't await individual tasks)
       // This allows the queue to process files concurrently up to the concurrency limit
-      const processingPromises: Promise<void>[] = [];
-      // Track retry promises separately so we can wait for them after the main batch
-      const retryPromises: Promise<void>[] = [];
+      // Queue handles promise tracking internally - we'll use onIdle() to wait
 
       for (const fileInfo of newFiles) {
-        const promise = queue.add(async () => {
+        queue.add(async () => {
         // Each file gets its own correlation context that inherits from parent
         await withCorrelationAsync(async () => {
           const fileCorrelationId = getCorrelationId();
@@ -262,7 +260,8 @@ export async function scanFolder(folderId?: string): Promise<Result<ScanResult, 
               });
 
               // Re-queue at end of queue for retry
-              const retryPromise = queue.add(async () => {
+              // Queue will track this internally - no need to capture promise
+              queue.add(async () => {
                 await withCorrelationAsync(async () => {
                   const retryCorrelationId = getCorrelationId();
 
@@ -411,7 +410,7 @@ export async function scanFolder(folderId?: string): Promise<Result<ScanResult, 
                   );
                 }, { correlationId: generateCorrelationId(), fileId: fileInfo.id, fileName: fileInfo.name });
               });
-              retryPromises.push(retryPromise);
+              // Queue will track retry internally - no need to push to retryPromises array
               return; // Don't move to Sin Procesar yet - will retry
             }
 
@@ -552,22 +551,11 @@ export async function scanFolder(folderId?: string): Promise<Result<ScanResult, 
           );
         }, { correlationId: generateCorrelationId(), fileId: fileInfo.id, fileName: fileInfo.name });
         });
-
-        processingPromises.push(promise);
       }
 
-      // Wait for all processing to complete
-      await Promise.allSettled(processingPromises);
-
-      // Wait for any retry attempts to complete
-      if (retryPromises.length > 0) {
-        info(`Waiting for ${retryPromises.length} retry attempt(s)`, {
-          module: 'scanner',
-          phase: 'process-retries',
-          correlationId,
-        });
-        await Promise.allSettled(retryPromises);
-      }
+      // Wait for all processing to complete (including retries)
+      // Queue tracks all tasks internally, including retries added via queue.add()
+      await queue.onIdle();
 
       // Clear retry tracking for next scan
       retriedFileIds.clear();
