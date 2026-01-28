@@ -74,7 +74,7 @@ Skills are specialized workflows in `.claude/skills/`. Descriptions drive automa
 | `plan-fix` | Investigate bugs and create fix plans. Use when user reports extraction errors, deployment failures, wrong data, or prompt issues. Uses Railway logs, Drive files, and Gemini prompt testing. |
 | `plan-implement` | Execute the pending plan in PLANS.md following TDD. Use after any plan-* skill creates a plan, or when user says "implement the plan". Runs tests, writes code, documents results. |
 | `plan-review-implementation` | QA review of completed implementation. Use after plan-implement finishes to verify correctness. Creates fix plans for issues found or marks COMPLETE. |
-| `code-audit` | Audit codebase for bugs, security issues, memory leaks, and violations. Use when user says "audit", "find bugs", "check security", or "review codebase". Writes prioritized findings to TODO.md. Analysis only. |
+| `code-audit` | Audit codebase for bugs, security issues, memory leaks, and violations. Use when user says "audit", "find bugs", "check security", or "review codebase". Validates existing TODO.md items, merges with new findings, and writes reprioritized TODO.md. Analysis only. |
 
 **Skill workflow:** `code-audit` → `plan-todo` → `plan-implement` → `plan-review-implementation` (repeat until COMPLETE)
 
