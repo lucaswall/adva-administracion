@@ -1,8 +1,8 @@
 ---
 name: plan-fix
-description: Investigate bugs and create TDD fix plans. Use when a bug is reported after file processing (extraction errors, wrong data, missing matches), deployment failures, or prompt-related issues. Supports codebase, deployment, and Gemini prompt investigation.
-argument-hint: <bug description with context>
-allowed-tools: Read, Edit, Write, Glob, Grep, Task, mcp__gdrive__gdrive_search, mcp__gdrive__gdrive_read_file, mcp__gdrive__gdrive_list_folder, mcp__gdrive__gdrive_get_pdf, mcp__gdrive__gsheets_read, mcp__Railway__check-railway-status, mcp__Railway__get-logs, mcp__Railway__list-deployments, mcp__Railway__list-services, mcp__Railway__list-variables, mcp__gemini__gemini_analyze_pdf
+description: Investigate bugs and create TDD fix plans. Use when user reports extraction errors, deployment failures, wrong data, missing matches, or prompt issues. Discovers MCPs from CLAUDE.md for debugging (logs, files, prompts).
+argument-hint: <bug description>
+allowed-tools: Read, Edit, Write, Glob, Grep, Task
 disable-model-invocation: true
 ---
 
@@ -39,20 +39,19 @@ $ARGUMENTS should contain the bug description with context:
 
 **IMPORTANT: Do NOT hardcode MCP names or folder paths.** Always read CLAUDE.md to discover:
 
-1. **Available MCP servers** - Look for the "MCP SERVERS" section to find:
-   - Google Drive MCP for file access (`gdrive_search`, `gdrive_read_file`, `gsheets_read`, etc.)
-   - Railway MCP for deployment debugging (`get-logs`, `list-deployments`, `list-services`, `list-variables`)
-   - Gemini MCP for prompt testing (`gemini_analyze_pdf`)
+1. **Available MCP servers** - Look for "MCP SERVERS" section to find:
+   - File/storage MCPs for accessing documents and data
+   - Deployment MCPs for logs and service status
+   - AI/LLM MCPs for prompt testing
 
-2. **Folder structure** - Look for "FOLDER STRUCTURE" section to understand:
-   - Where documents are stored
-   - Naming conventions for bank folders, card folders, broker folders
+2. **Project structure** - Look for "STRUCTURE" or "FOLDER STRUCTURE" sections to understand:
+   - Where source code and documents are stored
+   - Naming conventions and organization
 
-3. **Document types** - Look for "DOCUMENT CLASSIFICATION" section to understand:
-   - Document type → destination mapping
-   - ADVA role in each document type
-
-4. **Spreadsheet schemas** - Look for "SPREADSHEETS" section or read SPREADSHEET_FORMAT.md
+3. **Domain concepts** - Look for sections describing:
+   - Document types and their processing
+   - Data schemas and formats
+   - Business rules and validation
 
 ## Investigation Workflow
 
@@ -75,24 +74,23 @@ Based on $ARGUMENTS, determine the bug category:
 - Use Task tool with subagent_type=Explore for broader exploration
 - Read relevant source files and tests
 
-**For Deployment Issues:**
-1. `check-railway-status` - Verify CLI is working
-2. `list-services` - Find the affected service
-3. `list-deployments` - Get recent deployment IDs and statuses
-4. `get-logs` with `logType: "deploy"` - Check deployment logs
-5. `get-logs` with `logType: "build"` - Check build logs if deployment failed
-6. `list-variables` - Verify environment configuration
+**For Deployment Issues (if deployment MCPs available):**
+1. Check MCP/CLI status
+2. List services to find affected service
+3. List recent deployments with statuses
+4. Get deployment and build logs
+5. Verify environment configuration
 
-**For Document/Drive Issues:**
-- `gdrive_search` - Find the problematic file
-- `gdrive_read_file` or `gdrive_get_pdf` - Read file contents
-- `gsheets_read` - Check spreadsheet data
+**For Document/File Issues (if file MCPs available):**
+- Search for the problematic file
+- Read file contents
+- Check related data stores (spreadsheets, databases)
 
-**For Prompt Issues (when extraction is consistently wrong):**
-1. Get the source PDF using `gdrive_get_pdf`
-2. Use `gemini_analyze_pdf` to test alternative prompts
-3. Compare current prompt output vs expected output
-4. Iterate on prompt wording until extraction improves
+**For Prompt/AI Issues (when extraction is consistently wrong):**
+1. Get the source document
+2. Test alternative prompts using AI MCPs
+3. Compare current vs expected output
+4. Iterate until extraction improves
 5. Document the improved prompt for implementation
 
 ### Step 3: Document Findings
@@ -133,40 +131,52 @@ Write PLANS.md with this structure:
 3. Run `builder` agent - Verify zero warnings
 ```
 
-## Gemini Prompt Testing Guidelines
+## Prompt/AI Testing Guidelines
 
-When investigating extraction issues:
+When investigating AI/LLM extraction issues:
 
-1. **Get the problematic PDF** using `gdrive_get_pdf`
-2. **Read current prompt** from `src/gemini/prompts.ts`
-3. **Test with `gemini_analyze_pdf`** using variations of the prompt
+1. **Get the problematic input** using file/document MCPs
+2. **Read current prompt** from the project's prompts file (find via codebase exploration)
+3. **Test variations** using AI MCPs if available
 4. **Document what works** - Include the improved prompt in the fix plan
-5. **Note:** `gemini_analyze_pdf` is for testing ONLY, not production analysis
+5. **Note:** Testing MCPs are for debugging, not production use
 
 Example prompt testing workflow:
 ```
-1. Current prompt extracts "fechaCierre" as null
-2. Test prompt variation A: "Look for 'Fecha de Cierre' or 'CIERRE'"
-3. Test prompt variation B: "The closing date appears near the top of the statement"
-4. Variation B correctly extracts the date
-5. Add to fix plan: Update prompts.ts with variation B
+1. Current prompt extracts field X as null
+2. Test prompt variation A: More explicit field description
+3. Test prompt variation B: Add context about document layout
+4. Variation B correctly extracts the field
+5. Add to fix plan: Update prompts file with variation B
 ```
 
-## Railway Debugging Guidelines
+## Deployment Debugging Guidelines
 
-When investigating deployment issues:
+When investigating deployment issues (if deployment MCPs available):
 
-1. **Check status first** - `check-railway-status` confirms CLI access
-2. **List recent deployments** - `list-deployments` with `json: true` for structured data
-3. **Get targeted logs** - Use `filter` parameter to search for errors:
-   - `filter: "@level:error"` - Find error-level logs
-   - `filter: "TypeError"` - Search for specific errors
-4. **Check environment** - `list-variables` to verify config
+1. **Check status first** - Verify MCP/CLI access
+2. **List recent deployments** - Get deployment IDs and statuses
+3. **Get targeted logs** - Search for errors using filters:
+   - Error-level logs
+   - Specific error types or messages
+4. **Check environment** - Verify configuration variables
+
+## Error Handling
+
+| Situation | Action |
+|-----------|--------|
+| PLANS.md has incomplete work | Stop and tell user to review/clear PLANS.md first |
+| $ARGUMENTS lacks bug description | Ask user to describe what happened vs expected |
+| CLAUDE.md doesn't exist | Continue with codebase-only investigation |
+| MCP not available | Skip that MCP, note in investigation what couldn't be checked |
+| File/resource not found | Document as part of investigation (may be the bug) |
+| Cannot reproduce issue | Document investigation steps taken, ask user for more context |
+| Root cause unclear | Document possible causes ranked by likelihood |
 
 ## Rules
 
 - **Refuse to proceed if PLANS.md has incomplete work**
-- **Do NOT hardcode MCP names or folder paths** - always read from CLAUDE.md
+- **Discover MCPs from CLAUDE.md** - don't hardcode MCP names or paths
 - **Investigation only** - do not modify source code
 - All fixes must follow TDD (test first)
 - Include enough detail for another model to implement without context

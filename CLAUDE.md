@@ -65,18 +65,18 @@ Task: Add parseResumenBroker function
 
 ## SKILLS
 
-Skills are specialized workflows in `.claude/skills/`. Use them for planning and code quality tasks.
+Skills are specialized workflows in `.claude/skills/`. Descriptions drive automatic invocation - include action verbs and explicit triggers.
 
-| Skill | Purpose | When to Use |
-|-------|---------|-------------|
-| `plan-todo` | Convert TODO.md items into TDD plans | When TODO.md has items to implement |
-| `plan-inline` | Create TDD plans from direct requests | When user describes a feature directly |
-| `plan-fix` | Investigate bugs and create fix plans | When debugging extraction, deployment, or prompt issues |
-| `plan-implement` | Execute pending work from PLANS.md | After a plan is created |
-| `plan-review-implementation` | QA review of completed implementations | After plan-implement finishes |
-| `code-audit` | Comprehensive codebase audit | To find bugs, security issues, violations, dead code |
+| Skill | When to Invoke |
+|-------|----------------|
+| `plan-todo` | Convert TODO.md backlog items into TDD implementation plans. Use when user says "plan item #N", "plan all bugs", or wants to work on backlog items. Explores codebase and uses MCPs for context. |
+| `plan-inline` | Create TDD plans from direct feature requests without TODO.md. Use when user provides a task description directly like "add X feature" or "create Y function". Faster than plan-todo for ad-hoc requests. |
+| `plan-fix` | Investigate bugs and create fix plans. Use when user reports extraction errors, deployment failures, wrong data, or prompt issues. Uses Railway logs, Drive files, and Gemini prompt testing. |
+| `plan-implement` | Execute the pending plan in PLANS.md following TDD. Use after any plan-* skill creates a plan, or when user says "implement the plan". Runs tests, writes code, documents results. |
+| `plan-review-implementation` | QA review of completed implementation. Use after plan-implement finishes to verify correctness. Creates fix plans for issues found or marks COMPLETE. |
+| `code-audit` | Audit codebase for bugs, security issues, memory leaks, and violations. Use when user says "audit", "find bugs", "check security", or "review codebase". Writes prioritized findings to TODO.md. Analysis only. |
 
-**Code audit:** Use `code-audit` to analyze the entire codebase for issues. Writes findings to TODO.md with priority ordering. Analysis only - does not fix issues.
+**Skill workflow:** `code-audit` → `plan-todo` → `plan-implement` → `plan-review-implementation` (repeat until COMPLETE)
 
 ## MCP SERVERS
 

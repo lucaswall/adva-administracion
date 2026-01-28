@@ -1,6 +1,6 @@
 ---
 name: test-runner
-description: Test executor that runs Vitest and reports results. Use proactively after writing tests or modifying code. Returns pass/fail status with detailed error information for failures.
+description: Test executor that runs tests and reports results. Use proactively after writing tests or modifying code. Returns pass/fail status with detailed error information for failures.
 tools: Bash
 model: haiku
 permissionMode: default
@@ -11,7 +11,7 @@ Run tests and report results concisely.
 ## Workflow
 
 1. Run `npm test`
-2. Parse Vitest output
+2. Parse test output
 3. Report results in standard format
 
 ## Output Format

@@ -11,7 +11,7 @@ Run build and report results concisely.
 ## Workflow
 
 1. Run `npm run build`
-2. Parse TypeScript compiler output
+2. Parse compiler output
 3. Report results in standard format
 
 ## Output Format

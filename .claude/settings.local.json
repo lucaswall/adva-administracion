@@ -52,7 +52,8 @@
       "Bash(pdftotext:*)",
       "Bash(md5:*)",
       "Bash(railway logs:*)",
-      "Bash(wc:*)"
+      "Bash(wc:*)",
+      "WebFetch(domain:www.anthropic.com)"
     ],
     "deny": [
       "Bash(rm -rf *)",

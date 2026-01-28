@@ -6,7 +6,7 @@ model: haiku
 permissionMode: default
 ---
 
-Create a complete PR from current changes: branch → commit → push → PR.
+Create a complete PR from current changes: commit → push → PR.
 
 ## Workflow
 
@@ -14,20 +14,25 @@ Create a complete PR from current changes: branch → commit → push → PR.
    - `git status --porcelain=v1`
    - If empty → report "Nothing to commit" and stop
 
-2. **Create branch**
+2. **Check current branch**
+   - `git branch --show-current`
+   - If on `main` → create new branch first
+   - If on feature branch → use current branch
+
+3. **Create branch (only if on main)**
    - `git checkout -b <branch-name>`
    - Branch format: `<type>/<description>` (e.g., `feat/add-broker-parsing`)
    - Types: `feat/` | `fix/` | `refactor/` | `chore/` | `docs/`
 
-3. **Stage and commit**
+4. **Stage and commit**
    - `git add -A`
    - `git diff --cached` - Analyze changes
    - `git commit -m "<type>: <summary>"` (imperative, max 72 chars, no period)
 
-4. **Push to remote**
+5. **Push to remote**
    - `git push -u origin <branch-name>`
 
-5. **Create PR**
+6. **Create PR**
    ```bash
    gh pr create --title "<title>" --base main --body "<body>"
    ```
@@ -84,6 +89,7 @@ Error: [relevant output]
 
 - Use only git and gh commands
 - Do not include co-author attribution
+- If on main, create a new branch; otherwise use current branch
 - Branch name should be descriptive but concise
 - PR title should match commit subject
-- Always target `main` branch unless specified otherwise
+- Always target `main` as base branch

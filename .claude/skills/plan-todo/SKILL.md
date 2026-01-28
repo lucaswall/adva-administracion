@@ -1,8 +1,8 @@
 ---
 name: plan-todo
-description: Convert TODO.md items into TDD implementation plans in PLANS.md. Use when starting work on backlog items, planning features, or organizing implementation tasks. Supports codebase exploration and MCP integration.
-argument-hint: [item-selector] e.g., "bug #2", "all improvements", "the file naming issue"
-allowed-tools: Read, Edit, Write, Glob, Grep, Task, mcp__gdrive__gdrive_search, mcp__gdrive__gdrive_read_file, mcp__gdrive__gdrive_list_folder, mcp__gdrive__gdrive_get_pdf, mcp__gdrive__gsheets_read, mcp__Railway__check-railway-status, mcp__Railway__get-logs, mcp__Railway__list-deployments, mcp__Railway__list-services, mcp__Railway__list-variables, mcp__gemini__gemini_analyze_pdf
+description: Convert TODO.md backlog items into TDD implementation plans. Use when user says "plan item #N", "plan all bugs", "work on backlog", or wants to implement items from TODO.md. Explores codebase for patterns and discovers available MCPs from CLAUDE.md.
+argument-hint: [item-selector] e.g., "item #2", "all bugs", "the file naming issue"
+allowed-tools: Read, Edit, Write, Glob, Grep, Task
 disable-model-invocation: true
 ---
 
@@ -158,20 +158,24 @@ Bad task example:
 
 ## MCP Usage Guidelines
 
-**Google Drive MCP** - Use when TODO item involves:
-- Document processing or extraction
-- Spreadsheet column changes
-- File organization or naming
+Discover available MCPs from CLAUDE.md's "MCP SERVERS" section. Common patterns:
 
-**Railway MCP** - Use when TODO item involves:
+**File/Document MCPs** - Use when TODO item involves:
+- Document processing or extraction
+- Spreadsheet or database changes
+- File organization or storage
+
+**Deployment MCPs** - Use when TODO item involves:
 - Deployment configuration
 - Environment variables
 - Service logs for debugging context
 
-**Gemini MCP** - Use when TODO item involves:
+**AI/LLM MCPs** - Use when TODO item involves:
 - Prompt improvements
 - Extraction accuracy
-- Test prompt variations before planning changes
+- Testing variations before implementation
+
+If CLAUDE.md doesn't list MCPs, skip MCP context gathering.
 
 ## TODO.md Reformatting
 
@@ -196,11 +200,22 @@ Description of second issue.
 
 This ensures TODO.md stays consistent regardless of how items were originally added.
 
+## Error Handling
+
+| Situation | Action |
+|-----------|--------|
+| PLANS.md has incomplete work | Stop and tell user to review/clear PLANS.md first |
+| TODO.md doesn't exist or is empty | Stop and tell user "No items in TODO.md to plan" |
+| CLAUDE.md doesn't exist | Continue without project-specific rules, use general TDD practices |
+| Item selector matches nothing | List available items and ask user to clarify |
+| Codebase exploration times out | Continue with partial context, note limitation in plan |
+| MCP not available | Skip MCP context gathering, note in plan what was skipped |
+
 ## Rules
 
 - **Refuse to proceed if PLANS.md has incomplete work**
 - **Explore codebase before planning** - Find patterns to follow
-- **Use MCPs when relevant** - Gather context from external systems
+- **Use MCPs when relevant** - Gather context from external systems (discover from CLAUDE.md)
 - Every task must follow TDD (test first, then implement)
 - No manual verification steps - use agents only
 - Tasks must be implementable without additional context

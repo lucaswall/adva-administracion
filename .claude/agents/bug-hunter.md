@@ -6,29 +6,33 @@ model: opus
 permissionMode: default
 ---
 
-Analyze uncommitted git changes for bugs and CLAUDE.md violations.
+Analyze uncommitted git changes for bugs and project rule violations.
 
 ## Workflow
 
-1. **Read CLAUDE.md** - Load all project rules and conventions
+1. **Read CLAUDE.md** (if exists) - Load project-specific rules and conventions
 2. **Get changes**:
    - `git diff` - Unstaged changes
    - `git diff --cached` - Staged changes
 3. **For each modified file**:
    - Read the full file for context
-   - Analyze changes against CLAUDE.md rules
+   - Analyze changes against CLAUDE.md rules (if exists)
    - Hunt for bugs in new/modified code
 
 ## What to Check
 
-### CLAUDE.md Compliance
-- Security: auth middleware on endpoints, no exposed secrets
-- Style: TS strict mode, naming conventions, ESM imports with `.js`
-- Logging: Pino logger only, no `console.log`
-- Testing: fake CUITs, fictional names
-- Patterns: `Result<T,E>` for error-prone operations
+### Project Rule Compliance (from CLAUDE.md)
+If CLAUDE.md exists, check for violations of:
+- Security rules (auth, secrets, input validation)
+- Code style rules (naming, imports, formatting)
+- Logging rules (logger usage, no console.log)
+- Testing rules (test data requirements)
+- Error handling patterns
+- Any other project-specific conventions
 
-### Bug Patterns
+If no CLAUDE.md, use general best practices.
+
+### Universal Bug Patterns
 - Logic errors, off-by-one mistakes
 - Null/undefined handling gaps
 - Missing error handling
@@ -38,6 +42,8 @@ Analyze uncommitted git changes for bugs and CLAUDE.md violations.
 - Incorrect function signatures
 - Unhandled edge cases
 - Pattern inconsistencies with existing code
+- Resource leaks (unclosed handles, missing cleanup)
+- Security issues (injection, exposed data)
 
 ## Output Format
 
