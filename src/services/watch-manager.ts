@@ -25,6 +25,7 @@ let lastScanTime: Date | null = null;
 let renewalJob: cron.ScheduledTask | null = null;
 let pollingJob: cron.ScheduledTask | null = null;
 let statusUpdateJob: cron.ScheduledTask | null = null;
+let cleanupJob: cron.ScheduledTask | null = null;
 let runningScan: Promise<void> | null = null;
 let hasPendingScan: boolean = false;
 let pendingScanFolderId: string | undefined = undefined;
@@ -34,6 +35,78 @@ const CHANNEL_EXPIRATION_MS = 3600000; // 1 hour
 const RENEWAL_THRESHOLD_MS = 600000; // Renew if expires within 10 minutes
 const MAX_NOTIFICATION_AGE_MS = 3600000; // Keep notifications for 1 hour
 const MAX_NOTIFICATIONS_PER_CHANNEL = 1000;
+
+/**
+ * Cleanup expired notifications from all channels
+ * Removes entries older than MAX_NOTIFICATION_AGE_MS
+ * Removes empty channel maps after cleanup
+ */
+export function cleanupExpiredNotifications(): void {
+  const now = Date.now();
+
+  for (const [channelId, channelNotifications] of processedNotifications.entries()) {
+    // Remove expired entries
+    for (const [messageNumber, timestamp] of channelNotifications.entries()) {
+      if (now - timestamp > MAX_NOTIFICATION_AGE_MS) {
+        channelNotifications.delete(messageNumber);
+      }
+    }
+
+    // Remove empty channel maps
+    if (channelNotifications.size === 0) {
+      processedNotifications.delete(channelId);
+    }
+  }
+
+  debug('Cleaned up expired notifications', {
+    module: 'watch-manager',
+    phase: 'cleanup',
+    remainingChannels: processedNotifications.size,
+  });
+}
+
+/**
+ * Test helper: Mark notification as processed with custom timestamp
+ * Only exported for testing purposes
+ *
+ * @param messageNumber - Notification message number
+ * @param channelId - Channel ID
+ * @param timestamp - Custom timestamp in ms
+ */
+export function markNotificationProcessedWithTimestamp(
+  messageNumber: string,
+  channelId: string,
+  timestamp: number
+): void {
+  let channelNotifications = processedNotifications.get(channelId);
+
+  if (!channelNotifications) {
+    channelNotifications = new Map();
+    processedNotifications.set(channelId, channelNotifications);
+  }
+
+  channelNotifications.set(messageNumber, timestamp);
+}
+
+/**
+ * Test helper: Get notification count (for testing cleanup)
+ * Returns total number of notifications across all channels
+ */
+export function getNotificationCount(): number {
+  let total = 0;
+  for (const channelNotifications of processedNotifications.values()) {
+    total += channelNotifications.size;
+  }
+  return total;
+}
+
+/**
+ * Test helper: Get channel count (for testing cleanup)
+ * Returns number of active channels in processedNotifications
+ */
+export function getChannelCount(): number {
+  return processedNotifications.size;
+}
 
 /**
  * Initialize watch manager with webhook URL and start cron jobs
@@ -62,6 +135,12 @@ export function initWatchManager(url: string): void {
     if (folderStructure?.dashboardOperativoId) {
       await updateStatusSheet(folderStructure.dashboardOperativoId);
     }
+  });
+
+  // Start notification cleanup cron job (every 10 minutes)
+  cleanupJob = cron.schedule('*/10 * * * *', () => {
+    debug('Running notification cleanup', { module: 'watch-manager', phase: 'cleanup' });
+    cleanupExpiredNotifications();
   });
 
   info('Watch manager initialized', { module: 'watch-manager', phase: 'init' });
@@ -476,6 +555,11 @@ export async function shutdownWatchManager(): Promise<void> {
   if (statusUpdateJob) {
     statusUpdateJob.stop();
     statusUpdateJob = null;
+  }
+
+  if (cleanupJob) {
+    cleanupJob.stop();
+    cleanupJob = null;
   }
 
   // Stop all watch channels

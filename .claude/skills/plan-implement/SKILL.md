@@ -1,6 +1,6 @@
 ---
 name: plan-implement
-description: Execute the implementation plan from PLANS.md following TDD workflow. Use after plan-todo or plan-fix has created a plan. Runs tests, implements code, and documents results.
+description: Execute the pending plan in PLANS.md following TDD workflow. Use when user says "implement the plan", "execute the plan", or after any plan-* skill creates a plan. Runs tests, writes code, documents results.
 allowed-tools: Read, Edit, Write, Bash, Task, Glob, Grep
 disable-model-invocation: true
 ---
@@ -88,6 +88,29 @@ After execution, append a new "Iteration N" section to PLANS.md:
 ### Notes
 [Any important observations, edge cases discovered, or deviations from plan]
 ```
+
+## Error Handling
+
+| Situation | Action |
+|-----------|--------|
+| PLANS.md doesn't exist or is empty | Stop and tell user "No plan found. Run plan-todo or plan-inline first." |
+| PLANS.md already has "Status: COMPLETE" | Stop and tell user "Plan already complete. Create a new plan first." |
+| Test won't fail in step 2 | Review test logic - ensure it tests new behavior, not existing |
+| Test won't pass in step 4 | Debug implementation, do not skip or delete test |
+| bug-hunter finds issues | Fix all bugs before marking tasks complete |
+| test-runner has failures | Fix all failures before proceeding |
+| builder has warnings | Fix all warnings before proceeding |
+| Task references file that doesn't exist | Create the file as part of implementation |
+| Task is ambiguous | Re-read PLANS.md context section, infer from codebase patterns |
+
+## Scope Boundaries
+
+**This skill implements plans. It does NOT:**
+1. **NEVER create commits or PRs** - Unless user explicitly requests
+2. **NEVER skip failing tests** - Fix them or ask for help
+3. **NEVER modify PLANS.md sections above current iteration** - Append only
+4. **NEVER proceed with warnings** - Fix all warnings first
+5. **NEVER ask "should I continue?"** - Execute the full plan
 
 ## Rules
 

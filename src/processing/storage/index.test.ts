@@ -286,7 +286,8 @@ describe('File Tracking Functions', () => {
       expect(getValues).toHaveBeenCalledWith('dashboard-id', 'Archivos Procesados!A:A');
     });
 
-    it('should use cached index on second update', async () => {
+    it('should re-read on each update for safety (lock-based)', async () => {
+      // After lock implementation, each updateFileStatus re-reads for data freshness
       vi.mocked(getValues).mockResolvedValue({
         ok: true,
         value: [
@@ -302,11 +303,11 @@ describe('File Tracking Functions', () => {
       expect(result1.ok).toBe(true);
       expect(getValues).toHaveBeenCalledTimes(1);
 
-      // Second update should use cache
+      // Second update re-reads for safety (sequential calls still refresh)
       const result2 = await updateFileStatus('dashboard-id', 'test-file-id', 'failed', 'Test error');
       expect(result2.ok).toBe(true);
-      // getValues should still only be called once (from first update)
-      expect(getValues).toHaveBeenCalledTimes(1);
+      // getValues should be called again for fresh data
+      expect(getValues).toHaveBeenCalledTimes(2);
     });
 
     it('should read for different file', async () => {
@@ -563,6 +564,141 @@ describe('File Tracking Functions', () => {
         expect(result.value.has('')).toBe(false);
         expect(result.value.size).toBe(2);
       }
+    });
+  });
+
+  describe('Lock-Based Concurrency Tests', () => {
+    beforeEach(() => {
+      clearFileStatusCache();
+    });
+
+    it('serializes concurrent updateFileStatus calls for same file using lock', async () => {
+      // This test verifies that withLock prevents TOCTOU race conditions
+      // Two concurrent updates to the same file should be serialized
+
+      const fileId = 'test-file';
+      const dashboardId = 'dashboard-id';
+
+      // First call reads sheet
+      vi.mocked(getValues).mockResolvedValueOnce({
+        ok: true,
+        value: [
+          ['fileId', 'fileName', 'processedAt', 'documentType', 'status'],
+          [fileId, 'test.pdf', '2025-01-15T10:00:00Z', 'factura_emitida', 'processing'],
+        ],
+      });
+
+      // Second call reads sheet again (would happen concurrently without lock)
+      vi.mocked(getValues).mockResolvedValueOnce({
+        ok: true,
+        value: [
+          ['fileId', 'fileName', 'processedAt', 'documentType', 'status'],
+          [fileId, 'test.pdf', '2025-01-15T10:00:00Z', 'factura_emitida', 'processing'],
+        ],
+      });
+
+      vi.mocked(batchUpdate).mockResolvedValue({ ok: true, value: 1 });
+
+      // Concurrent calls - should be serialized by lock
+      const [result1, result2] = await Promise.all([
+        updateFileStatus(dashboardId, fileId, 'success'),
+        updateFileStatus(dashboardId, fileId, 'failed', 'Test error'),
+      ]);
+
+      expect(result1.ok).toBe(true);
+      expect(result2.ok).toBe(true);
+
+      // Both should update row 2, but sequentially
+      expect(batchUpdate).toHaveBeenCalledTimes(2);
+      expect(batchUpdate).toHaveBeenNthCalledWith(1, dashboardId, [
+        { range: 'Archivos Procesados!E2', values: [['success']] },
+      ]);
+      expect(batchUpdate).toHaveBeenNthCalledWith(2, dashboardId, [
+        { range: 'Archivos Procesados!E2', values: [['failed: Test error']] },
+      ]);
+    });
+
+    it('allows concurrent updateFileStatus calls for different files', async () => {
+      // Different files should NOT block each other
+
+      const fileId1 = 'file-1';
+      const fileId2 = 'file-2';
+      const dashboardId = 'dashboard-id';
+
+      vi.mocked(getValues)
+        .mockResolvedValueOnce({
+          ok: true,
+          value: [
+            ['fileId', 'fileName', 'processedAt', 'documentType', 'status'],
+            [fileId1, 'test1.pdf', '2025-01-15T10:00:00Z', 'factura_emitida', 'processing'],
+            [fileId2, 'test2.pdf', '2025-01-15T10:00:01Z', 'pago_enviado', 'processing'],
+          ],
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          value: [
+            ['fileId', 'fileName', 'processedAt', 'documentType', 'status'],
+            [fileId1, 'test1.pdf', '2025-01-15T10:00:00Z', 'factura_emitida', 'processing'],
+            [fileId2, 'test2.pdf', '2025-01-15T10:00:01Z', 'pago_enviado', 'processing'],
+          ],
+        });
+
+      vi.mocked(batchUpdate).mockResolvedValue({ ok: true, value: 1 });
+
+      // Concurrent calls for different files - should NOT block
+      const [result1, result2] = await Promise.all([
+        updateFileStatus(dashboardId, fileId1, 'success'),
+        updateFileStatus(dashboardId, fileId2, 'success'),
+      ]);
+
+      expect(result1.ok).toBe(true);
+      expect(result2.ok).toBe(true);
+
+      expect(batchUpdate).toHaveBeenCalledTimes(2);
+      expect(batchUpdate).toHaveBeenNthCalledWith(1, dashboardId, [
+        { range: 'Archivos Procesados!E2', values: [['success']] },
+      ]);
+      expect(batchUpdate).toHaveBeenNthCalledWith(2, dashboardId, [
+        { range: 'Archivos Procesados!E3', values: [['success']] },
+      ]);
+    });
+
+    it('invalidates cache on concurrent update to ensure fresh data', async () => {
+      // Test that cache is invalidated at start of lock to prevent stale reads
+
+      const fileId = 'test-file';
+      const dashboardId = 'dashboard-id';
+
+      // First call: populate cache
+      vi.mocked(getValues).mockResolvedValueOnce({
+        ok: true,
+        value: [
+          ['fileId', 'fileName', 'processedAt', 'documentType', 'status'],
+          [fileId, 'test.pdf', '2025-01-15T10:00:00Z', 'factura_emitida', 'processing'],
+        ],
+      });
+      vi.mocked(batchUpdate).mockResolvedValue({ ok: true, value: 1 });
+
+      await updateFileStatus(dashboardId, fileId, 'success');
+
+      // Cache should now have fileId -> row 2
+
+      // Second call: should re-read even though cache exists (to get fresh data)
+      vi.mocked(getValues).mockResolvedValueOnce({
+        ok: true,
+        value: [
+          ['fileId', 'fileName', 'processedAt', 'documentType', 'status'],
+          ['other-file', 'other.pdf', '2025-01-15T09:59:00Z', 'pago_enviado', 'processing'],
+          [fileId, 'test.pdf', '2025-01-15T10:00:00Z', 'factura_emitida', 'success'],
+        ],
+      });
+
+      await updateFileStatus(dashboardId, fileId, 'failed', 'Extraction error');
+
+      // Should update row 3 (new position), not row 2 (cached position)
+      expect(batchUpdate).toHaveBeenNthCalledWith(2, dashboardId, [
+        { range: 'Archivos Procesados!E3', values: [['failed: Extraction error']] },
+      ]);
     });
   });
 });

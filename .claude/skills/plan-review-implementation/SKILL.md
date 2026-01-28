@@ -1,6 +1,6 @@
 ---
 name: plan-review-implementation
-description: Review completed implementation, identify issues, and either create fix plans or mark complete. Use after plan-implement has executed work.
+description: QA review of completed implementation. Use after plan-implement finishes, or when user says "review the implementation". Identifies bugs, edge cases, security issues. Creates fix plans for issues found or marks COMPLETE.
 allowed-tools: Read, Edit, Glob, Grep
 disable-model-invocation: true
 ---
@@ -107,6 +107,17 @@ All tasks implemented and reviewed successfully. Ready for human review.
 | `TYPE` | Type safety issues | Medium |
 | `ERROR` | Missing or incorrect error handling | Medium |
 | `CONVENTION` | Violation of CLAUDE.md rules | Low-Medium |
+
+## Error Handling
+
+| Situation | Action |
+|-----------|--------|
+| PLANS.md doesn't exist | Stop and tell user "No plan found." |
+| No iteration needs review | Stop and tell user "No iteration to review. Run plan-implement first." |
+| Files in iteration don't exist | Note as issue - implementation may have failed |
+| CLAUDE.md doesn't exist | Use general coding best practices for review |
+| Unsure if issue is a bug | Document as "POTENTIAL" and explain uncertainty |
+| Too many issues found | Prioritize by severity, create fix plan for critical/high only |
 
 ## Rules
 
