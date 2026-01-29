@@ -177,3 +177,38 @@ After deploying the fix:
 - Files are marked as 'processing' before extraction to enable stale recovery on deployment interruptions
 - Stale recovery checks for files with 'processing' status older than 5 minutes that still exist in Entrada folder
 - The tracking sheet uses column C for `processedAt` timestamp (ISO format)
+
+### Review Findings
+
+Files reviewed: 5
+- `src/processing/scanner.ts` (retry logic with exponential backoff)
+- `src/processing/storage/index.ts` (`getStaleProcessingFileIds()` and `markFileProcessing()`)
+- `src/config.ts` (constants `MAX_TRANSIENT_RETRIES`, `RETRY_DELAYS_MS`)
+- `src/processing/scanner.test.ts` (tests for retry and stale recovery)
+- `src/processing/storage/index.test.ts` (tests for stale processing detection)
+
+Checks applied: Security, Logic, Async, Resources, Type Safety, Conventions, Edge Cases, Error Handling
+
+**Issues requiring fix:**
+- [MEDIUM] BUG: DocumentType not updated in tracking sheet when file succeeds on retry (`src/processing/scanner.ts:186`) - The condition `if (retryCount === 0)` prevents updating documentType for successful retries, leaving it as 'unknown'
+
+**Documented (no fix needed):**
+- [LOW] TYPE: Using `'unknown' as any` (`src/processing/scanner.ts:86`) - Type assertion is intentional placeholder, acceptable given the immediate update pattern
+
+### Fix Plan
+
+#### Fix 1: Update documentType for successful retries
+
+**Problem:** When a file succeeds on retry (retryCount > 0), the documentType remains 'unknown' in the tracking sheet because the update at line 186 only runs when `retryCount === 0`.
+
+**Solution:** Remove the `retryCount === 0` condition for the documentType update after successful extraction.
+
+1. Write test in `src/processing/scanner.test.ts`:
+   - Test that documentType is updated in tracking sheet even when file succeeds on retry
+   - Mock `markFileProcessing` and verify it's called with correct documentType after successful retry
+
+2. Update `src/processing/scanner.ts:186-203`:
+   - Remove the `if (retryCount === 0)` condition around the `markFileProcessing` call
+   - The function already handles existing rows correctly (updates instead of appending)
+
+3. Run test-runner to verify tests pass
