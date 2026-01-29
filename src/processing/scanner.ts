@@ -183,23 +183,21 @@ async function processFileWithRetry(
 
   // Update file with correct documentType after successful extraction
   // (was marked as 'unknown' before processing for stale recovery tracking)
-  if (retryCount === 0) {
-    const updateResult = await markFileProcessing(
-      dashboardOperativoId,
-      fileInfo.id,
-      fileInfo.name,
-      processed.documentType
-    );
-    if (!updateResult.ok) {
-      warn('Failed to update file documentType', {
-        module: 'scanner',
-        phase: isRetry ? 'process-file-retry' : 'process-file',
-        fileId: fileInfo.id,
-        error: updateResult.error.message,
-        correlationId,
-      });
-      // Continue processing even if update fails
-    }
+  const updateResult = await markFileProcessing(
+    dashboardOperativoId,
+    fileInfo.id,
+    fileInfo.name,
+    processed.documentType
+  );
+  if (!updateResult.ok) {
+    warn('Failed to update file documentType', {
+      module: 'scanner',
+      phase: isRetry ? 'process-file-retry' : 'process-file',
+      fileId: fileInfo.id,
+      error: updateResult.error.message,
+      correlationId,
+    });
+    // Continue processing even if update fails
   }
 
   // Handle unrecognized/unknown documents

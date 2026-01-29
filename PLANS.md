@@ -212,3 +212,33 @@ Checks applied: Security, Logic, Async, Resources, Type Safety, Conventions, Edg
    - The function already handles existing rows correctly (updates instead of appending)
 
 3. Run test-runner to verify tests pass
+
+---
+
+## Iteration 2
+
+**Implemented:** 2026-01-29
+
+### Completed
+- Fix 1: Update documentType for successful retries
+  - Added test in `src/processing/scanner.test.ts` to verify documentType is updated even when file succeeds on retry
+  - Removed the `if (retryCount === 0)` condition from `src/processing/scanner.ts:186` so `markFileProcessing` is called after successful extraction regardless of retry count
+  - The function properly updates the tracking sheet with the actual documentType (e.g., 'factura_recibida') after successful retry, replacing the initial 'unknown' placeholder
+
+### Checklist Results
+- bug-hunter: Found 0 bugs - All changes are correct and well-tested
+- test-runner: All 1058 tests pass across 53 test files (7.24s duration)
+- builder: Build passes with zero warnings or errors
+
+### Notes
+- Files that succeed on first attempt: `markFileProcessing` is called twice (once with 'unknown' before extraction, once with actual documentType after)
+- Files that succeed on retry: `markFileProcessing` is called once with 'unknown' on first attempt (before failed extraction), then called again with actual documentType after successful retry
+- The tracking sheet now accurately reflects the document type for all processed files, including those that initially failed with transient JSON errors
+
+### Status
+**COMPLETE** - The resilient retry mechanism is now fully functional:
+1. ✅ Exponential backoff retry with 3 attempts (10s → 30s → 60s)
+2. ✅ Startup recovery for interrupted processing (stale files older than 5 minutes)
+3. ✅ ProcessedAt timestamp tracking in column C
+4. ✅ DocumentType properly updated for both first-attempt successes and retry successes
+5. ✅ All documentation updated in CLAUDE.md

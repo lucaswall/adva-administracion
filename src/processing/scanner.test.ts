@@ -135,6 +135,8 @@ describe('scanner', () => {
   let mockListFiles: any;
   let mockProcessFile: any;
   let mockSortToSinProcesar: any;
+  let mockSortAndRename: any;
+  let mockMarkFileProcessing: any;
   let pendingTasks: Set<Promise<void>>;
 
   beforeEach(async () => {
@@ -144,11 +146,14 @@ describe('scanner', () => {
     const { listFilesInFolder } = await import('../services/drive.js');
     const { getProcessingQueue } = await import('./queue.js');
     const { processFile } = await import('./extractor.js');
-    const { sortToSinProcesar } = await import('../services/document-sorter.js');
+    const { sortToSinProcesar, sortAndRenameDocument } = await import('../services/document-sorter.js');
+    const { markFileProcessing } = await import('./storage/index.js');
 
     mockListFiles = vi.mocked(listFilesInFolder);
     mockProcessFile = vi.mocked(processFile);
     mockSortToSinProcesar = vi.mocked(sortToSinProcesar);
+    mockSortAndRename = vi.mocked(sortAndRenameDocument);
+    mockMarkFileProcessing = vi.mocked(markFileProcessing);
 
     // Create a proper queue mock that tracks pending tasks
     pendingTasks = new Set<Promise<void>>();
@@ -325,6 +330,82 @@ describe('scanner', () => {
       expect(mockProcessFile).toHaveBeenCalledTimes(1);
       // Should move to Sin Procesar immediately
       expect(mockSortToSinProcesar).toHaveBeenCalled();
+    });
+
+    it('should update documentType in tracking sheet when file succeeds on retry', async () => {
+      vi.useFakeTimers();
+
+      const mockFile = {
+        id: 'test-file-retry',
+        name: 'test-retry.pdf',
+        mimeType: 'application/pdf',
+        parents: ['folder-id'],
+      };
+
+      mockListFiles.mockResolvedValue({
+        ok: true,
+        value: [mockFile],
+      });
+
+      // Mock processFile to fail with JSON error once, then succeed
+      let attemptCount = 0;
+      mockProcessFile.mockImplementation(async () => {
+        attemptCount++;
+        if (attemptCount === 1) {
+          return {
+            ok: false,
+            error: new Error('Expected \',\' or \']\' after array element in JSON at position 422'),
+          };
+        }
+        return {
+          ok: true,
+          value: {
+            documentType: 'factura_recibida',
+            document: { fechaEmision: '2024-01-15' },
+          },
+        };
+      });
+
+      mockSortAndRename.mockResolvedValue({
+        success: true,
+        targetPath: 'Egresos/test-retry.pdf',
+      });
+
+      // Start scan (don't await yet)
+      const scanPromise = scanFolder('folder-id');
+
+      // Fast-forward through first retry delay
+      await vi.advanceTimersByTimeAsync(10000); // First retry after 10s
+
+      await scanPromise;
+
+      // Should have attempted 2 times total (1 initial + 1 retry)
+      expect(attemptCount).toBe(2);
+
+      // Should have called markFileProcessing twice:
+      // 1. First with 'unknown' documentType before extraction
+      // 2. Second with 'factura_recibida' after successful retry
+      expect(mockMarkFileProcessing).toHaveBeenCalledTimes(2);
+
+      // First call: before processing with 'unknown'
+      expect(mockMarkFileProcessing).toHaveBeenNthCalledWith(
+        1,
+        'dashboard',
+        'test-file-retry',
+        'test-retry.pdf',
+        'unknown'
+      );
+
+      // Second call: after successful retry with actual documentType
+      expect(mockMarkFileProcessing).toHaveBeenNthCalledWith(
+        2,
+        'dashboard',
+        'test-file-retry',
+        'test-retry.pdf',
+        'factura_recibida'
+      );
+
+      vi.useRealTimers();
     });
 
     it('should recover files with stale processing status on startup', async () => {
