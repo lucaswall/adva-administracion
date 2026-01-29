@@ -2,28 +2,81 @@
 
 Universal checks that apply to any project. Project-specific rules should be defined in CLAUDE.md.
 
-## Security
+## Security (OWASP-Based)
 
-### Authentication & Authorization
+### Authorization (OWASP A01:2021)
 - Public endpoints are intentional and documented
 - Auth middleware applied to protected routes
 - Role/permission checks where needed
+- IDOR prevention (validate user owns resource)
+- Horizontal/vertical privilege escalation blocked
 
-### Secrets & Credentials
+### Secrets & Credentials (OWASP A02:2021)
 - No hardcoded secrets, API keys, or passwords in code
 - Secrets loaded from environment variables or secret managers
 - No secrets in git history (check for accidental commits)
+- Sensitive data not logged (passwords, tokens, PII)
+- Debug/verbose modes don't expose secrets
+- Error messages don't leak internal paths or stack traces
 
-### Input Validation
+### Input Validation (OWASP A03:2021)
 - User input sanitized before use
-- SQL/NoSQL injection prevention (parameterized queries)
-- Path traversal prevention (validate file paths)
-- XSS prevention (escape output in templates)
+- SQL/NoSQL injection prevention (parameterized queries, ORM)
+- Command injection prevention (avoid shell execution with user input)
+- Path traversal prevention (`../` sequences blocked)
+- XSS prevention (context-appropriate encoding: HTML, JS, CSS, URL)
+- File upload validation (content type, size, extension)
+
+### Authentication (OWASP A07:2021)
+- Strong password hashing (bcrypt, argon2, scrypt with salt)
+- Session tokens cryptographically random (>=128 bits)
+- Session invalidation on logout
+- Re-authentication for sensitive operations
+- JWT validation complete (signature, expiry, issuer)
 
 ### HTTPS & Transport
 - External API calls use HTTPS
 - Certificate validation not disabled
-- Sensitive data not logged
+
+## Type Safety
+
+### Unsafe Casts
+- No unsafe `any` casts without justification
+- Type assertions (`as Type`) verified correct
+- Generic constraints appropriate
+
+### Type Guards
+- Union types have exhaustive handling
+- Nullable types explicitly handled (null, undefined)
+- External data validated before use (API responses, file parsing)
+
+### Runtime Validation
+- API inputs validated (zod, io-ts, or manual)
+- Config values validated at startup
+- Type mismatches detected early (fail fast)
+
+## Logic & Correctness
+
+### Common Bug Patterns
+- Off-by-one errors in loops/indices
+- Empty array/object edge cases not handled
+- Integer overflow/underflow (rare in JS but possible)
+- Floating point comparison issues (use epsilon)
+- Assignment vs comparison (= vs ==)
+
+### Boundary Conditions
+- Empty inputs handled (null, undefined, "", [], {})
+- Single-element collections work correctly
+- Maximum size inputs don't break logic
+- Negative numbers where only positive expected
+- Zero values handled appropriately
+- Unicode edge cases (emojis, RTL, combining chars)
+
+### State Management
+- Race conditions in shared state
+- State mutations in wrong order
+- Missing state cleanup after operations
+- Stale state references in closures
 
 ## Memory Leaks
 
@@ -165,6 +218,12 @@ Use Grep tool (not bash grep) to find potential issues. Replace `{src}` with dis
 **Security:**
 - `password|secret|api.?key|token` (case insensitive) - potential hardcoded secrets
 - `eval\(|new Function\(` - dangerous code execution
+- `exec\(|spawn\(` with variable input - command injection risk
+
+**Type Safety:**
+- `as any` - unsafe type cast
+- `as unknown as` - double cast (often hiding type issues)
+- `@ts-ignore|@ts-expect-error` - suppressed type errors
 
 **Memory/Resource:**
 - `\.on\(` - event listeners (check for cleanup)
@@ -175,6 +234,7 @@ Use Grep tool (not bash grep) to find potential issues. Replace `{src}` with dis
 **Async:**
 - `\.then\(` without `.catch` nearby - unhandled promise
 - `async ` functions - verify try/catch coverage
+- `Promise\.all` - verify error handling
 
 **Logging:**
 - `console\.log|console\.warn|console\.error` - should use proper logger
