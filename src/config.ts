@@ -36,6 +36,18 @@ export const MAX_CASCADE_DEPTH = 10;
 export const CASCADE_TIMEOUT_MS = 30000;
 
 /**
+ * Maximum number of retry attempts for transient errors (JSON parse errors)
+ * These errors are often caused by temporary Gemini API instability
+ */
+export const MAX_TRANSIENT_RETRIES = 3;
+
+/**
+ * Retry delays in milliseconds for exponential backoff
+ * [10s, 30s, 60s] - gives API time to recover from overload
+ */
+export const RETRY_DELAYS_MS = [10000, 30000, 60000] as const;
+
+/**
  * Fetch timeout in milliseconds
  * Maximum time allowed for a single fetch request to Gemini API
  * Set to 5 minutes to accommodate large PDF processing (300+ pages can take >3 minutes)

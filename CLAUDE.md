@@ -227,6 +227,58 @@ apps-script/              # Dashboard ADVA menu (bound script)
 - `src/processing/storage/pago-store.test.ts`
 - `src/processing/storage/resumen-store.test.ts`
 
+## PROCESSING & RETRY BEHAVIOR
+
+### Resilient Retry Mechanism
+
+The scanner implements exponential backoff retry for transient errors:
+
+**Transient Errors (JSON parse errors from Gemini API):**
+- Automatically retried up to 3 times with exponential backoff delays
+- Retry delays: 10s → 30s → 60s (total ~100 seconds before giving up)
+- After 3 failed attempts, file moves to Sin Procesar folder
+- Configuration: `MAX_TRANSIENT_RETRIES = 3`, `RETRY_DELAYS_MS = [10000, 30000, 60000]` in `src/config.ts`
+
+**Why:** JSON parse errors often indicate temporary Gemini API instability (rate limiting, overload) rather than document issues. Exponential backoff gives the API time to stabilize.
+
+**Example log flow:**
+```
+Processing file: invoice.pdf
+JSON parse error, will retry (attempt 1/3)
+[10s delay]
+Retrying file: invoice.pdf (attempt 1)
+JSON parse error, will retry (attempt 2/3)
+[30s delay]
+Retrying file: invoice.pdf (attempt 2)
+JSON parse error, will retry (attempt 3/3)
+[60s delay]
+Retrying file: invoice.pdf (attempt 3)
+Success on retry
+```
+
+### Startup Recovery
+
+Files with stale 'processing' status are automatically recovered on server startup:
+
+**What qualifies as stale:**
+- Files with 'processing' status older than 5 minutes (configurable: `getStaleProcessingFileIds(dashboardId, 5 * 60 * 1000)`)
+- Still present in the Entrada folder
+
+**Recovery flow:**
+1. On scanner startup, query `getStaleProcessingFileIds()` from Dashboard tracking sheet
+2. Cross-reference with files currently in Entrada folder
+3. Add stale files to processing queue alongside new files
+4. Process with normal retry logic
+
+**Why:** Deployment restarts, container terminations, or crashes can interrupt file processing. Without recovery, these files would remain in 'processing' state indefinitely.
+
+**Tracking Sheet Schema (Dashboard Operativo - Archivos Procesados):**
+- Column A: `fileId` (Google Drive file ID)
+- Column B: `fileName`
+- Column C: `processedAt` (ISO timestamp when processing started)
+- Column D: `documentType`
+- Column E: `status` (`processing` | `success` | `failed: <error message>`)
+
 ## SECURITY
 
 All endpoints except `/health` and `/webhooks/drive` require Bearer token: `Authorization: Bearer <API_SECRET>`

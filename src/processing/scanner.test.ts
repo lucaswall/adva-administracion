@@ -14,31 +14,41 @@ vi.mock('./queue.js', () => ({
 }));
 
 vi.mock('./extractor.js', () => ({
-  processFile: vi.fn(),
+  processFile: vi.fn(async () => ({
+    ok: true,
+    value: {
+      documentType: 'factura_emitida',
+      document: { fechaEmision: '2024-01-01' }
+    }
+  })),
   hasValidDate: vi.fn(() => true),
 }));
 
 vi.mock('./storage/index.js', () => ({
   getProcessedFileIds: vi.fn(async () => ({ ok: true, value: new Set() })),
+  getStaleProcessingFileIds: vi.fn(async () => ({ ok: true, value: new Set() })),
   markFileProcessing: vi.fn(async () => ({ ok: true, value: undefined })),
   updateFileStatus: vi.fn(async () => ({ ok: true, value: undefined })),
-  storeFactura: vi.fn(),
-  storePago: vi.fn(),
-  storeRecibo: vi.fn(),
-  storeRetencion: vi.fn(),
-  storeResumenBancario: vi.fn(),
-  storeResumenTarjeta: vi.fn(),
-  storeResumenBroker: vi.fn(),
-  storeMovimientosBancario: vi.fn(),
-  storeMovimientosTarjeta: vi.fn(),
-  storeMovimientosBroker: vi.fn(),
+  storeFactura: vi.fn(async () => ({ ok: true, value: { stored: true } })),
+  storePago: vi.fn(async () => ({ ok: true, value: { stored: true } })),
+  storeRecibo: vi.fn(async () => ({ ok: true, value: { stored: true } })),
+  storeRetencion: vi.fn(async () => ({ ok: true, value: { stored: true } })),
+  storeResumenBancario: vi.fn(async () => ({ ok: true, value: { stored: true } })),
+  storeResumenTarjeta: vi.fn(async () => ({ ok: true, value: { stored: true } })),
+  storeResumenBroker: vi.fn(async () => ({ ok: true, value: { stored: true } })),
+  storeMovimientosBancario: vi.fn(async () => ({ ok: true, value: undefined })),
+  storeMovimientosTarjeta: vi.fn(async () => ({ ok: true, value: undefined })),
+  storeMovimientosBroker: vi.fn(async () => ({ ok: true, value: undefined })),
 }));
 
 vi.mock('../services/folder-structure.js', () => ({
   getCachedFolderStructure: vi.fn(() => ({
-    entradaFolderId: 'entrada',
-    sinProcesarFolderId: 'sin-procesar',
-    duplicadoFolderId: 'duplicado',
+    entradaId: 'entrada',
+    sinProcesarId: 'sin-procesar',
+    duplicadoId: 'duplicado',
+    controlIngresosId: 'control-ingresos',
+    controlEgresosId: 'control-egresos',
+    dashboardOperativoId: 'dashboard',
   })),
   getOrCreateBankAccountFolder: vi.fn(),
   getOrCreateBankAccountSpreadsheet: vi.fn(),
@@ -50,9 +60,9 @@ vi.mock('../services/folder-structure.js', () => ({
 }));
 
 vi.mock('../services/document-sorter.js', () => ({
-  sortToSinProcesar: vi.fn(async () => ({ ok: true, value: undefined })),
-  sortAndRenameDocument: vi.fn(async () => ({ ok: true, value: undefined })),
-  moveToDuplicadoFolder: vi.fn(async () => ({ ok: true, value: undefined })),
+  sortToSinProcesar: vi.fn(async () => ({ success: true, targetPath: 'Sin Procesar/file.pdf' })),
+  sortAndRenameDocument: vi.fn(async () => ({ success: true, targetPath: 'Ingresos/file.pdf' })),
+  moveToDuplicadoFolder: vi.fn(async () => ({ ok: true, value: { targetPath: 'Duplicado/file.pdf' } })),
 }));
 
 vi.mock('../utils/logger.js', () => ({
@@ -69,7 +79,7 @@ vi.mock('../utils/correlation.js', () => ({
 }));
 
 vi.mock('./matching/index.js', () => ({
-  runMatching: vi.fn(async () => undefined),
+  runMatching: vi.fn(async () => ({ ok: true, value: 0 })),
 }));
 
 vi.mock('./caches/index.js', () => {
@@ -123,6 +133,11 @@ vi.mock('../services/token-usage-batch.js', () => {
 describe('scanner', () => {
   let mockQueue: any;
   let mockListFiles: any;
+  let mockProcessFile: any;
+  let mockSortToSinProcesar: any;
+  let mockSortAndRename: any;
+  let mockMarkFileProcessing: any;
+  let pendingTasks: Set<Promise<void>>;
 
   beforeEach(async () => {
     vi.clearAllMocks();
@@ -130,11 +145,29 @@ describe('scanner', () => {
     // Set up fresh mocks
     const { listFilesInFolder } = await import('../services/drive.js');
     const { getProcessingQueue } = await import('./queue.js');
+    const { processFile } = await import('./extractor.js');
+    const { sortToSinProcesar, sortAndRenameDocument } = await import('../services/document-sorter.js');
+    const { markFileProcessing } = await import('./storage/index.js');
 
     mockListFiles = vi.mocked(listFilesInFolder);
+    mockProcessFile = vi.mocked(processFile);
+    mockSortToSinProcesar = vi.mocked(sortToSinProcesar);
+    mockSortAndRename = vi.mocked(sortAndRenameDocument);
+    mockMarkFileProcessing = vi.mocked(markFileProcessing);
+
+    // Create a proper queue mock that tracks pending tasks
+    pendingTasks = new Set<Promise<void>>();
     mockQueue = {
-      add: vi.fn(async (fn: () => Promise<void>) => await fn()),
-      onIdle: vi.fn(async () => undefined),
+      add: vi.fn((fn: () => Promise<void>) => {
+        const task = fn().finally(() => pendingTasks.delete(task));
+        pendingTasks.add(task);
+        return task;
+      }),
+      onIdle: vi.fn(async () => {
+        while (pendingTasks.size > 0) {
+          await Promise.race(Array.from(pendingTasks));
+        }
+      }),
     };
     vi.mocked(getProcessingQueue).mockReturnValue(mockQueue);
   });
@@ -162,6 +195,289 @@ describe('scanner', () => {
 
       // The key behavioral test: scanner should use queue.onIdle()
       // instead of maintaining processingPromises/retryPromises arrays
+    });
+
+    it('should retry JSON parse errors up to 3 times with delays', async () => {
+      vi.useFakeTimers();
+
+      const mockFile = {
+        id: 'test-file',
+        name: 'test.pdf',
+        mimeType: 'application/pdf',
+        parents: ['folder-id'],
+      };
+
+      mockListFiles.mockResolvedValue({
+        ok: true,
+        value: [mockFile],
+      });
+
+      // Mock processFile to fail with JSON error 3 times, then succeed
+      let attemptCount = 0;
+      mockProcessFile.mockImplementation(async () => {
+        attemptCount++;
+        if (attemptCount <= 3) {
+          return {
+            ok: false,
+            error: new Error('Expected \',\' or \']\' after array element in JSON at position 422'),
+          };
+        }
+        return {
+          ok: true,
+          value: {
+            documentType: 'factura_emitida',
+            document: { fechaEmision: '2024-01-01' },
+          },
+        };
+      });
+
+      mockSortToSinProcesar.mockResolvedValue({
+        success: true,
+        targetPath: 'Sin Procesar/test.pdf',
+      });
+
+      // Start scan (don't await yet)
+      const scanPromise = scanFolder('folder-id');
+
+      // Fast-forward through delays: 10s, 30s, 60s
+      await vi.advanceTimersByTimeAsync(10000); // First retry after 10s
+      await vi.advanceTimersByTimeAsync(30000); // Second retry after 30s
+      await vi.advanceTimersByTimeAsync(60000); // Third retry after 60s
+
+      await scanPromise;
+
+      // Should have attempted 4 times total (1 initial + 3 retries)
+      expect(attemptCount).toBe(4);
+
+      vi.useRealTimers();
+    });
+
+    it('should move file to Sin Procesar after 3 failed retries', async () => {
+      vi.useFakeTimers();
+
+      const mockFile = {
+        id: 'test-file',
+        name: 'test.pdf',
+        mimeType: 'application/pdf',
+        parents: ['folder-id'],
+      };
+
+      mockListFiles.mockResolvedValue({
+        ok: true,
+        value: [mockFile],
+      });
+
+      // Mock processFile to always fail with JSON error
+      let attemptCount = 0;
+      mockProcessFile.mockImplementation(async () => {
+        attemptCount++;
+        return {
+          ok: false,
+          error: new Error('No JSON found in response'),
+        };
+      });
+
+      mockSortToSinProcesar.mockResolvedValue({
+        success: true,
+        targetPath: 'Sin Procesar/test.pdf',
+      });
+
+      // Start scan (don't await yet)
+      const scanPromise = scanFolder('folder-id');
+
+      // Fast-forward through delays: 10s, 30s, 60s
+      await vi.advanceTimersByTimeAsync(10000); // First retry after 10s
+      await vi.advanceTimersByTimeAsync(30000); // Second retry after 30s
+      await vi.advanceTimersByTimeAsync(60000); // Third retry after 60s
+
+      await scanPromise;
+
+      // Should have tried 4 times (1 initial + 3 retries)
+      expect(attemptCount).toBe(4);
+      // Should have moved to Sin Procesar after all retries exhausted
+      expect(mockSortToSinProcesar).toHaveBeenCalled();
+
+      vi.useRealTimers();
+    });
+
+    it('should only retry JSON parse errors, not other errors', async () => {
+      const mockFile = {
+        id: 'test-file',
+        name: 'test.pdf',
+        mimeType: 'application/pdf',
+        parents: ['folder-id'],
+      };
+
+      mockListFiles.mockResolvedValue({
+        ok: true,
+        value: [mockFile],
+      });
+
+      // Mock processFile to fail with non-JSON error
+      mockProcessFile.mockResolvedValue({
+        ok: false,
+        error: new Error('Network timeout'),
+      });
+
+      mockSortToSinProcesar.mockResolvedValue({
+        success: true,
+        targetPath: 'Sin Procesar/test.pdf',
+      });
+
+      await scanFolder('folder-id');
+
+      // Should only process once (no retries for non-JSON errors)
+      expect(mockProcessFile).toHaveBeenCalledTimes(1);
+      // Should move to Sin Procesar immediately
+      expect(mockSortToSinProcesar).toHaveBeenCalled();
+    });
+
+    it('should update documentType in tracking sheet when file succeeds on retry', async () => {
+      vi.useFakeTimers();
+
+      const mockFile = {
+        id: 'test-file-retry',
+        name: 'test-retry.pdf',
+        mimeType: 'application/pdf',
+        parents: ['folder-id'],
+      };
+
+      mockListFiles.mockResolvedValue({
+        ok: true,
+        value: [mockFile],
+      });
+
+      // Mock processFile to fail with JSON error once, then succeed
+      let attemptCount = 0;
+      mockProcessFile.mockImplementation(async () => {
+        attemptCount++;
+        if (attemptCount === 1) {
+          return {
+            ok: false,
+            error: new Error('Expected \',\' or \']\' after array element in JSON at position 422'),
+          };
+        }
+        return {
+          ok: true,
+          value: {
+            documentType: 'factura_recibida',
+            document: { fechaEmision: '2024-01-15' },
+          },
+        };
+      });
+
+      mockSortAndRename.mockResolvedValue({
+        success: true,
+        targetPath: 'Egresos/test-retry.pdf',
+      });
+
+      // Start scan (don't await yet)
+      const scanPromise = scanFolder('folder-id');
+
+      // Fast-forward through first retry delay
+      await vi.advanceTimersByTimeAsync(10000); // First retry after 10s
+
+      await scanPromise;
+
+      // Should have attempted 2 times total (1 initial + 1 retry)
+      expect(attemptCount).toBe(2);
+
+      // Should have called markFileProcessing twice:
+      // 1. First with 'unknown' documentType before extraction
+      // 2. Second with 'factura_recibida' after successful retry
+      expect(mockMarkFileProcessing).toHaveBeenCalledTimes(2);
+
+      // First call: before processing with 'unknown'
+      expect(mockMarkFileProcessing).toHaveBeenNthCalledWith(
+        1,
+        'dashboard',
+        'test-file-retry',
+        'test-retry.pdf',
+        'unknown'
+      );
+
+      // Second call: after successful retry with actual documentType
+      expect(mockMarkFileProcessing).toHaveBeenNthCalledWith(
+        2,
+        'dashboard',
+        'test-file-retry',
+        'test-retry.pdf',
+        'factura_recibida'
+      );
+
+      vi.useRealTimers();
+    });
+
+    it('should recover files with stale processing status on startup', async () => {
+      // Import the storage module to get the mock
+      const { getStaleProcessingFileIds, getProcessedFileIds } = await import('./storage/index.js');
+
+      // Mock file list in Entrada folder
+      const mockFile = {
+        id: 'stale-file',
+        name: 'stale-document.pdf',
+        mimeType: 'application/pdf',
+        parents: ['entrada'],
+      };
+
+      mockListFiles.mockResolvedValue({
+        ok: true,
+        value: [mockFile],
+      });
+
+      // Mock that this file has stale processing status
+      vi.mocked(getStaleProcessingFileIds).mockResolvedValue({
+        ok: true,
+        value: new Set(['stale-file']),
+      });
+
+      // Mock that no files are successfully processed
+      vi.mocked(getProcessedFileIds).mockResolvedValue({
+        ok: true,
+        value: new Set(),
+      });
+
+      // Mock successful processing on recovery
+      mockProcessFile.mockResolvedValue({
+        ok: true,
+        value: {
+          documentType: 'factura_emitida',
+          document: { fechaEmision: '2024-01-01' }
+        }
+      });
+
+      await scanFolder('entrada');
+
+      // Should call getStaleProcessingFileIds to find stale files
+      expect(getStaleProcessingFileIds).toHaveBeenCalled();
+      // Should process the stale file
+      expect(mockProcessFile).toHaveBeenCalled();
+    });
+
+    it('should not recover stale files that are not in Entrada folder', async () => {
+      const { getStaleProcessingFileIds, getProcessedFileIds } = await import('./storage/index.js');
+
+      // Mock empty Entrada folder
+      mockListFiles.mockResolvedValue({
+        ok: true,
+        value: [],
+      });
+
+      // Mock that a file has stale processing status (but not in Entrada)
+      vi.mocked(getStaleProcessingFileIds).mockResolvedValue({
+        ok: true,
+        value: new Set(['missing-file']),
+      });
+
+      vi.mocked(getProcessedFileIds).mockResolvedValue({
+        ok: true,
+        value: new Set(),
+      });
+
+      await scanFolder('entrada');
+
+      // Should not process the file since it's not in Entrada
+      expect(mockProcessFile).not.toHaveBeenCalled();
     });
   });
 });
