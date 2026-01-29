@@ -235,8 +235,36 @@ Checks applied: Security, Logic, Async, Resources, Type Safety, Conventions, Edg
 - Files that succeed on retry: `markFileProcessing` is called once with 'unknown' on first attempt (before failed extraction), then called again with actual documentType after successful retry
 - The tracking sheet now accurately reflects the document type for all processed files, including those that initially failed with transient JSON errors
 
-### Status
-**COMPLETE** - The resilient retry mechanism is now fully functional:
+### Review Findings
+
+Files reviewed: 2
+- `src/processing/scanner.ts` (documentType update fix at line 186-191)
+- `src/processing/scanner.test.ts` (new test at line 335-409)
+
+Checks applied: Security, Logic, Async, Resources, Type Safety, Conventions, Edge Cases, Error Handling
+
+**Analysis of the fix:**
+- The condition `if (retryCount === 0)` was correctly removed from line 186
+- `markFileProcessing` is now called unconditionally after successful extraction
+- This ensures documentType is updated to the actual value (e.g., 'factura_recibida') regardless of whether it's a first attempt or retry
+
+**Edge case verification:**
+- First attempt success: `markFileProcessing` called twice (once with 'unknown' at line 81, once with actual type at line 186) - the function handles updates correctly
+- Retry success: `markFileProcessing` called once with 'unknown' (on first failed attempt), then once with actual type after successful retry - now works correctly
+
+**Test coverage:**
+- New test `'should update documentType in tracking sheet when file succeeds on retry'` validates the fix
+- Test verifies both calls to `markFileProcessing` with correct parameters
+
+No issues found - all implementations are correct and follow project conventions.
+
+---
+
+## Status: COMPLETE
+
+All tasks implemented and reviewed successfully. Ready for human review.
+
+**Summary of what was implemented:**
 1. ✅ Exponential backoff retry with 3 attempts (10s → 30s → 60s)
 2. ✅ Startup recovery for interrupted processing (stale files older than 5 minutes)
 3. ✅ ProcessedAt timestamp tracking in column C
