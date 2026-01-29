@@ -11,6 +11,18 @@ import {
 } from '../services/watch-manager.js';
 import { createRateLimiter } from '../utils/rate-limiter.js';
 
+// Module-level rate limiter: 60 requests per minute per channelId
+const rateLimiter = createRateLimiter(60000, 60);
+
+/**
+ * Clean up expired rate limiter keys to prevent memory leak
+ * Should be called periodically (e.g., from watch-manager cleanup cron)
+ * @returns Number of keys removed
+ */
+export function cleanupRateLimiter(): number {
+  return rateLimiter.cleanup();
+}
+
 /**
  * Drive push notification headers
  */
@@ -26,8 +38,6 @@ interface DriveNotificationHeaders {
  * Register webhook routes
  */
 export async function webhookRoutes(server: FastifyInstance) {
-  // Create rate limiter: 60 requests per minute per channelId
-  const rateLimiter = createRateLimiter(60000, 60);
 
   /**
    * POST /webhooks/drive - Handle Drive push notifications

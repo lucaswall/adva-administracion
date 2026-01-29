@@ -177,7 +177,7 @@ export async function storePago(
     }
 
     // Update cache if available
-    context?.duplicateCache.addEntry(spreadsheetId, sheetName, pago.fileId, row);
+    context?.duplicateCache?.addEntry(spreadsheetId, sheetName, pago.fileId, row);
 
     info('Pago stored successfully', {
       module: 'storage',

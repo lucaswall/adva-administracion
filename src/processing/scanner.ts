@@ -603,7 +603,17 @@ export async function scanFolder(folderId?: string): Promise<Result<ScanResult, 
 
       await context.sortBatch.flushSorts();
       await context.sheetOrderBatch.flushReorders();
-      await context.tokenBatch.flush(dashboardOperativoId);
+
+      const tokenFlushResult = await context.tokenBatch.flush(dashboardOperativoId);
+      if (!tokenFlushResult.ok) {
+        logError('Failed to flush token usage batch', {
+          module: 'scanner',
+          phase: 'flush-caches',
+          correlationId,
+          error: tokenFlushResult.error.message
+        });
+        // Continue anyway - token logging is not critical to scan success
+      }
 
       info('Batched operations flushed', {
         module: 'scanner',

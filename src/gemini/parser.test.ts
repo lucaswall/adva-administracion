@@ -525,3 +525,118 @@ describe('Parser - Movimiento Validation', () => {
     });
   });
 });
+
+describe('isValidDateFormat', () => {
+  // Note: isValidDateFormat is not exported, so we test it indirectly through parser functions
+  // We'll test with parseResumenBancarioResponse which uses isValidDateFormat internally
+
+  it('rejects invalid day (2024-02-30)', () => {
+    const response = JSON.stringify({
+      banco: 'BBVA',
+      numeroCuenta: '1234567890',
+      fechaDesde: '2024-02-30', // Invalid: Feb doesn't have 30 days
+      fechaHasta: '2024-02-28',
+      saldoInicial: 100000,
+      saldoFinal: 150000,
+      moneda: 'ARS',
+      cantidadMovimientos: 0,
+      movimientos: []
+    });
+
+    const result = parseResumenBancarioResponse(response);
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      // Should flag for review due to invalid date
+      expect(result.value.needsReview).toBe(true);
+    }
+  });
+
+  it('rejects invalid month (2024-13-01)', () => {
+    const response = JSON.stringify({
+      banco: 'BBVA',
+      numeroCuenta: '1234567890',
+      fechaDesde: '2024-13-01', // Invalid: month 13 doesn't exist
+      fechaHasta: '2024-12-31',
+      saldoInicial: 100000,
+      saldoFinal: 150000,
+      moneda: 'ARS',
+      cantidadMovimientos: 0,
+      movimientos: []
+    });
+
+    const result = parseResumenBancarioResponse(response);
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      // Should flag for review due to invalid date
+      expect(result.value.needsReview).toBe(true);
+    }
+  });
+
+  it('accepts leap year date (2024-02-29)', () => {
+    const response = JSON.stringify({
+      banco: 'BBVA',
+      numeroCuenta: '1234567890',
+      fechaDesde: '2024-02-29', // Valid: 2024 is a leap year
+      fechaHasta: '2024-02-29',
+      saldoInicial: 100000,
+      saldoFinal: 150000,
+      moneda: 'ARS',
+      cantidadMovimientos: 0,
+      movimientos: []
+    });
+
+    const result = parseResumenBancarioResponse(response);
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      // Should NOT flag for review - date is valid
+      expect(result.value.needsReview).toBe(false);
+    }
+  });
+
+  it('rejects non-leap year Feb 29 (2023-02-29)', () => {
+    const response = JSON.stringify({
+      banco: 'BBVA',
+      numeroCuenta: '1234567890',
+      fechaDesde: '2023-02-29', // Invalid: 2023 is not a leap year
+      fechaHasta: '2023-02-28',
+      saldoInicial: 100000,
+      saldoFinal: 150000,
+      moneda: 'ARS',
+      cantidadMovimientos: 0,
+      movimientos: []
+    });
+
+    const result = parseResumenBancarioResponse(response);
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      // Should flag for review due to invalid date
+      expect(result.value.needsReview).toBe(true);
+    }
+  });
+
+  it('accepts valid dates', () => {
+    const response = JSON.stringify({
+      banco: 'BBVA',
+      numeroCuenta: '1234567890',
+      fechaDesde: '2024-01-15', // Valid date
+      fechaHasta: '2024-12-31', // Valid date
+      saldoInicial: 100000,
+      saldoFinal: 150000,
+      moneda: 'ARS',
+      cantidadMovimientos: 0,
+      movimientos: []
+    });
+
+    const result = parseResumenBancarioResponse(response);
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      // Should NOT flag for review
+      expect(result.value.needsReview).toBe(false);
+    }
+  });
+});

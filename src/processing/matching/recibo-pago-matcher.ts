@@ -104,7 +104,7 @@ async function processCascadingReciboDisplacements(
         };
         const newQuality: MatchQuality = {
           confidence: bestMatch.confidence,
-          hasCuitMatch: bestMatch.hasCuilMatch || false,
+          hasCuitMatch: bestMatch.hasCuitMatch || false,
           dateProximityDays: bestMatch.dateProximityDays || 999
         };
 
@@ -142,7 +142,7 @@ async function processCascadingReciboDisplacements(
               bestMatch.reciboRow,
               displacedPago.fileId,
               bestMatch.confidence,
-              bestMatch.hasCuilMatch || false
+              bestMatch.hasCuitMatch || false
             )
           );
           cascadeState.displacedCount++;
@@ -157,7 +157,7 @@ async function processCascadingReciboDisplacements(
             bestMatch.reciboRow,
             displacedPago.fileId,
             bestMatch.confidence,
-            bestMatch.hasCuilMatch || false
+            bestMatch.hasCuitMatch || false
           )
         );
 
@@ -374,7 +374,7 @@ async function doMatchRecibosWithPagos(
           };
           const newQuality: MatchQuality = {
             confidence: bestMatch.confidence,
-            hasCuitMatch: bestMatch.hasCuilMatch || false,
+            hasCuitMatch: bestMatch.hasCuitMatch || false,
             dateProximityDays: bestMatch.dateProximityDays || 999
           };
 
@@ -408,7 +408,7 @@ async function doMatchRecibosWithPagos(
                   bestMatch.reciboRow,
                   pago.fileId,
                   bestMatch.confidence,
-                  bestMatch.hasCuilMatch || false
+                  bestMatch.hasCuitMatch || false
                 )
               );
               cascadeState.displacedCount++;
@@ -424,7 +424,7 @@ async function doMatchRecibosWithPagos(
               bestMatch.reciboRow,
               pago.fileId,
               bestMatch.confidence,
-              bestMatch.hasCuilMatch || false
+              bestMatch.hasCuitMatch || false
             )
           );
 
@@ -434,7 +434,7 @@ async function doMatchRecibosWithPagos(
             pagoId: pago.fileId,
             reciboId: bestMatch.reciboFileId,
             confidence: bestMatch.confidence,
-            hasCuilMatch: bestMatch.hasCuilMatch,
+            hasCuitMatch: bestMatch.hasCuitMatch,
             correlationId,
           });
         }

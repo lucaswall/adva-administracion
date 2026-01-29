@@ -111,7 +111,7 @@ vi.mock('./caches/index.js', () => {
 
 vi.mock('../services/token-usage-batch.js', () => {
   const TokenUsageBatch = vi.fn(function (this: any) {
-    this.flush = vi.fn();
+    this.flush = vi.fn(async () => ({ ok: true, value: undefined }));
     return this;
   });
 

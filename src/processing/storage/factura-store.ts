@@ -191,7 +191,7 @@ export async function storeFactura(
     }
 
     // Update cache if available
-    context?.duplicateCache.addEntry(spreadsheetId, sheetName, factura.fileId, row);
+    context?.duplicateCache?.addEntry(spreadsheetId, sheetName, factura.fileId, row);
 
     info('Factura stored successfully', {
       module: 'storage',

@@ -178,73 +178,105 @@ describe('moveToDuplicadoFolder', () => {
 });
 
 describe('getDocumentDate', () => {
-  it('extracts date from factura with YYYY-MM-DD fechaEmision', () => {
+  it('returns ok:true with Date for factura with YYYY-MM-DD fechaEmision', () => {
     const factura: Partial<Factura> = {
       fileId: 'test-id',
       fileName: 'test.pdf',
       fechaEmision: '2025-11-01',
     };
-    const date = getDocumentDate(factura as Factura);
-    expect(date.getUTCFullYear()).toBe(2025);
-    expect(date.getUTCMonth()).toBe(10); // November = 10
-    expect(date.getUTCDate()).toBe(1);
+    const result = getDocumentDate(factura as Factura);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.getUTCFullYear()).toBe(2025);
+      expect(result.value.getUTCMonth()).toBe(10); // November = 10
+      expect(result.value.getUTCDate()).toBe(1);
+    }
   });
 
-  it('extracts date from factura with DD/MM/YYYY fechaEmision (parseArgDate handles it)', () => {
+  it('returns ok:true with Date for factura with DD/MM/YYYY fechaEmision (parseArgDate handles it)', () => {
     const factura: Partial<Factura> = {
       fileId: 'test-id',
       fileName: 'test.pdf',
       fechaEmision: '01/11/2025',
     };
-    const date = getDocumentDate(factura as Factura);
-    expect(date.getUTCFullYear()).toBe(2025);
-    expect(date.getUTCMonth()).toBe(10); // November = 10
-    expect(date.getUTCDate()).toBe(1);
+    const result = getDocumentDate(factura as Factura);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.getUTCFullYear()).toBe(2025);
+      expect(result.value.getUTCMonth()).toBe(10); // November = 10
+      expect(result.value.getUTCDate()).toBe(1);
+    }
   });
 
-  it('extracts date from pago with valid fechaPago', () => {
+  it('returns ok:true with Date for pago with valid fechaPago', () => {
     const pago: Partial<Pago> = {
       fileId: 'test-id',
       fileName: 'test.pdf',
       fechaPago: '2025-12-15',
     };
-    const date = getDocumentDate(pago as Pago);
-    expect(date.getUTCFullYear()).toBe(2025);
-    expect(date.getUTCMonth()).toBe(11); // December = 11
-    expect(date.getUTCDate()).toBe(15);
+    const result = getDocumentDate(pago as Pago);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.getUTCFullYear()).toBe(2025);
+      expect(result.value.getUTCMonth()).toBe(11); // December = 11
+      expect(result.value.getUTCDate()).toBe(15);
+    }
   });
 
-  it('extracts date from recibo with valid fechaPago', () => {
+  it('returns ok:true with Date for recibo with valid fechaPago', () => {
     const recibo: Partial<Recibo> = {
       fileId: 'test-id',
       fileName: 'test.pdf',
       fechaPago: '2025-11-30',
     };
-    const date = getDocumentDate(recibo as Recibo);
-    expect(date.getUTCFullYear()).toBe(2025);
-    expect(date.getUTCMonth()).toBe(10); // November = 10
-    expect(date.getUTCDate()).toBe(30);
+    const result = getDocumentDate(recibo as Recibo);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.getUTCFullYear()).toBe(2025);
+      expect(result.value.getUTCMonth()).toBe(10); // November = 10
+      expect(result.value.getUTCDate()).toBe(30);
+    }
   });
 
-  it('extracts date from resumen with valid fechaHasta', () => {
+  it('returns ok:true with Date for resumen with valid fechaHasta', () => {
     const resumen: Partial<ResumenBancario> = {
       fileId: 'test-id',
       fileName: 'test.pdf',
       fechaDesde: '2025-11-01',
       fechaHasta: '2025-11-30',
     };
-    const date = getDocumentDate(resumen as ResumenBancario);
-    expect(date.getUTCFullYear()).toBe(2025);
-    expect(date.getUTCMonth()).toBe(10); // November = 10
-    expect(date.getUTCDate()).toBe(30);
+    const result = getDocumentDate(resumen as ResumenBancario);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.getUTCFullYear()).toBe(2025);
+      expect(result.value.getUTCMonth()).toBe(10); // November = 10
+      expect(result.value.getUTCDate()).toBe(30);
+    }
   });
 
-  it('throws error for document with invalid date', () => {
+  it('returns ok:false for document with no date field', () => {
+    const factura: Partial<Factura> = {
+      fileId: 'test-id',
+      fileName: 'test.pdf',
+      // No fechaEmision
+    };
+    const result = getDocumentDate(factura as Factura);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.message).toContain('no valid date field');
+    }
+  });
+
+  it('returns ok:false for document with invalid date format', () => {
     const factura: Partial<Factura> = {
       fileId: 'test-id',
       fileName: 'test.pdf',
       fechaEmision: 'invalid-date',
     };
-    expect(() => getDocumentDate(factura as Factura)).toThrow();
+    const result = getDocumentDate(factura as Factura);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.message).toContain('Invalid date format');
+    }
   });
 });

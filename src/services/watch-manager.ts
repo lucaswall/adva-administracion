@@ -27,8 +27,7 @@ let pollingJob: cron.ScheduledTask | null = null;
 let statusUpdateJob: cron.ScheduledTask | null = null;
 let cleanupJob: cron.ScheduledTask | null = null;
 let runningScan: Promise<void> | null = null;
-let hasPendingScan: boolean = false;
-let pendingScanFolderId: string | undefined = undefined;
+let pendingScanFolderIds: Set<string | undefined> = new Set();
 
 // Configuration
 const CHANNEL_EXPIRATION_MS = 3600000; // 1 hour
@@ -41,7 +40,7 @@ const MAX_NOTIFICATIONS_PER_CHANNEL = 1000;
  * Removes entries older than MAX_NOTIFICATION_AGE_MS
  * Removes empty channel maps after cleanup
  */
-export function cleanupExpiredNotifications(): void {
+export async function cleanupExpiredNotifications(): Promise<void> {
   const now = Date.now();
 
   for (const [channelId, channelNotifications] of processedNotifications.entries()) {
@@ -58,10 +57,15 @@ export function cleanupExpiredNotifications(): void {
     }
   }
 
-  debug('Cleaned up expired notifications', {
+  // Also clean up rate limiter keys to prevent memory leak
+  const { cleanupRateLimiter } = await import('../routes/webhooks.js');
+  const removedKeys = cleanupRateLimiter();
+
+  debug('Cleaned up expired notifications and rate limiter', {
     module: 'watch-manager',
     phase: 'cleanup',
     remainingChannels: processedNotifications.size,
+    rateLimiterKeysRemoved: removedKeys,
   });
 }
 
@@ -138,9 +142,9 @@ export function initWatchManager(url: string): void {
   });
 
   // Start notification cleanup cron job (every 10 minutes)
-  cleanupJob = cron.schedule('*/10 * * * *', () => {
+  cleanupJob = cron.schedule('*/10 * * * *', async () => {
     debug('Running notification cleanup', { module: 'watch-manager', phase: 'cleanup' });
-    cleanupExpiredNotifications();
+    await cleanupExpiredNotifications();
   });
 
   info('Watch manager initialized', { module: 'watch-manager', phase: 'init' });
@@ -372,8 +376,7 @@ export function triggerScan(folderId?: string): void {
       phase: 'scan-trigger',
       folderId
     });
-    hasPendingScan = true;
-    pendingScanFolderId = folderId;
+    pendingScanFolderIds.add(folderId);
     return;
   }
 
@@ -421,17 +424,20 @@ export function triggerScan(folderId?: string): void {
     .finally(() => {
       runningScan = null;
 
-      // If a pending scan was queued, trigger it now
-      if (hasPendingScan) {
-        const queuedFolderId = pendingScanFolderId;
-        hasPendingScan = false;
-        pendingScanFolderId = undefined;
+      // If pending scans were queued, trigger the next one
+      // Only trigger one at a time - it will recursively process the rest
+      if (pendingScanFolderIds.size > 0) {
+        // Get first pending folder ID from the set
+        const queuedFolderIds = Array.from(pendingScanFolderIds);
+        const nextFolderId = queuedFolderIds[0];
+        pendingScanFolderIds.delete(nextFolderId);
+
         info('Starting pending scan', {
           module: 'watch-manager',
           phase: 'scan-trigger',
-          folderId: queuedFolderId
+          folderId: nextFolderId
         });
-        triggerScan(queuedFolderId);
+        triggerScan(nextFolderId);
       }
     });
 }
@@ -572,8 +578,7 @@ export async function shutdownWatchManager(): Promise<void> {
   lastNotificationTime = null;
   lastScanTime = null;
   runningScan = null;
-  hasPendingScan = false;
-  pendingScanFolderId = undefined;
+  pendingScanFolderIds.clear();
 
   info('Watch manager shutdown complete', {
     module: 'watch-manager',

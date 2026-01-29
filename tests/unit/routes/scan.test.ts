@@ -294,7 +294,6 @@ describe('Scan routes', () => {
           rowsFilled: 35,
           bankFeeMatches: 5,
           creditCardPaymentMatches: 2,
-          subdiarioCobroMatches: 10,
           pagoFacturaMatches: 15,
           directFacturaMatches: 3,
           reciboMatches: 0,

@@ -153,6 +153,10 @@ function parseRecibos(data: CellValue[][]): Array<Recibo & { row: number }> {
  *
  * @param bankName - Optional bank name to filter (if not provided, processes all banks)
  * @returns Auto-fill result with statistics
+ *
+ * Note: Returns ok:true for partial success (some rows processed successfully).
+ * Check result.errors count to determine if any errors occurred during processing.
+ * Only returns ok:false for complete failures (e.g., cannot read spreadsheets).
  */
 export async function autoFillBankMovements(
   bankName?: string
@@ -207,7 +211,6 @@ export async function autoFillBankMovements(
     rowsFilled: 0,
     bankFeeMatches: 0,
     creditCardPaymentMatches: 0,
-    subdiarioCobroMatches: 0,
     pagoFacturaMatches: 0,
     directFacturaMatches: 0,
     reciboMatches: 0,
@@ -270,9 +273,6 @@ export async function autoFillBankMovements(
             break;
           case 'credit_card_payment':
             result.creditCardPaymentMatches++;
-            break;
-          case 'subdiario_cobro':
-            result.subdiarioCobroMatches++;
             break;
           case 'pago_factura':
             result.pagoFacturaMatches++;

@@ -194,6 +194,11 @@ export class FacturaPagoMatcher {
       // Beneficiary is the one receiving money, which should match the invoice emisor
       // Uses cuitOrDniMatch to handle cases where payment shows DNI (7-8 digits)
       // instead of full CUIT (11 digits)
+      //
+      // Note: Fallback to cuitPagador === cuitEmisor handles edge cases where:
+      // - Payment document lists ADVA as pagador and counterparty details are in payer fields
+      // - Some payment systems use payer field for counterparty when direction is ambiguous
+      // This is kept for backward compatibility with existing matches.
       let cuitMatch = false;
       if (pago.cuitBeneficiario && factura.cuitEmisor && cuitOrDniMatch(pago.cuitBeneficiario, factura.cuitEmisor)) {
         cuitMatch = true;
@@ -466,7 +471,7 @@ export class ReciboPagoMatcher {
         reciboRow: recibo.row,
         confidence,
         reasons,
-        hasCuilMatch: cuilMatch,
+        hasCuitMatch: cuilMatch,
         dateProximityDays: daysDiff,
         isUpgrade,
         existingMatchConfidence,
@@ -475,16 +480,16 @@ export class ReciboPagoMatcher {
       });
     }
 
-    // Sort by match quality (confidence, CUIL match, date proximity)
+    // Sort by match quality (confidence, CUIT match, date proximity)
     candidates.sort((a, b) => {
       const qualityA: MatchQuality = {
         confidence: a.confidence,
-        hasCuitMatch: a.hasCuilMatch || false,
+        hasCuitMatch: a.hasCuitMatch || false,
         dateProximityDays: a.dateProximityDays || 999
       };
       const qualityB: MatchQuality = {
         confidence: b.confidence,
-        hasCuitMatch: b.hasCuilMatch || false,
+        hasCuitMatch: b.hasCuitMatch || false,
         dateProximityDays: b.dateProximityDays || 999
       };
       return compareMatchQuality(qualityB, qualityA); // Sort descending

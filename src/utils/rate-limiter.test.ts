@@ -159,4 +159,92 @@ describe('createRateLimiter', () => {
     expect(result.resetMs).toBeGreaterThan(58000);
     expect(result.resetMs).toBeLessThanOrEqual(60000);
   });
+
+  describe('cleanup', () => {
+    it('removes keys with all-expired timestamps', () => {
+      const limiter = createRateLimiter(60000, 5);
+
+      // Create entries for multiple keys
+      limiter.check('key1');
+      limiter.check('key2');
+      limiter.check('key3');
+
+      // Advance time past window to make all timestamps expire
+      vi.advanceTimersByTime(61000);
+
+      // Call cleanup
+      const removedCount = limiter.cleanup();
+
+      // Should have removed all 3 keys with expired timestamps
+      expect(removedCount).toBe(3);
+
+      // New requests should start fresh
+      const result = limiter.check('key1');
+      expect(result.remaining).toBe(4); // 5 - 1 = 4
+    });
+
+    it('removes keys with empty arrays', () => {
+      const limiter = createRateLimiter(60000, 5);
+
+      // Create entries
+      limiter.check('key1');
+      limiter.check('key2');
+
+      // Advance time to expire all
+      vi.advanceTimersByTime(61000);
+
+      // Call cleanup
+      const removedCount = limiter.cleanup();
+
+      // Should remove both keys
+      expect(removedCount).toBe(2);
+    });
+
+    it('preserves active keys after cleanup', () => {
+      const limiter = createRateLimiter(60000, 5);
+
+      // Create old entries
+      limiter.check('old-key1');
+      limiter.check('old-key2');
+
+      // Advance time to expire old entries
+      vi.advanceTimersByTime(61000);
+
+      // Create fresh entries
+      limiter.check('active-key1');
+      limiter.check('active-key2');
+      limiter.check('active-key1'); // Second request
+
+      // Call cleanup
+      const removedCount = limiter.cleanup();
+
+      // Should remove only the 2 old keys
+      expect(removedCount).toBe(2);
+
+      // Active keys should still have their state
+      const result1 = limiter.check('active-key1');
+      expect(result1.remaining).toBe(2); // 5 - 3 = 2
+
+      const result2 = limiter.check('active-key2');
+      expect(result2.remaining).toBe(3); // 5 - 2 = 3
+    });
+
+    it('reduces key count after cleanup', () => {
+      const limiter = createRateLimiter(60000, 5);
+
+      // Create many keys (simulating webhook UUIDs)
+      for (let i = 0; i < 100; i++) {
+        limiter.check(`uuid-${i}`);
+      }
+
+      // Advance time to expire all
+      vi.advanceTimersByTime(61000);
+
+      // Call cleanup
+      const removedCount = limiter.cleanup();
+
+      // Should have removed all 100 keys
+      expect(removedCount).toBe(100);
+    });
+  });
 });

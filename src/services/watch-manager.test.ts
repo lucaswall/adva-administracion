@@ -6,6 +6,7 @@ import {
   markNotificationProcessedWithTimestamp,
   getNotificationCount,
   getChannelCount,
+  triggerScan,
 } from './watch-manager.js';
 import * as cron from 'node-cron';
 
@@ -35,6 +36,24 @@ vi.mock('../config.js', () => ({
     driveRootFolderId: 'test-root-folder',
     apiBaseUrl: 'http://localhost:3000',
   }),
+}));
+
+// Mock scanner
+vi.mock('../processing/scanner.js', () => ({
+  scanFolder: vi.fn(async () => ({
+    ok: true,
+    value: {
+      filesProcessed: 0,
+      errors: 0,
+      facturasAdded: 0,
+      pagosAdded: 0
+    }
+  })),
+}));
+
+// Mock folder structure
+vi.mock('./folder-structure.js', () => ({
+  getCachedFolderStructure: vi.fn(() => null),
 }));
 
 describe('watch-manager', () => {
@@ -149,6 +168,186 @@ describe('watch-manager', () => {
 
       // Verify cleanup job was stopped
       expect(mockCleanupJob.stop).toHaveBeenCalled();
+    });
+  });
+
+  describe('triggerScan - pending scan queue', () => {
+    it('should queue multiple triggerScan calls with different folderIds', async () => {
+      const { scanFolder } = await import('../processing/scanner.js');
+      const mockScanFolder = vi.mocked(scanFolder);
+
+      // First call will complete immediately, second and third will be queued
+      const scanPromises: Array<{ resolve: () => void }> = [];
+
+      mockScanFolder.mockImplementation(() => {
+        return new Promise((resolve) => {
+          scanPromises.push({
+            resolve: () => resolve({
+              ok: true,
+              value: { filesProcessed: 0, errors: 0, facturasAdded: 0, pagosAdded: 0, recibosAdded: 0, matchesFound: 0, duration: 0 }
+            })
+          });
+        });
+      });
+
+      // Trigger first scan (will start)
+      triggerScan('folder1');
+      await new Promise(resolve => setTimeout(resolve, 10)); // Let it start
+
+      // Trigger second and third scans while first is running (will be queued)
+      triggerScan('folder2');
+      triggerScan('folder3');
+
+      // Should only have called scanFolder once so far
+      expect(mockScanFolder).toHaveBeenCalledTimes(1);
+      expect(mockScanFolder).toHaveBeenCalledWith('folder1');
+
+      // Complete first scan - this should trigger folder2
+      scanPromises[0].resolve();
+      await new Promise(resolve => setTimeout(resolve, 100)); // Wait for promise chain
+
+      // Should have started folder2
+      expect(mockScanFolder).toHaveBeenCalledTimes(2);
+
+      // Complete folder2 scan - this should trigger folder3
+      scanPromises[1].resolve();
+      await new Promise(resolve => setTimeout(resolve, 100));
+
+      // Should have started folder3
+      expect(mockScanFolder).toHaveBeenCalledTimes(3);
+
+      // Complete folder3 scan
+      scanPromises[2].resolve();
+      await new Promise(resolve => setTimeout(resolve, 100));
+    });
+
+    it('should process all pending scans in order after current scan completes', async () => {
+      const { scanFolder } = await import('../processing/scanner.js');
+      const mockScanFolder = vi.mocked(scanFolder);
+
+      const scanPromises: Array<{ resolve: () => void }> = [];
+
+      mockScanFolder.mockImplementation(() => {
+        return new Promise((resolve) => {
+          scanPromises.push({
+            resolve: () => resolve({
+              ok: true,
+              value: { filesProcessed: 0, errors: 0, facturasAdded: 0, pagosAdded: 0, recibosAdded: 0, matchesFound: 0, duration: 0 }
+            })
+          });
+        });
+      });
+
+      // Trigger scans
+      triggerScan('folder1');
+      await new Promise(resolve => setTimeout(resolve, 10));
+
+      triggerScan('folder2');
+      triggerScan('folder3');
+
+      // Complete first scan
+      scanPromises[0].resolve();
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      // Complete second pending scan
+      scanPromises[1].resolve();
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      // Should have processed folder3 as well
+      scanPromises[2].resolve();
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      // All three scans should have been processed
+      expect(mockScanFolder).toHaveBeenCalledTimes(3);
+      expect(mockScanFolder).toHaveBeenNthCalledWith(1, 'folder1');
+      // folder2 and folder3 are both in the queue (Set maintains insertion order)
+      const secondCall = mockScanFolder.mock.calls[1][0];
+      const thirdCall = mockScanFolder.mock.calls[2][0];
+      expect([secondCall, thirdCall]).toContain('folder2');
+      expect([secondCall, thirdCall]).toContain('folder3');
+    });
+
+    it('should deduplicate folderIds in pending queue', async () => {
+      const { scanFolder } = await import('../processing/scanner.js');
+      const mockScanFolder = vi.mocked(scanFolder);
+
+      const scanPromises: Array<{ resolve: () => void }> = [];
+
+      mockScanFolder.mockImplementation(() => {
+        return new Promise((resolve) => {
+          scanPromises.push({
+            resolve: () => resolve({
+              ok: true,
+              value: { filesProcessed: 0, errors: 0, facturasAdded: 0, pagosAdded: 0, recibosAdded: 0, matchesFound: 0, duration: 0 }
+            })
+          });
+        });
+      });
+
+      // Trigger first scan
+      triggerScan('folder1');
+      await new Promise(resolve => setTimeout(resolve, 10));
+
+      // Queue same folder multiple times
+      triggerScan('folder2');
+      triggerScan('folder2');
+      triggerScan('folder2');
+
+      // Complete first scan
+      scanPromises[0].resolve();
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      // Should only scan folder2 once (deduplicated)
+      expect(mockScanFolder).toHaveBeenCalledTimes(2);
+      expect(mockScanFolder).toHaveBeenNthCalledWith(2, 'folder2');
+
+      // Complete pending scan
+      scanPromises[1].resolve();
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      // No additional scans
+      expect(mockScanFolder).toHaveBeenCalledTimes(2);
+    });
+
+    it('should handle undefined folderId (full scan) specially', async () => {
+      const { scanFolder } = await import('../processing/scanner.js');
+      const mockScanFolder = vi.mocked(scanFolder);
+
+      const scanPromises: Array<{ resolve: () => void }> = [];
+
+      mockScanFolder.mockImplementation(() => {
+        return new Promise((resolve) => {
+          scanPromises.push({
+            resolve: () => resolve({
+              ok: true,
+              value: { filesProcessed: 0, errors: 0, facturasAdded: 0, pagosAdded: 0, recibosAdded: 0, matchesFound: 0, duration: 0 }
+            })
+          });
+        });
+      });
+
+      // Trigger first scan
+      triggerScan('folder1');
+      await new Promise(resolve => setTimeout(resolve, 10));
+
+      // Queue full scan and specific folder scan
+      triggerScan(undefined); // full scan
+      triggerScan('folder2');
+
+      // Complete first scan
+      scanPromises[0].resolve();
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      // Should process both pending scans
+      expect(mockScanFolder).toHaveBeenCalledTimes(2);
+
+      // Complete remaining scans
+      scanPromises[1].resolve();
+      await new Promise(resolve => setTimeout(resolve, 50));
+      scanPromises[2].resolve();
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      expect(mockScanFolder).toHaveBeenCalledTimes(3);
     });
   });
 });

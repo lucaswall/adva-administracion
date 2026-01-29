@@ -699,13 +699,26 @@ export function parseReciboResponse(response: string): Result<ParseResult<Partia
 const VALID_CARD_TYPES = ['Visa', 'Mastercard', 'Amex', 'Naranja', 'Cabal'] as const;
 
 /**
- * Validates if a date string is in YYYY-MM-DD format
+ * Validates if a date string is in YYYY-MM-DD format and represents a valid date
  * @param dateStr - Date string to validate
- * @returns True if valid format
+ * @returns True if valid format and valid date
  */
 function isValidDateFormat(dateStr: string): boolean {
   const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
-  return dateRegex.test(dateStr);
+  if (!dateRegex.test(dateStr)) {
+    return false;
+  }
+
+  // Parse the date and check that components round-trip correctly
+  const parsed = new Date(dateStr + 'T00:00:00.000Z'); // Use UTC to avoid timezone issues
+  const [year, month, day] = dateStr.split('-').map(Number);
+
+  // Check if the parsed date matches the input (catches invalid dates like 2024-02-30)
+  return (
+    parsed.getUTCFullYear() === year &&
+    parsed.getUTCMonth() === month - 1 && // getUTCMonth is 0-indexed
+    parsed.getUTCDate() === day
+  );
 }
 
 /**
@@ -880,6 +893,24 @@ export function parseResumenBancarioResponse(response: string): Result<ParseResu
     // Verify movimientos count if movimientos array is present
     let needsReview = confidence <= 0.9 && missingFields.length > 0;
 
+    // Validate main date fields
+    if (data.fechaDesde && !isValidDateFormat(data.fechaDesde)) {
+      needsReview = true;
+      warn('Invalid fechaDesde format or value', {
+        module: 'gemini-parser',
+        phase: 'resumen-bancario-parse',
+        fechaDesde: data.fechaDesde
+      });
+    }
+    if (data.fechaHasta && !isValidDateFormat(data.fechaHasta)) {
+      needsReview = true;
+      warn('Invalid fechaHasta format or value', {
+        module: 'gemini-parser',
+        phase: 'resumen-bancario-parse',
+        fechaHasta: data.fechaHasta
+      });
+    }
+
     if (data.movimientos !== undefined && data.cantidadMovimientos !== undefined) {
       const actualCount = data.movimientos.length;
       const expectedCount = data.cantidadMovimientos;
@@ -991,6 +1022,24 @@ export function parseResumenTarjetaResponse(response: string): Result<ParseResul
     // Verify movimientos count if movimientos array is present
     let needsReview = confidence <= 0.9 && missingFields.length > 0;
 
+    // Validate main date fields
+    if (data.fechaDesde && !isValidDateFormat(data.fechaDesde)) {
+      needsReview = true;
+      warn('Invalid fechaDesde format or value', {
+        module: 'gemini-parser',
+        phase: 'resumen-tarjeta-parse',
+        fechaDesde: data.fechaDesde
+      });
+    }
+    if (data.fechaHasta && !isValidDateFormat(data.fechaHasta)) {
+      needsReview = true;
+      warn('Invalid fechaHasta format or value', {
+        module: 'gemini-parser',
+        phase: 'resumen-tarjeta-parse',
+        fechaHasta: data.fechaHasta
+      });
+    }
+
     if (data.movimientos !== undefined && data.cantidadMovimientos !== undefined) {
       const actualCount = data.movimientos.length;
       const expectedCount = data.cantidadMovimientos;
@@ -1080,6 +1129,24 @@ export function parseResumenBrokerResponse(response: string): Result<ParseResult
 
     // Verify movimientos count if movimientos array is present
     let needsReview = confidence <= 0.9 && missingFields.length > 0;
+
+    // Validate main date fields
+    if (data.fechaDesde && !isValidDateFormat(data.fechaDesde)) {
+      needsReview = true;
+      warn('Invalid fechaDesde format or value', {
+        module: 'gemini-parser',
+        phase: 'resumen-broker-parse',
+        fechaDesde: data.fechaDesde
+      });
+    }
+    if (data.fechaHasta && !isValidDateFormat(data.fechaHasta)) {
+      needsReview = true;
+      warn('Invalid fechaHasta format or value', {
+        module: 'gemini-parser',
+        phase: 'resumen-broker-parse',
+        fechaHasta: data.fechaHasta
+      });
+    }
 
     if (data.movimientos !== undefined && data.cantidadMovimientos !== undefined) {
       const actualCount = data.movimientos.length;
