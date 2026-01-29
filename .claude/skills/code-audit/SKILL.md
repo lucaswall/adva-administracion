@@ -77,6 +77,7 @@ Use Task tool with `subagent_type=Explore` to examine each discovered area.
 - Logic errors, null handling, race conditions
 - Security vulnerabilities (injection, missing auth, exposed secrets)
 - Unhandled edge cases and boundary conditions
+- Type safety issues (unsafe casts, unvalidated external data)
 - Dead or duplicate code
 - Memory leaks (unbounded collections, event listeners, unclosed streams)
 - Resource leaks (connections, file handles, timers not cleared)
@@ -84,9 +85,19 @@ Use Task tool with `subagent_type=Explore` to examine each discovered area.
 - Timeout/hang scenarios (API calls without timeouts)
 - Graceful shutdown issues (cleanup not performed)
 
+**AI-Generated Code Risks:**
+When code shows AI patterns (repetitive structure, unusual APIs), apply extra scrutiny for:
+- Logic errors (75% more common in AI code)
+- XSS vulnerabilities (2.74x higher frequency)
+- Code duplication
+- Hallucinated APIs (non-existent methods/libraries)
+- Missing business context
+
+See [references/compliance-checklist.md](references/compliance-checklist.md) for detailed checks.
+
 ### Step 4: CLAUDE.md Compliance
 
-If CLAUDE.md exists, check project-specific rules. See [references/compliance-checklist.md](references/compliance-checklist.md) for common checks.
+If CLAUDE.md exists, check project-specific rules defined there (imports, logging, patterns, TDD).
 
 ### Step 5: Dependency Vulnerabilities
 
