@@ -701,4 +701,93 @@ describe('File Tracking Functions', () => {
       ]);
     });
   });
+
+  describe('getStaleProcessingFileIds', () => {
+    it('returns files with processing status older than maxAgeMs', async () => {
+      const now = Date.now();
+      const tenMinutesAgo = new Date(now - 10 * 60 * 1000).toISOString();
+      const twoMinutesAgo = new Date(now - 2 * 60 * 1000).toISOString();
+
+      vi.mocked(getValues).mockResolvedValue({
+        ok: true,
+        value: [
+          ['fileId', 'fileName', 'processedAt', 'documentType', 'status'],
+          ['file-1', 'doc1.pdf', tenMinutesAgo, 'factura_emitida', 'processing'], // Stale
+          ['file-2', 'doc2.pdf', twoMinutesAgo, 'pago_enviado', 'processing'], // Recent
+          ['file-3', 'doc3.pdf', tenMinutesAgo, 'factura_recibida', 'success'], // Success, not stale
+        ],
+      });
+
+      // Import the function after mocks are set up
+      const { getStaleProcessingFileIds } = await import('./index.js');
+      const result = await getStaleProcessingFileIds('dashboard-id', 5 * 60 * 1000); // 5 minutes
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        // Only file-1 is stale (older than 5 minutes and has 'processing' status)
+        expect(result.value.has('file-1')).toBe(true);
+        expect(result.value.has('file-2')).toBe(false); // Too recent
+        expect(result.value.has('file-3')).toBe(false); // Success status
+        expect(result.value.size).toBe(1);
+      }
+    });
+
+    it('returns empty set when no stale files exist', async () => {
+      const now = Date.now();
+      const twoMinutesAgo = new Date(now - 2 * 60 * 1000).toISOString();
+
+      vi.mocked(getValues).mockResolvedValue({
+        ok: true,
+        value: [
+          ['fileId', 'fileName', 'processedAt', 'documentType', 'status'],
+          ['file-1', 'doc1.pdf', twoMinutesAgo, 'factura_emitida', 'processing'],
+        ],
+      });
+
+      const { getStaleProcessingFileIds } = await import('./index.js');
+      const result = await getStaleProcessingFileIds('dashboard-id', 5 * 60 * 1000);
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value.size).toBe(0);
+      }
+    });
+
+    it('handles missing processedAt timestamp gracefully', async () => {
+      vi.mocked(getValues).mockResolvedValue({
+        ok: true,
+        value: [
+          ['fileId', 'fileName', 'processedAt', 'documentType', 'status'],
+          ['file-1', 'doc1.pdf', '', 'factura_emitida', 'processing'], // Missing timestamp
+          ['file-2', 'doc2.pdf', null, 'pago_enviado', 'processing'], // Null timestamp
+        ],
+      });
+
+      const { getStaleProcessingFileIds } = await import('./index.js');
+      const result = await getStaleProcessingFileIds('dashboard-id', 5 * 60 * 1000);
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        // Files without valid timestamps should be treated as stale
+        expect(result.value.has('file-1')).toBe(true);
+        expect(result.value.has('file-2')).toBe(true);
+        expect(result.value.size).toBe(2);
+      }
+    });
+
+    it('returns error when getValues fails', async () => {
+      vi.mocked(getValues).mockResolvedValue({
+        ok: false,
+        error: new Error('Sheets API error'),
+      });
+
+      const { getStaleProcessingFileIds } = await import('./index.js');
+      const result = await getStaleProcessingFileIds('dashboard-id', 5 * 60 * 1000);
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.error.message).toBe('Sheets API error');
+      }
+    });
+  });
 });

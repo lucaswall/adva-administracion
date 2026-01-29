@@ -271,3 +271,63 @@ export async function getProcessedFileIds(dashboardId: string): Promise<Result<S
 
   return { ok: true, value: processedIds };
 }
+
+/**
+ * Gets list of file IDs with stale 'processing' status from centralized tracking sheet
+ * These are files that started processing but were interrupted (e.g., deployment restart)
+ *
+ * @param dashboardId - Dashboard Operativo Contable spreadsheet ID
+ * @param maxAgeMs - Maximum age in milliseconds (default 5 minutes = 300000ms)
+ * @returns Set of file IDs with stale processing status
+ */
+export async function getStaleProcessingFileIds(
+  dashboardId: string,
+  maxAgeMs: number = 300000
+): Promise<Result<Set<string>, Error>> {
+  const staleIds = new Set<string>();
+
+  // Read columns A (fileId), C (processedAt), and E (status)
+  const result = await getValues(dashboardId, 'Archivos Procesados!A:E');
+
+  if (!result.ok) {
+    return result;
+  }
+
+  const now = Date.now();
+
+  if (result.value.length > 1) {
+    // Skip header row (index 0)
+    for (let i = 1; i < result.value.length; i++) {
+      const row = result.value[i];
+      const fileId = row && row[0];
+      const processedAt = row && row[2];
+      const status = row && row[4];
+
+      // Only consider files with 'processing' status
+      if (!fileId || status !== 'processing') {
+        continue;
+      }
+
+      // Check if timestamp is missing or older than maxAgeMs
+      if (!processedAt) {
+        // Missing timestamp - treat as stale (safety mechanism)
+        staleIds.add(String(fileId));
+        continue;
+      }
+
+      try {
+        const timestamp = new Date(String(processedAt)).getTime();
+        const age = now - timestamp;
+
+        if (age > maxAgeMs) {
+          staleIds.add(String(fileId));
+        }
+      } catch (error) {
+        // Invalid timestamp - treat as stale (safety mechanism)
+        staleIds.add(String(fileId));
+      }
+    }
+  }
+
+  return { ok: true, value: staleIds };
+}

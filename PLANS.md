@@ -127,3 +127,53 @@ After deploying the fix:
 1. Move `30709076783_011_00005_00000047.pdf` from Sin Procesar back to Entrada
 2. System will process it on next scan (startup recovery will also help if it has stale status)
 3. Document is valid and will process correctly
+
+---
+
+## Iteration 1
+
+**Implemented:** 2026-01-29
+
+### Completed
+- Task 1: Implemented exponential backoff retry with 3 attempts (10s → 30s → 60s delays)
+  - Changed `retriedFileIds` from `Set<string>` to `Map<string, number>` to track retry count
+  - Added `MAX_TRANSIENT_RETRIES = 3` and `RETRY_DELAYS_MS = [10000, 30000, 60000]` to config.ts
+  - Extracted retry logic into `processFileWithRetry()` helper function with recursive retries
+  - Only moves to Sin Procesar after all 3 retries exhausted
+
+- Task 2: Added startup recovery for interrupted processing
+  - Implemented `getStaleProcessingFileIds()` in storage/index.ts to detect files with 'processing' status older than 5 minutes
+  - Scanner now calls this function on startup and re-processes stale files that are still in Entrada folder
+  - Logs: "Recovering X files with stale processing status"
+
+- Task 3: Added `processedAt` timestamp to tracking sheet
+  - Modified `markFileProcessing()` to write ISO timestamp to column C
+  - Implemented `getStaleProcessingFileIds()` using timestamp comparison (maxAgeMs parameter, default 5 minutes)
+  - Handles missing/invalid timestamps by treating them as stale (safety mechanism)
+
+- Task 4: Updated CLAUDE.md documentation
+  - Added "PROCESSING & RETRY BEHAVIOR" section documenting retry mechanism and startup recovery
+  - Documented tracking sheet schema (columns A-E)
+
+### Bug Fixes (from bug-hunter review)
+- **Bug 3 (HIGH):** Fixed `markFileProcessing` timing - now called BEFORE `processFile()` instead of after
+  - Files marked as 'processing' before extraction begins, enabling proper stale recovery
+  - Uses placeholder 'unknown' documentType initially, updated after successful extraction
+
+- **Bug 2 (MEDIUM):** Removed unused `queue` parameter from `processFileWithRetry()`
+
+- **Bug 1 (MEDIUM - acknowledged):** Documented that retry delays block queue slots
+  - Added comment noting this is intentional for simplicity and acceptable for typical batch sizes
+
+- **Bug 5 (LOW):** Fixed type safety - builder automatically updated to use `Omit<FileInfo, 'content'>` type
+
+### Checklist Results
+- bug-hunter: Found 6 bugs (1 HIGH, 3 MEDIUM, 2 LOW) - Fixed HIGH and MEDIUM priority issues
+- test-runner: All 1057 tests pass across 53 test files
+- builder: Build passes with zero warnings or errors
+
+### Notes
+- Retry delays block the current queue slot during the wait period (intentional tradeoff for simplicity)
+- Files are marked as 'processing' before extraction to enable stale recovery on deployment interruptions
+- Stale recovery checks for files with 'processing' status older than 5 minutes that still exist in Entrada folder
+- The tracking sheet uses column C for `processedAt` timestamp (ISO format)

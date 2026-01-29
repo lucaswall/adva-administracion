@@ -22,6 +22,7 @@ import type {
   Retencion,
   ScanResult,
   DocumentType,
+  FileInfo,
 } from '../types/index.js';
 import { listFilesInFolder } from '../services/drive.js';
 import { getCachedFolderStructure, getOrCreateBankAccountFolder, getOrCreateBankAccountSpreadsheet, getOrCreateCreditCardFolder, getOrCreateCreditCardSpreadsheet, getOrCreateBrokerFolder, getOrCreateBrokerSpreadsheet, getOrCreateMovimientosSpreadsheet } from '../services/folder-structure.js';
@@ -33,17 +34,247 @@ import { withCorrelationAsync, getCorrelationId, generateCorrelationId } from '.
 
 // Import from refactored modules
 import { processFile, hasValidDate } from './extractor.js';
-import { storeFactura, storePago, storeRecibo, storeRetencion, storeResumenBancario, storeResumenTarjeta, storeResumenBroker, storeMovimientosBancario, storeMovimientosTarjeta, storeMovimientosBroker, getProcessedFileIds, markFileProcessing, updateFileStatus } from './storage/index.js';
+import { storeFactura, storePago, storeRecibo, storeRetencion, storeResumenBancario, storeResumenTarjeta, storeResumenBroker, storeMovimientosBancario, storeMovimientosTarjeta, storeMovimientosBroker, getProcessedFileIds, getStaleProcessingFileIds, markFileProcessing, updateFileStatus } from './storage/index.js';
 import { runMatching } from './matching/index.js';
 import { SortBatch, DuplicateCache, MetadataCache, SheetOrderBatch } from './caches/index.js';
 import { TokenUsageBatch } from '../services/token-usage-batch.js';
+import { MAX_TRANSIENT_RETRIES, RETRY_DELAYS_MS } from '../config.js';
 
 // Re-export for backwards compatibility
 export { processFile, hasValidDate, type ProcessFileResult } from './extractor.js';
 
-// Track files that have already been retried (to prevent infinite retries)
+// Track retry count for each file (to implement exponential backoff)
+// Key: fileId, Value: retry count (0 = first retry, 1 = second retry, etc.)
 // This is cleared at the end of each scan
-const retriedFileIds = new Set<string>();
+const retriedFileIds = new Map<string, number>();
+
+/**
+ * Delay utility for exponential backoff
+ * @param ms - Milliseconds to delay
+ */
+function delay(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/**
+ * Helper to handle file processing with automatic retry logic
+ * Recursively retries JSON parse errors up to MAX_TRANSIENT_RETRIES times
+ *
+ * NOTE: Retry delays block the current queue slot. This is intentional for simplicity
+ * and acceptable for typical batch sizes. For large batches with many failures, consider
+ * refactoring to release the queue slot before delaying.
+ */
+async function processFileWithRetry(
+  fileInfo: Omit<FileInfo, 'content'>,
+  context: ScanContext,
+  dashboardOperativoId: string,
+  controlIngresosId: string,
+  controlEgresosId: string,
+  result: ScanResult
+): Promise<void> {
+  const correlationId = getCorrelationId();
+  const retryCount = retriedFileIds.get(fileInfo.id) ?? 0;
+  const isRetry = retryCount > 0;
+
+  // Mark file as processing BEFORE extraction (for stale recovery tracking)
+  // Only mark on first attempt, not on retries (retries already have the tracking row)
+  if (retryCount === 0) {
+    const markResult = await markFileProcessing(
+      dashboardOperativoId,
+      fileInfo.id,
+      fileInfo.name,
+      'unknown' as any // Placeholder - will be updated after successful extraction
+    );
+    if (!markResult.ok) {
+      warn('Failed to mark file as processing, continuing anyway', {
+        module: 'scanner',
+        phase: 'process-file',
+        fileId: fileInfo.id,
+        error: markResult.error.message,
+        correlationId,
+      });
+    }
+  }
+
+  info(`${isRetry ? 'Retrying' : 'Processing'} file: ${fileInfo.name}`, {
+    module: 'scanner',
+    phase: isRetry ? 'process-file-retry' : 'process-file',
+    fileId: fileInfo.id,
+    ...(isRetry ? { retryAttempt: retryCount } : {}),
+    correlationId,
+  });
+
+  const processResult = await processFile(fileInfo, context);
+
+  if (!processResult.ok) {
+    // Check if it's a JSON parse error and we haven't exceeded retry limit
+    if (isJsonParseError(processResult.error) && retryCount < MAX_TRANSIENT_RETRIES) {
+      // Increment retry count
+      retriedFileIds.set(fileInfo.id, retryCount + 1);
+
+      warn('JSON parse error, will retry', {
+        module: 'scanner',
+        phase: isRetry ? 'process-file-retry' : 'process-file',
+        fileId: fileInfo.id,
+        fileName: fileInfo.name,
+        error: processResult.error.message,
+        retryAttempt: retryCount + 1,
+        maxRetries: MAX_TRANSIENT_RETRIES,
+        correlationId,
+      });
+
+      // Add delay, then re-queue for retry
+      await delay(RETRY_DELAYS_MS[retryCount]);
+
+      // Recursive retry
+      return processFileWithRetry(
+        fileInfo,
+        context,
+        dashboardOperativoId,
+        controlIngresosId,
+        controlEgresosId,
+        result
+      );
+    }
+
+    // No more retries or not a JSON error - move to Sin Procesar
+    logError(`Failed to process file${retryCount > 0 ? ' after all retries' : ''}`, {
+      module: 'scanner',
+      phase: isRetry ? 'process-file-retry' : 'process-file',
+      fileId: fileInfo.id,
+      fileName: fileInfo.name,
+      error: processResult.error.message,
+      ...(retryCount > 0 ? { retriesExhausted: retryCount } : {}),
+      correlationId,
+    });
+    result.errors++;
+
+    const sortResult = await sortToSinProcesar(fileInfo.id, fileInfo.name);
+    if (!sortResult.success) {
+      logError('Failed to move file to Sin Procesar', {
+        module: 'scanner',
+        phase: isRetry ? 'process-file-retry' : 'process-file',
+        fileName: fileInfo.name,
+        error: sortResult.error,
+        correlationId,
+      });
+    } else {
+      info(`Moved failed file to ${sortResult.targetPath}`, {
+        module: 'scanner',
+        phase: isRetry ? 'process-file-retry' : 'process-file',
+        fileName: fileInfo.name,
+        correlationId,
+      });
+    }
+    return;
+  }
+
+  // Success - process normally
+  const processed = processResult.value;
+  result.filesProcessed++;
+  info(`File processed successfully${isRetry ? ' on retry' : ''}`, {
+    module: 'scanner',
+    phase: 'complete',
+    fileId: fileInfo.id,
+    fileName: fileInfo.name,
+    documentType: processed.documentType,
+    correlationId,
+  });
+
+  // Update file with correct documentType after successful extraction
+  // (was marked as 'unknown' before processing for stale recovery tracking)
+  if (retryCount === 0) {
+    const updateResult = await markFileProcessing(
+      dashboardOperativoId,
+      fileInfo.id,
+      fileInfo.name,
+      processed.documentType
+    );
+    if (!updateResult.ok) {
+      warn('Failed to update file documentType', {
+        module: 'scanner',
+        phase: isRetry ? 'process-file-retry' : 'process-file',
+        fileId: fileInfo.id,
+        error: updateResult.error.message,
+        correlationId,
+      });
+      // Continue processing even if update fails
+    }
+  }
+
+  // Handle unrecognized/unknown documents
+  if (processed.documentType === 'unrecognized' || processed.documentType === 'unknown') {
+    info('Moving unrecognized file to Sin Procesar', {
+      module: 'scanner',
+      phase: isRetry ? 'process-file-retry' : 'process-file',
+      fileName: fileInfo.name,
+      correlationId,
+    });
+    const sortResult = await sortToSinProcesar(fileInfo.id, fileInfo.name);
+    if (!sortResult.success) {
+      logError('Failed to move file to Sin Procesar', {
+        module: 'scanner',
+        phase: isRetry ? 'process-file-retry' : 'process-file',
+        fileName: fileInfo.name,
+        error: sortResult.error,
+        correlationId,
+      });
+    } else {
+      info(`Moved to ${sortResult.targetPath}`, {
+        module: 'scanner',
+        phase: isRetry ? 'process-file-retry' : 'process-file',
+        fileName: fileInfo.name,
+        correlationId,
+      });
+    }
+    return;
+  }
+
+  const doc = processed.document;
+  if (!doc) return;
+
+  // CRITICAL: Validate that document has required date field
+  if (!hasValidDate(doc, processed.documentType)) {
+    warn('No date extracted, moving to Sin Procesar', {
+      module: 'scanner',
+      phase: isRetry ? 'process-file-retry' : 'process-file',
+      fileName: fileInfo.name,
+      correlationId,
+    });
+    const sortResult = await sortToSinProcesar(fileInfo.id, fileInfo.name);
+    if (!sortResult.success) {
+      logError('Failed to move file to Sin Procesar', {
+        module: 'scanner',
+        phase: isRetry ? 'process-file-retry' : 'process-file',
+        fileName: fileInfo.name,
+        error: sortResult.error,
+        correlationId,
+      });
+      result.errors++;
+    } else {
+      info(`Moved file without date to ${sortResult.targetPath}`, {
+        module: 'scanner',
+        phase: isRetry ? 'process-file-retry' : 'process-file',
+        fileName: fileInfo.name,
+        correlationId,
+      });
+    }
+    return;
+  }
+
+  // Store and sort based on document type
+  await storeAndSortDocument(
+    doc,
+    processed.documentType,
+    fileInfo,
+    controlIngresosId,
+    controlEgresosId,
+    dashboardOperativoId,
+    result,
+    correlationId,
+    context
+  );
+}
 
 /**
  * Scan context containing all caches for optimized batch operations
@@ -212,6 +443,40 @@ export async function scanFolder(folderId?: string): Promise<Result<ScanResult, 
         correlationId,
       });
 
+      // Check for stale processing files (files that started processing but were interrupted)
+      // These are files with 'processing' status older than 5 minutes
+      const staleResult = await getStaleProcessingFileIds(dashboardOperativoId, 5 * 60 * 1000);
+      if (!staleResult.ok) {
+        warn('Failed to get stale processing files, continuing without recovery', {
+          module: 'scanner',
+          phase: 'scan-start',
+          error: staleResult.error.message,
+          correlationId,
+        });
+      } else {
+        const staleIds = staleResult.value;
+        if (staleIds.size > 0) {
+          // Find stale files that are still in Entrada folder
+          const staleFilesInEntrada = allFiles.filter(f => staleIds.has(f.id));
+
+          if (staleFilesInEntrada.length > 0) {
+            info(`Recovering ${staleFilesInEntrada.length} files with stale processing status`, {
+              module: 'scanner',
+              phase: 'scan-start',
+              staleCount: staleFilesInEntrada.length,
+              correlationId,
+            });
+
+            // Add stale files to the new files list for processing
+            for (const staleFile of staleFilesInEntrada) {
+              if (!newFiles.find(f => f.id === staleFile.id)) {
+                newFiles.push(staleFile);
+              }
+            }
+          }
+        }
+      }
+
       const result: ScanResult = {
         filesProcessed: 0,
         facturasAdded: 0,
@@ -230,326 +495,17 @@ export async function scanFolder(folderId?: string): Promise<Result<ScanResult, 
 
       for (const fileInfo of newFiles) {
         queue.add(async () => {
-        // Each file gets its own correlation context that inherits from parent
-        await withCorrelationAsync(async () => {
-          const fileCorrelationId = getCorrelationId();
-
-          info(`Processing file: ${fileInfo.name}`, {
-            module: 'scanner',
-            phase: 'process-file',
-            fileId: fileInfo.id,
-            correlationId: fileCorrelationId,
-          });
-
-          const processResult = await processFile(fileInfo, context);
-
-          if (!processResult.ok) {
-            // Check if it's a JSON parse error and hasn't been retried yet
-            // JSON errors are often transient (API instability, rate limiting, etc.)
-            if (isJsonParseError(processResult.error) && !retriedFileIds.has(fileInfo.id)) {
-              // Mark as retried to prevent infinite retries
-              retriedFileIds.add(fileInfo.id);
-
-              warn('JSON parse error, re-queuing for retry', {
-                module: 'scanner',
-                phase: 'process-file',
-                fileId: fileInfo.id,
-                fileName: fileInfo.name,
-                error: processResult.error.message,
-                correlationId: fileCorrelationId,
-              });
-
-              // Re-queue at end of queue for retry
-              // Queue will track this internally - no need to capture promise
-              queue.add(async () => {
-                await withCorrelationAsync(async () => {
-                  const retryCorrelationId = getCorrelationId();
-
-                  info(`Retrying file: ${fileInfo.name}`, {
-                    module: 'scanner',
-                    phase: 'process-file-retry',
-                    fileId: fileInfo.id,
-                    correlationId: retryCorrelationId,
-                  });
-
-                  const retryResult = await processFile(fileInfo, context);
-
-                  if (!retryResult.ok) {
-                    logError('Failed to process file on retry', {
-                      module: 'scanner',
-                      phase: 'process-file-retry',
-                      fileId: fileInfo.id,
-                      fileName: fileInfo.name,
-                      error: retryResult.error.message,
-                      correlationId: retryCorrelationId,
-                    });
-                    result.errors++;
-                    // Move failed file to Sin Procesar
-                    const sortResult = await sortToSinProcesar(fileInfo.id, fileInfo.name);
-                    if (!sortResult.success) {
-                      logError('Failed to move file to Sin Procesar', {
-                        module: 'scanner',
-                        phase: 'process-file-retry',
-                        fileName: fileInfo.name,
-                        error: sortResult.error,
-                        correlationId: retryCorrelationId,
-                      });
-                    } else {
-                      info(`Moved failed file to ${sortResult.targetPath}`, {
-                        module: 'scanner',
-                        phase: 'process-file-retry',
-                        fileName: fileInfo.name,
-                        correlationId: retryCorrelationId,
-                      });
-                    }
-                    return;
-                  }
-
-                  // Success on retry - process normally
-                  const processed = retryResult.value;
-                  result.filesProcessed++;
-                  info('File processed successfully on retry', {
-                    module: 'scanner',
-                    phase: 'complete',
-                    fileId: fileInfo.id,
-                    fileName: fileInfo.name,
-                    documentType: processed.documentType,
-                    correlationId: retryCorrelationId,
-                  });
-
-                  // Mark file as processing in centralized tracking sheet
-                  const markResult = await markFileProcessing(
-                    dashboardOperativoId,
-                    fileInfo.id,
-                    fileInfo.name,
-                    processed.documentType
-                  );
-                  if (!markResult.ok) {
-                    logError('Failed to mark file as processing', {
-                      module: 'scanner',
-                      phase: 'process-file-retry',
-                      fileId: fileInfo.id,
-                      fileName: fileInfo.name,
-                      error: markResult.error.message,
-                      correlationId: retryCorrelationId,
-                    });
-                    // Continue processing even if marking fails
-                  }
-
-                  // Handle unrecognized/unknown documents
-                  if (processed.documentType === 'unrecognized' || processed.documentType === 'unknown') {
-                    info('Moving unrecognized file to Sin Procesar', {
-                      module: 'scanner',
-                      phase: 'process-file-retry',
-                      fileName: fileInfo.name,
-                      correlationId: retryCorrelationId,
-                    });
-                    const sortResult = await sortToSinProcesar(fileInfo.id, fileInfo.name);
-                    if (!sortResult.success) {
-                      logError('Failed to move file to Sin Procesar', {
-                        module: 'scanner',
-                        phase: 'process-file-retry',
-                        fileName: fileInfo.name,
-                        error: sortResult.error,
-                        correlationId: retryCorrelationId,
-                      });
-                    } else {
-                      info(`Moved to ${sortResult.targetPath}`, {
-                        module: 'scanner',
-                        phase: 'process-file-retry',
-                        fileName: fileInfo.name,
-                        correlationId: retryCorrelationId,
-                      });
-                    }
-                    return;
-                  }
-
-                  const doc = processed.document;
-                  if (!doc) return;
-
-                  // CRITICAL: Validate that document has required date field
-                  if (!hasValidDate(doc, processed.documentType)) {
-                    warn('No date extracted, moving to Sin Procesar', {
-                      module: 'scanner',
-                      phase: 'process-file-retry',
-                      fileName: fileInfo.name,
-                      correlationId: retryCorrelationId,
-                    });
-                    const sortResult = await sortToSinProcesar(fileInfo.id, fileInfo.name);
-                    if (!sortResult.success) {
-                      logError('Failed to move file to Sin Procesar', {
-                        module: 'scanner',
-                        phase: 'process-file-retry',
-                        fileName: fileInfo.name,
-                        error: sortResult.error,
-                        correlationId: retryCorrelationId,
-                      });
-                      result.errors++;
-                    } else {
-                      info(`Moved file without date to ${sortResult.targetPath}`, {
-                        module: 'scanner',
-                        phase: 'process-file-retry',
-                        fileName: fileInfo.name,
-                        correlationId: retryCorrelationId,
-                      });
-                    }
-                    return;
-                  }
-
-                  // Store and sort based on document type
-                  await storeAndSortDocument(
-                    doc,
-                    processed.documentType,
-                    fileInfo,
-                    controlIngresosId,
-                    controlEgresosId,
-                    dashboardOperativoId,
-                    result,
-                    retryCorrelationId,
-                    context
-                  );
-                }, { correlationId: generateCorrelationId(), fileId: fileInfo.id, fileName: fileInfo.name });
-              });
-              // Queue will track retry internally - no need to push to retryPromises array
-              return; // Don't move to Sin Procesar yet - will retry
-            }
-
-            // Already retried or not a JSON error - move to Sin Procesar
-            logError('Failed to process file', {
-              module: 'scanner',
-              phase: 'process-file',
-              fileId: fileInfo.id,
-              fileName: fileInfo.name,
-              error: processResult.error.message,
-              correlationId: fileCorrelationId,
-            });
-            result.errors++;
-            // Move failed file to Sin Procesar
-            const sortResult = await sortToSinProcesar(fileInfo.id, fileInfo.name);
-            if (!sortResult.success) {
-              logError('Failed to move file to Sin Procesar', {
-                module: 'scanner',
-                phase: 'process-file',
-                fileId: fileInfo.id,
-                fileName: fileInfo.name,
-                error: sortResult.error,
-                correlationId: fileCorrelationId,
-              });
-            } else {
-              info(`Moved failed file to ${sortResult.targetPath}`, {
-                module: 'scanner',
-                phase: 'process-file',
-                fileName: fileInfo.name,
-                correlationId: fileCorrelationId,
-              });
-            }
-            return;
-          }
-
-          const processed = processResult.value;
-          result.filesProcessed++;
-          info('File processed successfully', {
-            module: 'scanner',
-            phase: 'complete',
-            fileId: fileInfo.id,
-            fileName: fileInfo.name,
-            documentType: processed.documentType,
-            correlationId: fileCorrelationId,
-          });
-
-          // Mark file as processing in centralized tracking sheet
-          const markResult = await markFileProcessing(
-            dashboardOperativoId,
-            fileInfo.id,
-            fileInfo.name,
-            processed.documentType
-          );
-          if (!markResult.ok) {
-            logError('Failed to mark file as processing', {
-              module: 'scanner',
-              phase: 'process-file',
-              fileId: fileInfo.id,
-              fileName: fileInfo.name,
-              error: markResult.error.message,
-              correlationId: fileCorrelationId,
-            });
-            // Continue processing even if marking fails
-          }
-
-          // Handle unrecognized/unknown documents
-          if (processed.documentType === 'unrecognized' || processed.documentType === 'unknown') {
-            info('Moving unrecognized file to Sin Procesar', {
-              module: 'scanner',
-              phase: 'process-file',
-              fileName: fileInfo.name,
-              correlationId: fileCorrelationId,
-            });
-            const sortResult = await sortToSinProcesar(fileInfo.id, fileInfo.name);
-            if (!sortResult.success) {
-              logError('Failed to move file to Sin Procesar', {
-                module: 'scanner',
-                phase: 'process-file',
-                fileName: fileInfo.name,
-                error: sortResult.error,
-                correlationId: fileCorrelationId,
-              });
-            } else {
-              info(`Moved to ${sortResult.targetPath}`, {
-                module: 'scanner',
-                phase: 'process-file',
-                fileName: fileInfo.name,
-                correlationId: fileCorrelationId,
-              });
-            }
-            return;
-          }
-
-          const doc = processed.document;
-          if (!doc) return;
-
-          // CRITICAL: Validate that document has required date field
-          // Documents without dates MUST NOT be written to spreadsheets
-          if (!hasValidDate(doc, processed.documentType)) {
-            warn('No date extracted, moving to Sin Procesar', {
-              module: 'scanner',
-              phase: 'process-file',
-              fileName: fileInfo.name,
-              correlationId: fileCorrelationId,
-            });
-            const sortResult = await sortToSinProcesar(fileInfo.id, fileInfo.name);
-            if (!sortResult.success) {
-              logError('Failed to move file to Sin Procesar', {
-                module: 'scanner',
-                phase: 'process-file',
-                fileName: fileInfo.name,
-                error: sortResult.error,
-                correlationId: fileCorrelationId,
-              });
-              result.errors++;
-            } else {
-              info(`Moved file without date to ${sortResult.targetPath}`, {
-                module: 'scanner',
-                phase: 'process-file',
-                fileName: fileInfo.name,
-                correlationId: fileCorrelationId,
-              });
-            }
-            return; // STOP processing - do NOT write to spreadsheet or move to destination folder
-          }
-
-          // Store and sort based on document type
-          await storeAndSortDocument(
-            doc,
-            processed.documentType,
-            fileInfo,
-            controlIngresosId,
-            controlEgresosId,
-            dashboardOperativoId,
-            result,
-            fileCorrelationId,
-            context
-          );
-        }, { correlationId: generateCorrelationId(), fileId: fileInfo.id, fileName: fileInfo.name });
+          // Each file gets its own correlation context that inherits from parent
+          await withCorrelationAsync(async () => {
+            await processFileWithRetry(
+              fileInfo,
+              context,
+              dashboardOperativoId,
+              controlIngresosId,
+              controlEgresosId,
+              result
+            );
+          }, { correlationId: generateCorrelationId(), fileId: fileInfo.id, fileName: fileInfo.name });
         });
       }
 
@@ -664,7 +620,7 @@ export async function scanFolder(folderId?: string): Promise<Result<ScanResult, 
 async function storeAndSortDocument(
   doc: Factura | Pago | Recibo | ResumenBancario | ResumenTarjeta | ResumenBroker | Retencion,
   documentType: DocumentType,
-  fileInfo: { id: string; name: string },
+  fileInfo: Omit<FileInfo, 'content'>,
   controlIngresosId: string,
   controlEgresosId: string,
   dashboardOperativoId: string,
