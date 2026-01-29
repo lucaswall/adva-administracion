@@ -235,7 +235,7 @@ describe('GeminiClient', () => {
               status: 200,
               text: async () => JSON.stringify({ candidates: [{ content: { parts: [{ text: 'data' }] } }] })
             });
-          }, 35000); // 35 seconds, longer than timeout
+          }, 350000); // 350 seconds, longer than 5 minute timeout
         })
       );
 
@@ -247,7 +247,7 @@ describe('GeminiClient', () => {
       );
 
       // Advance time to trigger timeout
-      await vi.advanceTimersByTimeAsync(30000); // 30 seconds
+      await vi.advanceTimersByTimeAsync(300000); // 5 minutes
 
       const result = await promise;
 
@@ -326,7 +326,7 @@ describe('GeminiClient', () => {
               status: 200,
               text: async () => JSON.stringify({ candidates: [{ content: { parts: [{ text: 'data' }] } }] })
             });
-          }, 35000);
+          }, 350000); // 350 seconds, longer than 5 minute timeout
         })
       );
 
@@ -337,7 +337,7 @@ describe('GeminiClient', () => {
         1
       );
 
-      await vi.advanceTimersByTimeAsync(30000);
+      await vi.advanceTimersByTimeAsync(300000); // 5 minutes
 
       const result = await promise;
 

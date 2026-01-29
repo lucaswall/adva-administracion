@@ -145,4 +145,34 @@ After deploying the fix:
 
 ---
 
-## Status: READY FOR IMPLEMENTATION
+## Iteration 1
+
+**Implemented:** 2026-01-29
+
+### Completed
+- Task 1: Increased FETCH_TIMEOUT_MS from 30 seconds to 5 minutes (300000ms) in src/config.ts:43
+- Task 2: Removed circuit breaker from document extraction in src/processing/extractor.ts - replaced wrapped calls with direct Gemini API calls
+- Task 3: Deleted circuit breaker module src/utils/circuit-breaker.ts entirely
+- Task 4: Updated documentation - removed circuit-breaker.ts from CLAUDE.md structure section (line 206) and removed TODO.md item #58
+- Task 5: Added slow call logging in src/gemini/client.ts:255-264 - warns when API calls exceed 60 seconds without treating as failures
+- Additional fix: Increased PIPELINE_TIMEOUT_MS from 60 seconds to 15 minutes (900000ms) to accommodate 3 retry attempts with new 5-minute fetch timeout
+
+### Test Updates
+- Updated timeout tests in src/gemini/client.test.ts:
+  - "aborts fetch after timeout" test: changed simulated request from 35s to 350s, timer advance from 30s to 300s
+  - "distinguishes timeout error from network error" test: changed simulated request from 35s to 350s, timer advance from 30s to 300s
+
+### Checklist Results
+- bug-hunter: Passed - Found and fixed PIPELINE_TIMEOUT_MS inconsistency before final approval. No bugs in final changes.
+- test-runner: Passed - All 1048 tests passing across 53 test files
+- builder: Passed - Zero warnings, zero errors
+
+### Notes
+- Circuit breaker pattern was misapplied for this batch processing use case where timeouts are normal for large PDFs, not service failures
+- The 5-minute timeout aligns with Google's documentation noting large PDFs (300+ pages) can take >3 minutes
+- Slow call monitoring (>60s) provides visibility without causing cascade failures
+- dist/ directory contains stale build artifacts from deleted circuit-breaker module - will be cleaned on next deployment
+
+---
+
+## Status: COMPLETE
