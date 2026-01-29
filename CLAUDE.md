@@ -203,7 +203,6 @@ src/
 │   ├── drive-parser.ts
 │   ├── logger.ts          # Pino logger - use this, not console.log
 │   ├── spreadsheet.ts
-│   ├── circuit-breaker.ts
 │   ├── concurrency.ts
 │   └── correlation.ts
 └── bank/

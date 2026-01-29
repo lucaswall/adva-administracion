@@ -43,7 +43,6 @@ import { generateRequestId, logTokenUsage } from '../services/token-usage-logger
 import { getConfig, GEMINI_PRICING } from '../config.js';
 import { debug, warn, error as logError } from '../utils/logger.js';
 import { getCorrelationId, updateCorrelationContext } from '../utils/correlation.js';
-import { getCircuitBreaker } from '../utils/circuit-breaker.js';
 import { isValidISODate } from '../utils/date.js';
 
 /**
@@ -162,13 +161,6 @@ export async function processFile(
 
   const gemini = new GeminiClient(config.geminiApiKey, config.geminiRpmLimit, usageCallback);
 
-  // Get circuit breaker for Gemini API
-  const circuitBreaker = getCircuitBreaker('gemini', {
-    failureThreshold: 5,
-    resetTimeoutMs: 60000, // 1 minute
-    successThreshold: 2,
-  });
-
   // Download file content
   const downloadResult = await downloadFile(fileInfo.id);
   if (!downloadResult.ok) {
@@ -177,21 +169,15 @@ export async function processFile(
 
   const content = downloadResult.value;
 
-  // Step 1: Classify the document (with circuit breaker protection)
-  const classifyResult = await circuitBreaker.execute(async () => {
-    const result = await gemini.analyzeDocument(
-      content,
-      fileInfo.mimeType,
-      CLASSIFICATION_PROMPT,
-      3,
-      fileInfo.id,
-      fileInfo.name
-    );
-    if (!result.ok) {
-      throw result.error;
-    }
-    return result.value;
-  });
+  // Step 1: Classify the document
+  const classifyResult = await gemini.analyzeDocument(
+    content,
+    fileInfo.mimeType,
+    CLASSIFICATION_PROMPT,
+    3,
+    fileInfo.id,
+    fileInfo.name
+  );
 
   if (!classifyResult.ok) {
     return {
@@ -271,21 +257,15 @@ export async function processFile(
       };
   }
 
-  // Extract document data (with circuit breaker protection)
-  const extractResult = await circuitBreaker.execute(async () => {
-    const result = await gemini.analyzeDocument(
-      content,
-      fileInfo.mimeType,
-      extractPrompt,
-      3,
-      fileInfo.id,
-      fileInfo.name
-    );
-    if (!result.ok) {
-      throw result.error;
-    }
-    return result.value;
-  });
+  // Extract document data
+  const extractResult = await gemini.analyzeDocument(
+    content,
+    fileInfo.mimeType,
+    extractPrompt,
+    3,
+    fileInfo.id,
+    fileInfo.name
+  );
 
   if (!extractResult.ok) {
     return {

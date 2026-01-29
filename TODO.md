@@ -171,9 +171,6 @@ Potential null pointer in autoFill when no documents at src/bank/autofill.ts:197
 ## item #57 [edge-case] [medium]
 Missing pino transport error handling at src/utils/logger.ts:21-32. Pino logger initialization doesn't catch exceptions. Invalid config causes unhandled failure.
 
-## item #58 [async] [medium]
-Circuit breaker state transition not idempotent at src/utils/circuit-breaker.ts:110-117. No protection against concurrent checkStateTransition() calls transitioning multiple times.
-
 ## item #59 [edge-case] [medium]
 Movimientos count validation too lenient at src/gemini/parser.ts:918-931,1047-1060,1155-1168. Uses 10% threshold but for small expectedCount, allows 1->2 change without flagging.
 

@@ -1,94 +1,147 @@
-# Implementation Plan
+# Bug Fix Plan
 
 **Created:** 2026-01-29
-**Source:** TODO.md items #1-3 [critical]
+**Bug Report:** 100 test files ended up in Sin Procesar folder - REGRESSION
+**Category:** Critical Bug / Architecture Fix
 
-## Context Gathered
+## Investigation
 
-### Codebase Analysis
+### Context Gathered
+- **MCPs used:** Railway MCP (get-logs, list-deployments)
+- **Files examined:**
+  - Railway deployment logs from deployment `0e07f7e6-3873-4930-9ed9-df2c6db7eab4`
+  - Git commit `71bbc73` (LP validation, fetch timeout, rate limit race)
+  - `src/config.ts` (FETCH_TIMEOUT_MS = 30000)
+  - `src/gemini/client.ts` (AbortController implementation)
+  - `src/processing/extractor.ts` (circuit breaker usage)
+  - `src/utils/circuit-breaker.ts` (failureThreshold = 5)
 
-**Item #1 - TipoComprobante 'LP' not validated:**
-- **File:** `src/types/index.ts:71` defines `TipoComprobante = 'A' | 'B' | 'C' | 'E' | 'NC' | 'ND' | 'LP'`
-- **File:** `src/utils/validation.ts:345` defines `validTypes = ['A', 'B', 'C', 'E', 'NC', 'ND']` (missing 'LP')
-- **Existing tests:** `src/utils/validation.test.ts:540-592` has tests for `validateTipoComprobante` but no test for 'LP'
-- **Fix pattern:** Add 'LP' to validTypes array in validateTipoComprobante()
+### Evidence
 
-**Item #2 - Missing fetch timeout abort signal:**
-- **File:** `src/gemini/client.ts:217-224` - fetch() call has no AbortController
-- **Issue:** Pipeline timeout (60s) at src/processing/extractor.ts checks elapsed time but doesn't abort hanging fetch
-- **Existing tests:** `src/gemini/client.test.ts` - tests retry logic and errors but not timeout abort
-- **Fix pattern:** Add AbortController with signal to fetch(), abort on timeout
+**Log Analysis - Failure Pattern:**
 
-**Item #3 - Rate limiter race condition:**
-- **File:** `src/gemini/client.ts:430-450` - enforceRateLimit() has check-then-increment pattern
-- **Issue:** Concurrent requests can pass limit check before any increment occurs
-- **Existing tests:** `src/gemini/client.test.ts:368-411` - has rate limiting tests but not concurrent race
-- **Fix pattern:** Use atomic increment or lock pattern to serialize limit checks
+| Time | Error Type | Count | Files Affected |
+|------|------------|-------|----------------|
+| 12:52:00 - 12:54:13 | `Extraction failed: Gemini API request timeout after 30000ms` | ~12 | CC$ BBVA *.pdf (bank statements) |
+| 12:54:25 onward | `Classification failed: Circuit breaker is open for gemini` | ~88 | All remaining files |
 
-### Test Conventions
+**Sample Error Messages from Logs:**
+```
+[INFO] Failed to process file error="Extraction failed: Gemini API request timeout after 30000ms" fileName="02 CC$ BBVA FEB 2025.pdf"
+[INFO] Failed to process file error="Classification failed: Circuit breaker is open for gemini. Retry in 49s" fileName="2025-11-10 - Magarinos..."
+```
 
-- Tests use Vitest (`describe`, `it`, `expect`, `vi`)
-- Tests colocated with source as `*.test.ts`
-- Mock `global.fetch` for API tests
-- Use `vi.useFakeTimers()` for timing-sensitive tests
-- Use `vi.fn()` for mock functions
+### Root Cause
 
-## Original Plan
+**Two architectural issues combined to cause total failure:**
 
-### Task 1: Add 'LP' to validateTipoComprobante validation
+1. **30-second timeout is too short** for large PDF extraction (bank statements need 60-120+ seconds)
+2. **Circuit breaker pattern is misapplied** for this batch processing use case
 
-Addresses item #1: TipoComprobante type includes 'LP' but validation rejects it.
+**The cascade of failure:**
+1. Large bank statement PDFs sent to Gemini for extraction
+2. 30s timeout kills requests before Gemini responds → counted as "failure"
+3. After 5 "failures", circuit breaker opens
+4. ALL remaining ~88 files immediately rejected with "Circuit breaker is open"
+5. 100% of files end up in Sin Procesar
 
-1. Write test in `src/utils/validation.test.ts` for 'LP' validation
-   - Test `validateTipoComprobante('LP')` returns 'LP'
-   - Follow existing test pattern from lines 541-592
-2. Run test-runner (expect fail)
-3. Update `validateTipoComprobante()` in `src/utils/validation.ts:345`
-   - Add 'LP' to validTypes array: `['A', 'B', 'C', 'E', 'NC', 'ND', 'LP']`
-4. Run test-runner (expect pass)
+### Architectural Analysis
 
-### Task 2: Add fetch timeout with AbortController
+**Why circuit breaker is wrong for this use case:**
 
-Addresses item #2: Missing fetch timeout abort signal at src/gemini/client.ts:217-224.
+| Circuit Breaker Design Intent | This Use Case Reality |
+|-------------------------------|----------------------|
+| Protect against failing services | Gemini is working, just slow |
+| Prevent cascading failures in microservices | Batch processing - no cascade risk |
+| Fast-fail on unavailable dependencies | Timeouts are normal for large PDFs |
+| Service needs time to "recover" | Gemini doesn't need recovery |
 
-1. Write tests in `src/gemini/client.test.ts` for fetch timeout
-   - Test that fetch is aborted after timeout (using vi.useFakeTimers)
-   - Test that aborted fetch returns appropriate error
-   - Test that successful fetch within timeout works normally
-   - Test error message indicates timeout vs network error
-2. Run test-runner (expect fail)
-3. Update `analyzeDocument()` in `src/gemini/client.ts`
-   - Create AbortController before fetch
-   - Set timeout using setTimeout to call controller.abort()
-   - Pass signal to fetch options: `signal: controller.signal`
-   - Clear timeout on success
-   - Handle AbortError in catch block with specific message
-   - Use FETCH_TIMEOUT_MS constant (e.g., 30000ms for 30s timeout)
-4. Run test-runner (expect pass)
-5. Add FETCH_TIMEOUT_MS to `src/config.ts` if not exists
+**Research Sources:**
+- [Martin Fowler - Circuit Breaker](https://martinfowler.com/bliki/CircuitBreaker.html)
+- [Microsoft Azure - Circuit Breaker Pattern](https://learn.microsoft.com/en-us/azure/architecture/patterns/circuit-breaker)
+- [AKF Partners - Circuit Breaker Dos and Don'ts](https://akfpartners.com/growth-blog/the-circuit-breaker-pattern-dos-and-donts)
+- [Google Gemini - Document Understanding](https://ai.google.dev/gemini-api/docs/document-processing) - notes that large PDFs (300+ pages) can take >3 minutes
 
-### Task 3: Fix rate limiter race condition with atomic increment
+### Affected Files
+- `src/config.ts` - `FETCH_TIMEOUT_MS = 30000` (too short)
+- `src/processing/extractor.ts` - circuit breaker wrapping Gemini calls (wrong pattern)
+- `src/utils/circuit-breaker.ts` - entire module to be deleted (not used elsewhere)
+- `CLAUDE.md` - lists circuit-breaker.ts in structure (needs update)
+- `TODO.md` - item #58 about circuit breaker bug (needs removal)
 
-Addresses item #3: Race condition in rate limiter with concurrent requests.
+## Fix Plan
 
-1. Write tests in `src/gemini/client.test.ts` for concurrent rate limiting
-   - Test multiple concurrent calls don't exceed rate limit
-   - Test that concurrent calls at limit all wait properly
-   - Use Promise.all to simulate concurrent requests
-   - Verify correct number of requests made within time window
-2. Run test-runner (expect fail)
-3. Update `enforceRateLimit()` in `src/gemini/client.ts`
-   - Change from check-then-increment to pre-increment approach
-   - Increment requestCount BEFORE checking limit (optimistic increment)
-   - If over limit after increment, decrement and wait, then retry
-   - Or use a serialized queue for limit enforcement
-   - Option B: Add a Promise-based mutex/lock for rate limiting
-4. Run test-runner (expect pass)
+### Task 1: Increase fetch timeout to 5 minutes
+
+**Rationale:** Google's documentation notes large PDFs can take >3 minutes. 5 minutes provides safety margin.
+
+1. Update `FETCH_TIMEOUT_MS` in `src/config.ts` from `30000` to `300000` (5 minutes)
+2. Update JSDoc comment to reflect new value
+3. Run test-runner to verify no tests break
+
+### Task 2: Remove circuit breaker from document extraction
+
+**Rationale:** Circuit breaker is designed for service unavailability, not slow processing. This is batch processing with no cascade risk.
+
+1. In `src/processing/extractor.ts`:
+   - Remove import: `import { getCircuitBreaker } from '../utils/circuit-breaker.js';`
+   - Remove circuit breaker instantiation (lines 165-170)
+   - Replace `circuitBreaker.execute(async () => { ... })` with direct calls:
+     - Classification call: unwrap from `circuitBreaker.execute()`, keep inner logic
+     - Extraction call: unwrap from `circuitBreaker.execute()`, keep inner logic
+   - Keep the existing error handling (the `if (!result.ok)` checks)
+2. Run test-runner to verify tests pass
+
+### Task 3: Delete circuit breaker module entirely
+
+**Rationale:** Circuit breaker is only used in extractor.ts - no other usages in codebase.
+
+1. Delete file: `src/utils/circuit-breaker.ts`
+2. Run builder to verify no import errors
+
+### Task 4: Update documentation
+
+1. In `CLAUDE.md`:
+   - Remove `│   ├── circuit-breaker.ts` from the STRUCTURE section (line 206)
+2. In `TODO.md`:
+   - Remove item #58 (circuit breaker state transition bug) - no longer applicable
+
+### Task 5: Add slow call logging for monitoring
+
+**Rationale:** We still want visibility into slow calls without treating them as failures.
+
+1. In `src/gemini/client.ts`, add logging after successful calls that took > 60 seconds:
+   ```typescript
+   if (duration > 60000) {
+     warn('Slow Gemini API call', {
+       module: 'gemini-client',
+       phase: 'api-call',
+       durationMs: duration,
+       fileId,
+       fileName,
+     });
+   }
+   ```
+2. Run test-runner to verify tests pass
 
 ## Post-Implementation Checklist
 1. Run `bug-hunter` agent - Review changes for bugs
 2. Run `test-runner` agent - Verify all tests pass
 3. Run `builder` agent - Verify zero warnings
+
+## Recovery Steps
+
+After deploying the fix:
+1. Move all 100 files from Sin Procesar back to Entrada folder in Google Drive
+2. System will automatically reprocess them on next scan (every 5 minutes)
+3. Monitor Railway logs to verify successful processing
+4. Watch for slow call warnings to understand actual processing times
+
+## Future Considerations
+
+1. **Gemini Files API**: For very large documents, consider pre-uploading via Files API to reduce per-request processing time
+2. **Async processing**: If timeouts remain an issue, consider async job queue pattern
+3. **Circuit breaker for actual outages**: If needed in future, implement one that ONLY triggers on 5xx errors or network failures, NOT timeouts
 
 ---
 
@@ -97,82 +150,29 @@ Addresses item #3: Race condition in rate limiter with concurrent requests.
 **Implemented:** 2026-01-29
 
 ### Completed
+- Task 1: Increased FETCH_TIMEOUT_MS from 30 seconds to 5 minutes (300000ms) in src/config.ts:43
+- Task 2: Removed circuit breaker from document extraction in src/processing/extractor.ts - replaced wrapped calls with direct Gemini API calls
+- Task 3: Deleted circuit breaker module src/utils/circuit-breaker.ts entirely
+- Task 4: Updated documentation - removed circuit-breaker.ts from CLAUDE.md structure section (line 206) and removed TODO.md item #58
+- Task 5: Added slow call logging in src/gemini/client.ts:255-264 - warns when API calls exceed 60 seconds without treating as failures
+- Additional fix: Increased PIPELINE_TIMEOUT_MS from 60 seconds to 15 minutes (900000ms) to accommodate 3 retry attempts with new 5-minute fetch timeout
 
-- **Task 1: Add 'LP' to validateTipoComprobante validation**
-  - Added test in `src/utils/validation.test.ts` for 'LP' validation
-  - Confirmed test fails (red phase)
-  - Added 'LP' to validTypes array in `src/utils/validation.ts:345`
-  - Confirmed test passes (green phase)
-  - Updated JSDoc comment in `src/types/index.ts:94` to include LP
-
-- **Task 2: Add fetch timeout with AbortController**
-  - Added FETCH_TIMEOUT_MS constant to `src/config.ts` (30000ms)
-  - Added import for FETCH_TIMEOUT_MS in `src/gemini/client.ts`
-  - Added 3 tests in `src/gemini/client.test.ts` for timeout behavior:
-    - Test fetch aborts after timeout
-    - Test fetch completes successfully before timeout
-    - Test distinguishes timeout error from network error
-  - Confirmed tests fail (red phase)
-  - Implemented AbortController in `analyzeDocument()` method:
-    - Created AbortController before fetch
-    - Set timeout using setTimeout to call controller.abort()
-    - Passed signal to fetch options
-    - Clear timeout on success
-    - Handle AbortError in catch block with specific "timeout" message
-  - Confirmed tests pass (green phase)
-
-- **Task 3: Fix rate limiter race condition with atomic increment**
-  - Added 3 tests in `src/gemini/client.test.ts` for concurrent rate limiting:
-    - Test multiple concurrent calls don't exceed rate limit
-    - Test concurrent calls at limit all wait properly
-    - Test correct number of requests made within time window
-  - Confirmed tests fail (red phase)
-  - Implemented promise queue for serialized rate limiting in `src/gemini/client.ts`:
-    - Added `rateLimitQueue: Promise<void>` property
-    - Updated `enforceRateLimit()` to use queue pattern for atomic operations
-    - Changed from check-then-increment to always-increment approach
-    - Moved increment inside the locked section to prevent race conditions
-  - Removed duplicate `requestCount++` from success path
-  - Confirmed tests pass (green phase)
+### Test Updates
+- Updated timeout tests in src/gemini/client.test.ts:
+  - "aborts fetch after timeout" test: changed simulated request from 35s to 350s, timer advance from 30s to 300s
+  - "distinguishes timeout error from network error" test: changed simulated request from 35s to 350s, timer advance from 30s to 300s
 
 ### Checklist Results
-
-- **bug-hunter**: Found 2 bugs, fixed both:
-  - HIGH: Request not counted when window resets - Fixed by restructuring if/else to always increment
-  - LOW: Missing 'LP' in JSDoc comment - Fixed by updating comment to include LP
-- **test-runner**: Passed (1048 tests, 53 files)
-- **builder**: Passed (zero warnings)
+- bug-hunter: Passed - Found and fixed PIPELINE_TIMEOUT_MS inconsistency before final approval. No bugs in final changes.
+- test-runner: Passed - All 1048 tests passing across 53 test files
+- builder: Passed - Zero warnings, zero errors
 
 ### Notes
-
-- All three critical audit findings have been resolved
-- TipoComprobante 'LP' is now fully validated across the codebase
-- Fetch timeout prevents hanging requests to Gemini API
-- Rate limiter race condition fixed with promise queue serialization pattern
-- All tests passing with full coverage of edge cases
-- No warnings in build output
-
-### Review Findings
-
-Files reviewed: 6
-- `src/utils/validation.ts` (lines 342-347)
-- `src/utils/validation.test.ts` (lines 565-567)
-- `src/config.ts` (lines 38-42)
-- `src/gemini/client.ts` (full file)
-- `src/gemini/client.test.ts` (full file)
-- `src/types/index.ts` (line 94)
-
-Checks applied: Security, Logic, Async, Resources, Type Safety, Error Handling, Timeout, Conventions
-
-No issues found - all implementations are correct and follow project conventions.
-
-**Verification details:**
-- Task 1: 'LP' correctly added to validTypes array and tested
-- Task 2: AbortController properly manages timeout; clearTimeout called in both success and error paths (no resource leak); timeout errors correctly distinguished from network errors
-- Task 3: Promise queue pattern correctly serializes rate limit checks; increment happens atomically within locked section; finally block ensures queue always progresses
+- Circuit breaker pattern was misapplied for this batch processing use case where timeouts are normal for large PDFs, not service failures
+- The 5-minute timeout aligns with Google's documentation noting large PDFs (300+ pages) can take >3 minutes
+- Slow call monitoring (>60s) provides visibility without causing cascade failures
+- dist/ directory contains stale build artifacts from deleted circuit-breaker module - will be cleaned on next deployment
 
 ---
 
 ## Status: COMPLETE
-
-All tasks implemented and reviewed successfully. Ready for human review.

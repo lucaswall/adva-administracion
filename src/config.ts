@@ -38,8 +38,9 @@ export const CASCADE_TIMEOUT_MS = 30000;
 /**
  * Fetch timeout in milliseconds
  * Maximum time allowed for a single fetch request to Gemini API
+ * Set to 5 minutes to accommodate large PDF processing (300+ pages can take >3 minutes)
  */
-export const FETCH_TIMEOUT_MS = 30000;
+export const FETCH_TIMEOUT_MS = 300000;
 
 /**
  * Gemini API pricing per token (Standard tier)

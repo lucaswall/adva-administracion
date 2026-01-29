@@ -50,8 +50,9 @@ function sleep(ms: number): Promise<void> {
 /**
  * Pipeline timeout in milliseconds
  * Maximum time allowed for the entire analyzeDocument operation including retries
+ * Set to 3x FETCH_TIMEOUT_MS (15 minutes) to allow for 3 retry attempts of large PDFs
  */
-const PIPELINE_TIMEOUT_MS = 60000;
+const PIPELINE_TIMEOUT_MS = 900000;
 
 /**
  * Gemini API client with built-in rate limiting
@@ -250,6 +251,18 @@ export class GeminiClient {
             responseLength: parseResult.value.length,
             responsePreview: parseResult.value.substring(0, 500) + '...'
           });
+
+          // Log slow API calls for monitoring (without treating them as failures)
+          if (duration > 60000) {
+            warn('Slow Gemini API call', {
+              module: 'gemini-client',
+              phase: 'api-call',
+              durationMs: duration,
+              fileId,
+              fileName,
+            });
+          }
+
           this.callUsageCallback(true, usageMetadata, duration, fileId, fileName);
           return { ok: true, value: parseResult.value };
         } else {
