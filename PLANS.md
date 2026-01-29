@@ -518,3 +518,99 @@ All OTHER implementations (Tasks 7, 9, 10, 11, 12) are correct and follow projec
 Two tasks remain to be implemented:
 - Task 8: Promise.all error handling in `src/utils/exchange-rate.ts:212-223`
 - Task 13: Cross-currency confidence capping in `src/bank/matcher.ts`
+
+---
+
+## Iteration 3
+
+**Implemented:** 2026-01-28
+
+### Completed Tasks (8 and 13 - Final)
+
+**Task 8: Promise.all error handling** ✅
+- Updated `prefetchExchangeRates()` in `src/utils/exchange-rate.ts:214-246` to use `Promise.allSettled()`
+- Added logging for failed exchange rate fetches using Pino logger
+- Added logging for any rejected promises (defensive programming)
+- Ensures successful fetches are cached even when some dates fail
+- Created 4 comprehensive tests in `src/utils/exchange-rate.test.ts`:
+  - Test prefetch continues when one date fetch fails
+  - Test successful fetches are cached despite partial failures
+  - Test all failures don't throw
+  - Test network errors handled gracefully
+- All tests pass, implementation follows Result<T,E> pattern correctly
+
+**Task 13: Cross-currency confidence capping** ✅
+- Updated `createDirectFacturaMatch()` in `src/bank/matcher.ts:583-616` to cap confidence for USD facturas
+- Implementation follows CLAUDE.md spec: "With CUIT → MEDIUM max; without → LOW"
+- Cross-currency matches (USD→ARS) now capped:
+  - CUIT match: HIGH → MEDIUM
+  - Keyword match: MEDIUM → LOW
+- ARS facturas (same currency) retain HIGH confidence with CUIT match
+- Created 3 comprehensive tests in `src/bank/matcher.test.ts`:
+  - Test USD factura with CUIT match gets MEDIUM (not HIGH)
+  - Test USD factura with keyword match gets LOW (not MEDIUM)
+  - Test ARS factura with CUIT match keeps HIGH (unchanged)
+- Cross-currency reason already tracked in matching logic
+
+### Bug Fixes (from bug-hunter)
+Fixed 5 bugs found by bug-hunter agent:
+
+1. **Missing return value in async map** (`src/utils/exchange-rate.ts:231`)
+   - Added `return undefined;` for cached dates branch
+
+2. **Missing confidence property** (`src/bank/matcher.test.ts`)
+   - Added `confidence: 0.95` to all test Factura objects
+
+3. **Invalid saldo property** (`src/bank/matcher.test.ts`)
+   - Removed `saldo` property from BankMovement test objects
+   - Added all required fields (row, fechaValor, codigo, oficina, areaAdva, detalle)
+
+4. **Unused imports in matcher test** (`src/bank/matcher.test.ts:7`)
+   - Removed unused `Pago` and `Recibo` imports
+
+5. **Unused imports in exchange-rate test** (`src/utils/exchange-rate.test.ts:7`)
+   - Removed unused `getExchangeRate` and `setExchangeRateCache` imports
+
+### Checklist Results
+- **bug-hunter**: Found 5 bugs, all fixed
+- **test-runner**: All 504 tests passing (7 new tests added: 4 exchange-rate + 3 matcher)
+- **builder**: Zero warnings, zero errors
+
+### Notes
+- Both remaining tasks (8 and 13) completed successfully
+- Task 8 implementation was straightforward - current code already uses Result<T,E> pattern, just needed Promise.allSettled
+- Task 13 implementation cleanly isolated in createDirectFacturaMatch method
+- All fixes follow TDD workflow with tests written first
+- Total test count increased from 497 to 504 (7 new tests)
+- All implementations follow CLAUDE.md conventions
+
+### Review Findings
+None - all implementations are correct and follow project conventions.
+
+**Reviewed Files:**
+
+**Task 8: Promise.all error handling** (`src/utils/exchange-rate.ts:214-246`)
+- `prefetchExchangeRates()` correctly uses `Promise.allSettled()` instead of `Promise.all()`
+- Logs failed fetches with Pino `warn()` including date and error message
+- Handles rejected promises defensively with second loop for edge cases
+- Returns `undefined` for already-cached entries (no unnecessary fetch)
+- Tests in `src/utils/exchange-rate.test.ts` verify partial failures, all failures, and network errors
+
+**Task 13: Cross-currency confidence capping** (`src/bank/matcher.ts:583-620`)
+- `createDirectFacturaMatch()` correctly checks `factura.moneda === 'USD'` for cross-currency
+- CUIT matches capped to MEDIUM (line 602) per CLAUDE.md: "With CUIT → MEDIUM max"
+- Keyword matches capped to LOW (line 604) per CLAUDE.md: "without → LOW"
+- ARS facturas retain original confidence levels (no capping)
+- Tests in `src/bank/matcher.test.ts` verify all three scenarios
+
+**Verification:**
+- All 504 tests pass (7 new tests from Iteration 3)
+- Zero warnings in build
+- Code follows CLAUDE.md conventions (Result<T,E>, ESM imports, Pino logging)
+- No security issues, no logic errors
+
+---
+
+## Status: COMPLETE
+
+All 13 tasks from original plan implemented and reviewed successfully. Ready for human review.

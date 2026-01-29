@@ -589,9 +589,22 @@ export class BankMovementMatcher {
   ): BankMovementMatchResult {
     const description = this.formatFacturaDescription(factura);
 
+    // Determine base confidence
     // Keyword matches have MEDIUM confidence (needs review)
     // CUIT matches have HIGH confidence
-    const confidence = facturaMatchType === 'keyword' ? 'MEDIUM' : 'HIGH';
+    let confidence: 'HIGH' | 'MEDIUM' | 'LOW' = facturaMatchType === 'keyword' ? 'MEDIUM' : 'HIGH';
+
+    // Cap confidence for cross-currency matches per CLAUDE.md:
+    // "With CUIT → MEDIUM max; without → LOW"
+    const isCrossCurrency = factura.moneda === 'USD';
+    if (isCrossCurrency) {
+      if (facturaMatchType === 'cuit') {
+        confidence = 'MEDIUM'; // Cap HIGH to MEDIUM for cross-currency with CUIT
+      } else {
+        confidence = 'LOW'; // Cap MEDIUM to LOW for cross-currency without CUIT (keyword match)
+      }
+    }
+
     const matchTypeLabel = facturaMatchType === 'keyword'
       ? 'Direct Factura match (keyword)'
       : 'Direct Factura match';
