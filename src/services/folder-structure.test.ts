@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { validateYear } from './folder-structure.js';
+import { validateYear, clearFolderStructureCache, getCachedFolderStructure } from './folder-structure.js';
 
 describe('validateYear', () => {
   it('returns ok for valid years in range 2000-current+1', () => {
@@ -67,5 +67,23 @@ describe('validateYear', () => {
     // The bug was caused by 2-digit year parsing, not by 2020 being invalid
     const result = validateYear('2020');
     expect(result.ok).toBe(true);
+  });
+});
+
+describe('clearFolderStructureCache', () => {
+  it('should reset cached structure to null', () => {
+    // Note: We can't easily populate the cache without mocking Drive calls
+    // But we can verify the clear function works
+    clearFolderStructureCache();
+    expect(getCachedFolderStructure()).toBeNull();
+  });
+
+  it('should handle clearing when cache is already null', () => {
+    clearFolderStructureCache();
+    expect(getCachedFolderStructure()).toBeNull();
+
+    // Clear again - should not throw
+    expect(() => clearFolderStructureCache()).not.toThrow();
+    expect(getCachedFolderStructure()).toBeNull();
   });
 });

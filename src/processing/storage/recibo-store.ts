@@ -137,7 +137,7 @@ export async function storeRecibo(
     }
 
     // Update cache if available
-    context?.duplicateCache.addEntry(spreadsheetId, 'Recibos', recibo.fileId, row);
+    context?.duplicateCache?.addEntry(spreadsheetId, 'Recibos', recibo.fileId, row);
 
     info('Recibo stored successfully', {
       module: 'storage',

@@ -729,8 +729,8 @@ export interface ReciboMatchCandidate {
   existingMatchConfidence?: MatchConfidence;
   /** Existing pago file ID (if upgrade) */
   existingPagoFileId?: string;
-  /** Whether this match has CUIL match */
-  hasCuilMatch?: boolean;
+  /** Whether this match has CUIT match */
+  hasCuitMatch?: boolean;
   /** Date proximity in days from recibo date */
   dateProximityDays?: number;
   /** Date proximity of existing match (if upgrade) */
@@ -852,7 +852,7 @@ export interface BankMovement {
 /**
  * Match type for bank movement matching
  */
-export type BankMatchType = 'bank_fee' | 'credit_card_payment' | 'subdiario_cobro' | 'pago_factura' | 'direct_factura' | 'recibo' | 'pago_only' | 'no_match';
+export type BankMatchType = 'bank_fee' | 'credit_card_payment' | 'pago_factura' | 'direct_factura' | 'recibo' | 'pago_only' | 'no_match';
 
 /**
  * Result of matching a bank movement
@@ -884,8 +884,6 @@ export interface BankAutoFillResult {
   bankFeeMatches: number;
   /** Matches for credit card payments */
   creditCardPaymentMatches: number;
-  /** Matches from Subdiario de Ventas Cobros */
-  subdiarioCobroMatches: number;
   /** Matches via Pago→Factura link */
   pagoFacturaMatches: number;
   /** Direct Factura matches */

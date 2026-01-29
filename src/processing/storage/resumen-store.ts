@@ -215,7 +215,7 @@ export async function storeResumenBancario(
     }
 
     // Update cache if available
-    context?.duplicateCache.addEntry(spreadsheetId, 'Resumenes', resumen.fileId, row);
+    context?.duplicateCache?.addEntry(spreadsheetId, 'Resumenes', resumen.fileId, row);
 
     info('Stored bank account resumen', {
       module: 'storage',
@@ -331,7 +331,7 @@ export async function storeResumenTarjeta(
     }
 
     // Update cache if available
-    context?.duplicateCache.addEntry(spreadsheetId, 'Resumenes', resumen.fileId, row);
+    context?.duplicateCache?.addEntry(spreadsheetId, 'Resumenes', resumen.fileId, row);
 
     info('Stored credit card resumen', {
       module: 'storage',
@@ -452,7 +452,7 @@ export async function storeResumenBroker(
     }
 
     // Update cache if available
-    context?.duplicateCache.addEntry(spreadsheetId, 'Resumenes', resumen.fileId, row);
+    context?.duplicateCache?.addEntry(spreadsheetId, 'Resumenes', resumen.fileId, row);
 
     info('Stored broker resumen', {
       module: 'storage',

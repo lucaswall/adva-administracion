@@ -150,7 +150,7 @@ export async function storeRetencion(
     }
 
     // Update cache if available
-    context?.duplicateCache.addEntry(spreadsheetId, sheetName, retencion.fileId, row);
+    context?.duplicateCache?.addEntry(spreadsheetId, sheetName, retencion.fileId, row);
 
     info('Retencion stored successfully', {
       module: 'retencion-store',

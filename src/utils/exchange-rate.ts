@@ -207,19 +207,43 @@ export function getExchangeRateSync(date: string): Result<ExchangeRate, Error> {
  * Pre-fetches exchange rates for a list of dates
  * Call this before running matching to ensure rates are cached
  *
+ * Uses Promise.allSettled to continue fetching even if some dates fail
+ *
  * @param dates - Array of date strings
  */
 export async function prefetchExchangeRates(dates: string[]): Promise<void> {
   const uniqueDates = [...new Set(dates.map(d => normalizeDateToIso(d)).filter(Boolean) as string[])];
 
-  await Promise.all(
+  const results = await Promise.allSettled(
     uniqueDates.map(async (date) => {
       const cacheKey = `exchange_rate_oficial_${date}`;
       if (!getCachedValue(cacheKey)) {
-        await getExchangeRate(date);
+        const result = await getExchangeRate(date);
+        if (!result.ok) {
+          warn('Failed to prefetch exchange rate', {
+            module: 'exchange-rate',
+            date,
+            error: result.error.message,
+            correlationId: getCorrelationId(),
+          });
+        }
+        return result;
       }
+      return undefined; // Already cached
     })
   );
+
+  // Log any rejected promises (shouldn't happen with current implementation)
+  results.forEach((result, index) => {
+    if (result.status === 'rejected') {
+      warn('Promise rejected during exchange rate prefetch', {
+        module: 'exchange-rate',
+        date: uniqueDates[index],
+        error: result.reason,
+        correlationId: getCorrelationId(),
+      });
+    }
+  });
 }
 
 /**

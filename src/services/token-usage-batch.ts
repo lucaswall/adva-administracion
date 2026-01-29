@@ -2,6 +2,8 @@ import { appendRowsWithFormatting } from './sheets.js';
 import { getSpreadsheetTimezone } from './sheets.js';
 import { calculateCost } from './token-usage-logger.js';
 import type { CellValue } from './sheets.js';
+import type { Result } from '../types/index.js';
+import { warn as logWarn } from '../utils/logger.js';
 
 export interface TokenUsageEntry {
   timestamp: Date;
@@ -37,9 +39,13 @@ export class TokenUsageBatch {
 
   /**
    * Writes all accumulated entries to the spreadsheet.
+   * Only clears entries on successful write to prevent data loss.
+   * @returns Result indicating success or failure
    */
-  async flush(dashboardId: string): Promise<void> {
-    if (this.entries.length === 0) return;
+  async flush(dashboardId: string): Promise<Result<void, Error>> {
+    if (this.entries.length === 0) {
+      return { ok: true, value: undefined };
+    }
 
     // Get timezone once
     if (!this.timezone) {
@@ -77,9 +83,21 @@ export class TokenUsageBatch {
     });
 
     // Single batch write
-    await appendRowsWithFormatting(dashboardId, 'Uso de API', rows, this.timezone);
+    const writeResult = await appendRowsWithFormatting(dashboardId, 'Uso de API', rows, this.timezone);
 
+    if (!writeResult.ok) {
+      // Log warning and keep entries for retry
+      logWarn('Token usage batch write failed, entries preserved for retry', {
+        module: 'token-usage-batch',
+        error: writeResult.error.message,
+        entryCount: this.entries.length
+      });
+      return { ok: false, error: writeResult.error };
+    }
+
+    // Only clear entries after successful write
     this.entries = [];
+    return { ok: true, value: undefined };
   }
 
   /**

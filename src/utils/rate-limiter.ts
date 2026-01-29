@@ -12,6 +12,12 @@ export interface RateLimiter {
    * @returns Result indicating if request is allowed and remaining quota
    */
   check(key: string): RateLimitResult;
+
+  /**
+   * Remove keys with all-expired timestamps to prevent memory leak
+   * @returns Number of keys removed
+   */
+  cleanup(): number;
 }
 
 /**
@@ -87,6 +93,26 @@ export function createRateLimiter(windowMs: number, maxRequests: number): RateLi
         remaining: 0,
         resetMs,
       };
+    },
+
+    cleanup(): number {
+      const now = Date.now();
+      const windowStart = now - windowMs;
+      let removedCount = 0;
+
+      // Iterate all keys and remove those with all-expired timestamps
+      for (const [key, requests] of requestLog.entries()) {
+        // Filter to only valid timestamps within current window
+        const validRequests = requests.filter(timestamp => timestamp > windowStart);
+
+        // If no valid requests remain, remove the key entirely
+        if (validRequests.length === 0) {
+          requestLog.delete(key);
+          removedCount++;
+        }
+      }
+
+      return removedCount;
     },
   };
 }

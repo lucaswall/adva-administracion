@@ -221,4 +221,106 @@ describe('TokenUsageBatch', () => {
     expect(sheets.getSpreadsheetTimezone).toHaveBeenCalledTimes(1);
     expect(sheets.appendRowsWithFormatting).toHaveBeenCalledTimes(2);
   });
+
+  it('flush() preserves entries when appendRowsWithFormatting fails', async () => {
+    const batch = new TokenUsageBatch();
+    const entry: TokenUsageEntry = {
+      timestamp: new Date('2026-01-25T10:00:00Z'),
+      requestId: 'req-1',
+      fileId: 'file-1',
+      fileName: 'test1.pdf',
+      model: 'gemini-2.0-flash',
+      promptTokens: 100,
+      cachedTokens: 0,
+      outputTokens: 50,
+      totalTokens: 150,
+      promptCostPerToken: 0.0001,
+      cachedCostPerToken: 0,
+      outputCostPerToken: 0.0002,
+      durationMs: 500,
+      success: true,
+    };
+
+    vi.mocked(sheets.getSpreadsheetTimezone).mockResolvedValue({ ok: true, value: 'America/Argentina/Buenos_Aires' });
+    vi.mocked(sheets.appendRowsWithFormatting).mockResolvedValue({ ok: false, error: new Error('Network error') });
+
+    batch.add(entry);
+    expect(batch.pendingCount).toBe(1);
+
+    const result = await batch.flush('dashboard-id');
+
+    // Entries should be preserved on failure
+    expect(batch.pendingCount).toBe(1);
+    expect(result.ok).toBe(false);
+  });
+
+  it('flush() clears entries only on successful write', async () => {
+    const batch = new TokenUsageBatch();
+    const entry: TokenUsageEntry = {
+      timestamp: new Date('2026-01-25T10:00:00Z'),
+      requestId: 'req-1',
+      fileId: 'file-1',
+      fileName: 'test1.pdf',
+      model: 'gemini-2.0-flash',
+      promptTokens: 100,
+      cachedTokens: 0,
+      outputTokens: 50,
+      totalTokens: 150,
+      promptCostPerToken: 0.0001,
+      cachedCostPerToken: 0,
+      outputCostPerToken: 0.0002,
+      durationMs: 500,
+      success: true,
+    };
+
+    vi.mocked(sheets.getSpreadsheetTimezone).mockResolvedValue({ ok: true, value: 'America/Argentina/Buenos_Aires' });
+    vi.mocked(sheets.appendRowsWithFormatting).mockResolvedValue({ ok: true, value: 1 });
+
+    batch.add(entry);
+
+    const result = await batch.flush('dashboard-id');
+
+    // Entries should be cleared on success
+    expect(batch.pendingCount).toBe(0);
+    expect(result.ok).toBe(true);
+  });
+
+  it('flush() allows retry with preserved entries after failure', async () => {
+    const batch = new TokenUsageBatch();
+    const entry: TokenUsageEntry = {
+      timestamp: new Date('2026-01-25T10:00:00Z'),
+      requestId: 'req-1',
+      fileId: 'file-1',
+      fileName: 'test1.pdf',
+      model: 'gemini-2.0-flash',
+      promptTokens: 100,
+      cachedTokens: 0,
+      outputTokens: 50,
+      totalTokens: 150,
+      promptCostPerToken: 0.0001,
+      cachedCostPerToken: 0,
+      outputCostPerToken: 0.0002,
+      durationMs: 500,
+      success: true,
+    };
+
+    vi.mocked(sheets.getSpreadsheetTimezone).mockResolvedValue({ ok: true, value: 'America/Argentina/Buenos_Aires' });
+
+    batch.add(entry);
+
+    // First flush fails
+    vi.mocked(sheets.appendRowsWithFormatting).mockResolvedValue({ ok: false, error: new Error('Temporary error') });
+    const result1 = await batch.flush('dashboard-id');
+    expect(result1.ok).toBe(false);
+    expect(batch.pendingCount).toBe(1);
+
+    // Retry flush succeeds
+    vi.mocked(sheets.appendRowsWithFormatting).mockResolvedValue({ ok: true, value: 1 });
+    const result2 = await batch.flush('dashboard-id');
+    expect(result2.ok).toBe(true);
+    expect(batch.pendingCount).toBe(0);
+
+    // Should have tried twice
+    expect(sheets.appendRowsWithFormatting).toHaveBeenCalledTimes(2);
+  });
 });

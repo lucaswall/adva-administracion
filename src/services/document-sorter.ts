@@ -35,9 +35,9 @@ type SortableDocument = Factura | Pago | Recibo | ResumenBancario | ResumenTarje
  * Extracts the relevant date from a document for sorting
  * Uses parseArgDate for robust date parsing across formats
  *
- * @throws Error if date cannot be parsed (should not happen if hasValidDate() passed)
+ * @returns Result with Date on success or Error on failure
  */
-export function getDocumentDate(doc: SortableDocument): Date {
+export function getDocumentDate(doc: SortableDocument): Result<Date, Error> {
   let dateStr: string | undefined;
 
   if ('fechaEmision' in doc && doc.fechaEmision) {
@@ -52,15 +52,21 @@ export function getDocumentDate(doc: SortableDocument): Date {
   }
 
   if (!dateStr) {
-    throw new Error('Document has no valid date field');
+    return {
+      ok: false,
+      error: new Error('Document has no valid date field')
+    };
   }
 
   const parsed = parseArgDate(dateStr);
   if (!parsed) {
-    throw new Error(`Invalid date format: ${dateStr}`);
+    return {
+      ok: false,
+      error: new Error(`Invalid date format: ${dateStr}`)
+    };
   }
 
-  return parsed;
+  return { ok: true, value: parsed };
 }
 
 /**
@@ -128,7 +134,14 @@ export async function sortDocument(
 
   // Determine target folder
   let targetFolderId: string;
-  const docDate = getDocumentDate(doc);
+  const docDateResult = getDocumentDate(doc);
+  if (!docDateResult.ok) {
+    return {
+      success: false,
+      error: docDateResult.error.message,
+    };
+  }
+  const docDate = docDateResult.value;
 
   if (destination === 'sin_procesar') {
     // Sin Procesar stays at root level
