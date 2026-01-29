@@ -173,6 +173,16 @@ Summary: N bug(s) found
 | MEDIUM | Edge cases, type safety, error handling gaps |
 | LOW | Convention violations, style issues (only report if egregious) |
 
+## Error Handling
+
+| Situation | Action |
+|-----------|--------|
+| No uncommitted changes | Report "No changes to review" and stop |
+| CLAUDE.md doesn't exist | Use general best practices only |
+| File in diff no longer exists | Skip that file, note in report |
+| Binary files in diff | Skip, note "Binary files not reviewed" |
+| Very large diff (>1000 lines) | Focus on high-risk areas (security, async, error handling) |
+
 ## Rules
 
 - Examine only uncommitted changes (git diff output)

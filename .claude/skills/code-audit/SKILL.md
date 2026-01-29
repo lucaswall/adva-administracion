@@ -97,7 +97,7 @@ See [references/compliance-checklist.md](references/compliance-checklist.md) for
 
 ### Step 4: CLAUDE.md Compliance
 
-If CLAUDE.md exists, check project-specific rules. See [references/compliance-checklist.md](references/compliance-checklist.md) for common checks.
+If CLAUDE.md exists, check project-specific rules defined there (imports, logging, patterns, TDD).
 
 ### Step 5: Dependency Vulnerabilities
 
