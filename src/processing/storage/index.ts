@@ -315,15 +315,15 @@ export async function getStaleProcessingFileIds(
         continue;
       }
 
-      try {
-        const timestamp = new Date(String(processedAt)).getTime();
-        const age = now - timestamp;
-
-        if (age > maxAgeMs) {
-          staleIds.add(String(fileId));
-        }
-      } catch (error) {
+      const timestamp = new Date(String(processedAt)).getTime();
+      if (Number.isNaN(timestamp)) {
         // Invalid timestamp - treat as stale (safety mechanism)
+        staleIds.add(String(fileId));
+        continue;
+      }
+
+      const age = now - timestamp;
+      if (age > maxAgeMs) {
         staleIds.add(String(fileId));
       }
     }

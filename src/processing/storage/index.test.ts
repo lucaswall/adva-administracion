@@ -775,6 +775,34 @@ describe('File Tracking Functions', () => {
       }
     });
 
+    it('treats corrupted/invalid timestamps as stale', async () => {
+      const now = Date.now();
+      const twoMinutesAgo = new Date(now - 2 * 60 * 1000).toISOString();
+
+      vi.mocked(getValues).mockResolvedValue({
+        ok: true,
+        value: [
+          ['fileId', 'fileName', 'processedAt', 'documentType', 'status'],
+          ['file-1', 'doc1.pdf', 'invalid-date-string', 'factura_emitida', 'processing'], // Invalid format
+          ['file-2', 'doc2.pdf', 'not-a-date', 'pago_enviado', 'processing'], // Invalid format
+          ['file-3', 'doc3.pdf', twoMinutesAgo, 'factura_recibida', 'processing'], // Valid, recent
+        ],
+      });
+
+      const { getStaleProcessingFileIds } = await import('./index.js');
+      const result = await getStaleProcessingFileIds('dashboard-id', 5 * 60 * 1000);
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        // Files with corrupted timestamps should be treated as stale (safety mechanism)
+        expect(result.value.has('file-1')).toBe(true);
+        expect(result.value.has('file-2')).toBe(true);
+        // file-3 is valid and recent, should not be stale
+        expect(result.value.has('file-3')).toBe(false);
+        expect(result.value.size).toBe(2);
+      }
+    });
+
     it('returns error when getValues fails', async () => {
       vi.mocked(getValues).mockResolvedValue({
         ok: false,
