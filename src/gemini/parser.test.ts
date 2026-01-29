@@ -429,6 +429,36 @@ describe('Parser - Movimiento Validation', () => {
         expect(result.value.needsReview).toBe(true);
       }
     });
+
+    it('detects movimientos count mismatch', () => {
+      const response = JSON.stringify({
+        banco: 'BBVA',
+        tipoTarjeta: 'Visa',
+        numeroCuenta: '4563',
+        fechaDesde: '2024-01-01',
+        fechaHasta: '2024-01-31',
+        pagoMinimo: 5000,
+        saldoActual: 25000,
+        cantidadMovimientos: 50,
+        movimientos: [
+          {
+            fecha: '2024-01-11',
+            descripcion: 'TEST',
+            nroCupon: null,
+            pesos: 1000.00,
+            dolares: null
+          }
+        ]
+      });
+
+      const result = parseResumenTarjetaResponse(response);
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        // 1 vs 50 is > 10% mismatch
+        expect(result.value.needsReview).toBe(true);
+      }
+    });
   });
 
   describe('parseResumenBrokerResponse - movimientos', () => {
@@ -520,6 +550,39 @@ describe('Parser - Movimiento Validation', () => {
       expect(result.ok).toBe(true);
       if (result.ok) {
         // Should flag for review due to invalid date format
+        expect(result.value.needsReview).toBe(true);
+      }
+    });
+
+    it('detects movimientos count mismatch', () => {
+      const response = JSON.stringify({
+        broker: 'BALANZ CAPITAL VALORES SAU',
+        numeroCuenta: '123456',
+        fechaDesde: '2024-07-01',
+        fechaHasta: '2024-07-31',
+        saldoARS: 500000,
+        cantidadMovimientos: 20,
+        movimientos: [
+          {
+            descripcion: 'TEST',
+            cantidadVN: null,
+            saldo: 500000.00,
+            precio: null,
+            bruto: null,
+            arancel: null,
+            iva: null,
+            neto: null,
+            fechaConcertacion: '2024-07-31',
+            fechaLiquidacion: '2024-07-31'
+          }
+        ]
+      });
+
+      const result = parseResumenBrokerResponse(response);
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        // 1 vs 20 is > 10% mismatch
         expect(result.value.needsReview).toBe(true);
       }
     });

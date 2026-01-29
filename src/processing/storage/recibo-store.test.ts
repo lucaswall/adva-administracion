@@ -52,7 +52,7 @@ describe('storeRecibo', () => {
     vi.clearAllMocks();
   });
 
-  describe('Duplicate detection', () => {
+  describe('duplicate detection', () => {
     it('returns { stored: true } when recibo is new', async () => {
       vi.mocked(getValues).mockResolvedValue({ ok: true, value: [['Header']] });
       vi.mocked(appendRowsWithLinks).mockResolvedValue({ ok: true, value: 1 });

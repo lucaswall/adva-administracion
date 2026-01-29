@@ -4,46 +4,15 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import type { Factura, Pago, Recibo, MatchConfidence } from '../types/index.js';
+import type { Pago } from '../types/index.js';
 import {
   DisplacementQueue,
-  DisplacementQueueItem,
   CascadeState,
   CascadeClaims,
   isBetterMatch,
   detectCycle,
 } from './cascade-matcher.js';
 import type { MatchQuality } from './matcher.js';
-
-// Helper to create test Factura
-function createFactura(
-  fileId: string,
-  fechaEmision: string,
-  importeTotal: number,
-  cuitEmisor?: string,
-  matchedPagoFileId?: string,
-  matchConfidence?: MatchConfidence
-): Factura & { row: number } {
-  return {
-    fileId,
-    fileName: `${fileId}.pdf`,
-    tipoComprobante: 'A',
-    nroFactura: '00001-00001234',
-    fechaEmision,
-    cuitEmisor: cuitEmisor || '20123456786',
-    razonSocialEmisor: 'TEST SA',
-    importeNeto: importeTotal / 1.21,
-    importeIva: importeTotal - importeTotal / 1.21,
-    importeTotal,
-    moneda: 'ARS',
-    processedAt: new Date().toISOString(),
-    confidence: 0.95,
-    needsReview: false,
-    matchedPagoFileId,
-    matchConfidence,
-    row: 2, // Arbitrary row number
-  };
-}
 
 // Helper to create test Pago
 function createPago(
@@ -66,37 +35,6 @@ function createPago(
     confidence: 0.9,
     needsReview: false,
     matchedFacturaFileId,
-  };
-}
-
-// Helper to create test Recibo
-function createRecibo(
-  fileId: string,
-  fechaPago: string,
-  totalNeto: number,
-  cuilEmpleado?: string,
-  matchedPagoFileId?: string,
-  matchConfidence?: MatchConfidence
-): Recibo & { row: number } {
-  return {
-    fileId,
-    fileName: `${fileId}.pdf`,
-    tipoRecibo: 'sueldo',
-    nombreEmpleado: 'MARTIN, Miguel',
-    cuilEmpleado: cuilEmpleado || '20271190523',
-    legajo: '1',
-    cuitEmpleador: '30709076783',
-    periodoAbonado: 'enero/2024',
-    fechaPago,
-    subtotalRemuneraciones: totalNeto * 1.3,
-    subtotalDescuentos: totalNeto * 0.3,
-    totalNeto,
-    processedAt: new Date().toISOString(),
-    confidence: 0.95,
-    needsReview: false,
-    matchedPagoFileId,
-    matchConfidence,
-    row: 2,
   };
 }
 

@@ -20,14 +20,14 @@ describe('Status routes', () => {
   let server: FastifyInstance;
 
   const mockConfig = {
-    nodeEnv: 'test',
+    nodeEnv: 'test' as const,
     port: 3000,
-    logLevel: 'info' as const,
+    logLevel: 'INFO' as const,
     apiSecret: 'test-secret-123',
+    apiBaseUrl: 'http://localhost:3000',
     googleServiceAccountKey: 'mock-key',
     geminiApiKey: 'mock-gemini-key',
     driveRootFolderId: 'mock-folder-id',
-    controlTemplateId: 'mock-template-id',
     webhookUrl: 'http://localhost:3000/webhooks/drive',
     matchDaysBefore: 10,
     matchDaysAfter: 60,

@@ -86,6 +86,7 @@ describe('ResumenBancario', () => {
       fileId: 'file-123',
       fileName: 'resumen.pdf',
       banco: 'BBVA',
+      numeroCuenta: '1234567890',
       fechaDesde: '2024-01-01',
       fechaHasta: '2024-01-31',
       saldoInicial: 100000,
@@ -98,6 +99,7 @@ describe('ResumenBancario', () => {
     };
 
     expect(resumen.banco).toBe('BBVA');
+    expect(resumen.numeroCuenta).toBe('1234567890');
     expect(resumen.fechaDesde).toBe('2024-01-01');
     expect(resumen.fechaHasta).toBe('2024-01-31');
     expect(resumen.saldoInicial).toBe(100000);
@@ -111,6 +113,7 @@ describe('ResumenBancario', () => {
       fileId: 'file-456',
       fileName: 'resumen-usd.pdf',
       banco: 'Santander',
+      numeroCuenta: '9876543210',
       fechaDesde: '2024-02-01',
       fechaHasta: '2024-02-29',
       saldoInicial: 5000,
@@ -132,6 +135,7 @@ describe('FolderStructure', () => {
       rootId: 'root-id',
       entradaId: 'entrada-id',
       sinProcesarId: 'sin-procesar-id',
+      duplicadoId: 'duplicado-id',
       controlIngresosId: 'control-ingresos-id',
       controlEgresosId: 'control-egresos-id',
       dashboardOperativoId: 'dashboard-id',
@@ -139,6 +143,8 @@ describe('FolderStructure', () => {
       yearFolders: new Map(),
       classificationFolders: new Map(),
       monthFolders: new Map(),
+      bankAccountFolders: new Map(),
+      bankAccountSpreadsheets: new Map(),
       lastRefreshed: new Date(),
     };
 
