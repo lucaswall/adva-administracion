@@ -215,6 +215,140 @@ describe('GeminiClient', () => {
         expect(result.error).toBeInstanceOf(GeminiError);
       }
     });
+
+    it('aborts fetch after timeout', async () => {
+      vi.useFakeTimers();
+
+      global.fetch = vi.fn().mockImplementation((_url, options) =>
+        new Promise((resolve, reject) => {
+          const signal = options?.signal;
+          if (signal) {
+            signal.addEventListener('abort', () => {
+              reject(new DOMException('The operation was aborted.', 'AbortError'));
+            });
+          }
+
+          // Simulate long-running request
+          setTimeout(() => {
+            resolve({
+              ok: true,
+              status: 200,
+              text: async () => JSON.stringify({ candidates: [{ content: { parts: [{ text: 'data' }] } }] })
+            });
+          }, 35000); // 35 seconds, longer than timeout
+        })
+      );
+
+      const promise = client.analyzeDocument(
+        mockBuffer,
+        mockMimeType,
+        mockPrompt,
+        1
+      );
+
+      // Advance time to trigger timeout
+      await vi.advanceTimersByTimeAsync(30000); // 30 seconds
+
+      const result = await promise;
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.error.message).toContain('timeout');
+      }
+
+      vi.useRealTimers();
+    });
+
+    it('completes successfully when fetch finishes before timeout', async () => {
+      vi.useFakeTimers();
+
+      const mockResponse = {
+        candidates: [{
+          content: {
+            parts: [{ text: 'Extracted data' }]
+          }
+        }]
+      };
+
+      global.fetch = vi.fn().mockImplementation((_url, options) =>
+        new Promise((resolve, reject) => {
+          const signal = options?.signal;
+          if (signal) {
+            signal.addEventListener('abort', () => {
+              reject(new DOMException('The operation was aborted.', 'AbortError'));
+            });
+          }
+
+          setTimeout(() => {
+            resolve({
+              ok: true,
+              status: 200,
+              text: async () => JSON.stringify(mockResponse)
+            });
+          }, 1000); // 1 second, well within timeout
+        })
+      );
+
+      const promise = client.analyzeDocument(
+        mockBuffer,
+        mockMimeType,
+        mockPrompt,
+        1
+      );
+
+      await vi.advanceTimersByTimeAsync(1000);
+
+      const result = await promise;
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value).toBe('Extracted data');
+      }
+
+      vi.useRealTimers();
+    });
+
+    it('distinguishes timeout error from network error', async () => {
+      vi.useFakeTimers();
+
+      global.fetch = vi.fn().mockImplementation((_url, options) =>
+        new Promise((resolve, reject) => {
+          const signal = options?.signal;
+          if (signal) {
+            signal.addEventListener('abort', () => {
+              reject(new DOMException('The operation was aborted.', 'AbortError'));
+            });
+          }
+
+          setTimeout(() => {
+            resolve({
+              ok: true,
+              status: 200,
+              text: async () => JSON.stringify({ candidates: [{ content: { parts: [{ text: 'data' }] } }] })
+            });
+          }, 35000);
+        })
+      );
+
+      const promise = client.analyzeDocument(
+        mockBuffer,
+        mockMimeType,
+        mockPrompt,
+        1
+      );
+
+      await vi.advanceTimersByTimeAsync(30000);
+
+      const result = await promise;
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.error.message).toContain('timeout');
+        expect(result.error.message).not.toContain('network');
+      }
+
+      vi.useRealTimers();
+    });
   });
 
   describe('retry logic', () => {
@@ -407,6 +541,138 @@ describe('GeminiClient', () => {
       const status = limitedClient.getRateLimitStatus();
       expect(status.requestCount).toBe(0);
       expect(status.timeUntilReset).toBeGreaterThan(0);
+    });
+
+    it('handles concurrent requests without exceeding rate limit', async () => {
+      vi.useFakeTimers();
+
+      const mockResponse = {
+        candidates: [{
+          content: {
+            parts: [{ text: 'Success' }]
+          }
+        }]
+      };
+
+      let fetchCount = 0;
+      global.fetch = vi.fn().mockImplementation(async () => {
+        fetchCount++;
+        return {
+          ok: true,
+          status: 200,
+          text: async () => JSON.stringify(mockResponse)
+        };
+      });
+
+      const limitedClient = new GeminiClient(mockApiKey, 3);
+
+      // Launch 5 concurrent requests with limit of 3
+      const promises = Array.from({ length: 5 }, () =>
+        limitedClient.analyzeDocument(mockBuffer, mockMimeType, mockPrompt, 1)
+      );
+
+      // Advance timers to allow first batch to complete
+      await vi.runAllTimersAsync();
+
+      const results = await Promise.all(promises);
+
+      // All should succeed
+      expect(results.every(r => r.ok)).toBe(true);
+
+      // Should have made exactly 5 fetch calls
+      expect(fetchCount).toBe(5);
+
+      vi.useRealTimers();
+    });
+
+    it('concurrent requests at limit all wait properly', async () => {
+      vi.useFakeTimers();
+
+      const mockResponse = {
+        candidates: [{
+          content: {
+            parts: [{ text: 'Success' }]
+          }
+        }]
+      };
+
+      const fetchTimes: number[] = [];
+      global.fetch = vi.fn().mockImplementation(async () => {
+        fetchTimes.push(Date.now());
+        return {
+          ok: true,
+          status: 200,
+          text: async () => JSON.stringify(mockResponse)
+        };
+      });
+
+      const limitedClient = new GeminiClient(mockApiKey, 2);
+
+      // Launch 4 concurrent requests with limit of 2
+      const promises = Array.from({ length: 4 }, () =>
+        limitedClient.analyzeDocument(mockBuffer, mockMimeType, mockPrompt, 1)
+      );
+
+      await vi.runAllTimersAsync();
+
+      const results = await Promise.all(promises);
+
+      // All should succeed
+      expect(results.every(r => r.ok)).toBe(true);
+
+      // Should have made exactly 4 fetch calls
+      expect(fetchTimes.length).toBe(4);
+
+      // First 2 should be at same time, next 2 should be 60s later
+      const firstBatchTime = fetchTimes[0];
+      expect(fetchTimes[1]).toBe(firstBatchTime);
+      expect(fetchTimes[2]).toBeGreaterThanOrEqual(firstBatchTime + 60000);
+      expect(fetchTimes[3]).toBeGreaterThanOrEqual(firstBatchTime + 60000);
+
+      vi.useRealTimers();
+    });
+
+    it('verifies correct number of requests within time window', async () => {
+      vi.useFakeTimers();
+
+      const mockResponse = {
+        candidates: [{
+          content: {
+            parts: [{ text: 'Success' }]
+          }
+        }]
+      };
+
+      let fetchCount = 0;
+      global.fetch = vi.fn().mockImplementation(async () => {
+        fetchCount++;
+        return {
+          ok: true,
+          status: 200,
+          text: async () => JSON.stringify(mockResponse)
+        };
+      });
+
+      const limitedClient = new GeminiClient(mockApiKey, 3);
+
+      // Launch 6 concurrent requests with limit of 3
+      const promises = Array.from({ length: 6 }, () =>
+        limitedClient.analyzeDocument(mockBuffer, mockMimeType, mockPrompt, 1)
+      );
+
+      await vi.runAllTimersAsync();
+
+      await Promise.all(promises);
+
+      // Should have made exactly 6 fetch calls
+      expect(fetchCount).toBe(6);
+
+      // Verify rate limiter state is correct
+      const status = limitedClient.getRateLimitStatus();
+      // After processing 6 requests in 2 windows (3 per window), count should be 3 (in second window)
+      expect(status.requestCount).toBe(3);
+
+      vi.useRealTimers();
     });
   });
 

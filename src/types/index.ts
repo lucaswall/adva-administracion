@@ -91,7 +91,7 @@ export interface Factura {
   fileName: string;
 
   // Comprobante identification
-  /** Type of comprobante (A, B, C, E, NC, ND) */
+  /** Type of comprobante (A, B, C, E, NC, ND, LP) */
   tipoComprobante: TipoComprobante;
   /** Full invoice number (e.g., "00003-00001957" or "0003-00001957") */
   nroFactura: string;
