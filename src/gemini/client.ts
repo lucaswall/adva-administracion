@@ -7,6 +7,7 @@ import type { GeminiResponse, GeminiUsageMetadata, Result } from '../types/index
 import { GeminiError } from '../types/index.js';
 import { classifyError } from './errors.js';
 import { debug, warn, error as logError } from '../utils/logger.js';
+import { FETCH_TIMEOUT_MS } from '../config.js';
 
 /**
  * Usage callback data structure
@@ -63,6 +64,7 @@ export class GeminiClient {
   private readonly MODEL = 'gemini-2.5-flash';
   private readonly ENDPOINT: string;
   private readonly usageCallback?: UsageCallback;
+  private rateLimitQueue: Promise<void> = Promise.resolve();
 
   /**
    * Creates a new Gemini client
@@ -214,38 +216,76 @@ export class GeminiClient {
         promptPreview: prompt.substring(0, 200) + '...'
       });
 
-      const response = await fetch(this.ENDPOINT, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-goog-api-key': this.apiKey
-        },
-        body: JSON.stringify(payload)
-      });
+      // Create AbortController for timeout
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
 
-      const responseText = await response.text();
-      const parseResult = this.parseApiResponse(responseText, response.status);
+      try {
+        const response = await fetch(this.ENDPOINT, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-goog-api-key': this.apiKey
+          },
+          body: JSON.stringify(payload),
+          signal: controller.signal
+        });
 
-      // Extract usage metadata from parse result
-      if (parseResult.ok && 'usageMetadata' in parseResult) {
-        usageMetadata = (parseResult as any).usageMetadata;
-      }
+        clearTimeout(timeoutId);
+        const responseText = await response.text();
 
-      const duration = Date.now() - startTime;
+        const parseResult = this.parseApiResponse(responseText, response.status);
 
-      if (parseResult.ok) {
-        debug('Gemini API response', {
+        // Extract usage metadata from parse result
+        if (parseResult.ok && 'usageMetadata' in parseResult) {
+          usageMetadata = (parseResult as any).usageMetadata;
+        }
+
+        const duration = Date.now() - startTime;
+
+        if (parseResult.ok) {
+          debug('Gemini API response', {
+            module: 'gemini-client',
+            phase: 'api-call',
+            responseLength: parseResult.value.length,
+            responsePreview: parseResult.value.substring(0, 500) + '...'
+          });
+          this.callUsageCallback(true, usageMetadata, duration, fileId, fileName);
+          return { ok: true, value: parseResult.value };
+        } else {
+          this.callUsageCallback(false, usageMetadata, duration, fileId, fileName, parseResult.error.message);
+          return parseResult;
+        }
+      } catch (fetchError) {
+        clearTimeout(timeoutId);
+
+        // Check if this is an abort error (timeout)
+        const err = fetchError instanceof Error ? fetchError : new Error('Unknown error');
+        const isTimeout = err.name === 'AbortError';
+        const errorMessage = isTimeout
+          ? `Gemini API request timeout after ${FETCH_TIMEOUT_MS}ms`
+          : err.message;
+
+        const duration = Date.now() - startTime;
+
+        logError('Gemini API error', {
           module: 'gemini-client',
           phase: 'api-call',
-          responseLength: parseResult.value.length,
-          responsePreview: parseResult.value.substring(0, 500) + '...'
+          error: errorMessage,
+          isTimeout,
+          details: fetchError
         });
-        this.requestCount++;
-        this.callUsageCallback(true, usageMetadata, duration, fileId, fileName);
-        return { ok: true, value: parseResult.value };
-      } else {
-        this.callUsageCallback(false, usageMetadata, duration, fileId, fileName, parseResult.error.message);
-        return parseResult;
+
+        this.callUsageCallback(false, usageMetadata, duration, fileId, fileName, errorMessage);
+
+        return {
+          ok: false,
+          error: new GeminiError(
+            errorMessage,
+            undefined,
+            fetchError
+          )
+        };
       }
     } catch (error) {
       const err = error instanceof Error ? error : new Error('Unknown error');
@@ -428,25 +468,40 @@ export class GeminiClient {
    * Sleeps if needed to stay under limit
    */
   private async enforceRateLimit(): Promise<void> {
-    const now = Date.now();
-    const elapsed = now - this.windowStart;
+    // Serialize rate limit checks using a promise queue to prevent race conditions
+    const previousPromise = this.rateLimitQueue;
+    let resolver: () => void;
 
-    // Reset counter if window has passed (1 minute)
-    if (elapsed >= 60000) {
-      this.requestCount = 0;
-      this.windowStart = now;
-      return;
-    }
+    this.rateLimitQueue = new Promise<void>((resolve) => {
+      resolver = resolve;
+    });
 
-    // If at limit, sleep until window resets
-    if (this.requestCount >= this.rpmLimit) {
-      const sleepTime = 60000 - elapsed;
-      if (sleepTime > 0) {
-        await sleep(sleepTime);
-        // Reset after sleeping
+    await previousPromise;
+
+    try {
+      const now = Date.now();
+      const elapsed = now - this.windowStart;
+
+      // Reset counter if window has passed (1 minute)
+      if (elapsed >= 60000) {
         this.requestCount = 0;
-        this.windowStart = Date.now();
+        this.windowStart = now;
+      } else if (this.requestCount >= this.rpmLimit) {
+        // If at limit, sleep until window resets
+        const sleepTime = 60000 - elapsed;
+        if (sleepTime > 0) {
+          await sleep(sleepTime);
+          // Reset after sleeping
+          this.requestCount = 0;
+          this.windowStart = Date.now();
+        }
       }
+
+      // Increment request count atomically within the locked section
+      this.requestCount++;
+    } finally {
+      // Release the lock
+      resolver!();
     }
   }
 

@@ -36,6 +36,12 @@ export const MAX_CASCADE_DEPTH = 10;
 export const CASCADE_TIMEOUT_MS = 30000;
 
 /**
+ * Fetch timeout in milliseconds
+ * Maximum time allowed for a single fetch request to Gemini API
+ */
+export const FETCH_TIMEOUT_MS = 30000;
+
+/**
  * Gemini API pricing per token (Standard tier)
  * Source: https://ai.google.dev/gemini-api/docs/pricing
  * Last updated: 2026-01-23

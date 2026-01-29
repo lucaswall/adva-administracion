@@ -342,7 +342,7 @@ export function validateRecibo(data: Partial<Recibo>): ValidationResult {
 export function validateTipoComprobante(value: unknown): TipoComprobante | undefined {
   if (typeof value !== 'string') return undefined;
 
-  const validTypes: TipoComprobante[] = ['A', 'B', 'C', 'E', 'NC', 'ND'];
+  const validTypes: TipoComprobante[] = ['A', 'B', 'C', 'E', 'NC', 'ND', 'LP'];
   return validTypes.includes(value as TipoComprobante) ? (value as TipoComprobante) : undefined;
 }
 

@@ -89,3 +89,90 @@ Addresses item #3: Race condition in rate limiter with concurrent requests.
 1. Run `bug-hunter` agent - Review changes for bugs
 2. Run `test-runner` agent - Verify all tests pass
 3. Run `builder` agent - Verify zero warnings
+
+---
+
+## Iteration 1
+
+**Implemented:** 2026-01-29
+
+### Completed
+
+- **Task 1: Add 'LP' to validateTipoComprobante validation**
+  - Added test in `src/utils/validation.test.ts` for 'LP' validation
+  - Confirmed test fails (red phase)
+  - Added 'LP' to validTypes array in `src/utils/validation.ts:345`
+  - Confirmed test passes (green phase)
+  - Updated JSDoc comment in `src/types/index.ts:94` to include LP
+
+- **Task 2: Add fetch timeout with AbortController**
+  - Added FETCH_TIMEOUT_MS constant to `src/config.ts` (30000ms)
+  - Added import for FETCH_TIMEOUT_MS in `src/gemini/client.ts`
+  - Added 3 tests in `src/gemini/client.test.ts` for timeout behavior:
+    - Test fetch aborts after timeout
+    - Test fetch completes successfully before timeout
+    - Test distinguishes timeout error from network error
+  - Confirmed tests fail (red phase)
+  - Implemented AbortController in `analyzeDocument()` method:
+    - Created AbortController before fetch
+    - Set timeout using setTimeout to call controller.abort()
+    - Passed signal to fetch options
+    - Clear timeout on success
+    - Handle AbortError in catch block with specific "timeout" message
+  - Confirmed tests pass (green phase)
+
+- **Task 3: Fix rate limiter race condition with atomic increment**
+  - Added 3 tests in `src/gemini/client.test.ts` for concurrent rate limiting:
+    - Test multiple concurrent calls don't exceed rate limit
+    - Test concurrent calls at limit all wait properly
+    - Test correct number of requests made within time window
+  - Confirmed tests fail (red phase)
+  - Implemented promise queue for serialized rate limiting in `src/gemini/client.ts`:
+    - Added `rateLimitQueue: Promise<void>` property
+    - Updated `enforceRateLimit()` to use queue pattern for atomic operations
+    - Changed from check-then-increment to always-increment approach
+    - Moved increment inside the locked section to prevent race conditions
+  - Removed duplicate `requestCount++` from success path
+  - Confirmed tests pass (green phase)
+
+### Checklist Results
+
+- **bug-hunter**: Found 2 bugs, fixed both:
+  - HIGH: Request not counted when window resets - Fixed by restructuring if/else to always increment
+  - LOW: Missing 'LP' in JSDoc comment - Fixed by updating comment to include LP
+- **test-runner**: Passed (1048 tests, 53 files)
+- **builder**: Passed (zero warnings)
+
+### Notes
+
+- All three critical audit findings have been resolved
+- TipoComprobante 'LP' is now fully validated across the codebase
+- Fetch timeout prevents hanging requests to Gemini API
+- Rate limiter race condition fixed with promise queue serialization pattern
+- All tests passing with full coverage of edge cases
+- No warnings in build output
+
+### Review Findings
+
+Files reviewed: 6
+- `src/utils/validation.ts` (lines 342-347)
+- `src/utils/validation.test.ts` (lines 565-567)
+- `src/config.ts` (lines 38-42)
+- `src/gemini/client.ts` (full file)
+- `src/gemini/client.test.ts` (full file)
+- `src/types/index.ts` (line 94)
+
+Checks applied: Security, Logic, Async, Resources, Type Safety, Error Handling, Timeout, Conventions
+
+No issues found - all implementations are correct and follow project conventions.
+
+**Verification details:**
+- Task 1: 'LP' correctly added to validTypes array and tested
+- Task 2: AbortController properly manages timeout; clearTimeout called in both success and error paths (no resource leak); timeout errors correctly distinguished from network errors
+- Task 3: Promise queue pattern correctly serializes rate limit checks; increment happens atomically within locked section; finally block ensures queue always progresses
+
+---
+
+## Status: COMPLETE
+
+All tasks implemented and reviewed successfully. Ready for human review.

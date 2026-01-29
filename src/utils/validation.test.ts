@@ -562,6 +562,10 @@ describe('validateTipoComprobante', () => {
     expect(validateTipoComprobante('ND')).toBe('ND');
   });
 
+  it('returns valid tipo for LP', () => {
+    expect(validateTipoComprobante('LP')).toBe('LP');
+  });
+
   it('returns undefined for invalid string', () => {
     expect(validateTipoComprobante('X')).toBeUndefined();
   });
