@@ -11,7 +11,7 @@ import {
   formatUSCurrency,
   normalizeAmount,
   amountsMatch
-} from '../../../src/utils/numbers';
+} from './numbers.js';
 
 describe('detectNumberFormat', () => {
   it('detects Argentine format (comma last)', () => {

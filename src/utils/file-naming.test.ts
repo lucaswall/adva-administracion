@@ -12,8 +12,8 @@ import {
   generateResumenTarjetaFileName,
   generateResumenBrokerFileName,
   sanitizeFileName,
-} from '../../../src/utils/file-naming.js';
-import type { Factura, Pago, Recibo, ResumenBancario, ResumenTarjeta, ResumenBroker } from '../../../src/types/index.js';
+} from './file-naming.js';
+import type { Factura, Pago, Recibo, ResumenBancario, ResumenTarjeta, ResumenBroker } from '../types/index.js';
 
 describe('sanitizeFileName', () => {
   it('replaces slashes with dashes for account numbers', () => {

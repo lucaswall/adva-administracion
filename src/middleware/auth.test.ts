@@ -8,13 +8,13 @@ import Fastify from 'fastify';
 import type { FastifyInstance } from 'fastify';
 
 // Mock config
-vi.mock('../../../src/config.js', () => ({
+vi.mock('../config.js', () => ({
   getConfig: vi.fn(),
 }));
 
 // Import middleware after mocks
-import { authMiddleware } from '../../../src/middleware/auth.js';
-import { getConfig } from '../../../src/config.js';
+import { authMiddleware } from './auth.js';
+import { getConfig } from '../config.js';
 
 describe('Authentication middleware', () => {
   let server: FastifyInstance;

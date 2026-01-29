@@ -4,7 +4,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { extractDriveFolderId, isValidDriveId } from '../../../src/utils/drive-parser';
+import { extractDriveFolderId, isValidDriveId } from './drive-parser.js';
 
 describe('Drive URL Parser', () => {
   describe('extractDriveFolderId', () => {

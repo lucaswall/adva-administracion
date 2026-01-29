@@ -4,8 +4,8 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { classifyError } from '../../../src/gemini/errors';
-import { GeminiError } from '../../../src/types/index';
+import { classifyError } from './errors.js';
+import { GeminiError } from '../types/index.js';
 
 describe('classifyError', () => {
   describe('Quota Exceeded Errors (429 with quota message)', () => {

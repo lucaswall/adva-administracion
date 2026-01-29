@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { AMOUNT_TOLERANCE } from '../../../src/utils/currency.js';
+import { AMOUNT_TOLERANCE } from './currency.js';
 
 describe('currency', () => {
   describe('AMOUNT_TOLERANCE', () => {

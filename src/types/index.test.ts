@@ -9,7 +9,7 @@ import type {
   SortDestination,
   ResumenBancario,
   FolderStructure,
-} from '../../src/types/index.js';
+} from './index.js';
 
 describe('DocumentType', () => {
   it('accepts all valid document types', () => {

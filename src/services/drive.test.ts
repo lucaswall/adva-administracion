@@ -22,7 +22,7 @@ vi.mock('googleapis', () => ({
 }));
 
 // Mock google-auth
-vi.mock('../../../src/services/google-auth.js', () => ({
+vi.mock('./google-auth.js', () => ({
   getGoogleAuth: vi.fn(() => ({})),
   getGoogleAuthAsync: vi.fn(async () => ({})),
   getDefaultScopes: vi.fn(() => []),
@@ -36,7 +36,7 @@ import {
   getParents,
   renameFile,
   clearDriveCache,
-} from '../../../src/services/drive.js';
+} from './drive.js';
 
 describe('Drive folder operations', () => {
   let mockDriveFiles: {

@@ -6,8 +6,8 @@ import { describe, it, expect } from 'vitest';
 import {
   SubdiarioMatcher,
   extractCuitFromMovementConcepto
-} from '../../../src/bank/subdiario-matcher';
-import type { BankMovement, SubdiarioCobro } from '../../../src/types/index';
+} from './subdiario-matcher.js';
+import type { BankMovement, SubdiarioCobro } from '../types/index.js';
 
 describe('extractCuitFromMovementConcepto', () => {
   it('extracts CUIT from "TRANSFERENCI 30712345671"', () => {

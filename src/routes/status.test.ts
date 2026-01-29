@@ -8,13 +8,13 @@ import Fastify from 'fastify';
 import type { FastifyInstance } from 'fastify';
 
 // Mock config
-vi.mock('../../../src/config.js', () => ({
+vi.mock('../config.js', () => ({
   getConfig: vi.fn(),
 }));
 
 // Import modules after mocks
-import { statusRoutes } from '../../../src/routes/status.js';
-import { getConfig } from '../../../src/config.js';
+import { statusRoutes } from './status.js';
+import { getConfig } from '../config.js';
 
 describe('Status routes', () => {
   let server: FastifyInstance;

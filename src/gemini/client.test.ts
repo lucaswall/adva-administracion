@@ -3,8 +3,8 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { GeminiClient } from '../../../src/gemini/client.js';
-import { GeminiError } from '../../../src/types/index.js';
+import { GeminiClient } from './client.js';
+import { GeminiError } from '../types/index.js';
 
 describe('GeminiClient', () => {
   let client: GeminiClient;

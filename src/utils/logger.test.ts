@@ -21,7 +21,7 @@ vi.mock('pino', () => {
 });
 
 // Mock config
-vi.mock('../../../src/config.js', () => ({
+vi.mock('../config.js', () => ({
   getConfig: vi.fn(() => ({
     logLevel: 'INFO',
   })),
@@ -43,7 +43,7 @@ describe('Logger', () => {
 
   describe('debug()', () => {
     it('should log debug message without context', async () => {
-      const { debug } = await import('../../../src/utils/logger.js');
+      const { debug } = await import('./logger.js');
 
       debug('Test debug message');
 
@@ -52,7 +52,7 @@ describe('Logger', () => {
     });
 
     it('should log debug message with context', async () => {
-      const { debug } = await import('../../../src/utils/logger.js');
+      const { debug } = await import('./logger.js');
 
       const context = { userId: 123, action: 'test' };
       debug('Test debug message', context);
@@ -64,7 +64,7 @@ describe('Logger', () => {
 
   describe('info()', () => {
     it('should log info message without context', async () => {
-      const { info } = await import('../../../src/utils/logger.js');
+      const { info } = await import('./logger.js');
 
       info('Test info message');
 
@@ -73,7 +73,7 @@ describe('Logger', () => {
     });
 
     it('should log info message with context', async () => {
-      const { info } = await import('../../../src/utils/logger.js');
+      const { info } = await import('./logger.js');
 
       const context = { requestId: 'abc123', method: 'GET' };
       info('Request received', context);
@@ -85,7 +85,7 @@ describe('Logger', () => {
 
   describe('warn()', () => {
     it('should log warn message without context', async () => {
-      const { warn } = await import('../../../src/utils/logger.js');
+      const { warn } = await import('./logger.js');
 
       warn('Test warning message');
 
@@ -94,7 +94,7 @@ describe('Logger', () => {
     });
 
     it('should log warn message with context', async () => {
-      const { warn } = await import('../../../src/utils/logger.js');
+      const { warn } = await import('./logger.js');
 
       const context = { retryCount: 3, maxRetries: 5 };
       warn('Retry attempt failed', context);
@@ -106,7 +106,7 @@ describe('Logger', () => {
 
   describe('error()', () => {
     it('should log error message without context', async () => {
-      const { error } = await import('../../../src/utils/logger.js');
+      const { error } = await import('./logger.js');
 
       error('Test error message');
 
@@ -115,7 +115,7 @@ describe('Logger', () => {
     });
 
     it('should log error message with context', async () => {
-      const { error } = await import('../../../src/utils/logger.js');
+      const { error } = await import('./logger.js');
 
       const context = { errorCode: 'ERR_001', stack: 'Error stack trace' };
       error('Database connection failed', context);
@@ -131,7 +131,7 @@ describe('Logger', () => {
       process.env.NODE_ENV = 'development';
 
       vi.resetModules();
-      const { info } = await import('../../../src/utils/logger.js');
+      const { info } = await import('./logger.js');
 
       // Trigger logger initialization by calling a logging function
       info('test');
@@ -159,13 +159,13 @@ describe('Logger', () => {
       vi.resetModules();
 
       // Re-mock config for this test
-      vi.doMock('../../../src/config.js', () => ({
+      vi.doMock('../config.js', () => ({
         getConfig: vi.fn(() => ({
           logLevel: 'INFO',
         })),
       }));
 
-      const { info } = await import('../../../src/utils/logger.js');
+      const { info } = await import('./logger.js');
 
       // Trigger logger initialization by calling a logging function
       info('test');
@@ -185,13 +185,13 @@ describe('Logger', () => {
       vi.resetModules();
 
       // Mock config with DEBUG level
-      vi.doMock('../../../src/config.js', () => ({
+      vi.doMock('../config.js', () => ({
         getConfig: vi.fn(() => ({
           logLevel: 'DEBUG',
         })),
       }));
 
-      const { info } = await import('../../../src/utils/logger.js');
+      const { info } = await import('./logger.js');
 
       // Trigger logger initialization by calling a logging function
       info('test');
@@ -207,11 +207,11 @@ describe('Logger', () => {
       vi.resetModules();
 
       // Mock config without logLevel
-      vi.doMock('../../../src/config.js', () => ({
+      vi.doMock('../config.js', () => ({
         getConfig: vi.fn(() => ({})),
       }));
 
-      const { info } = await import('../../../src/utils/logger.js');
+      const { info } = await import('./logger.js');
 
       // Trigger logger initialization by calling a logging function
       info('test');
@@ -227,13 +227,13 @@ describe('Logger', () => {
       vi.resetModules();
 
       // Mock config with uppercase WARN
-      vi.doMock('../../../src/config.js', () => ({
+      vi.doMock('../config.js', () => ({
         getConfig: vi.fn(() => ({
           logLevel: 'WARN',
         })),
       }));
 
-      const { info } = await import('../../../src/utils/logger.js');
+      const { info } = await import('./logger.js');
 
       // Trigger logger initialization by calling a logging function
       info('test');
@@ -248,7 +248,7 @@ describe('Logger', () => {
 
   describe('context handling', () => {
     it('should handle empty context object', async () => {
-      const { info } = await import('../../../src/utils/logger.js');
+      const { info } = await import('./logger.js');
 
       info('Test message', {});
 
@@ -256,7 +256,7 @@ describe('Logger', () => {
     });
 
     it('should handle complex context objects', async () => {
-      const { error } = await import('../../../src/utils/logger.js');
+      const { error } = await import('./logger.js');
 
       const context = {
         user: { id: 123, name: 'Test User' },
@@ -272,7 +272,7 @@ describe('Logger', () => {
 
   describe('getLogger export', () => {
     it('should export the getLogger function as named export', async () => {
-      const loggerModule = await import('../../../src/utils/logger.js');
+      const loggerModule = await import('./logger.js');
 
       expect(loggerModule.getLogger).toBeDefined();
       expect(typeof loggerModule.getLogger).toBe('function');

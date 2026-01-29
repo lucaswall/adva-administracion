@@ -7,7 +7,7 @@ import { describe, it, expect } from 'vitest';
 import {
   SPANISH_MONTHS,
   formatMonthFolder,
-} from '../../../src/utils/spanish-date.js';
+} from './spanish-date.js';
 
 describe('SPANISH_MONTHS', () => {
   it('has 12 months', () => {

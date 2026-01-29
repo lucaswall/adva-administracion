@@ -20,8 +20,8 @@ import {
   validateMatchConfidence,
   validateMoneda,
   validateTipoRecibo
-} from '../../src/utils/validation';
-import type { Factura, Pago, Recibo } from '../../src/types/index';
+} from './validation.js';
+import type { Factura, Pago, Recibo } from '../types/index.js';
 
 describe('isValidCuit', () => {
   it('returns true for valid CUIT 20-12345678-6', () => {

@@ -11,7 +11,7 @@ import type { FastifyInstance } from 'fastify';
 const mockScanFolder = vi.fn();
 const mockRematch = vi.fn();
 
-vi.mock('../../../src/processing/scanner.js', () => ({
+vi.mock('../processing/scanner.js', () => ({
   scanFolder: (...args: unknown[]) => mockScanFolder(...args),
   rematch: (...args: unknown[]) => mockRematch(...args),
 }));
@@ -20,7 +20,7 @@ vi.mock('../../../src/processing/scanner.js', () => ({
 const mockGetCachedFolderStructure = vi.fn();
 const mockDiscoverFolderStructure = vi.fn();
 
-vi.mock('../../../src/services/folder-structure.js', () => ({
+vi.mock('../services/folder-structure.js', () => ({
   getCachedFolderStructure: () => mockGetCachedFolderStructure(),
   discoverFolderStructure: () => mockDiscoverFolderStructure(),
   clearFolderStructureCache: vi.fn(),
@@ -29,18 +29,18 @@ vi.mock('../../../src/services/folder-structure.js', () => ({
 // Mock bank autofill
 const mockAutoFillBankMovements = vi.fn();
 
-vi.mock('../../../src/bank/autofill.js', () => ({
+vi.mock('../bank/autofill.js', () => ({
   autoFillBankMovements: (...args: unknown[]) => mockAutoFillBankMovements(...args),
 }));
 
 // Mock config
-vi.mock('../../../src/config.js', () => ({
+vi.mock('../config.js', () => ({
   getConfig: vi.fn(),
 }));
 
 // Import modules after mocks
-import { scanRoutes } from '../../../src/routes/scan.js';
-import { getConfig } from '../../../src/config.js';
+import { scanRoutes } from './scan.js';
+import { getConfig } from '../config.js';
 
 describe('Scan routes', () => {
   let server: FastifyInstance;

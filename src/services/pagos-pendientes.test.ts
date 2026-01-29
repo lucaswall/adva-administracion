@@ -3,18 +3,18 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { syncPagosPendientes } from '../../../src/services/pagos-pendientes.js';
-import * as sheets from '../../../src/services/sheets.js';
+import { syncPagosPendientes } from './pagos-pendientes.js';
+import * as sheets from './sheets.js';
 
 // Mock the sheets service
-vi.mock('../../../src/services/sheets.js', () => ({
+vi.mock('./sheets.js', () => ({
   getValues: vi.fn(),
   clearSheetData: vi.fn(),
   appendRowsWithFormatting: vi.fn(),
 }));
 
 // Mock logger
-vi.mock('../../../src/utils/logger.js', () => ({
+vi.mock('../utils/logger.js', () => ({
   info: vi.fn(),
   warn: vi.fn(),
   debug: vi.fn(),
@@ -22,7 +22,7 @@ vi.mock('../../../src/utils/logger.js', () => ({
 }));
 
 // Mock correlation
-vi.mock('../../../src/utils/correlation.js', () => ({
+vi.mock('../utils/correlation.js', () => ({
   getCorrelationId: vi.fn(() => 'test-correlation-id'),
 }));
 

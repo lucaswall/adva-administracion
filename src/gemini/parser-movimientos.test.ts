@@ -7,7 +7,7 @@ import { describe, it, expect } from 'vitest';
 import {
   parseResumenTarjetaResponse,
   parseResumenBrokerResponse,
-} from '../../../src/gemini/parser.js';
+} from './parser.js';
 
 describe('parseResumenTarjetaResponse - movimientos', () => {
   it('parses response with movimientos array', () => {

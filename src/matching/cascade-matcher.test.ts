@@ -4,7 +4,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import type { Factura, Pago, Recibo, MatchConfidence } from '../../../src/types/index.js';
+import type { Factura, Pago, Recibo, MatchConfidence } from '../types/index.js';
 import {
   DisplacementQueue,
   DisplacementQueueItem,
@@ -12,8 +12,8 @@ import {
   CascadeClaims,
   isBetterMatch,
   detectCycle,
-} from '../../../src/matching/cascade-matcher.js';
-import type { MatchQuality } from '../../../src/matching/matcher.js';
+} from './cascade-matcher.js';
+import type { MatchQuality } from './matcher.js';
 
 // Helper to create test Factura
 function createFactura(

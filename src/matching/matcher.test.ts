@@ -4,9 +4,9 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
-import { FacturaPagoMatcher, ReciboPagoMatcher } from '../../src/matching/matcher';
-import type { Factura, Pago, Recibo } from '../../src/types/index';
-import { clearExchangeRateCache, setExchangeRateCache } from '../../src/utils/exchange-rate';
+import { FacturaPagoMatcher, ReciboPagoMatcher } from './matcher.js';
+import type { Factura, Pago, Recibo } from '../types/index.js';
+import { clearExchangeRateCache, setExchangeRateCache } from '../utils/exchange-rate.js';
 
 describe('FacturaPagoMatcher.findMatches', () => {
   // Sample facturas for testing
