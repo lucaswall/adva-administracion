@@ -20,19 +20,19 @@ Universal checks that apply to any project. Project-specific rules should be def
 - Error messages don't leak internal paths or stack traces
 
 ### Input Validation (OWASP A03:2021)
-- User input sanitized before use
-- SQL/NoSQL injection prevention (parameterized queries, ORM)
+- User/API input sanitized before use
+- SQL/NoSQL injection prevention (parameterized queries, ORM) - if using databases
 - Command injection prevention (avoid shell execution with user input)
 - Path traversal prevention (`../` sequences blocked)
-- XSS prevention (context-appropriate encoding: HTML, JS, CSS, URL)
-- File upload validation (content type, size, extension)
+- External API response validation (don't trust third-party data)
+- File path/name validation when processing external files
 
 ### Authentication (OWASP A07:2021)
-- Strong password hashing (bcrypt, argon2, scrypt with salt)
-- Session tokens cryptographically random (>=128 bits)
-- Session invalidation on logout
-- Re-authentication for sensitive operations
-- JWT validation complete (signature, expiry, issuer)
+- Bearer/API tokens validated on every request
+- Token secrets loaded from environment (not hardcoded)
+- Auth middleware applied consistently to protected routes
+- Service account credentials properly scoped
+- JWT validation complete (signature, expiry, issuer) - if using JWTs
 
 ### HTTPS & Transport
 - External API calls use HTTPS
@@ -48,7 +48,8 @@ Universal checks that apply to any project. Project-specific rules should be def
 ### Type Guards
 - Union types have exhaustive handling
 - Nullable types explicitly handled (null, undefined)
-- External data validated before use (API responses, file parsing)
+- External data validated before use (API responses, AI outputs, file parsing)
+- Parsed data matches expected schema (dates, numbers, enums)
 
 ### Runtime Validation
 - API inputs validated (zod, io-ts, or manual)
@@ -134,8 +135,9 @@ Universal checks that apply to any project. Project-specific rules should be def
 
 ### External API Calls
 - HTTP requests without timeout option
-- Third-party API calls that could hang indefinitely
+- Third-party API calls that could hang indefinitely (Google, AI services)
 - No circuit breaker for unreliable dependencies
+- Missing retry logic for transient failures (network errors, 5xx)
 
 ### Blocking Operations
 - Synchronous file/network operations in async code
@@ -160,10 +162,11 @@ Universal checks that apply to any project. Project-specific rules should be def
 - Scheduled tasks cancelled
 
 ### Resource Cleanup
-- Database connections closed
+- Database/API connections closed
 - File handles released
 - Timers cleared
-- External subscriptions/watches cancelled
+- External subscriptions/watches cancelled (webhooks, Drive watches)
+- Pending API requests aborted
 
 ## Dependency Vulnerabilities
 
@@ -184,9 +187,10 @@ Universal checks that apply to any project. Project-specific rules should be def
 ## Rate Limiting
 
 ### External API Quotas
-- Rate limit handling for third-party APIs
+- Rate limit handling for third-party APIs (Google, AI services)
 - Backoff/retry logic for 429 responses
 - Quota monitoring and alerting
+- Token/request budgeting for AI APIs
 
 ### Internal Rate Limiting
 - Prevent self-DDoS on downstream services
