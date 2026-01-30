@@ -360,6 +360,12 @@ ADVA CUIT: 30709076783 | Direction determines routing:
 - `resumen_tarjeta`: Credit card statements (CIERRE, PAGO MÍNIMO, card type visible)
 - `resumen_broker`: Broker/investment statements (Comitente number, instruments list, multi-currency)
 
+**Invoice ID Handling:**
+- Standard B2B invoices: Client CUIT labeled "CUIT:" in receptor section
+- Consumidor Final invoices: Client ID may be labeled "Doc. Receptor:", "DNI:", or "CUIL:" instead of "CUIT:"
+- System extracts ALL identification numbers (7-11 digits) regardless of label
+- Empty `cuitReceptor` in `factura_emitida` triggers automatic review flag for human verification
+
 ## FOLDER STRUCTURE
 
 ```
