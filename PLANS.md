@@ -242,3 +242,33 @@ This implementation focuses on `resumen_bancario` (bank accounts) only because:
 - Maintained backward compatibility with empty movimientos case
 - Updated all test mocks to use correct camelCase header names
 - All changes follow TDD workflow (test first, then implementation)
+
+### Review Findings
+
+Files reviewed: 7
+- `src/utils/balance-formulas.ts` (new)
+- `src/utils/balance-formulas.test.ts` (new)
+- `src/constants/spreadsheet-headers.ts` (modified)
+- `src/constants/spreadsheet-headers.test.ts` (modified)
+- `src/processing/storage/movimientos-store.ts` (modified)
+- `src/processing/storage/movimientos-store.test.ts` (modified)
+- `src/processing/scanner.ts` (modified)
+
+Checks applied: Security, Logic, Async, Resources, Type Safety, Edge Cases, Conventions
+
+No issues found - all implementations are correct and follow project conventions.
+
+**Verification details:**
+- Formula row indexing logic verified: SALDO INICIAL at sheet row 1, transactions at rows 2..N+1, SALDO FINAL references last transaction correctly
+- Empty movimientos edge case handled (creates formatted empty sheet without balance rows)
+- Zero/negative saldoInicial values tested and work correctly
+- ESM imports use `.js` extensions ✓
+- Logging uses Pino (`info()`) not console.log ✓
+- JSDoc comments on all exported functions ✓
+- Tests follow TDD pattern with comprehensive coverage ✓
+
+---
+
+## Status: COMPLETE
+
+All tasks implemented and reviewed successfully. Ready for human review.
