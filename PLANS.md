@@ -164,3 +164,31 @@
 - Sorting by periodo provides chronological ordering that aligns with monthly statements
 - Duplicate detection logic remains unchanged (skips periodo column, matches on business keys)
 - No breaking changes to external APIs or folder structure
+
+### Review Findings
+
+Files reviewed: 7
+- `src/constants/spreadsheet-headers.ts`
+- `src/constants/spreadsheet-headers.test.ts`
+- `src/utils/file-naming.ts`
+- `src/utils/file-naming.test.ts`
+- `src/processing/storage/resumen-store.ts`
+- `src/processing/storage/resumen-store.test.ts`
+- `SPREADSHEET_FORMAT.md`
+
+Checks applied: Security, Logic, Async, Resources, Type Safety, Conventions
+
+No issues found - all implementations are correct and follow project conventions:
+- `periodo` correctly derived from `fechaHasta.substring(0, 7)` in all 3 store functions
+- Column indices correctly shifted (+1) in headers and numberFormats Maps
+- Duplicate detection correctly reads shifted columns (periodo at 0, business keys at 1+)
+- Sorting correctly uses column 0 (periodo) ascending
+- File naming consistently uses YYYY-MM format from fechaHasta
+- Tests comprehensively verify new 10-column structure (bancario/tarjeta) and 9-column (broker)
+- Documentation accurately reflects schema changes
+
+---
+
+## Status: COMPLETE
+
+All tasks implemented and reviewed successfully. Ready for human review.
