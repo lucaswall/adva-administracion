@@ -1,120 +1,118 @@
 # Bug Fix Plan
 
 **Created:** 2026-01-29
-**Bug Report:** File stuck in Sin Procesar after transient Gemini API error during deployment restart
-**Category:** Resilience / Retry Mechanism
+**Bug Report:** Marcial Fermin Gutierrez factura_emitida has empty CUIT in spreadsheet despite CUIT being present in PDF
+**Category:** Extraction / Prompt Reliability
 
 ## Investigation
 
 ### Context Gathered
-- **MCPs used:** Google Drive MCP (file search, folder listing), Railway MCP (deployment logs), Gemini MCP (prompt testing)
+- **MCPs used:** Google Drive MCP (file retrieval), Gemini MCP (prompt testing)
 - **Files examined:**
-  - `30709076783_011_00005_00000047.pdf` (file ID: `1kHLs2XurqLYtyEd6k_cN4-py7rZ2vmAo`)
-  - Railway deployment logs from `d5c24a36-d26b-4dfd-94de-9cbd41db3d0c`
-  - `src/processing/scanner.ts` (retry mechanism)
-  - `src/processing/storage/index.ts` (file status tracking)
+  - `2025-11-10 - Factura Emitida - 00005-00000035 - Marcial Fermin Gutierrez` (file ID: `1Noz78UoBQfIpfN2Twk-S-PrpzRt68CZ3`)
+  - `src/gemini/prompts.ts` (FACTURA_PROMPT)
+  - `src/gemini/parser.ts` (assignCuitsAndClassify, parseFacturaResponse)
 
 ### Evidence
 
-**Log Timeline:**
-1. `18:23:35` - File started processing
-2. `18:23:44` - JSON parse error: `Expected ',' or ']' after array element in JSON at position 422`
-3. `18:24:35` - File queued for retry
-4. `19:16:45` - Container stopped (SIGTERM) - new deployment pushed
-5. No further logs for the file's retry
+**PDF Content Analysis:**
+The invoice clearly shows:
+- `Doc. Receptor: 20367086921` (client's CUIT)
+- `Cliente: Marcial Fermin Gutierrez`
+- `IVA Receptor: Consumidor Final`
 
-**Current Retry Behavior:**
-- JSON parse errors get ONE retry via re-queuing to end of processing queue
-- If retry fails OR is interrupted, file moves to Sin Procesar
-- Files with 'processing' status in tracking sheet ARE supposed to be retried (not in `getProcessedFileIds` result)
-- BUT: scanner only looks at files physically in Entrada folder
+**Gemini MCP Testing (2026-01-29):**
+Tested the FACTURA_PROMPT against the PDF twice:
+1. Custom prompt asking specifically for CUITs: Extracted `["30709076783", "20367086921"]` correctly
+2. Actual FACTURA_PROMPT: Also extracted `["30709076783", "20367086921"]` correctly
 
-**Why File Got Stuck:**
-1. File had JSON parse error (transient Gemini issue)
-2. File was re-queued for retry at end of queue
-3. Deployment was terminated before retry executed
-4. File was left in Entrada with 'processing' status in tracking sheet
-5. On next startup, file was no longer in Entrada (or already moved to Sin Procesar by partial retry)
-6. Result: file stuck, never successfully processed
-
-**Validation:**
-- Tested the PDF with Gemini MCP - extraction works correctly
-- The JSON error was transient API instability, not a document issue
+**Spreadsheet State:**
+Row 21 in Control de Ingresos > Facturas Emitidas shows empty `cuitReceptor` despite CUIT being present in PDF.
 
 ### Root Cause
 
-**Two gaps in the retry mechanism:**
+**Non-deterministic Gemini extraction:**
 
-1. **Single retry is insufficient** for transient API errors - the error can recur immediately
-2. **In-memory retry queue is lost** on deployment restart - no persistence
+The FACTURA_PROMPT instructs Gemini to extract "ALL CUITs found in the document", but:
+1. The client's identification is labeled "Doc. Receptor" not "CUIT"
+2. Gemini extraction is probabilistic - same prompt can produce different results
+3. During actual processing, Gemini likely did not extract `20367086921` because it wasn't labeled as "CUIT"
+4. The `allCuits` array only contained `["30709076783"]`, so `assignCuitsAndClassify` returned empty `cuitReceptor`
+
+**Why testing passed now:**
+- Gemini models have some variance in extraction
+- The prompt improvements I tested happened to work, but the original processing may have had a different result
+- This is a reliability issue, not a complete failure
+
+### Impact Assessment
+
+**Severity:** MEDIUM
+- Missing CUIT affects matching with payments
+- Doesn't prevent file processing (moved to correct folder)
+- Affects data completeness for accounting
+
+**Scope:**
+- Only affects invoices where client ID is labeled differently (e.g., "Doc. Receptor", "DNI Receptor")
+- Consumidor Final clients often have non-standard labeling
+- Most B2B invoices have "CUIT" label and work correctly
 
 ## Fix Plan
 
-### Task 1: Implement exponential backoff retry with 3 attempts
+### Task 1: Enhance FACTURA_PROMPT to explicitly handle Doc. Receptor and other ID labels
 
-**Rationale:** Single immediate retry is often insufficient for transient API issues. Multiple retries with backoff gives the API time to stabilize.
+**Rationale:** The prompt currently only mentions "CUIT" for identification numbers. Argentine invoices for Consumidor Final clients use "Doc. Receptor" or "DNI" labels instead.
 
-**Retry delays:** 10s → 30s → 60s (total ~100 seconds before giving up)
-- Aligns with existing quota retry logic (15-30s delays)
-- Gives Gemini API time to recover from overload
-- JSON parse errors often indicate API instability, not document issues
+1. Write test in `src/gemini/parser.test.ts`:
+   - Test that extraction handles `allCuits` with various ID formats
+   - Test normalization of IDs with different lengths (CUIT=11 digits, DNI=7-8 digits)
 
-1. Write test in `src/processing/scanner.test.ts`:
-   - Test that JSON parse errors trigger up to 3 retry attempts
-   - Test that retries have appropriate delays (10s, 30s, 60s)
-   - Test that file only moves to Sin Procesar after all retries exhausted
-
-2. Update `src/processing/scanner.ts`:
-   - Change `retriedFileIds` from `Set<string>` to `Map<string, number>` to track retry count
-   - Add constant `MAX_TRANSIENT_RETRIES = 3`
-   - Add constant `RETRY_DELAYS_MS = [10000, 30000, 60000]` (10s, 30s, 60s)
-   - Modify retry logic to:
-     - Check `retriedFileIds.get(fileInfo.id) < MAX_TRANSIENT_RETRIES`
-     - Increment retry count: `retriedFileIds.set(fileInfo.id, (retriedFileIds.get(fileInfo.id) || 0) + 1)`
-     - Add delay before retry: `await delay(RETRY_DELAYS_MS[retryCount - 1])`
-   - Only move to Sin Procesar when retries exhausted
+2. Update `src/gemini/prompts.ts` FACTURA_PROMPT:
+   - In section "3. ALL CUITs", explicitly mention alternative labels:
+     - "Doc. Receptor" (common for Consumidor Final)
+     - "DNI" (national ID, 7-8 digits)
+     - "CUIL" (worker ID, 11 digits)
+   - Add example showing these formats
+   - Emphasize: "Even if labeled differently, include ALL 11-digit identification numbers"
 
 3. Run test-runner to verify tests pass
 
-### Task 2: Add startup recovery for interrupted processing
+### Task 2: Test updated prompt with Gemini MCP against sample files
 
-**Rationale:** Files marked as 'processing' that are still in Entrada folder on startup should be re-processed.
+**Rationale:** Before deploying prompt changes, verify they work correctly on multiple document types.
 
-1. Write test in `src/processing/scanner.test.ts`:
-   - Test that files with 'processing' status in tracking sheet AND still in Entrada are re-processed on startup
-   - Test that files with 'processing' status but NOT in Entrada are skipped (moved elsewhere)
+**Test files from `_samples/`:**
 
-2. Update `src/processing/storage/index.ts`:
-   - Add new function `getStaleProcessingFileIds(dashboardId: string, maxAgeMs: number)`:
-     - Returns file IDs with 'processing' status older than maxAgeMs (default 5 minutes)
-     - These represent interrupted processing that should be retried
+1. Test with Consumidor Final invoice (Doc. Receptor label):
+   - Use file: `_samples/2025/CobrosFacturas/11-2025/30709076783_011_00005_00000034.pdf` (if available) or similar
+   - Verify: `allCuits` contains both ADVA's CUIT and client's ID
 
-3. Update `src/processing/scanner.ts`:
-   - After getting `newFiles`, also call `getStaleProcessingFileIds(dashboardOperativoId, 5 * 60 * 1000)`
-   - For stale processing files that exist in Entrada folder, add them to processing queue
-   - Log: "Recovering X files with stale processing status"
+2. Test with standard B2B invoice (CUIT label):
+   - Use file: `_samples/2025/CobrosFacturas/11-2025/30709076783_011_00003_00002178.pdf`
+   - Verify: No regression, both CUITs extracted
 
-4. Run test-runner to verify tests pass
+3. Test with factura_recibida (client is ADVA):
+   - Use file: `_samples/2025/Pagos/11/2025-11-03 - Salamanca Distribuidora S.A. - EVA2025 - Vianda voluntarios - B00200-00064069.pdf`
+   - Verify: Both CUITs extracted correctly
 
-### Task 3: Add processedAt timestamp to tracking sheet
+4. Document test results in this plan
 
-**Rationale:** To detect stale processing status, we need to know when processing started.
+### Task 3: Add validation warning for empty cuitReceptor in factura_emitida
 
-1. Write test in `src/processing/storage/index.test.ts`:
-   - Test that `markFileProcessing` writes timestamp to column F
-   - Test that `getStaleProcessingFileIds` uses timestamp for filtering
+**Rationale:** Even with improved prompt, extraction may occasionally fail. Add explicit logging when this happens.
 
-2. Update `src/processing/storage/index.ts`:
-   - Modify `markFileProcessing` to add ISO timestamp in column F
-   - Implement `getStaleProcessingFileIds` to compare timestamps
+1. Update `src/gemini/parser.ts` `parseFacturaResponse`:
+   - After CUIT assignment for `factura_emitida`, if `cuitReceptor` is empty:
+     - Log warning with file context
+     - Set `needsReview = true` regardless of confidence
+   - This ensures human review for edge cases
 
-3. Run test-runner to verify tests pass
+2. Run test-runner to verify tests pass
 
 ### Task 4: Update CLAUDE.md documentation
 
-1. In `CLAUDE.md`, add note under relevant section about retry behavior:
-   - Transient errors (JSON parse) get 3 retries with exponential backoff
-   - Stale processing files are recovered on startup
+1. In `CLAUDE.md`, under DOCUMENT CLASSIFICATION or relevant section:
+   - Note that Consumidor Final invoices may use "Doc. Receptor" instead of "CUIT"
+   - Document that empty cuitReceptor triggers review flag
 
 ## Post-Implementation Checklist
 1. Run `bug-hunter` agent - Review changes for bugs
@@ -124,149 +122,7 @@
 ## Recovery for Current File
 
 After deploying the fix:
-1. Move `30709076783_011_00005_00000047.pdf` from Sin Procesar back to Entrada
-2. System will process it on next scan (startup recovery will also help if it has stale status)
-3. Document is valid and will process correctly
-
----
-
-## Iteration 1
-
-**Implemented:** 2026-01-29
-
-### Completed
-- Task 1: Implemented exponential backoff retry with 3 attempts (10s → 30s → 60s delays)
-  - Changed `retriedFileIds` from `Set<string>` to `Map<string, number>` to track retry count
-  - Added `MAX_TRANSIENT_RETRIES = 3` and `RETRY_DELAYS_MS = [10000, 30000, 60000]` to config.ts
-  - Extracted retry logic into `processFileWithRetry()` helper function with recursive retries
-  - Only moves to Sin Procesar after all 3 retries exhausted
-
-- Task 2: Added startup recovery for interrupted processing
-  - Implemented `getStaleProcessingFileIds()` in storage/index.ts to detect files with 'processing' status older than 5 minutes
-  - Scanner now calls this function on startup and re-processes stale files that are still in Entrada folder
-  - Logs: "Recovering X files with stale processing status"
-
-- Task 3: Added `processedAt` timestamp to tracking sheet
-  - Modified `markFileProcessing()` to write ISO timestamp to column C
-  - Implemented `getStaleProcessingFileIds()` using timestamp comparison (maxAgeMs parameter, default 5 minutes)
-  - Handles missing/invalid timestamps by treating them as stale (safety mechanism)
-
-- Task 4: Updated CLAUDE.md documentation
-  - Added "PROCESSING & RETRY BEHAVIOR" section documenting retry mechanism and startup recovery
-  - Documented tracking sheet schema (columns A-E)
-
-### Bug Fixes (from bug-hunter review)
-- **Bug 3 (HIGH):** Fixed `markFileProcessing` timing - now called BEFORE `processFile()` instead of after
-  - Files marked as 'processing' before extraction begins, enabling proper stale recovery
-  - Uses placeholder 'unknown' documentType initially, updated after successful extraction
-
-- **Bug 2 (MEDIUM):** Removed unused `queue` parameter from `processFileWithRetry()`
-
-- **Bug 1 (MEDIUM - acknowledged):** Documented that retry delays block queue slots
-  - Added comment noting this is intentional for simplicity and acceptable for typical batch sizes
-
-- **Bug 5 (LOW):** Fixed type safety - builder automatically updated to use `Omit<FileInfo, 'content'>` type
-
-### Checklist Results
-- bug-hunter: Found 6 bugs (1 HIGH, 3 MEDIUM, 2 LOW) - Fixed HIGH and MEDIUM priority issues
-- test-runner: All 1057 tests pass across 53 test files
-- builder: Build passes with zero warnings or errors
-
-### Notes
-- Retry delays block the current queue slot during the wait period (intentional tradeoff for simplicity)
-- Files are marked as 'processing' before extraction to enable stale recovery on deployment interruptions
-- Stale recovery checks for files with 'processing' status older than 5 minutes that still exist in Entrada folder
-- The tracking sheet uses column C for `processedAt` timestamp (ISO format)
-
-### Review Findings
-
-Files reviewed: 5
-- `src/processing/scanner.ts` (retry logic with exponential backoff)
-- `src/processing/storage/index.ts` (`getStaleProcessingFileIds()` and `markFileProcessing()`)
-- `src/config.ts` (constants `MAX_TRANSIENT_RETRIES`, `RETRY_DELAYS_MS`)
-- `src/processing/scanner.test.ts` (tests for retry and stale recovery)
-- `src/processing/storage/index.test.ts` (tests for stale processing detection)
-
-Checks applied: Security, Logic, Async, Resources, Type Safety, Conventions, Edge Cases, Error Handling
-
-**Issues requiring fix:**
-- [MEDIUM] BUG: DocumentType not updated in tracking sheet when file succeeds on retry (`src/processing/scanner.ts:186`) - The condition `if (retryCount === 0)` prevents updating documentType for successful retries, leaving it as 'unknown'
-
-**Documented (no fix needed):**
-- [LOW] TYPE: Using `'unknown' as any` (`src/processing/scanner.ts:86`) - Type assertion is intentional placeholder, acceptable given the immediate update pattern
-
-### Fix Plan
-
-#### Fix 1: Update documentType for successful retries
-
-**Problem:** When a file succeeds on retry (retryCount > 0), the documentType remains 'unknown' in the tracking sheet because the update at line 186 only runs when `retryCount === 0`.
-
-**Solution:** Remove the `retryCount === 0` condition for the documentType update after successful extraction.
-
-1. Write test in `src/processing/scanner.test.ts`:
-   - Test that documentType is updated in tracking sheet even when file succeeds on retry
-   - Mock `markFileProcessing` and verify it's called with correct documentType after successful retry
-
-2. Update `src/processing/scanner.ts:186-203`:
-   - Remove the `if (retryCount === 0)` condition around the `markFileProcessing` call
-   - The function already handles existing rows correctly (updates instead of appending)
-
-3. Run test-runner to verify tests pass
-
----
-
-## Iteration 2
-
-**Implemented:** 2026-01-29
-
-### Completed
-- Fix 1: Update documentType for successful retries
-  - Added test in `src/processing/scanner.test.ts` to verify documentType is updated even when file succeeds on retry
-  - Removed the `if (retryCount === 0)` condition from `src/processing/scanner.ts:186` so `markFileProcessing` is called after successful extraction regardless of retry count
-  - The function properly updates the tracking sheet with the actual documentType (e.g., 'factura_recibida') after successful retry, replacing the initial 'unknown' placeholder
-
-### Checklist Results
-- bug-hunter: Found 0 bugs - All changes are correct and well-tested
-- test-runner: All 1058 tests pass across 53 test files (7.24s duration)
-- builder: Build passes with zero warnings or errors
-
-### Notes
-- Files that succeed on first attempt: `markFileProcessing` is called twice (once with 'unknown' before extraction, once with actual documentType after)
-- Files that succeed on retry: `markFileProcessing` is called once with 'unknown' on first attempt (before failed extraction), then called again with actual documentType after successful retry
-- The tracking sheet now accurately reflects the document type for all processed files, including those that initially failed with transient JSON errors
-
-### Review Findings
-
-Files reviewed: 2
-- `src/processing/scanner.ts` (documentType update fix at line 186-191)
-- `src/processing/scanner.test.ts` (new test at line 335-409)
-
-Checks applied: Security, Logic, Async, Resources, Type Safety, Conventions, Edge Cases, Error Handling
-
-**Analysis of the fix:**
-- The condition `if (retryCount === 0)` was correctly removed from line 186
-- `markFileProcessing` is now called unconditionally after successful extraction
-- This ensures documentType is updated to the actual value (e.g., 'factura_recibida') regardless of whether it's a first attempt or retry
-
-**Edge case verification:**
-- First attempt success: `markFileProcessing` called twice (once with 'unknown' at line 81, once with actual type at line 186) - the function handles updates correctly
-- Retry success: `markFileProcessing` called once with 'unknown' (on first failed attempt), then once with actual type after successful retry - now works correctly
-
-**Test coverage:**
-- New test `'should update documentType in tracking sheet when file succeeds on retry'` validates the fix
-- Test verifies both calls to `markFileProcessing` with correct parameters
-
-No issues found - all implementations are correct and follow project conventions.
-
----
-
-## Status: COMPLETE
-
-All tasks implemented and reviewed successfully. Ready for human review.
-
-**Summary of what was implemented:**
-1. ✅ Exponential backoff retry with 3 attempts (10s → 30s → 60s)
-2. ✅ Startup recovery for interrupted processing (stale files older than 5 minutes)
-3. ✅ ProcessedAt timestamp tracking in column C
-4. ✅ DocumentType properly updated for both first-attempt successes and retry successes
-5. ✅ All documentation updated in CLAUDE.md
+1. The file is already processed and in the correct folder (2025/Ingresos/11 - Noviembre/)
+2. Manually update row 21 in Control de Ingresos > Facturas Emitidas:
+   - Set `cuitReceptor` to `20367086921`
+3. This is a one-time manual fix; new processing will extract correctly
