@@ -113,9 +113,20 @@ export interface CellNumber {
 }
 
 /**
+ * Cell formula type - represents an explicit formula value
+ * Use this to insert formulas that bypass the security sanitization
+ * Only use for trusted, internally-generated formulas (never user input)
+ */
+export interface CellFormula {
+  type: 'formula';
+  /** Formula string (must start with =) */
+  value: string;
+}
+
+/**
  * Cell value or link type
  */
-export type CellValueOrLink = CellValue | CellLink | CellDate | CellNumber;
+export type CellValueOrLink = CellValue | CellLink | CellDate | CellNumber | CellFormula;
 
 /**
  * Gets values from a range
@@ -835,6 +846,18 @@ function isCellNumber(value: CellValueOrLink): value is CellNumber {
 }
 
 /**
+ * Helper to check if a value is a CellFormula
+ */
+function isCellFormula(value: CellValueOrLink): value is CellFormula {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'type' in value &&
+    value.type === 'formula'
+  );
+}
+
+/**
  * Checks if a string is an ISO 8601 timestamp
  * Matches formats like: 2026-01-24T18:30:00.000Z or 2026-01-24T18:30:00Z
  */
@@ -884,6 +907,13 @@ function convertToSheetsCellData(
           pattern: '#,##0.00',
         },
       },
+    };
+  }
+
+  if (isCellFormula(value)) {
+    // Insert as formula (bypasses sanitization for trusted internal formulas)
+    return {
+      userEnteredValue: { formulaValue: value.value },
     };
   }
 

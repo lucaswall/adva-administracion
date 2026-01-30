@@ -5,12 +5,13 @@
 
 import type { Result, ResumenBancario, ResumenTarjeta, ResumenBroker, StoreResult } from '../../types/index.js';
 import type { ScanContext } from '../scanner.js';
-import { appendRowsWithLinks, sortSheet, getValues, getSpreadsheetTimezone, type CellValueOrLink, type CellDate, type CellNumber } from '../../services/sheets.js';
+import { appendRowsWithLinks, sortSheet, getValues, getSpreadsheetTimezone, type CellValueOrLink, type CellDate, type CellNumber, type CellFormula } from '../../services/sheets.js';
 import { generateResumenFileName, generateResumenTarjetaFileName, generateResumenBrokerFileName } from '../../utils/file-naming.js';
 import { normalizeSpreadsheetDate } from '../../utils/date.js';
 import { info, warn } from '../../utils/logger.js';
 import { getCorrelationId } from '../../utils/correlation.js';
 import { withLock } from '../../utils/concurrency.js';
+import { calculateBalanceDiff, generateBalanceOkFormulaLocal } from '../../utils/balance-formulas.js';
 
 /**
  * Checks if a bank account resumen already exists in the sheet
@@ -24,7 +25,7 @@ async function isDuplicateResumenBancario(
   spreadsheetId: string,
   resumen: ResumenBancario
 ): Promise<{ isDuplicate: boolean; existingFileId?: string }> {
-  const rowsResult = await getValues(spreadsheetId, 'Resumenes!A:J');
+  const rowsResult = await getValues(spreadsheetId, 'Resumenes!A:L');
   if (!rowsResult.ok || rowsResult.value.length <= 1) {
     return { isDuplicate: false };
   }
@@ -175,13 +176,23 @@ export async function storeResumenBancario(
       };
     }
 
-    // Build the row with CellDate for proper date formatting and CellNumber for monetary values
+    // Build the row with CellDate for proper date formatting, CellNumber for monetary values,
+    // and CellFormula for the balanceOk formula
     const fileName = generateResumenFileName(resumen);
     const periodo = resumen.fechaHasta.substring(0, 7); // YYYY-MM-DD -> YYYY-MM
     const fechaDesdeDate: CellDate = { type: 'date', value: resumen.fechaDesde };
     const fechaHastaDate: CellDate = { type: 'date', value: resumen.fechaHasta };
     const saldoInicialNum: CellNumber = { type: 'number', value: resumen.saldoInicial };
     const saldoFinalNum: CellNumber = { type: 'number', value: resumen.saldoFinal };
+
+    // Calculate balanceDiff at write time for immediate validation
+    const balanceDiff = calculateBalanceDiff(
+      resumen.saldoInicial,
+      resumen.movimientos ?? [],
+      resumen.saldoFinal
+    );
+    const balanceDiffNum: CellNumber = { type: 'number', value: balanceDiff };
+    const balanceOkFormula: CellFormula = { type: 'formula', value: generateBalanceOkFormulaLocal() };
 
     const row: CellValueOrLink[] = [
       periodo,
@@ -197,6 +208,8 @@ export async function storeResumenBancario(
       resumen.moneda,
       saldoInicialNum,
       saldoFinalNum,
+      balanceOkFormula,  // K: balanceOk formula
+      balanceDiffNum,    // L: balanceDiff (computed - reported)
     ];
 
     // Get spreadsheet timezone for proper timestamp formatting
@@ -206,7 +219,7 @@ export async function storeResumenBancario(
     // Append the row
     const appendResult = await appendRowsWithLinks(
       spreadsheetId,
-      'Resumenes!A:J',
+      'Resumenes!A:L',
       [row],
       timeZone,
       context?.metadataCache

@@ -182,7 +182,7 @@ Rows sorted by `fechaPago` descending after insert.
 
 Three types of financial statements, each with its own schema and folder structure.
 
-### 1. Resumen Bancario (Bank Account) - 10 columns, A:J
+### 1. Resumen Bancario (Bank Account) - 12 columns, A:L
 
 Folder: `{YYYY}/Bancos/{Bank} {Account} {Currency}/`
 
@@ -198,6 +198,8 @@ Folder: `{YYYY}/Bancos/{Bank} {Account} {Currency}/`
 | H | moneda | enum | ARS\|USD |
 | I | saldoInicial | currency | Opening balance (2 decimals) |
 | J | saldoFinal | currency | Closing balance (2 decimals) |
+| K | balanceOk | formula | "SI" if \|balanceDiff\| < 0.01, "NO" otherwise |
+| L | balanceDiff | currency | Computed balance - saldoFinal (should be ~0) |
 
 **Duplicate Detection**: (banco, numeroCuenta, fechaDesde, fechaHasta, moneda)
 **Sorting**: Rows sorted by `periodo` (column A) ascending (oldest first)

@@ -36,22 +36,27 @@ export function generateInitialBalanceRow(
  * - D = credito column
  * - C = debito column
  *
+ * Row mapping (accounts for header row):
+ * - Row 1 (sheet): Headers
+ * - Row 2 (sheet): SALDO INICIAL (array index 0)
+ * - Row N+2 (sheet): Transaction at array index N
+ *
  * @param mov - Bank transaction data
- * @param rowIndex - 0-based row index where this transaction will be inserted
+ * @param rowIndex - 0-based array index where this transaction will be inserted
  * @returns Row data with formula in saldoCalculado column
  */
 export function generateMovimientoRowWithFormula(
   mov: MovimientoBancario,
   rowIndex: number
 ): [string, string, number | null, number | null, number | null, string] {
-  // Sheet rows are 1-based, rowIndex is 0-based
-  // Previous row in sheet = rowIndex (e.g., rowIndex 2 -> row 2 in sheet)
-  // Current row in sheet = rowIndex + 1 (e.g., rowIndex 2 -> row 3 in sheet)
-  const previousSheetRow = rowIndex;
-  const currentSheetRow = rowIndex + 1;
+  // Account for header row: array index N → sheet row N + 2
+  // Previous row in sheet = rowIndex + 1 (previous array position + 2)
+  // Current row in sheet = rowIndex + 2
+  const previousSheetRow = rowIndex + 1;
+  const currentSheetRow = rowIndex + 2;
 
   // Formula: =F{prev}+D{curr}-C{curr}
-  // Example: for rowIndex 2 (sheet row 3): =F2+D3-C3
+  // Example: for array index 1 (sheet row 3): =F2+D3-C3
   const formula = `=F${previousSheetRow}+D${currentSheetRow}-C${currentSheetRow}`;
 
   return [
@@ -70,14 +75,17 @@ export function generateMovimientoRowWithFormula(
  * This row simply references the last transaction's computed saldoCalculado.
  * Used for cross-sheet IMPORTRANGE validation in Control Resumenes.
  *
- * @param lastRowIndex - 0-based row index of last transaction
+ * Row mapping (accounts for header row):
+ * - Last transaction at array index N is at sheet row N + 2
+ *
+ * @param lastRowIndex - 0-based array index of last transaction
  * @returns Row data with formula referencing last transaction's saldoCalculado
  */
 export function generateFinalBalanceRow(
   lastRowIndex: number
 ): [null, string, null, null, null, string] {
-  // Convert 0-based index to 1-based sheet row
-  const lastSheetRow = lastRowIndex + 1;
+  // Account for header row: array index N → sheet row N + 2
+  const lastSheetRow = lastRowIndex + 2;
 
   return [
     null,                    // fecha (empty)
@@ -143,4 +151,41 @@ export function generateBalanceDiffFormula(
 
   // J column (index 9) is saldoFinal in Control Resumenes bancario sheet
   return `=IMPORTRANGE("${movimientosSpreadsheetId}","${monthSheetName}!F${finalSheetRow}")-J${resumenSheetRow}`;
+}
+
+/**
+ * Calculates the difference between computed and reported final balance
+ *
+ * This is calculated at write time and stored as a value (not a formula).
+ * It allows immediate validation without requiring IMPORTRANGE permissions.
+ *
+ * @param saldoInicial - Starting balance from resumen
+ * @param movimientos - Array of transactions from resumen
+ * @param saldoFinal - Reported final balance from resumen
+ * @returns Difference (computed - reported), should be ~0 if parsing is correct
+ */
+export function calculateBalanceDiff(
+  saldoInicial: number,
+  movimientos: MovimientoBancario[],
+  saldoFinal: number
+): number {
+  let computedBalance = saldoInicial;
+  for (const mov of movimientos) {
+    computedBalance += (mov.credito ?? 0) - (mov.debito ?? 0);
+  }
+  return computedBalance - saldoFinal;
+}
+
+/**
+ * Generates the balanceOk formula for Control Resumenes
+ *
+ * Uses INDIRECT with ROW() so it works regardless of row position after sorting.
+ * References balanceDiff in column L and checks if it's within 0.01 tolerance.
+ *
+ * @returns Formula string checking if balanceDiff (column L) is within tolerance
+ */
+export function generateBalanceOkFormulaLocal(): string {
+  // Column L contains balanceDiff
+  // Returns "SI" if |balanceDiff| < 0.01, "NO" otherwise
+  return '=IF(ABS(INDIRECT("L"&ROW()))<0.01,"SI","NO")';
 }

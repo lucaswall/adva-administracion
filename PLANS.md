@@ -1,190 +1,227 @@
-# Implementation Plan
+# Bug Fix Plan
 
 **Created:** 2026-01-30
-**Source:** Inline request: Add balance validation for resumenes - running balance formulas in Movimientos sheets with initial/final balance verification against Control Resumenes
+**Bug Report:** Formulas in Movimientos sheets are being inserted as strings instead of formulas, formula row references are off by one, and balance validation columns in Control Resumenes are empty.
+**Category:** Storage
 
-## Context Gathered
+## Investigation
 
-### Codebase Analysis
+### Context Gathered
+- **Files examined:**
+  - `src/processing/storage/movimientos-store.ts` - Uses `appendRowsWithLinks`
+  - `src/processing/storage/resumen-store.ts` - Stores resumenes, currently writes 10 columns
+  - `src/services/sheets.ts` - `appendRowsWithLinks` sanitizes formula strings
+  - `src/utils/balance-formulas.ts` - Generates formulas but doesn't account for header row
+  - `src/constants/spreadsheet-headers.ts` - Defines 12-column schema with balanceOk/balanceDiff
 
-**Related files:**
-- `src/processing/storage/movimientos-store.ts` - Stores individual transactions to per-month sheets
-- `src/processing/storage/resumen-store.ts` - Stores resumen summaries to Control Resumenes sheets
-- `src/constants/spreadsheet-headers.ts` - Defines sheet headers and column configurations
-- `src/types/index.ts` - Type definitions for MovimientoBancario, ResumenBancario, etc.
-- `src/services/sheets.ts` - Low-level Sheets API (supports formulas via strings starting with `=`)
+### Evidence
 
-**Existing patterns:**
-- Movimientos sheets have per-month tabs (e.g., "2025-01")
-- MovimientoBancario has `saldo` field (parsed from document, not computed)
-- ResumenBancario has `saldoInicial` and `saldoFinal` fields
-- Control Resumenes has 10 columns (A:J) for bancario type
-- Sheets service supports formulas via `{ userEnteredValue: { formulaValue: value } }` when string starts with `=`
+**Problem 1: Formulas inserted as strings in Movimientos sheets**
 
-**Test conventions:**
-- Tests colocated as `*.test.ts`
-- Use vi.mock for dependencies
-- Helper functions like `createTestResumen()`
+In `movimientos-store.ts:102`, formula strings like `=F2+D3-C3` are passed to `appendRowsWithLinks`. However, `convertToSheetsCellData` (sheets.ts:925) sanitizes all strings starting with `=` by prefixing with a single quote, making them render as text instead of formulas.
 
-### Problem Analysis
+**Problem 2: Formula row indexing off by one**
 
-**Current state:**
-- Movimientos sheets store transactions but the `saldo` column is just a parsed value (from PDF)
-- No formula-based running balance calculation
-- No validation that transactions reconcile to reported saldoFinal
-- Errors in parsing movimientos are hard to detect without manual inspection
+`getOrCreateMonthSheet` creates sheets with headers in row 1. When rows are appended:
+- Row 1: Headers
+- Row 2: SALDO INICIAL (array index 0)
+- Row 3: First transaction (array index 1)
 
-**User requirements:**
-1. Each Movimientos month sheet should start with an initial balance row (from resumen.saldoInicial)
-2. Each transaction row should have a running balance formula: `=previous_saldo + credito - debito`
-3. Compare final computed balance to resumen.saldoFinal
-4. Control Resumenes should show a "balanceOk" indicator
+But `generateMovimientoRowWithFormula` generates `=F1+D2-C2` for rowIndex=1, which references:
+- F1 = Header cell (not a number!)
+- D2-C2 = SALDO INICIAL row (empty!)
 
-### Proposed Improvements
+Correct formula should be `=F2+D3-C3`.
 
-Based on the user's request, I propose the following enhancements:
+**Problem 3: Balance validation columns empty in Control Resumenes**
 
-1. **Initial Balance Row**: Add a "SALDO INICIAL" row at the top of each month sheet before transactions
-2. **Running Balance Formulas**: Replace static `saldo` values with formulas that compute running balance
-3. **Final Balance Formula Row**: Add a "SALDO FINAL" row at the bottom that equals the last running balance
-4. **Balance Match Column**: Add `balanceOk` column to Control Resumenes showing `SI` or `NO` based on comparison
-5. **Balance Difference Column**: Add `balanceDiff` column showing the difference (for debugging)
+The schema defines `balanceOk` and `balanceDiff` columns (indices 10-11) but `storeResumenBancario` only writes 10 columns (A:J), leaving these empty.
 
-**Why this is valuable:**
-- Immediately identifies parsing errors in movimientos
-- Self-documenting spreadsheet that shows exactly how balance is computed
-- Easy to spot discrepancies without running code
-- Accountant-friendly format they can verify manually
+### Root Cause Summary
 
-**Scope Decision - Bancario Only:**
-This implementation focuses on `resumen_bancario` (bank accounts) only because:
-- It's the only type with true debito/credito/saldo structure
-- `resumen_tarjeta` has pesos/dolares but no running balance concept (credit cards don't work that way)
-- `resumen_broker` has different saldo semantics (position values, not account balance)
+1. **Formula strings sanitized:** Security feature blocks legitimate formulas
+2. **Missing header row offset:** Formulas reference wrong rows
+3. **Validation columns not populated:** Code doesn't calculate or write balance validation data
 
-## Original Plan
+## Fix Plan
 
-### Task 1: Update spreadsheet headers for Control Resumenes with balance validation columns
+### Fix 1: Add CellFormula type to allow explicit formulas
 
-1. Write test in `src/constants/spreadsheet-headers.test.ts`:
-   - Test CONTROL_RESUMENES_BANCARIO_SHEET has 12 columns (A:L)
-   - Test `balanceOk` is column K
-   - Test `balanceDiff` is column L
-   - Test numberFormats includes new column for balanceDiff (currency format)
-2. Run test-runner (expect fail)
-3. Update `src/constants/spreadsheet-headers.ts`:
-   - Add `balanceOk` and `balanceDiff` columns to CONTROL_RESUMENES_BANCARIO_SHEET headers
-   - Update numberFormats Map with index 11 for balanceDiff (currency format)
-4. Run test-runner (expect pass)
+**Problem:** The security sanitization blocks all strings starting with `=`, including our generated formulas.
 
-### Task 2: Update Movimientos bancario headers with saldoCalculado column
+**Solution:** Add a `CellFormula` type following the existing `CellDate`/`CellNumber` pattern.
 
-1. Write test in `src/constants/spreadsheet-headers.test.ts`:
-   - Test MOVIMIENTOS_BANCARIO_SHEET has 6 columns (A:F)
-   - Test `saldoCalculado` is column F
-   - Test numberFormats includes column 5 for saldoCalculado (currency format)
-2. Run test-runner (expect fail)
-3. Update `src/constants/spreadsheet-headers.ts`:
-   - Add `saldoCalculado` column to MOVIMIENTOS_BANCARIO_SHEET headers
-   - Update numberFormats Map with index 5 for saldoCalculado (currency format)
-4. Run test-runner (expect pass)
+1. Write test in `src/services/sheets.test.ts`:
+   - Test that `CellFormula` values are inserted with `formulaValue`
+   - Test that regular strings starting with `=` are still sanitized
+   - Add test in "Formula injection sanitization" describe block
 
-### Task 3: Create balance formula generation utility
+2. Update `src/services/sheets.ts`:
+   - Add `CellFormula` interface:
+     ```typescript
+     export interface CellFormula {
+       type: 'formula';
+       value: string;
+     }
+     ```
+   - Add `isCellFormula` helper function
+   - Update `CellValueOrLink` type to include `CellFormula`
+   - Handle `CellFormula` in `convertToSheetsCellData`:
+     ```typescript
+     if (isCellFormula(value)) {
+       return {
+         userEnteredValue: { formulaValue: value.value },
+       };
+     }
+     ```
 
-1. Write test in `src/utils/balance-formulas.test.ts` (new file):
-   - Test `generateInitialBalanceRow()` returns correct row format with saldo in saldoCalculado column
-   - Test `generateMovimientoRowWithFormula()` returns row with formula in saldoCalculado column
-   - Test formula references previous row correctly (e.g., `=F2+D3-C3` for row 3)
-   - Test first transaction row references initial balance row
-   - Test `generateFinalBalanceRow()` returns row referencing last transaction saldo
-2. Run test-runner (expect fail)
-3. Implement `src/utils/balance-formulas.ts`:
-   - `generateInitialBalanceRow(saldoInicial: number, sheetName: string)` - returns row for initial balance
-   - `generateMovimientoRowWithFormula(mov: MovimientoBancario, rowIndex: number)` - returns row with formula
-   - `generateFinalBalanceRow(lastRowIndex: number)` - returns final balance row referencing last saldo
-   - `generateBalanceOkFormula(movimientosSheetId: string, monthSheetName: string, saldoFinalColumn: number, resumenRowIndex: number)` - generates formula for Control sheet
-4. Run test-runner (expect pass)
-
-### Task 4: Update storeMovimientosBancario to use balance formulas
-
-1. Write test in `src/processing/storage/movimientos-store.test.ts`:
-   - Test that initial balance row is inserted first with label "SALDO INICIAL" and saldo value
-   - Test that each transaction row has formula in saldoCalculado column
-   - Test that final balance row is inserted last with label "SALDO FINAL"
-   - Test formula references are correct (F2, F3+D4-C4, etc.)
-   - Test that original `saldo` column still contains parsed value (for comparison)
-   - Update existing tests to expect 6 columns instead of 5
-2. Run test-runner (expect fail)
 3. Update `src/processing/storage/movimientos-store.ts`:
-   - Import balance formula utilities
-   - Modify `storeMovimientosBancario()` to:
-     - Accept additional parameter `saldoInicial: number`
-     - Insert initial balance row first
-     - Generate formula-based saldoCalculado for each transaction row
-     - Insert final balance row last
-   - Update range from `A:E` to `A:F`
-4. Run test-runner (expect pass)
+   - Import `CellFormula` type
+   - Wrap formula strings: `{ type: 'formula', value: txRow[5] } as CellFormula`
+   - Update for SALDO INICIAL row (index 0) - saldoCalculado is a number, not formula
+   - Update for transaction rows - saldoCalculado is a formula
+   - Update for SALDO FINAL row - saldoCalculado is a formula
 
-### Task 5: Update scanner to pass saldoInicial to storeMovimientosBancario
+### Fix 2: Fix formula row indexing to account for header row
 
-1. Write test in `src/processing/scanner.test.ts`:
-   - Test that storeMovimientosBancario is called with saldoInicial from parsed resumen
-   - Test error handling if storeMovimientosBancario fails
-2. Run test-runner (expect fail)
-3. Update `src/processing/scanner.ts`:
-   - Modify call to `storeMovimientosBancario()` to pass `resumen.saldoInicial`
-4. Run test-runner (expect pass)
+**Problem:** Formulas reference wrong rows because they don't account for headers in row 1.
 
-### Task 6: Update storeResumenBancario to include balance validation columns
+**Correct mapping:**
+- Array index 0 (SALDO INICIAL) → Sheet row 2
+- Array index N → Sheet row N + 2
 
-1. Write test in `src/processing/storage/resumen-store.test.ts`:
-   - Test that row has 12 columns (A:L)
-   - Test that `balanceOk` column contains formula comparing computed vs reported saldoFinal
-   - Test that `balanceDiff` column contains formula for difference
-   - Test formula references correct Movimientos spreadsheet and month sheet
-   - Update existing tests for new column count
-2. Run test-runner (expect fail)
+For transaction at array index `rowIndex`:
+- Previous row in sheet = rowIndex + 1
+- Current row in sheet = rowIndex + 2
+
+1. Update tests in `src/utils/balance-formulas.test.ts`:
+   - Change expected formula for rowIndex=1 from `=F1+D2-C2` to `=F2+D3-C3`
+   - Change expected formula for rowIndex=2 from `=F2+D3-C3` to `=F3+D4-C4`
+   - Change SALDO FINAL with lastRowIndex=2 from `=F3` to `=F4`
+   - Update all affected test cases
+
+2. Update `src/utils/balance-formulas.ts`:
+   - Fix `generateMovimientoRowWithFormula`:
+     ```typescript
+     // Account for header row: array index N → sheet row N + 2
+     const previousSheetRow = rowIndex + 1;
+     const currentSheetRow = rowIndex + 2;
+     const formula = `=F${previousSheetRow}+D${currentSheetRow}-C${currentSheetRow}`;
+     ```
+   - Fix `generateFinalBalanceRow`:
+     ```typescript
+     // Last transaction at array index N is at sheet row N + 2
+     const lastSheetRow = lastRowIndex + 2;
+     return [..., `=F${lastSheetRow}`];
+     ```
+   - Update JSDoc comments to clarify row mapping
+
+3. Update `src/processing/storage/movimientos-store.test.ts`:
+   - Fix formula assertions:
+     - First transaction: `=F2+D3-C3`
+     - Second transaction: `=F3+D4-C4`
+     - SALDO FINAL (2 transactions): `=F4`
+
+### Fix 3: Implement balance validation columns in Control Resumenes
+
+**Problem:** `balanceOk` and `balanceDiff` columns are defined in schema but never populated.
+
+**Solution:** Calculate balanceDiff in code at write time, use formula for balanceOk.
+
+**How balanceDiff is calculated:**
+```typescript
+let computedBalance = saldoInicial;
+for (const mov of movimientos) {
+  computedBalance += (mov.credito ?? 0) - (mov.debito ?? 0);
+}
+const balanceDiff = computedBalance - saldoFinal;
+```
+
+**Schema (12 columns A:L - already defined):**
+- A-J: existing columns (periodo through saldoFinal)
+- K (index 10): balanceOk - Formula: `=IF(ABS(INDIRECT("L"&ROW()))<0.01,"SI","NO")`
+- L (index 11): balanceDiff - Number: computed balance minus parsed saldoFinal
+
+1. Add balance calculation utility in `src/utils/balance-formulas.ts`:
+   ```typescript
+   /**
+    * Calculates the difference between computed and reported final balance
+    * @param saldoInicial - Starting balance from resumen
+    * @param movimientos - Array of transactions
+    * @param saldoFinal - Reported final balance from resumen
+    * @returns Difference (computed - reported), should be ~0 if parsing correct
+    */
+   export function calculateBalanceDiff(
+     saldoInicial: number,
+     movimientos: MovimientoBancario[],
+     saldoFinal: number
+   ): number {
+     let computedBalance = saldoInicial;
+     for (const mov of movimientos) {
+       computedBalance += (mov.credito ?? 0) - (mov.debito ?? 0);
+     }
+     return computedBalance - saldoFinal;
+   }
+
+   /**
+    * Generates the balanceOk formula for Control Resumenes
+    * Uses INDIRECT with ROW() so it works regardless of row position after sorting
+    * @returns Formula string checking if balanceDiff (column L) is within 0.01 tolerance
+    */
+   export function generateBalanceOkFormula(): string {
+     return '=IF(ABS(INDIRECT("L"&ROW()))<0.01,"SI","NO")';
+   }
+   ```
+
+2. Write tests in `src/utils/balance-formulas.test.ts`:
+   - Test `calculateBalanceDiff` with various scenarios:
+     - Perfect match (diff = 0)
+     - Small rounding difference
+     - Parsing error (large diff)
+     - Empty movimientos array
+     - Mix of debits and credits
+   - Test `generateBalanceOkFormula` returns correct formula string
+
 3. Update `src/processing/storage/resumen-store.ts`:
-   - Import balance formula utilities
-   - Modify `storeResumenBancario()` to:
-     - Accept additional parameter `movimientosSpreadsheetId: string` (needed for cross-sheet formula)
-     - Add `balanceOk` formula column (compares SALDO FINAL row to saldoFinal)
-     - Add `balanceDiff` formula column (SALDO FINAL - saldoFinal)
-   - Update range from `A:J` to `A:L`
-4. Run test-runner (expect pass)
+   - Import `calculateBalanceDiff`, `generateBalanceOkFormula`, and `CellFormula` type
+   - In `storeResumenBancario`:
+     - Calculate balanceDiff: `calculateBalanceDiff(resumen.saldoInicial, resumen.movimientos, resumen.saldoFinal)`
+     - Build row with 12 columns (A:L):
+       ```typescript
+       const balanceDiff = calculateBalanceDiff(
+         resumen.saldoInicial,
+         resumen.movimientos,
+         resumen.saldoFinal
+       );
 
-### Task 7: Update scanner to pass movimientosSpreadsheetId to storeResumenBancario
+       const row: CellValueOrLink[] = [
+         // ... existing 10 columns (periodo through saldoFinal) ...
+         { type: 'formula', value: generateBalanceOkFormula() } as CellFormula,  // K: balanceOk
+         { type: 'number', value: balanceDiff } as CellNumber,                    // L: balanceDiff
+       ];
+       ```
+     - Update append range from `'Resumenes!A:J'` to `'Resumenes!A:L'`
+   - Update `isDuplicateResumenBancario`:
+     - Update getValues range from `'Resumenes!A:J'` to `'Resumenes!A:L'`
+     - Column indices for business key remain unchanged
 
-1. Write test in `src/processing/scanner.test.ts`:
-   - Test that storeResumenBancario is called with movimientosSpreadsheetId
-2. Run test-runner (expect fail)
-3. Update `src/processing/scanner.ts`:
-   - Modify call to `storeResumenBancario()` to pass `movimientosSpreadsheetId`
-4. Run test-runner (expect pass)
+4. Update `src/processing/storage/resumen-store.test.ts`:
+   - Add tests verifying:
+     - Row has 12 columns
+     - Column K contains balanceOk formula
+     - Column L contains calculated balanceDiff as CellNumber
+   - Test balanceDiff calculation scenarios
 
-### Task 8: Update duplicate detection for new column count
+5. Update documentation:
+   - Update `CLAUDE.md` SPREADSHEETS section to document balanceOk and balanceDiff behavior
 
-1. Write test in `src/processing/storage/resumen-store.test.ts`:
-   - Test isDuplicateResumenBancario reads correct columns from 12-column sheet
-   - Test duplicate detection still works correctly
-2. Run test-runner (expect fail)
-3. Update `src/processing/storage/resumen-store.ts`:
-   - Update `isDuplicateResumenBancario()` range from `A:J` to `A:L`
-   - Column indices remain the same (business key columns unchanged)
-4. Run test-runner (expect pass)
+### Result
 
-### Task 9: Update documentation
+When viewing Control Resumenes sheet:
+- **balanceDiff** (column L): Shows actual difference (0.00 if perfect, small value if rounding, large if parsing error)
+- **balanceOk** (column K): Shows "SI" if |balanceDiff| < 0.01, "NO" otherwise
 
-1. Update `SPREADSHEET_FORMAT.md`:
-   - Document new `saldoCalculado` column in Movimientos Bancario section
-   - Document SALDO INICIAL and SALDO FINAL rows format
-   - Document `balanceOk` and `balanceDiff` columns in Control Resumenes Bancario section
-   - Add formula documentation showing cross-sheet references
-   - Update column counts (bancario movimientos: 6 cols A:F, control resumenes bancario: 12 cols A:L)
-
-2. Update `CLAUDE.md`:
-   - Update SPREADSHEETS section with new column counts
-   - Add note about balance validation feature
+Users can quickly scan the balanceOk column to spot problems, then look at balanceDiff for the exact discrepancy.
 
 ## Post-Implementation Checklist
 1. Run `bug-hunter` agent - Review changes for bugs
@@ -198,74 +235,53 @@ This implementation focuses on `resumen_bancario` (bank accounts) only because:
 **Implemented:** 2026-01-30
 
 ### Completed
-- Task 1: Updated spreadsheet headers for Control Resumenes bancario sheet (12 columns A:L with balanceOk and balanceDiff)
-- Task 2: Updated Movimientos bancario headers (6 columns A:F with saldoCalculado)
-- Task 3: Created balance formula generation utility (src/utils/balance-formulas.ts)
-- Task 4: Updated storeMovimientosBancario to use balance formulas (SALDO INICIAL, running formulas, SALDO FINAL)
-- Task 5: Updated scanner to pass saldoInicial to storeMovimientosBancario
-- Task 9: Updated CLAUDE.md documentation with new column counts
 
-### Skipped
-- Task 6: Update storeResumenBancario to include balance validation columns - BLOCKED (requires row index from appendRowsWithLinks which isn't returned)
-- Task 7: Update scanner to pass movimientosSpreadsheetId to storeResumenBancario - BLOCKED (depends on Task 6)
-- Task 8: Update duplicate detection for new column count - NOT NEEDED (duplicate detection uses business key columns which haven't changed)
+- **Fix 1: CellFormula type** - Added `CellFormula` interface to `sheets.ts` with `isCellFormula` type guard. Updated `convertToSheetsCellData` to handle `CellFormula` values using `formulaValue` (bypasses sanitization for trusted internal formulas). Updated `movimientos-store.ts` to wrap formula strings in `CellFormula` type.
+
+- **Fix 2: Formula row indexing** - Fixed `generateMovimientoRowWithFormula` to account for header row. Array index N now maps to sheet row N+2 (since row 1 is headers, row 2 is SALDO INICIAL). Updated `generateFinalBalanceRow` similarly. Updated all related test assertions.
+
+- **Fix 3: Balance validation columns** - Implemented `calculateBalanceDiff` function to compute (saldoInicial + credits - debits - saldoFinal). Implemented `generateBalanceOkFormulaLocal` function returning `=IF(ABS(INDIRECT("L"&ROW()))<0.01,"SI","NO")`. Updated `storeResumenBancario` to include columns K (balanceOk formula) and L (balanceDiff number). Updated range from A:J to A:L.
+
+- **Documentation** - Updated SPREADSHEET_FORMAT.md to reflect the new 12-column schema for Resumen Bancario, adding balanceOk and balanceDiff columns.
 
 ### Checklist Results
-- bug-hunter: Found 1 MEDIUM issue (mock header mismatch), fixed
-- test-runner: Passed (54 files, 1102 tests)
+- bug-hunter: Found 1 medium issue (SPREADSHEET_FORMAT.md outdated) - fixed
+- test-runner: Passed (1114 tests across 54 files)
 - builder: Passed (zero warnings)
 
 ### Notes
-**Balance validation implementation:**
-- Successfully implemented running balance formulas in Movimientos sheets
-- Each month sheet now has: SALDO INICIAL row → transaction rows with formulas → SALDO FINAL row
-- Formula pattern: `=F{prev}+D{curr}-C{curr}` computes running balance from debito/credito
-- Original `saldo` column preserved for comparison with computed `saldoCalculado`
-
-**Cross-sheet validation blocked:**
-- Original plan included `balanceOk` and `balanceDiff` formulas in Control Resumenes sheet
-- These formulas require knowing the row index where the resumen is being inserted
-- `appendRowsWithLinks` doesn't return row indices, making formula generation impossible at write time
-- Alternative approaches would require:
-  - Reading back the sheet after append to find row index (expensive, race-prone)
-  - Using IMPORTRANGE with dynamic sheet references (complex, fragile)
-  - Manual verification workflow instead of automated formulas
-
-**Value delivered:**
-- Movimientos sheets now self-validate with running balance formulas
-- Accountants can immediately spot discrepancies by comparing `saldo` vs `saldoCalculado`
-- Easy to identify parsing errors in individual transactions
-- Foundation in place for future cross-sheet validation if needed
-
-### Technical Improvements
-- Added comprehensive tests for balance formula generation (13 new tests)
-- Maintained backward compatibility with empty movimientos case
-- Updated all test mocks to use correct camelCase header names
-- All changes follow TDD workflow (test first, then implementation)
+- The CellFormula type is intentionally bypassing sanitization. The JSDoc comment warns this is only for trusted, internally-generated formulas.
+- The balanceOk formula uses INDIRECT with ROW() to work correctly even after the sheet is sorted by periodo.
+- Tests were updated following TDD: write failing tests first, then implement to make them pass.
 
 ### Review Findings
 
-Files reviewed: 7
-- `src/utils/balance-formulas.ts` (new)
-- `src/utils/balance-formulas.test.ts` (new)
-- `src/constants/spreadsheet-headers.ts` (modified)
-- `src/constants/spreadsheet-headers.test.ts` (modified)
-- `src/processing/storage/movimientos-store.ts` (modified)
-- `src/processing/storage/movimientos-store.test.ts` (modified)
-- `src/processing/scanner.ts` (modified)
+Files reviewed: 8
+Checks applied: Security, Logic, Async, Resources, Type Safety, Error Handling, Conventions
 
-Checks applied: Security, Logic, Async, Resources, Type Safety, Edge Cases, Conventions
+**Security Analysis (CellFormula bypass):**
+- The `CellFormula` type intentionally bypasses sanitization but is properly secured:
+  - JSDoc comment warns it's "Only use for trusted, internally-generated formulas (never user input)"
+  - Only used internally by `movimientos-store.ts` and `resumen-store.ts`
+  - User input from PDFs is parsed separately and never directly converted to `CellFormula`
+  - Formulas are generated by `generateMovimientoRowWithFormula`, `generateFinalBalanceRow`, and `generateBalanceOkFormulaLocal` which produce hardcoded formula patterns - no user input in formula strings
+
+**Logic Analysis:**
+- Formula row indexing correctly accounts for header row (array index N → sheet row N + 2)
+- Tests verify correct formulas: `=F2+D3-C3` for index 1, `=F3+D4-C4` for index 2
+- `calculateBalanceDiff` correctly handles null debito/credito values with `?? 0`
+
+**Type Safety:**
+- `isCellFormula` type guard properly checks for `type: 'formula'` property
+- `CellFormula` is included in `CellValueOrLink` union type
+
+**Conventions:**
+- ESM imports with `.js` extensions ✓
+- No console.log usage ✓
+- Uses Pino logger ✓
+- TDD workflow followed ✓
 
 No issues found - all implementations are correct and follow project conventions.
-
-**Verification details:**
-- Formula row indexing logic verified: SALDO INICIAL at sheet row 1, transactions at rows 2..N+1, SALDO FINAL references last transaction correctly
-- Empty movimientos edge case handled (creates formatted empty sheet without balance rows)
-- Zero/negative saldoInicial values tested and work correctly
-- ESM imports use `.js` extensions ✓
-- Logging uses Pino (`info()`) not console.log ✓
-- JSDoc comments on all exported functions ✓
-- Tests follow TDD pattern with comprehensive coverage ✓
 
 ---
 
