@@ -182,61 +182,65 @@ Rows sorted by `fechaPago` descending after insert.
 
 Three types of financial statements, each with its own schema and folder structure.
 
-### 1. Resumen Bancario (Bank Account) - 9 columns, A:I
+### 1. Resumen Bancario (Bank Account) - 10 columns, A:J
 
 Folder: `{YYYY}/Bancos/{Bank} {Account} {Currency}/`
 
 | Column | Field | Type | Description |
 |--------|-------|------|-------------|
-| A | fechaDesde | date | Statement start date (serial format) |
-| B | fechaHasta | date | Statement end date (serial format) |
-| C | fileId | string | Google Drive file ID |
-| D | fileName | hyperlink | Link to Drive file |
-| E | banco | string | Bank name (BBVA, Santander, etc.) |
-| F | numeroCuenta | string | Account number (10+ digits) |
-| G | moneda | enum | ARS\|USD |
-| H | saldoInicial | currency | Opening balance (2 decimals) |
-| I | saldoFinal | currency | Closing balance (2 decimals) |
+| A | periodo | string | Statement period in YYYY-MM format (derived from fechaHasta) |
+| B | fechaDesde | date | Statement start date (serial format) |
+| C | fechaHasta | date | Statement end date (serial format) |
+| D | fileId | string | Google Drive file ID |
+| E | fileName | hyperlink | Link to Drive file |
+| F | banco | string | Bank name (BBVA, Santander, etc.) |
+| G | numeroCuenta | string | Account number (10+ digits) |
+| H | moneda | enum | ARS\|USD |
+| I | saldoInicial | currency | Opening balance (2 decimals) |
+| J | saldoFinal | currency | Closing balance (2 decimals) |
 
 **Duplicate Detection**: (banco, numeroCuenta, fechaDesde, fechaHasta, moneda)
+**Sorting**: Rows sorted by `periodo` (column A) ascending (oldest first)
 
-### 2. Resumen Tarjeta (Credit Card) - 9 columns, A:I
+### 2. Resumen Tarjeta (Credit Card) - 10 columns, A:J
 
 Folder: `{YYYY}/Bancos/{Bank} {CardType} {LastDigits}/`
 
 | Column | Field | Type | Description |
 |--------|-------|------|-------------|
-| A | fechaDesde | date | Statement start date (serial format) |
-| B | fechaHasta | date | Statement end date (serial format) |
-| C | fileId | string | Google Drive file ID |
-| D | fileName | hyperlink | Link to Drive file |
-| E | banco | string | Bank name (BBVA, Santander, etc.) |
-| F | numeroCuenta | string | Last 4-8 digits of card |
-| G | tipoTarjeta | enum | Visa\|Mastercard\|Amex\|Naranja\|Cabal |
-| H | pagoMinimo | currency | Minimum payment due (2 decimals) |
-| I | saldoActual | currency | Current balance owed (2 decimals) |
+| A | periodo | string | Statement period in YYYY-MM format (derived from fechaHasta) |
+| B | fechaDesde | date | Statement start date (serial format) |
+| C | fechaHasta | date | Statement end date (serial format) |
+| D | fileId | string | Google Drive file ID |
+| E | fileName | hyperlink | Link to Drive file |
+| F | banco | string | Bank name (BBVA, Santander, etc.) |
+| G | numeroCuenta | string | Last 4-8 digits of card |
+| H | tipoTarjeta | enum | Visa\|Mastercard\|Amex\|Naranja\|Cabal |
+| I | pagoMinimo | currency | Minimum payment due (2 decimals) |
+| J | saldoActual | currency | Current balance owed (2 decimals) |
 
 **Duplicate Detection**: (banco, tipoTarjeta, numeroCuenta, fechaDesde, fechaHasta)
+**Sorting**: Rows sorted by `periodo` (column A) ascending (oldest first)
 
-### 3. Resumen Broker (Broker/Investment) - 8 columns, A:H
+### 3. Resumen Broker (Broker/Investment) - 9 columns, A:I
 
 Folder: `{YYYY}/Bancos/{Broker} {Comitente}/`
 
 | Column | Field | Type | Description |
 |--------|-------|------|-------------|
-| A | fechaDesde | date | Statement start date (serial format) |
-| B | fechaHasta | date | Statement end date (serial format) |
-| C | fileId | string | Google Drive file ID |
-| D | fileName | hyperlink | Link to Drive file |
-| E | broker | string | Broker name (BALANZ, IOL, etc.) |
-| F | numeroCuenta | string | Comitente number |
-| G | saldoARS | currency | Balance in ARS (2 decimals, optional) |
-| H | saldoUSD | currency | Balance in USD (2 decimals, optional) |
+| A | periodo | string | Statement period in YYYY-MM format (derived from fechaHasta) |
+| B | fechaDesde | date | Statement start date (serial format) |
+| C | fechaHasta | date | Statement end date (serial format) |
+| D | fileId | string | Google Drive file ID |
+| E | fileName | hyperlink | Link to Drive file |
+| F | broker | string | Broker name (BALANZ, IOL, etc.) |
+| G | numeroCuenta | string | Comitente number |
+| H | saldoARS | currency | Balance in ARS (2 decimals, optional) |
+| I | saldoUSD | currency | Balance in USD (2 decimals, optional) |
 
 **Duplicate Detection**: (broker, numeroCuenta, fechaDesde, fechaHasta)
 **Note:** Multi-currency accounts - both ARS and USD balances can be present.
-
-All Resumen types sorted by `fechaDesde` ascending (oldest first).
+**Sorting**: Rows sorted by `periodo` (column A) ascending (oldest first)
 
 ---
 

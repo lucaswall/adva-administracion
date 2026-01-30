@@ -32,7 +32,7 @@ vi.mock('../../utils/correlation.js', () => ({
 
 vi.mock('../../utils/file-naming.js', () => ({
   generateResumenFileName: vi.fn((resumen: ResumenBancario) =>
-    `${resumen.fechaDesde} - Resumen - ${resumen.banco} ${resumen.numeroCuenta}.pdf`
+    `${resumen.fechaHasta.substring(0, 7)} - Resumen - ${resumen.banco} - ${resumen.numeroCuenta} ${resumen.moneda}.pdf`
   ),
 }));
 
@@ -81,8 +81,8 @@ describe('storeResumenBancario (bank accounts)', () => {
       vi.mocked(getValues).mockResolvedValue({
         ok: true,
         value: [
-          ['fechaDesde', 'fechaHasta', 'fileId', 'fileName', 'banco', 'numeroCuenta', 'moneda', 'saldoInicial', 'saldoFinal'],
-          [45292, 45322, existingFileId, 'existing.pdf', 'Santander', '1234567890', 'ARS', 10000, 15000], // Serial numbers for 2024-01-01 and 2024-01-31
+          ['periodo', 'fechaDesde', 'fechaHasta', 'fileId', 'fileName', 'banco', 'numeroCuenta', 'moneda', 'saldoInicial', 'saldoFinal'],
+          ['2024-01', 45292, 45322, existingFileId, 'existing.pdf', 'Santander', '1234567890', 'ARS', 10000, 15000], // Serial numbers for 2024-01-01 and 2024-01-31
         ],
       });
 
@@ -115,12 +115,12 @@ describe('storeResumenBancario (bank accounts)', () => {
   });
 
   describe('duplicate detection', () => {
-    it('detects duplicate when all 5 fields match', async () => {
+    it('detects duplicate when all 5 fields match (skipping periodo column)', async () => {
       vi.mocked(getValues).mockResolvedValue({
         ok: true,
         value: [
-          ['fechaDesde', 'fechaHasta', 'fileId', 'fileName', 'banco', 'numeroCuenta', 'moneda', 'saldoInicial', 'saldoFinal'],
-          ['2024-01-01', '2024-01-31', 'existing-id', 'existing.pdf', 'Santander', '1234567890', 'ARS', 10000, 15000],
+          ['periodo', 'fechaDesde', 'fechaHasta', 'fileId', 'fileName', 'banco', 'numeroCuenta', 'moneda', 'saldoInicial', 'saldoFinal'],
+          ['2024-01', '2024-01-01', '2024-01-31', 'existing-id', 'existing.pdf', 'Santander', '1234567890', 'ARS', 10000, 15000],
         ],
       });
 
@@ -145,11 +145,11 @@ describe('storeResumenBancario (bank accounts)', () => {
       vi.mocked(getValues).mockResolvedValue({
         ok: true,
         value: [
-          ['fechaDesde', 'fechaHasta', 'fileId', 'fileName', 'banco', 'numeroCuenta', 'moneda', 'saldoInicial', 'saldoFinal'],
-          ['2024-01-01', '2024-01-31', 'existing-id', 'existing.pdf', 'BBVA', '1234567890', 'ARS', 10000, 15000],
+          ['periodo', 'fechaDesde', 'fechaHasta', 'fileId', 'fileName', 'banco', 'numeroCuenta', 'moneda', 'saldoInicial', 'saldoFinal'],
+          ['2024-01', '2024-01-01', '2024-01-31', 'existing-id', 'existing.pdf', 'BBVA', '1234567890', 'ARS', 10000, 15000],
         ],
       });
-      vi.mocked(appendRowsWithLinks).mockResolvedValue({ ok: true, value: 9 });
+      vi.mocked(appendRowsWithLinks).mockResolvedValue({ ok: true, value: 10 });
       vi.mocked(sortSheet).mockResolvedValue({ ok: true, value: undefined });
 
       const resumen = createTestResumen({
@@ -173,11 +173,11 @@ describe('storeResumenBancario (bank accounts)', () => {
       vi.mocked(getValues).mockResolvedValue({
         ok: true,
         value: [
-          ['fechaDesde', 'fechaHasta', 'fileId', 'fileName', 'banco', 'numeroCuenta', 'moneda', 'saldoInicial', 'saldoFinal'],
-          ['2024-01-01', '2024-01-31', 'existing-id', 'existing.pdf', 'Santander', '1234567890', 'ARS', 10000, 15000],
+          ['periodo', 'fechaDesde', 'fechaHasta', 'fileId', 'fileName', 'banco', 'numeroCuenta', 'moneda', 'saldoInicial', 'saldoFinal'],
+          ['2024-01', '2024-01-01', '2024-01-31', 'existing-id', 'existing.pdf', 'Santander', '1234567890', 'ARS', 10000, 15000],
         ],
       });
-      vi.mocked(appendRowsWithLinks).mockResolvedValue({ ok: true, value: 9 });
+      vi.mocked(appendRowsWithLinks).mockResolvedValue({ ok: true, value: 10 });
       vi.mocked(sortSheet).mockResolvedValue({ ok: true, value: undefined });
 
       const resumen = createTestResumen({
@@ -201,11 +201,11 @@ describe('storeResumenBancario (bank accounts)', () => {
       vi.mocked(getValues).mockResolvedValue({
         ok: true,
         value: [
-          ['fechaDesde', 'fechaHasta', 'fileId', 'fileName', 'banco', 'numeroCuenta', 'moneda', 'saldoInicial', 'saldoFinal'],
-          ['2024-01-01', '2024-01-31', 'existing-id', 'existing.pdf', 'Santander', '1234567890', 'ARS', 10000, 15000],
+          ['periodo', 'fechaDesde', 'fechaHasta', 'fileId', 'fileName', 'banco', 'numeroCuenta', 'moneda', 'saldoInicial', 'saldoFinal'],
+          ['2024-01', '2024-01-01', '2024-01-31', 'existing-id', 'existing.pdf', 'Santander', '1234567890', 'ARS', 10000, 15000],
         ],
       });
-      vi.mocked(appendRowsWithLinks).mockResolvedValue({ ok: true, value: 9 });
+      vi.mocked(appendRowsWithLinks).mockResolvedValue({ ok: true, value: 10 });
       vi.mocked(sortSheet).mockResolvedValue({ ok: true, value: undefined });
 
       const resumen = createTestResumen({
@@ -229,11 +229,11 @@ describe('storeResumenBancario (bank accounts)', () => {
       vi.mocked(getValues).mockResolvedValue({
         ok: true,
         value: [
-          ['fechaDesde', 'fechaHasta', 'fileId', 'fileName', 'banco', 'numeroCuenta', 'moneda', 'saldoInicial', 'saldoFinal'],
-          ['2024-01-01', '2024-01-31', 'existing-id', 'existing.pdf', 'Santander', '1234567890', 'ARS', 10000, 15000],
+          ['periodo', 'fechaDesde', 'fechaHasta', 'fileId', 'fileName', 'banco', 'numeroCuenta', 'moneda', 'saldoInicial', 'saldoFinal'],
+          ['2024-01', '2024-01-01', '2024-01-31', 'existing-id', 'existing.pdf', 'Santander', '1234567890', 'ARS', 10000, 15000],
         ],
       });
-      vi.mocked(appendRowsWithLinks).mockResolvedValue({ ok: true, value: 9 });
+      vi.mocked(appendRowsWithLinks).mockResolvedValue({ ok: true, value: 10 });
       vi.mocked(sortSheet).mockResolvedValue({ ok: true, value: undefined });
 
       const resumen = createTestResumen({
@@ -257,11 +257,11 @@ describe('storeResumenBancario (bank accounts)', () => {
       vi.mocked(getValues).mockResolvedValue({
         ok: true,
         value: [
-          ['fechaDesde', 'fechaHasta', 'fileId', 'fileName', 'banco', 'numeroCuenta', 'moneda', 'saldoInicial', 'saldoFinal'],
-          ['2024-01-01', '2024-01-31', 'existing-id', 'existing.pdf', 'Santander', '1234567890', 'ARS', 10000, 15000],
+          ['periodo', 'fechaDesde', 'fechaHasta', 'fileId', 'fileName', 'banco', 'numeroCuenta', 'moneda', 'saldoInicial', 'saldoFinal'],
+          ['2024-01', '2024-01-01', '2024-01-31', 'existing-id', 'existing.pdf', 'Santander', '1234567890', 'ARS', 10000, 15000],
         ],
       });
-      vi.mocked(appendRowsWithLinks).mockResolvedValue({ ok: true, value: 9 });
+      vi.mocked(appendRowsWithLinks).mockResolvedValue({ ok: true, value: 10 });
       vi.mocked(sortSheet).mockResolvedValue({ ok: true, value: undefined });
 
       const resumen = createTestResumen({
@@ -286,8 +286,8 @@ describe('storeResumenBancario (bank accounts)', () => {
       vi.mocked(getValues).mockResolvedValue({
         ok: true,
         value: [
-          ['fechaDesde', 'fechaHasta', 'fileId', 'fileName', 'banco', 'numeroCuenta', 'moneda', 'saldoInicial', 'saldoFinal'],
-          [45292, 45322, 'existing-id', 'existing.pdf', 'Santander', '1234567890', 'ARS', 10000, 15000], // Serial numbers
+          ['periodo', 'fechaDesde', 'fechaHasta', 'fileId', 'fileName', 'banco', 'numeroCuenta', 'moneda', 'saldoInicial', 'saldoFinal'],
+          ['2024-01', 45292, 45322, 'existing-id', 'existing.pdf', 'Santander', '1234567890', 'ARS', 10000, 15000], // Serial numbers
         ],
       });
 
@@ -309,9 +309,9 @@ describe('storeResumenBancario (bank accounts)', () => {
   });
 
   describe('row formatting', () => {
-    it('stores row with correct column order using CellDate and CellNumber types', async () => {
+    it('stores row with periodo as first column (10 columns total)', async () => {
       vi.mocked(getValues).mockResolvedValue({ ok: true, value: [['Header']] });
-      vi.mocked(appendRowsWithLinks).mockResolvedValue({ ok: true, value: 9 });
+      vi.mocked(appendRowsWithLinks).mockResolvedValue({ ok: true, value: 10 });
       vi.mocked(sortSheet).mockResolvedValue({ ok: true, value: undefined });
 
       const resumen = createTestResumen({
@@ -329,14 +329,15 @@ describe('storeResumenBancario (bank accounts)', () => {
 
       expect(appendRowsWithLinks).toHaveBeenCalledWith(
         'spreadsheet-id',
-        'Resumenes!A:I',
+        'Resumenes!A:J',
         expect.arrayContaining([
           expect.arrayContaining([
+            '2024-01', // periodo (first column, derived from fechaHasta)
             { type: 'date', value: '2024-01-01' }, // fechaDesde as CellDate
             { type: 'date', value: '2024-01-31' }, // fechaHasta as CellDate
             'test-id-123',
             expect.objectContaining({
-              text: expect.stringContaining('2024-01-01'),
+              text: expect.stringContaining('2024-01'),
               url: 'https://drive.google.com/file/d/test-id-123/view'
             }),
             'Santander',
@@ -351,9 +352,51 @@ describe('storeResumenBancario (bank accounts)', () => {
       );
     });
 
-    it('creates hyperlink with correct format', async () => {
+    it('derives periodo from fechaHasta in YYYY-MM format', async () => {
       vi.mocked(getValues).mockResolvedValue({ ok: true, value: [['Header']] });
-      vi.mocked(appendRowsWithLinks).mockResolvedValue({ ok: true, value: 9 });
+      vi.mocked(appendRowsWithLinks).mockResolvedValue({ ok: true, value: 10 });
+      vi.mocked(sortSheet).mockResolvedValue({ ok: true, value: undefined });
+
+      const resumen = createTestResumen({
+        fechaDesde: '2024-01-15',
+        fechaHasta: '2024-02-14',
+      });
+
+      await storeResumenBancario(resumen, 'spreadsheet-id');
+
+      const calls = vi.mocked(appendRowsWithLinks).mock.calls;
+      expect(calls.length).toBe(1);
+      const row = calls[0][2][0];
+      expect(row[0]).toBe('2024-02'); // periodo from fechaHasta
+    });
+
+    it('stores row with correct column order using CellDate and CellNumber types', async () => {
+      vi.mocked(getValues).mockResolvedValue({ ok: true, value: [['Header']] });
+      vi.mocked(appendRowsWithLinks).mockResolvedValue({ ok: true, value: 10 });
+      vi.mocked(sortSheet).mockResolvedValue({ ok: true, value: undefined });
+
+      const resumen = createTestResumen({
+        fechaDesde: '2024-01-01',
+        fechaHasta: '2024-01-31',
+        fileId: 'test-id-123',
+        banco: 'Santander',
+        numeroCuenta: '1234567890',
+        moneda: 'ARS',
+        saldoInicial: 10000,
+        saldoFinal: 15000,
+      });
+
+      await storeResumenBancario(resumen, 'spreadsheet-id');
+
+      const calls = vi.mocked(appendRowsWithLinks).mock.calls;
+      expect(calls.length).toBe(1);
+      const row = calls[0][2][0];
+      expect(row).toHaveLength(10); // Confirm 10 columns total
+    });
+
+    it('creates hyperlink with correct format (now at index 4)', async () => {
+      vi.mocked(getValues).mockResolvedValue({ ok: true, value: [['Header']] });
+      vi.mocked(appendRowsWithLinks).mockResolvedValue({ ok: true, value: 10 });
       vi.mocked(sortSheet).mockResolvedValue({ ok: true, value: undefined });
 
       const resumen = createTestResumen({
@@ -365,7 +408,7 @@ describe('storeResumenBancario (bank accounts)', () => {
       const calls = vi.mocked(appendRowsWithLinks).mock.calls;
       expect(calls.length).toBe(1);
       const row = calls[0][2][0];
-      expect(row[3]).toEqual(expect.objectContaining({
+      expect(row[4]).toEqual(expect.objectContaining({
         text: expect.any(String),
         url: 'https://drive.google.com/file/d/abc123/view',
       }));
@@ -373,9 +416,9 @@ describe('storeResumenBancario (bank accounts)', () => {
   });
 
   describe('sorting', () => {
-    it('sorts by fechaDesde ascending after storing', async () => {
+    it('sorts by periodo ascending after storing', async () => {
       vi.mocked(getValues).mockResolvedValue({ ok: true, value: [['Header']] });
-      vi.mocked(appendRowsWithLinks).mockResolvedValue({ ok: true, value: 9 });
+      vi.mocked(appendRowsWithLinks).mockResolvedValue({ ok: true, value: 10 });
       vi.mocked(sortSheet).mockResolvedValue({ ok: true, value: undefined });
 
       const resumen = createTestResumen();
@@ -384,7 +427,7 @@ describe('storeResumenBancario (bank accounts)', () => {
       expect(sortSheet).toHaveBeenCalledWith(
         'spreadsheet-id',
         'Resumenes',
-        0, // column index 0 (fechaDesde)
+        0, // column index 0 (periodo)
         false // ascending
       );
     });
