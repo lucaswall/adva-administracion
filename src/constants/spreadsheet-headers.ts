@@ -148,7 +148,7 @@ export const RESUMEN_BANCARIO_HEADERS = [
  * Sheet configuration for Control de Resumenes spreadsheet - Bank Accounts
  * Stores bank account statements in bank account-specific folders
  * Folder: {YYYY}/Bancos/{Bank} {Account} {Currency}/
- * 10 columns (A:J)
+ * 12 columns (A:L) - includes balance validation columns
  */
 export const CONTROL_RESUMENES_BANCARIO_SHEET: SheetConfig = {
   title: 'Resumenes',
@@ -163,12 +163,15 @@ export const CONTROL_RESUMENES_BANCARIO_SHEET: SheetConfig = {
     'moneda',          // ARS|USD
     'saldoInicial',
     'saldoFinal',
+    'balanceOk',       // Formula: compares computed balance to saldoFinal
+    'balanceDiff',     // Formula: difference between computed and reported balance
   ],
   numberFormats: new Map([
     [1, { type: 'date' }],              // fechaDesde
     [2, { type: 'date' }],              // fechaHasta
     [8, { type: 'currency', decimals: 2 }],  // saldoInicial
     [9, { type: 'currency', decimals: 2 }],  // saldoFinal
+    [11, { type: 'currency', decimals: 2 }], // balanceDiff
   ]),
 };
 
@@ -231,6 +234,7 @@ export const CONTROL_RESUMENES_BROKER_SHEET: SheetConfig = {
  * Sheet configuration for Movimientos - Bank Account Transactions
  * Stores individual bank account transactions in per-month sheets
  * One sheet per month (e.g., "2025-01")
+ * 6 columns (A:F) - includes saldoCalculado for running balance formula
  */
 export const MOVIMIENTOS_BANCARIO_SHEET: SheetConfig = {
   title: 'Movimientos',
@@ -239,13 +243,15 @@ export const MOVIMIENTOS_BANCARIO_SHEET: SheetConfig = {
     'origenConcepto',
     'debito',
     'credito',
-    'saldo',
+    'saldo',           // Parsed from PDF (for comparison)
+    'saldoCalculado',  // Formula: running balance computed from transactions
   ],
   numberFormats: new Map([
     [0, { type: 'date' }],                    // fecha
     [2, { type: 'currency', decimals: 2 }],   // debito
     [3, { type: 'currency', decimals: 2 }],   // credito
     [4, { type: 'currency', decimals: 2 }],   // saldo
+    [5, { type: 'currency', decimals: 2 }],   // saldoCalculado
   ]),
 };
 

@@ -12,6 +12,7 @@ import {
   CONTROL_RESUMENES_BANCARIO_SHEET,
   CONTROL_RESUMENES_TARJETA_SHEET,
   CONTROL_RESUMENES_BROKER_SHEET,
+  MOVIMIENTOS_BANCARIO_SHEET,
 } from './spreadsheet-headers.js';
 
 describe('Status Sheet Headers', () => {
@@ -91,8 +92,8 @@ describe('Control Resumenes Bancario Sheet', () => {
       expect(CONTROL_RESUMENES_BANCARIO_SHEET.headers[0]).toBe('periodo');
     });
 
-    it('should have 10 columns total', () => {
-      expect(CONTROL_RESUMENES_BANCARIO_SHEET.headers).toHaveLength(10);
+    it('should have 12 columns total (A:L)', () => {
+      expect(CONTROL_RESUMENES_BANCARIO_SHEET.headers).toHaveLength(12);
     });
 
     it('should have correct header order', () => {
@@ -107,7 +108,17 @@ describe('Control Resumenes Bancario Sheet', () => {
         'moneda',
         'saldoInicial',
         'saldoFinal',
+        'balanceOk',
+        'balanceDiff',
       ]);
+    });
+
+    it('should have balanceOk as column K (index 10)', () => {
+      expect(CONTROL_RESUMENES_BANCARIO_SHEET.headers[10]).toBe('balanceOk');
+    });
+
+    it('should have balanceDiff as column L (index 11)', () => {
+      expect(CONTROL_RESUMENES_BANCARIO_SHEET.headers[11]).toBe('balanceDiff');
     });
 
     it('should have correctly shifted numberFormats indices', () => {
@@ -122,6 +133,8 @@ describe('Control Resumenes Bancario Sheet', () => {
         expect(formats.get(8)).toEqual({ type: 'currency', decimals: 2 });
         // saldoFinal should now be at index 9 (was 8)
         expect(formats.get(9)).toEqual({ type: 'currency', decimals: 2 });
+        // balanceDiff should be at index 11 with currency format
+        expect(formats.get(11)).toEqual({ type: 'currency', decimals: 2 });
       }
     });
   });
@@ -205,6 +218,37 @@ describe('Control Resumenes Broker Sheet', () => {
         expect(formats.get(7)).toEqual({ type: 'currency', decimals: 2 });
         // saldoUSD should now be at index 8 (was 7)
         expect(formats.get(8)).toEqual({ type: 'currency', decimals: 2 });
+      }
+    });
+  });
+});
+
+describe('Movimientos Bancario Sheet', () => {
+  describe('MOVIMIENTOS_BANCARIO_SHEET', () => {
+    it('should have 6 columns total (A:F)', () => {
+      expect(MOVIMIENTOS_BANCARIO_SHEET.headers).toHaveLength(6);
+    });
+
+    it('should have correct header order', () => {
+      expect(MOVIMIENTOS_BANCARIO_SHEET.headers).toEqual([
+        'fecha',
+        'origenConcepto',
+        'debito',
+        'credito',
+        'saldo',
+        'saldoCalculado',
+      ]);
+    });
+
+    it('should have saldoCalculado as column F (index 5)', () => {
+      expect(MOVIMIENTOS_BANCARIO_SHEET.headers[5]).toBe('saldoCalculado');
+    });
+
+    it('should have numberFormats for saldoCalculado at index 5', () => {
+      const formats = MOVIMIENTOS_BANCARIO_SHEET.numberFormats;
+      expect(formats).toBeDefined();
+      if (formats) {
+        expect(formats.get(5)).toEqual({ type: 'currency', decimals: 2 });
       }
     });
   });
