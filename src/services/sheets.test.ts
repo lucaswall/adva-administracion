@@ -1959,6 +1959,41 @@ describe('Google Sheets API wrapper - quota retry tests', () => {
         mockSheetsApi.spreadsheets.batchUpdate.mockResolvedValue({ data: {} });
       });
 
+      it('should insert CellFormula values as formulaValue (not sanitized)', async () => {
+        const resultPromise = appendRowsWithLinks('spreadsheet123', 'TestSheet!A:C', [
+          [
+            'Normal text',
+            { type: 'formula', value: '=F2+D3-C3' },  // CellFormula
+            'Safe',
+          ],
+        ]);
+        await vi.runAllTimersAsync();
+        const result = await resultPromise;
+
+        expect(result.ok).toBe(true);
+        expect(mockSheetsApi.spreadsheets.batchUpdate).toHaveBeenCalledWith(
+          expect.objectContaining({
+            requestBody: expect.objectContaining({
+              requests: expect.arrayContaining([
+                expect.objectContaining({
+                  appendCells: expect.objectContaining({
+                    rows: [
+                      {
+                        values: [
+                          { userEnteredValue: { stringValue: 'Normal text' } },
+                          { userEnteredValue: { formulaValue: '=F2+D3-C3' } },
+                          { userEnteredValue: { stringValue: 'Safe' } },
+                        ],
+                      },
+                    ],
+                  }),
+                }),
+              ]),
+            }),
+          })
+        );
+      });
+
       it('should sanitize strings starting with = in cell values', async () => {
         const resultPromise = appendRowsWithLinks('spreadsheet123', 'TestSheet!A:C', [
           ['Normal', '=SUM(A1:A10)', 'Safe'],

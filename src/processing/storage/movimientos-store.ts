@@ -4,7 +4,7 @@
  */
 
 import type { Result, MovimientoBancario, MovimientoTarjeta, MovimientoBroker } from '../../types/index.js';
-import { getOrCreateMonthSheet, formatEmptyMonthSheet, appendRowsWithLinks, type CellDate, type CellNumber } from '../../services/sheets.js';
+import { getOrCreateMonthSheet, formatEmptyMonthSheet, appendRowsWithLinks, type CellDate, type CellNumber, type CellFormula } from '../../services/sheets.js';
 import { MOVIMIENTOS_BANCARIO_SHEET, MOVIMIENTOS_TARJETA_SHEET, MOVIMIENTOS_BROKER_SHEET } from '../../constants/spreadsheet-headers.js';
 import { info } from '../../utils/logger.js';
 import type { SheetOrderBatch } from '../caches/index.js';
@@ -92,14 +92,14 @@ export async function storeMovimientosBancario(
       const rowIndex = index + 1;
       const txRow = generateMovimientoRowWithFormula(mov, rowIndex);
 
-      // Wrap in CellDate/CellNumber types for spreadsheet formatting
+      // Wrap in CellDate/CellNumber/CellFormula types for spreadsheet formatting
       rows.push([
         { type: 'date', value: txRow[0] } as CellDate,
         txRow[1],  // origenConcepto (string)
         txRow[2] !== null ? { type: 'number', value: txRow[2] } as CellNumber : null,  // debito
         txRow[3] !== null ? { type: 'number', value: txRow[3] } as CellNumber : null,  // credito
         txRow[4] !== null ? { type: 'number', value: txRow[4] } as CellNumber : null,  // saldo
-        txRow[5],  // saldoCalculado (formula string)
+        { type: 'formula', value: txRow[5] } as CellFormula,  // saldoCalculado (formula)
       ]);
     });
 
@@ -113,7 +113,7 @@ export async function storeMovimientosBancario(
       finalRow[2],  // null (debito)
       finalRow[3],  // null (credito)
       finalRow[4],  // null (saldo)
-      finalRow[5],  // formula referencing last saldoCalculado
+      { type: 'formula', value: finalRow[5] } as CellFormula,  // formula referencing last saldoCalculado
     ]);
 
     // Append all rows to target month (A:F for 6 columns)

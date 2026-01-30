@@ -52,6 +52,9 @@ const createTestResumen = (overrides: Partial<ResumenBancario> = {}): ResumenBan
   processedAt: '2025-01-15T10:00:00Z',
   confidence: 0.95,
   needsReview: false,
+  movimientos: [
+    { fecha: '2024-01-15', origenConcepto: 'Credit', debito: null, credito: 5000, saldo: 15000 },
+  ],
   ...overrides,
 });
 
@@ -309,9 +312,9 @@ describe('storeResumenBancario (bank accounts)', () => {
   });
 
   describe('row formatting', () => {
-    it('stores row with periodo as first column (10 columns total)', async () => {
+    it('stores row with periodo as first column (12 columns total with balanceOk and balanceDiff)', async () => {
       vi.mocked(getValues).mockResolvedValue({ ok: true, value: [['Header']] });
-      vi.mocked(appendRowsWithLinks).mockResolvedValue({ ok: true, value: 10 });
+      vi.mocked(appendRowsWithLinks).mockResolvedValue({ ok: true, value: 12 });
       vi.mocked(sortSheet).mockResolvedValue({ ok: true, value: undefined });
 
       const resumen = createTestResumen({
@@ -323,13 +326,16 @@ describe('storeResumenBancario (bank accounts)', () => {
         moneda: 'ARS',
         saldoInicial: 10000,
         saldoFinal: 15000,
+        movimientos: [
+          { fecha: '2024-01-15', origenConcepto: 'Credit', debito: null, credito: 5000, saldo: 15000 },
+        ],
       });
 
       await storeResumenBancario(resumen, 'spreadsheet-id');
 
       expect(appendRowsWithLinks).toHaveBeenCalledWith(
         'spreadsheet-id',
-        'Resumenes!A:J',
+        'Resumenes!A:L',  // Updated range from A:J to A:L
         expect.arrayContaining([
           expect.arrayContaining([
             '2024-01', // periodo (first column, derived from fechaHasta)
@@ -345,6 +351,8 @@ describe('storeResumenBancario (bank accounts)', () => {
             'ARS',
             { type: 'number', value: 10000 }, // saldoInicial as CellNumber
             { type: 'number', value: 15000 }, // saldoFinal as CellNumber
+            { type: 'formula', value: '=IF(ABS(INDIRECT("L"&ROW()))<0.01,"SI","NO")' }, // balanceOk formula
+            { type: 'number', value: 0 }, // balanceDiff (10000 + 5000 - 15000 = 0)
           ])
         ]),
         'America/Argentina/Buenos_Aires', // Timezone parameter
@@ -370,9 +378,9 @@ describe('storeResumenBancario (bank accounts)', () => {
       expect(row[0]).toBe('2024-02'); // periodo from fechaHasta
     });
 
-    it('stores row with correct column order using CellDate and CellNumber types', async () => {
+    it('stores row with correct column order using CellDate, CellNumber, and CellFormula types', async () => {
       vi.mocked(getValues).mockResolvedValue({ ok: true, value: [['Header']] });
-      vi.mocked(appendRowsWithLinks).mockResolvedValue({ ok: true, value: 10 });
+      vi.mocked(appendRowsWithLinks).mockResolvedValue({ ok: true, value: 12 });
       vi.mocked(sortSheet).mockResolvedValue({ ok: true, value: undefined });
 
       const resumen = createTestResumen({
@@ -384,6 +392,9 @@ describe('storeResumenBancario (bank accounts)', () => {
         moneda: 'ARS',
         saldoInicial: 10000,
         saldoFinal: 15000,
+        movimientos: [
+          { fecha: '2024-01-15', origenConcepto: 'Credit', debito: null, credito: 5000, saldo: 15000 },
+        ],
       });
 
       await storeResumenBancario(resumen, 'spreadsheet-id');
@@ -391,7 +402,50 @@ describe('storeResumenBancario (bank accounts)', () => {
       const calls = vi.mocked(appendRowsWithLinks).mock.calls;
       expect(calls.length).toBe(1);
       const row = calls[0][2][0];
-      expect(row).toHaveLength(10); // Confirm 10 columns total
+      expect(row).toHaveLength(12); // Confirm 12 columns total (added balanceOk and balanceDiff)
+    });
+
+    it('calculates balanceDiff correctly with various transaction scenarios', async () => {
+      vi.mocked(getValues).mockResolvedValue({ ok: true, value: [['Header']] });
+      vi.mocked(appendRowsWithLinks).mockResolvedValue({ ok: true, value: 12 });
+      vi.mocked(sortSheet).mockResolvedValue({ ok: true, value: undefined });
+
+      // saldoInicial: 10000, credito: 3000, debito: 2000 = 11000
+      // saldoFinal: 10500 => diff = 11000 - 10500 = 500
+      const resumen = createTestResumen({
+        saldoInicial: 10000,
+        saldoFinal: 10500,
+        movimientos: [
+          { fecha: '2024-01-15', origenConcepto: 'Credit', debito: null, credito: 3000, saldo: 13000 },
+          { fecha: '2024-01-20', origenConcepto: 'Debit', debito: 2000, credito: null, saldo: 11000 },
+        ],
+      });
+
+      await storeResumenBancario(resumen, 'spreadsheet-id');
+
+      const calls = vi.mocked(appendRowsWithLinks).mock.calls;
+      const row = calls[0][2][0];
+      // balanceDiff should be 500 (computed 11000 - reported 10500)
+      expect(row[11]).toEqual({ type: 'number', value: 500 });
+    });
+
+    it('handles empty movimientos with zero balanceDiff when saldoFinal equals saldoInicial', async () => {
+      vi.mocked(getValues).mockResolvedValue({ ok: true, value: [['Header']] });
+      vi.mocked(appendRowsWithLinks).mockResolvedValue({ ok: true, value: 12 });
+      vi.mocked(sortSheet).mockResolvedValue({ ok: true, value: undefined });
+
+      const resumen = createTestResumen({
+        saldoInicial: 10000,
+        saldoFinal: 10000,
+        movimientos: [],  // No transactions
+      });
+
+      await storeResumenBancario(resumen, 'spreadsheet-id');
+
+      const calls = vi.mocked(appendRowsWithLinks).mock.calls;
+      const row = calls[0][2][0];
+      // balanceDiff should be 0
+      expect(row[11]).toEqual({ type: 'number', value: 0 });
     });
 
     it('creates hyperlink with correct format (now at index 4)', async () => {

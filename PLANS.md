@@ -227,3 +227,29 @@ Users can quickly scan the balanceOk column to spot problems, then look at balan
 1. Run `bug-hunter` agent - Review changes for bugs
 2. Run `test-runner` agent - Verify all tests pass
 3. Run `builder` agent - Verify zero warnings
+
+---
+
+## Iteration 1
+
+**Implemented:** 2026-01-30
+
+### Completed
+
+- **Fix 1: CellFormula type** - Added `CellFormula` interface to `sheets.ts` with `isCellFormula` type guard. Updated `convertToSheetsCellData` to handle `CellFormula` values using `formulaValue` (bypasses sanitization for trusted internal formulas). Updated `movimientos-store.ts` to wrap formula strings in `CellFormula` type.
+
+- **Fix 2: Formula row indexing** - Fixed `generateMovimientoRowWithFormula` to account for header row. Array index N now maps to sheet row N+2 (since row 1 is headers, row 2 is SALDO INICIAL). Updated `generateFinalBalanceRow` similarly. Updated all related test assertions.
+
+- **Fix 3: Balance validation columns** - Implemented `calculateBalanceDiff` function to compute (saldoInicial + credits - debits - saldoFinal). Implemented `generateBalanceOkFormulaLocal` function returning `=IF(ABS(INDIRECT("L"&ROW()))<0.01,"SI","NO")`. Updated `storeResumenBancario` to include columns K (balanceOk formula) and L (balanceDiff number). Updated range from A:J to A:L.
+
+- **Documentation** - Updated SPREADSHEET_FORMAT.md to reflect the new 12-column schema for Resumen Bancario, adding balanceOk and balanceDiff columns.
+
+### Checklist Results
+- bug-hunter: Found 1 medium issue (SPREADSHEET_FORMAT.md outdated) - fixed
+- test-runner: Passed (1114 tests across 54 files)
+- builder: Passed (zero warnings)
+
+### Notes
+- The CellFormula type is intentionally bypassing sanitization. The JSDoc comment warns this is only for trusted, internally-generated formulas.
+- The balanceOk formula uses INDIRECT with ROW() to work correctly even after the sheet is sorted by periodo.
+- Tests were updated following TDD: write failing tests first, then implement to make them pass.

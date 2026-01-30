@@ -9,6 +9,8 @@ import {
   generateFinalBalanceRow,
   generateBalanceOkFormula,
   generateBalanceDiffFormula,
+  calculateBalanceDiff,
+  generateBalanceOkFormulaLocal,
 } from './balance-formulas.js';
 import type { MovimientoBancario } from '../types/index.js';
 
@@ -49,8 +51,14 @@ describe('Balance Formula Utilities', () => {
       saldo: 15000,
     };
 
-    it('should generate row with formula in saldoCalculado column', () => {
-      // Row 3 means row index 2 (0-based), previous row is index 1 (row 2 in sheet)
+    // Row indexing with header row:
+    // - Row 1 (sheet): Headers
+    // - Row 2 (sheet): SALDO INICIAL (array index 0)
+    // - Row 3 (sheet): First transaction (array index 1)
+    // - Row N+2 (sheet): Transaction at array index N
+
+    it('should generate row with formula in saldoCalculado column (accounts for header)', () => {
+      // Array index 2 → Sheet row 4, previous sheet row 3
       const result = generateMovimientoRowWithFormula(mockMovimiento, 2);
 
       expect(result).toHaveLength(6);
@@ -59,14 +67,15 @@ describe('Balance Formula Utilities', () => {
       expect(result[2]).toBeNull(); // debito
       expect(result[3]).toBe(5000);  // credito
       expect(result[4]).toBe(15000); // saldo (parsed from PDF)
-      expect(result[5]).toBe('=F2+D3-C3'); // formula: previous saldoCalculado + credito - debito
+      // Formula: =F{prev}+D{curr}-C{curr} where prev=3, curr=4
+      expect(result[5]).toBe('=F3+D4-C4');
     });
 
     it('should handle first transaction row (index 1)', () => {
       const result = generateMovimientoRowWithFormula(mockMovimiento, 1);
 
-      // First transaction references initial balance row (row 1, index 0)
-      expect(result[5]).toBe('=F1+D2-C2');
+      // Array index 1 → Sheet row 3, previous sheet row 2 (SALDO INICIAL)
+      expect(result[5]).toBe('=F2+D3-C3');
     });
 
     it('should handle debit transaction', () => {
@@ -78,11 +87,12 @@ describe('Balance Formula Utilities', () => {
         saldo: 14000,
       };
 
+      // Array index 3 → Sheet row 5, previous sheet row 4
       const result = generateMovimientoRowWithFormula(debitMovimiento, 3);
 
       expect(result[2]).toBe(1000);  // debito
       expect(result[3]).toBeNull();  // credito
-      expect(result[5]).toBe('=F3+D4-C4'); // formula
+      expect(result[5]).toBe('=F4+D5-C5'); // formula
     });
 
     it('should handle transaction with both debit and credit', () => {
@@ -94,17 +104,22 @@ describe('Balance Formula Utilities', () => {
         saldo: 13950,
       };
 
+      // Array index 4 → Sheet row 6, previous sheet row 5
       const result = generateMovimientoRowWithFormula(bothMovimiento, 4);
 
       expect(result[2]).toBe(100);   // debito
       expect(result[3]).toBe(50);    // credito
-      expect(result[5]).toBe('=F4+D5-C5'); // formula
+      expect(result[5]).toBe('=F5+D6-C6'); // formula
     });
   });
 
   describe('generateFinalBalanceRow', () => {
-    it('should generate final balance row referencing last transaction', () => {
-      // If last transaction is at row index 10 (row 11 in sheet)
+    // Row indexing with header row:
+    // - Last transaction at array index N is at sheet row N + 2
+    // - Array index 10 → Sheet row 12
+
+    it('should generate final balance row referencing last transaction (accounts for header)', () => {
+      // Last transaction at array index 10 → Sheet row 12
       const result = generateFinalBalanceRow(10);
 
       expect(result).toEqual([
@@ -113,15 +128,15 @@ describe('Balance Formula Utilities', () => {
         null,            // debito (empty)
         null,            // credito (empty)
         null,            // saldo (empty)
-        '=F11',          // saldoCalculado (reference to last transaction's saldoCalculado)
+        '=F12',          // saldoCalculado (reference to last transaction at sheet row 12)
       ]);
     });
 
     it('should handle single transaction case', () => {
-      // If only one transaction at row index 1 (row 2 in sheet)
+      // Only one transaction at array index 1 → Sheet row 3
       const result = generateFinalBalanceRow(1);
 
-      expect(result[5]).toBe('=F2');
+      expect(result[5]).toBe('=F3');
     });
   });
 
@@ -169,6 +184,99 @@ describe('Balance Formula Utilities', () => {
       const result = generateBalanceDiffFormula('xyz789', '2024-12', 20, 15);
 
       expect(result).toBe('=IMPORTRANGE("xyz789","2024-12!F21")-J16');
+    });
+  });
+
+  describe('calculateBalanceDiff', () => {
+    it('should return 0 when computed balance matches saldoFinal exactly', () => {
+      const movimientos: MovimientoBancario[] = [
+        { fecha: '2025-01-15', origenConcepto: 'Credit', debito: null, credito: 5000, saldo: 15000 },
+        { fecha: '2025-01-20', origenConcepto: 'Debit', debito: 2000, credito: null, saldo: 13000 },
+      ];
+
+      // saldoInicial: 10000 + 5000 - 2000 = 13000
+      const diff = calculateBalanceDiff(10000, movimientos, 13000);
+
+      expect(diff).toBe(0);
+    });
+
+    it('should return positive diff when computed balance is higher than saldoFinal', () => {
+      const movimientos: MovimientoBancario[] = [
+        { fecha: '2025-01-15', origenConcepto: 'Credit', debito: null, credito: 5000, saldo: 15000 },
+      ];
+
+      // saldoInicial: 10000 + 5000 = 15000, but saldoFinal reported as 14000
+      const diff = calculateBalanceDiff(10000, movimientos, 14000);
+
+      expect(diff).toBe(1000);  // computed - reported = 15000 - 14000
+    });
+
+    it('should return negative diff when computed balance is lower than saldoFinal', () => {
+      const movimientos: MovimientoBancario[] = [
+        { fecha: '2025-01-15', origenConcepto: 'Debit', debito: 3000, credito: null, saldo: 7000 },
+      ];
+
+      // saldoInicial: 10000 - 3000 = 7000, but saldoFinal reported as 8000
+      const diff = calculateBalanceDiff(10000, movimientos, 8000);
+
+      expect(diff).toBe(-1000);  // computed - reported = 7000 - 8000
+    });
+
+    it('should handle small rounding differences', () => {
+      const movimientos: MovimientoBancario[] = [
+        { fecha: '2025-01-15', origenConcepto: 'Credit', debito: null, credito: 100.33, saldo: 10100.33 },
+        { fecha: '2025-01-16', origenConcepto: 'Credit', debito: null, credito: 100.33, saldo: 10200.66 },
+        { fecha: '2025-01-17', origenConcepto: 'Credit', debito: null, credito: 100.34, saldo: 10301 },
+      ];
+
+      // 10000 + 100.33 + 100.33 + 100.34 = 10301.00
+      const diff = calculateBalanceDiff(10000, movimientos, 10301);
+
+      expect(diff).toBe(0);
+    });
+
+    it('should handle empty movimientos array', () => {
+      const diff = calculateBalanceDiff(10000, [], 10000);
+
+      expect(diff).toBe(0);  // No transactions, balance should equal initial
+    });
+
+    it('should handle empty movimientos with different saldoFinal', () => {
+      const diff = calculateBalanceDiff(10000, [], 9500);
+
+      expect(diff).toBe(500);  // Parsing error: computed (10000) - reported (9500)
+    });
+
+    it('should handle transactions with both debit and credit', () => {
+      const movimientos: MovimientoBancario[] = [
+        { fecha: '2025-01-15', origenConcepto: 'Adjustment', debito: 100, credito: 200, saldo: 10100 },
+      ];
+
+      // saldoInicial: 10000 + 200 - 100 = 10100
+      const diff = calculateBalanceDiff(10000, movimientos, 10100);
+
+      expect(diff).toBe(0);
+    });
+
+    it('should handle null debito/credito values', () => {
+      const movimientos: MovimientoBancario[] = [
+        { fecha: '2025-01-15', origenConcepto: 'Only credit', debito: null, credito: 500, saldo: 10500 },
+        { fecha: '2025-01-16', origenConcepto: 'Only debit', debito: 200, credito: null, saldo: 10300 },
+      ];
+
+      // saldoInicial: 10000 + 500 - 200 = 10300
+      const diff = calculateBalanceDiff(10000, movimientos, 10300);
+
+      expect(diff).toBe(0);
+    });
+  });
+
+  describe('generateBalanceOkFormulaLocal', () => {
+    it('should generate formula checking if balanceDiff is within tolerance', () => {
+      const result = generateBalanceOkFormulaLocal();
+
+      // Uses INDIRECT with ROW() to work regardless of row position after sorting
+      expect(result).toBe('=IF(ABS(INDIRECT("L"&ROW()))<0.01,"SI","NO")');
     });
   });
 });

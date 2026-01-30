@@ -284,12 +284,13 @@ describe('storeMovimientosBancario', () => {
     const appendCall = vi.mocked(appendRowsWithLinks).mock.calls[0];
     const rows = appendCall[2] as any[];
 
-    // Row 0: SALDO INICIAL (row 1 in sheet)
-    // Row 1: First transaction (row 2 in sheet) - formula references row 1
-    expect(rows[1][5]).toBe('=F1+D2-C2');
-
-    // Row 2: Second transaction (row 3 in sheet) - formula references row 2
-    expect(rows[2][5]).toBe('=F2+D3-C3');
+    // Row mapping with header row:
+    // - Sheet row 1: Headers
+    // - Sheet row 2: SALDO INICIAL (array index 0)
+    // - Sheet row 3: First transaction (array index 1) - formula references row 2
+    // - Sheet row 4: Second transaction (array index 2) - formula references row 3
+    expect(rows[1][5]).toEqual({ type: 'formula', value: '=F2+D3-C3' });
+    expect(rows[2][5]).toEqual({ type: 'formula', value: '=F3+D4-C4' });
   });
 
   it('should insert final balance row last referencing last transaction', async () => {
@@ -314,9 +315,12 @@ describe('storeMovimientosBancario', () => {
     // Last row should be SALDO FINAL
     const lastRow = rows[rows.length - 1];
     expect(lastRow[1]).toBe('SALDO FINAL');
-    // Row 0: SALDO INICIAL, Row 1-2: transactions (rows 2-3 in sheet), Row 3: SALDO FINAL (row 4 in sheet)
-    // References last transaction at row 3 (sheet row 3)
-    expect(lastRow[5]).toBe('=F3');
+    // Row mapping with header row:
+    // - Sheet row 1: Headers
+    // - Sheet row 2: SALDO INICIAL (array index 0)
+    // - Sheet row 3-4: transactions (array index 1-2)
+    // - Last transaction at array index 2 → sheet row 4
+    expect(lastRow[5]).toEqual({ type: 'formula', value: '=F4' });
   });
 
   it('should keep original saldo column for comparison alongside saldoCalculado', async () => {
@@ -340,7 +344,8 @@ describe('storeMovimientosBancario', () => {
     // Transaction row (row 1, after SALDO INICIAL)
     const txRow = rows[1];
     expect(txRow[4]).toEqual({ type: 'number', value: 9000 }); // saldo (parsed from PDF)
-    expect(txRow[5]).toBe('=F1+D2-C2');  // saldoCalculado (formula)
+    // Array index 1 → sheet row 3, previous row 2
+    expect(txRow[5]).toEqual({ type: 'formula', value: '=F2+D3-C3' });  // saldoCalculado (CellFormula)
   });
 
   it('should use range A:F for 6-column sheet', async () => {
