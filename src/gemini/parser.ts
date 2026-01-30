@@ -79,7 +79,8 @@ export function assignCuitsAndClassify(
   const advaIsClient = isAdvaName(clientName);
 
   // Find the "other" CUIT (not ADVA's) - CUITs should already be normalized by caller
-  const otherCuit = allCuits.find(c => c !== ADVA_CUIT) || '';
+  // Validate length: Argentine IDs are 7-11 digits (DNI: 7-8, CUIT/CUIL: 11)
+  const otherCuit = allCuits.find(c => c !== ADVA_CUIT && c.length >= 7 && c.length <= 11) || '';
 
   if (advaIsIssuer && !advaIsClient) {
     // factura_emitida - ADVA created this invoice
@@ -248,7 +249,7 @@ function validateAdvaRole(
       }
       // Require receptor info for factura_emitida
       if (!data.cuitReceptor) {
-        validation.errors.push('Missing cuitReceptor (counterparty)');
+        validation.errors.push('Missing cuitReceptor - may be Consumidor Final or extraction issue');
       }
       break;
 
@@ -475,7 +476,18 @@ export function parseFacturaResponse(
     const confidence = Math.max(0.5, completeness); // Minimum 0.5 if we got some data
 
     // If confidence > 0.9, no review needed; otherwise check for issues
-    const needsReview = confidence <= 0.9 && (missingFields.length > 0 || hasSuspiciousEmptyFields);
+    let needsReview = confidence <= 0.9 && (missingFields.length > 0 || hasSuspiciousEmptyFields);
+
+    // CRITICAL: For factura_emitida, empty cuitReceptor indicates Consumidor Final or extraction failure
+    // Flag for review to ensure human verification
+    if (actualDocumentType === 'factura_emitida' && (!data.cuitReceptor || data.cuitReceptor === '')) {
+      warn('Empty cuitReceptor in factura_emitida - likely Consumidor Final or extraction issue', {
+        module: 'gemini-parser',
+        phase: 'factura-parse',
+        clientName: data.razonSocialReceptor,
+      });
+      needsReview = true;
+    }
 
     // Validate ADVA role using the actual document type (may differ from expected)
     const expectedRole = actualDocumentType === 'factura_emitida' ? 'emisor' : 'receptor';

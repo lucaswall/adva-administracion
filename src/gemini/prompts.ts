@@ -160,9 +160,17 @@ DOCUMENT STRUCTURE:
    - LOCATION: In the CLIENT/BUYER section below the header, typically mid-page
    - Extract the NAME of this company/person
 
-3. ALL CUITs: Find ALL CUITs anywhere in the document
-   - List each unique CUIT found (11 digits, formatted as XX-XXXXXXXX-X or XXXXXXXXXXX)
-   - Do NOT assign CUITs to specific parties - just list them all
+3. ALL CUITs: Find ALL identification numbers anywhere in the document
+   - CRITICAL: In Argentina, identification numbers may have different labels:
+     * "CUIT:" (11 digits) - Tax ID for companies/individuals
+     * "Doc. Receptor:" (7-11 digits) - Common for Consumidor Final clients
+     * "DNI:" (7-8 digits) - National ID for individuals
+     * "CUIL:" (11 digits) - Worker ID, same format as CUIT
+   - Extract ALL identification numbers (7-11 digits) regardless of their label
+   - Even if labeled "Doc. Receptor" or "DNI", include them in allCuits array
+   - Format: Remove all dashes, spaces, slashes - return only digits
+   - List each unique number found - do NOT assign them to specific parties
+   - IMPORTANT: A document may have multiple IDs with different labels - extract them ALL
 
 ## INSURANCE DOCUMENTS (Liquidación de Premio)
 
@@ -207,6 +215,21 @@ Return ONLY valid JSON in this exact format:
   "importeNeto": 1000.00,
   "importeIva": 210.00,
   "importeTotal": 1210.00,
+  "moneda": "ARS",
+  "concepto": "Servicios profesionales"
+}
+
+Example with Consumidor Final (Doc. Receptor):
+{
+  "issuerName": "ASOCIACION CIVIL DE DESARROLLADORES DE VIDEOJUEGOS ARGENTINOS",
+  "clientName": "Marcial Fermin Gutierrez",
+  "allCuits": ["30709076783", "20367086921"],
+  "tipoComprobante": "C",
+  "nroFactura": "00005-00000035",
+  "fechaEmision": "2025-11-10",
+  "importeNeto": 100000.00,
+  "importeIva": 0,
+  "importeTotal": 100000.00,
   "moneda": "ARS",
   "concepto": "Servicios profesionales"
 }

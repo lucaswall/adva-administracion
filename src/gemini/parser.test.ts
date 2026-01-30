@@ -6,7 +6,9 @@ import { describe, it, expect } from 'vitest';
 import {
   parseResumenBancarioResponse,
   parseResumenTarjetaResponse,
-  parseResumenBrokerResponse
+  parseResumenBrokerResponse,
+  assignCuitsAndClassify,
+  parseFacturaResponse
 } from './parser.js';
 
 describe('Parser - Bank Name Normalization', () => {
@@ -584,6 +586,102 @@ describe('Parser - Movimiento Validation', () => {
       if (result.ok) {
         // 1 vs 20 is > 10% mismatch
         expect(result.value.needsReview).toBe(true);
+      }
+    });
+  });
+});
+
+describe('Parser - CUIT Assignment for Consumidor Final', () => {
+  describe('assignCuitsAndClassify', () => {
+    it('handles Doc. Receptor IDs for Consumidor Final clients', () => {
+      // Test case where client ID is labeled "Doc. Receptor" not "CUIT"
+      const issuerName = 'ASOCIACION CIVIL DE DESARROLLADORES DE VIDEOJUEGOS ARGENTINOS';
+      const clientName = 'Marcial Fermin Gutierrez';
+      const allCuits = ['30709076783', '20367086921']; // ADVA CUIT + client CUIL (11 digits)
+
+      const result = assignCuitsAndClassify(issuerName, clientName, allCuits);
+
+      expect(result.documentType).toBe('factura_emitida');
+      expect(result.cuitEmisor).toBe('30709076783');
+      expect(result.razonSocialEmisor).toBe(issuerName);
+      expect(result.cuitReceptor).toBe('20367086921');
+      expect(result.razonSocialReceptor).toBe(clientName);
+    });
+
+    it('handles extraction with only ADVA CUIT (Consumidor Final case)', () => {
+      // When allCuits only contains ADVA's CUIT, cuitReceptor should be empty
+      const issuerName = 'ASOCIACION CIVIL DE DESARROLLADORES DE VIDEOJUEGOS ARGENTINOS';
+      const clientName = 'Marcial Fermin Gutierrez';
+      const allCuits = ['30709076783']; // Only ADVA's CUIT extracted
+
+      const result = assignCuitsAndClassify(issuerName, clientName, allCuits);
+
+      expect(result.documentType).toBe('factura_emitida');
+      expect(result.cuitEmisor).toBe('30709076783');
+      expect(result.cuitReceptor).toBe(''); // Empty, not present in allCuits
+      expect(result.razonSocialReceptor).toBe(clientName);
+    });
+
+    it('handles DNI format (7-8 digits)', () => {
+      // DNIs are 7-8 digits, not 11 like CUITs
+      const issuerName = 'ADVA';
+      const clientName = 'Juan Perez';
+      const allCuits = ['30709076783', '12345678']; // ADVA CUIT + client DNI (8 digits)
+
+      const result = assignCuitsAndClassify(issuerName, clientName, allCuits);
+
+      expect(result.documentType).toBe('factura_emitida');
+      expect(result.cuitReceptor).toBe('12345678'); // DNI should be assigned
+    });
+  });
+
+  describe('parseFacturaResponse - Consumidor Final validation', () => {
+    it('flags empty cuitReceptor for factura_emitida as needs review', () => {
+      // Simulate Gemini extracting only ADVA's CUIT
+      const response = JSON.stringify({
+        issuerName: 'ASOCIACION CIVIL DE DESARROLLADORES DE VIDEOJUEGOS ARGENTINOS',
+        clientName: 'Marcial Fermin Gutierrez',
+        allCuits: ['30709076783'], // Only ADVA CUIT
+        tipoComprobante: 'C',
+        nroFactura: '00005-00000035',
+        fechaEmision: '2025-11-10',
+        importeNeto: 100000,
+        importeIva: 0,
+        importeTotal: 100000,
+        moneda: 'ARS',
+      });
+
+      const result = parseFacturaResponse(response, 'factura_emitida');
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value.data.cuitReceptor).toBeUndefined();
+        expect(result.value.needsReview).toBe(true); // Should flag for review
+      }
+    });
+
+    it('does not flag when cuitReceptor is present', () => {
+      // Complete data: all required fields present, confidence > 0.9, no suspicious fields
+      const response = JSON.stringify({
+        issuerName: 'ASOCIACION CIVIL DE DESARROLLADORES DE VIDEOJUEGOS ARGENTINOS',
+        clientName: 'Empresa Test SA',
+        allCuits: ['30709076783', '20367086921'],
+        tipoComprobante: 'A',
+        nroFactura: '00001-00000001',
+        fechaEmision: '2025-01-15',
+        importeNeto: 100000,
+        importeIva: 21000,
+        importeTotal: 121000,
+        moneda: 'ARS',
+      });
+
+      const result = parseFacturaResponse(response, 'factura_emitida');
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value.data.cuitReceptor).toBe('20367086921');
+        // No review needed: all required fields present, cuitReceptor not empty, confidence = 1.0
+        expect(result.value.needsReview).toBe(false);
       }
     });
   });
