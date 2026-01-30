@@ -178,16 +178,16 @@ export function generateReciboFileName(recibo: Recibo): string {
 /**
  * Generates a standardized file name for a bank account resumen
  *
- * Format: YYYY-MM-DD - Resumen - Bank Name - Account Number CURRENCY.pdf
- * Example ARS: 2024-01-15 - Resumen - BBVA - 1234567890 ARS.pdf
- * Example USD: 2024-01-15 - Resumen - BBVA - 1234567890 USD.pdf
+ * Format: YYYY-MM - Resumen - Bank Name - Account Number CURRENCY.pdf
+ * Example ARS: 2024-01 - Resumen - BBVA - 1234567890 ARS.pdf
+ * Example USD: 2024-01 - Resumen - BBVA - 1234567890 USD.pdf
  *
  * @param resumen - Resumen bancario data
  * @returns Standardized file name
  */
 export function generateResumenFileName(resumen: ResumenBancario): string {
-  // Date (YYYY-MM-DD from fechaDesde)
-  const fecha = resumen.fechaDesde;
+  // Extract YYYY-MM from fechaHasta (periodo format)
+  const periodo = resumen.fechaHasta.substring(0, 7); // YYYY-MM-DD -> YYYY-MM
 
   // Bank name (sanitized)
   const bankName = sanitizeFileName(resumen.banco);
@@ -195,21 +195,21 @@ export function generateResumenFileName(resumen: ResumenBancario): string {
   // Account number (sanitized)
   const numeroCuenta = sanitizeFileName(resumen.numeroCuenta);
 
-  return `${fecha} - Resumen - ${bankName} - ${numeroCuenta} ${resumen.moneda}.pdf`;
+  return `${periodo} - Resumen - ${bankName} - ${numeroCuenta} ${resumen.moneda}.pdf`;
 }
 
 /**
  * Generates a standardized file name for a credit card resumen
  *
- * Format: YYYY-MM-DD - Resumen - Bank Name - CardType CardNumber.pdf
- * Example: 2024-01-15 - Resumen - BBVA - Visa 65656454.pdf
+ * Format: YYYY-MM - Resumen - Bank Name - CardType CardNumber.pdf
+ * Example: 2024-01 - Resumen - BBVA - Visa 65656454.pdf
  *
  * @param resumen - Resumen tarjeta data
  * @returns Standardized file name
  */
 export function generateResumenTarjetaFileName(resumen: ResumenTarjeta): string {
-  // Date (YYYY-MM-DD from fechaDesde)
-  const fecha = resumen.fechaDesde;
+  // Extract YYYY-MM from fechaHasta (periodo format)
+  const periodo = resumen.fechaHasta.substring(0, 7); // YYYY-MM-DD -> YYYY-MM
 
   // Bank name (sanitized)
   const bankName = sanitizeFileName(resumen.banco);
@@ -217,21 +217,21 @@ export function generateResumenTarjetaFileName(resumen: ResumenTarjeta): string 
   // Card last digits (sanitized)
   const numeroCuenta = sanitizeFileName(resumen.numeroCuenta);
 
-  return `${fecha} - Resumen - ${bankName} - ${resumen.tipoTarjeta} ${numeroCuenta}.pdf`;
+  return `${periodo} - Resumen - ${bankName} - ${resumen.tipoTarjeta} ${numeroCuenta}.pdf`;
 }
 
 /**
  * Generates a standardized file name for a broker resumen
  *
- * Format: YYYY-MM-DD - Resumen Broker - Broker Name - Comitente.pdf
- * Example: 2024-01-15 - Resumen Broker - BALANZ - 123456.pdf
+ * Format: YYYY-MM - Resumen Broker - Broker Name - Comitente.pdf
+ * Example: 2024-01 - Resumen Broker - BALANZ - 123456.pdf
  *
  * @param resumen - Resumen broker data
  * @returns Standardized file name
  */
 export function generateResumenBrokerFileName(resumen: ResumenBroker): string {
-  // Date (YYYY-MM-DD from fechaDesde)
-  const fecha = resumen.fechaDesde;
+  // Extract YYYY-MM from fechaHasta (periodo format)
+  const periodo = resumen.fechaHasta.substring(0, 7); // YYYY-MM-DD -> YYYY-MM
 
   // Broker name (sanitized)
   const brokerName = sanitizeFileName(resumen.broker);
@@ -239,7 +239,7 @@ export function generateResumenBrokerFileName(resumen: ResumenBroker): string {
   // Comitente number (sanitized)
   const numeroCuenta = sanitizeFileName(resumen.numeroCuenta);
 
-  return `${fecha} - Resumen Broker - ${brokerName} - ${numeroCuenta}.pdf`;
+  return `${periodo} - Resumen Broker - ${brokerName} - ${numeroCuenta}.pdf`;
 }
 
 /**

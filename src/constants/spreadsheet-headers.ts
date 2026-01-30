@@ -148,10 +148,12 @@ export const RESUMEN_BANCARIO_HEADERS = [
  * Sheet configuration for Control de Resumenes spreadsheet - Bank Accounts
  * Stores bank account statements in bank account-specific folders
  * Folder: {YYYY}/Bancos/{Bank} {Account} {Currency}/
+ * 10 columns (A:J)
  */
 export const CONTROL_RESUMENES_BANCARIO_SHEET: SheetConfig = {
   title: 'Resumenes',
   headers: [
+    'periodo',         // YYYY-MM format
     'fechaDesde',
     'fechaHasta',
     'fileId',
@@ -163,10 +165,10 @@ export const CONTROL_RESUMENES_BANCARIO_SHEET: SheetConfig = {
     'saldoFinal',
   ],
   numberFormats: new Map([
-    [0, { type: 'date' }],              // fechaDesde
-    [1, { type: 'date' }],              // fechaHasta
-    [7, { type: 'currency', decimals: 2 }],  // saldoInicial
-    [8, { type: 'currency', decimals: 2 }],  // saldoFinal
+    [1, { type: 'date' }],              // fechaDesde
+    [2, { type: 'date' }],              // fechaHasta
+    [8, { type: 'currency', decimals: 2 }],  // saldoInicial
+    [9, { type: 'currency', decimals: 2 }],  // saldoFinal
   ]),
 };
 
@@ -174,10 +176,12 @@ export const CONTROL_RESUMENES_BANCARIO_SHEET: SheetConfig = {
  * Sheet configuration for Control de Resumenes spreadsheet - Credit Cards
  * Stores credit card statements in card-specific folders
  * Folder: {YYYY}/Bancos/{Bank} {CardType} {LastDigits}/
+ * 10 columns (A:J)
  */
 export const CONTROL_RESUMENES_TARJETA_SHEET: SheetConfig = {
   title: 'Resumenes',
   headers: [
+    'periodo',         // YYYY-MM format
     'fechaDesde',
     'fechaHasta',
     'fileId',
@@ -189,10 +193,10 @@ export const CONTROL_RESUMENES_TARJETA_SHEET: SheetConfig = {
     'saldoActual',
   ],
   numberFormats: new Map([
-    [0, { type: 'date' }],              // fechaDesde
-    [1, { type: 'date' }],              // fechaHasta
-    [7, { type: 'currency', decimals: 2 }],  // pagoMinimo
-    [8, { type: 'currency', decimals: 2 }],  // saldoActual
+    [1, { type: 'date' }],              // fechaDesde
+    [2, { type: 'date' }],              // fechaHasta
+    [8, { type: 'currency', decimals: 2 }],  // pagoMinimo
+    [9, { type: 'currency', decimals: 2 }],  // saldoActual
   ]),
 };
 
@@ -200,10 +204,12 @@ export const CONTROL_RESUMENES_TARJETA_SHEET: SheetConfig = {
  * Sheet configuration for Control de Resumenes spreadsheet - Broker/Investment
  * Stores broker statements in broker-specific folders
  * Folder: {YYYY}/Bancos/{Broker} {Comitente}/
+ * 9 columns (A:I)
  */
 export const CONTROL_RESUMENES_BROKER_SHEET: SheetConfig = {
   title: 'Resumenes',
   headers: [
+    'periodo',         // YYYY-MM format
     'fechaDesde',
     'fechaHasta',
     'fileId',
@@ -214,10 +220,10 @@ export const CONTROL_RESUMENES_BROKER_SHEET: SheetConfig = {
     'saldoUSD',        // Balance in USD (optional)
   ],
   numberFormats: new Map([
-    [0, { type: 'date' }],              // fechaDesde
-    [1, { type: 'date' }],              // fechaHasta
-    [6, { type: 'currency', decimals: 2 }],  // saldoARS
-    [7, { type: 'currency', decimals: 2 }],  // saldoUSD
+    [1, { type: 'date' }],              // fechaDesde
+    [2, { type: 'date' }],              // fechaHasta
+    [7, { type: 'currency', decimals: 2 }],  // saldoARS
+    [8, { type: 'currency', decimals: 2 }],  // saldoUSD
   ]),
 };
 

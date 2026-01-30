@@ -259,27 +259,27 @@ describe('generateResumenFileName', () => {
     needsReview: false,
   };
 
-  it('generates ARS currency resumen with account number', () => {
+  it('generates ARS currency resumen with account number (YYYY-MM format from fechaHasta)', () => {
     const result = generateResumenFileName(baseResumen);
-    expect(result).toBe('2024-01-15 - Resumen - BBVA - 1234567890 ARS.pdf');
+    expect(result).toBe('2024-01 - Resumen - BBVA - 1234567890 ARS.pdf');
   });
 
-  it('generates USD currency resumen with account number', () => {
+  it('generates USD currency resumen with account number (YYYY-MM format from fechaHasta)', () => {
     const resumenUSD: ResumenBancario = { ...baseResumen, moneda: 'USD' };
     const result = generateResumenFileName(resumenUSD);
-    expect(result).toBe('2024-01-15 - Resumen - BBVA - 1234567890 USD.pdf');
+    expect(result).toBe('2024-01 - Resumen - BBVA - 1234567890 USD.pdf');
   });
 
   it('handles bank name with accents', () => {
     const resumen: ResumenBancario = { ...baseResumen, banco: 'Río de la Plata' };
     const result = generateResumenFileName(resumen);
-    expect(result).toBe('2024-01-15 - Resumen - Rio de la Plata - 1234567890 ARS.pdf');
+    expect(result).toBe('2024-01 - Resumen - Rio de la Plata - 1234567890 ARS.pdf');
   });
 
   it('handles account number with spaces or special characters', () => {
     const resumen: ResumenBancario = { ...baseResumen, numeroCuenta: '1234 5678 90' };
     const result = generateResumenFileName(resumen);
-    expect(result).toBe('2024-01-15 - Resumen - BBVA - 1234 5678 90 ARS.pdf');
+    expect(result).toBe('2024-01 - Resumen - BBVA - 1234 5678 90 ARS.pdf');
   });
 });
 
@@ -300,9 +300,9 @@ describe('generateResumenTarjetaFileName', () => {
     needsReview: false,
   };
 
-  it('generates credit card resumen with card type (no currency suffix)', () => {
+  it('generates credit card resumen with card type (YYYY-MM format from fechaHasta, no currency suffix)', () => {
     const result = generateResumenTarjetaFileName(baseTarjeta);
-    expect(result).toBe('2024-01-15 - Resumen - BBVA - Visa 4563.pdf');
+    expect(result).toBe('2024-01 - Resumen - BBVA - Visa 4563.pdf');
   });
 
   it('generates resumen for different card types', () => {
@@ -321,7 +321,7 @@ describe('generateResumenTarjetaFileName', () => {
         tipoTarjeta: card.tipo,
       };
       const result = generateResumenTarjetaFileName(tarjeta);
-      expect(result).toBe(`2024-01-15 - Resumen - BBVA - ${card.tipo} ${card.digitos}.pdf`);
+      expect(result).toBe(`2024-01 - Resumen - BBVA - ${card.tipo} ${card.digitos}.pdf`);
       // Verify no currency suffix for credit cards
       expect(result).not.toContain('ARS');
       expect(result).not.toContain('USD');
@@ -345,14 +345,14 @@ describe('generateResumenBrokerFileName', () => {
     needsReview: false,
   };
 
-  it('generates broker resumen with broker name and comitente', () => {
+  it('generates broker resumen with broker name and comitente (YYYY-MM format from fechaHasta)', () => {
     const result = generateResumenBrokerFileName(baseBroker);
-    expect(result).toBe('2024-01-15 - Resumen Broker - BALANZ CAPITAL VALORES SAU - 123456.pdf');
+    expect(result).toBe('2024-01 - Resumen Broker - BALANZ CAPITAL VALORES SAU - 123456.pdf');
   });
 
   it('handles broker name with special characters (slash becomes dash)', () => {
     const broker: ResumenBroker = { ...baseBroker, broker: 'IOL Invertir/Online S.A.' };
     const result = generateResumenBrokerFileName(broker);
-    expect(result).toBe('2024-01-15 - Resumen Broker - IOL Invertir-Online S.A. - 123456.pdf');
+    expect(result).toBe('2024-01 - Resumen Broker - IOL Invertir-Online S.A. - 123456.pdf');
   });
 });

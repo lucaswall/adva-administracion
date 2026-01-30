@@ -24,7 +24,7 @@ async function isDuplicateResumenBancario(
   spreadsheetId: string,
   resumen: ResumenBancario
 ): Promise<{ isDuplicate: boolean; existingFileId?: string }> {
-  const rowsResult = await getValues(spreadsheetId, 'Resumenes!A:I');
+  const rowsResult = await getValues(spreadsheetId, 'Resumenes!A:J');
   if (!rowsResult.ok || rowsResult.value.length <= 1) {
     return { isDuplicate: false };
   }
@@ -32,15 +32,15 @@ async function isDuplicateResumenBancario(
   // Skip header row
   for (let i = 1; i < rowsResult.value.length; i++) {
     const row = rowsResult.value[i];
-    if (!row || row.length < 7) continue;
+    if (!row || row.length < 8) continue;
 
-    // Columns: fechaDesde, fechaHasta, fileId, fileName, banco, numeroCuenta, moneda, saldoInicial, saldoFinal
-    const rowFechaDesde = row[0];
-    const rowFechaHasta = row[1];
-    const rowFileId = row[2];
-    const rowBanco = row[4];
-    const rowNumeroCuenta = row[5];
-    const rowMoneda = row[6];
+    // Columns: periodo, fechaDesde, fechaHasta, fileId, fileName, banco, numeroCuenta, moneda, saldoInicial, saldoFinal
+    const rowFechaDesde = row[1];
+    const rowFechaHasta = row[2];
+    const rowFileId = row[3];
+    const rowBanco = row[5];
+    const rowNumeroCuenta = row[6];
+    const rowMoneda = row[7];
 
     // Convert serial numbers to date strings for comparison
     const rowFechaDesdeStr = normalizeSpreadsheetDate(rowFechaDesde);
@@ -66,7 +66,7 @@ async function isDuplicateResumenTarjeta(
   spreadsheetId: string,
   resumen: ResumenTarjeta
 ): Promise<{ isDuplicate: boolean; existingFileId?: string }> {
-  const rowsResult = await getValues(spreadsheetId, 'Resumenes!A:I');
+  const rowsResult = await getValues(spreadsheetId, 'Resumenes!A:J');
   if (!rowsResult.ok || rowsResult.value.length <= 1) {
     return { isDuplicate: false };
   }
@@ -74,15 +74,15 @@ async function isDuplicateResumenTarjeta(
   // Skip header row
   for (let i = 1; i < rowsResult.value.length; i++) {
     const row = rowsResult.value[i];
-    if (!row || row.length < 7) continue;
+    if (!row || row.length < 8) continue;
 
-    // Columns: fechaDesde, fechaHasta, fileId, fileName, banco, numeroCuenta, tipoTarjeta, pagoMinimo, saldoActual
-    const rowFechaDesde = row[0];
-    const rowFechaHasta = row[1];
-    const rowFileId = row[2];
-    const rowBanco = row[4];
-    const rowNumeroCuenta = row[5];
-    const rowTipoTarjeta = row[6];
+    // Columns: periodo, fechaDesde, fechaHasta, fileId, fileName, banco, numeroCuenta, tipoTarjeta, pagoMinimo, saldoActual
+    const rowFechaDesde = row[1];
+    const rowFechaHasta = row[2];
+    const rowFileId = row[3];
+    const rowBanco = row[5];
+    const rowNumeroCuenta = row[6];
+    const rowTipoTarjeta = row[7];
 
     const rowFechaDesdeStr = normalizeSpreadsheetDate(rowFechaDesde);
     const rowFechaHastaStr = normalizeSpreadsheetDate(rowFechaHasta);
@@ -106,7 +106,7 @@ async function isDuplicateResumenBroker(
   spreadsheetId: string,
   resumen: ResumenBroker
 ): Promise<{ isDuplicate: boolean; existingFileId?: string }> {
-  const rowsResult = await getValues(spreadsheetId, 'Resumenes!A:H');
+  const rowsResult = await getValues(spreadsheetId, 'Resumenes!A:I');
   if (!rowsResult.ok || rowsResult.value.length <= 1) {
     return { isDuplicate: false };
   }
@@ -114,14 +114,14 @@ async function isDuplicateResumenBroker(
   // Skip header row
   for (let i = 1; i < rowsResult.value.length; i++) {
     const row = rowsResult.value[i];
-    if (!row || row.length < 6) continue;
+    if (!row || row.length < 7) continue;
 
-    // Columns: fechaDesde, fechaHasta, fileId, fileName, broker, numeroCuenta, saldoARS, saldoUSD
-    const rowFechaDesde = row[0];
-    const rowFechaHasta = row[1];
-    const rowFileId = row[2];
-    const rowBroker = row[4];
-    const rowNumeroCuenta = row[5];
+    // Columns: periodo, fechaDesde, fechaHasta, fileId, fileName, broker, numeroCuenta, saldoARS, saldoUSD
+    const rowFechaDesde = row[1];
+    const rowFechaHasta = row[2];
+    const rowFileId = row[3];
+    const rowBroker = row[5];
+    const rowNumeroCuenta = row[6];
 
     const rowFechaDesdeStr = normalizeSpreadsheetDate(rowFechaDesde);
     const rowFechaHastaStr = normalizeSpreadsheetDate(rowFechaHasta);
@@ -177,12 +177,14 @@ export async function storeResumenBancario(
 
     // Build the row with CellDate for proper date formatting and CellNumber for monetary values
     const fileName = generateResumenFileName(resumen);
+    const periodo = resumen.fechaHasta.substring(0, 7); // YYYY-MM-DD -> YYYY-MM
     const fechaDesdeDate: CellDate = { type: 'date', value: resumen.fechaDesde };
     const fechaHastaDate: CellDate = { type: 'date', value: resumen.fechaHasta };
     const saldoInicialNum: CellNumber = { type: 'number', value: resumen.saldoInicial };
     const saldoFinalNum: CellNumber = { type: 'number', value: resumen.saldoFinal };
 
     const row: CellValueOrLink[] = [
+      periodo,
       fechaDesdeDate,
       fechaHastaDate,
       resumen.fileId,
@@ -204,7 +206,7 @@ export async function storeResumenBancario(
     // Append the row
     const appendResult = await appendRowsWithLinks(
       spreadsheetId,
-      'Resumenes!A:I',
+      'Resumenes!A:J',
       [row],
       timeZone,
       context?.metadataCache
@@ -230,10 +232,10 @@ export async function storeResumenBancario(
 
     // Defer sort if context available, otherwise sort immediately
     if (context) {
-      // Sort by fechaDesde (column 0) ascending (oldest first)
+      // Sort by periodo (column 0) ascending (oldest first)
       context.sortBatch.addPendingSort(spreadsheetId, 'Resumenes', 0, false);
     } else {
-      // Sort by fechaDesde (column 0) ascending (oldest first)
+      // Sort by periodo (column 0) ascending (oldest first)
       const sortResult = await sortSheet(spreadsheetId, 'Resumenes', 0, false);
       if (!sortResult.ok) {
         warn('Failed to sort Resumenes sheet', {
@@ -293,12 +295,14 @@ export async function storeResumenTarjeta(
 
     // Build the row with CellDate for proper date formatting and CellNumber for monetary values
     const fileName = generateResumenTarjetaFileName(resumen);
+    const periodo = resumen.fechaHasta.substring(0, 7); // YYYY-MM-DD -> YYYY-MM
     const fechaDesdeDate: CellDate = { type: 'date', value: resumen.fechaDesde };
     const fechaHastaDate: CellDate = { type: 'date', value: resumen.fechaHasta };
     const pagoMinimoNum: CellNumber = { type: 'number', value: resumen.pagoMinimo };
     const saldoActualNum: CellNumber = { type: 'number', value: resumen.saldoActual };
 
     const row: CellValueOrLink[] = [
+      periodo,
       fechaDesdeDate,
       fechaHastaDate,
       resumen.fileId,
@@ -320,7 +324,7 @@ export async function storeResumenTarjeta(
     // Append the row
     const appendResult = await appendRowsWithLinks(
       spreadsheetId,
-      'Resumenes!A:I',
+      'Resumenes!A:J',
       [row],
       timeZone,
       context?.metadataCache
@@ -347,10 +351,10 @@ export async function storeResumenTarjeta(
 
     // Defer sort if context available, otherwise sort immediately
     if (context) {
-      // Sort by fechaDesde (column 0) ascending (oldest first)
+      // Sort by periodo (column 0) ascending (oldest first)
       context.sortBatch.addPendingSort(spreadsheetId, 'Resumenes', 0, false);
     } else {
-      // Sort by fechaDesde (column 0) ascending (oldest first)
+      // Sort by periodo (column 0) ascending (oldest first)
       const sortResult = await sortSheet(spreadsheetId, 'Resumenes', 0, false);
       if (!sortResult.ok) {
         warn('Failed to sort Resumenes sheet', {
@@ -409,6 +413,7 @@ export async function storeResumenBroker(
 
     // Build the row with CellDate for proper date formatting and CellNumber for monetary values
     const fileName = generateResumenBrokerFileName(resumen);
+    const periodo = resumen.fechaHasta.substring(0, 7); // YYYY-MM-DD -> YYYY-MM
     const fechaDesdeDate: CellDate = { type: 'date', value: resumen.fechaDesde };
     const fechaHastaDate: CellDate = { type: 'date', value: resumen.fechaHasta };
 
@@ -421,6 +426,7 @@ export async function storeResumenBroker(
       : '';
 
     const row: CellValueOrLink[] = [
+      periodo,
       fechaDesdeDate,
       fechaHastaDate,
       resumen.fileId,
@@ -441,7 +447,7 @@ export async function storeResumenBroker(
     // Append the row
     const appendResult = await appendRowsWithLinks(
       spreadsheetId,
-      'Resumenes!A:H',
+      'Resumenes!A:I',
       [row],
       timeZone,
       context?.metadataCache
@@ -467,10 +473,10 @@ export async function storeResumenBroker(
 
     // Defer sort if context available, otherwise sort immediately
     if (context) {
-      // Sort by fechaDesde (column 0) ascending (oldest first)
+      // Sort by periodo (column 0) ascending (oldest first)
       context.sortBatch.addPendingSort(spreadsheetId, 'Resumenes', 0, false);
     } else {
-      // Sort by fechaDesde (column 0) ascending (oldest first)
+      // Sort by periodo (column 0) ascending (oldest first)
       const sortResult = await sortSheet(spreadsheetId, 'Resumenes', 0, false);
       if (!sortResult.ok) {
         warn('Failed to sort Resumenes sheet', {

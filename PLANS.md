@@ -1,244 +1,166 @@
-# Bug Fix Plan
+# Implementation Plan
 
-**Created:** 2026-01-29
-**Bug Report:** Marcial Fermin Gutierrez factura_emitida has empty CUIT in spreadsheet despite CUIT being present in PDF
-**Category:** Extraction / Prompt Reliability
+**Created:** 2026-01-30
+**Source:** Inline request: Add `periodo` column (YYYY-MM format) as first column in Control Resumenes, sort by periodo ascending, and rename files using periodo instead of fechaHasta
 
-## Investigation
+## Context Gathered
 
-### Context Gathered
-- **MCPs used:** Google Drive MCP (file retrieval), Gemini MCP (prompt testing)
-- **Files examined:**
-  - `2025-11-10 - Factura Emitida - 00005-00000035 - Marcial Fermin Gutierrez` (file ID: `1Noz78UoBQfIpfN2Twk-S-PrpzRt68CZ3`)
-  - `src/gemini/prompts.ts` (FACTURA_PROMPT)
-  - `src/gemini/parser.ts` (assignCuitsAndClassify, parseFacturaResponse)
+### Codebase Analysis
 
-### Evidence
+**Related files:**
+- `src/constants/spreadsheet-headers.ts` - Defines sheet headers for Resumenes (CONTROL_RESUMENES_BANCARIO_SHEET, CONTROL_RESUMENES_TARJETA_SHEET, CONTROL_RESUMENES_BROKER_SHEET)
+- `src/processing/storage/resumen-store.ts` - Stores resumen rows (storeResumenBancario, storeResumenTarjeta, storeResumenBroker)
+- `src/processing/storage/resumen-store.test.ts` - Tests for resumen storage
+- `src/utils/file-naming.ts` - Generates file names (generateResumenFileName, generateResumenTarjetaFileName, generateResumenBrokerFileName)
+- `src/utils/file-naming.test.ts` - Tests for file naming
+- `src/processing/storage/movimientos-store.ts` - Uses `targetMonth = period.fechaHasta.substring(0, 7)` format for YYYY-MM sheets
+- `SPREADSHEET_FORMAT.md` - Documents spreadsheet schemas
 
-**PDF Content Analysis:**
-The invoice clearly shows:
-- `Doc. Receptor: 20367086921` (client's CUIT)
-- `Cliente: Marcial Fermin Gutierrez`
-- `IVA Receptor: Consumidor Final`
+**Existing patterns:**
+- `periodo` is derived from `fechaHasta.substring(0, 7)` (e.g., "2024-01-31" → "2024-01")
+- Movimientos sheets already use YYYY-MM format for sheet names
+- Current file names use `fechaDesde` date (e.g., "2024-01-15 - Resumen - BBVA - 1234567890 ARS.pdf")
+- Sheets currently sorted by `fechaDesde` (column 0) ascending
 
-**Gemini MCP Testing (2026-01-29):**
-Tested the FACTURA_PROMPT against the PDF twice:
-1. Custom prompt asking specifically for CUITs: Extracted `["30709076783", "20367086921"]` correctly
-2. Actual FACTURA_PROMPT: Also extracted `["30709076783", "20367086921"]` correctly
+**Test conventions:**
+- Tests use vi.mock for dependencies
+- Tests verify row structure and column order
+- Use createTestResumen() helper functions
 
-**Spreadsheet State:**
-Row 21 in Control de Ingresos > Facturas Emitidas shows empty `cuitReceptor` despite CUIT being present in PDF.
+### Key Changes Required
 
-### Root Cause
+1. **Spreadsheet headers** - Add `periodo` as first column (index 0)
+   - Shifts all column indices by +1
+   - Requires updating numberFormats Map indices
 
-**Non-deterministic Gemini extraction:**
+2. **Resumen storage** - Build `periodo` from `fechaHasta.substring(0, 7)`
+   - Add periodo as first element in row array
+   - Update duplicate detection to skip new column
+   - Update sort column index (still column 0, but now periodo instead of fechaDesde)
 
-The FACTURA_PROMPT instructs Gemini to extract "ALL CUITs found in the document", but:
-1. The client's identification is labeled "Doc. Receptor" not "CUIT"
-2. Gemini extraction is probabilistic - same prompt can produce different results
-3. During actual processing, Gemini likely did not extract `20367086921` because it wasn't labeled as "CUIT"
-4. The `allCuits` array only contained `["30709076783"]`, so `assignCuitsAndClassify` returned empty `cuitReceptor`
+3. **File naming** - Use `fechaHasta.substring(0, 7)` instead of `fechaDesde`
+   - Format: "2024-01 - Resumen - BBVA - 1234567890 ARS.pdf"
+   - Use YYYY-MM (month only) instead of YYYY-MM-DD (full date)
 
-**Why testing passed now:**
-- Gemini models have some variance in extraction
-- The prompt improvements I tested happened to work, but the original processing may have had a different result
-- This is a reliability issue, not a complete failure
+4. **Documentation** - Update SPREADSHEET_FORMAT.md
 
-### Impact Assessment
+## Original Plan
 
-**Severity:** MEDIUM
-- Missing CUIT affects matching with payments
-- Doesn't prevent file processing (moved to correct folder)
-- Affects data completeness for accounting
+### Task 1: Update spreadsheet headers with periodo column
 
-**Scope:**
-- Only affects invoices where client ID is labeled differently (e.g., "Doc. Receptor", "DNI Receptor")
-- Consumidor Final clients often have non-standard labeling
-- Most B2B invoices have "CUIT" label and work correctly
+1. Write test in `src/constants/spreadsheet-headers.test.ts` (new file):
+   - Test that CONTROL_RESUMENES_BANCARIO_SHEET has 'periodo' as first header
+   - Test that CONTROL_RESUMENES_TARJETA_SHEET has 'periodo' as first header
+   - Test that CONTROL_RESUMENES_BROKER_SHEET has 'periodo' as first header
+   - Test that numberFormats indices are correctly shifted (+1)
+2. Run test-runner (expect fail)
+3. Update `src/constants/spreadsheet-headers.ts`:
+   - Add 'periodo' as first element in headers arrays for all three resumen sheets
+   - Update numberFormats Map indices (+1 for all existing entries)
+   - Update column count comments if present
+4. Run test-runner (expect pass)
 
-## Fix Plan
+### Task 2: Update file naming functions to use periodo format
 
-### Task 1: Enhance FACTURA_PROMPT to explicitly handle Doc. Receptor and other ID labels
+1. Write test in `src/utils/file-naming.test.ts`:
+   - Update existing tests to expect YYYY-MM format (from fechaHasta)
+   - Test: generateResumenFileName returns "2024-01 - Resumen - BBVA - 1234567890 ARS.pdf" (month from fechaHasta)
+   - Test: generateResumenTarjetaFileName returns "2024-01 - Resumen - BBVA - Visa 4563.pdf"
+   - Test: generateResumenBrokerFileName returns "2024-01 - Resumen Broker - BALANZ - 123456.pdf"
+2. Run test-runner (expect fail)
+3. Update `src/utils/file-naming.ts`:
+   - generateResumenFileName: Use `resumen.fechaHasta.substring(0, 7)` instead of `resumen.fechaDesde`
+   - generateResumenTarjetaFileName: Use `resumen.fechaHasta.substring(0, 7)` instead of `resumen.fechaDesde`
+   - generateResumenBrokerFileName: Use `resumen.fechaHasta.substring(0, 7)` instead of `resumen.fechaDesde`
+   - Update JSDoc comments to reflect new format
+4. Run test-runner (expect pass)
 
-**Rationale:** The prompt currently only mentions "CUIT" for identification numbers. Argentine invoices for Consumidor Final clients use "Doc. Receptor" or "DNI" labels instead.
+### Task 3: Update resumen storage to include periodo column
 
-1. Write test in `src/gemini/parser.test.ts`:
-   - Test that extraction handles `allCuits` with various ID formats
-   - Test normalization of IDs with different lengths (CUIT=11 digits, DNI=7-8 digits)
+1. Write test in `src/processing/storage/resumen-store.test.ts`:
+   - Test that storeResumenBancario includes periodo as first column
+   - Test periodo value is derived from fechaHasta (e.g., "2024-01-31" → "2024-01")
+   - Test that row has 10 columns (was 9)
+   - Update existing tests for new column indices
+2. Run test-runner (expect fail)
+3. Update `src/processing/storage/resumen-store.ts`:
+   - storeResumenBancario: Add `const periodo = resumen.fechaHasta.substring(0, 7);` and add as first element
+   - storeResumenTarjeta: Add periodo as first element
+   - storeResumenBroker: Add periodo as first element
+   - Update appendRowsWithLinks range from 'Resumenes!A:I' to 'Resumenes!A:J' (bancario/tarjeta) and 'A:H' to 'A:I' (broker)
+   - Update isDuplicateResumenBancario column indices (+1)
+   - Update isDuplicateResumenTarjeta column indices (+1)
+   - Update isDuplicateResumenBroker column indices (+1)
+4. Run test-runner (expect pass)
 
-2. Update `src/gemini/prompts.ts` FACTURA_PROMPT:
-   - In section "3. ALL CUITs", explicitly mention alternative labels:
-     - "Doc. Receptor" (common for Consumidor Final)
-     - "DNI" (national ID, 7-8 digits)
-     - "CUIL" (worker ID, 11 digits)
-   - Add example showing these formats
-   - Emphasize: "Even if labeled differently, include ALL 11-digit identification numbers"
+### Task 4: Update documentation
 
-3. Run test-runner to verify tests pass
+1. Update `SPREADSHEET_FORMAT.md`:
+   - Add `periodo` as column A for all three Resumen types
+   - Shift all existing columns (fechaDesde becomes B, etc.)
+   - Update column counts (bancario: 10 cols A:J, tarjeta: 10 cols A:J, broker: 9 cols A:I)
+   - Note that rows are sorted by periodo (column A) ascending
 
-### Task 2: Test updated prompt with Gemini MCP against sample files
-
-**Rationale:** Before deploying prompt changes, verify they work correctly on multiple document types.
-
-**Test files from `_samples/`:**
-
-1. Test with Consumidor Final invoice (Doc. Receptor label):
-   - Use file: `_samples/2025/CobrosFacturas/11-2025/30709076783_011_00005_00000034.pdf` (if available) or similar
-   - Verify: `allCuits` contains both ADVA's CUIT and client's ID
-
-2. Test with standard B2B invoice (CUIT label):
-   - Use file: `_samples/2025/CobrosFacturas/11-2025/30709076783_011_00003_00002178.pdf`
-   - Verify: No regression, both CUITs extracted
-
-3. Test with factura_recibida (client is ADVA):
-   - Use file: `_samples/2025/Pagos/11/2025-11-03 - Salamanca Distribuidora S.A. - EVA2025 - Vianda voluntarios - B00200-00064069.pdf`
-   - Verify: Both CUITs extracted correctly
-
-4. Document test results in this plan
-
-### Task 3: Add validation warning for empty cuitReceptor in factura_emitida
-
-**Rationale:** Even with improved prompt, extraction may occasionally fail. Add explicit logging when this happens.
-
-1. Update `src/gemini/parser.ts` `parseFacturaResponse`:
-   - After CUIT assignment for `factura_emitida`, if `cuitReceptor` is empty:
-     - Log warning with file context
-     - Set `needsReview = true` regardless of confidence
-   - This ensures human review for edge cases
-
-2. Run test-runner to verify tests pass
-
-### Task 4: Update CLAUDE.md documentation
-
-1. In `CLAUDE.md`, under DOCUMENT CLASSIFICATION or relevant section:
-   - Note that Consumidor Final invoices may use "Doc. Receptor" instead of "CUIT"
-   - Document that empty cuitReceptor triggers review flag
+2. Update `CLAUDE.md`:
+   - Update SPREADSHEETS section if Resumen schemas are mentioned
+   - Note the periodo format matches Movimientos sheet names (YYYY-MM)
 
 ## Post-Implementation Checklist
 1. Run `bug-hunter` agent - Review changes for bugs
 2. Run `test-runner` agent - Verify all tests pass
 3. Run `builder` agent - Verify zero warnings
 
-## Recovery for Current File
-
-After deploying the fix:
-1. The file is already processed and in the correct folder (2025/Ingresos/11 - Noviembre/)
-2. Manually update row 21 in Control de Ingresos > Facturas Emitidas:
-   - Set `cuitReceptor` to `20367086921`
-3. This is a one-time manual fix; new processing will extract correctly
-
 ---
 
 ## Iteration 1
 
-**Implemented:** 2026-01-29
+**Implemented:** 2026-01-30
 
 ### Completed
+- Task 1: Updated spreadsheet headers with periodo column
+  - Added `periodo` as first column in CONTROL_RESUMENES_BANCARIO_SHEET (10 cols: A:J)
+  - Added `periodo` as first column in CONTROL_RESUMENES_TARJETA_SHEET (10 cols: A:J)
+  - Added `periodo` as first column in CONTROL_RESUMENES_BROKER_SHEET (9 cols: A:I)
+  - Updated numberFormats indices (+1 for all existing date/currency columns)
+  - Created comprehensive test suite in `src/constants/spreadsheet-headers.test.ts`
 
-**Task 1: Enhance FACTURA_PROMPT to explicitly handle Doc. Receptor and other ID labels**
-- Added tests in `src/gemini/parser.test.ts`:
-  - Test for `assignCuitsAndClassify` handling Doc. Receptor IDs
-  - Test for extraction with only ADVA CUIT (Consumidor Final case)
-  - Test for DNI format (7-8 digits)
-  - Test for empty `cuitReceptor` triggering review flag
-  - Test for present `cuitReceptor` not triggering review flag
-- Updated `src/gemini/prompts.ts` FACTURA_PROMPT:
-  - Expanded section "3. ALL CUITs" to explicitly mention alternative labels:
-    * "CUIT:" (11 digits) - Tax ID for companies/individuals
-    * "Doc. Receptor:" (7-11 digits) - Common for Consumidor Final clients
-    * "DNI:" (7-8 digits) - National ID for individuals
-    * "CUIL:" (11 digits) - Worker ID, same format as CUIT
-  - Added example showing Consumidor Final invoice with Doc. Receptor
-  - Emphasized: "Extract ALL identification numbers (7-11 digits) regardless of label"
-- Updated `src/gemini/parser.ts`:
-  - Added validation for empty `cuitReceptor` in `factura_emitida` (lines 480-489)
-  - Sets `needsReview = true` when `cuitReceptor` is empty for issued invoices
-  - Logs warning to help diagnose Consumidor Final vs extraction failure
-  - Added CUIT length validation (7-11 digits) in `assignCuitsAndClassify`
-  - Improved validation error message for missing `cuitReceptor`
+- Task 2: Updated file naming functions to use periodo format
+  - Modified `generateResumenFileName()` to use `fechaHasta.substring(0, 7)` (YYYY-MM format)
+  - Modified `generateResumenTarjetaFileName()` to use `fechaHasta.substring(0, 7)`
+  - Modified `generateResumenBrokerFileName()` to use `fechaHasta.substring(0, 7)`
+  - Updated JSDoc comments to reflect YYYY-MM format instead of YYYY-MM-DD
+  - Updated all test expectations to match new YYYY-MM format
 
-**Task 2: Test updated prompt with Gemini MCP against sample files**
-- Tested with Consumidor Final invoice (`30709076783_011_00005_00000035.pdf`):
-  - ✅ Both CUITs extracted: `["30709076783", "20367086921"]`
-  - ✅ Client CUIL correctly identified despite "Doc. Receptor" label
-- Tested with standard B2B invoice (`30709076783_011_00003_00002178.pdf`):
-  - ✅ Both CUITs extracted: `["30709076783", "30709578991"]`
-  - ✅ No regression in standard CUIT extraction
-- Tested with factura_recibida (`2025-11-03 - Salamanca Distribuidora S.A...pdf`):
-  - ✅ All CUITs extracted: `["30711980098", "9025773248", "30709076783"]`
-  - ✅ ADVA correctly identified as client
+- Task 3: Updated resumen storage to include periodo column
+  - Modified `isDuplicateResumenBancario()` to handle 10-column structure with periodo
+  - Modified `isDuplicateResumenTarjeta()` to handle 10-column structure with periodo
+  - Modified `isDuplicateResumenBroker()` to handle 9-column structure with periodo
+  - Updated `storeResumenBancario()` to derive periodo from fechaHasta and insert as first column
+  - Updated `storeResumenTarjeta()` to derive periodo from fechaHasta and insert as first column
+  - Updated `storeResumenBroker()` to derive periodo from fechaHasta and insert as first column
+  - Changed range from 'Resumenes!A:I' to 'Resumenes!A:J' (bancario/tarjeta)
+  - Changed range from 'Resumenes!A:H' to 'Resumenes!A:I' (broker)
+  - Updated all sorting to use column 0 (now periodo instead of fechaDesde)
+  - Updated all test expectations for new column structure
 
-**Task 3: Add validation warning for empty cuitReceptor in factura_emitida**
-- Already completed in Task 1 implementation
-- Parser now explicitly checks for empty `cuitReceptor` in `factura_emitida`
-- Sets `needsReview = true` to ensure human review for edge cases
-
-**Task 4: Update CLAUDE.md documentation**
-- Added "Invoice ID Handling" section under DOCUMENT CLASSIFICATION:
-  - Documented that Consumidor Final invoices may use "Doc. Receptor" instead of "CUIT"
-  - Documented that system extracts ALL identification numbers (7-11 digits) regardless of label
-  - Documented that empty `cuitReceptor` in `factura_emitida` triggers automatic review flag
-
-### Bug Fixes (from bug-hunter review)
-
-1. **[HIGH]** Improved validation error message for missing `cuitReceptor`:
-   - Changed from "Missing cuitReceptor (counterparty)" to "Missing cuitReceptor - may be Consumidor Final or extraction issue"
-   - Prevents confusion when reviewing Consumidor Final invoices
-
-2. **[MEDIUM]** Added clarifying comments for `needsReview` test assertions:
-   - Documented conditions that keep `needsReview = false`
-   - Helps prevent future test failures from unintended changes
-
-3. **[LOW]** Added CUIT length validation in `assignCuitsAndClassify`:
-   - Now validates that extracted IDs are 7-11 digits (DNI: 7-8, CUIT/CUIL: 11)
-   - Catches malformed extraction data from Gemini
-
-4. **[LOW]** Fixed misleading test comment:
-   - Changed "ADVA + client DNI" to "ADVA CUIT + client CUIL (11 digits)"
-   - Accurately reflects the test data being used
+- Task 4: Updated documentation
+  - Updated SPREADSHEET_FORMAT.md with periodo column details for all three Resumen types
+  - Added sorting notes indicating rows sorted by periodo ascending
+  - Updated column counts (bancario: 10 cols A:J, tarjeta: 10 cols A:J, broker: 9 cols A:I)
+  - Updated CLAUDE.md SPREADSHEETS section with periodo information
+  - Added note that periodo format matches Movimientos sheet names (YYYY-MM)
 
 ### Checklist Results
-
-- **bug-hunter**: Found 4 bugs (1 HIGH, 1 MEDIUM, 2 LOW) - All fixed
-- **test-runner**: ✅ All 1064 tests passed (53 test files)
-- **builder**: ✅ Build passed with zero warnings
+- bug-hunter: Found 2 bugs, fixed both
+  - Fixed test mock to use fechaHasta instead of fechaDesde
+  - Updated test description from "fechaDesde" to "periodo"
+- test-runner: All 1,078 tests passed (53 test files, 7.34s)
+- builder: Passed with zero warnings
 
 ### Notes
-
-- The enhanced FACTURA_PROMPT now reliably extracts client IDs regardless of their label
-- Gemini testing confirmed 100% success rate on all three document types
-- The validation logic ensures human review for edge cases without blocking processing
-- All existing tests continue to pass, confirming no regressions
-- Code follows TDD workflow: tests written first, implementation second, bugs fixed before completion
-
-### Review Findings
-
-Files reviewed: 3
-- `src/gemini/parser.ts` - CUIT assignment logic, empty cuitReceptor validation
-- `src/gemini/prompts.ts` - FACTURA_PROMPT enhancement for Doc. Receptor/DNI/CUIL
-- `src/gemini/parser.test.ts` - Tests for Consumidor Final CUIT extraction
-
-Checks applied: Security, Logic, Async, Resources, Type Safety, Error Handling, Conventions (CLAUDE.md)
-
-No issues found - all implementations are correct and follow project conventions:
-
-1. **Security**: No input validation issues. CUIT length validation (7-11 digits) properly constrains extracted values.
-
-2. **Logic**: `assignCuitsAndClassify` correctly identifies "other" CUITs by filtering out ADVA's CUIT and validating length. Empty `cuitReceptor` correctly triggers `needsReview = true` for `factura_emitida`.
-
-3. **Type Safety**: TypeScript types used properly. No unsafe casts.
-
-4. **Error Handling**: Proper warning logs with context for empty `cuitReceptor`. Error message updated to clarify Consumidor Final vs extraction failure.
-
-5. **Conventions**:
-   - ESM imports with `.js` extensions ✓
-   - Pino logger (`warn`) instead of console.log ✓
-   - Proper test data (fake CUITs from CLAUDE.md) ✓
-
-6. **Test Quality**: Tests have meaningful assertions, cover edge cases (empty cuitReceptor, DNI format), and use appropriate test data.
-
----
-
-## Status: COMPLETE
-
-All tasks implemented and reviewed successfully. Ready for human review.
+- All changes follow strict TDD workflow (red-green-refactor)
+- Periodo column is derived from fechaHasta (YYYY-MM format) for consistency with Movimientos sheets
+- File names now use periodo format (e.g., "2024-01 - Resumen - BBVA - 1234567890 ARS.pdf")
+- Sorting by periodo provides chronological ordering that aligns with monthly statements
+- Duplicate detection logic remains unchanged (skips periodo column, matches on business keys)
+- No breaking changes to external APIs or folder structure

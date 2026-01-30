@@ -406,9 +406,11 @@ See `SPREADSHEET_FORMAT.md` for complete schema.
 - **Control de Ingresos**: Facturas Emitidas (18 cols), Pagos Recibidos (15 cols), Retenciones Recibidas (15 cols)
 - **Control de Egresos**: Facturas Recibidas (19 cols), Pagos Enviados (15 cols), Recibos (18 cols)
 - **Control de Resumenes**: 3 distinct schemas based on document type:
-  - `resumen_bancario`: 9 cols with `moneda` (ARS/USD)
-  - `resumen_tarjeta`: 9 cols with `tipoTarjeta` (Visa/Mastercard/etc)
-  - `resumen_broker`: 8 cols with `saldoARS` + `saldoUSD` (multi-currency)
+  - `resumen_bancario`: 10 cols (A:J) with `periodo` (YYYY-MM) as first column, `moneda` (ARS/USD)
+  - `resumen_tarjeta`: 10 cols (A:J) with `periodo` (YYYY-MM) as first column, `tipoTarjeta` (Visa/Mastercard/etc)
+  - `resumen_broker`: 9 cols (A:I) with `periodo` (YYYY-MM) as first column, `saldoARS` + `saldoUSD` (multi-currency)
+  - `periodo` format matches Movimientos sheet names (YYYY-MM derived from fechaHasta)
+  - Rows sorted by `periodo` ascending (oldest first)
 - **Dashboard**: Pagos Pendientes (10 cols), API Mensual (7 cols), Uso de API (12 cols)
 
 **Principles:**
