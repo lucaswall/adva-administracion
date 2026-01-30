@@ -1345,6 +1345,7 @@ async function storeAndSortDocument(
                   resumenWithMovimientos.movimientos,
                   movSpreadsheetResult.value,
                   { fechaDesde: resumen.fechaDesde, fechaHasta: resumen.fechaHasta },
+                  resumen.saldoInicial,  // Pass saldoInicial for balance formulas
                   context?.sheetOrderBatch
                 );
 

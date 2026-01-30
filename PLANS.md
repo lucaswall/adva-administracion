@@ -190,3 +190,55 @@ This implementation focuses on `resumen_bancario` (bank accounts) only because:
 1. Run `bug-hunter` agent - Review changes for bugs
 2. Run `test-runner` agent - Verify all tests pass
 3. Run `builder` agent - Verify zero warnings
+
+---
+
+## Iteration 1
+
+**Implemented:** 2026-01-30
+
+### Completed
+- Task 1: Updated spreadsheet headers for Control Resumenes bancario sheet (12 columns A:L with balanceOk and balanceDiff)
+- Task 2: Updated Movimientos bancario headers (6 columns A:F with saldoCalculado)
+- Task 3: Created balance formula generation utility (src/utils/balance-formulas.ts)
+- Task 4: Updated storeMovimientosBancario to use balance formulas (SALDO INICIAL, running formulas, SALDO FINAL)
+- Task 5: Updated scanner to pass saldoInicial to storeMovimientosBancario
+- Task 9: Updated CLAUDE.md documentation with new column counts
+
+### Skipped
+- Task 6: Update storeResumenBancario to include balance validation columns - BLOCKED (requires row index from appendRowsWithLinks which isn't returned)
+- Task 7: Update scanner to pass movimientosSpreadsheetId to storeResumenBancario - BLOCKED (depends on Task 6)
+- Task 8: Update duplicate detection for new column count - NOT NEEDED (duplicate detection uses business key columns which haven't changed)
+
+### Checklist Results
+- bug-hunter: Found 1 MEDIUM issue (mock header mismatch), fixed
+- test-runner: Passed (54 files, 1102 tests)
+- builder: Passed (zero warnings)
+
+### Notes
+**Balance validation implementation:**
+- Successfully implemented running balance formulas in Movimientos sheets
+- Each month sheet now has: SALDO INICIAL row → transaction rows with formulas → SALDO FINAL row
+- Formula pattern: `=F{prev}+D{curr}-C{curr}` computes running balance from debito/credito
+- Original `saldo` column preserved for comparison with computed `saldoCalculado`
+
+**Cross-sheet validation blocked:**
+- Original plan included `balanceOk` and `balanceDiff` formulas in Control Resumenes sheet
+- These formulas require knowing the row index where the resumen is being inserted
+- `appendRowsWithLinks` doesn't return row indices, making formula generation impossible at write time
+- Alternative approaches would require:
+  - Reading back the sheet after append to find row index (expensive, race-prone)
+  - Using IMPORTRANGE with dynamic sheet references (complex, fragile)
+  - Manual verification workflow instead of automated formulas
+
+**Value delivered:**
+- Movimientos sheets now self-validate with running balance formulas
+- Accountants can immediately spot discrepancies by comparing `saldo` vs `saldoCalculado`
+- Easy to identify parsing errors in individual transactions
+- Foundation in place for future cross-sheet validation if needed
+
+### Technical Improvements
+- Added comprehensive tests for balance formula generation (13 new tests)
+- Maintained backward compatibility with empty movimientos case
+- Updated all test mocks to use correct camelCase header names
+- All changes follow TDD workflow (test first, then implementation)

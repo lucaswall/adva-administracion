@@ -8,6 +8,11 @@ import { getOrCreateMonthSheet, formatEmptyMonthSheet, appendRowsWithLinks, type
 import { MOVIMIENTOS_BANCARIO_SHEET, MOVIMIENTOS_TARJETA_SHEET, MOVIMIENTOS_BROKER_SHEET } from '../../constants/spreadsheet-headers.js';
 import { info } from '../../utils/logger.js';
 import type { SheetOrderBatch } from '../caches/index.js';
+import {
+  generateInitialBalanceRow,
+  generateMovimientoRowWithFormula,
+  generateFinalBalanceRow,
+} from '../../utils/balance-formulas.js';
 
 /**
  * Stores bank account transactions to Movimientos spreadsheet
@@ -16,6 +21,7 @@ import type { SheetOrderBatch } from '../caches/index.js';
  * @param movimientos - Array of bank transactions
  * @param spreadsheetId - Movimientos spreadsheet ID
  * @param period - Statement period (determines target month via fechaHasta)
+ * @param saldoInicial - Starting balance for running balance formulas
  * @param sheetOrderBatch - Optional batch collector to defer sheet reordering
  * @returns Success/failure result
  */
@@ -23,6 +29,7 @@ export async function storeMovimientosBancario(
   movimientos: MovimientoBancario[],
   spreadsheetId: string,
   period: { fechaDesde: string; fechaHasta: string },
+  saldoInicial: number,
   sheetOrderBatch?: SheetOrderBatch
 ): Promise<Result<void, Error>> {
   try {
@@ -61,17 +68,56 @@ export async function storeMovimientosBancario(
       a.fecha.localeCompare(b.fecha)
     );
 
-    // Transform to spreadsheet rows
-    const rows = sorted.map(mov => [
-      { type: 'date', value: mov.fecha } as CellDate,
-      mov.origenConcepto,
-      mov.debito !== null ? { type: 'number', value: mov.debito } as CellNumber : null,
-      mov.credito !== null ? { type: 'number', value: mov.credito } as CellNumber : null,
-      { type: 'number', value: mov.saldo } as CellNumber
+    // Build rows with balance formulas:
+    // 1. Initial balance row (SALDO INICIAL)
+    // 2. Transaction rows with running balance formulas
+    // 3. Final balance row (SALDO FINAL)
+    const rows: any[] = [];
+
+    // Row 0 (sheet row 1): SALDO INICIAL
+    const initialRow = generateInitialBalanceRow(saldoInicial, targetMonth);
+    rows.push([
+      initialRow[0],  // null (fecha)
+      initialRow[1],  // 'SALDO INICIAL' (origenConcepto)
+      initialRow[2],  // null (debito)
+      initialRow[3],  // null (credito)
+      initialRow[4],  // null (saldo)
+      initialRow[5],  // saldoInicial value (saldoCalculado)
     ]);
 
-    // Append all rows to target month
-    const range = `${targetMonth}!A:E`;
+    // Rows 1..N (sheet rows 2..N+1): Transactions with formulas
+    sorted.forEach((mov, index) => {
+      // rowIndex is the 0-based position where this transaction will be inserted
+      // Row 0 is SALDO INICIAL, so first transaction is at rowIndex 1
+      const rowIndex = index + 1;
+      const txRow = generateMovimientoRowWithFormula(mov, rowIndex);
+
+      // Wrap in CellDate/CellNumber types for spreadsheet formatting
+      rows.push([
+        { type: 'date', value: txRow[0] } as CellDate,
+        txRow[1],  // origenConcepto (string)
+        txRow[2] !== null ? { type: 'number', value: txRow[2] } as CellNumber : null,  // debito
+        txRow[3] !== null ? { type: 'number', value: txRow[3] } as CellNumber : null,  // credito
+        txRow[4] !== null ? { type: 'number', value: txRow[4] } as CellNumber : null,  // saldo
+        txRow[5],  // saldoCalculado (formula string)
+      ]);
+    });
+
+    // Final row (sheet row N+2): SALDO FINAL
+    // Last transaction is at rowIndex = sorted.length (0-based)
+    const lastTransactionRowIndex = sorted.length;
+    const finalRow = generateFinalBalanceRow(lastTransactionRowIndex);
+    rows.push([
+      finalRow[0],  // null (fecha)
+      finalRow[1],  // 'SALDO FINAL' (origenConcepto)
+      finalRow[2],  // null (debito)
+      finalRow[3],  // null (credito)
+      finalRow[4],  // null (saldo)
+      finalRow[5],  // formula referencing last saldoCalculado
+    ]);
+
+    // Append all rows to target month (A:F for 6 columns)
+    const range = `${targetMonth}!A:F`;
     const appendResult = await appendRowsWithLinks(spreadsheetId, range, rows);
     if (!appendResult.ok) return { ok: false, error: appendResult.error };
 

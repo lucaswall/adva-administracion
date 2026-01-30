@@ -22,13 +22,13 @@ vi.mock('../../utils/logger.js', () => ({
 
 vi.mock('../../constants/spreadsheet-headers.js', () => ({
   MOVIMIENTOS_BANCARIO_SHEET: {
-    headers: ['Fecha', 'Origen/Concepto', 'Débito', 'Crédito', 'Saldo'],
+    headers: ['fecha', 'origenConcepto', 'debito', 'credito', 'saldo', 'saldoCalculado'],
   },
   MOVIMIENTOS_TARJETA_SHEET: {
-    headers: ['Fecha', 'Descripción', 'Nro. Cupón', 'Pesos', 'Dólares'],
+    headers: ['fecha', 'descripcion', 'nroCupon', 'pesos', 'dolares'],
   },
   MOVIMIENTOS_BROKER_SHEET: {
-    headers: ['Descripción', 'Cantidad/VN', 'Saldo', 'Precio', 'Bruto', 'Arancel', 'IVA', 'Neto', 'Fecha Concertación', 'Fecha Liquidación'],
+    headers: ['descripcion', 'cantidadVN', 'saldo', 'precio', 'bruto', 'arancel', 'iva', 'neto', 'fechaConcertacion', 'fechaLiquidacion'],
   },
 }));
 
@@ -84,7 +84,8 @@ describe('storeMovimientosBancario', () => {
     const result = await storeMovimientosBancario(
       movimientos,
       'spreadsheet-id',
-      { fechaDesde: '2024-12-30', fechaHasta: '2025-01-31' }
+      { fechaDesde: '2024-12-30', fechaHasta: '2025-01-31' },
+      5000  // saldoInicial
     );
 
     expect(result.ok).toBe(true);
@@ -104,13 +105,19 @@ describe('storeMovimientosBancario', () => {
     const appendCall = vi.mocked(appendRowsWithLinks).mock.calls[0];
     const rows = appendCall[2] as any[];
 
-    // All 3 movimientos stored together
-    expect(rows).toHaveLength(3);
+    // 3 movimientos + SALDO INICIAL + SALDO FINAL = 5 rows
+    expect(rows).toHaveLength(5);
 
-    // Original fechas preserved (sorted order)
-    expect(rows[0][0]).toEqual({ type: 'date', value: '2024-12-30' });
-    expect(rows[1][0]).toEqual({ type: 'date', value: '2025-01-05' });
-    expect(rows[2][0]).toEqual({ type: 'date', value: '2025-01-15' });
+    // First row is SALDO INICIAL
+    expect(rows[0][1]).toBe('SALDO INICIAL');
+
+    // Transaction rows (1, 2, 3) have original fechas preserved (sorted order)
+    expect(rows[1][0]).toEqual({ type: 'date', value: '2024-12-30' });
+    expect(rows[2][0]).toEqual({ type: 'date', value: '2025-01-05' });
+    expect(rows[3][0]).toEqual({ type: 'date', value: '2025-01-15' });
+
+    // Last row is SALDO FINAL
+    expect(rows[4][1]).toBe('SALDO FINAL');
   });
 
   it('should sort movimientos by date within each month', async () => {
@@ -126,15 +133,21 @@ describe('storeMovimientosBancario', () => {
     await storeMovimientosBancario(
       movimientos,
       'spreadsheet-id',
-      { fechaDesde: '2025-01-01', fechaHasta: '2025-01-31' }
+      { fechaDesde: '2025-01-01', fechaHasta: '2025-01-31' },
+      5000  // saldoInicial
     );
 
     const appendCall = vi.mocked(appendRowsWithLinks).mock.calls[0];
     const rows = appendCall[2] as any[];
 
-    expect(rows[0][1]).toBe('First');
-    expect(rows[1][1]).toBe('Middle');
-    expect(rows[2][1]).toBe('Second');
+    // Row 0: SALDO INICIAL
+    expect(rows[0][1]).toBe('SALDO INICIAL');
+    // Rows 1-3: transactions in sorted order
+    expect(rows[1][1]).toBe('First');
+    expect(rows[2][1]).toBe('Middle');
+    expect(rows[3][1]).toBe('Second');
+    // Row 4: SALDO FINAL
+    expect(rows[4][1]).toBe('SALDO FINAL');
   });
 
   it('should handle empty movimientos array by creating empty sheet', async () => {
@@ -144,7 +157,8 @@ describe('storeMovimientosBancario', () => {
     const result = await storeMovimientosBancario(
       [],
       'spreadsheet-id',
-      { fechaDesde: '2024-12-30', fechaHasta: '2025-01-31' }
+      { fechaDesde: '2024-12-30', fechaHasta: '2025-01-31' },
+      5000  // saldoInicial
     );
 
     expect(result.ok).toBe(true);
@@ -154,7 +168,7 @@ describe('storeMovimientosBancario', () => {
       expect.any(Array),
       undefined  // sheetOrderBatch is optional
     );
-    expect(formatEmptyMonthSheet).toHaveBeenCalledWith('spreadsheet-id', 123, 5);
+    expect(formatEmptyMonthSheet).toHaveBeenCalledWith('spreadsheet-id', 123, 6); // Updated from 5 to 6
     expect(appendRowsWithLinks).not.toHaveBeenCalled();
   });
 
@@ -170,21 +184,23 @@ describe('storeMovimientosBancario', () => {
     await storeMovimientosBancario(
       movimientos,
       'spreadsheet-id',
-      { fechaDesde: '2025-01-01', fechaHasta: '2025-01-31' }
+      { fechaDesde: '2025-01-01', fechaHasta: '2025-01-31' },
+      5000  // saldoInicial
     );
 
     const appendCall = vi.mocked(appendRowsWithLinks).mock.calls[0];
     const rows = appendCall[2] as any[];
 
-    // First row: debito has value, credito is null
-    expect(rows[0][2]).toEqual({ type: 'number', value: 1000 });
-    expect(rows[0][3]).toBeNull();
-    expect(rows[0][4]).toEqual({ type: 'number', value: 4000 });
+    // Row 0: SALDO INICIAL
+    // Row 1: First transaction - debito has value, credito is null
+    expect(rows[1][2]).toEqual({ type: 'number', value: 1000 });
+    expect(rows[1][3]).toBeNull();
+    expect(rows[1][4]).toEqual({ type: 'number', value: 4000 });
 
-    // Second row: debito is null, credito has value
-    expect(rows[1][2]).toBeNull();
-    expect(rows[1][3]).toEqual({ type: 'number', value: 2000 });
-    expect(rows[1][4]).toEqual({ type: 'number', value: 6000 });
+    // Row 2: Second transaction - debito is null, credito has value
+    expect(rows[2][2]).toBeNull();
+    expect(rows[2][3]).toEqual({ type: 'number', value: 2000 });
+    expect(rows[2][4]).toEqual({ type: 'number', value: 6000 });
   });
 
   it('should return error when getOrCreateMonthSheet fails', async () => {
@@ -196,7 +212,8 @@ describe('storeMovimientosBancario', () => {
     const result = await storeMovimientosBancario(
       [createTestMovimientoBancario()],
       'spreadsheet-id',
-      { fechaDesde: '2025-01-01', fechaHasta: '2025-01-31' }
+      { fechaDesde: '2025-01-01', fechaHasta: '2025-01-31' },
+      5000  // saldoInicial
     );
 
     expect(result.ok).toBe(false);
@@ -215,13 +232,136 @@ describe('storeMovimientosBancario', () => {
     const result = await storeMovimientosBancario(
       [createTestMovimientoBancario()],
       'spreadsheet-id',
-      { fechaDesde: '2025-01-01', fechaHasta: '2025-01-31' }
+      { fechaDesde: '2025-01-01', fechaHasta: '2025-01-31' },
+      5000  // saldoInicial
     );
 
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.error).toEqual(new Error('Append failed'));
     }
+  });
+
+  it('should insert initial balance row first with saldoInicial value', async () => {
+    const movimientos: MovimientoBancario[] = [
+      createTestMovimientoBancario({ fecha: '2025-01-15', saldo: 11000 }),
+    ];
+
+    vi.mocked(getOrCreateMonthSheet).mockResolvedValue({ ok: true, value: 123 });
+    vi.mocked(appendRowsWithLinks).mockResolvedValue({ ok: true, value: 0 });
+
+    await storeMovimientosBancario(
+      movimientos,
+      'spreadsheet-id',
+      { fechaDesde: '2025-01-01', fechaHasta: '2025-01-31' },
+      10000  // saldoInicial
+    );
+
+    const appendCall = vi.mocked(appendRowsWithLinks).mock.calls[0];
+    const rows = appendCall[2] as any[];
+
+    // First row should be SALDO INICIAL
+    expect(rows[0][1]).toBe('SALDO INICIAL');
+    expect(rows[0][5]).toBe(10000);  // saldoCalculado column has initial balance value
+  });
+
+  it('should generate formula in saldoCalculado column for each transaction', async () => {
+    const movimientos: MovimientoBancario[] = [
+      createTestMovimientoBancario({ fecha: '2025-01-15', debito: 1000, credito: null, saldo: 9000 }),
+      createTestMovimientoBancario({ fecha: '2025-01-20', debito: null, credito: 5000, saldo: 14000 }),
+    ];
+
+    vi.mocked(getOrCreateMonthSheet).mockResolvedValue({ ok: true, value: 123 });
+    vi.mocked(appendRowsWithLinks).mockResolvedValue({ ok: true, value: 0 });
+
+    await storeMovimientosBancario(
+      movimientos,
+      'spreadsheet-id',
+      { fechaDesde: '2025-01-01', fechaHasta: '2025-01-31' },
+      10000  // saldoInicial
+    );
+
+    const appendCall = vi.mocked(appendRowsWithLinks).mock.calls[0];
+    const rows = appendCall[2] as any[];
+
+    // Row 0: SALDO INICIAL (row 1 in sheet)
+    // Row 1: First transaction (row 2 in sheet) - formula references row 1
+    expect(rows[1][5]).toBe('=F1+D2-C2');
+
+    // Row 2: Second transaction (row 3 in sheet) - formula references row 2
+    expect(rows[2][5]).toBe('=F2+D3-C3');
+  });
+
+  it('should insert final balance row last referencing last transaction', async () => {
+    const movimientos: MovimientoBancario[] = [
+      createTestMovimientoBancario({ fecha: '2025-01-15', saldo: 9000 }),
+      createTestMovimientoBancario({ fecha: '2025-01-20', saldo: 14000 }),
+    ];
+
+    vi.mocked(getOrCreateMonthSheet).mockResolvedValue({ ok: true, value: 123 });
+    vi.mocked(appendRowsWithLinks).mockResolvedValue({ ok: true, value: 0 });
+
+    await storeMovimientosBancario(
+      movimientos,
+      'spreadsheet-id',
+      { fechaDesde: '2025-01-01', fechaHasta: '2025-01-31' },
+      10000  // saldoInicial
+    );
+
+    const appendCall = vi.mocked(appendRowsWithLinks).mock.calls[0];
+    const rows = appendCall[2] as any[];
+
+    // Last row should be SALDO FINAL
+    const lastRow = rows[rows.length - 1];
+    expect(lastRow[1]).toBe('SALDO FINAL');
+    // Row 0: SALDO INICIAL, Row 1-2: transactions (rows 2-3 in sheet), Row 3: SALDO FINAL (row 4 in sheet)
+    // References last transaction at row 3 (sheet row 3)
+    expect(lastRow[5]).toBe('=F3');
+  });
+
+  it('should keep original saldo column for comparison alongside saldoCalculado', async () => {
+    const movimientos: MovimientoBancario[] = [
+      createTestMovimientoBancario({ fecha: '2025-01-15', debito: 1000, credito: null, saldo: 9000 }),
+    ];
+
+    vi.mocked(getOrCreateMonthSheet).mockResolvedValue({ ok: true, value: 123 });
+    vi.mocked(appendRowsWithLinks).mockResolvedValue({ ok: true, value: 0 });
+
+    await storeMovimientosBancario(
+      movimientos,
+      'spreadsheet-id',
+      { fechaDesde: '2025-01-01', fechaHasta: '2025-01-31' },
+      10000  // saldoInicial
+    );
+
+    const appendCall = vi.mocked(appendRowsWithLinks).mock.calls[0];
+    const rows = appendCall[2] as any[];
+
+    // Transaction row (row 1, after SALDO INICIAL)
+    const txRow = rows[1];
+    expect(txRow[4]).toEqual({ type: 'number', value: 9000 }); // saldo (parsed from PDF)
+    expect(txRow[5]).toBe('=F1+D2-C2');  // saldoCalculado (formula)
+  });
+
+  it('should use range A:F for 6-column sheet', async () => {
+    const movimientos: MovimientoBancario[] = [
+      createTestMovimientoBancario(),
+    ];
+
+    vi.mocked(getOrCreateMonthSheet).mockResolvedValue({ ok: true, value: 123 });
+    vi.mocked(appendRowsWithLinks).mockResolvedValue({ ok: true, value: 0 });
+
+    await storeMovimientosBancario(
+      movimientos,
+      'spreadsheet-id',
+      { fechaDesde: '2025-01-01', fechaHasta: '2025-01-31' },
+      10000
+    );
+
+    const appendCall = vi.mocked(appendRowsWithLinks).mock.calls[0];
+    const range = appendCall[1];
+
+    expect(range).toBe('2025-01!A:F');  // Updated from A:E to A:F
   });
 });
 
