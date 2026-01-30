@@ -1,290 +1,331 @@
-# Bug Fix Plan
+# Implementation Plan
 
 **Created:** 2026-01-30
-**Bug Report:** Formulas in Movimientos sheets are being inserted as strings instead of formulas, formula row references are off by one, and balance validation columns in Control Resumenes are empty.
-**Category:** Storage
+**Source:** Inline request: Add Detalles column matching for Movimientos sheets
 
-## Investigation
+## Context Gathered
 
-### Context Gathered
-- **Files examined:**
-  - `src/processing/storage/movimientos-store.ts` - Uses `appendRowsWithLinks`
-  - `src/processing/storage/resumen-store.ts` - Stores resumenes, currently writes 10 columns
-  - `src/services/sheets.ts` - `appendRowsWithLinks` sanitizes formula strings
-  - `src/utils/balance-formulas.ts` - Generates formulas but doesn't account for header row
-  - `src/constants/spreadsheet-headers.ts` - Defines 12-column schema with balanceOk/balanceDiff
+### Codebase Analysis
 
-### Evidence
+**Current Project (adva-administracion):**
+- `src/bank/autofill.ts` - Already matches bank movements against Control de Ingresos/Egresos
+- `src/bank/matcher.ts` - `BankMovementMatcher` class handles **debit** matching only (line 258 checks for debito)
+- `src/processing/storage/movimientos-store.ts` - Stores bank movements to per-month sheets with 6 columns (A:F)
+- `src/constants/spreadsheet-headers.ts` - Defines `MOVIMIENTOS_BANCARIO_SHEET` with 6 headers
+- `src/routes/scan.ts` - Has `/api/autofill-bank` route, does NOT trigger autofill after scan
+- `apps-script/src/main.ts` - Dashboard menu with "Auto-fill Bank Data" option
 
-**Problem 1: Formulas inserted as strings in Movimientos sheets**
+**Current Movimientos Bancario Schema (6 columns A:F):**
+- fecha, origenConcepto, debito, credito, saldo, saldoCalculado
 
-In `movimientos-store.ts:102`, formula strings like `=F2+D3-C3` are passed to `appendRowsWithLinks`. However, `convertToSheetsCellData` (sheets.ts:925) sanitizes all strings starting with `=` by prefixing with a single quote, making them render as text instead of formulas.
+**New schema (7 columns A:G):**
+- fecha, origenConcepto, debito, credito, saldo, saldoCalculado, **detalles** (new)
 
-**Problem 2: Formula row indexing off by one**
+### Data Sources for Matching
 
-`getOrCreateMonthSheet` creates sheets with headers in row 1. When rows are appended:
-- Row 1: Headers
-- Row 2: SALDO INICIAL (array index 0)
-- Row 3: First transaction (array index 1)
+**Control de Ingresos (for CREDIT movements - money IN to ADVA):**
+- Facturas Emitidas - Invoices issued BY ADVA (client pays us)
+- Pagos Recibidos - Payments received BY ADVA
+- Retenciones Recibidas - Tax withholdings (client retains this amount for AFIP, NOT a bank movement)
 
-But `generateMovimientoRowWithFormula` generates `=F1+D2-C2` for rowIndex=1, which references:
-- F1 = Header cell (not a number!)
-- D2-C2 = SALDO INICIAL row (empty!)
+**Important: Retenciones affect matching but are NOT bank credits**
+When a client pays a Factura Emitida, they may withhold taxes:
+- Factura Total: $100,000
+- Bank Credit (Pago Recibido): $95,000
+- Retencion (to AFIP): $5,000
+- Formula: `Bank Credit = Factura Total - Retenciones`
 
-Correct formula should be `=F2+D3-C3`.
+Matching must account for this difference when comparing credit amounts to Factura Emitida totals.
 
-**Problem 3: Balance validation columns empty in Control Resumenes**
+**Control de Egresos (for DEBIT movements - money OUT from ADVA):**
+- Facturas Recibidas - Invoices received BY ADVA (we pay supplier)
+- Pagos Enviados - Payments sent BY ADVA
+- Recibos - Salary receipts (we pay employees)
 
-The schema defines `balanceOk` and `balanceDiff` columns (indices 10-11) but `storeResumenBancario` only writes 10 columns (A:J), leaving these empty.
+### Current Matcher Limitation
 
-### Root Cause Summary
-
-1. **Formula strings sanitized:** Security feature blocks legitimate formulas
-2. **Missing header row offset:** Formulas reference wrong rows
-3. **Validation columns not populated:** Code doesn't calculate or write balance validation data
-
-## Fix Plan
-
-### Fix 1: Add CellFormula type to allow explicit formulas
-
-**Problem:** The security sanitization blocks all strings starting with `=`, including our generated formulas.
-
-**Solution:** Add a `CellFormula` type following the existing `CellDate`/`CellNumber` pattern.
-
-1. Write test in `src/services/sheets.test.ts`:
-   - Test that `CellFormula` values are inserted with `formulaValue`
-   - Test that regular strings starting with `=` are still sanitized
-   - Add test in "Formula injection sanitization" describe block
-
-2. Update `src/services/sheets.ts`:
-   - Add `CellFormula` interface:
-     ```typescript
-     export interface CellFormula {
-       type: 'formula';
-       value: string;
-     }
-     ```
-   - Add `isCellFormula` helper function
-   - Update `CellValueOrLink` type to include `CellFormula`
-   - Handle `CellFormula` in `convertToSheetsCellData`:
-     ```typescript
-     if (isCellFormula(value)) {
-       return {
-         userEnteredValue: { formulaValue: value.value },
-       };
-     }
-     ```
-
-3. Update `src/processing/storage/movimientos-store.ts`:
-   - Import `CellFormula` type
-   - Wrap formula strings: `{ type: 'formula', value: txRow[5] } as CellFormula`
-   - Update for SALDO INICIAL row (index 0) - saldoCalculado is a number, not formula
-   - Update for transaction rows - saldoCalculado is a formula
-   - Update for SALDO FINAL row - saldoCalculado is a formula
-
-### Fix 2: Fix formula row indexing to account for header row
-
-**Problem:** Formulas reference wrong rows because they don't account for headers in row 1.
-
-**Correct mapping:**
-- Array index 0 (SALDO INICIAL) → Sheet row 2
-- Array index N → Sheet row N + 2
-
-For transaction at array index `rowIndex`:
-- Previous row in sheet = rowIndex + 1
-- Current row in sheet = rowIndex + 2
-
-1. Update tests in `src/utils/balance-formulas.test.ts`:
-   - Change expected formula for rowIndex=1 from `=F1+D2-C2` to `=F2+D3-C3`
-   - Change expected formula for rowIndex=2 from `=F2+D3-C3` to `=F3+D4-C4`
-   - Change SALDO FINAL with lastRowIndex=2 from `=F3` to `=F4`
-   - Update all affected test cases
-
-2. Update `src/utils/balance-formulas.ts`:
-   - Fix `generateMovimientoRowWithFormula`:
-     ```typescript
-     // Account for header row: array index N → sheet row N + 2
-     const previousSheetRow = rowIndex + 1;
-     const currentSheetRow = rowIndex + 2;
-     const formula = `=F${previousSheetRow}+D${currentSheetRow}-C${currentSheetRow}`;
-     ```
-   - Fix `generateFinalBalanceRow`:
-     ```typescript
-     // Last transaction at array index N is at sheet row N + 2
-     const lastSheetRow = lastRowIndex + 2;
-     return [..., `=F${lastSheetRow}`];
-     ```
-   - Update JSDoc comments to clarify row mapping
-
-3. Update `src/processing/storage/movimientos-store.test.ts`:
-   - Fix formula assertions:
-     - First transaction: `=F2+D3-C3`
-     - Second transaction: `=F3+D4-C4`
-     - SALDO FINAL (2 transactions): `=F4`
-
-### Fix 3: Implement balance validation columns in Control Resumenes
-
-**Problem:** `balanceOk` and `balanceDiff` columns are defined in schema but never populated.
-
-**Solution:** Calculate balanceDiff in code at write time, use formula for balanceOk.
-
-**How balanceDiff is calculated:**
+The existing `BankMovementMatcher` in `src/bank/matcher.ts` only handles **debits**:
 ```typescript
-let computedBalance = saldoInicial;
-for (const mov of movimientos) {
-  computedBalance += (mov.credito ?? 0) - (mov.debito ?? 0);
+const amount = movement.debito;
+if (amount === null || amount === 0) {
+  return this.noMatch(movement, ['No debit amount']);
 }
-const balanceDiff = computedBalance - saldoFinal;
 ```
 
-**Schema (12 columns A:L - already defined):**
-- A-J: existing columns (periodo through saldoFinal)
-- K (index 10): balanceOk - Formula: `=IF(ABS(INDIRECT("L"&ROW()))<0.01,"SI","NO")`
-- L (index 11): balanceDiff - Number: computed balance minus parsed saldoFinal
+**This plan adds credit matching** using Control de Ingresos data.
 
-1. Add balance calculation utility in `src/utils/balance-formulas.ts`:
+### Matching Strategy
+
+**For DEBIT movements (existing logic):**
+1. Bank fees auto-detection (patterns like "IMPUESTO LEY", "COMISION")
+2. Credit card payment auto-detection ("PAGO TARJETA")
+3. Pago Enviado → linked Factura Recibida (best match)
+4. Direct Factura Recibida match (amount + date + CUIT/keyword)
+5. Recibo match (salary payments)
+6. Pago Enviado without linked Factura (REVISAR)
+
+**For CREDIT movements (new logic):**
+1. Pago Recibido → linked Factura Emitida (best match) → "Cobro Factura de [Cliente]"
+2. Direct Factura Emitida match with retencion tolerance:
+   - If `Credit Amount + Related Retenciones ≈ Factura Total` → match
+   - Related retenciones: same CUIT, date range, amounts that sum correctly
+   - Example: Credit $95,000 + Retencion $5,000 = Factura $100,000 → match
+3. Pago Recibido without linked Factura → "REVISAR! Cobro de [Pagador]"
+
+### Date Filtering
+
+Only process movements from current year and previous year (e.g., 2025 and 2026 if today is 2026-01-30).
+Month sheet names are YYYY-MM format.
+
+## Original Plan
+
+### Task 1: Add detalles column to Movimientos Bancario schema
+
+1. Write test in `src/constants/spreadsheet-headers.test.ts`:
+   - Test that `MOVIMIENTOS_BANCARIO_SHEET.headers` has 7 columns
+   - Test that column index 6 is 'detalles'
+
+2. Run test-runner (expect fail)
+
+3. Update `src/constants/spreadsheet-headers.ts`:
+   - Add 'detalles' to `MOVIMIENTOS_BANCARIO_SHEET.headers` array
+
+4. Run test-runner (expect pass)
+
+### Task 2: Update movimientos-store to include empty detalles column
+
+1. Write test in `src/processing/storage/movimientos-store.test.ts`:
+   - Test that stored rows have 7 columns (not 6)
+   - Test that column G (index 6) is empty string for new movimientos
+
+2. Run test-runner (expect fail)
+
+3. Update `src/processing/storage/movimientos-store.ts`:
+   - Update `storeMovimientosBancario` to append empty string for detalles column (7th column)
+   - Update range from `A:F` to `A:G`
+   - Add empty detalles to SALDO INICIAL, transaction, and SALDO FINAL rows
+
+4. Run test-runner (expect pass)
+
+### Task 3: Extend BankMovementMatcher to handle credit movements
+
+1. Write test in `src/bank/matcher.test.ts`:
+   - Test `matchCreditMovement` matches against Pago Recibido with linked Factura Emitida
+   - Test `matchCreditMovement` matches direct Factura Emitida with exact amount
+   - Test `matchCreditMovement` matches Factura Emitida with retencion tolerance:
+     - Credit $95,000 + Retencion $5,000 (same CUIT) = Factura $100,000 → match
+   - Test `matchCreditMovement` matches Pago Recibido without linked Factura
+   - Test credit movement with no match returns no_match
+   - Test CUIT extraction from concepto works for credits
+
+2. Run test-runner (expect fail)
+
+3. Update `src/bank/matcher.ts`:
+   - Add `Retencion` to imports from types
+   - Add `matchCreditMovement` method to `BankMovementMatcher` class:
+     ```typescript
+     matchCreditMovement(
+       movement: BankMovement,
+       facturasEmitidas: Array<Factura & { row: number }>,
+       pagosRecibidos: Array<Pago & { row: number }>,
+       retenciones: Array<Retencion & { row: number }>
+     ): BankMovementMatchResult
+     ```
+   - Priority order for credits:
+     1. Pago Recibido with linked Factura Emitida → "Cobro Factura de [Cliente] - [Concepto]"
+     2. Direct Factura Emitida match (with retencion tolerance):
+        - Find retenciones with same CUIT (cuitAgenteRetencion) and date range
+        - Check if `Credit + sum(retenciones.montoRetencion) ≈ Factura.importeTotal`
+        - → "Cobro Factura de [Cliente] - [Concepto]"
+     3. Pago Recibido without linked Factura → "REVISAR! Cobro de [Pagador]"
+   - Add helper methods:
+     - `findMatchingPagosRecibidos` - match by amount, date, CUIT
+     - `findMatchingFacturasEmitidas` - match by amount (with retencion tolerance), date, CUIT
+     - `findRelatedRetenciones` - find retenciones for same CUIT within date range
+
+4. Run test-runner (expect pass)
+
+### Task 4: Create movimientos-reader service to read from per-month sheets
+
+1. Write test in `src/services/movimientos-reader.test.ts`:
+   - Test `getRecentMovimientoSheets` returns sheets for current + previous year only
+   - Test `readMovimientosForPeriod` reads and parses data correctly
+   - Test filtering of sheets by year (e.g., "2025-01" included, "2023-12" excluded)
+   - Test parsing of empty detalles column
+   - Test skipping SALDO INICIAL and SALDO FINAL rows
+
+2. Run test-runner (expect fail)
+
+3. Implement `src/services/movimientos-reader.ts`:
    ```typescript
-   /**
-    * Calculates the difference between computed and reported final balance
-    * @param saldoInicial - Starting balance from resumen
-    * @param movimientos - Array of transactions
-    * @param saldoFinal - Reported final balance from resumen
-    * @returns Difference (computed - reported), should be ~0 if parsing correct
-    */
-   export function calculateBalanceDiff(
-     saldoInicial: number,
-     movimientos: MovimientoBancario[],
-     saldoFinal: number
-   ): number {
-     let computedBalance = saldoInicial;
-     for (const mov of movimientos) {
-       computedBalance += (mov.credito ?? 0) - (mov.debito ?? 0);
-     }
-     return computedBalance - saldoFinal;
+   interface MovimientoRow {
+     sheetName: string;   // e.g., "2025-01"
+     rowNumber: number;   // Row in sheet (1-indexed, after header)
+     fecha: string;
+     origenConcepto: string;
+     debito: number | null;
+     credito: number | null;
+     saldo: number | null;
+     saldoCalculado: number | null;
+     detalles: string;
    }
 
-   /**
-    * Generates the balanceOk formula for Control Resumenes
-    * Uses INDIRECT with ROW() so it works regardless of row position after sorting
-    * @returns Formula string checking if balanceDiff (column L) is within 0.01 tolerance
-    */
-   export function generateBalanceOkFormula(): string {
-     return '=IF(ABS(INDIRECT("L"&ROW()))<0.01,"SI","NO")';
-   }
+   // Get sheet names matching YYYY-MM pattern for current + previous year
+   async function getRecentMovimientoSheets(
+     spreadsheetId: string,
+     currentYear: number
+   ): Promise<Result<string[], Error>>
+
+   // Read movimientos from a specific month sheet
+   async function readMovimientosForPeriod(
+     spreadsheetId: string,
+     sheetName: string
+   ): Promise<Result<MovimientoRow[], Error>>
+
+   // Get all recent movimientos with empty detalles (excludes SALDO INICIAL/FINAL)
+   async function getMovimientosToFill(
+     spreadsheetId: string
+   ): Promise<Result<MovimientoRow[], Error>>
    ```
 
-2. Write tests in `src/utils/balance-formulas.test.ts`:
-   - Test `calculateBalanceDiff` with various scenarios:
-     - Perfect match (diff = 0)
-     - Small rounding difference
-     - Parsing error (large diff)
-     - Empty movimientos array
-     - Mix of debits and credits
-   - Test `generateBalanceOkFormula` returns correct formula string
+4. Run test-runner (expect pass)
 
-3. Update `src/processing/storage/resumen-store.ts`:
-   - Import `calculateBalanceDiff`, `generateBalanceOkFormula`, and `CellFormula` type
-   - In `storeResumenBancario`:
-     - Calculate balanceDiff: `calculateBalanceDiff(resumen.saldoInicial, resumen.movimientos, resumen.saldoFinal)`
-     - Build row with 12 columns (A:L):
-       ```typescript
-       const balanceDiff = calculateBalanceDiff(
-         resumen.saldoInicial,
-         resumen.movimientos,
-         resumen.saldoFinal
-       );
+### Task 5: Create movimientos-detalles service for batch updates
 
-       const row: CellValueOrLink[] = [
-         // ... existing 10 columns (periodo through saldoFinal) ...
-         { type: 'formula', value: generateBalanceOkFormula() } as CellFormula,  // K: balanceOk
-         { type: 'number', value: balanceDiff } as CellNumber,                    // L: balanceDiff
-       ];
-       ```
-     - Update append range from `'Resumenes!A:J'` to `'Resumenes!A:L'`
-   - Update `isDuplicateResumenBancario`:
-     - Update getValues range from `'Resumenes!A:J'` to `'Resumenes!A:L'`
-     - Column indices for business key remain unchanged
+1. Write test in `src/services/movimientos-detalles.test.ts`:
+   - Test `updateDetalles` correctly updates column G for specified rows
+   - Test batch update across multiple sheets works correctly
+   - Test update skips rows that already have detalles
 
-4. Update `src/processing/storage/resumen-store.test.ts`:
-   - Add tests verifying:
-     - Row has 12 columns
-     - Column K contains balanceOk formula
-     - Column L contains calculated balanceDiff as CellNumber
-   - Test balanceDiff calculation scenarios
+2. Run test-runner (expect fail)
 
-5. Update documentation:
-   - Update `CLAUDE.md` SPREADSHEETS section to document balanceOk and balanceDiff behavior
+3. Implement `src/services/movimientos-detalles.ts`:
+   ```typescript
+   interface DetallesUpdate {
+     sheetName: string;     // e.g., "2025-01"
+     rowNumber: number;     // Row number in sheet
+     detalles: string;      // Description to write
+   }
 
-### Result
+   // Update detalles column for specified rows
+   async function updateDetalles(
+     spreadsheetId: string,
+     updates: DetallesUpdate[]
+   ): Promise<Result<number, Error>>  // Returns count of updated rows
+   ```
 
-When viewing Control Resumenes sheet:
-- **balanceDiff** (column L): Shows actual difference (0.00 if perfect, small value if rounding, large if parsing error)
-- **balanceOk** (column K): Shows "SI" if |balanceDiff| < 0.01, "NO" otherwise
+4. Run test-runner (expect pass)
 
-Users can quickly scan the balanceOk column to spot problems, then look at balanceDiff for the exact discrepancy.
+### Task 6: Create matchMovimientos service to orchestrate matching
+
+1. Write test in `src/bank/match-movimientos.test.ts`:
+   - Test matching a debit movement against facturas recibidas/pagos enviados/recibos
+   - Test matching a credit movement against facturas emitidas/pagos recibidos
+   - Test credit matching with retencion tolerance (credit + retenciones ≈ factura)
+   - Test auto-detection from concepto (bank fees, credit card payments)
+   - Test movements without match get empty detalles (no update)
+   - Test date filtering (only current + previous year)
+
+2. Run test-runner (expect fail)
+
+3. Implement `src/bank/match-movimientos.ts`:
+   ```typescript
+   interface MatchMovimientosResult {
+     spreadsheetName: string;     // Bank account name
+     sheetsProcessed: number;
+     movimientosProcessed: number;
+     movimientosFilled: number;
+     debitsFilled: number;        // Debits matched (egresos)
+     creditsFilled: number;       // Credits matched (ingresos)
+     noMatches: number;
+     errors: number;
+     duration: number;
+   }
+
+   // Match all movimientos for a bank spreadsheet
+   async function matchMovimientosForBank(
+     spreadsheetId: string,
+     spreadsheetName: string,
+     // Egresos data (for debits)
+     facturasRecibidas: Array<Factura & { row: number }>,
+     pagosEnviados: Array<Pago & { row: number }>,
+     recibos: Array<Recibo & { row: number }>,
+     // Ingresos data (for credits)
+     facturasEmitidas: Array<Factura & { row: number }>,
+     pagosRecibidos: Array<Pago & { row: number }>,
+     retenciones: Array<Retencion & { row: number }>  // Used for amount tolerance, not direct matching
+   ): Promise<Result<MatchMovimientosResult, Error>>
+
+   // Match all movimientos across all banks
+   async function matchAllMovimientos(): Promise<Result<{
+     results: MatchMovimientosResult[];
+     totalProcessed: number;
+     totalFilled: number;
+     totalDebitsFilled: number;
+     totalCreditsFilled: number;
+     duration: number;
+   }, Error>>
+   ```
+   - For each movement:
+     - If `debito` has value → use `matchMovement()` (existing debit logic)
+     - If `credito` has value → use `matchCreditMovement()` (new credit logic)
+   - Read all data from Control de Ingresos and Control de Egresos once
+   - Convert `MovimientoRow` to `BankMovement` interface for matching
+
+4. Run test-runner (expect pass)
+
+### Task 7: Add API route for match-movimientos
+
+1. Write test in `src/routes/scan.test.ts`:
+   - Test POST `/api/match-movimientos` returns expected result structure
+   - Test route requires authentication
+
+2. Run test-runner (expect fail)
+
+3. Update `src/routes/scan.ts`:
+   - Add `matchAllMovimientos` import
+   - Add `/match-movimientos` POST route with `authMiddleware`
+   - Return result with statistics
+
+4. Run test-runner (expect pass)
+
+### Task 8: Add Dashboard menu option for match-movimientos
+
+1. Update `apps-script/src/main.ts`:
+   - Add "📝 Completar Detalles Movimientos" menu item after "Auto-fill Bank Data"
+   - Add `triggerMatchMovimientos` function calling `/api/match-movimientos`
+
+2. Build and test:
+   - Run `npm run build:script`
+   - Verify menu item appears and works
+
+### Task 9: Trigger match-movimientos at end of scan
+
+1. Write test in `src/processing/scanner.test.ts`:
+   - Test that scan triggers matchAllMovimientos after processing
+   - Test that matchAllMovimientos is called only when scan succeeds
+
+2. Run test-runner (expect fail)
+
+3. Update `src/processing/scanner.ts`:
+   - Import `matchAllMovimientos` from `../bank/match-movimientos.js`
+   - Call `matchAllMovimientos()` at end of successful scan (after folder structure update)
+   - Log results
+
+4. Run test-runner (expect pass)
+
+### Task 10: Update documentation
+
+1. Update `SPREADSHEET_FORMAT.md`:
+   - Add 'detalles' column to Movimientos Bancario schema (column G)
+   - Document the matching behavior and sources for both debits and credits
+
+2. Update `CLAUDE.md`:
+   - Add `/api/match-movimientos` to API ENDPOINTS table
+   - Document auto-trigger after scan
 
 ## Post-Implementation Checklist
+
 1. Run `bug-hunter` agent - Review changes for bugs
 2. Run `test-runner` agent - Verify all tests pass
 3. Run `builder` agent - Verify zero warnings
-
----
-
-## Iteration 1
-
-**Implemented:** 2026-01-30
-
-### Completed
-
-- **Fix 1: CellFormula type** - Added `CellFormula` interface to `sheets.ts` with `isCellFormula` type guard. Updated `convertToSheetsCellData` to handle `CellFormula` values using `formulaValue` (bypasses sanitization for trusted internal formulas). Updated `movimientos-store.ts` to wrap formula strings in `CellFormula` type.
-
-- **Fix 2: Formula row indexing** - Fixed `generateMovimientoRowWithFormula` to account for header row. Array index N now maps to sheet row N+2 (since row 1 is headers, row 2 is SALDO INICIAL). Updated `generateFinalBalanceRow` similarly. Updated all related test assertions.
-
-- **Fix 3: Balance validation columns** - Implemented `calculateBalanceDiff` function to compute (saldoInicial + credits - debits - saldoFinal). Implemented `generateBalanceOkFormulaLocal` function returning `=IF(ABS(INDIRECT("L"&ROW()))<0.01,"SI","NO")`. Updated `storeResumenBancario` to include columns K (balanceOk formula) and L (balanceDiff number). Updated range from A:J to A:L.
-
-- **Documentation** - Updated SPREADSHEET_FORMAT.md to reflect the new 12-column schema for Resumen Bancario, adding balanceOk and balanceDiff columns.
-
-### Checklist Results
-- bug-hunter: Found 1 medium issue (SPREADSHEET_FORMAT.md outdated) - fixed
-- test-runner: Passed (1114 tests across 54 files)
-- builder: Passed (zero warnings)
-
-### Notes
-- The CellFormula type is intentionally bypassing sanitization. The JSDoc comment warns this is only for trusted, internally-generated formulas.
-- The balanceOk formula uses INDIRECT with ROW() to work correctly even after the sheet is sorted by periodo.
-- Tests were updated following TDD: write failing tests first, then implement to make them pass.
-
-### Review Findings
-
-Files reviewed: 8
-Checks applied: Security, Logic, Async, Resources, Type Safety, Error Handling, Conventions
-
-**Security Analysis (CellFormula bypass):**
-- The `CellFormula` type intentionally bypasses sanitization but is properly secured:
-  - JSDoc comment warns it's "Only use for trusted, internally-generated formulas (never user input)"
-  - Only used internally by `movimientos-store.ts` and `resumen-store.ts`
-  - User input from PDFs is parsed separately and never directly converted to `CellFormula`
-  - Formulas are generated by `generateMovimientoRowWithFormula`, `generateFinalBalanceRow`, and `generateBalanceOkFormulaLocal` which produce hardcoded formula patterns - no user input in formula strings
-
-**Logic Analysis:**
-- Formula row indexing correctly accounts for header row (array index N → sheet row N + 2)
-- Tests verify correct formulas: `=F2+D3-C3` for index 1, `=F3+D4-C4` for index 2
-- `calculateBalanceDiff` correctly handles null debito/credito values with `?? 0`
-
-**Type Safety:**
-- `isCellFormula` type guard properly checks for `type: 'formula'` property
-- `CellFormula` is included in `CellValueOrLink` union type
-
-**Conventions:**
-- ESM imports with `.js` extensions ✓
-- No console.log usage ✓
-- Uses Pino logger ✓
-- TDD workflow followed ✓
-
-No issues found - all implementations are correct and follow project conventions.
-
----
-
-## Status: COMPLETE
-
-All tasks implemented and reviewed successfully. Ready for human review.
