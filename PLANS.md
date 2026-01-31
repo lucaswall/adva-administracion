@@ -114,15 +114,20 @@ Month sheet names are YYYY-MM format.
 - Run async (fire and forget) so scan response isn't blocked
 - **Always log result** (success OR failure) for observability
 
-**Concurrency control (prevent overlapping runs):**
+**Concurrency control (prevent overlapping scan AND match runs):**
 - Use existing `withLock()` from `src/utils/concurrency.ts` (NOT a simple boolean flag)
-- Lock ID: `'movimientos-matching'`
-- Lock timeout: 5 minutes (300,000ms) - matching can take time
+- **Single unified lock** for both scan and match operations
+- Lock ID: `'document-processing'` (shared by scanner.ts and match-movimientos.ts)
+- Lock timeout: 5 minutes (300,000ms) - processing can take time
+- At any time, only ONE of these can run:
+  - Scan process (processing new documents)
+  - Match process (filling detalles column)
 - Benefits over simple flag:
   - 30-second auto-expiration prevents deadlocks if process crashes
   - Proper `finally` block ensures lock release
   - Correlation ID tracking for debugging
   - Existing battle-tested implementation
+- **Trigger sequencing:** Match is triggered AFTER scan releases lock, ensuring sequential execution
 
 **Estimated API Calls per execution:**
 - Control de Ingresos: 3 reads (Facturas Emitidas, Pagos Recibidos, Retenciones)
@@ -528,6 +533,7 @@ For `matchCreditMovement()`, match credit bank movements against:
    - Test movements without match get empty detalles (no update)
    - Test date filtering (only current + previous year)
    - **Test mutex using withLock: concurrent calls return `skipped: true` instead of running twice**
+   - **Test unified lock blocks both scan and match from running concurrently**
    - **Test force option re-matches rows with existing detalles**
    - **Test exchange rate pre-fetching is called before matching**
    - **Test error logging when matching fails**
@@ -595,8 +601,9 @@ For `matchCreditMovement()`, match credit bank movements against:
      force?: boolean;  // Re-match rows that already have detalles
    }
 
-   const MATCHING_LOCK_ID = 'movimientos-matching';
-   const MATCHING_LOCK_TIMEOUT = 300000;  // 5 minutes
+   // Unified lock shared with scanner.ts - prevents concurrent scan/match
+   const PROCESSING_LOCK_ID = 'document-processing';
+   const PROCESSING_LOCK_TIMEOUT = 300000;  // 5 minutes
 
    // Match all movimientos for a bank spreadsheet
    async function matchMovimientosForBank(
@@ -617,9 +624,9 @@ For `matchCreditMovement()`, match credit bank movements against:
    async function matchAllMovimientos(
      options?: MatchOptions
    ): Promise<Result<MatchAllResult, Error>> {
-     // Use existing withLock for concurrency control
+     // Use existing withLock for concurrency control (shared with scanner)
      const lockResult = await withLock(
-       MATCHING_LOCK_ID,
+       PROCESSING_LOCK_ID,
        async () => {
          const startTime = Date.now();
 
@@ -684,12 +691,12 @@ For `matchCreditMovement()`, match credit bank movements against:
            }
          };
        },
-       MATCHING_LOCK_TIMEOUT
+       PROCESSING_LOCK_TIMEOUT
      );
 
-     // Handle lock acquisition failure (already running)
+     // Handle lock acquisition failure (scan or match already running)
      if (!lockResult.ok) {
-       info('Match movimientos skipped - already running', { module: 'match-movimientos' });
+       info('Match movimientos skipped - scan or match already running', { module: 'match-movimientos' });
        return {
          ok: true,
          value: {
@@ -756,54 +763,96 @@ For `matchCreditMovement()`, match credit bank movements against:
    - Run `npm run build:script`
    - Verify menu item appears and works
 
-### Task 9: Trigger match-movimientos at end of scan (async)
+### Task 9: Add unified lock to scan and trigger match-movimientos after
 
 1. Write test in `src/processing/scanner.test.ts`:
+   - **Test that scan process is wrapped in unified lock (`'document-processing'`)**
+   - **Test that concurrent scan requests return `skipped: true` instead of running twice**
+   - **Test that scan cannot run while match is running (and vice versa)**
    - Test that scan triggers matchAllMovimientos after processing any document type
    - Test that matchAllMovimientos runs async (doesn't block scan response)
    - Test that matchAllMovimientos is called only when scan succeeds
+   - **Test that match is triggered AFTER scan releases lock (not inside lock)**
    - **Test that errors are logged (not silently discarded)**
 
 2. Run test-runner (expect fail)
 
 3. Update `src/processing/scanner.ts`:
    - Import `matchAllMovimientos` from `../bank/match-movimientos.js`
+   - Import `withLock` from `../utils/concurrency.js`
    - Import `error as logError` from `../utils/logger.js`
-   - At end of successful scan, call async with proper error handling:
+   - Add lock constants (same as match-movimientos.ts):
      ```typescript
-     // Don't await - run in background so scan response isn't delayed
-     void matchAllMovimientos()
-       .then(result => {
-         if (result.ok) {
-           if (result.value.skipped) {
-             info('Match movimientos skipped', {
-               module: 'scanner',
-               reason: result.value.reason
-             });
+     // Unified lock shared with match-movimientos.ts - prevents concurrent scan/match
+     const PROCESSING_LOCK_ID = 'document-processing';
+     const PROCESSING_LOCK_TIMEOUT = 300000;  // 5 minutes
+     ```
+   - **Wrap scan processing logic in withLock:**
+     ```typescript
+     async function processScan(): Promise<Result<ScanResult, Error>> {
+       const lockResult = await withLock(
+         PROCESSING_LOCK_ID,
+         async () => {
+           // ... existing scan processing logic ...
+           return scanResult;
+         },
+         PROCESSING_LOCK_TIMEOUT
+       );
+
+       // Handle lock acquisition failure (match or another scan already running)
+       if (!lockResult.ok) {
+         info('Scan skipped - another process already running', { module: 'scanner' });
+         return {
+           ok: true,
+           value: { skipped: true, reason: 'already_running', filesProcessed: 0 }
+         };
+       }
+
+       // Lock released - NOW trigger match async (outside lock!)
+       if (lockResult.value.filesProcessed > 0) {
+         void triggerMatchAsync();
+       }
+
+       return lockResult;
+     }
+     ```
+   - **Match trigger function (called AFTER lock is released):**
+     ```typescript
+     function triggerMatchAsync(): void {
+       // Don't await - run in background so scan response isn't delayed
+       void matchAllMovimientos()
+         .then(result => {
+           if (result.ok) {
+             if (result.value.skipped) {
+               info('Match movimientos skipped', {
+                 module: 'scanner',
+                 reason: result.value.reason
+               });
+             } else {
+               info('Match movimientos completed', {
+                 module: 'scanner',
+                 filled: result.value.totalFilled,
+                 debitsFilled: result.value.totalDebitsFilled,
+                 creditsFilled: result.value.totalCreditsFilled,
+                 duration: result.value.duration
+               });
+             }
            } else {
-             info('Match movimientos completed', {
+             // Log errors - don't silently discard!
+             logError('Match movimientos failed', {
                module: 'scanner',
-               filled: result.value.totalFilled,
-               debitsFilled: result.value.totalDebitsFilled,
-               creditsFilled: result.value.totalCreditsFilled,
-               duration: result.value.duration
+               error: result.error.message
              });
            }
-         } else {
-           // Log errors - don't silently discard!
-           logError('Match movimientos failed', {
+         })
+         .catch(err => {
+           // Catch unexpected exceptions
+           logError('Match movimientos crashed', {
              module: 'scanner',
-             error: result.error.message
+             error: err instanceof Error ? err.message : String(err)
            });
-         }
-       })
-       .catch(err => {
-         // Catch unexpected exceptions
-         logError('Match movimientos crashed', {
-           module: 'scanner',
-           error: err instanceof Error ? err.message : String(err)
          });
-       });
+     }
      ```
    - Any document type triggers this (factura, pago, recibo, retencion, resumen)
 
@@ -820,7 +869,10 @@ For `matchCreditMovement()`, match credit bank movements against:
    - Add `/api/match-movimientos` to API ENDPOINTS table
    - Document optional `force` query parameter
    - Document auto-trigger after scan
-   - Add note about concurrency control using withLock
+   - Add note about unified concurrency control:
+     - Both scan and match use same lock ID `'document-processing'`
+     - At any time, only one scan OR match process can run
+     - Prevents race conditions and overlapping processing
 
 ## Post-Implementation Checklist
 
