@@ -77,6 +77,24 @@ if (amount === null || amount === 0) {
 Only process movements from current year and previous year (e.g., 2025 and 2026 if today is 2026-01-30).
 Month sheet names are YYYY-MM format.
 
+### API & Memory Optimization Strategy
+
+**Minimize Sheets API Calls:**
+1. **Read Control data ONCE at start** - Load Facturas, Pagos, Recibos, Retenciones from both Control de Ingresos and Control de Egresos once, reuse for all banks
+2. **Use metadata for sheet discovery** - Call `getSheetMetadata()` once per bank spreadsheet to get sheet names, filter to YYYY-MM pattern matching current/previous year (avoid reading non-existent sheets)
+3. **Batch updates** - Collect all detalles updates per spreadsheet, use single `batchUpdate()` call instead of individual cell updates
+
+**Memory Management (Railway VM ~512MB):**
+1. **Process banks sequentially** - Load movimientos for one bank at a time, process, write, then release memory before next bank
+2. **Control data stays loaded** - Ingresos/Egresos data (~1000s of rows) stays in memory throughout (reasonable size)
+3. **Stream updates** - Don't accumulate all updates across all banks; write after each bank completes
+
+**Estimated API Calls per execution:**
+- Control de Ingresos: 3 reads (Facturas Emitidas, Pagos Recibidos, Retenciones)
+- Control de Egresos: 3 reads (Facturas Recibidas, Pagos Enviados, Recibos)
+- Per bank spreadsheet: 1 metadata + N month sheet reads + 1 batch update
+- Total: 6 + (banks × (1 + months + 1)) ≈ 6 + (5 banks × 15 calls) = ~81 calls
+
 ## Original Plan
 
 ### Task 1: Add detalles column to Movimientos Bancario schema
@@ -171,6 +189,7 @@ Month sheet names are YYYY-MM format.
    }
 
    // Get sheet names matching YYYY-MM pattern for current + previous year
+   // Uses getSheetMetadata() - 1 API call to discover all sheets
    async function getRecentMovimientoSheets(
      spreadsheetId: string,
      currentYear: number
@@ -183,10 +202,13 @@ Month sheet names are YYYY-MM format.
    ): Promise<Result<MovimientoRow[], Error>>
 
    // Get all recent movimientos with empty detalles (excludes SALDO INICIAL/FINAL)
+   // Calls getRecentMovimientoSheets, then reads each sheet
    async function getMovimientosToFill(
      spreadsheetId: string
    ): Promise<Result<MovimientoRow[], Error>>
    ```
+
+   **API optimization:** Use `getSheetMetadata()` once to get all sheet titles, filter by regex `/^\d{4}-\d{2}$/` for YYYY-MM pattern, then filter by year.
 
 4. Run test-runner (expect pass)
 
@@ -207,12 +229,14 @@ Month sheet names are YYYY-MM format.
      detalles: string;      // Description to write
    }
 
-   // Update detalles column for specified rows
+   // Update detalles column for specified rows using batchUpdate (1 API call)
    async function updateDetalles(
      spreadsheetId: string,
      updates: DetallesUpdate[]
    ): Promise<Result<number, Error>>  // Returns count of updated rows
    ```
+
+   **API optimization:** Use existing `batchUpdate()` from `src/services/sheets.ts` to update all cells in a single API call. Group updates by sheet to build proper ranges (e.g., `"2025-01!G3"`, `"2025-01!G5"`).
 
 4. Run test-runner (expect pass)
 
@@ -266,10 +290,37 @@ Month sheet names are YYYY-MM format.
      duration: number;
    }, Error>>
    ```
+
+   **Implementation with API/Memory optimization:**
+   ```typescript
+   async function matchAllMovimientos() {
+     // 1. Load Control data ONCE (6 API calls total)
+     const ingresosData = await loadControlIngresos();  // 3 calls
+     const egresosData = await loadControlEgresos();    // 3 calls
+
+     // 2. Process banks SEQUENTIALLY (memory efficient)
+     const results: MatchMovimientosResult[] = [];
+     for (const [bankName, spreadsheetId] of bankSpreadsheets) {
+       // Load this bank's movimientos (1 metadata + N sheet reads)
+       const movimientos = await getMovimientosToFill(spreadsheetId);
+
+       // Match in memory
+       const updates = matchAll(movimientos, ingresosData, egresosData);
+
+       // Write batch update (1 API call)
+       await updateDetalles(spreadsheetId, updates);
+
+       results.push(...);
+       // movimientos released from memory before next bank
+     }
+
+     return results;
+   }
+   ```
+
    - For each movement:
      - If `debito` has value → use `matchMovement()` (existing debit logic)
      - If `credito` has value → use `matchCreditMovement()` (new credit logic)
-   - Read all data from Control de Ingresos and Control de Egresos once
    - Convert `MovimientoRow` to `BankMovement` interface for matching
 
 4. Run test-runner (expect pass)
