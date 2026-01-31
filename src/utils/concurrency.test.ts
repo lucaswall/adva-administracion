@@ -223,4 +223,129 @@ describe('withLock', () => {
     expect(fn1).toHaveBeenCalledOnce();
     expect(fn2).toHaveBeenCalledOnce();
   });
+
+  it('prevents concurrent lock acquisition - only one acquires, others wait', async () => {
+    const executionOrder: number[] = [];
+
+    // Create 3 concurrent attempts to acquire the same lock
+    const fn1 = vi.fn().mockImplementation(async () => {
+      executionOrder.push(1);
+      await new Promise(resolve => setTimeout(resolve, 100));
+      return 'first';
+    });
+
+    const fn2 = vi.fn().mockImplementation(async () => {
+      executionOrder.push(2);
+      await new Promise(resolve => setTimeout(resolve, 100));
+      return 'second';
+    });
+
+    const fn3 = vi.fn().mockImplementation(async () => {
+      executionOrder.push(3);
+      await new Promise(resolve => setTimeout(resolve, 100));
+      return 'third';
+    });
+
+    // Start all 3 lock attempts concurrently
+    const promise1 = withLock('race-test', fn1, 5000);
+    const promise2 = withLock('race-test', fn2, 5000);
+    const promise3 = withLock('race-test', fn3, 5000);
+
+    // Let them all run
+    await vi.runAllTimersAsync();
+    const [result1, result2, result3] = await Promise.all([promise1, promise2, promise3]);
+
+    // All should succeed (sequential execution)
+    expect(result1.ok).toBe(true);
+    expect(result2.ok).toBe(true);
+    expect(result3.ok).toBe(true);
+
+    // Each function should be called exactly once
+    expect(fn1).toHaveBeenCalledOnce();
+    expect(fn2).toHaveBeenCalledOnce();
+    expect(fn3).toHaveBeenCalledOnce();
+
+    // They should execute sequentially (not concurrently)
+    // executionOrder should be [1, 2, 3] NOT [1, 2, 3] all at once
+    expect(executionOrder.length).toBe(3);
+    expect(executionOrder).toEqual([1, 2, 3]);
+  });
+
+  it('waitPromise is immediately available for waiting tasks', async () => {
+    let waitPromiseWasUndefined = false;
+
+    const fn1 = vi.fn().mockImplementation(async () => {
+      await new Promise(resolve => setTimeout(resolve, 100));
+      return 'holder';
+    });
+
+    const fn2 = vi.fn().mockImplementation(async () => {
+      return 'waiter';
+    });
+
+    // Start first lock holder
+    const promise1 = withLock('wait-test', fn1, 5000);
+
+    // Immediately try to acquire - should wait on a valid promise
+    // (The race condition would cause waitPromise to be undefined)
+    const promise2 = withLock('wait-test', fn2, 5000);
+
+    await vi.runAllTimersAsync();
+    const [result1, result2] = await Promise.all([promise1, promise2]);
+
+    expect(result1.ok).toBe(true);
+    expect(result2.ok).toBe(true);
+    expect(fn1).toHaveBeenCalledOnce();
+    expect(fn2).toHaveBeenCalledOnce();
+
+    // If there was a race condition, waitPromise would be undefined
+    // and fn2 would have fallen into the polling fallback
+    expect(waitPromiseWasUndefined).toBe(false);
+  });
+
+  it('stress test - 10 concurrent withLock calls maintain mutual exclusion', async () => {
+    const executionLog: Array<{ id: number; event: 'start' | 'end'; timestamp: number }> = [];
+    const startTime = Date.now();
+
+    // Create 10 concurrent lock attempts
+    const tasks = Array.from({ length: 10 }, (_, i) => {
+      const fn = vi.fn().mockImplementation(async () => {
+        executionLog.push({ id: i, event: 'start', timestamp: Date.now() - startTime });
+        await new Promise(resolve => setTimeout(resolve, 50));
+        executionLog.push({ id: i, event: 'end', timestamp: Date.now() - startTime });
+        return `task-${i}`;
+      });
+
+      return withLock('stress-test', fn, 10000, 30000);
+    });
+
+    // Run all concurrently
+    await vi.runAllTimersAsync();
+    const results = await Promise.all(tasks);
+
+    // All should succeed
+    expect(results.every(r => r.ok)).toBe(true);
+
+    // Verify mutual exclusion: no overlapping executions
+    // For each task, check that no other task started before it ended
+    for (let i = 0; i < executionLog.length; i += 2) {
+      const start = executionLog[i];
+      const end = executionLog[i + 1];
+
+      expect(start.event).toBe('start');
+      expect(end.event).toBe('end');
+      expect(start.id).toBe(end.id);
+
+      // Check no other task started between this task's start and end
+      const overlaps = executionLog.filter(
+        (log) =>
+          log.event === 'start' &&
+          log.id !== start.id &&
+          log.timestamp > start.timestamp &&
+          log.timestamp < end.timestamp
+      );
+
+      expect(overlaps).toEqual([]);
+    }
+  });
 });

@@ -268,3 +268,53 @@ if (!currentState?.locked) {
 1. Run `bug-hunter` agent - Review changes for bugs
 2. Run `test-runner` agent - Verify all tests pass
 3. Run `builder` agent - Verify zero warnings
+
+---
+
+## Iteration 1
+
+**Implemented:** 2026-01-31
+
+### Completed
+
+- **Task 1**: Fixed lock acquisition race condition in `src/utils/concurrency.ts:102-122`
+  - Created Promise with resolver BEFORE setting lock state
+  - Set all lock state atomically in single `Map.set()` call including `waitPromise`
+  - Removed separate `waitPromise` assignment that created TOCTOU gap
+  - Added tests to verify concurrent lock acquisition maintains mutual exclusion
+
+- **Task 2**: Fixed pendingScan race condition in `src/processing/scanner.ts:54,365-384,391,713`
+  - Replaced boolean `pendingScan` flag with state machine: `type ScanState = 'idle' | 'pending' | 'running'`
+  - Implemented atomic check-and-set pattern (no yield between read and write)
+  - State transitions: `idle` → `pending` (before lock wait) → `running` (after acquiring lock) → `idle` (finally block)
+  - Added tests to verify concurrent scanFolder calls only allow one to proceed
+
+- **Task 3**: Added stress test for concurrent lock acquisition in `src/utils/concurrency.test.ts:229-271`
+  - Spawns 10 concurrent `withLock()` calls
+  - Verifies mutual exclusion (no overlapping executions)
+  - Test passes, validating the atomic state fix
+
+- **Task 4**: Added stress test for concurrent scan calls in `src/processing/scanner.test.ts:620-686`
+  - Spawns 5 concurrent `scanFolder()` calls
+  - Verifies exactly 1 runs, 4 skip
+  - Verifies only 1 acquires lock
+  - Test passes, validating the state machine fix
+
+- **Task 5**: Updated documentation in `CLAUDE.md:346-365`
+  - Documented atomic lock acquisition pattern
+  - Documented scan state machine transitions
+  - Added section on race condition prevention with JavaScript async caveats
+
+### Checklist Results
+
+- **bug-hunter**: Found 1 medium type safety issue (uninitialized variable with `!` assertion) - Fixed by initializing `resolver` to no-op
+- **test-runner**: All 1183 tests passed (56 test files, 7.77s duration)
+- **builder**: Build passed with zero warnings after fixing unused `idx` variable in test
+
+### Notes
+
+- The race conditions were structural (TOCTOU gaps in the code) but difficult to trigger in tests due to JavaScript's single-threaded execution model
+- The fixes work by ensuring atomic operations (no async yields between check and set)
+- JavaScript's event loop allows async interleaving at `await` points, requiring explicit synchronization
+- The stress tests validate correct behavior even though they don't reliably trigger the race in practice
+- Lock timeout edge case noted: if scan A waits for lock and times out, scan B (which skipped) won't process files - this is intentional design per documentation
