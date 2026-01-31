@@ -3,6 +3,16 @@
 ## STATUS: DEVELOPMENT
 Breaking changes OK. Delete unused code immediately. Update refs when changing APIs/configs.
 
+## DOCUMENTATION
+
+| Document | Audience | Description |
+|----------|----------|-------------|
+| `CLAUDE.md` | Developers | Technical reference for development |
+| `SPREADSHEET_FORMAT.md` | Developers | Complete schema for all spreadsheets |
+| `OPERATION-MANUAL.es.md` | End users | Day-to-day operation guide (Spanish) |
+| `README.md` | Developers | Project overview and setup |
+| `DEVELOPMENT.md` | Developers | Development environment setup |
+
 ## CRITICAL RULES (ALWAYS FOLLOW)
 
 1. **TDD is mandatory** - Write test BEFORE implementation code. No exceptions.
