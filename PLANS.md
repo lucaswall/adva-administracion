@@ -139,9 +139,8 @@ Month sheet names are YYYY-MM format.
 3. **Partial payments**: If a Factura is paid in installments, only the first payment with matching retencion sum will match automatically. Subsequent payments may need manual review.
 
 **Handled by implementation:**
-1. **Schema migration**: Reader handles both 6-column (legacy) and 7-column (new) formats gracefully.
-2. **SALDO INICIAL/FINAL rows**: Robustly filtered using `startsWith()` check on trimmed uppercase string.
-3. **Cross-currency retenciones**: USD facturas with ARS retenciones are handled via exchange rate conversion.
+1. **SALDO INICIAL/FINAL rows**: Robustly filtered using `startsWith()` check on trimmed uppercase string.
+2. **Cross-currency retenciones**: USD facturas with ARS retenciones are handled via exchange rate conversion.
 
 ### Re-match Capability
 
@@ -160,7 +159,7 @@ By default, rows with existing detalles are skipped. For re-evaluation:
 
 1. **`BankMovement`** (existing, `src/types/index.ts:829`) - Used by autofill.ts for external bank spreadsheets
    - Columns: fecha, fechaValor, concepto, codigo, oficina, areaAdva, credito, debito, detalle
-   - This is for a DIFFERENT spreadsheet format (legacy external banks)
+   - This is for a DIFFERENT spreadsheet format (external banks imported separately)
 
 2. **`MovimientoRow`** (NEW, to be created) - For internal Movimientos sheets in bank spreadsheets
    - Columns: fecha, origenConcepto, debito, credito, saldo, saldoCalculado, detalles
@@ -248,8 +247,7 @@ function parseRetenciones(data: CellValue[][]): Array<Retencion & { row: number 
 
 ### Movimientos Sheet Reading
 
-Read using range `'YYYY-MM!A:G'` for new sheets, `'YYYY-MM!A:F'` works for legacy.
-The reader should request `A:G` and handle 6 vs 7 columns gracefully.
+Read using range `'YYYY-MM!A:G'` (7 columns including detalles).
 
 ### batchUpdate Format for Detalles Updates
 
@@ -410,7 +408,6 @@ For `matchCreditMovement()`, match credit bank movements against:
    - Test `readMovimientosForPeriod` reads and parses data correctly
    - Test filtering of sheets by year (e.g., "2025-01" included, "2023-12" excluded)
    - Test parsing of empty detalles column
-   - **Test backward compatibility: 6-column sheets (legacy) parsed correctly with empty detalles**
    - Test skipping SALDO INICIAL and SALDO FINAL rows
    - **Test robust SALDO row detection:**
      - "SALDO INICIAL" → skipped
@@ -442,7 +439,6 @@ For `matchCreditMovement()`, match credit bank movements against:
      return SKIP_LABELS.some(label => normalized.startsWith(label));
    }
 
-   // Parse row with backward compatibility (6 or 7 columns)
    function parseMovimientoRow(
      row: CellValue[],
      sheetName: string,
@@ -460,8 +456,7 @@ For `matchCreditMovement()`, match credit bank movements against:
        credito: parseNumber(row[3]),
        saldo: parseNumber(row[4]),
        saldoCalculado: parseNumber(row[5]),
-       // Handle both 6-column (legacy) and 7-column (new) formats
-       detalles: row.length > 6 ? String(row[6] || '') : '',
+       detalles: String(row[6] || ''),
      };
    }
 
