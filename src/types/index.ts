@@ -769,6 +769,10 @@ export interface FileInfo {
  * Scan result summary
  */
 export interface ScanResult {
+  /** Whether the scan was skipped */
+  skipped?: boolean;
+  /** Reason for skip (if skipped) */
+  reason?: string;
   /** Number of files processed */
   filesProcessed: number;
   /** Number of facturas added */
@@ -850,6 +854,33 @@ export interface BankMovement {
 }
 
 /**
+ * Row from Movimientos Bancario per-month sheets
+ * Used for matching against Control de Ingresos/Egresos
+ */
+export interface MovimientoRow {
+  /** Sheet name (e.g., "2025-01") */
+  sheetName: string;
+  /** Row number in sheet (1-indexed, after header) */
+  rowNumber: number;
+  /** Transaction date */
+  fecha: string;
+  /** Origin/concept description */
+  origenConcepto: string;
+  /** Debit amount - null if credit */
+  debito: number | null;
+  /** Credit amount - null if debit */
+  credito: number | null;
+  /** Balance from PDF (for comparison) */
+  saldo: number | null;
+  /** Calculated balance (formula) */
+  saldoCalculado: number | null;
+  /** Google Drive fileId of matched document (for replacement logic) */
+  matchedFileId: string;
+  /** Human-readable match description */
+  detalle: string;
+}
+
+/**
  * Match type for bank movement matching
  */
 export type BankMatchType = 'bank_fee' | 'credit_card_payment' | 'pago_factura' | 'direct_factura' | 'recibo' | 'pago_only' | 'no_match';
@@ -864,6 +895,8 @@ export interface BankMovementMatchResult {
   matchType: BankMatchType;
   /** Generated description in Spanish (empty if no match) */
   description: string;
+  /** Google Drive fileId of matched document (for replacement logic) */
+  matchedFileId?: string;
   /** CUIT/CUIL extracted from concepto (if any) */
   extractedCuit?: string;
   /** Match confidence */
@@ -941,46 +974,6 @@ export interface BankImportResult {
   duration: number;
 }
 
-/**
- * Cobro from Subdiario de Ventas spreadsheet
- * Represents a collection/payment received from a client
- */
-export interface SubdiarioCobro {
-  /** Row number in Cobros sheet (1-indexed) */
-  rowNumber: number;
-  /** Collection date (when payment was received) */
-  fechaCobro: Date;
-  /** Invoice date (from the original invoice) */
-  fechaFactura: Date;
-  /** Invoice number (e.g., "00003-00001957") */
-  comprobanteNumero: string;
-  /** Client name */
-  cliente: string;
-  /** Client CUIT (11 digits) */
-  cuit: string;
-  /** Total amount collected */
-  total: number;
-  /** Payment concept/description */
-  concepto: string;
-  /** Category */
-  categoria: string;
-}
-
-/**
- * Match result for Subdiario de Ventas matching
- */
-export interface SubdiarioMatchResult {
-  /** Whether a match was found */
-  matched: boolean;
-  /** The matched cobro (if any) */
-  cobro?: SubdiarioCobro;
-  /** Match confidence level */
-  confidence: MatchConfidence;
-  /** Match reasons for debugging */
-  reasons: string[];
-  /** Generated Detalle text */
-  detalle: string;
-}
 
 /**
  * Sort destination types for document sorting

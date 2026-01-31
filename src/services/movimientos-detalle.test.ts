@@ -1,0 +1,221 @@
+/**
+ * Tests for movimientos-detalle service
+ * Handles batch updates of matchedFileId and detalle columns
+ */
+
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { updateDetalle, type DetalleUpdate } from './movimientos-detalle.js';
+
+// Mock dependencies
+vi.mock('./sheets.js', () => ({
+  batchUpdate: vi.fn(),
+}));
+
+vi.mock('../utils/logger.js', () => ({
+  debug: vi.fn(),
+  info: vi.fn(),
+  warn: vi.fn(),
+  error: vi.fn(),
+}));
+
+import { batchUpdate } from './sheets.js';
+
+describe('updateDetalle', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('should return success with 0 count for empty updates array', async () => {
+    const result = await updateDetalle('spreadsheet-id', []);
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value).toBe(0);
+    }
+    expect(batchUpdate).not.toHaveBeenCalled();
+  });
+
+  it('should update columns G and H for a single row', async () => {
+    vi.mocked(batchUpdate).mockResolvedValue({ ok: true, value: 1 });
+
+    const updates: DetalleUpdate[] = [
+      {
+        sheetName: '2025-01',
+        rowNumber: 5,
+        matchedFileId: 'file123',
+        detalle: 'Cobro Factura de TEST SA',
+      },
+    ];
+
+    const result = await updateDetalle('spreadsheet-id', updates);
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value).toBe(1);
+    }
+
+    expect(batchUpdate).toHaveBeenCalledWith('spreadsheet-id', [
+      {
+        range: "'2025-01'!G5:H5",
+        values: [['file123', 'Cobro Factura de TEST SA']],
+      },
+    ]);
+  });
+
+  it('should update multiple rows across different sheets', async () => {
+    vi.mocked(batchUpdate).mockResolvedValue({ ok: true, value: 1 });
+
+    const updates: DetalleUpdate[] = [
+      { sheetName: '2025-01', rowNumber: 5, matchedFileId: 'file1', detalle: 'Match 1' },
+      { sheetName: '2025-01', rowNumber: 10, matchedFileId: 'file2', detalle: 'Match 2' },
+      { sheetName: '2025-02', rowNumber: 3, matchedFileId: 'file3', detalle: 'Match 3' },
+    ];
+
+    const result = await updateDetalle('spreadsheet-id', updates);
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value).toBe(3);
+    }
+
+    expect(batchUpdate).toHaveBeenCalledWith('spreadsheet-id', [
+      { range: "'2025-01'!G5:H5", values: [['file1', 'Match 1']] },
+      { range: "'2025-01'!G10:H10", values: [['file2', 'Match 2']] },
+      { range: "'2025-02'!G3:H3", values: [['file3', 'Match 3']] },
+    ]);
+  });
+
+  it('should chunk updates when exceeding 500 operations', async () => {
+    vi.mocked(batchUpdate).mockResolvedValue({ ok: true, value: 1 });
+
+    // Create 600 updates
+    const updates: DetalleUpdate[] = [];
+    for (let i = 0; i < 600; i++) {
+      updates.push({
+        sheetName: '2025-01',
+        rowNumber: i + 2,
+        matchedFileId: `file${i}`,
+        detalle: `Match ${i}`,
+      });
+    }
+
+    const result = await updateDetalle('spreadsheet-id', updates);
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value).toBe(600);
+    }
+
+    // Should have been called twice (500 + 100)
+    expect(batchUpdate).toHaveBeenCalledTimes(2);
+
+    // First call should have 500 updates
+    const firstCall = vi.mocked(batchUpdate).mock.calls[0];
+    expect(firstCall[1]).toHaveLength(500);
+
+    // Second call should have 100 updates
+    const secondCall = vi.mocked(batchUpdate).mock.calls[1];
+    expect(secondCall[1]).toHaveLength(100);
+  });
+
+  it('should make 3 API calls for 1500 updates', async () => {
+    vi.mocked(batchUpdate).mockResolvedValue({ ok: true, value: 1 });
+
+    // Create 1500 updates
+    const updates: DetalleUpdate[] = [];
+    for (let i = 0; i < 1500; i++) {
+      updates.push({
+        sheetName: '2025-01',
+        rowNumber: i + 2,
+        matchedFileId: `file${i}`,
+        detalle: `Match ${i}`,
+      });
+    }
+
+    const result = await updateDetalle('spreadsheet-id', updates);
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value).toBe(1500);
+    }
+
+    // Should have been called three times (500 + 500 + 500)
+    expect(batchUpdate).toHaveBeenCalledTimes(3);
+  });
+
+  it('should propagate error from batchUpdate', async () => {
+    vi.mocked(batchUpdate).mockResolvedValue({
+      ok: false,
+      error: new Error('API quota exceeded'),
+    });
+
+    const updates: DetalleUpdate[] = [
+      { sheetName: '2025-01', rowNumber: 5, matchedFileId: 'file1', detalle: 'Match 1' },
+    ];
+
+    const result = await updateDetalle('spreadsheet-id', updates);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.message).toBe('API quota exceeded');
+    }
+  });
+
+  it('should stop processing on first chunk error', async () => {
+    vi.mocked(batchUpdate)
+      .mockResolvedValueOnce({ ok: true, value: 500 })
+      .mockResolvedValueOnce({ ok: false, error: new Error('Second chunk failed') });
+
+    // Create 600 updates (requires 2 chunks)
+    const updates: DetalleUpdate[] = [];
+    for (let i = 0; i < 600; i++) {
+      updates.push({
+        sheetName: '2025-01',
+        rowNumber: i + 2,
+        matchedFileId: `file${i}`,
+        detalle: `Match ${i}`,
+      });
+    }
+
+    const result = await updateDetalle('spreadsheet-id', updates);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.message).toBe('Second chunk failed');
+    }
+
+    // Should have attempted 2 calls
+    expect(batchUpdate).toHaveBeenCalledTimes(2);
+  });
+
+  it('should handle empty matchedFileId and detalle (clearing matches)', async () => {
+    vi.mocked(batchUpdate).mockResolvedValue({ ok: true, value: 1 });
+
+    const updates: DetalleUpdate[] = [
+      { sheetName: '2025-01', rowNumber: 5, matchedFileId: '', detalle: '' },
+    ];
+
+    const result = await updateDetalle('spreadsheet-id', updates);
+
+    expect(result.ok).toBe(true);
+    expect(batchUpdate).toHaveBeenCalledWith('spreadsheet-id', [
+      { range: "'2025-01'!G5:H5", values: [['', '']] },
+    ]);
+  });
+
+  it('should use correct range format with quoted sheet names', async () => {
+    vi.mocked(batchUpdate).mockResolvedValue({ ok: true, value: 1 });
+
+    const updates: DetalleUpdate[] = [
+      { sheetName: '2025-01', rowNumber: 5, matchedFileId: 'file1', detalle: 'Match' },
+    ];
+
+    await updateDetalle('spreadsheet-id', updates);
+
+    const call = vi.mocked(batchUpdate).mock.calls[0];
+    const ranges = call[1].map((u: { range: string }) => u.range);
+
+    // Sheet name should be quoted in A1 notation
+    expect(ranges[0]).toBe("'2025-01'!G5:H5");
+  });
+});
