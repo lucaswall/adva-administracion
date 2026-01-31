@@ -11,15 +11,13 @@ import type { WatchChannel } from '../types/index.js';
 // Mock watch-manager service
 vi.mock('../services/watch-manager.js', () => ({
   getActiveChannels: vi.fn(),
-  isNotificationDuplicate: vi.fn(),
-  markNotificationProcessed: vi.fn(),
+  checkAndMarkNotification: vi.fn(() => true), // Default: always return true (new notification)
   triggerScan: vi.fn(),
 }));
 
 import {
   getActiveChannels,
-  isNotificationDuplicate,
-  markNotificationProcessed,
+  checkAndMarkNotification,
   triggerScan,
 } from '../services/watch-manager.js';
 
@@ -104,7 +102,7 @@ describe('POST /webhooks/drive - resourceId validation', () => {
     };
 
     vi.mocked(getActiveChannels).mockReturnValue([mockChannel]);
-    vi.mocked(isNotificationDuplicate).mockReturnValue(false);
+    vi.mocked(checkAndMarkNotification).mockReturnValue(true);
 
     const response = await server.inject({
       method: 'POST',
@@ -119,7 +117,7 @@ describe('POST /webhooks/drive - resourceId validation', () => {
 
     expect(response.statusCode).toBe(200);
     expect(response.json()).toEqual({ status: 'queued' });
-    expect(markNotificationProcessed).toHaveBeenCalledWith('1', 'test-channel-id');
+    expect(checkAndMarkNotification).toHaveBeenCalledWith('1', 'test-channel-id');
     expect(triggerScan).toHaveBeenCalledWith('test-folder-id');
   });
 });
@@ -147,7 +145,7 @@ describe('POST /webhooks/drive - rate limiting', () => {
     };
 
     vi.mocked(getActiveChannels).mockReturnValue([mockChannel]);
-    vi.mocked(isNotificationDuplicate).mockReturnValue(false);
+    vi.mocked(checkAndMarkNotification).mockReturnValue(true);
 
     // Send multiple requests under the limit (e.g., 5 requests, limit is 60/min)
     for (let i = 0; i < 5; i++) {
@@ -179,7 +177,7 @@ describe('POST /webhooks/drive - rate limiting', () => {
     };
 
     vi.mocked(getActiveChannels).mockReturnValue([mockChannel]);
-    vi.mocked(isNotificationDuplicate).mockReturnValue(false);
+    vi.mocked(checkAndMarkNotification).mockReturnValue(true);
 
     // Send requests to exceed the rate limit (61 requests for 60/min limit)
     for (let i = 0; i < 61; i++) {
@@ -226,7 +224,7 @@ describe('POST /webhooks/drive - rate limiting', () => {
     };
 
     vi.mocked(getActiveChannels).mockReturnValue([mockChannel1, mockChannel2]);
-    vi.mocked(isNotificationDuplicate).mockReturnValue(false);
+    vi.mocked(checkAndMarkNotification).mockReturnValue(true);
 
     // Send 30 requests for channel-1
     for (let i = 0; i < 30; i++) {

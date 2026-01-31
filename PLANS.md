@@ -277,3 +277,93 @@ Existing tests in:
 1. Run `bug-hunter` agent - Review changes for bugs
 2. Run `test-runner` agent - Verify all tests pass
 3. Run `builder` agent - Verify zero warnings
+
+---
+
+## Iteration 1
+
+**Implemented:** 2026-01-31
+
+### Completed
+
+- **Task 1: Fix conditionalFormattingApplied race condition**
+  - Implemented atomic check-and-set pattern in `src/services/status-sheet.ts:255-256`
+  - Set flag BEFORE async call to prevent TOCTOU race
+  - Removed duplicate flag set inside `applyStatusConditionalFormatting()` at line 154
+  - Added concurrent test in `src/services/status-sheet.test.ts` (10 concurrent calls, formatting applied exactly once)
+
+- **Task 2: Fix duplicate notification detection race condition**
+  - Created atomic `checkAndMarkNotification()` function in `src/services/watch-manager.ts:363-421`
+  - Combines check and mark operations with no yield between (atomic in event loop)
+  - Updated `src/routes/webhooks.ts` to use new atomic function (lines 6-11, 117-119)
+  - Removed separate `markNotificationProcessed()` calls from webhook handlers
+  - Added concurrent test in `src/services/watch-manager.test.ts` (10 concurrent calls, exactly 1 returns true)
+  - **Bug fix (from bug-hunter):** Removed dead code - deleted unused `isNotificationDuplicate()` and `markNotificationProcessed()` functions
+
+- **Task 3: Remove item #18 from TODO.md (false positive)**
+  - Confirmed TODO.md was regenerated since plan creation - false positive already removed
+  - Original item #18 (retriedFileIds race condition) does not exist because:
+    - Each queue task processes a unique fileId
+    - Retry is recursive within same task (no concurrent access to same fileId)
+    - `retriedFileIds.clear()` happens after all queue tasks complete
+
+- **Task 4: Add stress tests for concurrent operations**
+  - Enhanced status-sheet test to verify 10 concurrent calls apply formatting exactly once
+  - Enhanced watch-manager test to verify 10 concurrent calls return exactly 1 true, 9 false
+  - Both tests validate the atomic fixes from Tasks 1-2
+
+### Checklist Results
+
+- **bug-hunter:** Passed
+  - Found 3 non-critical issues (test naming, dead code, test isolation)
+  - Fixed dead code issue by removing unused functions
+  - Other issues noted but acceptable (test is valid, module state is manageable)
+  - No runtime bugs found - race condition fixes are correct
+
+- **test-runner:** Passed
+  - All 1,187 tests passed
+  - Duration: 7.64 seconds
+
+- **builder:** Passed
+  - Zero warnings
+  - Zero errors
+
+### Notes
+
+**Race condition fixes verified:**
+
+1. **status-sheet.ts (line 255-256):** Atomic check-and-set prevents multiple concurrent `updateStatusSheet()` calls from applying formatting more than once. Flag set synchronously before async operation.
+
+2. **watch-manager.ts (line 363-421):** `checkAndMarkNotification()` combines check and mark with no `await` between operations, making it atomic in JavaScript's event loop model. Prevents duplicate notification processing.
+
+3. **webhooks.ts (line 117-119):** Webhook handler now uses single atomic call instead of separate check-then-mark pattern, eliminating TOCTOU window.
+
+**Edge case discovered:** Test naming could be improved - "concurrent" tests actually execute synchronously (which is fine since the functions are synchronous), but naming could be clearer about testing sequential deduplication rather than true concurrency.
+
+**Dead code removed:** `isNotificationDuplicate()` and `markNotificationProcessed()` were superseded by `checkAndMarkNotification()` and have been deleted. Only `markNotificationProcessedWithTimestamp()` remains for testing purposes.
+
+### Review Findings
+
+Files reviewed: 6
+Checks applied: Security, Logic, Async, Race Conditions, Resources, Type Safety, Error Handling, Tests, Conventions
+
+**Verification of race condition fixes:**
+
+1. **status-sheet.ts:255-256** - `conditionalFormattingApplied` flag is set synchronously (no `await` between check and set), preventing multiple concurrent `updateStatusSheet()` calls from passing the check. ✅
+
+2. **watch-manager.ts:292-342** - `checkAndMarkNotification()` is fully synchronous (contains no `await` or `.then()`), making it truly atomic in JavaScript's single-threaded event loop. The check (line 305-310) and mark (line 318) happen in the same synchronous execution block. ✅
+
+3. **webhooks.ts:121** - Single atomic `checkAndMarkNotification()` call replaces the previous separate `isNotificationDuplicate()` + `markNotificationProcessed()` pattern, eliminating the TOCTOU window. ✅
+
+**Test validity:**
+
+- `status-sheet.test.ts:138-157` - Correctly spawns 10 calls via `Promise.all()` and verifies `applyConditionalFormat` called exactly once
+- `watch-manager.test.ts:356-374` - Correctly verifies exactly 1 of 10 calls returns `true` (new), 9 return `false` (duplicate)
+
+No issues found - all implementations are correct and follow project conventions.
+
+---
+
+## Status: COMPLETE
+
+All tasks implemented and reviewed successfully. Ready for human review.

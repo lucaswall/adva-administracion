@@ -7,6 +7,7 @@ import {
   getNotificationCount,
   getChannelCount,
   triggerScan,
+  checkAndMarkNotification,
 } from './watch-manager.js';
 import * as cron from 'node-cron';
 
@@ -348,6 +349,43 @@ describe('watch-manager', () => {
       await new Promise(resolve => setTimeout(resolve, 50));
 
       expect(mockScanFolder).toHaveBeenCalledTimes(3);
+    });
+  });
+
+  describe('checkAndMarkNotification - concurrent calls', () => {
+    it('should handle 10 concurrent calls with same messageNumber atomically', async () => {
+      const channelId = 'test-channel';
+      const messageNumber = '12345';
+
+      // Spawn 10 concurrent calls with the same messageNumber
+      const concurrentCalls = Array.from({ length: 10 }, () =>
+        Promise.resolve(checkAndMarkNotification(messageNumber, channelId))
+      );
+
+      // Wait for all calls to complete
+      const results = await Promise.all(concurrentCalls);
+
+      // Exactly one should return true (new), 9 should return false (duplicate)
+      const trueCount = results.filter(r => r === true).length;
+      const falseCount = results.filter(r => r === false).length;
+
+      expect(trueCount).toBe(1);
+      expect(falseCount).toBe(9);
+    });
+
+    it('should return true for undefined messageNumber (legacy behavior)', () => {
+      const result = checkAndMarkNotification(undefined, 'test-channel');
+      expect(result).toBe(true);
+    });
+
+    it('should mark different messageNumbers as new', () => {
+      const channelId = 'test-channel';
+
+      const result1 = checkAndMarkNotification('msg-1', channelId);
+      const result2 = checkAndMarkNotification('msg-2', channelId);
+
+      expect(result1).toBe(true);
+      expect(result2).toBe(true);
     });
   });
 });

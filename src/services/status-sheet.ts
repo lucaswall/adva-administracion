@@ -151,7 +151,6 @@ async function applyStatusConditionalFormatting(
         module: 'status-sheet',
         phase: 'format',
       });
-      conditionalFormattingApplied = true;
     }
 
     return result;
@@ -252,10 +251,15 @@ export async function updateStatusSheet(
     });
 
     // Apply conditional formatting on first update
+    // Atomic check-and-set: no yield between read and write
     if (!conditionalFormattingApplied) {
+      conditionalFormattingApplied = true; // Set BEFORE async call
       const formatResult = await applyStatusConditionalFormatting(spreadsheetId);
       if (!formatResult.ok) {
-        // Log error but don't fail the update
+        // Note: We don't reset to false because:
+        // 1. Error is already logged (below)
+        // 2. Re-attempting on next call would likely fail again
+        // 3. Non-fatal - status sheet works without formatting
         logError('Failed to apply conditional formatting (non-fatal)', {
           module: 'status-sheet',
           phase: 'update',
