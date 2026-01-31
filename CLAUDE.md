@@ -167,7 +167,9 @@ src/
 │   ├── document-sorter.ts
 │   ├── watch-manager.ts
 │   ├── token-usage-logger.ts
-│   └── pagos-pendientes.ts
+│   ├── pagos-pendientes.ts
+│   ├── movimientos-reader.ts
+│   └── movimientos-detalle.ts
 ├── processing/
 │   ├── queue.ts
 │   ├── scanner.ts
@@ -209,7 +211,7 @@ src/
 └── bank/
     ├── matcher.ts
     ├── autofill.ts
-    └── subdiario-matcher.ts
+    └── match-movimientos.ts
 
 apps-script/              # Dashboard ADVA menu (bound script)
 ├── src/

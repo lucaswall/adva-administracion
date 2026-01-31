@@ -974,46 +974,6 @@ export interface BankImportResult {
   duration: number;
 }
 
-/**
- * Cobro from Subdiario de Ventas spreadsheet
- * Represents a collection/payment received from a client
- */
-export interface SubdiarioCobro {
-  /** Row number in Cobros sheet (1-indexed) */
-  rowNumber: number;
-  /** Collection date (when payment was received) */
-  fechaCobro: Date;
-  /** Invoice date (from the original invoice) */
-  fechaFactura: Date;
-  /** Invoice number (e.g., "00003-00001957") */
-  comprobanteNumero: string;
-  /** Client name */
-  cliente: string;
-  /** Client CUIT (11 digits) */
-  cuit: string;
-  /** Total amount collected */
-  total: number;
-  /** Payment concept/description */
-  concepto: string;
-  /** Category */
-  categoria: string;
-}
-
-/**
- * Match result for Subdiario de Ventas matching
- */
-export interface SubdiarioMatchResult {
-  /** Whether a match was found */
-  matched: boolean;
-  /** The matched cobro (if any) */
-  cobro?: SubdiarioCobro;
-  /** Match confidence level */
-  confidence: MatchConfidence;
-  /** Match reasons for debugging */
-  reasons: string[];
-  /** Generated Detalle text */
-  detalle: string;
-}
 
 /**
  * Sort destination types for document sorting
