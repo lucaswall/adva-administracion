@@ -102,6 +102,13 @@ Month sheet names are YYYY-MM format.
 - New Retencion → might help match credit to factura (provides tolerance amount)
 - Run async (fire and forget) so scan response isn't blocked
 
+**Concurrency control (prevent overlapping runs):**
+- Use in-memory mutex flag: `let isMatchingInProgress = false`
+- Before starting: check flag, if true → skip (log "already running")
+- On start: set flag to true
+- On complete/error: set flag to false (in finally block)
+- Single Node.js process on Railway → simple flag is sufficient
+
 **Estimated API Calls per execution:**
 - Control de Ingresos: 3 reads (Facturas Emitidas, Pagos Recibidos, Retenciones)
 - Control de Egresos: 3 reads (Facturas Recibidas, Pagos Enviados, Recibos)
@@ -266,6 +273,7 @@ Month sheet names are YYYY-MM format.
    - Test auto-detection from concepto (bank fees, credit card payments)
    - Test movements without match get empty detalles (no update)
    - Test date filtering (only current + previous year)
+   - Test mutex: concurrent calls return `skipped: true` instead of running twice
 
 2. Run test-runner (expect fail)
 
@@ -308,30 +316,44 @@ Month sheet names are YYYY-MM format.
    }, Error>>
    ```
 
-   **Implementation with API/Memory optimization:**
+   **Implementation with API/Memory optimization and mutex:**
    ```typescript
+   // Module-level mutex
+   let isMatchingInProgress = false;
+
    async function matchAllMovimientos() {
-     // 1. Load Control data ONCE (6 API calls total)
-     const ingresosData = await loadControlIngresos();  // 3 calls
-     const egresosData = await loadControlEgresos();    // 3 calls
-
-     // 2. Process banks SEQUENTIALLY (memory efficient)
-     const results: MatchMovimientosResult[] = [];
-     for (const [bankName, spreadsheetId] of bankSpreadsheets) {
-       // Load this bank's movimientos (1 metadata + N sheet reads)
-       const movimientos = await getMovimientosToFill(spreadsheetId);
-
-       // Match in memory
-       const updates = matchAll(movimientos, ingresosData, egresosData);
-
-       // Write batch update (1 API call)
-       await updateDetalles(spreadsheetId, updates);
-
-       results.push(...);
-       // movimientos released from memory before next bank
+     // Concurrency guard
+     if (isMatchingInProgress) {
+       info('Match movimientos skipped - already running', { module: 'match-movimientos' });
+       return { ok: true, value: { skipped: true, reason: 'already_running' } };
      }
 
-     return results;
+     isMatchingInProgress = true;
+     try {
+       // 1. Load Control data ONCE (6 API calls total)
+       const ingresosData = await loadControlIngresos();  // 3 calls
+       const egresosData = await loadControlEgresos();    // 3 calls
+
+       // 2. Process banks SEQUENTIALLY (memory efficient)
+       const results: MatchMovimientosResult[] = [];
+       for (const [bankName, spreadsheetId] of bankSpreadsheets) {
+         // Load this bank's movimientos (1 metadata + N parallel sheet reads)
+         const movimientos = await getMovimientosToFill(spreadsheetId);
+
+         // Match in memory
+         const updates = matchAll(movimientos, ingresosData, egresosData);
+
+         // Write batch update (1 API call)
+         await updateDetalles(spreadsheetId, updates);
+
+         results.push(...);
+         // movimientos released from memory before next bank
+       }
+
+       return { ok: true, value: { results, skipped: false } };
+     } finally {
+       isMatchingInProgress = false;  // Always release lock
+     }
    }
    ```
 
