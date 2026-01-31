@@ -1,278 +1,582 @@
 # Implementation Plan
 
 **Created:** 2026-01-31
-**Source:** TODO.md items #1, #4, #18 (race conditions - conditional formatting, duplicate notification, retry tracking)
+**Source:** TODO.md - All HIGH priority bugs (#1-19) plus related MEDIUM items grouped by affinity
 
-## Context Gathered
+## Overview
 
-### Codebase Analysis
+This plan tackles all 19 HIGH priority bugs in 6 phases, plus related MEDIUM items that share code locality. Each phase is scoped to avoid context exhaustion (~3-5 tasks per phase).
 
-**Files Analyzed:**
-- `src/services/status-sheet.ts:97-265` - conditionalFormattingApplied global flag race
-- `src/routes/webhooks.ts:122-137` - duplicate notification check-then-mark pattern
-- `src/services/watch-manager.ts:291-361` - isNotificationDuplicate and markNotificationProcessed (separate functions)
-- `src/processing/scanner.ts:51,82,119` - retriedFileIds check-then-set in concurrent queue tasks
-- `src/utils/concurrency.ts:103-118` - Reference atomic pattern from recent fix
-
-**Race Condition #1: conditionalFormattingApplied Flag**
-
-Location: `src/services/status-sheet.ts:97,154,255-265`
-
-```typescript
-// Line 97: Unprotected global flag
-let conditionalFormattingApplied = false;
-
-// Lines 255-265: TOCTOU - check then set
-if (!conditionalFormattingApplied) {        // CHECK
-  const formatResult = await applyStatus...  // yields to event loop
-  // ... inside applyStatus...
-  conditionalFormattingApplied = true;       // SET (inside async function at line 154)
-}
-```
-
-Problem: Multiple concurrent `updateStatusSheet()` calls can pass the check before any sets the flag, causing redundant API calls.
-
-**Race Condition #4: Duplicate Notification Detection**
-
-Location: `src/routes/webhooks.ts:122-137` and `src/services/watch-manager.ts:291-361`
-
-```typescript
-// webhooks.ts line 122-125: Check (calls separate function)
-if (messageNumber && isNotificationDuplicate(messageNumber, channelId)) {
-  return reply.code(200).send({ status: 'duplicate' });
-}
-
-// webhooks.ts lines 136-137: Mark (calls separate function)
-if (messageNumber) {
-  markNotificationProcessed(messageNumber, channelId);
-}
-```
-
-Problem: Two separate function calls create TOCTOU gap. Between check (line 122) and mark (line 136), another request can slip through.
-
-**Race Condition #18: retriedFileIds Tracking**
-
-Location: `src/processing/scanner.ts:51,82,119`
-
-```typescript
-// Line 51: Shared map
-const retriedFileIds = new Map<string, number>();
-
-// Line 82: Read (inside queue task)
-const retryCount = retriedFileIds.get(fileInfo.id) ?? 0;
-
-// Line 113: Async processing... (yields to event loop!)
-const processResult = await processFile(fileInfo, context);
-
-// Line 119: Write (after async gap)
-retriedFileIds.set(fileInfo.id, retryCount + 1);
-```
-
-Problem: Queue runs with concurrency=12 (see `queue.ts:29,34`). Between read at line 82 and write at line 119, another queue task can read the same value. However, this is only relevant for the SAME fileId. Since files are unique in a batch, concurrent tasks won't access the same fileId.
-
-**Upon closer analysis:** The scanner processes files from `newFiles` array (line 565). Each file has a unique `fileInfo.id`. The queue tasks operate on different files, not the same file. The retry logic is recursive within a single task (line 136), so there's no concurrent access to the same fileId.
-
-**Revised assessment:** Item #18 is actually a FALSE POSITIVE. The retry tracking race condition does NOT exist because:
-1. Each queue task processes a unique file
-2. Retry is recursive within the same task (line 136: `return processFileWithRetry(...)`)
-3. `retriedFileIds.clear()` happens after `queue.onIdle()` (line 583, 675) - all tasks complete first
-
-### Existing Patterns
-
-From recent fix in `concurrency.ts:103-118`:
-```typescript
-// Atomic: create promise, then set all state in single Map.set()
-let resolver: () => void = () => {};
-const waitPromise = new Promise<void>((resolve) => {
-  resolver = resolve;
-});
-
-this.locks.set(resourceId, {
-  locked: true,
-  acquiredAt: Date.now(),
-  autoExpiryMs,
-  holderCorrelationId: correlationId,
-  waitPromise,
-  waitResolve: resolver,
-});
-```
-
-From scanner.ts state machine (lines 54-55, 365-383):
-```typescript
-type ScanState = 'idle' | 'pending' | 'running';
-let scanState: ScanState = 'idle';
-
-// Atomic check-and-set (no yield between)
-if (scanState !== 'idle') {
-  return skipped;
-}
-scanState = 'pending';  // Set immediately, no await
-```
-
-### Test Patterns
-
-Existing tests in:
-- `src/services/status-sheet.test.ts` - Tests collectStatusMetrics, formatTimestampInTimezone
-- `src/routes/webhooks.test.ts` - Tests webhook routes with mocked watch-manager
-- `src/services/watch-manager.test.ts` - Tests watch channel management
-- `src/utils/concurrency.test.ts:227-350` - Concurrent lock acquisition stress tests
+**Phase Summary:**
+1. **Date/Time & Precision Fixes** - Bugs #3, #4, #7 + #22, #23 (date handling, floating-point)
+2. **Type Validation & Constraints** - Bugs #5, #6, #8, #9, #10 (add validators, constrain types)
+3. **Data Safety & Cache Integrity** - Bugs #2, #13, #14 + #41, #42 (prevent data loss, null checks)
+4. **Async & Concurrency Fixes** - Bugs #11, #12, #15, #17 + #35 (unwaited calls, race conditions)
+5. **Match Logic & Defaults** - Bugs #16, #18, #19 + #44, #53 (dateProximity, quality comparison, error context)
+6. **Column Validation & Final** - Bug #1 + #49, #50, #51, #52 (header-based lookup, input validation)
 
 ---
 
-## Implementation Tasks
+## Phase 1: Date/Time & Precision Fixes
 
-### Task 1: Fix conditionalFormattingApplied race condition
+**Bugs:** #3 (exchange rate precision), #4 (year validation), #7 (timezone inconsistency), #22 (truncated response), #23 (formatMonthFolder)
 
-1. Write test in `src/services/status-sheet.test.ts`:
-   - Test that concurrent `updateStatusSheet()` calls only apply formatting once
-   - Use Promise.all to simulate concurrent calls
-   - Mock `applyConditionalFormat` to track call count
-   - Verify formatting applied exactly once despite multiple concurrent calls
+### Context Gathered
+
+**Files:**
+- `src/utils/date.ts:26-27,129-135` - year validation, formatISODate
+- `src/utils/exchange-rate.ts:279-287` - floating-point precision
+- `src/utils/spanish-date.ts:29-34` - formatMonthFolder
+- `src/gemini/parser.ts:164-186` - truncated response handling
+
+**Patterns:**
+- UTC methods used in parseArgDate (lines 73, 82, 91)
+- SPANISH_MONTHS array for month names
+- Result<T,E> pattern for error handling
+
+### Task 1.1: Fix year validation (bug #4)
+
+1. Write test in `src/utils/date.test.ts`:
+   - Test `isValidISODate('2023-05-15')` returns true (3 years ago)
+   - Test `isValidISODate('2020-01-01')` returns true (6 years ago)
+   - Test `isValidISODate('1999-12-31')` returns false (too old)
+   - Test `isValidISODate('2030-01-01')` returns false (too far future)
 
 2. Run test-runner (expect fail)
 
-3. Update `src/services/status-sheet.ts`:
-   - Use atomic check-and-set pattern (same as scanner.ts state machine)
-   - Set flag BEFORE async operation, not after
-
-   **Before (lines 255-265):**
-   ```typescript
-   if (!conditionalFormattingApplied) {
-     const formatResult = await applyStatusConditionalFormatting(spreadsheetId);
-     // ... flag set inside applyStatusConditionalFormatting at line 154
-   }
-   ```
-
-   **After:**
-   ```typescript
-   // Atomic check-and-set: no yield between read and write
-   if (!conditionalFormattingApplied) {
-     conditionalFormattingApplied = true;  // Set BEFORE async call
-     const formatResult = await applyStatusConditionalFormatting(spreadsheetId);
-     if (!formatResult.ok) {
-       // Note: We don't reset to false because:
-       // 1. Error is already logged (line 259-263)
-       // 2. Re-attempting on next call would likely fail again
-       // 3. Non-fatal - status sheet works without formatting
-     }
-   }
-   ```
-
-   Also remove the duplicate flag set at line 154 inside `applyStatusConditionalFormatting()`.
+3. Update `src/utils/date.ts:26-27`:
+   - Change year validation to allow dates from `currentYear - 10` to `currentYear + 1`
+   - Keep upper bound of `currentYear + 1` (1 year in future)
+   - Allow 10 years in past for batch processing historical documents
 
 4. Run test-runner (expect pass)
 
-### Task 2: Fix duplicate notification detection race condition
+### Task 1.2: Fix timezone inconsistency (bug #7)
 
-1. Write test in `src/services/watch-manager.test.ts`:
-   - Test that concurrent calls with same messageNumber only process once
-   - Create new `checkAndMarkNotification()` function
-   - Use Promise.all to simulate concurrent webhook handlers
-   - Verify exactly one returns "new", others return "duplicate"
+1. Write test in `src/utils/date.test.ts`:
+   - Test roundtrip: `formatISODate(parseArgDate('15/03/2025')!)` equals '2025-03-15'
+   - Test same date regardless of local timezone
+   - Test edge case: Dec 31 23:00 UTC doesn't shift to next year
 
 2. Run test-runner (expect fail)
 
-3. Update `src/services/watch-manager.ts`:
-   - Create atomic `checkAndMarkNotification()` function that combines check and mark
-   - Returns boolean: `true` if notification was new (and now marked), `false` if duplicate
+3. Update `src/utils/date.ts:129-135`:
+   - Change `formatISODate()` to use UTC methods: `getUTCFullYear()`, `getUTCMonth()`, `getUTCDate()`
+   - Match the UTC approach used in `parseArgDate()`
 
-   **Add new function:**
+4. Run test-runner (expect pass)
+
+### Task 1.3: Fix floating-point precision in exchange rate (bug #3)
+
+1. Write test in `src/utils/exchange-rate.test.ts`:
+   - Test `amountsMatchCrossCurrency(100.00, 'USD', 125000.00, 1250.00, 5)` returns true
+   - Test edge case with accumulated precision: `amountsMatchCrossCurrency(99.99, 'USD', 124987.50, 1250.00, 5)` returns true (within tolerance)
+   - Test that very small precision differences don't cause false negatives
+
+2. Run test-runner (expect fail)
+
+3. Update `src/utils/exchange-rate.ts:279-287`:
+   - Round intermediate results to 2 decimal places before tolerance calculation
+   - Use `Math.round(value * 100) / 100` for monetary precision
+   - Apply rounding to: `expectedARS = Math.round(usdAmount * exchangeRate * 100) / 100`
+
+4. Run test-runner (expect pass)
+
+### Task 1.4: Fix formatMonthFolder invalid date handling (bug #23)
+
+1. Write test in `src/utils/spanish-date.test.ts`:
+   - Test `formatMonthFolder(new Date('invalid'))` returns undefined or throws
+   - Test `formatMonthFolder(new Date(NaN))` returns undefined or throws
+   - Test valid date still works: `formatMonthFolder(new Date('2025-03-15'))` returns '03 - Marzo'
+
+2. Run test-runner (expect fail)
+
+3. Update `src/utils/spanish-date.ts:29-34`:
+   - Add validation: `if (isNaN(date.getTime())) return undefined`
+   - Return undefined for invalid dates instead of broken string
+
+4. Run test-runner (expect pass)
+
+### Task 1.5: Improve truncated response handling (bug #22)
+
+1. Write test in `src/gemini/parser.test.ts`:
+   - Test truncated response returns distinct error vs empty JSON
+   - Test function distinguishes between: no JSON found, truncated JSON, valid empty
+
+2. Run test-runner (expect fail)
+
+3. Update `src/gemini/parser.ts:164-186`:
+   - Return `{ type: 'truncated', partial: string }` for truncated responses
+   - Return `{ type: 'empty' }` for no JSON found
+   - Return `{ type: 'valid', json: string }` for valid JSON
+   - Allow caller to handle each case appropriately
+
+4. Run test-runner (expect pass)
+
+---
+
+## Phase 2: Type Validation & Constraints
+
+**Bugs:** #5 (type assertion), #6 (needsReview flag), #8 (validateTipoTarjeta), #9 (confidence constraints), #10 (ResumenBroker balance)
+
+### Context Gathered
+
+**Files:**
+- `src/utils/validation.ts` - existing validators (validateMoneda, etc.)
+- `src/gemini/parser.ts:1000-1008` - tipoTarjeta handling
+- `src/utils/exchange-rate.ts:152-159` - type assertion
+- `src/types/index.ts:257,450-452` - TipoTarjeta, ResumenBroker
+
+**Patterns:**
+- Validation functions return `Type | undefined`
+- Array membership check: `validValues.includes(value as Type)`
+- confidence fields are plain `number` throughout
+
+### Task 2.1: Add validateTipoTarjeta function (bug #8)
+
+1. Write test in `src/utils/validation.test.ts`:
+   - Test `validateTipoTarjeta('Visa')` returns 'Visa'
+   - Test `validateTipoTarjeta('Mastercard')` returns 'Mastercard'
+   - Test `validateTipoTarjeta('InvalidCard')` returns undefined
+   - Test `validateTipoTarjeta(123)` returns undefined
+
+2. Run test-runner (expect fail)
+
+3. Add to `src/utils/validation.ts`:
    ```typescript
-   /**
-    * Atomically check and mark a notification as processed
-    * Prevents TOCTOU race between check and mark
-    *
-    * @param messageNumber - Notification message number
-    * @param channelId - Channel ID
-    * @returns true if notification was new and now marked, false if duplicate
-    */
-   export function checkAndMarkNotification(
-     messageNumber: string | undefined,
-     channelId: string
-   ): boolean {
-     if (!messageNumber) {
-       return true; // No message number = always process (legacy behavior)
-     }
-
-     const now = Date.now();
-     let channelNotifications = processedNotifications.get(channelId);
-
-     // Check if already processed (with expiry check)
-     if (channelNotifications) {
-       const timestamp = channelNotifications.get(messageNumber);
-       if (timestamp !== undefined) {
-         if (now - timestamp <= MAX_NOTIFICATION_AGE_MS) {
-           return false; // Duplicate
-         }
-         // Expired - will be replaced below
-       }
-     } else {
-       channelNotifications = new Map();
-       processedNotifications.set(channelId, channelNotifications);
-     }
-
-     // Atomic: mark as processed immediately (no yield before this)
-     channelNotifications.set(messageNumber, now);
-     lastNotificationTime = new Date();
-
-     // Cleanup old entries (same logic as markNotificationProcessed)
-     if (channelNotifications.size > MAX_NOTIFICATIONS_PER_CHANNEL) {
-       // ... existing cleanup logic
-     }
-
-     return true; // New notification
+   export function validateTipoTarjeta(value: unknown): TipoTarjeta | undefined {
+     if (typeof value !== 'string') return undefined;
+     const validTypes: TipoTarjeta[] = ['Visa', 'Mastercard', 'Amex', 'Naranja', 'Cabal'];
+     return validTypes.includes(value as TipoTarjeta) ? (value as TipoTarjeta) : undefined;
    }
    ```
 
-4. Update `src/routes/webhooks.ts` to use the new atomic function:
+4. Run test-runner (expect pass)
 
-   **Before (lines 122-137):**
+### Task 2.2: Fix needsReview flag for invalid tipoTarjeta (bug #6)
+
+1. Write test in `src/gemini/parser.test.ts`:
+   - Test that invalid tipoTarjeta sets `needsReview: true` in parsed result
+   - Test valid tipoTarjeta does NOT set needsReview
+   - Test warning is logged for invalid card type
+
+2. Run test-runner (expect fail)
+
+3. Update `src/gemini/parser.ts:1000-1008`:
+   - After setting tipoTarjeta to undefined, also set `data.needsReview = true`
+   - Add reason to needsReviewReason if field exists
+
+4. Run test-runner (expect pass)
+
+### Task 2.3: Add runtime validation for exchange rate response (bug #5)
+
+1. Write test in `src/utils/exchange-rate.test.ts`:
+   - Test malformed JSON `{ compra: "not a number" }` returns error
+   - Test missing required field `{ venta: 1250 }` (no compra) returns error
+   - Test valid response `{ compra: 1250, venta: 1260 }` returns value
+
+2. Run test-runner (expect fail)
+
+3. Update `src/utils/exchange-rate.ts:152-159`:
+   - Add explicit structure validation: `typeof data === 'object' && data !== null`
+   - Validate `typeof data.compra === 'number' && !isNaN(data.compra)`
+   - Return explicit error for malformed responses
+
+4. Run test-runner (expect pass)
+
+### Task 2.4: Add confidence validation helper (bug #9)
+
+1. Write test in `src/utils/validation.test.ts`:
+   - Test `validateConfidence(0.85)` returns 0.85
+   - Test `validateConfidence(-0.5)` returns undefined (negative)
+   - Test `validateConfidence(1.5)` returns undefined (>1)
+   - Test `validateConfidence(NaN)` returns undefined
+   - Test `validateConfidence(Infinity)` returns undefined
+
+2. Run test-runner (expect fail)
+
+3. Add to `src/utils/validation.ts`:
    ```typescript
-   if (messageNumber && isNotificationDuplicate(messageNumber, channelId)) {
-     return reply.code(200).send({ status: 'duplicate' });
-   }
-   // ... later ...
-   if (messageNumber) {
-     markNotificationProcessed(messageNumber, channelId);
+   export function validateConfidence(value: unknown): number | undefined {
+     if (typeof value !== 'number') return undefined;
+     if (!Number.isFinite(value)) return undefined;
+     if (value < 0 || value > 1) return undefined;
+     return value;
    }
    ```
 
-   **After:**
-   ```typescript
-   // Atomic check-and-mark to prevent TOCTOU race
-   if (!checkAndMarkNotification(messageNumber, channelId)) {
-     server.log.debug({ channelId, messageNumber }, 'Duplicate notification ignored');
-     return reply.code(200).send({ status: 'duplicate' });
-   }
-   // Remove the later markNotificationProcessed calls (lines 136-137, 155-157)
-   ```
+4. Update parser functions that set confidence to use this validation
 
 5. Run test-runner (expect pass)
 
-### Task 3: Remove item #18 from TODO.md (false positive)
+### Task 2.5: Add ResumenBroker balance validation (bug #10)
 
-1. No test needed - this is a documentation-only change
+1. Write test in `src/gemini/parser.test.ts`:
+   - Test ResumenBroker with no balances sets `needsReview: true`
+   - Test ResumenBroker with only saldoARS is valid
+   - Test ResumenBroker with only saldoUSD is valid
+   - Test ResumenBroker with both is valid
 
-2. The race condition described in item #18 does NOT exist because:
-   - Each queue task processes a unique fileId
-   - Retry is recursive within the same task (no concurrent access to same fileId)
-   - `retriedFileIds.clear()` happens after all queue tasks complete
+2. Run test-runner (expect fail)
 
-3. Update TODO.md to remove item #18 (will be done in final step)
+3. Update ResumenBroker parsing in `src/gemini/parser.ts`:
+   - After parsing, check if both `saldoARS` and `saldoUSD` are undefined
+   - If so, set `needsReview = true` with reason "No balance found"
 
-### Task 4: Add stress tests for concurrent operations
+4. Run test-runner (expect pass)
 
-1. Write stress test in `src/services/status-sheet.test.ts`:
-   - Spawn 10 concurrent updateStatusSheet() calls
-   - Verify conditional formatting applied exactly once
+---
 
-2. Write stress test in `src/services/watch-manager.test.ts`:
-   - Spawn 10 concurrent checkAndMarkNotification() calls with same messageNumber
-   - Verify exactly 1 returns true (new), 9 return false (duplicate)
+## Phase 3: Data Safety & Cache Integrity
 
-3. Run test-runner (expect pass - validates fixes from Tasks 1-2)
+**Bugs:** #2 (pagos pendientes data loss), #13 (folder structure cache), #14 (DisplacementQueue null), #41 (Map.get null), #42 (previousFactura not found)
 
-## Post-Implementation Checklist
+### Context Gathered
+
+**Files:**
+- `src/services/pagos-pendientes.ts:71-106` - clear before append
+- `src/services/folder-structure.ts:622-661` - cachedStructure! assertion
+- `src/processing/matching/factura-pago-matcher.ts:50-53,115,177-197` - null handling
+
+**Patterns:**
+- Map.get() returns T | undefined
+- Result<T,E> for fallible operations
+- Logging with context objects
+
+### Task 3.1: Fix pagos pendientes data loss (bug #2)
+
+1. Write test in `src/services/pagos-pendientes.test.ts`:
+   - Test that if appendRowsWithFormatting fails, original data preserved
+   - Mock appendRowsWithFormatting to throw error
+   - Verify clearSheetData NOT called when append would fail
+
+2. Run test-runner (expect fail)
+
+3. Update `src/services/pagos-pendientes.ts:71-106`:
+   - Reorder: call appendRowsWithFormatting FIRST
+   - Only call clearSheetData AFTER append succeeds
+   - Use transaction-like pattern: prepare data, append to temp, clear old, rename
+
+4. Run test-runner (expect pass)
+
+### Task 3.2: Fix folder structure cache null assertion (bug #13)
+
+1. Write test in `src/services/folder-structure.test.ts`:
+   - Test concurrent cache access during structure discovery
+   - Verify no crash when cache cleared between lock acquire and use
+
+2. Run test-runner (expect fail)
+
+3. Update `src/services/folder-structure.ts:622-661`:
+   - Remove `cachedStructure!` non-null assertion
+   - Add explicit null check inside lock: `if (!cachedStructure) { /* re-discover */ }`
+   - Handle cache miss gracefully by re-calling discoverFolderStructure
+
+4. Run test-runner (expect pass)
+
+### Task 3.3: Fix DisplacementQueue.pop() null handling (bug #14)
+
+1. Write test in `src/processing/matching/factura-pago-matcher.test.ts`:
+   - Test that pop() on empty queue returns undefined
+   - Test that code handles undefined result without crash
+   - Test type assertion only happens on valid document
+
+2. Run test-runner (expect fail)
+
+3. Update `src/processing/matching/factura-pago-matcher.ts:50-53`:
+   - Add null check: `const displaced = queue.pop(); if (!displaced) continue;`
+   - Only proceed with type assertion after confirming displaced exists
+
+4. Run test-runner (expect pass)
+
+### Task 3.4: Fix Map.get() null handling in matcher (bugs #41, #42)
+
+1. Write test in `src/processing/matching/factura-pago-matcher.test.ts`:
+   - Test behavior when pagosMap.get() returns undefined
+   - Test behavior when previousFactura lookup fails
+   - Verify appropriate logging for missing documents
+
+2. Run test-runner (expect fail)
+
+3. Update `src/processing/matching/factura-pago-matcher.ts:115,177-197`:
+   - Add explicit null checks after Map.get()
+   - Log warning when expected document not found
+   - Handle gracefully: skip update but log the issue
+
+4. Run test-runner (expect pass)
+
+---
+
+## Phase 4: Async & Concurrency Fixes
+
+**Bugs:** #11 (timezone cache), #12 (triggerScan not awaited), #15 (logger race), #17 (resolver assertion), #35 (correlation context)
+
+### Context Gathered
+
+**Files:**
+- `src/services/sheets.ts:33-59` - timezone cache
+- `src/services/watch-manager.ts:391-443` - triggerScan
+- `src/utils/logger.ts:11,17` - loggerInstance
+- `src/gemini/client.ts:517` - resolver assertion
+- `src/utils/correlation.ts:98-104` - context updates
+
+**Patterns:**
+- Map with TTL for caching
+- Promise resolver pattern for mutual exclusion
+- Module-level mutable state
+
+### Task 4.1: Add timezone cache size limit (bug #11)
+
+1. Write test in `src/services/sheets.test.ts`:
+   - Test cache doesn't grow beyond MAX_CACHE_SIZE
+   - Test oldest entries evicted when limit reached
+   - Test cache still functions correctly after eviction
+
+2. Run test-runner (expect fail)
+
+3. Update `src/services/sheets.ts:33-59`:
+   - Add `MAX_TIMEZONE_CACHE_SIZE = 100` constant
+   - When adding new entry, check cache size
+   - If over limit, delete oldest entries (by timestamp)
+
+4. Run test-runner (expect pass)
+
+### Task 4.2: Fix triggerScan not awaited (bug #12)
+
+1. Write test in `src/services/watch-manager.test.ts`:
+   - Test that recursive triggerScan calls are properly awaited
+   - Verify no concurrent execution pile-up
+   - Test queue drains sequentially
+
+2. Run test-runner (expect fail)
+
+3. Update `src/services/watch-manager.ts:440`:
+   - Change from `triggerScan(nextFolderId)` to `await triggerScan(nextFolderId)`
+   - Ensure finally block waits for recursive call
+
+4. Run test-runner (expect pass)
+
+### Task 4.3: Fix logger initialization race (bug #15)
+
+1. Write test in `src/utils/logger.test.ts`:
+   - Test concurrent getLogger() calls return same instance
+   - Test initialization errors are handled gracefully
+
+2. Run test-runner (expect fail)
+
+3. Update `src/utils/logger.ts`:
+   - Use module initialization pattern: create logger at module load
+   - Wrap getConfig() in try-catch with fallback defaults
+   - Remove mutable loggerInstance, use const
+
+4. Run test-runner (expect pass)
+
+### Task 4.4: Fix resolver non-null assertion (bug #17)
+
+1. Write test in `src/gemini/client.test.ts`:
+   - Test that resolver is always initialized before use
+   - Test error in Promise constructor is handled
+
+2. Run test-runner (expect fail)
+
+3. Update `src/gemini/client.ts:517`:
+   - Initialize resolver before Promise constructor: `let resolver: () => void = () => {}`
+   - Remove non-null assertion, resolver always has value
+
+4. Run test-runner (expect pass)
+
+### Task 4.5: Fix correlation context atomic updates (bug #35)
+
+1. Write test in `src/utils/correlation.test.ts`:
+   - Test concurrent context updates don't cause partial reads
+   - Test update is atomic (all-or-nothing visible)
+
+2. Run test-runner (expect fail)
+
+3. Update `src/utils/correlation.ts:98-104`:
+   - Create new context object with spread: `{ ...existing, ...updates }`
+   - Replace atomically with single Map.set()
+   - Never mutate stored context directly
+
+4. Run test-runner (expect pass)
+
+---
+
+## Phase 5: Match Logic & Defaults
+
+**Bugs:** #16 (dateProximityDays default), #18 (match-movimientos null), #19 (autofill error context), #44 (pago.matchedFacturaFileId), #53 (date calculation NaN)
+
+### Context Gathered
+
+**Files:**
+- `src/matching/matcher.ts:276-282,484-490` - dateProximityDays
+- `src/bank/match-movimientos.ts:641-650` - quality comparison
+- `src/bank/autofill.ts:236-238,297-300` - error context
+- `src/bank/matcher.ts:282-290` - matchedFacturaFileId
+- `src/bank/subdiario-matcher.ts:32-35` - daysBetween
+
+**Patterns:**
+- `|| defaultValue` for defaults (falsy check)
+- `?? defaultValue` for nullish coalescing
+- MatchQuality object comparison
+
+### Task 5.1: Fix dateProximityDays falsy default (bug #16)
+
+1. Write test in `src/matching/matcher.test.ts`:
+   - Test dateProximityDays=0 is treated as perfect match (not 999)
+   - Test dateProximityDays=undefined defaults to 999
+   - Test comparison correctly ranks 0 days better than 5 days
+
+2. Run test-runner (expect fail)
+
+3. Update `src/matching/matcher.ts:276-282,484-490`:
+   - Change `dateProximityDays || 999` to `dateProximityDays ?? 999`
+   - Nullish coalescing preserves 0 as valid value
+
+4. Run test-runner (expect pass)
+
+### Task 5.2: Fix match-movimientos quality null check (bug #18)
+
+1. Write test in `src/bank/match-movimientos.test.ts`:
+   - Test behavior when buildMatchQualityFromFileId returns null
+   - Verify existing matches NOT replaced when document not found
+   - Verify warning logged for orphaned fileId
+
+2. Run test-runner (expect fail)
+
+3. Update `src/bank/match-movimientos.ts:641-650`:
+   - Add null check: `if (!existingQuality) { log warning; keep existing match }`
+   - Don't replace match when can't compare quality
+
+4. Run test-runner (expect pass)
+
+### Task 5.3: Fix autofill error context logging (bug #19)
+
+1. Write test in `src/bank/autofill.test.ts`:
+   - Test that failed banks are logged with bank name
+   - Test that error details are captured
+   - Test return value indicates which banks failed
+
+2. Run test-runner (expect fail)
+
+3. Update `src/bank/autofill.ts:236-238,297-300`:
+   - Add `failedBanks: string[]` to track failures
+   - Log error with bank name: `warn({ bankName, error }, 'Bank load failed')`
+   - Include failedBanks in return value
+
+4. Run test-runner (expect pass)
+
+### Task 5.4: Fix matchedFacturaFileId null check (bug #44)
+
+1. Write test in `src/bank/matcher.test.ts`:
+   - Test behavior when matchedFacturaFileId exists but factura not in array
+   - Verify warning logged
+   - Verify graceful continuation
+
+2. Run test-runner (expect fail)
+
+3. Update `src/bank/matcher.ts:282-290`:
+   - Add explicit check: `const linkedFactura = facturas.find(...); if (!linkedFactura) { warn(...); continue; }`
+
+4. Run test-runner (expect pass)
+
+### Task 5.5: Fix daysBetween NaN propagation (bug #53)
+
+1. Write test in `src/bank/subdiario-matcher.test.ts`:
+   - Test daysBetween with invalid date returns 0 or throws
+   - Test comparison doesn't use NaN/Infinity
+
+2. Run test-runner (expect fail)
+
+3. Update `src/bank/subdiario-matcher.ts:32-35`:
+   - Add validation: `if (!isValidDate(date1) || !isValidDate(date2)) return Infinity`
+   - Use Infinity for invalid dates (worst possible proximity)
+
+4. Run test-runner (expect pass)
+
+---
+
+## Phase 6: Column Validation & Input Validation
+
+**Bugs:** #1 (hard-coded columns), #49 (missing JSON schemas), #50 (bankName validation), #51 (documentType enum), #52 (request body type assertion)
+
+### Context Gathered
+
+**Files:**
+- `src/services/pagos-pendientes.ts:58,90-100` - column indices
+- `src/routes/scan.ts:18-92` - route definitions
+- `src/constants/spreadsheet-headers.ts` - header definitions
+
+**Patterns:**
+- Fastify schema validation with JSON Schema
+- Type interfaces for request bodies
+- SPREADSHEET_HEADERS constant
+
+### Task 6.1: Add header-based column lookup (bug #1)
+
+1. Write test in `src/services/pagos-pendientes.test.ts`:
+   - Test column lookup by header name
+   - Test error when required column missing
+   - Test works with reordered columns
+
+2. Run test-runner (expect fail)
+
+3. Update `src/services/pagos-pendientes.ts`:
+   - Add helper: `getColumnIndex(headers: string[], columnName: string): number`
+   - Replace `row[18]` with `row[getColumnIndex(headers, 'Pagada')]`
+   - Validate headers on first row, cache indices
+
+4. Run test-runner (expect pass)
+
+### Task 6.2: Add Fastify JSON schema validation (bug #49)
+
+1. Write test in `src/routes/scan.test.ts`:
+   - Test invalid JSON body returns 400
+   - Test missing required fields returns 400
+   - Test valid body accepted
+
+2. Run test-runner (expect fail)
+
+3. Update `src/routes/scan.ts`:
+   - Add JSON schema to route options: `schema: { body: { type: 'object', ... } }`
+   - Define required properties and types
+
+4. Run test-runner (expect pass)
+
+### Task 6.3: Add bankName validation (bug #50)
+
+1. Write test in `src/routes/scan.test.ts`:
+   - Test empty bankName returns 400
+   - Test non-existent bankName returns 404
+   - Test valid bankName accepted
+
+2. Run test-runner (expect fail)
+
+3. Update `src/routes/scan.ts:119-124`:
+   - Validate bankName is non-empty string
+   - Check bankName exists in bankSpreadsheets before processing
+   - Return appropriate error for invalid bank
+
+4. Run test-runner (expect pass)
+
+### Task 6.4: Add documentType enum validation (bug #51)
+
+1. Write test in `src/routes/scan.test.ts`:
+   - Test invalid documentType returns 400
+   - Test valid documentType values accepted
+   - Test schema enforces enum
+
+2. Run test-runner (expect fail)
+
+3. Update `src/routes/scan.ts:98-113`:
+   - Add JSON schema with enum: `enum: ['factura_emitida', 'factura_recibida', ...]`
+   - Validate at runtime before processing
+
+4. Run test-runner (expect pass)
+
+---
+
+## Post-Implementation Checklist (Run After EACH Phase)
 
 1. Run `bug-hunter` agent - Review changes for bugs
 2. Run `test-runner` agent - Verify all tests pass
@@ -280,90 +584,15 @@ Existing tests in:
 
 ---
 
-## Iteration 1
+## Notes
 
-**Implemented:** 2026-01-31
+**Phase Independence:** Each phase can be implemented independently. Complete Phase N before starting Phase N+1.
 
-### Completed
+**Context Management:** Each phase has 4-5 tasks to avoid context exhaustion. If a phase seems too large during implementation, it can be split.
 
-- **Task 1: Fix conditionalFormattingApplied race condition**
-  - Implemented atomic check-and-set pattern in `src/services/status-sheet.ts:255-256`
-  - Set flag BEFORE async call to prevent TOCTOU race
-  - Removed duplicate flag set inside `applyStatusConditionalFormatting()` at line 154
-  - Added concurrent test in `src/services/status-sheet.test.ts` (10 concurrent calls, formatting applied exactly once)
+**Related MEDIUM Items:** Some MEDIUM items (#22, #23, #35, #41, #42, #44, #49, #50, #51, #52, #53) are included because they share code locality with HIGH items and can be fixed efficiently together.
 
-- **Task 2: Fix duplicate notification detection race condition**
-  - Created atomic `checkAndMarkNotification()` function in `src/services/watch-manager.ts:363-421`
-  - Combines check and mark operations with no yield between (atomic in event loop)
-  - Updated `src/routes/webhooks.ts` to use new atomic function (lines 6-11, 117-119)
-  - Removed separate `markNotificationProcessed()` calls from webhook handlers
-  - Added concurrent test in `src/services/watch-manager.test.ts` (10 concurrent calls, exactly 1 returns true)
-  - **Bug fix (from bug-hunter):** Removed dead code - deleted unused `isNotificationDuplicate()` and `markNotificationProcessed()` functions
+**Skipped Items:** The following MEDIUM items are NOT included in this plan because they don't have strong affinity with HIGH items:
+- #20-21, #24-34, #36-40, #43, #45-48, #54-60
 
-- **Task 3: Remove item #18 from TODO.md (false positive)**
-  - Confirmed TODO.md was regenerated since plan creation - false positive already removed
-  - Original item #18 (retriedFileIds race condition) does not exist because:
-    - Each queue task processes a unique fileId
-    - Retry is recursive within same task (no concurrent access to same fileId)
-    - `retriedFileIds.clear()` happens after all queue tasks complete
-
-- **Task 4: Add stress tests for concurrent operations**
-  - Enhanced status-sheet test to verify 10 concurrent calls apply formatting exactly once
-  - Enhanced watch-manager test to verify 10 concurrent calls return exactly 1 true, 9 false
-  - Both tests validate the atomic fixes from Tasks 1-2
-
-### Checklist Results
-
-- **bug-hunter:** Passed
-  - Found 3 non-critical issues (test naming, dead code, test isolation)
-  - Fixed dead code issue by removing unused functions
-  - Other issues noted but acceptable (test is valid, module state is manageable)
-  - No runtime bugs found - race condition fixes are correct
-
-- **test-runner:** Passed
-  - All 1,187 tests passed
-  - Duration: 7.64 seconds
-
-- **builder:** Passed
-  - Zero warnings
-  - Zero errors
-
-### Notes
-
-**Race condition fixes verified:**
-
-1. **status-sheet.ts (line 255-256):** Atomic check-and-set prevents multiple concurrent `updateStatusSheet()` calls from applying formatting more than once. Flag set synchronously before async operation.
-
-2. **watch-manager.ts (line 363-421):** `checkAndMarkNotification()` combines check and mark with no `await` between operations, making it atomic in JavaScript's event loop model. Prevents duplicate notification processing.
-
-3. **webhooks.ts (line 117-119):** Webhook handler now uses single atomic call instead of separate check-then-mark pattern, eliminating TOCTOU window.
-
-**Edge case discovered:** Test naming could be improved - "concurrent" tests actually execute synchronously (which is fine since the functions are synchronous), but naming could be clearer about testing sequential deduplication rather than true concurrency.
-
-**Dead code removed:** `isNotificationDuplicate()` and `markNotificationProcessed()` were superseded by `checkAndMarkNotification()` and have been deleted. Only `markNotificationProcessedWithTimestamp()` remains for testing purposes.
-
-### Review Findings
-
-Files reviewed: 6
-Checks applied: Security, Logic, Async, Race Conditions, Resources, Type Safety, Error Handling, Tests, Conventions
-
-**Verification of race condition fixes:**
-
-1. **status-sheet.ts:255-256** - `conditionalFormattingApplied` flag is set synchronously (no `await` between check and set), preventing multiple concurrent `updateStatusSheet()` calls from passing the check. ✅
-
-2. **watch-manager.ts:292-342** - `checkAndMarkNotification()` is fully synchronous (contains no `await` or `.then()`), making it truly atomic in JavaScript's single-threaded event loop. The check (line 305-310) and mark (line 318) happen in the same synchronous execution block. ✅
-
-3. **webhooks.ts:121** - Single atomic `checkAndMarkNotification()` call replaces the previous separate `isNotificationDuplicate()` + `markNotificationProcessed()` pattern, eliminating the TOCTOU window. ✅
-
-**Test validity:**
-
-- `status-sheet.test.ts:138-157` - Correctly spawns 10 calls via `Promise.all()` and verifies `applyConditionalFormat` called exactly once
-- `watch-manager.test.ts:356-374` - Correctly verifies exactly 1 of 10 calls returns `true` (new), 9 return `false` (duplicate)
-
-No issues found - all implementations are correct and follow project conventions.
-
----
-
-## Status: COMPLETE
-
-All tasks implemented and reviewed successfully. Ready for human review.
+These can be addressed in a separate plan after HIGH priority items are complete.
