@@ -644,4 +644,210 @@ describe('matchAllMovimientos', () => {
       expect(result.value.totalCreditsFilled).toBe(1);
     }
   });
+
+  it('should evaluate existing match against new candidate (replacement logic)', async () => {
+    const mockFolderStructure = {
+      controlIngresosId: 'ingresos-id',
+      controlEgresosId: 'egresos-id',
+      bankSpreadsheets: new Map([['BBVA', 'bbva-id']]),
+    };
+
+    vi.mocked(withLock).mockImplementation(async (_id, fn) => {
+      const result = await fn();
+      return { ok: true, value: result };
+    });
+
+    vi.mocked(getCachedFolderStructure).mockReturnValue(mockFolderStructure as any);
+
+    // Mock Control data with two facturas - one existing (far date), one new (close date)
+    vi.mocked(getValues).mockImplementation(async (_spreadsheetId, range) => {
+      if (range === 'Facturas Recibidas!A:S') {
+        return {
+          ok: true,
+          value: [
+            ['fechaemision', 'fileid', 'filename', 'tipocomprobante', 'puntoventa', 'numerocomprobante', 'cuitemisor', 'razonsocialemisor', 'cuitreceptor', 'razonsocialreceptor', 'importetotal', 'moneda', 'formadepago', 'cbu', 'processedat', 'confidence', 'needsreview', 'matchedpagofileid', 'matchconfidence'],
+            ['2025-01-01', 'factura-far', 'far.pdf', 'B', '1', '123', '20123456786', 'PROVEEDOR SA', '30709076783', 'ADVA', '1000', 'ARS', '', '', '2025-01-01T10:00:00Z', '0.95', 'NO', '', ''],
+            ['2025-01-16', 'factura-close', 'close.pdf', 'B', '1', '124', '20123456786', 'PROVEEDOR SA', '30709076783', 'ADVA', '1000', 'ARS', '', '', '2025-01-16T10:00:00Z', '0.95', 'NO', '', ''],
+          ],
+        };
+      }
+      return { ok: true, value: [['header']] };
+    });
+
+    // Movement with existing match to far-dated factura
+    vi.mocked(getMovimientosToFill).mockResolvedValue({
+      ok: true,
+      value: [
+        {
+          sheetName: '2025-01',
+          rowNumber: 2,
+          fecha: '2025-01-15',
+          origenConcepto: 'PAGO A PROVEEDOR SA',
+          debito: 1000,
+          credito: null,
+          saldo: 9000,
+          saldoCalculado: 9000,
+          matchedFileId: 'factura-far',  // Existing match, 14 days away
+          detalle: 'Pago Factura a PROVEEDOR SA',
+        },
+      ],
+    });
+
+    // New match will return the closer factura
+    mockMatchMovement.mockReturnValue({
+      matchType: 'direct_factura',
+      description: 'Pago Factura a PROVEEDOR SA - UPDATED',
+      matchedFileId: 'factura-close',  // New match, only 1 day away
+      confidence: 'HIGH',
+    });
+
+    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: 1 });
+
+    const resultPromise = matchAllMovimientos();
+    await vi.runAllTimersAsync();
+    const result = await resultPromise;
+
+    expect(result.ok).toBe(true);
+    // Should replace with closer match even though existing match exists
+    expect(updateDetalle).toHaveBeenCalledWith('bbva-id', expect.arrayContaining([
+      expect.objectContaining({
+        matchedFileId: 'factura-close',
+        detalle: 'Pago Factura a PROVEEDOR SA - UPDATED',
+      }),
+    ]));
+  });
+
+  it('should keep existing match when it is better than new candidate', async () => {
+    const mockFolderStructure = {
+      controlIngresosId: 'ingresos-id',
+      controlEgresosId: 'egresos-id',
+      bankSpreadsheets: new Map([['BBVA', 'bbva-id']]),
+    };
+
+    vi.mocked(withLock).mockImplementation(async (_id, fn) => {
+      const result = await fn();
+      return { ok: true, value: result };
+    });
+
+    vi.mocked(getCachedFolderStructure).mockReturnValue(mockFolderStructure as any);
+
+    // Mock Control data - existing match has CUIT, new candidate doesn't
+    vi.mocked(getValues).mockImplementation(async (_spreadsheetId, range) => {
+      if (range === 'Facturas Recibidas!A:S') {
+        return {
+          ok: true,
+          value: [
+            ['fechaemision', 'fileid', 'filename', 'tipocomprobante', 'puntoventa', 'numerocomprobante', 'cuitemisor', 'razonsocialemisor', 'cuitreceptor', 'razonsocialreceptor', 'importetotal', 'moneda', 'formadepago', 'cbu', 'processedat', 'confidence', 'needsreview', 'matchedpagofileid', 'matchconfidence'],
+            ['2025-01-10', 'factura-with-cuit', 'cuit.pdf', 'B', '1', '123', '20123456786', 'PROVEEDOR SA', '30709076783', 'ADVA', '1000', 'ARS', '', '', '2025-01-10T10:00:00Z', '0.95', 'NO', '', ''],
+            ['2025-01-15', 'factura-no-cuit', 'nocuit.pdf', 'B', '1', '124', '00000000000', 'OTRO SA', '30709076783', 'ADVA', '1000', 'ARS', '', '', '2025-01-15T10:00:00Z', '0.95', 'NO', '', ''],
+          ],
+        };
+      }
+      return { ok: true, value: [['header']] };
+    });
+
+    // Movement with existing match that has CUIT
+    vi.mocked(getMovimientosToFill).mockResolvedValue({
+      ok: true,
+      value: [
+        {
+          sheetName: '2025-01',
+          rowNumber: 2,
+          fecha: '2025-01-15',
+          origenConcepto: 'PAGO 20123456786',  // CUIT match
+          debito: 1000,
+          credito: null,
+          saldo: 9000,
+          saldoCalculado: 9000,
+          matchedFileId: 'factura-with-cuit',  // Existing match with CUIT, 5 days away
+          detalle: 'Pago Factura a PROVEEDOR SA',
+        },
+      ],
+    });
+
+    // New match without CUIT but closer date
+    mockMatchMovement.mockReturnValue({
+      matchType: 'direct_factura',
+      description: 'Pago Factura a OTRO SA',
+      matchedFileId: 'factura-no-cuit',  // No CUIT match, same day
+      confidence: 'MEDIUM',
+    });
+
+    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: 0 });
+
+    const resultPromise = matchAllMovimientos();
+    await vi.runAllTimersAsync();
+    const result = await resultPromise;
+
+    expect(result.ok).toBe(true);
+    // Should NOT replace - existing has CUIT match which beats closer date
+    expect(updateDetalle).toHaveBeenCalledWith('bbva-id', []);
+  });
+
+  it('should not update when force=false and new match is equal quality to existing', async () => {
+    const mockFolderStructure = {
+      controlIngresosId: 'ingresos-id',
+      controlEgresosId: 'egresos-id',
+      bankSpreadsheets: new Map([['BBVA', 'bbva-id']]),
+    };
+
+    vi.mocked(withLock).mockImplementation(async (_id, fn) => {
+      const result = await fn();
+      return { ok: true, value: result };
+    });
+
+    vi.mocked(getCachedFolderStructure).mockReturnValue(mockFolderStructure as any);
+
+    // Mock Control data - two facturas with same distance, same CUIT
+    vi.mocked(getValues).mockImplementation(async (_spreadsheetId, range) => {
+      if (range === 'Facturas Recibidas!A:S') {
+        return {
+          ok: true,
+          value: [
+            ['fechaemision', 'fileid', 'filename', 'tipocomprobante', 'puntoventa', 'numerocomprobante', 'cuitemisor', 'razonsocialemisor', 'cuitreceptor', 'razonsocialreceptor', 'importetotal', 'moneda', 'formadepago', 'cbu', 'processedat', 'confidence', 'needsreview', 'matchedpagofileid', 'matchconfidence'],
+            ['2025-01-10', 'factura-a', 'a.pdf', 'B', '1', '123', '20123456786', 'PROVEEDOR SA', '30709076783', 'ADVA', '1000', 'ARS', '', '', '2025-01-10T10:00:00Z', '0.95', 'NO', '', ''],
+            ['2025-01-20', 'factura-b', 'b.pdf', 'B', '1', '124', '20123456786', 'PROVEEDOR SA', '30709076783', 'ADVA', '1000', 'ARS', '', '', '2025-01-20T10:00:00Z', '0.95', 'NO', '', ''],
+          ],
+        };
+      }
+      return { ok: true, value: [['header']] };
+    });
+
+    // Movement with existing match, same distance as new match
+    vi.mocked(getMovimientosToFill).mockResolvedValue({
+      ok: true,
+      value: [
+        {
+          sheetName: '2025-01',
+          rowNumber: 2,
+          fecha: '2025-01-15',
+          origenConcepto: 'PAGO 20123456786',
+          debito: 1000,
+          credito: null,
+          saldo: 9000,
+          saldoCalculado: 9000,
+          matchedFileId: 'factura-a',  // 5 days away
+          detalle: 'Pago Factura a PROVEEDOR SA',
+        },
+      ],
+    });
+
+    // New match also 5 days away
+    mockMatchMovement.mockReturnValue({
+      matchType: 'direct_factura',
+      description: 'Pago Factura a PROVEEDOR SA',
+      matchedFileId: 'factura-b',  // Also 5 days away
+      confidence: 'HIGH',
+    });
+
+    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: 0 });
+
+    const resultPromise = matchAllMovimientos();
+    await vi.runAllTimersAsync();
+    const result = await resultPromise;
+
+    expect(result.ok).toBe(true);
+    // Should NOT replace - equal quality, keep existing (no churn)
+    expect(updateDetalle).toHaveBeenCalledWith('bbva-id', []);
+  });
 });

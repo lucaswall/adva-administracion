@@ -19,20 +19,12 @@ import { info, warn, debug } from '../utils/logger.js';
 import { getCachedFolderStructure } from '../services/folder-structure.js';
 import { getValues, type CellValue } from '../services/sheets.js';
 import { parseNumber } from '../utils/numbers.js';
-import { BankMovementMatcher } from './matcher.js';
+import { BankMovementMatcher, type MatchQuality } from './matcher.js';
 import { getMovimientosToFill } from '../services/movimientos-reader.js';
 import { updateDetalle, type DetalleUpdate } from '../services/movimientos-detalle.js';
 
-/**
- * Quality metrics for match comparison (replacement logic)
- */
-export interface MatchQuality {
-  fileId: string;
-  hasCuitMatch: boolean;
-  dateDistance: number;
-  isExactAmount: boolean;
-  hasLinkedPago: boolean;
-}
+// Re-export MatchQuality for test compatibility
+export type { MatchQuality };
 
 /**
  * Options for matching
@@ -429,6 +421,143 @@ async function loadControlEgresos(spreadsheetId: string): Promise<Result<Egresos
 }
 
 /**
+ * Builds MatchQuality from a document (Factura, Pago, or Recibo) and movement
+ */
+function buildMatchQuality(
+  fileId: string,
+  fechaDocumento: string,
+  fechaMovimiento: string,
+  cuitDocumento: string,
+  conceptoMovimiento: string,
+  hasLinkedPago: boolean,
+  isExactAmount: boolean
+): MatchQuality {
+  // Calculate date distance in days
+  const docDate = new Date(fechaDocumento);
+  const movDate = new Date(fechaMovimiento);
+
+  // Handle invalid dates - use Infinity for worst possible score
+  const dateDistance = (!isNaN(docDate.getTime()) && !isNaN(movDate.getTime()))
+    ? Math.abs(Math.floor((docDate.getTime() - movDate.getTime()) / (1000 * 60 * 60 * 24)))
+    : Infinity;
+
+  // Check for CUIT match in concepto
+  const hasCuitMatch = conceptoMovimiento.includes(cuitDocumento);
+
+  return {
+    fileId,
+    hasCuitMatch,
+    dateDistance,
+    isExactAmount,
+    hasLinkedPago,
+  };
+}
+
+/**
+ * Finds a document by fileId in the provided arrays
+ * Returns the document and its type for building MatchQuality
+ */
+function findDocumentByFileId(
+  fileId: string,
+  facturasEmitidas: Array<Factura & { row: number }>,
+  pagosRecibidos: Array<Pago & { row: number }>,
+  facturasRecibidas: Array<Factura & { row: number }>,
+  pagosEnviados: Array<Pago & { row: number }>,
+  recibos: Array<Recibo & { row: number }>
+): { document: any; type: 'factura_emitida' | 'pago_recibido' | 'factura_recibida' | 'pago_enviado' | 'recibo' } | null {
+  // Search in facturas emitidas
+  const facturaEmitida = facturasEmitidas.find(f => f.fileId === fileId);
+  if (facturaEmitida) {
+    return { document: facturaEmitida, type: 'factura_emitida' };
+  }
+
+  // Search in pagos recibidos
+  const pagoRecibido = pagosRecibidos.find(p => p.fileId === fileId);
+  if (pagoRecibido) {
+    return { document: pagoRecibido, type: 'pago_recibido' };
+  }
+
+  // Search in facturas recibidas
+  const facturaRecibida = facturasRecibidas.find(f => f.fileId === fileId);
+  if (facturaRecibida) {
+    return { document: facturaRecibida, type: 'factura_recibida' };
+  }
+
+  // Search in pagos enviados
+  const pagoEnviado = pagosEnviados.find(p => p.fileId === fileId);
+  if (pagoEnviado) {
+    return { document: pagoEnviado, type: 'pago_enviado' };
+  }
+
+  // Search in recibos
+  const recibo = recibos.find(r => r.fileId === fileId);
+  if (recibo) {
+    return { document: recibo, type: 'recibo' };
+  }
+
+  return null;
+}
+
+/**
+ * Builds MatchQuality for an existing match by looking up the document
+ */
+function buildMatchQualityFromFileId(
+  fileId: string,
+  fechaMovimiento: string,
+  conceptoMovimiento: string,
+  ingresosData: IngresosData,
+  egresosData: EgresosData
+): MatchQuality | null {
+  const found = findDocumentByFileId(
+    fileId,
+    ingresosData.facturasEmitidas,
+    ingresosData.pagosRecibidos,
+    egresosData.facturasRecibidas,
+    egresosData.pagosEnviados,
+    egresosData.recibos
+  );
+
+  if (!found) {
+    return null;
+  }
+
+  const { document, type } = found;
+
+  // Extract relevant fields based on document type
+  let fechaDocumento: string;
+  let cuitDocumento: string;
+  let hasLinkedPago = false;
+
+  if (type === 'factura_emitida' || type === 'factura_recibida') {
+    fechaDocumento = document.fechaEmision;
+    cuitDocumento = type === 'factura_emitida' ? document.cuitReceptor : document.cuitEmisor;
+    hasLinkedPago = !!document.matchedPagoFileId;
+  } else if (type === 'pago_recibido' || type === 'pago_enviado') {
+    fechaDocumento = document.fechaPago;
+    cuitDocumento = type === 'pago_recibido' ? document.cuitPagador : document.cuitBeneficiario;
+    hasLinkedPago = !!document.matchedFacturaFileId;
+  } else if (type === 'recibo') {
+    fechaDocumento = document.fechaPago;
+    cuitDocumento = document.cuilEmpleado;
+    hasLinkedPago = false;
+  } else {
+    return null;
+  }
+
+  // For isExactAmount, we can't determine this without re-running the match
+  // Use a conservative value (false) - if the candidate is exact, it will win
+  return buildMatchQuality(
+    fileId,
+    fechaDocumento,
+    fechaMovimiento,
+    cuitDocumento,
+    conceptoMovimiento,
+    hasLinkedPago,
+    false  // Conservative: assume existing match is not exact
+  );
+}
+
+/**
  * Matches all movimientos for a single bank spreadsheet
  */
 async function matchBankMovimientos(
@@ -472,11 +601,6 @@ async function matchBankMovimientos(
 
   // Process each movimiento
   for (const mov of movimientos) {
-    // Skip if already has match and not force mode
-    if (!options.force && mov.matchedFileId) {
-      continue;
-    }
-
     const bankMovement = movimientoRowToBankMovement(mov);
     let matchResult;
 
@@ -503,21 +627,107 @@ async function matchBankMovimientos(
       continue;
     }
 
-    // Only update if there's a match
+    // Handle match result with replacement logic
     if (matchResult.matchType !== 'no_match' && matchResult.matchedFileId) {
-      updates.push({
-        sheetName: mov.sheetName,
-        rowNumber: mov.rowNumber,
-        matchedFileId: matchResult.matchedFileId,
-        detalle: matchResult.description,
-      });
+      // Found a new candidate match
+      let shouldUpdate = false;
 
-      if (mov.debito !== null && mov.debito > 0) {
-        debitsFilled++;
+      if (options.force || !mov.matchedFileId) {
+        // Force mode OR no existing match - always update
+        shouldUpdate = true;
       } else {
-        creditsFilled++;
+        // Has existing match - compare quality
+        const existingQuality = buildMatchQualityFromFileId(
+          mov.matchedFileId,
+          mov.fecha,
+          mov.origenConcepto,
+          ingresosData,
+          egresosData
+        );
+
+        if (!existingQuality) {
+          // Couldn't find existing document - replace with new match
+          shouldUpdate = true;
+        } else {
+          // Build candidate quality
+          // Note: matchResult doesn't provide all fields we need, so we need to look up the document
+          const candidateDoc = findDocumentByFileId(
+            matchResult.matchedFileId,
+            ingresosData.facturasEmitidas,
+            ingresosData.pagosRecibidos,
+            egresosData.facturasRecibidas,
+            egresosData.pagosEnviados,
+            egresosData.recibos
+          );
+
+          if (candidateDoc) {
+            const { document, type } = candidateDoc;
+            let fechaDocumento: string;
+            let cuitDocumento: string;
+            let hasLinkedPago = false;
+
+            if (type === 'factura_emitida' || type === 'factura_recibida') {
+              fechaDocumento = document.fechaEmision;
+              cuitDocumento = type === 'factura_emitida' ? document.cuitReceptor : document.cuitEmisor;
+              hasLinkedPago = !!document.matchedPagoFileId;
+            } else if (type === 'pago_recibido' || type === 'pago_enviado') {
+              fechaDocumento = document.fechaPago;
+              cuitDocumento = type === 'pago_recibido' ? document.cuitPagador : document.cuitBeneficiario;
+              hasLinkedPago = !!document.matchedFacturaFileId;
+            } else if (type === 'recibo') {
+              fechaDocumento = document.fechaPago;
+              cuitDocumento = document.cuilEmpleado;
+              hasLinkedPago = false;
+            } else {
+              // Unknown type - replace with new match
+              shouldUpdate = true;
+              fechaDocumento = '';
+              cuitDocumento = '';
+            }
+
+            if (fechaDocumento && cuitDocumento) {
+              // For isExactAmount, we can't reliably determine this without re-running complex matching
+              // Use the same value for both (true) so they compare equally on this dimension
+              // This ensures the comparison focuses on CUIT match and date proximity
+              const candidateQuality = buildMatchQuality(
+                matchResult.matchedFileId,
+                fechaDocumento,
+                mov.fecha,
+                cuitDocumento,
+                mov.origenConcepto,
+                hasLinkedPago,
+                true  // Consistent with existing for fair comparison
+              );
+
+              // Update existing quality to use same isExactAmount value
+              existingQuality.isExactAmount = true;
+
+              // Compare: replace if candidate is better
+              shouldUpdate = isBetterMatch(existingQuality, candidateQuality);
+            }
+          } else {
+            // Couldn't find candidate document - keep existing
+            shouldUpdate = false;
+          }
+        }
+      }
+
+      if (shouldUpdate) {
+        updates.push({
+          sheetName: mov.sheetName,
+          rowNumber: mov.rowNumber,
+          matchedFileId: matchResult.matchedFileId,
+          detalle: matchResult.description,
+        });
+
+        if (mov.debito !== null && mov.debito > 0) {
+          debitsFilled++;
+        } else {
+          creditsFilled++;
+        }
       }
     } else {
+      // No match found
       noMatches++;
     }
   }
