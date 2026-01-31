@@ -171,12 +171,19 @@ describe('scanner', () => {
     const { processFile } = await import('./extractor.js');
     const { sortToSinProcesar, sortAndRenameDocument } = await import('../services/document-sorter.js');
     const { markFileProcessing } = await import('./storage/index.js');
+    const { withLock } = await import('../utils/concurrency.js');
 
     mockListFiles = vi.mocked(listFilesInFolder);
     mockProcessFile = vi.mocked(processFile);
     mockSortToSinProcesar = vi.mocked(sortToSinProcesar);
     mockSortAndRename = vi.mocked(sortAndRenameDocument);
     mockMarkFileProcessing = vi.mocked(markFileProcessing);
+
+    // Reset withLock mock to default behavior
+    vi.mocked(withLock).mockImplementation(async (_lockId: string, fn: () => Promise<any>) => {
+      const result = await fn();
+      return { ok: true, value: result };
+    });
 
     // Create a proper queue mock that tracks pending tasks
     pendingTasks = new Set<Promise<void>>();
@@ -501,6 +508,212 @@ describe('scanner', () => {
 
       // Should not process the file since it's not in Entrada
       expect(mockProcessFile).not.toHaveBeenCalled();
+    });
+
+    it('should use unified lock with PROCESSING_LOCK_ID and trigger match when files are processed', async () => {
+      const { withLock } = await import('../utils/concurrency.js');
+      const { matchAllMovimientos } = await import('../bank/match-movimientos.js');
+      const { PROCESSING_LOCK_ID } = await import('../config.js');
+
+      // Mock successful file processing
+      const mockFile = {
+        id: 'test-file',
+        name: 'test.pdf',
+        mimeType: 'application/pdf',
+        parents: ['entrada'],
+      };
+
+      mockListFiles.mockResolvedValue({
+        ok: true,
+        value: [mockFile],
+      });
+
+      mockProcessFile.mockResolvedValue({
+        ok: true,
+        value: {
+          documentType: 'factura_emitida',
+          document: { fechaEmision: '2024-01-01' }
+        }
+      });
+
+      await scanFolder('entrada');
+
+      // Should use unified lock with PROCESSING_LOCK_ID
+      expect(withLock).toHaveBeenCalledWith(
+        PROCESSING_LOCK_ID,
+        expect.any(Function),
+        expect.any(Number),
+        expect.any(Number)
+      );
+
+      // Should trigger match asynchronously after files processed
+      // Flush promise queue to allow async trigger to complete
+      await new Promise(resolve => setImmediate(resolve));
+      expect(matchAllMovimientos).toHaveBeenCalled();
+    });
+
+    it('should NOT trigger match when no files are processed', async () => {
+      const { matchAllMovimientos } = await import('../bank/match-movimientos.js');
+
+      // Mock empty folder
+      mockListFiles.mockResolvedValue({
+        ok: true,
+        value: [],
+      });
+
+      await scanFolder('entrada');
+
+      // Flush promise queue to ensure any accidentally-triggered async calls would have started
+      await new Promise(resolve => setImmediate(resolve));
+
+      // Should NOT trigger match when filesProcessed === 0
+      expect(matchAllMovimientos).not.toHaveBeenCalled();
+    });
+
+    it('should skip scan when another scan is already pending', async () => {
+      const { withLock } = await import('../utils/concurrency.js');
+
+      // Mock withLock to simulate lock being held
+      let lockCallCount = 0;
+      vi.mocked(withLock).mockImplementation(async (_lockId, fn) => {
+        lockCallCount++;
+
+        // First call: simulate lock held by waiting
+        if (lockCallCount === 1) {
+          await new Promise(resolve => setTimeout(resolve, 100));
+          const result = await fn();
+          return { ok: true, value: result };
+        }
+
+        // Second call while first is waiting: should not reach this
+        // because pendingScan flag should cause early return
+        throw new Error('Should not acquire lock when pending scan exists');
+      });
+
+      mockListFiles.mockResolvedValue({
+        ok: true,
+        value: [{
+          id: 'test-file',
+          name: 'test.pdf',
+          mimeType: 'application/pdf',
+          parents: ['entrada'],
+        }],
+      });
+
+      // Start two scans concurrently
+      const scan1 = scanFolder('entrada');
+      const scan2 = scanFolder('entrada'); // Should skip due to pendingScan flag
+
+      const result2 = await scan2;
+      await scan1;
+
+      // Second scan should have been skipped
+      expect(result2).toEqual({
+        ok: true,
+        value: expect.objectContaining({
+          skipped: true,
+          reason: 'scan_pending'
+        })
+      });
+    });
+
+    it('should log match errors instead of silently discarding them', async () => {
+      const { matchAllMovimientos } = await import('../bank/match-movimientos.js');
+      const { error: logError } = await import('../utils/logger.js');
+
+      // Mock match to fail
+      vi.mocked(matchAllMovimientos).mockResolvedValue({
+        ok: false,
+        error: new Error('Match failed - database connection lost'),
+      });
+
+      const mockFile = {
+        id: 'test-file',
+        name: 'test.pdf',
+        mimeType: 'application/pdf',
+        parents: ['entrada'],
+      };
+
+      mockListFiles.mockResolvedValue({
+        ok: true,
+        value: [mockFile],
+      });
+
+      mockProcessFile.mockResolvedValue({
+        ok: true,
+        value: {
+          documentType: 'factura_emitida',
+          document: { fechaEmision: '2024-01-01' }
+        }
+      });
+
+      await scanFolder('entrada');
+
+      // Flush promise queue to allow async match trigger to complete
+      await new Promise(resolve => setImmediate(resolve));
+
+      // Should log the error
+      expect(logError).toHaveBeenCalledWith(
+        expect.stringContaining('Match movimientos failed'),
+        expect.objectContaining({
+          module: 'scanner',
+          error: expect.stringContaining('Match failed')
+        })
+      );
+    });
+
+    it('should log match skip reason when match is skipped', async () => {
+      const { matchAllMovimientos } = await import('../bank/match-movimientos.js');
+      const { info: logInfo } = await import('../utils/logger.js');
+
+      // Mock match to be skipped (already running)
+      vi.mocked(matchAllMovimientos).mockResolvedValue({
+        ok: true,
+        value: {
+          skipped: true,
+          reason: 'already_running',
+          results: [],
+          totalProcessed: 0,
+          totalFilled: 0,
+          totalDebitsFilled: 0,
+          totalCreditsFilled: 0,
+          duration: 0,
+        },
+      });
+
+      const mockFile = {
+        id: 'test-file',
+        name: 'test.pdf',
+        mimeType: 'application/pdf',
+        parents: ['entrada'],
+      };
+
+      mockListFiles.mockResolvedValue({
+        ok: true,
+        value: [mockFile],
+      });
+
+      mockProcessFile.mockResolvedValue({
+        ok: true,
+        value: {
+          documentType: 'factura_emitida',
+          document: { fechaEmision: '2024-01-01' }
+        }
+      });
+
+      await scanFolder('entrada');
+
+      // Flush promise queue to allow async match trigger to complete
+      await new Promise(resolve => setImmediate(resolve));
+
+      // Should log the skip reason
+      expect(logInfo).toHaveBeenCalledWith(
+        expect.stringContaining('Match movimientos skipped'),
+        expect.objectContaining({
+          module: 'scanner',
+          reason: 'already_running'
+        })
+      );
     });
   });
 });

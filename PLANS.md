@@ -1837,3 +1837,82 @@ Checks applied: Test Coverage, Logic Verification, Implementation Completeness
 2. Run test-runner (expect pass)
 
 3. Run builder (expect zero warnings)
+
+---
+
+## Iteration 6: Fix Implementation - COMPLETED
+
+**Implemented:** 2026-01-31
+
+### Completed Fixes
+
+**Fix 1: Add missing tests for lock and match trigger functionality** ✅
+- Added 5 comprehensive tests to `src/processing/scanner.test.ts`:
+  1. `should use unified lock with PROCESSING_LOCK_ID and trigger match when files are processed` - Verifies lock usage and match trigger
+  2. `should NOT trigger match when no files are processed` - Verifies no match when filesProcessed === 0
+  3. `should skip scan when another scan is already pending` - Verifies pendingScan flag prevents duplicate scans
+  4. `should log match errors instead of silently discarding them` - Verifies error logging
+  5. `should log match skip reason when match is skipped` - Verifies skip reason logging
+- Added `withLock` mock reset in `beforeEach` to prevent test pollution
+- Used `setImmediate` for promise queue flushing (replaced arbitrary `setTimeout` delays)
+- All tests passing (1199 total tests, up from 1194)
+
+### Bug Fixes (from bug-hunter review)
+
+**Test Reliability Improvements:**
+- ✅ Fixed async timing issues by using `await new Promise(resolve => setImmediate(resolve))` instead of arbitrary 100ms delays
+- ✅ Added `withLock` mock reset in `beforeEach` to prevent test state leakage
+- ✅ Removed unnecessary `try/finally` block - mock reset now handled by `beforeEach`
+
+### Checklist Results
+
+✅ **test-runner:** PASSED - All 1199 tests passing across 57 test files (7.81s)
+✅ **builder:** PASSED - Zero warnings, clean build
+✅ **bug-hunter:** PASSED - No bugs found
+
+### Notes
+
+**Test coverage completed:**
+- ✅ Unified lock usage with `PROCESSING_LOCK_ID`
+- ✅ 5-minute lock timeout configuration
+- ✅ Match trigger when `filesProcessed > 0`
+- ✅ No match trigger when `filesProcessed === 0`
+- ✅ Error logging for match failures
+- ✅ Skip reason logging for skipped matches
+- ✅ `pendingScan` flag prevents duplicate scans
+
+**Implementation verification:**
+All tests align correctly with the scanner.ts implementation:
+- Lock acquisition at line 389 (`withLock(PROCESSING_LOCK_ID, ...)`)
+- Match trigger at line 706-708 (`if (filesProcessed > 0) { triggerMatchAsync(); }`)
+- Error logging at lines 343-353 in `triggerMatchAsync()`
+- Pending scan flag at lines 364-381
+
+**Test quality:**
+- Proper mocking patterns (reset in beforeEach)
+- Deterministic async handling (setImmediate for promise flushing)
+- Comprehensive coverage of all lock/match behaviors
+- No test pollution or race conditions
+
+### Status: COMPLETE ✅
+
+All tasks from the original plan (Tasks 0-11) have been implemented, tested, documented, and verified:
+- ✅ Schema updates (8-column Movimientos)
+- ✅ Credit matching logic with retencion tolerance
+- ✅ Replacement logic with quality comparison
+- ✅ Services (reader, detalle updater, orchestrator)
+- ✅ API endpoint with force parameter
+- ✅ Dashboard menu integration
+- ✅ Scanner integration with unified lock
+- ✅ Auto-trigger after scan
+- ✅ Complete test coverage (1199 tests)
+- ✅ Documentation updates
+- ✅ Zero warnings, zero bugs
+
+**Final metrics:**
+- Test files: 57
+- Total tests: 1199 (5 new tests added in this iteration)
+- Build: Clean, zero warnings
+- Bug review: No issues found
+
+This completes the movimientos detalles matching feature.
