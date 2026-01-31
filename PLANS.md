@@ -1,7 +1,7 @@
 # Implementation Plan
 
 **Created:** 2026-01-30
-**Updated:** 2026-01-30 (post-review: added critical fixes for lock timeout, batch limits, memory management)
+**Updated:** 2026-01-31 (scan deferral, rich comparison replacement, removed exchange rate pre-fetch, 8-column schema: G=matchedFileId, H=detalle)
 **Source:** Inline request: Add Detalles column matching for Movimientos sheets
 
 ## Context Gathered
@@ -20,8 +20,12 @@
 **Current Movimientos Bancario Schema (6 columns A:F):**
 - fecha, origenConcepto, debito, credito, saldo, saldoCalculado
 
-**New schema (7 columns A:G):**
-- fecha, origenConcepto, debito, credito, saldo, saldoCalculado, **detalles** (new)
+**New schema (8 columns A:H):**
+- fecha, origenConcepto, debito, credito, saldo, saldoCalculado, **matchedFileId** (new), **detalle** (new)
+
+The `matchedFileId` column (G) stores the Google Drive fileId of the matched document. This enables rich comparison - when a new potential match appears, we can look up the existing match and compare on ALL factors (CUIT match, date proximity, amount precision, etc.).
+
+The `detalle` column (H) is the human-readable description shown last for easy viewing.
 
 ### Data Sources for Matching
 
@@ -103,10 +107,11 @@ Month sheet names are YYYY-MM format.
 - After: 3 chunks × 4 sheets = ~1s per bank (chunked parallel)
 - Total time ~12-15 seconds (balance of speed and memory safety)
 
-**Exchange rate pre-fetching:**
-- Before matching begins, collect all unique dates from facturas and pagos
-- Call `prefetchExchangeRates()` with rate limiting (5 concurrent requests max)
-- Prevents `cacheMiss` during synchronous matching
+**Exchange rates (on-demand):**
+- USD payments are rare - no pre-fetching needed
+- Fetch exchange rates on-demand when cross-currency matching is needed
+- Built-in caching handles repeated lookups for same date
+- Prioritize minimizing Drive API calls over exchange rate API calls
 
 **Trigger after every scan:**
 - Any document type (factura, pago, recibo, retencion, resumen) could match existing movimientos
@@ -134,11 +139,22 @@ Month sheet names are YYYY-MM format.
   - Existing battle-tested implementation
 - **Trigger sequencing:** Match is triggered AFTER scan releases lock, ensuring sequential execution
 
-**Estimated API Calls per execution:**
+**Scan deferral (NOT skipping):**
+- Scans should NEVER be skipped - files in Entrada must not linger
+- When lock is held, scan WAITS for lock release instead of returning immediately
+- **Pending scan flag** prevents queue buildup:
+  - `pendingScan: boolean` flag in scanner module
+  - If lock held AND no pending scan → set flag, wait for lock, then run
+  - If lock held AND pending scan already exists → skip (the pending scan will handle all files)
+  - Since scan reads Entrada at start, one deferred scan catches everything
+- This ensures files are processed promptly while avoiding duplicate work
+
+**Estimated Drive API Calls per execution:**
 - Control de Ingresos: 3 reads (Facturas Emitidas, Pagos Recibidos, Retenciones)
 - Control de Egresos: 3 reads (Facturas Recibidas, Pagos Enviados, Recibos)
 - Per bank spreadsheet: 1 metadata + N month sheet reads (chunked parallel) + 1-N batch updates (chunked by 500)
 - Total: 6 + (banks × (1 + months + ceil(updates/500))) ≈ 6 + (5 banks × 15 calls) = ~81 calls
+- Exchange rate API: on-demand only, cached, not counted (rare USD cases)
 - **Time: ~12-15 seconds** (with chunked parallel reads)
 
 ### Edge Cases & Known Limitations
@@ -156,12 +172,46 @@ Month sheet names are YYYY-MM format.
 3. **Zero-amount movements**: Skip processing (no debit or credit).
 4. **Negative amounts**: Notas de Crédito have negative importeTotal - handle in amount comparison.
 
-### Re-match Capability
+### Replacement Logic (Better Match Wins)
 
-By default, rows with existing detalles are skipped. For re-evaluation:
-- API route accepts optional `force: true` parameter
-- When force=true, re-matches all rows (including those with existing detalles)
-- Useful for: bug fixes, algorithm improvements, or clearing incorrect manual entries
+Unlike cascade matching (where displaced matches seek new homes), this uses **simple replacement**:
+
+**Scenario:**
+1. Movimiento M matched to Factura A (amount matched, 15 days apart)
+2. New Factura B is scanned - same amount but only 2 days apart
+3. Factura B **replaces** Factura A as M's match
+4. Factura A is simply unmatched (it's a document, doesn't need a "home")
+
+**Implementation:**
+- Column H (`matchedFileId`) stores the fileId of the currently matched document
+- During matching, ALL movimientos are evaluated (including those with existing matches)
+- For each movimiento with an existing match:
+  1. Look up the existing matched document by fileId
+  2. Compare new candidate vs existing on ALL factors
+  3. Replace if new candidate is better
+
+**Comparison factors (in priority order):**
+1. **CUIT match**: exact match > partial/keyword > none
+2. **Date proximity**: closer to movimiento date = better (absolute days difference)
+3. **Amount precision**: exact match > within tolerance > with retencion adjustment
+4. **Has linked pago**: Factura with linked Pago Recibido > Factura alone
+
+**Example comparisons:**
+- Same CUIT, Factura A is 15 days away, Factura B is 2 days away → B wins
+- Factura A has no CUIT match, Factura B has exact CUIT → B wins (even if A is closer in date)
+- Both exact CUIT, same date distance, A needs retencion tolerance, B is exact amount → B wins
+
+**Why not full cascade?**
+- Facturas/Pagos don't need to find movimientos - they're source documents
+- Only movimientos need matches (bank statement explanation)
+- Simpler logic, faster execution, same practical result
+
+### Force Re-match
+
+The `force: true` parameter clears existing matches before re-matching:
+- Useful for: bug fixes, algorithm improvements, clearing incorrect manual entries
+- Without force: only improves matches (replacement logic above)
+- With force: treats all rows as unmatched, rebuilds from scratch
 
 ---
 
@@ -176,7 +226,8 @@ By default, rows with existing detalles are skipped. For re-evaluation:
    - This is for a DIFFERENT spreadsheet format (external banks imported separately)
 
 2. **`MovimientoRow`** (NEW, to be created and **exported** from `src/types/index.ts`) - For internal Movimientos sheets in bank spreadsheets
-   - Columns: fecha, origenConcepto, debito, credito, saldo, saldoCalculado, detalles
+   - Columns: fecha, origenConcepto, debito, credito, saldo, saldoCalculado, matchedFileId, detalle
+   - 8 columns (A:H)
    - Matches `MOVIMIENTOS_BANCARIO_SHEET.headers` from `src/constants/spreadsheet-headers.ts:239`
 
 **When matching, convert `MovimientoRow` to a compatible format for `BankMovementMatcher`.**
@@ -194,7 +245,6 @@ export const SHEETS_BATCH_UPDATE_LIMIT = 500;  // Google Sheets API limit
 
 // Parallel processing limits
 export const PARALLEL_SHEET_READ_CHUNK_SIZE = 4;  // Read 4 sheets at a time
-export const EXCHANGE_RATE_FETCH_CONCURRENCY = 5;  // Max concurrent API calls
 ```
 
 ### Existing Utilities to Use
@@ -202,7 +252,7 @@ export const EXCHANGE_RATE_FETCH_CONCURRENCY = 5;  // Max concurrent API calls
 | Utility | Location | Usage |
 |---------|----------|-------|
 | `withLock()` | `src/utils/concurrency.ts:208` | Concurrency control with configurable timeout |
-| `prefetchExchangeRates()` | `src/utils/exchange-rate.ts:214` | Pre-load exchange rates before matching |
+| `getExchangeRate()` | `src/utils/exchange-rate.ts` | On-demand exchange rate (cached) |
 | `getSheetMetadata()` | `src/services/sheets.ts:286` | Returns `Array<{title, sheetId, index}>` |
 | `batchUpdate()` | `src/services/sheets.ts:225` | Takes `Array<{range: string, values: CellValue[][]}>` |
 | `getValues()` | `src/services/sheets.ts:138` | Read spreadsheet data |
@@ -299,20 +349,20 @@ function parseRetenciones(data: CellValue[][]): Array<Retencion & { row: number 
 
 ### Movimientos Sheet Reading
 
-Read using range `'YYYY-MM!A:G'` (7 columns including detalles).
+Read using range `'YYYY-MM!A:H'` (8 columns: fecha, origenConcepto, debito, credito, saldo, saldoCalculado, matchedFileId, detalle).
 
-### batchUpdate Format for Detalles Updates
+### batchUpdate Format for Detalle Updates
 
 ```typescript
 import { SHEETS_BATCH_UPDATE_LIMIT } from '../config.js';
 
-// Build updates for batchUpdate()
+// Build updates for batchUpdate() - update both matchedFileId (G) and detalle (H)
 const updates: Array<{ range: string; values: CellValue[][] }> = [];
 
-for (const update of detallesUpdates) {
+for (const update of detalleUpdates) {
   updates.push({
-    range: `'${update.sheetName}'!G${update.rowNumber}`,  // Column G for detalles
-    values: [[update.detalles]],
+    range: `'${update.sheetName}'!G${update.rowNumber}:H${update.rowNumber}`,  // Columns G:H
+    values: [[update.matchedFileId, update.detalle]],  // G=matchedFileId, H=detalle
   });
 }
 
@@ -341,7 +391,7 @@ function movimientoRowToBankMovement(mov: MovimientoRow): BankMovement {
     areaAdva: '',
     credito: mov.credito,
     debito: mov.debito,
-    detalle: mov.detalles,
+    detalle: mov.detalle,
   };
 }
 ```
@@ -378,7 +428,6 @@ For `matchCreditMovement()`, match credit bank movements against:
 
    // Parallel processing limits
    export const PARALLEL_SHEET_READ_CHUNK_SIZE = 4;  // Read 4 sheets at a time
-   export const EXCHANGE_RATE_FETCH_CONCURRENCY = 5;  // Max concurrent API calls
    ```
 
 2. **No test needed** - these are just constants
@@ -408,31 +457,33 @@ For `matchCreditMovement()`, match credit bank movements against:
 
 4. Run test-runner (expect pass)
 
-### Task 1: Add detalles column to Movimientos Bancario schema
+### Task 1: Add matchedFileId and detalle columns to Movimientos Bancario schema
 
 1. Write test in `src/constants/spreadsheet-headers.test.ts`:
-   - Test that `MOVIMIENTOS_BANCARIO_SHEET.headers` has 7 columns
-   - Test that column index 6 is 'detalles'
+   - Test that `MOVIMIENTOS_BANCARIO_SHEET.headers` has 8 columns
+   - Test that column index 6 is 'matchedFileId'
+   - Test that column index 7 is 'detalle'
 
 2. Run test-runner (expect fail)
 
 3. Update `src/constants/spreadsheet-headers.ts`:
-   - Add 'detalles' to `MOVIMIENTOS_BANCARIO_SHEET.headers` array
+   - Add 'matchedFileId' and 'detalle' to `MOVIMIENTOS_BANCARIO_SHEET.headers` array
 
 4. Run test-runner (expect pass)
 
-### Task 2: Update movimientos-store to include empty detalles column
+### Task 2: Update movimientos-store to include empty matchedFileId and detalle columns
 
 1. Write test in `src/processing/storage/movimientos-store.test.ts`:
-   - Test that stored rows have 7 columns (not 6)
-   - Test that column G (index 6) is empty string for new movimientos
+   - Test that stored rows have 8 columns (not 6)
+   - Test that column G (index 6) is empty string for new movimientos (matchedFileId)
+   - Test that column H (index 7) is empty string for new movimientos (detalle)
 
 2. Run test-runner (expect fail)
 
 3. Update `src/processing/storage/movimientos-store.ts`:
-   - Update `storeMovimientosBancario` to append empty string for detalles column (7th column)
-   - Update range from `A:F` to `A:G`
-   - Add empty detalles to SALDO INICIAL, transaction, and SALDO FINAL rows
+   - Update `storeMovimientosBancario` to append empty strings for matchedFileId and detalle columns
+   - Update range from `A:F` to `A:H`
+   - Add empty matchedFileId and detalle to SALDO INICIAL, transaction, and SALDO FINAL rows
 
 4. Run test-runner (expect pass)
 
@@ -453,7 +504,8 @@ For `matchCreditMovement()`, match credit bank movements against:
      credito: number | null;
      saldo: number | null;
      saldoCalculado: number | null;
-     detalles: string;
+     matchedFileId: string;   // fileId of matched document (for comparison lookup)
+     detalle: string;         // human-readable match description
    }
    ```
 
@@ -482,6 +534,13 @@ For `matchCreditMovement()`, match credit bank movements against:
      - Test credit with CUIT in concepto but no matching Factura → REVISAR! with extracted CUIT
      - Test zero-amount movement → skip processing
      - Test negative amounts (Notas de Crédito) → handle correctly
+   - **Replacement logic tests:**
+     - Test `compareMatches(existing, candidate, movimientoDate)` returns which is better
+     - Test CUIT match beats no CUIT match (even if further in date)
+     - Test closer date wins when CUIT match is equal
+     - Test exact amount beats amount with retencion tolerance
+     - Test Factura with linked Pago beats Factura alone
+     - Test equal quality: keep existing (no unnecessary churn)
 
 2. Run test-runner (expect fail)
 
@@ -508,7 +567,7 @@ For `matchCreditMovement()`, match credit bank movements against:
          codigo: '', oficina: '', areaAdva: '',  // Not used by credit matcher
          credito: mov.credito,
          debito: mov.debito,
-         detalle: mov.detalles,
+         detalle: mov.detalle,
        };
      }
      ```
@@ -536,7 +595,8 @@ For `matchCreditMovement()`, match credit bank movements against:
    - Test `getRecentMovimientoSheets` returns sheets for current + previous year only
    - Test `readMovimientosForPeriod` reads and parses data correctly
    - Test filtering of sheets by year (e.g., "2025-01" included, "2023-12" excluded)
-   - Test parsing of empty detalles column
+   - Test parsing of matchedFileId column (fileId string or empty)
+   - Test parsing of empty detalle column
    - Test skipping SALDO INICIAL and SALDO FINAL rows
    - **Test robust SALDO row detection:**
      - "SALDO INICIAL" → skipped
@@ -579,7 +639,8 @@ For `matchCreditMovement()`, match credit bank movements against:
        credito: parseNumber(row[3]),
        saldo: parseNumber(row[4]),
        saldoCalculado: parseNumber(row[5]),
-       detalles: String(row[6] || ''),
+       matchedFileId: String(row[6] || ''),
+       detalle: String(row[7] || ''),
      };
    }
 
@@ -596,11 +657,11 @@ For `matchCreditMovement()`, match credit bank movements against:
      sheetName: string
    ): Promise<Result<MovimientoRow[], Error>>
 
-   // Get all recent movimientos with empty detalles (excludes SALDO INICIAL/FINAL)
+   // Get all recent movimientos (excludes SALDO INICIAL/FINAL)
    // Calls getRecentMovimientoSheets, then reads sheets in CHUNKED PARALLEL
+   // Returns ALL movimientos (with or without detalles) for replacement logic
    async function getMovimientosToFill(
-     spreadsheetId: string,
-     options?: { includeWithDetalles?: boolean }  // For force re-match
+     spreadsheetId: string
    ): Promise<Result<MovimientoRow[], Error>> {
      // ... get sheet names ...
 
@@ -624,13 +685,11 @@ For `matchCreditMovement()`, match credit bank movements against:
 
 4. Run test-runner (expect pass)
 
-### Task 6: Create movimientos-detalles service for batch updates
+### Task 6: Create movimientos-detalle service for batch updates
 
-1. Write test in `src/services/movimientos-detalles.test.ts`:
-   - Test `updateDetalles` correctly updates column G for specified rows
+1. Write test in `src/services/movimientos-detalle.test.ts`:
+   - Test `updateDetalle` correctly updates columns G and H for specified rows
    - Test batch update across multiple sheets works correctly
-   - Test update skips rows that already have detalles (when force=false)
-   - **Test update overwrites existing detalles (when force=true)**
    - Test empty updates array returns success with 0 count
    - **Test chunking when updates > 500:**
      - 600 updates should result in 2 batchUpdate API calls
@@ -638,29 +697,30 @@ For `matchCreditMovement()`, match credit bank movements against:
 
 2. Run test-runner (expect fail)
 
-3. Implement `src/services/movimientos-detalles.ts`:
+3. Implement `src/services/movimientos-detalle.ts`:
    ```typescript
    import { SHEETS_BATCH_UPDATE_LIMIT } from '../config.js';
 
-   interface DetallesUpdate {
-     sheetName: string;     // e.g., "2025-01"
-     rowNumber: number;     // Row number in sheet
-     detalles: string;      // Description to write
+   interface DetalleUpdate {
+     sheetName: string;      // e.g., "2025-01"
+     rowNumber: number;      // Row number in sheet
+     matchedFileId: string;  // fileId of matched document (column G)
+     detalle: string;        // Description to write (column H)
    }
 
-   // Update detalles column for specified rows using batchUpdate
+   // Update matchedFileId and detalle columns for specified rows using batchUpdate
    // Automatically chunks to respect 500 operations limit
-   async function updateDetalles(
+   async function updateDetalle(
      spreadsheetId: string,
-     updates: DetallesUpdate[]
+     updates: DetalleUpdate[]
    ): Promise<Result<number, Error>> {
      if (updates.length === 0) {
        return { ok: true, value: 0 };
      }
 
      const allUpdates = updates.map(u => ({
-       range: `'${u.sheetName}'!G${u.rowNumber}`,
-       values: [[u.detalles]],
+       range: `'${u.sheetName}'!G${u.rowNumber}:H${u.rowNumber}`,  // Both G and H
+       values: [[u.matchedFileId, u.detalle]],  // G=matchedFileId, H=detalle
      }));
 
      // Chunk to respect API limit
@@ -689,8 +749,10 @@ For `matchCreditMovement()`, match credit bank movements against:
    - Test date filtering (only current + previous year)
    - **Test mutex using withLock: concurrent calls return `skipped: true` instead of running twice**
    - **Test unified lock blocks both scan and match from running concurrently**
-   - **Test force option re-matches rows with existing detalles**
-   - **Test exchange rate pre-fetching is called before matching**
+   - **Test force option clears matchedFileId and detalle before re-matching**
+   - **Test replacement logic: looks up existing match by fileId, compares quality**
+   - **Test replacement stores matchedFileId in column G, detalle in column H**
+   - **Test comparison: closer date wins, CUIT match wins, etc.**
    - **Test error logging when matching fails**
    - **Test chunked batchUpdate when updates > 500**
    - **Test memory cleanup between bank processing (setImmediate)**
@@ -701,17 +763,48 @@ For `matchCreditMovement()`, match credit bank movements against:
 
    **Required imports:**
    ```typescript
-   import type { Result, Factura, Pago, Recibo, Retencion, MatchConfidence, MovimientoRow } from '../types/index.js';
+   import type { Result, Factura, Pago, Recibo, Retencion, MovimientoRow } from '../types/index.js';
    import { PROCESSING_LOCK_ID, PROCESSING_LOCK_TIMEOUT_MS } from '../config.js';
    import { withLock } from '../utils/concurrency.js';
-   import { prefetchExchangeRates } from '../utils/exchange-rate.js';
    import { info, error as logError } from '../utils/logger.js';
    import { getCachedFolderStructure } from '../services/folder-structure.js';
    import { getValues, type CellValue } from '../services/sheets.js';
    import { parseNumber } from '../utils/numbers.js';
    import { BankMovementMatcher } from './matcher.js';
    import { getMovimientosToFill } from '../services/movimientos-reader.js';
-   import { updateDetalles } from '../services/movimientos-detalles.js';
+   import { updateDetalle } from '../services/movimientos-detalle.js';
+   ```
+
+   **Match comparison helper:**
+   ```typescript
+   interface MatchQuality {
+     fileId: string;
+     hasCuitMatch: boolean;
+     dateDistance: number;      // absolute days from movimiento
+     isExactAmount: boolean;    // vs needs retencion tolerance
+     hasLinkedPago: boolean;    // Factura with Pago vs Factura alone
+   }
+
+   // Returns true if candidate is strictly better than existing
+   function isBetterMatch(existing: MatchQuality, candidate: MatchQuality): boolean {
+     // 1. CUIT match beats no CUIT match
+     if (candidate.hasCuitMatch && !existing.hasCuitMatch) return true;
+     if (!candidate.hasCuitMatch && existing.hasCuitMatch) return false;
+
+     // 2. Closer date wins (when CUIT match is equal)
+     if (candidate.dateDistance < existing.dateDistance) return true;
+     if (candidate.dateDistance > existing.dateDistance) return false;
+
+     // 3. Exact amount beats tolerance match
+     if (candidate.isExactAmount && !existing.isExactAmount) return true;
+     if (!candidate.isExactAmount && existing.isExactAmount) return false;
+
+     // 4. Has linked pago beats no linked pago
+     if (candidate.hasLinkedPago && !existing.hasLinkedPago) return true;
+
+     // Equal quality - keep existing (no churn)
+     return false;
+   }
    ```
 
    **Parsing functions:** Use header-based column lookup (see Integration Notes)
@@ -765,15 +858,7 @@ For `matchCreditMovement()`, match credit bank movements against:
          const egresosData = await loadControlEgresos();    // 3 calls
          if (!egresosData.ok) return egresosData;
 
-         // 2. Pre-fetch exchange rates for cross-currency matching
-         const allDates = [
-           ...ingresosData.value.facturasEmitidas.map(f => f.fechaEmision),
-           ...ingresosData.value.pagosRecibidos.map(p => p.fechaPago),
-           ...egresosData.value.facturasRecibidas.map(f => f.fechaEmision),
-         ];
-         await prefetchExchangeRates([...new Set(allDates)]);
-
-         // 3. Process banks SEQUENTIALLY (memory efficient)
+         // 2. Process banks SEQUENTIALLY (memory efficient)
          const results: MatchMovimientosResult[] = [];
          const bankSpreadsheets = getCachedFolderStructure()?.bankSpreadsheets;
 
@@ -782,9 +867,8 @@ For `matchCreditMovement()`, match credit bank movements against:
            await new Promise(resolve => setImmediate(resolve));
 
            // Load this bank's movimientos (1 metadata + N chunked sheet reads)
-           const movimientos = await getMovimientosToFill(spreadsheetId, {
-             includeWithDetalles: options?.force ?? false
-           });
+           // Always loads ALL movimientos - replacement logic decides what to update
+           const movimientos = await getMovimientosToFill(spreadsheetId);
            if (!movimientos.ok) {
              results.push({
                skipped: false,
@@ -801,11 +885,27 @@ For `matchCreditMovement()`, match credit bank movements against:
              continue;
            }
 
-           // Match in memory
-           const updates = matchAll(movimientos.value, ingresosData.value, egresosData.value);
+           // Match in memory with replacement logic
+           const updates = matchAllWithReplacement(
+             movimientos.value,
+             ingresosData.value,
+             egresosData.value,
+             options?.force ?? false  // force clears existing matches
+           );
+           // Each update includes: { sheetName, rowNumber, matchedFileId, detalle }
+           // Only includes rows where:
+           //   - No existing match (matchedFileId was empty), OR
+           //   - New match is better (isBetterMatch returned true), OR
+           //   - force=true (clear and rematch all)
+           //
+           // For rows with existing match:
+           //   1. Look up existing document by matchedFileId from loaded Control data
+           //   2. Build MatchQuality for existing and candidate
+           //   3. Call isBetterMatch() to compare
+           //   4. Only update if candidate wins
 
            // Write batch update (chunked if > 500)
-           await updateDetalles(spreadsheetId, updates);
+           await updateDetalle(spreadsheetId, updates);
 
            results.push({ /* ... */ });
            // movimientos released from memory before next bank
@@ -897,12 +997,15 @@ For `matchCreditMovement()`, match credit bank movements against:
    - Run `npm run build:script`
    - Verify menu item appears and works
 
-### Task 10: Add unified lock to scan and trigger match-movimientos after
+### Task 10: Add unified lock to scan with deferral (NOT skipping) and trigger match-movimientos after
 
 1. Write test in `src/processing/scanner.test.ts`:
    - **Test that scan process is wrapped in unified lock (`PROCESSING_LOCK_ID` from config)**
-   - **Test that concurrent scan requests return `skipped: true` instead of running twice**
-   - **Test that scan cannot run while match is running (and vice versa)**
+   - **Test scan deferral with pending flag:**
+     - First scan acquires lock and runs
+     - Second scan while lock held → sets pending flag, waits for lock, then runs
+     - Third scan while pending exists → returns `skipped: true` (pending scan will handle it)
+   - **Test that scan cannot run while match is running (waits for match to finish)**
    - Test that scan triggers matchAllMovimientos after processing any document type
    - Test that matchAllMovimientos runs async (doesn't block scan response)
    - Test that matchAllMovimientos is called only when scan succeeds
@@ -917,35 +1020,58 @@ For `matchCreditMovement()`, match credit bank movements against:
    - Import `withLock` from `../utils/concurrency.js`
    - Import `PROCESSING_LOCK_ID, PROCESSING_LOCK_TIMEOUT_MS` from `../config.js`
    - Import `error as logError` from `../utils/logger.js`
+   - **Add pending scan flag:**
+     ```typescript
+     // Module-level state for scan deferral
+     let pendingScan = false;
+     ```
    - **Move `retriedFileIds.clear()` to `finally` block** (not just on success)
-   - **Wrap scan processing logic in withLock:**
+   - **Wrap scan processing logic with deferral:**
      ```typescript
      async function processScan(): Promise<Result<ScanResult, Error>> {
-       const lockResult = await withLock(
-         PROCESSING_LOCK_ID,
-         async () => {
-           // ... existing scan processing logic ...
-           return scanResult;
-         },
-         PROCESSING_LOCK_TIMEOUT_MS,  // Wait timeout
-         PROCESSING_LOCK_TIMEOUT_MS   // Auto-expiry (5 min, not default 30s)
-       );
-
-       // Handle lock acquisition failure (match or another scan already running)
-       if (!lockResult.ok) {
-         info('Scan skipped - another process already running', { module: 'scanner' });
+       // Check if a scan is already waiting - if so, skip (it will handle our files)
+       if (pendingScan) {
+         info('Scan skipped - another scan already pending', { module: 'scanner' });
          return {
            ok: true,
-           value: { skipped: true, reason: 'already_running', filesProcessed: 0 }
+           value: { skipped: true, reason: 'scan_pending', filesProcessed: 0 }
          };
        }
 
-       // Lock released - NOW trigger match async (outside lock!)
-       if (lockResult.value.filesProcessed > 0) {
-         void triggerMatchAsync();
-       }
+       // Set pending flag before waiting for lock
+       pendingScan = true;
 
-       return lockResult;
+       try {
+         // This WAITS for lock (up to 5 min) instead of returning immediately
+         const lockResult = await withLock(
+           PROCESSING_LOCK_ID,
+           async () => {
+             // ... existing scan processing logic ...
+             return scanResult;
+           },
+           PROCESSING_LOCK_TIMEOUT_MS,  // Wait timeout (5 min)
+           PROCESSING_LOCK_TIMEOUT_MS   // Auto-expiry (5 min)
+         );
+
+         // Handle lock timeout (extremely rare - 5 min wait exceeded)
+         if (!lockResult.ok) {
+           logError('Scan failed to acquire lock after timeout', {
+             module: 'scanner',
+             error: lockResult.error.message
+           });
+           return lockResult;
+         }
+
+         // Lock released - NOW trigger match async (outside lock!)
+         if (lockResult.value.filesProcessed > 0) {
+           void triggerMatchAsync();
+         }
+
+         return lockResult;
+       } finally {
+         // Always clear pending flag when done
+         pendingScan = false;
+       }
      }
      ```
    - **Match trigger function (called AFTER lock is released):**
@@ -993,21 +1119,29 @@ For `matchCreditMovement()`, match credit bank movements against:
 ### Task 11: Update documentation
 
 1. Update `SPREADSHEET_FORMAT.md`:
-   - Add 'detalles' column to Movimientos Bancario schema (column G)
+   - Add 'matchedFileId' column to Movimientos Bancario schema (column G)
+   - Add 'detalle' column to Movimientos Bancario schema (column H)
    - Document the matching behavior and sources for both debits and credits
    - Document retencion tolerance matching for credits
    - Document the 90-day retencion date range
+   - Document replacement logic with comparison factors:
+     - CUIT match > no CUIT match
+     - Closer date > further date
+     - Exact amount > tolerance match
+     - Has linked pago > no linked pago
    - Document known limitations:
      - Partial payments need manual review
      - Year boundary (only current + previous year)
      - Inter-bank transfers may not be detected
 
 2. Update `CLAUDE.md`:
+   - Update Movimientos Bancario schema from 6 cols to 8 cols (A:H)
    - Add `/api/match-movimientos` to API ENDPOINTS table
    - Document optional `force` query parameter
    - Document auto-trigger after scan
    - Add note about unified concurrency control:
      - Both scan and match use same lock ID `PROCESSING_LOCK_ID` from config.ts
+     - Scans WAIT for lock (with pending flag) instead of skipping
      - At any time, only one scan OR match process can run
      - Lock auto-expires after 5 minutes (configurable via `PROCESSING_LOCK_TIMEOUT_MS`)
      - Prevents race conditions and overlapping processing
