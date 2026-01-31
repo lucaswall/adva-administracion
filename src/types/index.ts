@@ -850,6 +850,33 @@ export interface BankMovement {
 }
 
 /**
+ * Row from Movimientos Bancario per-month sheets
+ * Used for matching against Control de Ingresos/Egresos
+ */
+export interface MovimientoRow {
+  /** Sheet name (e.g., "2025-01") */
+  sheetName: string;
+  /** Row number in sheet (1-indexed, after header) */
+  rowNumber: number;
+  /** Transaction date */
+  fecha: string;
+  /** Origin/concept description */
+  origenConcepto: string;
+  /** Debit amount - null if credit */
+  debito: number | null;
+  /** Credit amount - null if debit */
+  credito: number | null;
+  /** Balance from PDF (for comparison) */
+  saldo: number | null;
+  /** Calculated balance (formula) */
+  saldoCalculado: number | null;
+  /** Google Drive fileId of matched document (for replacement logic) */
+  matchedFileId: string;
+  /** Human-readable match description */
+  detalle: string;
+}
+
+/**
  * Match type for bank movement matching
  */
 export type BankMatchType = 'bank_fee' | 'credit_card_payment' | 'pago_factura' | 'direct_factura' | 'recibo' | 'pago_only' | 'no_match';

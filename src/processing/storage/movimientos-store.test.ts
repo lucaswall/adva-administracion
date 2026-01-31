@@ -22,7 +22,7 @@ vi.mock('../../utils/logger.js', () => ({
 
 vi.mock('../../constants/spreadsheet-headers.js', () => ({
   MOVIMIENTOS_BANCARIO_SHEET: {
-    headers: ['fecha', 'origenConcepto', 'debito', 'credito', 'saldo', 'saldoCalculado'],
+    headers: ['fecha', 'origenConcepto', 'debito', 'credito', 'saldo', 'saldoCalculado', 'matchedFileId', 'detalle'],
   },
   MOVIMIENTOS_TARJETA_SHEET: {
     headers: ['fecha', 'descripcion', 'nroCupon', 'pesos', 'dolares'],
@@ -168,7 +168,7 @@ describe('storeMovimientosBancario', () => {
       expect.any(Array),
       undefined  // sheetOrderBatch is optional
     );
-    expect(formatEmptyMonthSheet).toHaveBeenCalledWith('spreadsheet-id', 123, 6); // Updated from 5 to 6
+    expect(formatEmptyMonthSheet).toHaveBeenCalledWith('spreadsheet-id', 123, 8);
     expect(appendRowsWithLinks).not.toHaveBeenCalled();
   });
 
@@ -348,7 +348,7 @@ describe('storeMovimientosBancario', () => {
     expect(txRow[5]).toEqual({ type: 'formula', value: '=F2+D3-C3' });  // saldoCalculado (CellFormula)
   });
 
-  it('should use range A:F for 6-column sheet', async () => {
+  it('should use range A:H for 8-column sheet', async () => {
     const movimientos: MovimientoBancario[] = [
       createTestMovimientoBancario(),
     ];
@@ -366,7 +366,83 @@ describe('storeMovimientosBancario', () => {
     const appendCall = vi.mocked(appendRowsWithLinks).mock.calls[0];
     const range = appendCall[1];
 
-    expect(range).toBe('2025-01!A:F');  // Updated from A:E to A:F
+    expect(range).toBe('2025-01!A:H');
+  });
+
+  it('should store rows with 8 columns (includes empty matchedFileId and detalle)', async () => {
+    const movimientos: MovimientoBancario[] = [
+      createTestMovimientoBancario({ fecha: '2025-01-15', origenConcepto: 'Test', saldo: 9000 }),
+    ];
+
+    vi.mocked(getOrCreateMonthSheet).mockResolvedValue({ ok: true, value: 123 });
+    vi.mocked(appendRowsWithLinks).mockResolvedValue({ ok: true, value: 0 });
+
+    await storeMovimientosBancario(
+      movimientos,
+      'spreadsheet-id',
+      { fechaDesde: '2025-01-01', fechaHasta: '2025-01-31' },
+      10000
+    );
+
+    const appendCall = vi.mocked(appendRowsWithLinks).mock.calls[0];
+    const rows = appendCall[2] as any[];
+
+    // Each row should have 8 columns
+    expect(rows[0]).toHaveLength(8); // SALDO INICIAL
+    expect(rows[1]).toHaveLength(8); // Transaction
+    expect(rows[2]).toHaveLength(8); // SALDO FINAL
+  });
+
+  it('should include empty matchedFileId (column G index 6) for new movimientos', async () => {
+    const movimientos: MovimientoBancario[] = [
+      createTestMovimientoBancario({ fecha: '2025-01-15', saldo: 9000 }),
+    ];
+
+    vi.mocked(getOrCreateMonthSheet).mockResolvedValue({ ok: true, value: 123 });
+    vi.mocked(appendRowsWithLinks).mockResolvedValue({ ok: true, value: 0 });
+
+    await storeMovimientosBancario(
+      movimientos,
+      'spreadsheet-id',
+      { fechaDesde: '2025-01-01', fechaHasta: '2025-01-31' },
+      10000
+    );
+
+    const appendCall = vi.mocked(appendRowsWithLinks).mock.calls[0];
+    const rows = appendCall[2] as any[];
+
+    // SALDO INICIAL row
+    expect(rows[0][6]).toBe('');  // matchedFileId empty
+    // Transaction row
+    expect(rows[1][6]).toBe('');  // matchedFileId empty
+    // SALDO FINAL row
+    expect(rows[2][6]).toBe('');  // matchedFileId empty
+  });
+
+  it('should include empty detalle (column H index 7) for new movimientos', async () => {
+    const movimientos: MovimientoBancario[] = [
+      createTestMovimientoBancario({ fecha: '2025-01-15', saldo: 9000 }),
+    ];
+
+    vi.mocked(getOrCreateMonthSheet).mockResolvedValue({ ok: true, value: 123 });
+    vi.mocked(appendRowsWithLinks).mockResolvedValue({ ok: true, value: 0 });
+
+    await storeMovimientosBancario(
+      movimientos,
+      'spreadsheet-id',
+      { fechaDesde: '2025-01-01', fechaHasta: '2025-01-31' },
+      10000
+    );
+
+    const appendCall = vi.mocked(appendRowsWithLinks).mock.calls[0];
+    const rows = appendCall[2] as any[];
+
+    // SALDO INICIAL row
+    expect(rows[0][7]).toBe('');  // detalle empty
+    // Transaction row
+    expect(rows[1][7]).toBe('');  // detalle empty
+    // SALDO FINAL row
+    expect(rows[2][7]).toBe('');  // detalle empty
   });
 });
 

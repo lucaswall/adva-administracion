@@ -225,8 +225,8 @@ describe('Control Resumenes Broker Sheet', () => {
 
 describe('Movimientos Bancario Sheet', () => {
   describe('MOVIMIENTOS_BANCARIO_SHEET', () => {
-    it('should have 6 columns total (A:F)', () => {
-      expect(MOVIMIENTOS_BANCARIO_SHEET.headers).toHaveLength(6);
+    it('should have 8 columns total (A:H)', () => {
+      expect(MOVIMIENTOS_BANCARIO_SHEET.headers).toHaveLength(8);
     });
 
     it('should have correct header order', () => {
@@ -237,7 +237,17 @@ describe('Movimientos Bancario Sheet', () => {
         'credito',
         'saldo',
         'saldoCalculado',
+        'matchedFileId',
+        'detalle',
       ]);
+    });
+
+    it('should have matchedFileId as column G (index 6)', () => {
+      expect(MOVIMIENTOS_BANCARIO_SHEET.headers[6]).toBe('matchedFileId');
+    });
+
+    it('should have detalle as column H (index 7)', () => {
+      expect(MOVIMIENTOS_BANCARIO_SHEET.headers[7]).toBe('detalle');
     });
 
     it('should have saldoCalculado as column F (index 5)', () => {

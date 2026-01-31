@@ -1,9 +1,9 @@
 /**
- * Tests for concurrency utilities - quota-aware retries
+ * Tests for concurrency utilities - quota-aware retries and locking
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { isQuotaError, withQuotaRetry, SHEETS_QUOTA_RETRY_CONFIG } from './concurrency.js';
+import { isQuotaError, withQuotaRetry, SHEETS_QUOTA_RETRY_CONFIG, withLock } from './concurrency.js';
 
 describe('isQuotaError', () => {
   it('detects "quota exceeded" message', () => {
@@ -146,5 +146,81 @@ describe('withQuotaRetry', () => {
       expect(result.value).toBe('success');
     }
     expect(fn).toHaveBeenCalledTimes(3);
+  });
+});
+
+describe('withLock', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('accepts custom autoExpiryMs parameter', async () => {
+    const fn = vi.fn().mockResolvedValue('success');
+    const customExpiry = 120000; // 2 minutes
+
+    const resultPromise = withLock('test-resource', fn, 5000, customExpiry);
+    await vi.runAllTimersAsync();
+    const result = await resultPromise;
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value).toBe('success');
+    }
+    expect(fn).toHaveBeenCalledOnce();
+  });
+
+  it('uses default 30s expiry when autoExpiryMs is omitted', async () => {
+    const fn = vi.fn().mockResolvedValue('success');
+
+    // Call without autoExpiryMs parameter
+    const resultPromise = withLock('test-resource-2', fn);
+    await vi.runAllTimersAsync();
+    const result = await resultPromise;
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value).toBe('success');
+    }
+    expect(fn).toHaveBeenCalledOnce();
+  });
+
+  it('lock auto-expires after custom timeout', async () => {
+    const customExpiry = 100; // 100ms for testing
+    let lockHeld = false;
+
+    // First call holds lock for longer than expiry
+    const fn1 = vi.fn().mockImplementation(async () => {
+      lockHeld = true;
+      await new Promise(resolve => setTimeout(resolve, customExpiry * 2)); // Hold for 200ms
+      lockHeld = false;
+      return 'first';
+    });
+
+    // Second call should succeed after auto-expiry
+    const fn2 = vi.fn().mockImplementation(async () => {
+      expect(lockHeld).toBe(false); // First lock should be expired
+      return 'second';
+    });
+
+    const promise1 = withLock('test-resource-3', fn1, 10, customExpiry);
+
+    // Advance past auto-expiry time
+    vi.advanceTimersByTime(customExpiry + 50);
+    await vi.runAllTimersAsync();
+
+    const promise2 = withLock('test-resource-3', fn2, 10, customExpiry);
+    await vi.runAllTimersAsync();
+
+    const [result1, result2] = await Promise.all([promise1, promise2]);
+
+    expect(result1.ok).toBe(true);
+    expect(result2.ok).toBe(true);
+    expect(fn1).toHaveBeenCalledOnce();
+    expect(fn2).toHaveBeenCalledOnce();
   });
 });

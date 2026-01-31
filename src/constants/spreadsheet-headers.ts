@@ -234,7 +234,7 @@ export const CONTROL_RESUMENES_BROKER_SHEET: SheetConfig = {
  * Sheet configuration for Movimientos - Bank Account Transactions
  * Stores individual bank account transactions in per-month sheets
  * One sheet per month (e.g., "2025-01")
- * 6 columns (A:F) - includes saldoCalculado for running balance formula
+ * 8 columns (A:H) - includes matchedFileId and detalle for document linking
  */
 export const MOVIMIENTOS_BANCARIO_SHEET: SheetConfig = {
   title: 'Movimientos',
@@ -245,6 +245,8 @@ export const MOVIMIENTOS_BANCARIO_SHEET: SheetConfig = {
     'credito',
     'saldo',           // Parsed from PDF (for comparison)
     'saldoCalculado',  // Formula: running balance computed from transactions
+    'matchedFileId',   // Google Drive fileId of matched document (for replacement logic)
+    'detalle',         // Human-readable match description
   ],
   numberFormats: new Map([
     [0, { type: 'date' }],                    // fecha

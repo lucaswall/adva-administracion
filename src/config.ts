@@ -36,6 +36,31 @@ export const MAX_CASCADE_DEPTH = 10;
 export const CASCADE_TIMEOUT_MS = 30000;
 
 /**
+ * Unified lock for document processing (scan and match)
+ * Both scan and match operations use this lock ID to prevent concurrent execution
+ */
+export const PROCESSING_LOCK_ID = 'document-processing';
+
+/**
+ * Processing lock timeout in milliseconds
+ * Used for both wait timeout and auto-expiry in scan/match operations
+ * Set to 5 minutes to allow for large batch processing
+ */
+export const PROCESSING_LOCK_TIMEOUT_MS = 300000;  // 5 minutes
+
+/**
+ * Google Sheets batch update limit
+ * Maximum number of operations per batchUpdate API call
+ */
+export const SHEETS_BATCH_UPDATE_LIMIT = 500;
+
+/**
+ * Parallel sheet read chunk size
+ * Number of sheets to read in parallel (memory-safe)
+ */
+export const PARALLEL_SHEET_READ_CHUNK_SIZE = 4;
+
+/**
  * Maximum number of retry attempts for transient errors (JSON parse errors)
  * These errors are often caused by temporary Gemini API instability
  */

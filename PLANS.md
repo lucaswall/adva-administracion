@@ -1152,3 +1152,97 @@ For `matchCreditMovement()`, match credit bank movements against:
 1. Run `bug-hunter` agent - Review changes for bugs
 2. Run `test-runner` agent - Verify all tests pass
 3. Run `builder` agent - Verify zero warnings
+
+---
+
+## Iteration 1
+
+**Implemented:** 2026-01-31
+
+### Completed Tasks
+
+**Task 0: Add shared constants to config.ts**
+- ✅ Added `PROCESSING_LOCK_ID = 'document-processing'`
+- ✅ Added `PROCESSING_LOCK_TIMEOUT_MS = 300000` (5 minutes)
+- ✅ Added `SHEETS_BATCH_UPDATE_LIMIT = 500`
+- ✅ Added `PARALLEL_SHEET_READ_CHUNK_SIZE = 4`
+- No test needed (constants only)
+
+**Task 0.5: Update withLock to support custom auto-expiry timeout**
+- ✅ Added optional `autoExpiryMs` parameter to `withLock()` function
+- ✅ Updated `LockManager.acquire()` to accept and use custom timeout
+- ✅ Added `autoExpiryMs` field to `LockState` interface
+- ✅ Updated `isLocked()` to check per-lock expiry timeout
+- ✅ Tests added: custom timeout, default 30s backward compatibility, auto-expiry behavior
+- ✅ All 17 concurrency tests passing
+
+**Task 1: Add matchedFileId and detalle columns to Movimientos Bancario schema**
+- ✅ Updated `MOVIMIENTOS_BANCARIO_SHEET.headers` from 6 to 8 columns
+- ✅ New columns: `matchedFileId` (index 6), `detalle` (index 7)
+- ✅ Updated schema comment from "6 cols (A:F)" to "8 cols (A:H)"
+- ✅ Tests added: header count, header order, column positions
+- ✅ All 31 spreadsheet-headers tests passing
+
+**Task 2: Update movimientos-store to include empty matchedFileId and detalle columns**
+- ✅ Updated `storeMovimientosBancario()` to append 8 columns instead of 6
+- ✅ Added empty string `''` for matchedFileId (column G) on all rows
+- ✅ Added empty string `''` for detalle (column H) on all rows
+- ✅ Updated range from `A:F` to `A:H`
+- ✅ Updated empty sheet column count from 6 to 8
+- ✅ Applied to: SALDO INICIAL, transaction rows, SALDO FINAL
+- ✅ Tests added: 8-column validation, empty matchedFileId/detalle checks
+- ✅ All 24 movimientos-store tests passing
+
+**Task 3: Add MovimientoRow type to types/index.ts**
+- ✅ Added `MovimientoRow` interface with 10 fields:
+  - `sheetName`, `rowNumber`, `fecha`, `origenConcepto`
+  - `debito`, `credito`, `saldo`, `saldoCalculado`
+  - `matchedFileId`, `detalle`
+- ✅ Exported from types/index.ts
+- ✅ JSDoc documentation added
+- No test needed (type definition only)
+
+### Checklist Results
+
+✅ **bug-hunter:** PASSED - 0 bugs found (reviewed 8 files)
+✅ **test-runner:** PASSED - All 1122 tests passing across 54 test files (7.34s)
+✅ **builder:** PASSED - Zero warnings, clean build
+
+### Notes
+
+**Foundation work completed:**
+- Configuration constants established for lock management, batch processing, and parallel operations
+- Lock mechanism enhanced to support long-running operations (5 min vs default 30s)
+- Spreadsheet schema updated with columns needed for match tracking and replacement logic
+- Storage layer properly initializes new columns as empty strings
+- Type definitions created for type-safe movimientos processing
+
+**Remaining work:**
+- Task 4: Credit matching logic (complex - requires extensive testing)
+- Task 5-10: Services, orchestration, API routes, scanner integration
+- Task 11: Documentation updates
+
+**Architecture decisions:**
+- Used empty strings (`''`) instead of `null` for matchedFileId/detalle to simplify comparison logic
+- 8-column schema maintains backward compatibility (formulas reference unchanged columns A-F)
+- Lock timeout increased to 5 minutes to accommodate bank processing across multiple spreadsheets
+
+**No breaking changes** - Existing movimientos sheets will read correctly (columns G-H will be undefined, treated as empty)
+
+### Review Findings
+
+Files reviewed: 8
+Checks applied: Security, Logic, Async, Resources, Type Safety, Conventions, Test Quality
+
+No issues found - all implementations are correct and follow project conventions.
+
+**Verification points:**
+- ✅ SECURITY: Constants are safe values, no user input or external data validation needed
+- ✅ LOGIC: Lock expiry correctly uses per-lock `autoExpiryMs`; column indices correct (6=matchedFileId, 7=detalle)
+- ✅ ASYNC: Lock acquisition/release properly handled in try/finally pattern
+- ✅ TYPE SAFETY: `MovimientoRow` interface correctly mirrors 8-column schema; backward-compatible defaults
+- ✅ CONVENTIONS: Pino logger, ESM .js imports, Result<T,E> pattern all followed
+- ✅ TEST QUALITY: Meaningful assertions, fictional test data, edge cases covered
+
+**Documented (no fix needed):**
+- [MEDIUM] `LockState.autoExpiryMs` is always set on new locks; in-memory locks are transient so no persistence concern

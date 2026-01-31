@@ -25,6 +25,8 @@ interface LockState {
   locked: boolean;
   /** When the lock was acquired */
   acquiredAt: number;
+  /** Auto-expiry timeout for this lock */
+  autoExpiryMs: number;
   /** Correlation ID of the holder */
   holderCorrelationId?: string;
   /** Promise that resolves when lock is released */
@@ -70,9 +72,10 @@ class LockManager {
    *
    * @param resourceId - Unique identifier for the resource
    * @param timeoutMs - Maximum time to wait for the lock
+   * @param autoExpiryMs - Lock auto-expiry timeout (defaults to LOCK_TIMEOUT_MS = 30s)
    * @returns true if lock acquired, false if timeout
    */
-  async acquire(resourceId: string, timeoutMs: number = 5000): Promise<boolean> {
+  async acquire(resourceId: string, timeoutMs: number = 5000, autoExpiryMs: number = LOCK_TIMEOUT_MS): Promise<boolean> {
     const startTime = Date.now();
     const correlationId = getCorrelationId();
 
@@ -82,11 +85,12 @@ class LockManager {
       // Check if lock is expired
       if (state?.locked && state.acquiredAt) {
         const lockAge = Date.now() - state.acquiredAt;
-        if (lockAge > LOCK_TIMEOUT_MS) {
+        if (lockAge > autoExpiryMs) {
           warn('Lock expired, force releasing', {
             module: 'concurrency',
             resourceId,
             lockAge,
+            autoExpiryMs,
             correlationId,
           });
           this.release(resourceId);
@@ -101,6 +105,7 @@ class LockManager {
           this.locks.set(resourceId, {
             locked: true,
             acquiredAt: Date.now(),
+            autoExpiryMs,
             holderCorrelationId: correlationId,
             waitResolve: resolve,
           });
@@ -170,8 +175,8 @@ class LockManager {
     const state = this.locks.get(resourceId);
     if (!state?.locked) return false;
 
-    // Check for expired lock
-    if (state.acquiredAt && Date.now() - state.acquiredAt > LOCK_TIMEOUT_MS) {
+    // Check for expired lock using the lock's specific auto-expiry timeout
+    if (state.acquiredAt && Date.now() - state.acquiredAt > state.autoExpiryMs) {
       this.release(resourceId);
       return false;
     }
@@ -203,14 +208,16 @@ const lockManager = new LockManager();
  * @param resourceId - Unique identifier for the resource to lock
  * @param fn - Function to execute while holding the lock
  * @param timeoutMs - Maximum time to wait for the lock
+ * @param autoExpiryMs - Lock auto-expiry timeout (defaults to LOCK_TIMEOUT_MS = 30s)
  * @returns Result with the function return value or error
  */
 export async function withLock<T>(
   resourceId: string,
   fn: () => Promise<T>,
-  timeoutMs: number = 5000
+  timeoutMs: number = 5000,
+  autoExpiryMs: number = LOCK_TIMEOUT_MS
 ): Promise<Result<T, Error>> {
-  const acquired = await lockManager.acquire(resourceId, timeoutMs);
+  const acquired = await lockManager.acquire(resourceId, timeoutMs, autoExpiryMs);
 
   if (!acquired) {
     return {
