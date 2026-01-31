@@ -891,6 +891,8 @@ export interface BankMovementMatchResult {
   matchType: BankMatchType;
   /** Generated description in Spanish (empty if no match) */
   description: string;
+  /** Google Drive fileId of matched document (for replacement logic) */
+  matchedFileId?: string;
   /** CUIT/CUIL extracted from concepto (if any) */
   extractedCuit?: string;
   /** Match confidence */

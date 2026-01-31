@@ -4,7 +4,7 @@
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import { BankMovementMatcher } from './matcher.js';
-import type { BankMovement, Factura } from '../types/index.js';
+import type { BankMovement, Factura, Pago, Retencion } from '../types/index.js';
 import { setExchangeRateCache, type ExchangeRate } from '../utils/exchange-rate.js';
 
 describe('BankMovementMatcher - Cross-Currency Confidence', () => {
@@ -146,6 +146,697 @@ describe('BankMovementMatcher - Cross-Currency Confidence', () => {
 
       expect(result.matchType).toBe('direct_factura');
       expect(result.confidence).toBe('HIGH'); // Not capped - same currency
+    });
+  });
+});
+
+describe('BankMovementMatcher - Credit Movement Matching', () => {
+  let matcher: BankMovementMatcher;
+
+  beforeEach(() => {
+    matcher = new BankMovementMatcher(5); // 5% tolerance
+
+    // Set up exchange rates for USD testing (multiple dates for different tests)
+    const testRate1: ExchangeRate = {
+      fecha: '2024-01-01',
+      compra: 800,
+      venta: 850
+    };
+    const testRate2: ExchangeRate = {
+      fecha: '2024-01-10',
+      compra: 800,
+      venta: 850
+    };
+    const testRate3: ExchangeRate = {
+      fecha: '2024-01-15',
+      compra: 800,
+      venta: 850
+    };
+    setExchangeRateCache('2024-01-01', testRate1);
+    setExchangeRateCache('2024-01-10', testRate2);
+    setExchangeRateCache('2024-01-15', testRate3);
+  });
+
+  describe('matchCreditMovement', () => {
+    it('matches Pago Recibido with linked Factura Emitida', () => {
+      const facturaEmitida: Factura & { row: number } = {
+        fileId: 'factura1',
+        fileName: 'factura-001.pdf',
+        tipoComprobante: 'A',
+        nroFactura: '00001-00000123',
+        fechaEmision: '2024-01-10',
+        cuitEmisor: '30709076783', // ADVA
+        razonSocialEmisor: 'ADVA',
+        cuitReceptor: '20123456786', // Client
+        razonSocialReceptor: 'TEST SA',
+        importeNeto: 90000,
+        importeIva: 10000,
+        importeTotal: 100000,
+        moneda: 'ARS',
+        processedAt: '2024-01-10T10:00:00Z',
+        needsReview: false,
+        confidence: 0.95,
+        row: 2
+      };
+
+      const pagoRecibido: Pago & { row: number } = {
+        fileId: 'pago1',
+        fileName: 'pago-001.pdf',
+        banco: 'BBVA',
+        fechaPago: '2024-01-15',
+        importePagado: 100000,
+        moneda: 'ARS',
+        cuitPagador: '20123456786', // Client
+        nombrePagador: 'TEST SA',
+        cuitBeneficiario: '30709076783', // ADVA
+        nombreBeneficiario: 'ADVA',
+        matchedFacturaFileId: 'factura1', // Linked to factura
+        matchConfidence: 'HIGH',
+        processedAt: '2024-01-15T10:00:00Z',
+        needsReview: false,
+        confidence: 0.95,
+        row: 2
+      };
+
+      const movement: BankMovement = {
+        row: 1,
+        fecha: '2024-01-15',
+        fechaValor: '2024-01-15',
+        concepto: 'TRANSFERENCIA DESDE TEST SA 20-12345678-6',
+        codigo: '',
+        oficina: '',
+        areaAdva: '',
+        debito: null,
+        credito: 100000,
+        detalle: ''
+      };
+
+      const result = matcher.matchCreditMovement(movement, [facturaEmitida], [pagoRecibido], []);
+
+      expect(result.matchType).toBe('pago_factura');
+      expect(result.confidence).toBe('HIGH');
+      expect(result.description).toContain('Cobro Factura de TEST SA');
+      expect(result.matchedFileId).toBe('pago1');
+    });
+
+    it('matches direct Factura Emitida with exact amount', () => {
+      const facturaEmitida: Factura & { row: number } = {
+        fileId: 'factura1',
+        fileName: 'factura-001.pdf',
+        tipoComprobante: 'A',
+        nroFactura: '00001-00000123',
+        fechaEmision: '2024-01-10',
+        cuitEmisor: '30709076783',
+        razonSocialEmisor: 'ADVA',
+        cuitReceptor: '20123456786',
+        razonSocialReceptor: 'TEST SA',
+        importeNeto: 90000,
+        importeIva: 10000,
+        importeTotal: 100000,
+        moneda: 'ARS',
+        processedAt: '2024-01-10T10:00:00Z',
+        needsReview: false,
+        confidence: 0.95,
+        row: 2
+      };
+
+      const movement: BankMovement = {
+        row: 1,
+        fecha: '2024-01-15',
+        fechaValor: '2024-01-15',
+        concepto: 'TRANSFERENCIA DESDE TEST SA 20-12345678-6',
+        codigo: '',
+        oficina: '',
+        areaAdva: '',
+        debito: null,
+        credito: 100000,
+        detalle: ''
+      };
+
+      const result = matcher.matchCreditMovement(movement, [facturaEmitida], [], []);
+
+      expect(result.matchType).toBe('direct_factura');
+      expect(result.confidence).toBe('HIGH');
+      expect(result.description).toContain('Cobro Factura de TEST SA');
+      expect(result.matchedFileId).toBe('factura1');
+    });
+
+    it('matches Factura Emitida with single retencion tolerance', () => {
+      const facturaEmitida: Factura & { row: number } = {
+        fileId: 'factura1',
+        fileName: 'factura-001.pdf',
+        tipoComprobante: 'A',
+        nroFactura: '00001-00000123',
+        fechaEmision: '2024-01-10',
+        cuitEmisor: '30709076783',
+        razonSocialEmisor: 'ADVA',
+        cuitReceptor: '20123456786',
+        razonSocialReceptor: 'TEST SA',
+        importeNeto: 90000,
+        importeIva: 10000,
+        importeTotal: 100000,
+        moneda: 'ARS',
+        processedAt: '2024-01-10T10:00:00Z',
+        needsReview: false,
+        confidence: 0.95,
+        row: 2
+      };
+
+      const retencion: Retencion & { row: number } = {
+        fileId: 'ret1',
+        fileName: 'retencion-001.pdf',
+        fechaEmision: '2024-01-15',
+        nroCertificado: '001',
+        cuitAgenteRetencion: '20123456786', // Same as factura client
+        razonSocialAgenteRetencion: 'TEST SA',
+        cuitSujetoRetenido: '30709076783', // ADVA
+        impuesto: 'Ganancias',
+        regimen: '830',
+        montoComprobante: 100000,
+        montoRetencion: 5000,
+        processedAt: '2024-01-15T10:00:00Z',
+        confidence: 0.95,
+        needsReview: false,
+        row: 2
+      };
+
+      const movement: BankMovement = {
+        row: 1,
+        fecha: '2024-01-15',
+        fechaValor: '2024-01-15',
+        concepto: 'TRANSFERENCIA DESDE TEST SA',
+        codigo: '',
+        oficina: '',
+        areaAdva: '',
+        debito: null,
+        credito: 95000, // 100000 - 5000
+        detalle: ''
+      };
+
+      const result = matcher.matchCreditMovement(movement, [facturaEmitida], [], [retencion]);
+
+      expect(result.matchType).toBe('direct_factura');
+      expect(result.confidence).toBe('HIGH');
+      expect(result.description).toContain('Cobro Factura de TEST SA');
+      expect(result.description).toContain('retencion');
+      expect(result.matchedFileId).toBe('factura1');
+    });
+
+    it('matches Factura Emitida with multiple retenciones', () => {
+      const facturaEmitida: Factura & { row: number } = {
+        fileId: 'factura1',
+        fileName: 'factura-001.pdf',
+        tipoComprobante: 'A',
+        nroFactura: '00001-00000123',
+        fechaEmision: '2024-01-10',
+        cuitEmisor: '30709076783',
+        razonSocialEmisor: 'ADVA',
+        cuitReceptor: '20123456786',
+        razonSocialReceptor: 'TEST SA',
+        importeNeto: 90000,
+        importeIva: 10000,
+        importeTotal: 100000,
+        moneda: 'ARS',
+        processedAt: '2024-01-10T10:00:00Z',
+        needsReview: false,
+        confidence: 0.95,
+        row: 2
+      };
+
+      const retencionGanancias: Retencion & { row: number } = {
+        fileId: 'ret1',
+        fileName: 'retencion-ganancias.pdf',
+        fechaEmision: '2024-01-15',
+        nroCertificado: '001',
+        cuitAgenteRetencion: '20123456786',
+        razonSocialAgenteRetencion: 'TEST SA',
+        cuitSujetoRetenido: '30709076783',
+        impuesto: 'Ganancias',
+        regimen: '830',
+        montoComprobante: 100000,
+        montoRetencion: 7000,
+        processedAt: '2024-01-15T10:00:00Z',
+        confidence: 0.95,
+        needsReview: false,
+        row: 2
+      };
+
+      const retencionIVA: Retencion & { row: number } = {
+        fileId: 'ret2',
+        fileName: 'retencion-iva.pdf',
+        fechaEmision: '2024-01-15',
+        nroCertificado: '002',
+        cuitAgenteRetencion: '20123456786',
+        razonSocialAgenteRetencion: 'TEST SA',
+        cuitSujetoRetenido: '30709076783',
+        impuesto: 'IVA',
+        regimen: '767',
+        montoComprobante: 100000,
+        montoRetencion: 3000,
+        processedAt: '2024-01-15T10:00:00Z',
+        confidence: 0.95,
+        needsReview: false,
+        row: 2
+      };
+
+      const movement: BankMovement = {
+        row: 1,
+        fecha: '2024-01-15',
+        fechaValor: '2024-01-15',
+        concepto: 'TRANSFERENCIA DESDE TEST SA',
+        codigo: '',
+        oficina: '',
+        areaAdva: '',
+        debito: null,
+        credito: 90000, // 100000 - 7000 - 3000
+        detalle: ''
+      };
+
+      const result = matcher.matchCreditMovement(
+        movement,
+        [facturaEmitida],
+        [],
+        [retencionGanancias, retencionIVA]
+      );
+
+      expect(result.matchType).toBe('direct_factura');
+      expect(result.confidence).toBe('HIGH');
+      expect(result.description).toContain('Cobro Factura de TEST SA');
+      expect(result.matchedFileId).toBe('factura1');
+    });
+
+    it('matches cross-currency USD Factura with ARS retenciones', () => {
+      const facturaEmitida: Factura & { row: number } = {
+        fileId: 'factura1',
+        fileName: 'factura-001.pdf',
+        tipoComprobante: 'A',
+        nroFactura: '00001-00000123',
+        fechaEmision: '2024-01-10',
+        cuitEmisor: '30709076783',
+        razonSocialEmisor: 'ADVA',
+        cuitReceptor: '20123456786',
+        razonSocialReceptor: 'TEST SA',
+        importeNeto: 90.91,
+        importeIva: 9.09,
+        importeTotal: 100, // USD
+        moneda: 'USD',
+        processedAt: '2024-01-10T10:00:00Z',
+        needsReview: false,
+        confidence: 0.95,
+        row: 2
+      };
+
+      const retencion: Retencion & { row: number } = {
+        fileId: 'ret1',
+        fileName: 'retencion-001.pdf',
+        fechaEmision: '2024-01-15',
+        nroCertificado: '001',
+        cuitAgenteRetencion: '20123456786',
+        razonSocialAgenteRetencion: 'TEST SA',
+        cuitSujetoRetenido: '30709076783',
+        impuesto: 'Ganancias',
+        regimen: '830',
+        montoComprobante: 85000, // ARS
+        montoRetencion: 6000, // ARS (larger to ensure no match without it)
+        processedAt: '2024-01-15T10:00:00Z',
+        confidence: 0.95,
+        needsReview: false,
+        row: 2
+      };
+
+      const movement: BankMovement = {
+        row: 1,
+        fecha: '2024-01-15',
+        fechaValor: '2024-01-15',
+        concepto: 'TRANSFERENCIA DESDE TEST SA',
+        codigo: '',
+        oficina: '',
+        areaAdva: '',
+        debito: null,
+        credito: 79000, // 85000 - 6000 (should NOT match without retencion: 7.1% diff)
+        detalle: ''
+      };
+
+      const result = matcher.matchCreditMovement(movement, [facturaEmitida], [], [retencion]);
+
+      expect(result.matchType).toBe('direct_factura');
+      expect(result.description).toContain('Cobro Factura de TEST SA');
+      expect(result.description).toContain('retencion'); // Should use retencion
+      expect(result.matchedFileId).toBe('factura1');
+      expect(result.confidence).toBe('MEDIUM'); // Cross-currency with implicit CUIT match from retenciones
+    });
+
+    it('matches Factura with retencion (simple case)', () => {
+      const facturaEmitida: Factura & { row: number } = {
+        fileId: 'factura1',
+        fileName: 'factura-001.pdf',
+        tipoComprobante: 'A',
+        nroFactura: '00001-00000123',
+        fechaEmision: '2024-01-10',
+        cuitEmisor: '30709076783',
+        razonSocialEmisor: 'ADVA',
+        cuitReceptor: '20123456786',
+        razonSocialReceptor: 'TEST SA',
+        importeNeto: 90000,
+        importeIva: 10000,
+        importeTotal: 100000,
+        moneda: 'ARS',
+        processedAt: '2024-01-10T10:00:00Z',
+        needsReview: false,
+        confidence: 0.95,
+        row: 2
+      };
+
+      const retencion: Retencion & { row: number } = {
+        fileId: 'ret1',
+        fileName: 'retencion-001.pdf',
+        fechaEmision: '2024-01-12', // 2 days after factura
+        nroCertificado: '001',
+        cuitAgenteRetencion: '20123456786',
+        razonSocialAgenteRetencion: 'TEST SA',
+        cuitSujetoRetenido: '30709076783',
+        impuesto: 'Ganancias',
+        regimen: '830',
+        montoComprobante: 100000,
+        montoRetencion: 5000,
+        processedAt: '2024-01-12T10:00:00Z',
+        confidence: 0.95,
+        needsReview: false,
+        row: 2
+      };
+
+      const movement: BankMovement = {
+        row: 1,
+        fecha: '2024-01-15',
+        fechaValor: '2024-01-15',
+        concepto: 'TRANSFERENCIA DESDE TEST SA',
+        codigo: '',
+        oficina: '',
+        areaAdva: '',
+        debito: null,
+        credito: 95000, // 100000 - 5000
+        detalle: ''
+      };
+
+      const result = matcher.matchCreditMovement(movement, [facturaEmitida], [], [retencion]);
+
+      expect(result.matchType).toBe('direct_factura');
+      expect(result.confidence).toBe('HIGH');
+      expect(result.description).toContain('retencion');
+    });
+
+    it('filters retenciones by date range (90 days)', () => {
+      const facturaEmitida: Factura & { row: number } = {
+        fileId: 'factura1',
+        fileName: 'factura-001.pdf',
+        tipoComprobante: 'A',
+        nroFactura: '00001-00000123',
+        fechaEmision: '2024-01-01',
+        cuitEmisor: '30709076783',
+        razonSocialEmisor: 'ADVA',
+        cuitReceptor: '20123456786',
+        razonSocialReceptor: 'TEST SA',
+        importeNeto: 90000,
+        importeIva: 10000,
+        importeTotal: 100000,
+        moneda: 'ARS',
+        processedAt: '2024-01-01T10:00:00Z',
+        needsReview: false,
+        confidence: 0.95,
+        row: 2
+      };
+
+      const retencionValid: Retencion & { row: number } = {
+        fileId: 'ret1',
+        fileName: 'retencion-valid.pdf',
+        fechaEmision: '2024-03-30', // 89 days after factura (within 90-day window)
+        nroCertificado: '001',
+        cuitAgenteRetencion: '20123456786',
+        razonSocialAgenteRetencion: 'TEST SA',
+        cuitSujetoRetenido: '30709076783',
+        impuesto: 'Ganancias',
+        regimen: '830',
+        montoComprobante: 100000,
+        montoRetencion: 5000,
+        processedAt: '2024-03-31T10:00:00Z',
+        confidence: 0.95,
+        needsReview: false,
+        row: 2
+      };
+
+      const retencionTooLate: Retencion & { row: number } = {
+        fileId: 'ret2',
+        fileName: 'retencion-toolate.pdf',
+        fechaEmision: '2024-04-02', // 91+ days after factura
+        nroCertificado: '002',
+        cuitAgenteRetencion: '20123456786',
+        razonSocialAgenteRetencion: 'TEST SA',
+        cuitSujetoRetenido: '30709076783',
+        impuesto: 'IVA',
+        regimen: '767',
+        montoComprobante: 100000,
+        montoRetencion: 3000,
+        processedAt: '2024-04-02T10:00:00Z',
+        confidence: 0.95,
+        needsReview: false,
+        row: 2
+      };
+
+      const movement: BankMovement = {
+        row: 1,
+        fecha: '2024-01-15', // Within factura date range (-5/+30 days)
+        fechaValor: '2024-01-15',
+        concepto: 'TRANSFERENCIA DESDE TEST SA',
+        codigo: '',
+        oficina: '',
+        areaAdva: '',
+        debito: null,
+        credito: 95000, // 100000 - 5000 (only valid retencion counted)
+        detalle: ''
+      };
+
+      const result = matcher.matchCreditMovement(
+        movement,
+        [facturaEmitida],
+        [],
+        [retencionValid, retencionTooLate]
+      );
+
+      expect(result.matchType).toBe('direct_factura');
+      expect(result.confidence).toBe('HIGH');
+      expect(result.description).toContain('retencion'); // Should mention retencion was used
+    });
+
+    it('matches Pago Recibido without linked Factura', () => {
+      const pagoRecibido: Pago & { row: number } = {
+        fileId: 'pago1',
+        fileName: 'pago-001.pdf',
+        banco: 'BBVA',
+        fechaPago: '2024-01-15',
+        importePagado: 100000,
+        moneda: 'ARS',
+        cuitPagador: '20123456786',
+        nombrePagador: 'TEST SA',
+        cuitBeneficiario: '30709076783',
+        nombreBeneficiario: 'ADVA',
+        processedAt: '2024-01-15T10:00:00Z',
+        needsReview: false,
+        confidence: 0.95,
+        row: 2
+      };
+
+      const movement: BankMovement = {
+        row: 1,
+        fecha: '2024-01-15',
+        fechaValor: '2024-01-15',
+        concepto: 'TRANSFERENCIA DESDE TEST SA',
+        codigo: '',
+        oficina: '',
+        areaAdva: '',
+        debito: null,
+        credito: 100000,
+        detalle: ''
+      };
+
+      const result = matcher.matchCreditMovement(movement, [], [pagoRecibido], []);
+
+      expect(result.matchType).toBe('pago_only');
+      expect(result.confidence).toBe('MEDIUM');
+      expect(result.description).toContain('REVISAR! Cobro de TEST SA');
+      expect(result.matchedFileId).toBe('pago1');
+    });
+
+    it('returns no match for credit movement with no matches', () => {
+      const movement: BankMovement = {
+        row: 1,
+        fecha: '2024-01-15',
+        fechaValor: '2024-01-15',
+        concepto: 'DEPOSITO DESCONOCIDO',
+        codigo: '',
+        oficina: '',
+        areaAdva: '',
+        debito: null,
+        credito: 50000,
+        detalle: ''
+      };
+
+      const result = matcher.matchCreditMovement(movement, [], [], []);
+
+      expect(result.matchType).toBe('no_match');
+      expect(result.description).toBe('');
+      expect(result.matchedFileId).toBe('');
+    });
+
+    it('extracts CUIT from concepto for credit movements', () => {
+      const facturaEmitida: Factura & { row: number } = {
+        fileId: 'factura1',
+        fileName: 'factura-001.pdf',
+        tipoComprobante: 'A',
+        nroFactura: '00001-00000123',
+        fechaEmision: '2024-01-10',
+        cuitEmisor: '30709076783',
+        razonSocialEmisor: 'ADVA',
+        cuitReceptor: '20123456786',
+        razonSocialReceptor: 'TEST SA',
+        importeNeto: 90000,
+        importeIva: 10000,
+        importeTotal: 100000,
+        moneda: 'ARS',
+        processedAt: '2024-01-10T10:00:00Z',
+        needsReview: false,
+        confidence: 0.95,
+        row: 2
+      };
+
+      const movement: BankMovement = {
+        row: 1,
+        fecha: '2024-01-15',
+        fechaValor: '2024-01-15',
+        concepto: 'TRANSFERENCIA 20-12345678-6',
+        codigo: '',
+        oficina: '',
+        areaAdva: '',
+        debito: null,
+        credito: 100000,
+        detalle: ''
+      };
+
+      const result = matcher.matchCreditMovement(movement, [facturaEmitida], [], []);
+
+      expect(result.matchType).toBe('direct_factura');
+      expect(result.confidence).toBe('HIGH');
+    });
+  });
+
+  describe('compareMatches', () => {
+    it('prefers CUIT match over no CUIT match', () => {
+      const withoutCuit = {
+        fileId: 'doc1',
+        hasCuitMatch: false,
+        dateDistance: 2,
+        isExactAmount: true,
+        hasLinkedPago: false
+      };
+
+      const withCuit = {
+        fileId: 'doc2',
+        hasCuitMatch: true,
+        dateDistance: 10,
+        isExactAmount: false,
+        hasLinkedPago: false
+      };
+
+      const result = matcher.compareMatches(withoutCuit, withCuit);
+
+      expect(result).toBe('candidate'); // withCuit wins
+    });
+
+    it('prefers closer date when CUIT match is equal', () => {
+      const further = {
+        fileId: 'doc1',
+        hasCuitMatch: true,
+        dateDistance: 10,
+        isExactAmount: true,
+        hasLinkedPago: false
+      };
+
+      const closer = {
+        fileId: 'doc2',
+        hasCuitMatch: true,
+        dateDistance: 2,
+        isExactAmount: true,
+        hasLinkedPago: false
+      };
+
+      const result = matcher.compareMatches(further, closer);
+
+      expect(result).toBe('candidate'); // closer wins
+    });
+
+    it('prefers exact amount over tolerance match', () => {
+      const withTolerance = {
+        fileId: 'doc1',
+        hasCuitMatch: true,
+        dateDistance: 2,
+        isExactAmount: false,
+        hasLinkedPago: false
+      };
+
+      const exact = {
+        fileId: 'doc2',
+        hasCuitMatch: true,
+        dateDistance: 2,
+        isExactAmount: true,
+        hasLinkedPago: false
+      };
+
+      const result = matcher.compareMatches(withTolerance, exact);
+
+      expect(result).toBe('candidate'); // exact wins
+    });
+
+    it('prefers Factura with linked Pago over Factura alone', () => {
+      const withoutPago = {
+        fileId: 'doc1',
+        hasCuitMatch: true,
+        dateDistance: 2,
+        isExactAmount: true,
+        hasLinkedPago: false
+      };
+
+      const withPago = {
+        fileId: 'doc2',
+        hasCuitMatch: true,
+        dateDistance: 2,
+        isExactAmount: true,
+        hasLinkedPago: true
+      };
+
+      const result = matcher.compareMatches(withoutPago, withPago);
+
+      expect(result).toBe('candidate'); // withPago wins
+    });
+
+    it('keeps existing when quality is equal', () => {
+      const existing = {
+        fileId: 'doc1',
+        hasCuitMatch: true,
+        dateDistance: 2,
+        isExactAmount: true,
+        hasLinkedPago: false
+      };
+
+      const candidate = {
+        fileId: 'doc2',
+        hasCuitMatch: true,
+        dateDistance: 2,
+        isExactAmount: true,
+        hasLinkedPago: false
+      };
+
+      const result = matcher.compareMatches(existing, candidate);
+
+      expect(result).toBe('existing'); // No churn
     });
   });
 });

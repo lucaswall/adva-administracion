@@ -6,6 +6,7 @@ import type { FastifyInstance } from 'fastify';
 import type { ScanResult, BankAutoFillResult } from '../types/index.js';
 import { scanFolder, rematch, RematchResult } from '../processing/scanner.js';
 import { autoFillBankMovements } from '../bank/autofill.js';
+import { matchAllMovimientos, type MatchAllResult } from '../bank/match-movimientos.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { extractDriveFolderId, isValidDriveId } from '../utils/drive-parser.js';
 import { updateStatusSheet } from '../services/status-sheet.js';
@@ -122,6 +123,31 @@ export async function scanRoutes(server: FastifyInstance) {
     server.log.info({ bankName }, 'Starting bank autofill');
 
     const result = await autoFillBankMovements(bankName);
+
+    if (!result.ok) {
+      reply.status(500);
+      return {
+        error: result.error.message,
+      };
+    }
+
+    return result.value;
+  });
+
+  /**
+   * POST /api/match-movimientos - Match bank movements against Control de Ingresos/Egresos
+   * Fills matchedFileId and detalle columns in Movimientos Bancario sheets
+   * Protected with authentication
+   *
+   * Query parameters:
+   *   force=true - Re-match all rows, clearing existing matches
+   */
+  server.post<{ Querystring: { force?: string } }>('/match-movimientos', { onRequest: authMiddleware }, async (request, reply): Promise<MatchAllResult | ErrorResponse> => {
+    const force = request.query.force === 'true';
+
+    server.log.info({ force }, 'Starting match movimientos');
+
+    const result = await matchAllMovimientos({ force });
 
     if (!result.ok) {
       reply.status(500);

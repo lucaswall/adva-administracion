@@ -33,6 +33,13 @@ vi.mock('../bank/autofill.js', () => ({
   autoFillBankMovements: (...args: unknown[]) => mockAutoFillBankMovements(...args),
 }));
 
+// Mock match-movimientos
+const mockMatchAllMovimientos = vi.fn();
+
+vi.mock('../bank/match-movimientos.js', () => ({
+  matchAllMovimientos: (...args: unknown[]) => mockMatchAllMovimientos(...args),
+}));
+
 // Mock config
 vi.mock('../config.js', () => ({
   getConfig: vi.fn(),
@@ -337,6 +344,137 @@ describe('Scan routes', () => {
       expect(response.statusCode).toBe(500);
       const body = JSON.parse(response.payload);
       expect(body.error).toBe('Bank sheet not found');
+    });
+  });
+
+  describe('POST /api/match-movimientos', () => {
+    it('triggers a successful match run', async () => {
+      mockMatchAllMovimientos.mockResolvedValue({
+        ok: true,
+        value: {
+          skipped: false,
+          results: [
+            {
+              spreadsheetName: 'BBVA ARS',
+              sheetsProcessed: 12,
+              movimientosProcessed: 150,
+              movimientosFilled: 45,
+              debitsFilled: 30,
+              creditsFilled: 15,
+              noMatches: 100,
+              errors: 5,
+              duration: 5000,
+            },
+          ],
+          totalProcessed: 150,
+          totalFilled: 45,
+          totalDebitsFilled: 30,
+          totalCreditsFilled: 15,
+          duration: 5000,
+        },
+      });
+
+      const response = await server.inject({
+        method: 'POST',
+        url: '/api/match-movimientos',
+        headers: {
+          authorization: 'Bearer test-secret-123',
+        },
+      });
+
+      expect(response.statusCode).toBe(200);
+      const body = JSON.parse(response.payload);
+      expect(body.skipped).toBe(false);
+      expect(body.totalProcessed).toBe(150);
+      expect(body.totalFilled).toBe(45);
+      expect(body.totalDebitsFilled).toBe(30);
+      expect(body.totalCreditsFilled).toBe(15);
+      expect(mockMatchAllMovimientos).toHaveBeenCalledWith({ force: false });
+    });
+
+    it('returns skipped result when already running', async () => {
+      mockMatchAllMovimientos.mockResolvedValue({
+        ok: true,
+        value: {
+          skipped: true,
+          reason: 'already_running',
+          results: [],
+          totalProcessed: 0,
+          totalFilled: 0,
+          totalDebitsFilled: 0,
+          totalCreditsFilled: 0,
+          duration: 0,
+        },
+      });
+
+      const response = await server.inject({
+        method: 'POST',
+        url: '/api/match-movimientos',
+        headers: {
+          authorization: 'Bearer test-secret-123',
+        },
+      });
+
+      expect(response.statusCode).toBe(200);
+      const body = JSON.parse(response.payload);
+      expect(body.skipped).toBe(true);
+      expect(body.reason).toBe('already_running');
+    });
+
+    it('accepts force query parameter', async () => {
+      mockMatchAllMovimientos.mockResolvedValue({
+        ok: true,
+        value: {
+          skipped: false,
+          results: [],
+          totalProcessed: 0,
+          totalFilled: 0,
+          totalDebitsFilled: 0,
+          totalCreditsFilled: 0,
+          duration: 100,
+        },
+      });
+
+      const response = await server.inject({
+        method: 'POST',
+        url: '/api/match-movimientos?force=true',
+        headers: {
+          authorization: 'Bearer test-secret-123',
+        },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(mockMatchAllMovimientos).toHaveBeenCalledWith({ force: true });
+    });
+
+    it('returns 500 on match failure', async () => {
+      mockMatchAllMovimientos.mockResolvedValue({
+        ok: false,
+        error: new Error('Folder structure not cached'),
+      });
+
+      const response = await server.inject({
+        method: 'POST',
+        url: '/api/match-movimientos',
+        headers: {
+          authorization: 'Bearer test-secret-123',
+        },
+      });
+
+      expect(response.statusCode).toBe(500);
+      const body = JSON.parse(response.payload);
+      expect(body.error).toBe('Folder structure not cached');
+    });
+
+    it('requires authentication', async () => {
+      const response = await server.inject({
+        method: 'POST',
+        url: '/api/match-movimientos',
+        // No authorization header
+      });
+
+      expect(response.statusCode).toBe(401);
+      expect(mockMatchAllMovimientos).not.toHaveBeenCalled();
     });
   });
 });

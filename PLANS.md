@@ -1246,3 +1246,174 @@ No issues found - all implementations are correct and follow project conventions
 
 **Documented (no fix needed):**
 - [MEDIUM] `LockState.autoExpiryMs` is always set on new locks; in-memory locks are transient so no persistence concern
+
+---
+
+## Iteration 2
+
+**Implemented:** 2026-01-31
+
+### Completed Tasks
+
+**Task 4: Extend BankMovementMatcher to handle credit movements** (uncommitted from previous session)
+- ✅ Added `matchCreditMovement()` method to `BankMovementMatcher` class
+- ✅ Handles credit movements against Facturas Emitidas, Pagos Recibidos, Retenciones
+- ✅ Implements retencion tolerance matching (credit + retenciones ≈ factura)
+- ✅ Includes 90-day retencion date range validation
+- ✅ Multiple retenciones per factura supported
+- ✅ 18 tests in matcher.test.ts passing
+
+**Task 5: Create movimientos-reader service**
+- ✅ Created `src/services/movimientos-reader.ts`
+- ✅ `isSpecialRow()` - Filters SALDO INICIAL/FINAL rows
+- ✅ `getRecentMovimientoSheets()` - Discovers YYYY-MM sheets for current/previous year
+- ✅ `readMovimientosForPeriod()` - Parses movimiento rows from a sheet
+- ✅ `getMovimientosToFill()` - Loads all movimientos with chunked parallel reads
+- ✅ 23 tests in movimientos-reader.test.ts passing
+
+**Task 6: Create movimientos-detalle service**
+- ✅ Created `src/services/movimientos-detalle.ts`
+- ✅ `DetalleUpdate` interface with sheetName, rowNumber, matchedFileId, detalle
+- ✅ `updateDetalle()` - Batch updates columns G and H
+- ✅ Automatic chunking to respect 500 operation API limit
+- ✅ 9 tests in movimientos-detalle.test.ts passing
+
+**Task 7: Create matchMovimientos orchestration service**
+- ✅ Created `src/bank/match-movimientos.ts`
+- ✅ `MatchQuality` interface for match comparison
+- ✅ `isBetterMatch()` - Compares matches by CUIT, date proximity, exact amount, linked pago
+- ✅ `matchAllMovimientos()` - Main orchestration function
+- ✅ Uses unified lock `PROCESSING_LOCK_ID` with 5-minute timeout
+- ✅ Loads Control data once, processes banks sequentially
+- ✅ Routes debits to `matchMovement()`, credits to `matchCreditMovement()`
+- ✅ 17 tests in match-movimientos.test.ts passing
+
+**Task 8: Add API route for match-movimientos**
+- ✅ Added `POST /api/match-movimientos` route to `src/routes/scan.ts`
+- ✅ Requires authentication via `authMiddleware`
+- ✅ Supports `force` query parameter for re-matching all rows
+- ✅ Returns `MatchAllResult` with statistics
+- ✅ 5 tests added to scan.test.ts, all passing
+
+**Task 9: Add Dashboard menu option**
+- ✅ Added "📝 Completar Detalles Movimientos" menu item to `apps-script/src/main.ts`
+- ✅ Added `triggerMatchMovimientos()` function calling `/api/match-movimientos`
+- ✅ Build verified with `npm run build:script`
+
+### Test Summary
+
+- All 1191 tests passing across 57 test files
+- New test files: movimientos-reader.test.ts, movimientos-detalle.test.ts, match-movimientos.test.ts
+- Updated test files: scan.test.ts
+
+### Bug Fixes (from bug-hunter review)
+
+- ✅ Fixed missing sorting in `findMatchingPagosRecibidos` - now sorts by CUIT match, then date proximity
+- ✅ Fixed missing sorting in `findMatchingFacturasEmitidas` - now sorts by CUIT match, date proximity, then exact amount
+- ✅ Fixed `parseRecibos` column header case - changed `'cuitEmpleador'` to `'cuitempleador'`
+
+### Checklist Results
+
+✅ **bug-hunter:** Issues found and fixed (sorting, column header case)
+✅ **test-runner:** PASSED - All 1191 tests passing across 57 test files
+✅ **builder:** PASSED - Zero warnings, clean build
+
+### Remaining Tasks
+
+- Task 10: Add unified lock to scan with deferral and trigger match-movimientos after
+- Task 11: Update documentation (SPREADSHEET_FORMAT.md, CLAUDE.md)
+- Final post-implementation checklist
+
+### Review Findings
+
+Files reviewed: 11
+- src/bank/matcher.ts (credit matching logic)
+- src/bank/matcher.test.ts
+- src/services/movimientos-reader.ts
+- src/services/movimientos-reader.test.ts
+- src/services/movimientos-detalle.ts
+- src/services/movimientos-detalle.test.ts
+- src/bank/match-movimientos.ts
+- src/bank/match-movimientos.test.ts
+- src/routes/scan.ts
+- src/routes/scan.test.ts
+- apps-script/src/main.ts
+
+Checks applied: Security, Logic, Async, Resources, Type Safety, Conventions, Error Handling, Test Quality
+
+**Issues requiring fix:**
+
+- [HIGH] BUG: Replacement logic not wired up (`src/bank/match-movimientos.ts:474-478`)
+  - The `isBetterMatch()` function exists and correctly implements fluid comparison (CUIT → date proximity → exact amount → linked pago)
+  - But it's **never called** - movimientos with existing matches are simply skipped:
+    ```typescript
+    if (!options.force && mov.matchedFileId) {
+      continue;  // BUG: skips instead of comparing
+    }
+    ```
+  - Should: run matching, compare new candidate vs existing match, replace if better
+
+- [MEDIUM] Duplicate `MatchQuality` interface
+  - Defined in both `src/bank/matcher.ts:1223` and `src/bank/match-movimientos.ts:29`
+  - Should consolidate in one place
+
+**Verified correct:**
+
+- ✅ Confidence levels (HIGH/MEDIUM/LOW) are NOT stored - only `matchedFileId` and `detalle` written to columns G:H
+- ✅ `MatchQuality` is for internal comparison only (CUIT match, date distance, etc.) - not persisted
+
+**Documented (no fix needed):**
+
+- [LOW] CONVENTION: Apps Script main.ts uses emojis in menu items - intentional for user-facing UI
+- [LOW] INFO: `compareMatches` method in matcher.ts duplicates `isBetterMatch` - both work correctly
+
+### Fix Plan
+
+#### Fix 1: Wire up replacement logic
+
+1. Write test in `src/bank/match-movimientos.test.ts`:
+   - Test movimiento with existing match gets new candidate evaluated
+   - Test replacement when candidate is closer in date
+   - Test no replacement when existing is better or equal
+
+2. Run test-runner (expect fail)
+
+3. Update `src/bank/match-movimientos.ts` line 474-478:
+   - Remove the early `continue` when `mov.matchedFileId` exists
+   - Always run matching to get candidate
+   - If movimiento has existing match AND candidate found:
+     - Build MatchQuality for both (need helper to look up existing doc by fileId)
+     - Call `isBetterMatch(existing, candidate)`
+     - Only add to updates if candidate wins
+   - If no existing match: add to updates as before
+
+4. Run test-runner (expect pass)
+
+#### Fix 2: Consolidate MatchQuality interface
+
+1. Remove duplicate from `src/bank/match-movimientos.ts`
+2. Import from `./matcher.js`
+3. Run builder to verify
+
+#### Fix 3: Remove dead confidence code from bank matcher
+
+The HIGH/MEDIUM/LOW confidence in `BankMovementMatchResult` is never used - only tested but ignored in production.
+
+1. Remove `confidence` field from `BankMovementMatchResult` type in `src/types/index.ts`
+2. Remove confidence assignment in all `bank/matcher.ts` match result creation methods:
+   - `createPagoFacturaMatch`
+   - `createDirectFacturaMatch`
+   - `createReciboMatch`
+   - `createPagoOnlyMatch`
+   - `noMatch`
+   - `createBankFeeMatch`
+   - `createCreditCardPaymentMatch`
+   - `createPagoFacturaMatchCredit`
+   - `createDirectFacturaMatchCredit`
+   - `createPagoOnlyMatchCredit`
+   - `noMatchCredit`
+3. Remove confidence assertions from test files:
+   - `src/bank/matcher.test.ts`
+   - `src/bank/subdiario-matcher.test.ts`
+4. Run test-runner to verify
+5. Run builder to verify

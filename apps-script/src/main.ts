@@ -42,6 +42,7 @@ export function createMenu(): void {
     .addItem('🔄 Trigger Scan', 'triggerScan')
     .addItem('🔗 Trigger Re-match', 'triggerRematch')
     .addItem('🏦 Auto-fill Bank Data', 'triggerAutofillBank')
+    .addItem('📝 Completar Detalles Movimientos', 'triggerMatchMovimientos')
     .addSeparator()
     .addItem('ℹ️ About', 'showAbout')
     .addToUi();
@@ -69,6 +70,15 @@ export function triggerRematch(): void {
 export function triggerAutofillBank(): void {
   const url = getApiUrl('/api/autofill-bank');
   makeApiCall(url, 'post', null, 'Bank auto-fill triggered successfully!');
+}
+
+/**
+ * Triggers matching of bank movements against Control de Ingresos/Egresos
+ * Fills matchedFileId and detalle columns in Movimientos Bancario sheets
+ */
+export function triggerMatchMovimientos(): void {
+  const url = getApiUrl('/api/match-movimientos');
+  makeApiCall(url, 'post', null, 'Match movimientos triggered successfully!');
 }
 
 /**
