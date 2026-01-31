@@ -82,6 +82,29 @@ vi.mock('./matching/index.js', () => ({
   runMatching: vi.fn(async () => ({ ok: true, value: 0 })),
 }));
 
+vi.mock('../bank/match-movimientos.js', () => ({
+  matchAllMovimientos: vi.fn(async () => ({
+    ok: true,
+    value: {
+      skipped: false,
+      results: [],
+      totalProcessed: 10,
+      totalFilled: 5,
+      totalDebitsFilled: 3,
+      totalCreditsFilled: 2,
+      duration: 1000,
+    },
+  })),
+}));
+
+vi.mock('../utils/concurrency.js', () => ({
+  withLock: vi.fn(async (_lockId: string, fn: () => Promise<any>) => {
+    // Execute the function directly, returning its result wrapped in a Result
+    const result = await fn();
+    return { ok: true, value: result };
+  }),
+}));
+
 vi.mock('./caches/index.js', () => {
   const SortBatch = vi.fn(function (this: any) {
     this.flush = vi.fn();

@@ -28,14 +28,16 @@ import { listFilesInFolder } from '../services/drive.js';
 import { getCachedFolderStructure, getOrCreateBankAccountFolder, getOrCreateBankAccountSpreadsheet, getOrCreateCreditCardFolder, getOrCreateCreditCardSpreadsheet, getOrCreateBrokerFolder, getOrCreateBrokerSpreadsheet, getOrCreateMovimientosSpreadsheet } from '../services/folder-structure.js';
 import { sortToSinProcesar, sortAndRenameDocument, moveToDuplicadoFolder } from '../services/document-sorter.js';
 import { getProcessingQueue } from './queue.js';
-import { getConfig } from '../config.js';
+import { getConfig, PROCESSING_LOCK_ID, PROCESSING_LOCK_TIMEOUT_MS } from '../config.js';
 import { debug, info, warn, error as logError } from '../utils/logger.js';
 import { withCorrelationAsync, getCorrelationId, generateCorrelationId } from '../utils/correlation.js';
+import { withLock } from '../utils/concurrency.js';
 
 // Import from refactored modules
 import { processFile, hasValidDate } from './extractor.js';
 import { storeFactura, storePago, storeRecibo, storeRetencion, storeResumenBancario, storeResumenTarjeta, storeResumenBroker, storeMovimientosBancario, storeMovimientosTarjeta, storeMovimientosBroker, getProcessedFileIds, getStaleProcessingFileIds, markFileProcessing, updateFileStatus } from './storage/index.js';
 import { runMatching } from './matching/index.js';
+import { matchAllMovimientos } from '../bank/match-movimientos.js';
 import { SortBatch, DuplicateCache, MetadataCache, SheetOrderBatch } from './caches/index.js';
 import { TokenUsageBatch } from '../services/token-usage-batch.js';
 import { MAX_TRANSIENT_RETRIES, RETRY_DELAYS_MS } from '../config.js';
@@ -45,8 +47,11 @@ export { processFile, hasValidDate, type ProcessFileResult } from './extractor.j
 
 // Track retry count for each file (to implement exponential backoff)
 // Key: fileId, Value: retry count (0 = first retry, 1 = second retry, etc.)
-// This is cleared at the end of each scan
+// This is cleared in the finally block of each scan
 const retriedFileIds = new Map<string, number>();
+
+// Module-level state for scan deferral
+let pendingScan = false;
 
 /**
  * Delay utility for exponential backoff
@@ -313,25 +318,89 @@ export interface RematchResult {
 }
 
 /**
+ * Async function to trigger match-movimientos in background
+ * Logs result without blocking scan response
+ */
+function triggerMatchAsync(): void {
+  void matchAllMovimientos()
+    .then(result => {
+      if (result.ok) {
+        if (result.value.skipped) {
+          info('Match movimientos skipped', {
+            module: 'scanner',
+            reason: result.value.reason
+          });
+        } else {
+          info('Match movimientos completed', {
+            module: 'scanner',
+            filled: result.value.totalFilled,
+            debitsFilled: result.value.totalDebitsFilled,
+            creditsFilled: result.value.totalCreditsFilled,
+            duration: result.value.duration
+          });
+        }
+      } else {
+        logError('Match movimientos failed', {
+          module: 'scanner',
+          error: result.error.message
+        });
+      }
+    })
+    .catch(err => {
+      logError('Match movimientos crashed', {
+        module: 'scanner',
+        error: err instanceof Error ? err.message : String(err)
+      });
+    });
+}
+
+/**
  * Scans a folder for new documents and processes them
  *
  * @param folderId - Optional folder ID to scan (defaults to Entrada folder)
  * @returns Scan result with statistics
  */
 export async function scanFolder(folderId?: string): Promise<Result<ScanResult, Error>> {
-  // Wrap the entire scan in a correlation context
-  return withCorrelationAsync(async () => {
-    const correlationId = getCorrelationId();
-    const startTime = Date.now();
+  // Check if a scan is already waiting - if so, skip (it will handle our files)
+  if (pendingScan) {
+    info('Scan skipped - another scan already pending', { module: 'scanner' });
+    return {
+      ok: true,
+      value: {
+        skipped: true,
+        reason: 'scan_pending',
+        filesProcessed: 0,
+        facturasAdded: 0,
+        pagosAdded: 0,
+        recibosAdded: 0,
+        matchesFound: 0,
+        errors: 0,
+        duration: 0
+      }
+    };
+  }
 
-    info(`Starting folder scan${folderId ? ` for folder ${folderId}` : ''}`, {
-      module: 'scanner',
-      phase: 'scan-start',
-      correlationId,
-    });
+  // Set pending flag before waiting for lock
+  pendingScan = true;
 
-    const folderStructure = getCachedFolderStructure();
-    const config = getConfig();
+  try {
+    // This WAITS for lock (up to 5 min) instead of returning immediately
+    const lockResult = await withLock(
+      PROCESSING_LOCK_ID,
+      async () => {
+        // Wrap the entire scan in a correlation context
+        return withCorrelationAsync(async () => {
+          const correlationId = getCorrelationId();
+          const startTime = Date.now();
+
+          info(`Starting folder scan${folderId ? ` for folder ${folderId}` : ''}`, {
+            module: 'scanner',
+            phase: 'scan-start',
+            correlationId,
+          });
+
+          const folderStructure = getCachedFolderStructure();
+          const config = getConfig();
 
     if (!folderStructure) {
       const errorMsg = 'Folder structure not initialized. Call discoverFolderStructure first.';
@@ -511,9 +580,6 @@ export async function scanFolder(folderId?: string): Promise<Result<ScanResult, 
       // Queue tracks all tasks internally, including retries added via queue.add()
       await queue.onIdle();
 
-      // Clear retry tracking for next scan
-      retriedFileIds.clear();
-
       // Run automatic matching after processing
       if (result.filesProcessed > 0) {
         debug('Running automatic matching', {
@@ -590,26 +656,62 @@ export async function scanFolder(folderId?: string): Promise<Result<ScanResult, 
       });
 
       return { ok: true, value: result };
-    } finally {
-      // Always clear caches to free memory
-      debug('Clearing caches', {
-        module: 'scanner',
-        phase: 'cleanup',
-        correlationId,
-      });
+        } finally {
+          // Always clear caches to free memory
+          debug('Clearing caches', {
+            module: 'scanner',
+            phase: 'cleanup',
+            correlationId,
+          });
 
-      context.sortBatch.clear();
-      context.sheetOrderBatch.clear();
-      context.duplicateCache.clear();
-      context.metadataCache.clear();
+          context.sortBatch.clear();
+          context.sheetOrderBatch.clear();
+          context.duplicateCache.clear();
+          context.metadataCache.clear();
 
-      info('Caches cleared', {
+          // Clear retry tracking for next scan (CRITICAL: in finally block)
+          retriedFileIds.clear();
+
+          info('Caches cleared', {
+            module: 'scanner',
+            phase: 'cleanup',
+            correlationId,
+          });
+        }
+        }, { correlationId: generateCorrelationId() });
+      },
+      PROCESSING_LOCK_TIMEOUT_MS,  // Wait timeout (5 min)
+      PROCESSING_LOCK_TIMEOUT_MS   // Auto-expiry (5 min)
+    );
+
+    // Handle lock acquisition failure or timeout
+    if (!lockResult.ok) {
+      logError('Scan failed to acquire lock after timeout', {
         module: 'scanner',
-        phase: 'cleanup',
-        correlationId,
+        error: lockResult.error.message
       });
+      // Return error from lock acquisition
+      return { ok: false, error: lockResult.error };
     }
-  }, { correlationId: generateCorrelationId() });
+
+    // Lock acquired successfully - lockResult.value is Result<ScanResult, Error>
+    const scanResult: Result<ScanResult, Error> = lockResult.value as Result<ScanResult, Error>;
+
+    // Check if scan itself succeeded
+    if (!scanResult.ok) {
+      return scanResult;
+    }
+
+    // Lock released - NOW trigger match async (outside lock!)
+    if (scanResult.value.filesProcessed > 0) {
+      triggerMatchAsync();
+    }
+
+    return scanResult;
+  } finally {
+    // Always clear pending flag when done
+    pendingScan = false;
+  }
 }
 
 /**

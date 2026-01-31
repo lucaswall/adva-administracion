@@ -769,6 +769,10 @@ export interface FileInfo {
  * Scan result summary
  */
 export interface ScanResult {
+  /** Whether the scan was skipped */
+  skipped?: boolean;
+  /** Reason for skip (if skipped) */
+  reason?: string;
   /** Number of files processed */
   filesProcessed: number;
   /** Number of facturas added */

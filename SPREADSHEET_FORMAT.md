@@ -244,6 +244,70 @@ Folder: `{YYYY}/Bancos/{Broker} {Comitente}/`
 **Note:** Multi-currency accounts - both ARS and USD balances can be present.
 **Sorting**: Rows sorted by `periodo` (column A) ascending (oldest first)
 
+### Movimientos Bancario (Per-Month Sheets) - 8 columns, A:H
+
+Each bank/card/broker spreadsheet has per-month sheets named `YYYY-MM` containing transactions.
+
+| Column | Field | Type | Description |
+|--------|-------|------|-------------|
+| A | fecha | date | Transaction date (serial format) |
+| B | origenConcepto | string | Transaction description/concept |
+| C | debito | currency | Debit amount (money OUT) |
+| D | credito | currency | Credit amount (money IN) |
+| E | saldo | currency | Balance from PDF (parsed) |
+| F | saldoCalculado | formula | Running balance calculation |
+| G | matchedFileId | string | Google Drive fileId of matched document |
+| H | detalle | string | Human-readable match description |
+
+**Special Rows:**
+- `SALDO INICIAL` - Opening balance row (skipped in matching)
+- `SALDO FINAL` - Closing balance row (skipped in matching)
+
+**Matching Behavior:**
+
+The `detalle` column (H) is automatically filled by matching bank movements against Control de Ingresos/Egresos data:
+
+**For DEBIT movements** (money OUT from ADVA):
+1. Bank fees auto-detection (patterns: "IMPUESTO LEY", "COMISION")
+2. Credit card payments auto-detection ("PAGO TARJETA")
+3. Pago Enviado → linked Factura Recibida (best match)
+4. Direct Factura Recibida match (amount + date + CUIT/keyword)
+5. Recibo match (salary payments)
+6. Pago Enviado without linked Factura → "REVISAR! Pago a [Beneficiario]"
+
+**For CREDIT movements** (money IN to ADVA):
+1. Pago Recibido → linked Factura Emitida (best match) → "Cobro Factura de [Cliente]"
+2. Direct Factura Emitida match with retencion tolerance:
+   - Formula: `Credit Amount + Related Retenciones ≈ Factura Total`
+   - Retencion criteria: same CUIT (`cuitAgenteRetencion` matches `factura.cuitReceptor`), within 90 days after factura date
+   - Supports multiple retenciones per factura (Ganancias + IVA + IIBB)
+   - Example: Credit $95,000 + Retencion $5,000 = Factura $100,000 → match
+3. Pago Recibido without linked Factura → "REVISAR! Cobro de [Pagador]"
+
+**Replacement Logic:**
+
+When a new potential match is found for a movimiento that already has a match:
+1. Lookup existing matched document by `matchedFileId` (column G)
+2. Compare new candidate vs existing on quality factors (priority order):
+   - CUIT match (exact match > no match)
+   - Date proximity (closer to movimiento date wins)
+   - Amount precision (exact amount > tolerance match)
+   - Has linked pago (Factura with linked Pago > Factura alone)
+3. Replace if new candidate is strictly better
+4. Keep existing if equal or worse quality (no unnecessary churn)
+
+**Date Filtering:**
+- Only processes movements from current year and previous year
+- Month sheet names in YYYY-MM format
+- Older movements require manual review (rare edge case)
+
+**Known Limitations:**
+1. **Year boundary**: Only processes current + previous year (e.g., 2025-2026). Late payments from 2+ years ago won't match automatically.
+2. **Multiple banks matching same document**: If two bank accounts both have movements matching the same Factura, both will show the same detalle (could be inter-account transfers or legitimate scenario).
+3. **Partial payments**: If a Factura is paid in installments, only the first payment with matching retencion sum will match automatically. Subsequent payments need manual review.
+4. **Inter-bank transfers**: Transfers between ADVA's own accounts may match incorrectly. Pattern detection could be added in future.
+5. **Credit card refunds**: Refunds appearing as credits are not currently auto-detected. Future enhancement if needed.
+
 ---
 
 ## Dashboard Operativo Contable

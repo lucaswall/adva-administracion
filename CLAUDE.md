@@ -328,7 +328,18 @@ npm run deploy:script # Build + deploy to Dashboard
 | POST | /api/scan | Yes | Manual scan |
 | POST | /api/rematch | Yes | Rematch unmatched |
 | POST | /api/autofill-bank | Yes | Auto-fill bank |
+| POST | /api/match-movimientos | Yes | Match movimientos detalles (supports `?force=true` to re-match all rows) |
 | POST | /webhooks/drive | No | Drive notifications |
+
+**Concurrency Control:**
+
+Both `/api/scan` and `/api/match-movimientos` use a unified lock (`PROCESSING_LOCK_ID` from `src/config.ts`):
+- **Scan deferral**: Scans WAIT for lock (up to 5 minutes) instead of skipping. A pending flag prevents queue buildup - if a scan is already waiting, subsequent scan requests skip (the pending scan will handle all files since it reads Entrada at start).
+- **Lock timeout**: 5 minutes auto-expiry (configurable via `PROCESSING_LOCK_TIMEOUT_MS` in `src/config.ts`)
+- **Sequential execution**: At any time, only ONE of these can run: scan OR match
+- **Auto-trigger**: After every successful scan (any document type), `matchAllMovimientos` is triggered asynchronously to fill detalles column
+
+This prevents race conditions and overlapping processing while ensuring files in Entrada are always processed promptly.
 
 ## TESTING
 
@@ -411,7 +422,7 @@ See `SPREADSHEET_FORMAT.md` for complete schema.
   - `resumen_broker`: 9 cols (A:I) with `periodo` (YYYY-MM) as first column, `saldoARS` + `saldoUSD` (multi-currency)
   - `periodo` format matches Movimientos sheet names (YYYY-MM derived from fechaHasta)
   - Rows sorted by `periodo` ascending (oldest first)
-- **Movimientos Bancario**: 6 cols (A:F) with running balance formulas - `saldo` (parsed from PDF) and `saldoCalculado` (computed formula)
+- **Movimientos Bancario**: 8 cols (A:H) with running balance formulas - `saldo` (parsed from PDF), `saldoCalculado` (computed formula), `matchedFileId` (fileId of matched document), `detalle` (human-readable match description)
 - **Dashboard**: Pagos Pendientes (10 cols), API Mensual (7 cols), Uso de API (12 cols)
 
 **Principles:**
