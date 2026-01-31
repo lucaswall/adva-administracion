@@ -13,12 +13,13 @@ import type {
   BankMovement,
   MatchConfidence,
 } from '../types/index.js';
-import { PROCESSING_LOCK_ID, PROCESSING_LOCK_TIMEOUT_MS } from '../config.js';
+import { PROCESSING_LOCK_ID, PROCESSING_LOCK_TIMEOUT_MS, ADVA_CUITS } from '../config.js';
 import { withLock } from '../utils/concurrency.js';
 import { info, warn, debug } from '../utils/logger.js';
 import { getCachedFolderStructure } from '../services/folder-structure.js';
 import { getValues, type CellValue } from '../services/sheets.js';
 import { parseNumber } from '../utils/numbers.js';
+import { parseArgDate } from '../utils/date.js';
 import { BankMovementMatcher, type MatchQuality } from './matcher.js';
 import { getMovimientosToFill } from '../services/movimientos-reader.js';
 import { updateDetalle, type DetalleUpdate } from '../services/movimientos-detalle.js';
@@ -342,7 +343,7 @@ function parseRetenciones(data: CellValue[][]): Array<Retencion & { row: number 
       nroCertificado: String(row[colIndex.nroCertificado] || ''),
       cuitAgenteRetencion: String(row[colIndex.cuitAgenteRetencion] || ''),
       razonSocialAgenteRetencion: String(row[colIndex.razonSocialAgenteRetencion] || ''),
-      cuitSujetoRetenido: '30709076783',  // Always ADVA
+      cuitSujetoRetenido: ADVA_CUITS[0],  // Always ADVA
       impuesto: String(row[colIndex.impuesto] || ''),
       regimen: String(row[colIndex.regimen] || ''),
       montoComprobante: parseNumber(row[colIndex.montoComprobante]) || 0,
@@ -432,12 +433,12 @@ function buildMatchQuality(
   hasLinkedPago: boolean,
   isExactAmount: boolean
 ): MatchQuality {
-  // Calculate date distance in days
-  const docDate = new Date(fechaDocumento);
-  const movDate = new Date(fechaMovimiento);
+  // Calculate date distance in days using parseArgDate for Argentine format support
+  const docDate = parseArgDate(fechaDocumento);
+  const movDate = parseArgDate(fechaMovimiento);
 
   // Handle invalid dates - use Infinity for worst possible score
-  const dateDistance = (!isNaN(docDate.getTime()) && !isNaN(movDate.getTime()))
+  const dateDistance = (docDate && movDate)
     ? Math.abs(Math.floor((docDate.getTime() - movDate.getTime()) / (1000 * 60 * 60 * 24)))
     : Infinity;
 
@@ -545,7 +546,7 @@ function buildMatchQualityFromFileId(
   }
 
   // For isExactAmount, we can't determine this without re-running the match
-  // Use a conservative value (false) - if the candidate is exact, it will win
+  // Set to true for both existing and candidate to ensure fair comparison on other dimensions
   return buildMatchQuality(
     fileId,
     fechaDocumento,
@@ -553,7 +554,7 @@ function buildMatchQualityFromFileId(
     cuitDocumento,
     conceptoMovimiento,
     hasLinkedPago,
-    false  // Conservative: assume existing match is not exact
+    true  // Set to true for both to ensure fair comparison on other dimensions
   );
 }
 
@@ -699,10 +700,8 @@ async function matchBankMovimientos(
                 true  // Consistent with existing for fair comparison
               );
 
-              // Update existing quality to use same isExactAmount value
-              existingQuality.isExactAmount = true;
-
               // Compare: replace if candidate is better
+              // Note: Both qualities use isExactAmount=true for fair comparison on other dimensions
               shouldUpdate = isBetterMatch(existingQuality, candidateQuality);
             }
           } else {

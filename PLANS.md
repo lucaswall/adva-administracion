@@ -1649,15 +1649,191 @@ Checks applied: Security, Logic, Async, Resources, Type Safety, Error Handling, 
 
 ---
 
-## Status: COMPLETE
+## Iteration 5: Comprehensive Audit Fixes
 
-All tasks from the original plan have been implemented, tested, and documented.
-All post-implementation checks passed (bug-hunter, test-runner, builder).
+**Created:** 2026-01-31
 
-**Note:** The HIGH-severity test coverage issue identified in the Iteration 4 review is documented but does NOT block the COMPLETE status because:
-1. The implementation code itself is correct and follows all conventions
-2. The existing mocking strategy in tests allows the code to execute through the lock/match paths
-3. The feature has been manually verified to work in production-like scenarios
-4. Adding explicit unit tests for lock contention scenarios would require significant test infrastructure changes
+### Audit Findings
 
-The test gap is documented here for future improvement if more comprehensive unit test coverage is desired.
+A full re-review of the implementation identified the following issues:
+
+#### [MEDIUM] Date Parsing Inconsistency in buildMatchQuality
+
+**File:** `src/bank/match-movimientos.ts:436-437`
+
+**Issue:** Uses `new Date()` directly instead of `parseArgDate()` from `utils/date.ts`. The existing matcher.ts uses `parseArgDate()` throughout (11 occurrences). While a safeguard exists for invalid dates (returns `Infinity`), this is inconsistent with the rest of the codebase and may fail for Argentine date formats (DD/MM/YYYY).
+
+**Impact:** If dates come in Argentine format, the date distance calculation would fail, causing all matches to compare as equal on date proximity.
+
+#### [LOW] Hardcoded ADVA CUIT
+
+**File:** `src/bank/match-movimientos.ts:345`
+
+**Issue:** The ADVA CUIT is hardcoded as `'30709076783'` instead of importing `ADVA_CUITS` from `config.ts`. Inconsistent with codebase conventions.
+
+#### [LOW] Mutation of existingQuality.isExactAmount
+
+**File:** `src/bank/match-movimientos.ts:703`
+
+**Issue:** The code mutates `existingQuality.isExactAmount = true` after the quality object has been computed. While functional, it's clearer to compute both qualities with consistent values from the start.
+
+### Fix Plan
+
+#### Fix 1: Use parseArgDate in buildMatchQuality
+
+1. Update `src/bank/match-movimientos.ts`:
+   - Add import: `import { parseArgDate } from '../utils/date.js';`
+   - Replace lines 436-442 with:
+     ```typescript
+     const docDate = parseArgDate(fechaDocumento);
+     const movDate = parseArgDate(fechaMovimiento);
+
+     // Handle invalid dates - use Infinity for worst possible score
+     const dateDistance = (docDate && movDate)
+       ? Math.abs(Math.floor((docDate.getTime() - movDate.getTime()) / (1000 * 60 * 60 * 24)))
+       : Infinity;
+     ```
+
+2. Run test-runner (expect pass - no behavioral change for ISO dates)
+3. Run builder (expect zero warnings)
+
+#### Fix 2: Import ADVA_CUITS from config.ts
+
+1. Update `src/bank/match-movimientos.ts`:
+   - Add import: `import { ADVA_CUITS } from '../config.js';`
+   - Replace line 345:
+     ```typescript
+     // Before:
+     cuitSujetoRetenido: '30709076783',  // Always ADVA
+
+     // After:
+     cuitSujetoRetenido: ADVA_CUITS[0],  // Always ADVA
+     ```
+
+2. Run builder (expect zero warnings)
+
+#### Fix 3: Refactor isExactAmount comparison logic
+
+1. Update `src/bank/match-movimientos.ts`:
+   - In `buildMatchQualityFromFileId()` (line 549), change `isExactAmount: false` to `isExactAmount: true`
+   - Remove the mutation at line 703: `existingQuality.isExactAmount = true;`
+   - Add comment explaining that `isExactAmount` is set to `true` for both to ensure fair comparison on other dimensions
+
+2. Run test-runner (expect pass)
+3. Run builder (expect zero warnings)
+
+### Post-Fix Checklist
+
+1. Run `bug-hunter` agent - Verify no new issues
+2. Run `test-runner` agent - Verify all tests pass
+3. Run `builder` agent - Verify zero warnings
+
+---
+
+## Iteration 5: Comprehensive Audit Fixes - COMPLETED
+
+**Implemented:** 2026-01-31
+
+### Completed Fixes
+
+**Fix 1: Use parseArgDate in buildMatchQuality** ✅
+- Added import: `import { parseArgDate } from '../utils/date.js';`
+- Updated `buildMatchQuality()` to use `parseArgDate()` instead of `new Date()`
+- Now consistent with matcher.ts (11+ occurrences of parseArgDate)
+- Properly handles Argentine date formats (DD/MM/YYYY) and ISO formats (YYYY-MM-DD)
+- Invalid dates still return `Infinity` for worst possible score
+
+**Fix 2: Import ADVA_CUITS from config.ts** ✅
+- Added import: `import { ADVA_CUITS } from '../config.js';`
+- Changed hardcoded `'30709076783'` to `ADVA_CUITS[0]`
+- Improves maintainability by centralizing the CUIT constant
+
+**Fix 3: Refactor isExactAmount comparison logic** ✅
+- Changed `buildMatchQualityFromFileId()` to use `isExactAmount: true` instead of `false`
+- Removed mutation: `existingQuality.isExactAmount = true;`
+- Added comment explaining that `isExactAmount` is set to `true` for both to ensure fair comparison
+- Cleaner immutable approach without post-hoc mutation
+
+### Checklist Results
+
+✅ **bug-hunter:** PASSED - No bugs found in current changes
+✅ **test-runner:** PASSED - All 1194 tests passing across 57 test files
+✅ **builder:** PASSED - Zero warnings, clean build
+
+### Notes
+
+**Impact Assessment:**
+- All three fixes are low-risk internal improvements
+- No behavioral changes for ISO date inputs (backward compatible)
+- Improved date parsing for edge cases (Argentine formats)
+- Better code maintainability (centralized CUIT constant)
+- Cleaner comparison logic (immutable approach)
+
+**Verification:**
+- `parseArgDate()` returns `Date | null`, properly handled with null check
+- `ADVA_CUITS[0]` evaluates to same value as hardcoded `'30709076783'`
+- Both existing and candidate qualities now use `isExactAmount: true` consistently
+- `isBetterMatch()` compares on CUIT → date proximity → exact amount → linked pago
+
+---
+
+## Iteration 6: Final Review
+
+**Reviewed:** 2026-01-31
+
+### Review Process
+
+1. Read PLANS.md to understand full plan and iteration history
+2. Identified that Iteration 4's Fix Plan (missing tests) was never implemented
+3. Verified implementation exists in scanner.ts but tests are missing
+
+### Review Findings
+
+Files reviewed: 3
+- src/processing/scanner.ts (lines 1-150, 320-470, 680-780)
+- src/processing/scanner.test.ts (506 lines)
+- src/bank/match-movimientos.ts (879 lines)
+
+Checks applied: Test Coverage, Logic Verification, Implementation Completeness
+
+**Issues requiring fix:**
+
+- [HIGH] TEST COVERAGE: Missing tests for Task 10 lock and match trigger functionality (`src/processing/scanner.test.ts`)
+  - Iteration 4's Review Findings identified this gap
+  - A Fix Plan was created specifying 6 required tests
+  - Fix was never implemented before marking plan as COMPLETE
+  - The `withLock` mock (line 100-106) simply passes through without testing lock contention
+  - No tests verify `pendingScan` flag prevents queue buildup
+  - No tests verify `triggerMatchAsync()` is called when `filesProcessed > 0`
+  - No tests verify errors are logged (not silently discarded)
+
+**Verified correct (implementation exists):**
+
+- ✅ `pendingScan` flag implemented at line 54
+- ✅ `triggerMatchAsync()` function implemented at lines 324-355
+- ✅ `scanFolder()` uses `PROCESSING_LOCK_ID` for unified lock (line 389)
+- ✅ Lock wait timeout and auto-expiry set to 5 minutes (lines 683-684)
+- ✅ Match triggered AFTER lock released (line 706-708)
+- ✅ Match only triggers when `filesProcessed > 0` (line 706)
+- ✅ `pendingScan` cleared in finally block (line 713)
+- ✅ Error logging in `triggerMatchAsync()` (lines 343-353)
+
+**Documented (no fix needed):**
+
+- [LOW] Indentation inconsistency in scanner.ts (lines 405-416) - cosmetic only
+- [LOW] Type cast at line 698 - acceptable given `withLock` generic complexity
+
+### Fix Plan
+
+#### Fix 1: Add missing tests for lock and match trigger functionality
+
+1. Write tests in `src/processing/scanner.test.ts`:
+   - Test that `pendingScan` flag prevents duplicate scans when one is waiting
+   - Test that `triggerMatchAsync()` is called when `filesProcessed > 0`
+   - Test that `triggerMatchAsync()` is NOT called when `filesProcessed === 0`
+   - Test that match errors are logged (not silently discarded)
+   - Test that `pendingScan` is cleared in finally block even on error
+
+2. Run test-runner (expect pass)
+
+3. Run builder (expect zero warnings)
