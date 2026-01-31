@@ -1,7 +1,7 @@
 # Implementation Plan
 
 **Created:** 2026-01-30
-**Updated:** 2026-01-30 (enhanced after thorough review)
+**Updated:** 2026-01-30 (post-review: added critical fixes for lock timeout, batch limits, memory management)
 **Source:** Inline request: Add Detalles column matching for Movimientos sheets
 
 ## Context Gathered
@@ -14,7 +14,7 @@
 - `src/processing/storage/movimientos-store.ts` - Stores bank movements to per-month sheets with 6 columns (A:F)
 - `src/constants/spreadsheet-headers.ts` - Defines `MOVIMIENTOS_BANCARIO_SHEET` with 6 headers
 - `src/routes/scan.ts` - Has `/api/autofill-bank` route, does NOT trigger autofill after scan
-- `src/utils/concurrency.ts` - Existing `withLock()` pattern with 30s auto-expiration (use this!)
+- `src/utils/concurrency.ts` - Existing `withLock()` pattern with 30s auto-expiration
 - `apps-script/src/main.ts` - Dashboard menu with "Auto-fill Bank Data" option
 
 **Current Movimientos Bancario Schema (6 columns A:F):**
@@ -88,22 +88,24 @@ Month sheet names are YYYY-MM format.
 **Minimize Sheets API Calls:**
 1. **Read Control data ONCE at start** - Load Facturas, Pagos, Recibos, Retenciones from both Control de Ingresos and Control de Egresos once, reuse for all banks
 2. **Use metadata for sheet discovery** - Call `getSheetMetadata()` once per bank spreadsheet to get sheet names, filter to YYYY-MM pattern matching current/previous year (avoid reading non-existent sheets)
-3. **Batch updates** - Collect all detalles updates per spreadsheet, use single `batchUpdate()` call instead of individual cell updates
+3. **Batch updates with chunking** - Collect all detalles updates per spreadsheet, use `batchUpdate()` but **chunk to 500 operations max** per API call (Google Sheets limit)
 
 **Memory Management (Railway VM ~512MB):**
 1. **Process banks sequentially** - Load movimientos for one bank at a time, process, write, then release memory before next bank
 2. **Control data stays loaded** - Ingresos/Egresos data (~1000s of rows) stays in memory throughout (reasonable size)
 3. **Stream updates** - Don't accumulate all updates across all banks; write after each bank completes
+4. **Allow GC between banks** - Use `setImmediate()` between bank processing to allow garbage collection
 
-**Parallel reads for speed:**
-- Read all month sheets for a bank in parallel using `Promise.all()`
+**Chunked parallel reads for speed (memory-safe):**
+- Read month sheets in **chunks of 4** using `Promise.all()` (not all 12 at once)
+- Prevents memory spike from loading all sheets simultaneously
 - Before: 12 sheets × 300ms = 3.6s per bank (sequential)
-- After: 12 sheets in parallel = ~500ms per bank
-- Total time reduced from ~25s to ~10s
+- After: 3 chunks × 4 sheets = ~1s per bank (chunked parallel)
+- Total time ~12-15 seconds (balance of speed and memory safety)
 
 **Exchange rate pre-fetching:**
 - Before matching begins, collect all unique dates from facturas and pagos
-- Call `prefetchExchangeRates()` to load rates into cache
+- Call `prefetchExchangeRates()` with rate limiting (5 concurrent requests max)
 - Prevents `cacheMiss` during synchronous matching
 
 **Trigger after every scan:**
@@ -115,15 +117,18 @@ Month sheet names are YYYY-MM format.
 - **Always log result** (success OR failure) for observability
 
 **Concurrency control (prevent overlapping scan AND match runs):**
-- Use existing `withLock()` from `src/utils/concurrency.ts` (NOT a simple boolean flag)
+- Use existing `withLock()` from `src/utils/concurrency.ts`
+- **CRITICAL:** Current `LOCK_TIMEOUT_MS` is 30 seconds (auto-expiry). This is **too short** for processing.
+- **Solution:** Add configurable lock timeout parameter to `withLock()` OR increase default for processing locks
 - **Single unified lock** for both scan and match operations
-- Lock ID: `'document-processing'` (shared by scanner.ts and match-movimientos.ts)
-- Lock timeout: 5 minutes (300,000ms) - processing can take time
+- Lock ID: `'document-processing'` (defined in `src/config.ts`, shared by scanner.ts and match-movimientos.ts)
+- Lock wait timeout: 5 minutes (300,000ms) - time to wait for lock acquisition
+- Lock auto-expiry: **5 minutes** (300,000ms) - time before stale lock auto-releases
 - At any time, only ONE of these can run:
   - Scan process (processing new documents)
   - Match process (filling detalles column)
 - Benefits over simple flag:
-  - 30-second auto-expiration prevents deadlocks if process crashes
+  - Auto-expiration prevents deadlocks if process crashes
   - Proper `finally` block ensures lock release
   - Correlation ID tracking for debugging
   - Existing battle-tested implementation
@@ -132,20 +137,24 @@ Month sheet names are YYYY-MM format.
 **Estimated API Calls per execution:**
 - Control de Ingresos: 3 reads (Facturas Emitidas, Pagos Recibidos, Retenciones)
 - Control de Egresos: 3 reads (Facturas Recibidas, Pagos Enviados, Recibos)
-- Per bank spreadsheet: 1 metadata + N month sheet reads (parallel) + 1 batch update
-- Total: 6 + (banks × (1 + months + 1)) ≈ 6 + (5 banks × 15 calls) = ~81 calls
-- **Time: ~10 seconds** (with parallel reads)
+- Per bank spreadsheet: 1 metadata + N month sheet reads (chunked parallel) + 1-N batch updates (chunked by 500)
+- Total: 6 + (banks × (1 + months + ceil(updates/500))) ≈ 6 + (5 banks × 15 calls) = ~81 calls
+- **Time: ~12-15 seconds** (with chunked parallel reads)
 
 ### Edge Cases & Known Limitations
 
 **Documented and accepted:**
 1. **Year boundary**: Only processes current + previous year. Late payments from 2+ years ago won't match automatically.
 2. **Multiple banks matching same document**: If Bank A and Bank B both have movements that match the same Factura, both will get the same detalles. This is acceptable (could be inter-account transfers or legitimate scenario).
-3. **Partial payments**: If a Factura is paid in installments, only the first payment with matching retencion sum will match automatically. Subsequent payments may need manual review.
+3. **Partial payments**: If a Factura is paid in installments, only the first payment with matching retencion sum will match automatically. Subsequent payments need manual review. Document this in SPREADSHEET_FORMAT.md.
+4. **Inter-bank transfers**: Transfers between ADVA's own accounts may match incorrectly. Pattern detection for "TRANSFERENCIA PROPIA" could be added in future.
+5. **Credit card refunds**: Refunds appearing as credits are not currently detected. Add pattern in future if needed.
 
 **Handled by implementation:**
 1. **SALDO INICIAL/FINAL rows**: Robustly filtered using `startsWith()` check on trimmed uppercase string.
 2. **Cross-currency retenciones**: USD facturas with ARS retenciones are handled via exchange rate conversion.
+3. **Zero-amount movements**: Skip processing (no debit or credit).
+4. **Negative amounts**: Notas de Crédito have negative importeTotal - handle in amount comparison.
 
 ### Re-match Capability
 
@@ -166,17 +175,33 @@ By default, rows with existing detalles are skipped. For re-evaluation:
    - Columns: fecha, fechaValor, concepto, codigo, oficina, areaAdva, credito, debito, detalle
    - This is for a DIFFERENT spreadsheet format (external banks imported separately)
 
-2. **`MovimientoRow`** (NEW, to be created) - For internal Movimientos sheets in bank spreadsheets
+2. **`MovimientoRow`** (NEW, to be created and **exported** from `src/types/index.ts`) - For internal Movimientos sheets in bank spreadsheets
    - Columns: fecha, origenConcepto, debito, credito, saldo, saldoCalculado, detalles
    - Matches `MOVIMIENTOS_BANCARIO_SHEET.headers` from `src/constants/spreadsheet-headers.ts:239`
 
 **When matching, convert `MovimientoRow` to a compatible format for `BankMovementMatcher`.**
 
+### Shared Constants (src/config.ts)
+
+**Add these to `src/config.ts` to avoid duplication:**
+```typescript
+// Unified lock for document processing (scan and match)
+export const PROCESSING_LOCK_ID = 'document-processing';
+export const PROCESSING_LOCK_TIMEOUT_MS = 300000;  // 5 minutes
+
+// Batch update limits
+export const SHEETS_BATCH_UPDATE_LIMIT = 500;  // Google Sheets API limit
+
+// Parallel processing limits
+export const PARALLEL_SHEET_READ_CHUNK_SIZE = 4;  // Read 4 sheets at a time
+export const EXCHANGE_RATE_FETCH_CONCURRENCY = 5;  // Max concurrent API calls
+```
+
 ### Existing Utilities to Use
 
 | Utility | Location | Usage |
 |---------|----------|-------|
-| `withLock()` | `src/utils/concurrency.ts:208` | Concurrency control with 30s auto-expiry |
+| `withLock()` | `src/utils/concurrency.ts:208` | Concurrency control with configurable timeout |
 | `prefetchExchangeRates()` | `src/utils/exchange-rate.ts:214` | Pre-load exchange rates before matching |
 | `getSheetMetadata()` | `src/services/sheets.ts:286` | Returns `Array<{title, sheetId, index}>` |
 | `batchUpdate()` | `src/services/sheets.ts:225` | Takes `Array<{range: string, values: CellValue[][]}>` |
@@ -216,33 +241,55 @@ interface FolderStructure {
 
 **NEW (add to `src/bank/match-movimientos.ts`):**
 ```typescript
-// Parse Retenciones from Control de Ingresos
+// Parse Retenciones from Control de Ingresos using header-based column lookup
 function parseRetenciones(data: CellValue[][]): Array<Retencion & { row: number }> {
+  if (data.length < 2) return [];
+
+  const headers = data[0].map(h => String(h || '').toLowerCase());
   const retenciones: Array<Retencion & { row: number }> = [];
+
+  // Build column index map from headers (robust against schema changes)
+  const colIndex = {
+    fechaEmision: headers.indexOf('fechaemision'),
+    fileId: headers.indexOf('fileid'),
+    fileName: headers.indexOf('filename'),
+    nroCertificado: headers.indexOf('nrocertificado'),
+    cuitAgenteRetencion: headers.indexOf('cuitagenteretencion'),
+    razonSocialAgenteRetencion: headers.indexOf('razonsocialagenteretencion'),
+    impuesto: headers.indexOf('impuesto'),
+    regimen: headers.indexOf('regimen'),
+    montoComprobante: headers.indexOf('montocomprobante'),
+    montoRetencion: headers.indexOf('montoretencion'),
+    processedAt: headers.indexOf('processedat'),
+    confidence: headers.indexOf('confidence'),
+    needsReview: headers.indexOf('needsreview'),
+    matchedFacturaFileId: headers.indexOf('matchedfacturafileid'),
+    matchConfidence: headers.indexOf('matchconfidence'),
+  };
 
   // Skip header row
   for (let i = 1; i < data.length; i++) {
     const row = data[i];
-    if (!row || !row[0]) continue;
+    if (!row || !row[colIndex.fechaEmision]) continue;
 
     retenciones.push({
       row: i + 1,
-      fechaEmision: String(row[0] || ''),           // Column A (index 0)
-      fileId: String(row[1] || ''),                 // Column B (index 1)
-      fileName: String(row[2] || ''),               // Column C (index 2)
-      nroCertificado: String(row[3] || ''),         // Column D (index 3)
-      cuitAgenteRetencion: String(row[4] || ''),    // Column E (index 4) - CRITICAL for CUIT matching
-      razonSocialAgenteRetencion: String(row[5] || ''), // Column F (index 5)
-      impuesto: String(row[6] || ''),               // Column G (index 6)
-      regimen: String(row[7] || ''),                // Column H (index 7)
-      montoComprobante: parseNumber(row[8]) || 0,   // Column I (index 8)
-      montoRetencion: parseNumber(row[9]) || 0,     // Column J (index 9) - CRITICAL for amount tolerance
-      cuitSujetoRetenido: '30709076783',            // Always ADVA (not stored in sheet)
-      processedAt: String(row[10] || ''),           // Column K (index 10)
-      confidence: Number(row[11]) || 0,             // Column L (index 11)
-      needsReview: row[12] === 'YES',               // Column M (index 12)
-      matchedFacturaFileId: row[13] ? String(row[13]) : undefined, // Column N (index 13)
-      matchConfidence: row[14] ? (String(row[14]) as MatchConfidence) : undefined, // Column O (index 14)
+      fechaEmision: String(row[colIndex.fechaEmision] || ''),
+      fileId: String(row[colIndex.fileId] || ''),
+      fileName: String(row[colIndex.fileName] || ''),
+      nroCertificado: String(row[colIndex.nroCertificado] || ''),
+      cuitAgenteRetencion: String(row[colIndex.cuitAgenteRetencion] || ''),
+      razonSocialAgenteRetencion: String(row[colIndex.razonSocialAgenteRetencion] || ''),
+      impuesto: String(row[colIndex.impuesto] || ''),
+      regimen: String(row[colIndex.regimen] || ''),
+      montoComprobante: parseNumber(row[colIndex.montoComprobante]) || 0,
+      montoRetencion: parseNumber(row[colIndex.montoRetencion]) || 0,
+      cuitSujetoRetenido: '30709076783',  // Always ADVA
+      processedAt: String(row[colIndex.processedAt] || ''),
+      confidence: Number(row[colIndex.confidence]) || 0,
+      needsReview: row[colIndex.needsReview] === 'YES',
+      matchedFacturaFileId: row[colIndex.matchedFacturaFileId] ? String(row[colIndex.matchedFacturaFileId]) : undefined,
+      matchConfidence: row[colIndex.matchConfidence] ? (String(row[colIndex.matchConfidence]) as MatchConfidence) : undefined,
     });
   }
 
@@ -257,6 +304,8 @@ Read using range `'YYYY-MM!A:G'` (7 columns including detalles).
 ### batchUpdate Format for Detalles Updates
 
 ```typescript
+import { SHEETS_BATCH_UPDATE_LIMIT } from '../config.js';
+
 // Build updates for batchUpdate()
 const updates: Array<{ range: string; values: CellValue[][] }> = [];
 
@@ -267,8 +316,11 @@ for (const update of detallesUpdates) {
   });
 }
 
-// Single API call
-await batchUpdate(spreadsheetId, updates);
+// Chunk updates to respect API limit (500 operations max per call)
+for (let i = 0; i < updates.length; i += SHEETS_BATCH_UPDATE_LIMIT) {
+  const chunk = updates.slice(i, i + SHEETS_BATCH_UPDATE_LIMIT);
+  await batchUpdate(spreadsheetId, chunk);
+}
 ```
 
 **Note:** Sheet names with special characters need single quotes in A1 notation (e.g., `'2025-01'`).
@@ -313,6 +365,49 @@ For `matchCreditMovement()`, match credit bank movements against:
 
 ## Implementation Tasks
 
+### Task 0: Add shared constants to config.ts (PREREQUISITE)
+
+1. Update `src/config.ts`:
+   ```typescript
+   // Unified lock for document processing (scan and match)
+   export const PROCESSING_LOCK_ID = 'document-processing';
+   export const PROCESSING_LOCK_TIMEOUT_MS = 300000;  // 5 minutes
+
+   // Batch update limits
+   export const SHEETS_BATCH_UPDATE_LIMIT = 500;  // Google Sheets API limit
+
+   // Parallel processing limits
+   export const PARALLEL_SHEET_READ_CHUNK_SIZE = 4;  // Read 4 sheets at a time
+   export const EXCHANGE_RATE_FETCH_CONCURRENCY = 5;  // Max concurrent API calls
+   ```
+
+2. **No test needed** - these are just constants
+
+### Task 0.5: Update withLock to support custom auto-expiry timeout
+
+**CRITICAL:** Current `LOCK_TIMEOUT_MS = 30000` (30s) in `concurrency.ts:60` is too short for processing.
+
+1. Write test in `src/utils/concurrency.test.ts`:
+   - Test that custom `autoExpiryMs` parameter overrides default 30s
+   - Test that lock auto-expires after custom timeout
+   - Test backward compatibility (omitting parameter uses default 30s)
+
+2. Run test-runner (expect fail)
+
+3. Update `src/utils/concurrency.ts`:
+   - Add optional `autoExpiryMs` parameter to `withLock()`:
+     ```typescript
+     export async function withLock<T>(
+       resourceId: string,
+       fn: () => Promise<T>,
+       waitTimeoutMs: number = 5000,
+       autoExpiryMs: number = LOCK_TIMEOUT_MS  // NEW: defaults to 30s for backward compat
+     ): Promise<Result<T, Error>>
+     ```
+   - Pass `autoExpiryMs` to `LockManager.acquire()` for per-lock expiry
+
+4. Run test-runner (expect pass)
+
 ### Task 1: Add detalles column to Movimientos Bancario schema
 
 1. Write test in `src/constants/spreadsheet-headers.test.ts`:
@@ -341,7 +436,30 @@ For `matchCreditMovement()`, match credit bank movements against:
 
 4. Run test-runner (expect pass)
 
-### Task 3: Extend BankMovementMatcher to handle credit movements
+### Task 3: Add MovimientoRow type to types/index.ts
+
+1. Add to `src/types/index.ts`:
+   ```typescript
+   /**
+    * Row from Movimientos Bancario per-month sheets
+    * Used for matching against Control de Ingresos/Egresos
+    */
+   export interface MovimientoRow {
+     sheetName: string;       // e.g., "2025-01"
+     rowNumber: number;       // Row in sheet (1-indexed, after header)
+     fecha: string;
+     origenConcepto: string;
+     debito: number | null;
+     credito: number | null;
+     saldo: number | null;
+     saldoCalculado: number | null;
+     detalles: string;
+   }
+   ```
+
+2. **No test needed** - just a type definition
+
+### Task 4: Extend BankMovementMatcher to handle credit movements
 
 1. Write test in `src/bank/matcher.test.ts`:
    - Test `matchCreditMovement` matches against Pago Recibido with linked Factura Emitida
@@ -358,6 +476,12 @@ For `matchCreditMovement()`, match credit bank movements against:
    - Test `matchCreditMovement` matches Pago Recibido without linked Factura
    - Test credit movement with no match returns no_match
    - Test CUIT extraction from concepto works for credits
+   - **Additional edge cases:**
+     - Test credit exactly equals Factura total (no retencion) → HIGH confidence
+     - Test credit matches two different Facturas → match highest confidence first
+     - Test credit with CUIT in concepto but no matching Factura → REVISAR! with extracted CUIT
+     - Test zero-amount movement → skip processing
+     - Test negative amounts (Notas de Crédito) → handle correctly
 
 2. Run test-runner (expect fail)
 
@@ -372,7 +496,7 @@ For `matchCreditMovement()`, match credit bank movements against:
        retenciones: Array<Retencion & { row: number }>
      ): BankMovementMatchResult
      ```
-   - **Note:** Uses existing `BankMovement` interface. The orchestrator (Task 6) will convert `MovimientoRow` to `BankMovement` using:
+   - **Note:** Uses existing `BankMovement` interface. The orchestrator (Task 7) will convert `MovimientoRow` to `BankMovement` using:
      ```typescript
      // In match-movimientos.ts
      function movimientoRowToBankMovement(mov: MovimientoRow): BankMovement {
@@ -406,7 +530,7 @@ For `matchCreditMovement()`, match credit bank movements against:
 
 4. Run test-runner (expect pass)
 
-### Task 4: Create movimientos-reader service to read from per-month sheets
+### Task 5: Create movimientos-reader service to read from per-month sheets
 
 1. Write test in `src/services/movimientos-reader.test.ts`:
    - Test `getRecentMovimientoSheets` returns sheets for current + previous year only
@@ -419,22 +543,16 @@ For `matchCreditMovement()`, match credit bank movements against:
      - "SALDO INICIAL AJUSTADO" → skipped
      - "  SALDO INICIAL  " (whitespace) → skipped
      - "SALDO FINAL" → skipped
+   - **Test chunked parallel reading:**
+     - Verify sheets are read in chunks of PARALLEL_SHEET_READ_CHUNK_SIZE
+     - Verify memory is released between chunks
 
 2. Run test-runner (expect fail)
 
 3. Implement `src/services/movimientos-reader.ts`:
    ```typescript
-   interface MovimientoRow {
-     sheetName: string;   // e.g., "2025-01"
-     rowNumber: number;   // Row in sheet (1-indexed, after header)
-     fecha: string;
-     origenConcepto: string;
-     debito: number | null;
-     credito: number | null;
-     saldo: number | null;
-     saldoCalculado: number | null;
-     detalles: string;
-   }
+   import { PARALLEL_SHEET_READ_CHUNK_SIZE } from '../config.js';
+   import type { MovimientoRow } from '../types/index.js';
 
    // Labels to skip (special rows, not transactions)
    const SKIP_LABELS = ['SALDO INICIAL', 'SALDO FINAL'];
@@ -479,21 +597,34 @@ For `matchCreditMovement()`, match credit bank movements against:
    ): Promise<Result<MovimientoRow[], Error>>
 
    // Get all recent movimientos with empty detalles (excludes SALDO INICIAL/FINAL)
-   // Calls getRecentMovimientoSheets, then reads sheets IN PARALLEL
+   // Calls getRecentMovimientoSheets, then reads sheets in CHUNKED PARALLEL
    async function getMovimientosToFill(
      spreadsheetId: string,
      options?: { includeWithDetalles?: boolean }  // For force re-match
-   ): Promise<Result<MovimientoRow[], Error>>
+   ): Promise<Result<MovimientoRow[], Error>> {
+     // ... get sheet names ...
+
+     // Read in chunks to manage memory
+     const allMovimientos: MovimientoRow[] = [];
+     for (let i = 0; i < sheetNames.length; i += PARALLEL_SHEET_READ_CHUNK_SIZE) {
+       const chunk = sheetNames.slice(i, i + PARALLEL_SHEET_READ_CHUNK_SIZE);
+       const results = await Promise.all(chunk.map(readMovimientosForPeriod));
+       // Process results...
+       allMovimientos.push(...results.flatMap(r => r.ok ? r.value : []));
+     }
+
+     return { ok: true, value: allMovimientos };
+   }
    ```
 
    **API optimization:**
    - Use `getSheetMetadata()` once to get all sheet titles
    - Filter by regex `/^\d{4}-\d{2}$/` for YYYY-MM pattern, then filter by year
-   - Read all matching sheets in parallel with `Promise.all()` for speed
+   - Read sheets in **chunks of 4** (not all at once) for memory safety
 
 4. Run test-runner (expect pass)
 
-### Task 5: Create movimientos-detalles service for batch updates
+### Task 6: Create movimientos-detalles service for batch updates
 
 1. Write test in `src/services/movimientos-detalles.test.ts`:
    - Test `updateDetalles` correctly updates column G for specified rows
@@ -501,29 +632,53 @@ For `matchCreditMovement()`, match credit bank movements against:
    - Test update skips rows that already have detalles (when force=false)
    - **Test update overwrites existing detalles (when force=true)**
    - Test empty updates array returns success with 0 count
+   - **Test chunking when updates > 500:**
+     - 600 updates should result in 2 batchUpdate API calls
+     - 1500 updates should result in 3 batchUpdate API calls
 
 2. Run test-runner (expect fail)
 
 3. Implement `src/services/movimientos-detalles.ts`:
    ```typescript
+   import { SHEETS_BATCH_UPDATE_LIMIT } from '../config.js';
+
    interface DetallesUpdate {
      sheetName: string;     // e.g., "2025-01"
      rowNumber: number;     // Row number in sheet
      detalles: string;      // Description to write
    }
 
-   // Update detalles column for specified rows using batchUpdate (1 API call)
+   // Update detalles column for specified rows using batchUpdate
+   // Automatically chunks to respect 500 operations limit
    async function updateDetalles(
      spreadsheetId: string,
      updates: DetallesUpdate[]
-   ): Promise<Result<number, Error>>  // Returns count of updated rows
-   ```
+   ): Promise<Result<number, Error>> {
+     if (updates.length === 0) {
+       return { ok: true, value: 0 };
+     }
 
-   **API optimization:** Use existing `batchUpdate()` from `src/services/sheets.ts` to update all cells in a single API call. Group updates by sheet to build proper ranges (e.g., `"2025-01!G3"`, `"2025-01!G5"`).
+     const allUpdates = updates.map(u => ({
+       range: `'${u.sheetName}'!G${u.rowNumber}`,
+       values: [[u.detalles]],
+     }));
+
+     // Chunk to respect API limit
+     let totalUpdated = 0;
+     for (let i = 0; i < allUpdates.length; i += SHEETS_BATCH_UPDATE_LIMIT) {
+       const chunk = allUpdates.slice(i, i + SHEETS_BATCH_UPDATE_LIMIT);
+       const result = await batchUpdate(spreadsheetId, chunk);
+       if (!result.ok) return result;
+       totalUpdated += chunk.length;
+     }
+
+     return { ok: true, value: totalUpdated };
+   }
+   ```
 
 4. Run test-runner (expect pass)
 
-### Task 6: Create matchMovimientos service to orchestrate matching
+### Task 7: Create matchMovimientos service to orchestrate matching
 
 1. Write test in `src/bank/match-movimientos.test.ts`:
    - Test matching a debit movement against facturas recibidas/pagos enviados/recibos
@@ -537,6 +692,8 @@ For `matchCreditMovement()`, match credit bank movements against:
    - **Test force option re-matches rows with existing detalles**
    - **Test exchange rate pre-fetching is called before matching**
    - **Test error logging when matching fails**
+   - **Test chunked batchUpdate when updates > 500**
+   - **Test memory cleanup between bank processing (setImmediate)**
 
 2. Run test-runner (expect fail)
 
@@ -544,34 +701,23 @@ For `matchCreditMovement()`, match credit bank movements against:
 
    **Required imports:**
    ```typescript
-   import type { Result, Factura, Pago, Recibo, Retencion, MatchConfidence } from '../types/index.js';
+   import type { Result, Factura, Pago, Recibo, Retencion, MatchConfidence, MovimientoRow } from '../types/index.js';
+   import { PROCESSING_LOCK_ID, PROCESSING_LOCK_TIMEOUT_MS } from '../config.js';
    import { withLock } from '../utils/concurrency.js';
    import { prefetchExchangeRates } from '../utils/exchange-rate.js';
    import { info, error as logError } from '../utils/logger.js';
    import { getCachedFolderStructure } from '../services/folder-structure.js';
-   import { getValues, batchUpdate, type CellValue } from '../services/sheets.js';
+   import { getValues, type CellValue } from '../services/sheets.js';
    import { parseNumber } from '../utils/numbers.js';
    import { BankMovementMatcher } from './matcher.js';
-   import { getMovimientosToFill, type MovimientoRow } from '../services/movimientos-reader.js';
+   import { getMovimientosToFill } from '../services/movimientos-reader.js';
    import { updateDetalles } from '../services/movimientos-detalles.js';
    ```
 
-   **Parsing functions (similar to autofill.ts patterns):**
-   - Copy `parseFacturas()`, `parsePagos()`, `parseRecibos()` from `src/bank/autofill.ts` or import if refactored
-   - Add new `parseRetenciones()` function (see Integration Notes above for implementation)
-
-   **Getting bank spreadsheets:**
-   ```typescript
-   const folderStructure = getCachedFolderStructure();
-   if (!folderStructure) {
-     return { ok: false, error: new Error('Folder structure not initialized') };
-   }
-   const bankSpreadsheets = folderStructure.bankSpreadsheets;  // Map<string, string>
-   ```
+   **Parsing functions:** Use header-based column lookup (see Integration Notes)
 
    **Interface definitions:**
    ```typescript
-
    interface MatchMovimientosResult {
      skipped: boolean;
      reason?: string;           // 'already_running' if skipped
@@ -601,30 +747,12 @@ For `matchCreditMovement()`, match credit bank movements against:
      force?: boolean;  // Re-match rows that already have detalles
    }
 
-   // Unified lock shared with scanner.ts - prevents concurrent scan/match
-   const PROCESSING_LOCK_ID = 'document-processing';
-   const PROCESSING_LOCK_TIMEOUT = 300000;  // 5 minutes
-
-   // Match all movimientos for a bank spreadsheet
-   async function matchMovimientosForBank(
-     spreadsheetId: string,
-     spreadsheetName: string,
-     // Egresos data (for debits)
-     facturasRecibidas: Array<Factura & { row: number }>,
-     pagosEnviados: Array<Pago & { row: number }>,
-     recibos: Array<Recibo & { row: number }>,
-     // Ingresos data (for credits)
-     facturasEmitidas: Array<Factura & { row: number }>,
-     pagosRecibidos: Array<Pago & { row: number }>,
-     retenciones: Array<Retencion & { row: number }>,
-     options?: MatchOptions
-   ): Promise<Result<MatchMovimientosResult, Error>>
-
    // Match all movimientos across all banks
    async function matchAllMovimientos(
      options?: MatchOptions
    ): Promise<Result<MatchAllResult, Error>> {
      // Use existing withLock for concurrency control (shared with scanner)
+     // Pass custom auto-expiry timeout (5 minutes instead of default 30s)
      const lockResult = await withLock(
        PROCESSING_LOCK_ID,
        async () => {
@@ -647,8 +775,13 @@ For `matchCreditMovement()`, match credit bank movements against:
 
          // 3. Process banks SEQUENTIALLY (memory efficient)
          const results: MatchMovimientosResult[] = [];
+         const bankSpreadsheets = getCachedFolderStructure()?.bankSpreadsheets;
+
          for (const [bankName, spreadsheetId] of bankSpreadsheets) {
-           // Load this bank's movimientos (1 metadata + N parallel sheet reads)
+           // Allow GC between banks
+           await new Promise(resolve => setImmediate(resolve));
+
+           // Load this bank's movimientos (1 metadata + N chunked sheet reads)
            const movimientos = await getMovimientosToFill(spreadsheetId, {
              includeWithDetalles: options?.force ?? false
            });
@@ -671,7 +804,7 @@ For `matchCreditMovement()`, match credit bank movements against:
            // Match in memory
            const updates = matchAll(movimientos.value, ingresosData.value, egresosData.value);
 
-           // Write batch update (1 API call)
+           // Write batch update (chunked if > 500)
            await updateDetalles(spreadsheetId, updates);
 
            results.push({ /* ... */ });
@@ -691,7 +824,8 @@ For `matchCreditMovement()`, match credit bank movements against:
            }
          };
        },
-       PROCESSING_LOCK_TIMEOUT
+       PROCESSING_LOCK_TIMEOUT_MS,  // Wait timeout: 5 minutes
+       PROCESSING_LOCK_TIMEOUT_MS   // Auto-expiry: 5 minutes (custom, not default 30s)
      );
 
      // Handle lock acquisition failure (scan or match already running)
@@ -723,7 +857,7 @@ For `matchCreditMovement()`, match credit bank movements against:
 
 4. Run test-runner (expect pass)
 
-### Task 7: Add API route for match-movimientos
+### Task 8: Add API route for match-movimientos
 
 1. Write test in `src/routes/scan.test.ts`:
    - Test POST `/api/match-movimientos` returns expected result structure
@@ -753,7 +887,7 @@ For `matchCreditMovement()`, match credit bank movements against:
 
 4. Run test-runner (expect pass)
 
-### Task 8: Add Dashboard menu option for match-movimientos
+### Task 9: Add Dashboard menu option for match-movimientos
 
 1. Update `apps-script/src/main.ts`:
    - Add "📝 Completar Detalles Movimientos" menu item after "Auto-fill Bank Data"
@@ -763,10 +897,10 @@ For `matchCreditMovement()`, match credit bank movements against:
    - Run `npm run build:script`
    - Verify menu item appears and works
 
-### Task 9: Add unified lock to scan and trigger match-movimientos after
+### Task 10: Add unified lock to scan and trigger match-movimientos after
 
 1. Write test in `src/processing/scanner.test.ts`:
-   - **Test that scan process is wrapped in unified lock (`'document-processing'`)**
+   - **Test that scan process is wrapped in unified lock (`PROCESSING_LOCK_ID` from config)**
    - **Test that concurrent scan requests return `skipped: true` instead of running twice**
    - **Test that scan cannot run while match is running (and vice versa)**
    - Test that scan triggers matchAllMovimientos after processing any document type
@@ -774,19 +908,16 @@ For `matchCreditMovement()`, match credit bank movements against:
    - Test that matchAllMovimientos is called only when scan succeeds
    - **Test that match is triggered AFTER scan releases lock (not inside lock)**
    - **Test that errors are logged (not silently discarded)**
+   - **Test that retriedFileIds is cleared in finally block (not just on success)**
 
 2. Run test-runner (expect fail)
 
 3. Update `src/processing/scanner.ts`:
    - Import `matchAllMovimientos` from `../bank/match-movimientos.js`
    - Import `withLock` from `../utils/concurrency.js`
+   - Import `PROCESSING_LOCK_ID, PROCESSING_LOCK_TIMEOUT_MS` from `../config.js`
    - Import `error as logError` from `../utils/logger.js`
-   - Add lock constants (same as match-movimientos.ts):
-     ```typescript
-     // Unified lock shared with match-movimientos.ts - prevents concurrent scan/match
-     const PROCESSING_LOCK_ID = 'document-processing';
-     const PROCESSING_LOCK_TIMEOUT = 300000;  // 5 minutes
-     ```
+   - **Move `retriedFileIds.clear()` to `finally` block** (not just on success)
    - **Wrap scan processing logic in withLock:**
      ```typescript
      async function processScan(): Promise<Result<ScanResult, Error>> {
@@ -796,7 +927,8 @@ For `matchCreditMovement()`, match credit bank movements against:
            // ... existing scan processing logic ...
            return scanResult;
          },
-         PROCESSING_LOCK_TIMEOUT
+         PROCESSING_LOCK_TIMEOUT_MS,  // Wait timeout
+         PROCESSING_LOCK_TIMEOUT_MS   // Auto-expiry (5 min, not default 30s)
        );
 
        // Handle lock acquisition failure (match or another scan already running)
@@ -858,21 +990,28 @@ For `matchCreditMovement()`, match credit bank movements against:
 
 4. Run test-runner (expect pass)
 
-### Task 10: Update documentation
+### Task 11: Update documentation
 
 1. Update `SPREADSHEET_FORMAT.md`:
    - Add 'detalles' column to Movimientos Bancario schema (column G)
    - Document the matching behavior and sources for both debits and credits
    - Document retencion tolerance matching for credits
+   - Document the 90-day retencion date range
+   - Document known limitations:
+     - Partial payments need manual review
+     - Year boundary (only current + previous year)
+     - Inter-bank transfers may not be detected
 
 2. Update `CLAUDE.md`:
    - Add `/api/match-movimientos` to API ENDPOINTS table
    - Document optional `force` query parameter
    - Document auto-trigger after scan
    - Add note about unified concurrency control:
-     - Both scan and match use same lock ID `'document-processing'`
+     - Both scan and match use same lock ID `PROCESSING_LOCK_ID` from config.ts
      - At any time, only one scan OR match process can run
+     - Lock auto-expires after 5 minutes (configurable via `PROCESSING_LOCK_TIMEOUT_MS`)
      - Prevents race conditions and overlapping processing
+   - Document new config constants in ENV VARS or COMMANDS section
 
 ## Post-Implementation Checklist
 
