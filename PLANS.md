@@ -596,3 +596,74 @@ This plan tackles all 19 HIGH priority bugs in 6 phases, plus related MEDIUM ite
 - #20-21, #24-34, #36-40, #43, #45-48, #54-60
 
 These can be addressed in a separate plan after HIGH priority items are complete.
+
+---
+
+## Iteration 1
+
+**Implemented:** 2026-01-31
+
+### Phase 1: Date/Time & Precision Fixes - COMPLETED
+
+**Tasks Completed:**
+- Task 1.1: Fixed year validation (bug #4) - Allow dates from 10 years in the past (current year - 10 to current year + 1)
+- Task 1.2: Fixed timezone inconsistency (bug #7) - Updated `formatISODate()` to use UTC methods matching `parseArgDate()`
+- Task 1.3: Fixed floating-point precision in exchange rate (bug #3) - Round `expectedArs` to 2 decimal places before tolerance calculation
+- Task 1.4: Fixed formatMonthFolder invalid date handling (bug #23) - Return `undefined` for invalid dates instead of `"NaN - undefined"`
+- Task 1.5: Improved truncated response handling (bug #22) - Return structured result with type information (`valid`, `truncated`, or `empty`)
+
+**Files Modified:**
+- `src/utils/date.ts` - Year validation, UTC methods for formatISODate
+- `src/utils/date.test.ts` - Added tests for year validation and timezone consistency
+- `src/utils/exchange-rate.ts` - Monetary rounding, UTC consistency in normalizeDateToIso
+- `src/utils/exchange-rate.test.ts` - Added precision tests
+- `src/utils/spanish-date.ts` - Invalid date handling
+- `src/utils/spanish-date.test.ts` - Added invalid date tests
+- `src/gemini/parser.ts` - Structured extractJSON return type, updated all call sites
+- `src/gemini/parser.test.ts` - Added extractJSON tests
+- `src/services/document-sorter.ts` - Handle undefined from formatMonthFolder
+- `src/services/folder-structure.ts` - Handle undefined from formatMonthFolder
+
+**Bug Fixes (from bug-hunter):**
+- Fixed `formatMonthFolder` callers to handle `undefined` return value (document-sorter.ts, folder-structure.ts)
+- Fixed `normalizeDateToIso` to use UTC methods via `formatISODate()` for consistency
+
+**Checklist Results:**
+- bug-hunter: Found 2 MEDIUM bugs, fixed immediately
+- test-runner: All 1207 tests pass
+- builder: Zero warnings
+
+**Notes:**
+- All Phase 1 tasks followed strict TDD workflow (test first, implement, verify)
+- The `extractJSON` return type change is a breaking change but acceptable in DEVELOPMENT status
+- Timezone consistency is now maintained across all date formatting functions (UTC-based)
+
+### Review Findings
+
+**Files reviewed:** 10
+- `src/utils/date.ts`, `src/utils/date.test.ts`
+- `src/utils/exchange-rate.ts`, `src/utils/exchange-rate.test.ts`
+- `src/utils/spanish-date.ts`, `src/utils/spanish-date.test.ts`
+- `src/gemini/parser.ts`, `src/gemini/parser.test.ts`
+- `src/services/document-sorter.ts`, `src/services/folder-structure.ts`
+
+**Checks applied:** Security, Logic, Async, Resources, Type Safety, Error Handling, Conventions
+
+No issues found - all implementations are correct and follow project conventions.
+
+**Verification details:**
+- Task 1.1 (year validation): Correctly allows 10 years in the past (currentYear - 10 to currentYear + 1)
+- Task 1.2 (timezone): `formatISODate()` now uses UTC methods matching `parseArgDate()`
+- Task 1.3 (precision): `expectedArs` rounded to 2 decimal places using `Math.round(value * 100) / 100`
+- Task 1.4 (formatMonthFolder): Returns `undefined` for invalid dates; callers handle with descriptive errors
+- Task 1.5 (extractJSON): Discriminated union `ExtractJSONResult` properly typed; all call sites updated
+
+**Type Safety:** ✓ Proper discriminated union for extractJSON, no unsafe casts
+**Error Handling:** ✓ All error cases handled with descriptive messages
+**Conventions:** ✓ ESM imports with .js, Pino logger, Result<T,E> pattern
+
+---
+
+## Status: COMPLETE (Phase 1)
+
+Phase 1 (Date/Time & Precision Fixes) implemented and reviewed successfully. Ready for Phase 2 implementation.

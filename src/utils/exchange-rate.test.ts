@@ -7,6 +7,7 @@ import {
   getExchangeRateSync,
   clearExchangeRateCache,
   prefetchExchangeRates,
+  amountsMatchCrossCurrency,
   type ExchangeRate
 } from './exchange-rate.js';
 
@@ -124,6 +125,154 @@ describe('exchange-rate', () => {
       // Second should still be cached
       const result = getExchangeRateSync('2024-01-16');
       expect(result.ok).toBe(true);
+    });
+  });
+
+  describe('amountsMatchCrossCurrency', () => {
+    beforeEach(() => {
+      // Clear any previous mocks
+      vi.clearAllMocks();
+    });
+
+    // Bug #3: Fix floating-point precision errors
+    it('matches amounts with proper monetary rounding', async () => {
+      const mockRate: ExchangeRate = {
+        fecha: '2025-01-15',
+        compra: 1240,
+        venta: 1250
+      };
+
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => mockRate
+      });
+
+      await prefetchExchangeRates(['2025-01-15']);
+
+      // Test case: 100 USD at rate 1250 = 125000 ARS exactly
+      const result = amountsMatchCrossCurrency(
+        100.00,
+        'USD',
+        '2025-01-15',
+        125000.00,
+        5 // 5% tolerance
+      );
+
+      expect(result.matches).toBe(true);
+      expect(result.isCrossCurrency).toBe(true);
+    });
+
+    it('handles accumulated floating-point precision correctly', async () => {
+      const mockRate: ExchangeRate = {
+        fecha: '2025-01-16',
+        compra: 1240,
+        venta: 1250
+      };
+
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => mockRate
+      });
+
+      await prefetchExchangeRates(['2025-01-16']);
+
+      // Edge case: 99.99 USD at rate 1250 should be rounded properly
+      // 99.99 * 1250 = 124987.50 (exact)
+      // Should match within 5% tolerance
+      const result = amountsMatchCrossCurrency(
+        99.99,
+        'USD',
+        '2025-01-16',
+        124987.50,
+        5
+      );
+
+      expect(result.matches).toBe(true);
+    });
+
+    it('does not produce false negatives from small precision errors', async () => {
+      const mockRate: ExchangeRate = {
+        fecha: '2025-01-17',
+        compra: 1240,
+        venta: 1250
+      };
+
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => mockRate
+      });
+
+      await prefetchExchangeRates(['2025-01-17']);
+
+      // Small amounts where floating-point errors might accumulate
+      // 1.23 USD * 1250 = 1537.50
+      const result = amountsMatchCrossCurrency(
+        1.23,
+        'USD',
+        '2025-01-17',
+        1537.50,
+        5
+      );
+
+      expect(result.matches).toBe(true);
+    });
+
+    it('rounds expectedArs to 2 decimal places for monetary precision', async () => {
+      // Mock rate with decimal places that cause floating-point issues
+      const mockRate: ExchangeRate = {
+        fecha: '2025-01-20',
+        compra: 1250.00,
+        venta: 1250.37
+      };
+
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => mockRate
+      });
+
+      await prefetchExchangeRates(['2025-01-20']);
+
+      // 10.29 USD * 1250.37 = 12866.307299999999 (floating-point error)
+      // Should be rounded to 12866.31
+      const result = amountsMatchCrossCurrency(
+        10.29,
+        'USD',
+        '2025-01-20',
+        12866.31,
+        5
+      );
+
+      // expectedArs should be rounded to 2 decimal places (12866.31, not 12866.307299999999)
+      expect(result.expectedArs).toBe(12866.31);
+      expect(result.matches).toBe(true);
+    });
+
+    it('tolerance calculation uses rounded expectedArs value', async () => {
+      const mockRate: ExchangeRate = {
+        fecha: '2025-01-21',
+        compra: 1250.00,
+        venta: 1250.33
+      };
+
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => mockRate
+      });
+
+      await prefetchExchangeRates(['2025-01-21']);
+
+      // 7.77 USD * 1250.33 = 9715.0641 (not exactly representable in binary)
+      // Should round to 9715.06
+      const result = amountsMatchCrossCurrency(
+        7.77,
+        'USD',
+        '2025-01-21',
+        9715.06,
+        5
+      );
+
+      expect(result.expectedArs).toBe(9715.06);
+      expect(result.matches).toBe(true);
     });
   });
 });

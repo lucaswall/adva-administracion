@@ -4,7 +4,7 @@
  */
 
 import type { Result, Moneda } from '../types/index.js';
-import { parseArgDate } from './date.js';
+import { parseArgDate, formatISODate } from './date.js';
 import { amountsMatch } from './numbers.js';
 import { warn } from './logger.js';
 import { getCorrelationId } from './correlation.js';
@@ -100,15 +100,14 @@ function setCachedValue(key: string, rate: ExchangeRate): void {
 /**
  * Parses a date string and returns it in ISO format (YYYY-MM-DD)
  * Handles both ISO and Argentine formats
+ * Uses UTC date components for consistency with formatISODate
  */
 function normalizeDateToIso(dateStr: string): string | null {
   const parsed = parseArgDate(dateStr);
   if (!parsed) return null;
 
-  const year = parsed.getFullYear();
-  const month = String(parsed.getMonth() + 1).padStart(2, '0');
-  const day = String(parsed.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
+  // Use formatISODate for consistency (uses UTC methods)
+  return formatISODate(parsed);
 }
 
 /**
@@ -301,7 +300,8 @@ export function amountsMatchCrossCurrency(
   }
 
   const rate = rateResult.value.venta; // Use venta (sell) rate
-  const expectedArs = facturaAmount * rate;
+  // Round to 2 decimal places for monetary precision (prevents floating-point errors)
+  const expectedArs = Math.round(facturaAmount * rate * 100) / 100;
 
   // Calculate tolerance bounds
   const toleranceFactor = tolerancePercent / 100;

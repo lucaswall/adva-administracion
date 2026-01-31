@@ -767,6 +767,12 @@ export async function getOrCreateMonthFolder(
 
   // For ingresos and egresos, create/find month folder
   const monthName = formatMonthFolder(date);
+  if (!monthName) {
+    return {
+      ok: false,
+      error: new Error(`Invalid date for month folder: ${date.toISOString()}`)
+    };
+  }
   const monthCacheKey = `${year}:${destination}:${monthName}`;
 
   // Check cache first

@@ -120,6 +120,45 @@ describe('formatISODate', () => {
     const date = new Date(2025, 0, 5); // January 5, 2025
     expect(formatISODate(date)).toBe('2025-01-05');
   });
+
+  // Bug #7: Ensure timezone consistency with parseArgDate
+  it('roundtrip preserves date (parseArgDate then formatISODate)', () => {
+    const parsed = parseArgDate('15/03/2025');
+    expect(parsed).not.toBeNull();
+    expect(formatISODate(parsed!)).toBe('2025-03-15');
+  });
+
+  it('uses UTC methods matching parseArgDate behavior', () => {
+    // parseArgDate creates dates at noon UTC
+    const parsed = parseArgDate('2025-03-15');
+    expect(parsed).not.toBeNull();
+
+    // Verify the date is at noon UTC (12:00:00)
+    expect(parsed!.getUTCHours()).toBe(12);
+
+    // formatISODate should use UTC methods to extract year/month/day
+    // so it matches the UTC date components
+    expect(formatISODate(parsed!)).toBe('2025-03-15');
+
+    // Test that UTC year/month/day are what we expect
+    expect(parsed!.getUTCFullYear()).toBe(2025);
+    expect(parsed!.getUTCMonth()).toBe(2); // March = 2
+    expect(parsed!.getUTCDate()).toBe(15);
+  });
+
+  it('formats UTC date correctly even when local date differs', () => {
+    // Create date at Jan 1, 2025 02:00 UTC
+    // In UTC-3 timezone, this is Dec 31, 2024 23:00 local
+    const date = new Date(Date.UTC(2025, 0, 1, 2, 0, 0));
+
+    // Should return UTC date (Jan 1), not local date (Dec 31)
+    expect(formatISODate(date)).toBe('2025-01-01');
+
+    // Verify the date components
+    expect(date.getUTCFullYear()).toBe(2025);
+    expect(date.getUTCMonth()).toBe(0);
+    expect(date.getUTCDate()).toBe(1);
+  });
 });
 
 describe('isWithinDays', () => {
@@ -189,15 +228,43 @@ describe('isValidISODate', () => {
   });
 
   it('returns false for years outside reasonable range', () => {
-    expect(isValidISODate('1999-01-01')).toBe(false); // Before 2000
-    const farFuture = new Date().getFullYear() + 2;
+    const currentYear = new Date().getFullYear();
+    const elevenYearsAgo = currentYear - 11;
+    expect(isValidISODate(`${elevenYearsAgo}-01-01`)).toBe(false); // Before current-10
+    const farFuture = currentYear + 2;
     expect(isValidISODate(`${farFuture}-01-01`)).toBe(false); // More than 1 year in future
   });
 
-  it('returns true for years in reasonable range (2000 to current+1)', () => {
+  it('returns true for years in reasonable range (current-10 to current+1)', () => {
     const currentYear = new Date().getFullYear();
-    expect(isValidISODate('2000-01-01')).toBe(true);
+    const tenYearsAgo = currentYear - 10;
+    expect(isValidISODate(`${tenYearsAgo}-01-01`)).toBe(true);
     expect(isValidISODate(`${currentYear}-12-31`)).toBe(true);
     expect(isValidISODate(`${currentYear + 1}-01-01`)).toBe(true);
+  });
+
+  // Bug #4: Allow dates from 10 years in the past for batch processing
+  it('returns true for dates 3 years in the past', () => {
+    const currentYear = new Date().getFullYear();
+    const threeYearsAgo = currentYear - 3;
+    expect(isValidISODate(`${threeYearsAgo}-05-15`)).toBe(true);
+  });
+
+  it('returns true for dates 6 years in the past', () => {
+    const currentYear = new Date().getFullYear();
+    const sixYearsAgo = currentYear - 6;
+    expect(isValidISODate(`${sixYearsAgo}-01-01`)).toBe(true);
+  });
+
+  it('returns false for dates more than 10 years in the past', () => {
+    const currentYear = new Date().getFullYear();
+    const elevenYearsAgo = currentYear - 11;
+    expect(isValidISODate(`${elevenYearsAgo}-12-31`)).toBe(false);
+  });
+
+  it('returns false for dates more than 1 year in the future', () => {
+    const currentYear = new Date().getFullYear();
+    const twoYearsFromNow = currentYear + 2;
+    expect(isValidISODate(`${twoYearsFromNow}-01-01`)).toBe(false);
   });
 });

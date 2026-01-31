@@ -157,13 +157,21 @@ function isTruncated(response: string): boolean {
 }
 
 /**
+ * Result types for JSON extraction
+ */
+export type ExtractJSONResult =
+  | { type: 'valid'; json: string }
+  | { type: 'truncated'; partial: string }
+  | { type: 'empty' };
+
+/**
  * Extracts JSON from a response that might be wrapped in markdown
  *
  * @param response - Raw response text
- * @returns Extracted JSON string or empty string if no JSON found
+ * @returns Extraction result with type information
  */
-export function extractJSON(response: string): string {
-  if (!response) return '';
+export function extractJSON(response: string): ExtractJSONResult {
+  if (!response) return { type: 'empty' };
 
   // Remove leading/trailing whitespace
   const trimmed = response.trim();
@@ -181,9 +189,7 @@ export function extractJSON(response: string): string {
       responseEnd: preview
     });
 
-    // Return empty string - caller will handle "No JSON found" error
-    // But the warning log will help diagnose the issue
-    return '';
+    return { type: 'truncated', partial: trimmed };
   }
 
   // Check for markdown code blocks (use non-greedy match and take first occurrence)
@@ -193,7 +199,7 @@ export function extractJSON(response: string): string {
     const firstBlock = markdownMatches[0];
     const contentMatch = firstBlock.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/);
     if (contentMatch && contentMatch[1] !== undefined) {
-      return contentMatch[1].trim();
+      return { type: 'valid', json: contentMatch[1].trim() };
     }
   }
 
@@ -211,12 +217,13 @@ export function extractJSON(response: string): string {
       }
     }
     if (endIndex > 0) {
-      return trimmed.substring(0, endIndex);
+      return { type: 'valid', json: trimmed.substring(0, endIndex) };
     }
-    return trimmed;
+    // Incomplete JSON (no matching closing brace)
+    return { type: 'truncated', partial: trimmed };
   }
 
-  return '';
+  return { type: 'empty' };
 }
 
 /**
@@ -356,13 +363,20 @@ export function parseFacturaResponse(
 ): Result<ParseResult<Partial<Factura>>, ParseError> {
   try {
     // Extract JSON
-    const jsonStr = extractJSON(response);
-    if (!jsonStr) {
+    const extractResult = extractJSON(response);
+    if (extractResult.type === 'empty') {
       return {
         ok: false,
         error: new ParseError('No JSON found in response', response)
       };
     }
+    if (extractResult.type === 'truncated') {
+      return {
+        ok: false,
+        error: new ParseError('Response appears truncated', extractResult.partial)
+      };
+    }
+    const jsonStr = extractResult.json;
 
     // Parse JSON
     const rawData = JSON.parse(jsonStr) as RawFacturaExtraction;
@@ -541,13 +555,20 @@ export function parsePagoResponse(
 ): Result<ParseResult<Partial<Pago>>, ParseError> {
   try {
     // Extract JSON
-    const jsonStr = extractJSON(response);
-    if (!jsonStr) {
+    const extractResult = extractJSON(response);
+    if (extractResult.type === 'empty') {
       return {
         ok: false,
         error: new ParseError('No JSON found in response', response)
       };
     }
+    if (extractResult.type === 'truncated') {
+      return {
+        ok: false,
+        error: new ParseError('Response appears truncated', extractResult.partial)
+      };
+    }
+    const jsonStr = extractResult.json;
 
     // Parse JSON
     const data = JSON.parse(jsonStr) as Partial<Pago>;
@@ -623,13 +644,20 @@ export function parsePagoResponse(
 export function parseReciboResponse(response: string): Result<ParseResult<Partial<Recibo>>, ParseError> {
   try {
     // Extract JSON
-    const jsonStr = extractJSON(response);
-    if (!jsonStr) {
+    const extractResult = extractJSON(response);
+    if (extractResult.type === 'empty') {
       return {
         ok: false,
         error: new ParseError('No JSON found in response', response)
       };
     }
+    if (extractResult.type === 'truncated') {
+      return {
+        ok: false,
+        error: new ParseError('Response appears truncated', extractResult.partial)
+      };
+    }
+    const jsonStr = extractResult.json;
 
     // Parse JSON
     const data = JSON.parse(jsonStr) as Partial<Recibo>;
@@ -864,13 +892,20 @@ function validateMovimientosBroker(movimientos: Array<{
 export function parseResumenBancarioResponse(response: string): Result<ParseResult<Partial<ResumenBancarioConMovimientos>>, ParseError> {
   try {
     // Extract JSON
-    const jsonStr = extractJSON(response);
-    if (!jsonStr) {
+    const extractResult = extractJSON(response);
+    if (extractResult.type === 'empty') {
       return {
         ok: false,
         error: new ParseError('No JSON found in response', response)
       };
     }
+    if (extractResult.type === 'truncated') {
+      return {
+        ok: false,
+        error: new ParseError('Response appears truncated', extractResult.partial)
+      };
+    }
+    const jsonStr = extractResult.json;
 
     // Parse JSON - might include movimientos array
     const data = JSON.parse(jsonStr) as Partial<ResumenBancarioConMovimientos>;
@@ -980,13 +1015,20 @@ export function parseResumenBancarioResponse(response: string): Result<ParseResu
 export function parseResumenTarjetaResponse(response: string): Result<ParseResult<Partial<ResumenTarjetaConMovimientos>>, ParseError> {
   try {
     // Extract JSON
-    const jsonStr = extractJSON(response);
-    if (!jsonStr) {
+    const extractResult = extractJSON(response);
+    if (extractResult.type === 'empty') {
       return {
         ok: false,
         error: new ParseError('No JSON found in response', response)
       };
     }
+    if (extractResult.type === 'truncated') {
+      return {
+        ok: false,
+        error: new ParseError('Response appears truncated', extractResult.partial)
+      };
+    }
+    const jsonStr = extractResult.json;
 
     // Parse JSON - might include movimientos array
     const data = JSON.parse(jsonStr) as Partial<ResumenTarjetaConMovimientos>;
@@ -1109,13 +1151,20 @@ export function parseResumenTarjetaResponse(response: string): Result<ParseResul
 export function parseResumenBrokerResponse(response: string): Result<ParseResult<Partial<ResumenBrokerConMovimientos>>, ParseError> {
   try {
     // Extract JSON
-    const jsonStr = extractJSON(response);
-    if (!jsonStr) {
+    const extractResult = extractJSON(response);
+    if (extractResult.type === 'empty') {
       return {
         ok: false,
         error: new ParseError('No JSON found in response', response)
       };
     }
+    if (extractResult.type === 'truncated') {
+      return {
+        ok: false,
+        error: new ParseError('Response appears truncated', extractResult.partial)
+      };
+    }
+    const jsonStr = extractResult.json;
 
     // Parse JSON - might include movimientos array
     const data = JSON.parse(jsonStr) as Partial<ResumenBrokerConMovimientos>;
@@ -1232,13 +1281,20 @@ export function parseClassificationResponse(
   response: string
 ): Result<ClassificationResult, ParseError> {
   try {
-    const jsonStr = extractJSON(response);
-    if (!jsonStr) {
+    const extractResult = extractJSON(response);
+    if (extractResult.type === 'empty') {
       return {
         ok: false,
         error: new ParseError('No JSON found in classification response', response)
       };
     }
+    if (extractResult.type === 'truncated') {
+      return {
+        ok: false,
+        error: new ParseError('Classification response appears truncated', extractResult.partial)
+      };
+    }
+    const jsonStr = extractResult.json;
 
     const data = JSON.parse(jsonStr);
 
@@ -1286,13 +1342,20 @@ export function parseRetencionResponse(
 ): Result<ParseResult<Partial<Retencion>>, ParseError> {
   try {
     // Extract JSON
-    const jsonStr = extractJSON(response);
-    if (!jsonStr) {
+    const extractResult = extractJSON(response);
+    if (extractResult.type === 'empty') {
       return {
         ok: false,
         error: new ParseError('No JSON found in response', response)
       };
     }
+    if (extractResult.type === 'truncated') {
+      return {
+        ok: false,
+        error: new ParseError('Response appears truncated', extractResult.partial)
+      };
+    }
+    const jsonStr = extractResult.json;
 
     // Parse JSON
     const data = JSON.parse(jsonStr) as Partial<Retencion>;

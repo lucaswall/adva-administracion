@@ -24,9 +24,14 @@ export const SPANISH_MONTHS = [
 /**
  * Formats a date as a month folder name
  * @param date - Date to format
- * @returns Folder name in format "MM - MonthName" (e.g., "01 - Enero")
+ * @returns Folder name in format "MM - MonthName" (e.g., "01 - Enero"), or undefined if date is invalid
  */
-export function formatMonthFolder(date: Date): string {
+export function formatMonthFolder(date: Date): string | undefined {
+  // Validate date is valid
+  if (isNaN(date.getTime())) {
+    return undefined;
+  }
+
   const monthIndex = date.getMonth();
   const monthNumber = String(monthIndex + 1).padStart(2, '0');
   const monthName = SPANISH_MONTHS[monthIndex];

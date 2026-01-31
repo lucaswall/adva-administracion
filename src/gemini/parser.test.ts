@@ -8,7 +8,8 @@ import {
   parseResumenTarjetaResponse,
   parseResumenBrokerResponse,
   assignCuitsAndClassify,
-  parseFacturaResponse
+  parseFacturaResponse,
+  extractJSON
 } from './parser.js';
 
 describe('Parser - Bank Name Normalization', () => {
@@ -798,6 +799,58 @@ describe('isValidDateFormat', () => {
     if (result.ok) {
       // Should NOT flag for review
       expect(result.value.needsReview).toBe(false);
+    }
+  });
+});
+
+// Bug #22: Improve truncated response handling
+describe('extractJSON', () => {
+  it('returns valid type for complete JSON', () => {
+    const response = '{"field": "value"}';
+    const result = extractJSON(response);
+
+    expect(result.type).toBe('valid');
+    if (result.type === 'valid') {
+      expect(result.json).toBe('{"field": "value"}');
+    }
+  });
+
+  it('returns truncated type for incomplete JSON', () => {
+    const response = '{"field": "value"'; // Missing closing brace
+    const result = extractJSON(response);
+
+    expect(result.type).toBe('truncated');
+    if (result.type === 'truncated') {
+      expect(result.partial).toContain('{"field": "value"');
+    }
+  });
+
+  it('returns empty type when no JSON found', () => {
+    const response = 'This is just plain text with no JSON';
+    const result = extractJSON(response);
+
+    expect(result.type).toBe('empty');
+  });
+
+  it('distinguishes between truncated and empty', () => {
+    const truncated = '{"incomplete": ';
+    const empty = 'No JSON here';
+
+    const truncatedResult = extractJSON(truncated);
+    const emptyResult = extractJSON(empty);
+
+    expect(truncatedResult.type).toBe('truncated');
+    expect(emptyResult.type).toBe('empty');
+    expect(truncatedResult.type).not.toBe(emptyResult.type);
+  });
+
+  it('extracts JSON from markdown code blocks', () => {
+    const response = '```json\n{"field": "value"}\n```';
+    const result = extractJSON(response);
+
+    expect(result.type).toBe('valid');
+    if (result.type === 'valid') {
+      expect(result.json).toContain('{"field": "value"}');
     }
   });
 });
