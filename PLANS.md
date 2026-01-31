@@ -89,11 +89,25 @@ Month sheet names are YYYY-MM format.
 2. **Control data stays loaded** - Ingresos/Egresos data (~1000s of rows) stays in memory throughout (reasonable size)
 3. **Stream updates** - Don't accumulate all updates across all banks; write after each bank completes
 
+**Parallel reads for speed:**
+- Read all month sheets for a bank in parallel using `Promise.all()`
+- Before: 12 sheets × 300ms = 3.6s per bank (sequential)
+- After: 12 sheets in parallel = ~500ms per bank
+- Total time reduced from ~25s to ~10s
+
+**Trigger after every scan:**
+- Any document type (factura, pago, recibo, retencion, resumen) could match existing movimientos
+- New Factura Recibida → might match existing bank debit
+- New Pago Recibido → might match existing bank credit
+- New Retencion → might help match credit to factura (provides tolerance amount)
+- Run async (fire and forget) so scan response isn't blocked
+
 **Estimated API Calls per execution:**
 - Control de Ingresos: 3 reads (Facturas Emitidas, Pagos Recibidos, Retenciones)
 - Control de Egresos: 3 reads (Facturas Recibidas, Pagos Enviados, Recibos)
-- Per bank spreadsheet: 1 metadata + N month sheet reads + 1 batch update
+- Per bank spreadsheet: 1 metadata + N month sheet reads (parallel) + 1 batch update
 - Total: 6 + (banks × (1 + months + 1)) ≈ 6 + (5 banks × 15 calls) = ~81 calls
+- **Time: ~10 seconds** (with parallel reads)
 
 ## Original Plan
 
@@ -202,13 +216,16 @@ Month sheet names are YYYY-MM format.
    ): Promise<Result<MovimientoRow[], Error>>
 
    // Get all recent movimientos with empty detalles (excludes SALDO INICIAL/FINAL)
-   // Calls getRecentMovimientoSheets, then reads each sheet
+   // Calls getRecentMovimientoSheets, then reads sheets IN PARALLEL
    async function getMovimientosToFill(
      spreadsheetId: string
    ): Promise<Result<MovimientoRow[], Error>>
    ```
 
-   **API optimization:** Use `getSheetMetadata()` once to get all sheet titles, filter by regex `/^\d{4}-\d{2}$/` for YYYY-MM pattern, then filter by year.
+   **API optimization:**
+   - Use `getSheetMetadata()` once to get all sheet titles
+   - Filter by regex `/^\d{4}-\d{2}$/` for YYYY-MM pattern, then filter by year
+   - Read all matching sheets in parallel with `Promise.all()` for speed
 
 4. Run test-runner (expect pass)
 
@@ -350,18 +367,30 @@ Month sheet names are YYYY-MM format.
    - Run `npm run build:script`
    - Verify menu item appears and works
 
-### Task 9: Trigger match-movimientos at end of scan
+### Task 9: Trigger match-movimientos at end of scan (async)
 
 1. Write test in `src/processing/scanner.test.ts`:
-   - Test that scan triggers matchAllMovimientos after processing
+   - Test that scan triggers matchAllMovimientos after processing any document type
+   - Test that matchAllMovimientos runs async (doesn't block scan response)
    - Test that matchAllMovimientos is called only when scan succeeds
 
 2. Run test-runner (expect fail)
 
 3. Update `src/processing/scanner.ts`:
    - Import `matchAllMovimientos` from `../bank/match-movimientos.js`
-   - Call `matchAllMovimientos()` at end of successful scan (after folder structure update)
-   - Log results
+   - At end of successful scan, call async (fire and forget):
+     ```typescript
+     // Don't await - run in background so scan response isn't delayed
+     void matchAllMovimientos().then(result => {
+       if (result.ok) {
+         info('Match movimientos completed', {
+           module: 'scanner',
+           filled: result.value.totalFilled
+         });
+       }
+     });
+     ```
+   - Any document type triggers this (factura, pago, recibo, retencion, resumen)
 
 4. Run test-runner (expect pass)
 
