@@ -50,8 +50,9 @@ export { processFile, hasValidDate, type ProcessFileResult } from './extractor.j
 // This is cleared in the finally block of each scan
 const retriedFileIds = new Map<string, number>();
 
-// Module-level state for scan deferral
-let pendingScan = false;
+// Module-level state for scan deferral - uses state machine to prevent TOCTOU race
+type ScanState = 'idle' | 'pending' | 'running';
+let scanState: ScanState = 'idle';
 
 /**
  * Delay utility for exponential backoff
@@ -361,14 +362,14 @@ function triggerMatchAsync(): void {
  * @returns Scan result with statistics
  */
 export async function scanFolder(folderId?: string): Promise<Result<ScanResult, Error>> {
-  // Check if a scan is already waiting - if so, skip (it will handle our files)
-  if (pendingScan) {
-    info('Scan skipped - another scan already pending', { module: 'scanner' });
+  // Atomic check-and-set to prevent TOCTOU race (no yield between read and write)
+  if (scanState !== 'idle') {
+    info('Scan skipped - another scan already ' + scanState, { module: 'scanner' });
     return {
       ok: true,
       value: {
         skipped: true,
-        reason: 'scan_pending',
+        reason: scanState === 'pending' ? 'scan_pending' : 'scan_running',
         filesProcessed: 0,
         facturasAdded: 0,
         pagosAdded: 0,
@@ -379,15 +380,16 @@ export async function scanFolder(folderId?: string): Promise<Result<ScanResult, 
       }
     };
   }
-
-  // Set pending flag before waiting for lock
-  pendingScan = true;
+  scanState = 'pending';
 
   try {
     // This WAITS for lock (up to 5 min) instead of returning immediately
     const lockResult = await withLock(
       PROCESSING_LOCK_ID,
       async () => {
+        // Mark as running after acquiring lock
+        scanState = 'running';
+
         // Wrap the entire scan in a correlation context
         return withCorrelationAsync(async () => {
           const correlationId = getCorrelationId();
@@ -709,8 +711,8 @@ export async function scanFolder(folderId?: string): Promise<Result<ScanResult, 
 
     return scanResult;
   } finally {
-    // Always clear pending flag when done
-    pendingScan = false;
+    // Always reset to idle when done
+    scanState = 'idle';
   }
 }
 

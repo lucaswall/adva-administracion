@@ -617,6 +617,135 @@ describe('scanner', () => {
       });
     });
 
+    it('prevents race condition - concurrent scanFolder calls use atomic state check', async () => {
+      // Test that multiple concurrent scanFolder invocations don't both proceed
+      // This tests the fix for the pendingScan TOCTOU race condition
+
+      const { withLock } = await import('../utils/concurrency.js');
+
+      let scanCount = 0;
+
+      // Mock withLock to execute immediately and count how many scans actually acquire the lock
+      vi.mocked(withLock).mockImplementation(async (_lockId, fn) => {
+        scanCount++;
+        const result = await fn();
+        return { ok: true, value: result };
+      });
+
+      mockListFiles.mockResolvedValue({
+        ok: true,
+        value: [{
+          id: 'test-file',
+          name: 'test.pdf',
+          mimeType: 'application/pdf',
+          parents: ['entrada'],
+        }],
+      });
+
+      mockProcessFile.mockResolvedValue({
+        ok: true,
+        value: {
+          documentType: 'factura_emitida',
+          document: { fechaEmision: '2024-01-01' }
+        }
+      });
+
+      // Start 5 scans concurrently - all at the same time
+      const results = await Promise.all([
+        scanFolder('entrada'),
+        scanFolder('entrada'),
+        scanFolder('entrada'),
+        scanFolder('entrada'),
+        scanFolder('entrada'),
+      ]);
+
+      // Count how many actually ran vs skipped
+      const ranCount = results.filter(r => r.ok && !r.value.skipped).length;
+      const skippedCount = results.filter(r => r.ok && r.value.skipped).length;
+
+      // Exactly one should run, the rest should skip
+      expect(ranCount).toBe(1);
+      expect(skippedCount).toBe(4);
+
+      // All skipped scans should have reason 'scan_pending' or 'scan_running'
+      results.forEach(result => {
+        if (result.ok && result.value.skipped) {
+          expect(['scan_pending', 'scan_running']).toContain(result.value.reason);
+        }
+      });
+
+      // withLock should only be called once (not 5 times)
+      expect(scanCount).toBe(1);
+    });
+
+    it('stress test - 5 concurrent scan attempts maintain sequential execution', async () => {
+      const { withLock } = await import('../utils/concurrency.js');
+
+      const executionLog: Array<{ scanId: number; event: 'check' | 'start' | 'end' }> = [];
+
+      // Track which scans got through the state check
+      let lockCallCount = 0;
+
+      vi.mocked(withLock).mockImplementation(async (_lockId, fn) => {
+        lockCallCount++;
+        const result = await fn();
+        return { ok: true, value: result };
+      });
+
+      mockListFiles.mockResolvedValue({
+        ok: true,
+        value: [{
+          id: 'test-file',
+          name: 'test.pdf',
+          mimeType: 'application/pdf',
+          parents: ['entrada'],
+        }],
+      });
+
+      mockProcessFile.mockResolvedValue({
+        ok: true,
+        value: {
+          documentType: 'factura_emitida',
+          document: { fechaEmision: '2024-01-01' }
+        }
+      });
+
+      // Start 5 scans concurrently
+      const scanPromises = Array.from({ length: 5 }, (_, i) => {
+        executionLog.push({ scanId: i, event: 'check' });
+        return scanFolder('entrada').then(result => {
+          if (result.ok && !result.value.skipped) {
+            executionLog.push({ scanId: i, event: 'start' });
+            executionLog.push({ scanId: i, event: 'end' });
+          }
+          return result;
+        });
+      });
+
+      const results = await Promise.all(scanPromises);
+
+      // Verify results
+      const ranCount = results.filter(r => r.ok && !r.value.skipped).length;
+      const skippedCount = results.filter(r => r.ok && r.value.skipped).length;
+
+      // Exactly 1 should run, 4 should skip
+      expect(ranCount).toBe(1);
+      expect(skippedCount).toBe(4);
+
+      // Only 1 should have acquired the lock
+      expect(lockCallCount).toBe(1);
+
+      // Verify execution log shows only one scan executed
+      const startEvents = executionLog.filter(e => e.event === 'start');
+      const endEvents = executionLog.filter(e => e.event === 'end');
+      expect(startEvents.length).toBe(1);
+      expect(endEvents.length).toBe(1);
+
+      // All check events should be present (all 5 scans checked state)
+      const checkEvents = executionLog.filter(e => e.event === 'check');
+      expect(checkEvents.length).toBe(5);
+    });
+
     it('should log match errors instead of silently discarding them', async () => {
       const { matchAllMovimientos } = await import('../bank/match-movimientos.js');
       const { error: logError } = await import('../utils/logger.js');

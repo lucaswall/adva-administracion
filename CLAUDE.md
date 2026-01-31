@@ -346,12 +346,15 @@ npm run deploy:script # Build + deploy to Dashboard
 **Concurrency Control:**
 
 Both `/api/scan` and `/api/match-movimientos` use a unified lock (`PROCESSING_LOCK_ID` from `src/config.ts`):
-- **Scan deferral**: Scans WAIT for lock (up to 5 minutes) instead of skipping. A pending flag prevents queue buildup - if a scan is already waiting, subsequent scan requests skip (the pending scan will handle all files since it reads Entrada at start).
+- **Scan deferral**: Scans WAIT for lock (up to 5 minutes) instead of skipping. A state machine (`'idle' | 'pending' | 'running'`) prevents queue buildup - if a scan is already waiting or running, subsequent scan requests skip (the pending scan will handle all files since it reads Entrada at start).
 - **Lock timeout**: 5 minutes auto-expiry (configurable via `PROCESSING_LOCK_TIMEOUT_MS` in `src/config.ts`)
 - **Sequential execution**: At any time, only ONE of these can run: scan OR match
 - **Auto-trigger**: After every successful scan (any document type), `matchAllMovimientos` is triggered asynchronously to fill detalles column
 
-This prevents race conditions and overlapping processing while ensuring files in Entrada are always processed promptly.
+**Race Condition Prevention:**
+- **Lock acquisition**: Uses atomic state initialization - all lock state (including `waitPromise`) is set in a single `Map.set()` call with no yields between, preventing TOCTOU races
+- **Scan state machine**: Uses atomic check-and-set pattern - `scanState` check and update happen in synchronous block (no await between), preventing concurrent scans from both passing the check
+- **JavaScript async caveat**: While JavaScript is single-threaded, `await` yields to the event loop, allowing multiple async operations to interleave. Explicit synchronization (atomic operations, locks) is required for mutual exclusion
 
 ## TESTING
 

@@ -100,18 +100,22 @@ class LockManager {
       const currentState = this.locks.get(resourceId);
 
       if (!currentState?.locked) {
-        // Lock is available
+        // Lock is available - create promise and capture resolver synchronously
+        // Note: Promise executor runs synchronously, so resolver is assigned before Map.set()
+        let resolver: () => void = () => {}; // Initialize to satisfy TypeScript
         const waitPromise = new Promise<void>((resolve) => {
-          this.locks.set(resourceId, {
-            locked: true,
-            acquiredAt: Date.now(),
-            autoExpiryMs,
-            holderCorrelationId: correlationId,
-            waitResolve: resolve,
-          });
+          resolver = resolve;
         });
 
-        this.locks.get(resourceId)!.waitPromise = waitPromise;
+        // Set ALL state atomically in single Map.set() call (no yields between)
+        this.locks.set(resourceId, {
+          locked: true,
+          acquiredAt: Date.now(),
+          autoExpiryMs,
+          holderCorrelationId: correlationId,
+          waitPromise,
+          waitResolve: resolver,
+        });
 
         debug('Lock acquired', {
           module: 'concurrency',
