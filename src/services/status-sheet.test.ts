@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { collectStatusMetrics, formatTimestampInTimezone } from './status-sheet.js';
+import { collectStatusMetrics, formatTimestampInTimezone, updateStatusSheet } from './status-sheet.js';
 
 // Mock dependencies
 vi.mock('../routes/status.js', () => ({
@@ -37,6 +37,15 @@ vi.mock('../config.js', () => ({
     nodeEnv: 'production',
     port: 3000,
   })),
+}));
+
+// Mock sheets service
+vi.mock('./sheets.js', () => ({
+  getSpreadsheetTimezone: vi.fn(() => Promise.resolve({ ok: true, value: 'America/Argentina/Buenos_Aires' })),
+  setValues: vi.fn(() => Promise.resolve({ ok: true, value: 13 })),
+  getSheetMetadata: vi.fn(() => Promise.resolve({ ok: true, value: [{ title: 'Status', sheetId: 0 }] })),
+  appendRowsWithFormatting: vi.fn(() => Promise.resolve({ ok: true, value: undefined })),
+  applyConditionalFormat: vi.fn(() => Promise.resolve({ ok: true, value: undefined })),
 }));
 
 describe('Status Sheet Service', () => {
@@ -122,6 +131,29 @@ describe('Status Sheet Service', () => {
 
       // Argentina is UTC-3, so 02:30 UTC = 23:30 previous day
       expect(formatted).toBe('2026-01-23 23:30:00');
+    });
+  });
+
+  describe('updateStatusSheet - concurrent calls', () => {
+    it('should apply conditional formatting only once despite 10 concurrent calls', async () => {
+      // Import the mock after it's been set up
+      const { applyConditionalFormat } = await import('./sheets.js');
+
+      const spreadsheetId = 'test-spreadsheet-id';
+
+      // Spawn 10 concurrent calls to updateStatusSheet
+      const concurrentCalls = Array.from({ length: 10 }, () =>
+        updateStatusSheet(spreadsheetId)
+      );
+
+      // Wait for all calls to complete
+      const results = await Promise.all(concurrentCalls);
+
+      // All calls should succeed
+      expect(results.every(r => r.ok)).toBe(true);
+
+      // Verify applyConditionalFormat was called exactly once
+      expect(applyConditionalFormat).toHaveBeenCalledTimes(1);
     });
   });
 });

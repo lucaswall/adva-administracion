@@ -5,8 +5,7 @@
 import type { FastifyInstance } from 'fastify';
 import {
   getActiveChannels,
-  isNotificationDuplicate,
-  markNotificationProcessed,
+  checkAndMarkNotification,
   triggerScan,
 } from '../services/watch-manager.js';
 import { createRateLimiter } from '../utils/rate-limiter.js';
@@ -118,8 +117,8 @@ export async function webhookRoutes(server: FastifyInstance) {
         });
     }
 
-    // Check for duplicate notification
-    if (messageNumber && isNotificationDuplicate(messageNumber, channelId)) {
+    // Atomic check-and-mark to prevent TOCTOU race
+    if (!checkAndMarkNotification(messageNumber, channelId)) {
       server.log.debug({ channelId, messageNumber }, 'Duplicate notification ignored');
       return reply.code(200).send({ status: 'duplicate' });
     }
@@ -132,11 +131,6 @@ export async function webhookRoutes(server: FastifyInstance) {
 
     // Handle add notifications (file created or shared)
     if (resourceState === 'add') {
-      // Mark notification as processed
-      if (messageNumber) {
-        markNotificationProcessed(messageNumber, channelId);
-      }
-
       // Queue scan for the watched folder
       server.log.info({ channelId }, 'File added, queueing scan');
       triggerScan(channel.folderId);
@@ -151,11 +145,6 @@ export async function webhookRoutes(server: FastifyInstance) {
       const shouldProcess = changed?.includes('children') || changed?.includes('content');
 
       if (shouldProcess) {
-        // Mark notification as processed
-        if (messageNumber) {
-          markNotificationProcessed(messageNumber, channelId);
-        }
-
         // Queue scan for the watched folder
         server.log.info({ channelId, changed }, 'Update detected, queueing scan');
         triggerScan(channel.folderId);
@@ -170,11 +159,6 @@ export async function webhookRoutes(server: FastifyInstance) {
 
     // Handle change notifications (changes API - legacy)
     if (resourceState === 'change') {
-      // Mark notification as processed
-      if (messageNumber) {
-        markNotificationProcessed(messageNumber, channelId);
-      }
-
       // Queue scan for the watched folder
       server.log.info({ channelId, changed }, 'Change detected, queueing scan');
       triggerScan(channel.folderId);

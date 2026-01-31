@@ -282,64 +282,43 @@ export function getActiveChannels(): WatchChannel[] {
 }
 
 /**
- * Check if a notification has already been processed
+ * Atomically check and mark a notification as processed
+ * Prevents TOCTOU race between check and mark operations
  *
  * @param messageNumber - Notification message number
  * @param channelId - Channel ID
- * @returns True if notification was already processed
+ * @returns true if notification was new and now marked, false if duplicate
  */
-export function isNotificationDuplicate(
+export function checkAndMarkNotification(
   messageNumber: string | undefined,
   channelId: string
 ): boolean {
   if (!messageNumber) {
-    return false;
+    return true; // No message number = always process (legacy behavior)
   }
 
-  const channelNotifications = processedNotifications.get(channelId);
-  if (!channelNotifications) {
-    return false;
-  }
-
-  const timestamp = channelNotifications.get(messageNumber);
-  if (timestamp === undefined) {
-    return false;
-  }
-
-  // Check if the notification is still within the valid age window
   const now = Date.now();
-  if (now - timestamp > MAX_NOTIFICATION_AGE_MS) {
-    // Entry has expired, remove it and return false
-    channelNotifications.delete(messageNumber);
-    return false;
-  }
-
-  return true;
-}
-
-/**
- * Mark a notification as processed
- *
- * @param messageNumber - Notification message number
- * @param channelId - Channel ID
- */
-export function markNotificationProcessed(
-  messageNumber: string,
-  channelId: string
-): void {
-  lastNotificationTime = new Date();
-  const now = Date.now();
-
   let channelNotifications = processedNotifications.get(channelId);
 
-  if (!channelNotifications) {
+  // Check if already processed (with expiry check)
+  if (channelNotifications) {
+    const timestamp = channelNotifications.get(messageNumber);
+    if (timestamp !== undefined) {
+      if (now - timestamp <= MAX_NOTIFICATION_AGE_MS) {
+        return false; // Duplicate
+      }
+      // Expired - will be replaced below
+    }
+  } else {
     channelNotifications = new Map();
     processedNotifications.set(channelId, channelNotifications);
   }
 
+  // Atomic: mark as processed immediately (no yield before this)
   channelNotifications.set(messageNumber, now);
+  lastNotificationTime = new Date();
 
-  // Cleanup: remove old entries based on timestamp
+  // Cleanup old entries (same logic as markNotificationProcessed)
   if (channelNotifications.size > MAX_NOTIFICATIONS_PER_CHANNEL) {
     // Remove entries older than MAX_NOTIFICATION_AGE_MS
     for (const [msgNum, timestamp] of channelNotifications.entries()) {
@@ -358,6 +337,8 @@ export function markNotificationProcessed(
       toRemove.forEach(([msgNum]) => channelNotifications!.delete(msgNum));
     }
   }
+
+  return true; // New notification
 }
 
 /**
