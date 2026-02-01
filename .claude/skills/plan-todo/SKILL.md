@@ -123,6 +123,28 @@ Default: plan the **first item** in TODO.md. Override with $ARGUMENTS:
 1. Run `bug-hunter` agent - Review changes for bugs
 2. Run `test-runner` agent - Verify all tests pass
 3. Run `builder` agent - Verify zero warnings
+
+---
+
+## Plan Summary
+
+**Objective:** [One sentence describing what this plan accomplishes]
+
+**Source Items:** [List the TODO.md items being planned, e.g., "#1, #3, #5"]
+
+**Approach:** [2-3 sentences describing the implementation strategy at a high level]
+
+**Scope:**
+- Tasks: [count]
+- Files affected: [estimated count]
+- New tests: [yes/no]
+
+**Key Decisions:**
+- [Important architectural or design decision 1]
+- [Important decision 2, if any]
+
+**Dependencies/Prerequisites:**
+- [Any prerequisites or dependencies]
 ```
 
 ## Task Writing Guidelines
@@ -233,13 +255,34 @@ This ensures TODO.md stays consistent regardless of how items were originally ad
 
 ## Termination
 
-When you finish writing PLANS.md (and updating TODO.md), output this exact message and STOP:
+When you finish writing PLANS.md (and updating TODO.md), output the plan summary followed by the completion message:
 
 ```
 ✓ Plan created in PLANS.md
 ✓ TODO.md updated (planned items removed, remaining items renumbered)
 
+## Plan Summary
+
+**Objective:** [Copy from PLANS.md summary]
+
+**Source Items:** [Copy from PLANS.md summary]
+
+**Approach:** [Copy from PLANS.md summary]
+
+**Scope:**
+- Tasks: [count]
+- Files affected: [estimated count]
+- New tests: [yes/no]
+
+**Key Decisions:**
+- [List from PLANS.md summary]
+
+**Dependencies/Prerequisites:**
+- [List from PLANS.md summary]
+
+---
+
 Next step: Run `plan-implement` to execute this plan.
 ```
 
-Do not ask follow-up questions. Do not offer to implement. Just output the message and stop.
+Do not ask follow-up questions. Do not offer to implement. Output the summary and stop.

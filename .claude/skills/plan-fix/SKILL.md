@@ -129,6 +129,25 @@ Write PLANS.md with this structure:
 1. Run `bug-hunter` agent - Review changes for bugs
 2. Run `test-runner` agent - Verify all tests pass
 3. Run `builder` agent - Verify zero warnings
+
+---
+
+## Plan Summary
+
+**Problem:** [One sentence describing the bug/issue]
+
+**Root Cause:** [One sentence explaining why it happens]
+
+**Solution Approach:** [2-3 sentences describing the fix strategy at a high level]
+
+**Scope:**
+- Files affected: [count]
+- New tests: [yes/no]
+- Breaking changes: [yes/no]
+
+**Risks/Considerations:**
+- [Key risk or consideration 1]
+- [Key risk or consideration 2, if any]
 ```
 
 ## Prompt/AI Testing Guidelines
@@ -194,12 +213,30 @@ When investigating deployment issues (if deployment MCPs available):
 
 ## Termination
 
-When you finish writing PLANS.md, output this exact message and STOP:
+When you finish writing PLANS.md, output the plan summary followed by the completion message:
 
 ```
 ✓ Plan created in PLANS.md
 
+## Plan Summary
+
+**Problem:** [Copy from PLANS.md summary]
+
+**Root Cause:** [Copy from PLANS.md summary]
+
+**Solution Approach:** [Copy from PLANS.md summary]
+
+**Scope:**
+- Files affected: [count]
+- New tests: [yes/no]
+- Breaking changes: [yes/no]
+
+**Risks/Considerations:**
+- [List from PLANS.md summary]
+
+---
+
 Next step: Run `plan-implement` to execute this plan.
 ```
 
-Do not ask follow-up questions. Do not offer to implement. Just output the message and stop.
+Do not ask follow-up questions. Do not offer to implement. Output the summary and stop.

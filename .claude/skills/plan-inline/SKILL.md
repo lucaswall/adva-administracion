@@ -137,6 +137,28 @@ Example arguments:
 1. Run `bug-hunter` agent - Review changes for bugs
 2. Run `test-runner` agent - Verify all tests pass
 3. Run `builder` agent - Verify zero warnings
+
+---
+
+## Plan Summary
+
+**Objective:** [One sentence describing what this plan accomplishes]
+
+**Request:** [Brief paraphrase of the original $ARGUMENTS]
+
+**Approach:** [2-3 sentences describing the implementation strategy at a high level]
+
+**Scope:**
+- Tasks: [count]
+- Files affected: [estimated count]
+- New tests: [yes/no]
+
+**Key Decisions:**
+- [Important architectural or design decision 1]
+- [Important decision 2, if any]
+
+**Risks/Considerations:**
+- [Any risks or things to watch out for]
 ```
 
 ## Task Writing Guidelines
@@ -224,12 +246,33 @@ If CLAUDE.md doesn't list MCPs, skip MCP context gathering.
 
 ## Termination
 
-When you finish writing PLANS.md, output this exact message and STOP:
+When you finish writing PLANS.md, output the plan summary followed by the completion message:
 
 ```
 ✓ Plan created in PLANS.md
 
+## Plan Summary
+
+**Objective:** [Copy from PLANS.md summary]
+
+**Request:** [Copy from PLANS.md summary]
+
+**Approach:** [Copy from PLANS.md summary]
+
+**Scope:**
+- Tasks: [count]
+- Files affected: [estimated count]
+- New tests: [yes/no]
+
+**Key Decisions:**
+- [List from PLANS.md summary]
+
+**Risks/Considerations:**
+- [List from PLANS.md summary]
+
+---
+
 Next step: Run `plan-implement` to execute this plan.
 ```
 
-Do not ask follow-up questions. Do not offer to implement. Just output the message and stop.
+Do not ask follow-up questions. Do not offer to implement. Output the summary and stop.
