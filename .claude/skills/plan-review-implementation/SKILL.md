@@ -5,7 +5,7 @@ allowed-tools: Read, Edit, Glob, Grep
 disable-model-invocation: true
 ---
 
-Review the latest implementation iteration and either create a fix plan or mark complete.
+Review **ALL** implementation iterations that need review, then mark complete or create fix plans.
 
 **Reference:** See [references/code-review-checklist.md](references/code-review-checklist.md) for comprehensive checklist.
 
@@ -17,19 +17,24 @@ Review the latest implementation iteration and either create a fix plan or mark 
 
 ## Identify What to Review
 
-Find the **latest "Iteration N"** section that has:
+Find **ALL "Iteration N"** sections that have:
 - "Completed" subsection (implementation was done)
 - NO `<!-- REVIEW COMPLETE -->` marker (not yet reviewed)
 
 **Detection logic:**
 1. Search PLANS.md for all `## Iteration N` sections
-2. For each iteration (latest first), check if it contains `<!-- REVIEW COMPLETE -->`
-3. If marker NOT found → This iteration needs review
-4. If marker found → Skip, already reviewed
+2. Build a list of iterations needing review:
+   - Has "Completed" or "### Completed" subsection
+   - Does NOT contain `<!-- REVIEW COMPLETE -->` marker
+3. Process iterations **in order** (Iteration 1 first, then 2, etc.)
 
 If no iteration needs review → Inform user and stop.
 
+**Important:** Review ALL pending iterations in a single session, not just one.
+
 ## Review Process
+
+**For EACH iteration needing review (in order):**
 
 ### Step 1: Identify Implemented Code
 
@@ -131,7 +136,7 @@ Summary: N issue(s) found
 
 ### If No Issues Found
 
-Add to the current Iteration section, then append final status:
+Add to the current Iteration section:
 
 ```markdown
 ### Review Findings
@@ -142,13 +147,29 @@ Checks applied: Security, Logic, Async, Resources, Type Safety, Conventions
 No issues found - all implementations are correct and follow project conventions.
 
 <!-- REVIEW COMPLETE -->
+```
 
+**Then continue to the next iteration needing review.**
+
+### After ALL Iterations Reviewed
+
+When all pending iterations have been reviewed:
+
+- **If any iteration has a Fix Plan** → Do NOT mark complete. Fix plans must be implemented first.
+- **If all iterations passed with no issues** → Append final status and suggest PR:
+
+```markdown
 ---
 
 ## Status: COMPLETE
 
 All tasks implemented and reviewed successfully. Ready for human review.
 ```
+
+**Then suggest to the user:**
+> "Plan complete! Would you like me to create a PR for these changes?"
+
+This prompts the user to invoke the `pr-creator` agent if they want to submit the work.
 
 ## Issue Categories Reference
 
@@ -176,13 +197,15 @@ All tasks implemented and reviewed successfully. Ready for human review.
 | CLAUDE.md doesn't exist | Use general coding best practices for review |
 | Unsure if issue is a bug | Document as "POTENTIAL" and explain uncertainty |
 | Too many issues found | Prioritize by severity, create fix plan for critical/high only |
+| Multiple iterations pending | Review ALL of them in order, don't stop after one |
 
 ## Rules
 
+- **Review ALL pending iterations** - Don't stop after one; process every iteration lacking `<!-- REVIEW COMPLETE -->`
 - **Do not modify source code** - Review only, document findings
 - **Be specific** - Include file paths and line numbers for every issue
 - **One fix per issue** - Each Review Finding must have a matching Fix task
 - **Fix Plan follows TDD** - Test first for each fix
 - **Never modify previous sections** - Only add to current iteration or append status
-- **Mark COMPLETE only when confident** - No known bugs, all conventions followed
+- **Mark COMPLETE only when ALL iterations pass** - No fix plans pending, all reviewed
 - If no iteration needs review, inform the user and stop
