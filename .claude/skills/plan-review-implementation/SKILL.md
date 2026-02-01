@@ -17,18 +17,21 @@ Review **ALL** implementation iterations that need review, then mark complete or
 
 ## Identify What to Review
 
-Find **ALL "Iteration N"** sections that have:
-- "Completed" subsection (implementation was done)
-- NO `<!-- REVIEW COMPLETE -->` marker (not yet reviewed)
-
 **Detection logic:**
-1. Search PLANS.md for all `## Iteration N` sections
-2. Build a list of iterations needing review:
+
+1. Search PLANS.md for `## Iteration N` sections
+2. **If iterations exist:** Build list of iterations needing review:
    - Has "Completed" or "### Completed" subsection
    - Does NOT contain `<!-- REVIEW COMPLETE -->` marker
-3. Process iterations **in order** (Iteration 1 first, then 2, etc.)
+   - Process in order (Iteration 1 first, then 2, etc.)
+3. **If NO iterations exist:** Treat entire plan as single iteration:
+   - Look for "Completed" or "### Completed" section at plan level
+   - Check if plan already has `<!-- REVIEW COMPLETE -->` marker
+   - If completed but not reviewed → review as "Iteration 1"
 
-If no iteration needs review → Inform user and stop.
+**Iteration detection:** A plan has iterations if it contains `## Iteration` (with or without number).
+
+If no iteration/plan needs review → Inform user and stop.
 
 **Important:** Review ALL pending iterations in a single session, not just one.
 
@@ -193,6 +196,7 @@ This prompts the user to invoke the `pr-creator` agent if they want to submit th
 |-----------|--------|
 | PLANS.md doesn't exist | Stop and tell user "No plan found." |
 | No iteration needs review | Stop and tell user "No iteration to review. Run plan-implement first." |
+| Plan has no iterations | Treat entire plan as single iteration (Iteration 1) |
 | Files in iteration don't exist | Note as issue - implementation may have failed |
 | CLAUDE.md doesn't exist | Use general coding best practices for review |
 | Unsure if issue is a bug | Document as "POTENTIAL" and explain uncertainty |
