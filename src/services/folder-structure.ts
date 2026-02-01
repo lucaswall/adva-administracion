@@ -502,6 +502,123 @@ async function initializeStatusSheet(
 }
 
 /**
+ * Discovers existing Movimientos spreadsheets across all bank account folders
+ * Traverses year folders → Bancos → bank account folders to find "Movimientos - {folderName}" spreadsheets
+ *
+ * @param rootId - Root folder ID
+ * @returns Map of folder names to Movimientos spreadsheet IDs
+ */
+export async function discoverMovimientosSpreadsheets(
+  rootId: string
+): Promise<Result<Map<string, string>, Error>> {
+  const movimientosSpreadsheets = new Map<string, string>();
+
+  try {
+    // List all folders in root (look for year folders)
+    const rootFoldersResult = await listByMimeType(rootId, FOLDER_MIME);
+    if (!rootFoldersResult.ok) return rootFoldersResult;
+
+    for (const yearFolder of rootFoldersResult.value) {
+      // Validate year folder name
+      const yearValidation = validateYear(yearFolder.name);
+      if (!yearValidation.ok) {
+        // Skip non-year folders (e.g., "Entrada", "Sin Procesar")
+        continue;
+      }
+
+      debug('Discovering Movimientos in year folder', {
+        module: 'folder-structure',
+        phase: 'discover-movimientos',
+        year: yearFolder.name,
+        yearFolderId: yearFolder.id
+      });
+
+      // Look for Bancos classification folder
+      const bancosFolderResult = await findByName(yearFolder.id, FOLDER_NAMES.bancos, FOLDER_MIME);
+      if (!bancosFolderResult.ok) {
+        logError('Error searching for Bancos folder', {
+          module: 'folder-structure',
+          phase: 'discover-movimientos',
+          year: yearFolder.name,
+          error: bancosFolderResult.error.message
+        });
+        continue;
+      }
+
+      if (!bancosFolderResult.value) {
+        // No Bancos folder in this year yet
+        debug('No Bancos folder found in year', {
+          module: 'folder-structure',
+          phase: 'discover-movimientos',
+          year: yearFolder.name
+        });
+        continue;
+      }
+
+      const bancosFolderId = bancosFolderResult.value.id;
+
+      // List all bank account folders within Bancos
+      const bankAccountFoldersResult = await listByMimeType(bancosFolderId, FOLDER_MIME);
+      if (!bankAccountFoldersResult.ok) {
+        logError('Error listing bank account folders', {
+          module: 'folder-structure',
+          phase: 'discover-movimientos',
+          year: yearFolder.name,
+          error: bankAccountFoldersResult.error.message
+        });
+        continue;
+      }
+
+      // For each bank account folder, look for Movimientos spreadsheet
+      for (const bankFolder of bankAccountFoldersResult.value) {
+        const movimientosName = `Movimientos - ${bankFolder.name}`;
+
+        const movimientosResult = await findByName(bankFolder.id, movimientosName, SPREADSHEET_MIME);
+        if (!movimientosResult.ok) {
+          logError('Error searching for Movimientos spreadsheet', {
+            module: 'folder-structure',
+            phase: 'discover-movimientos',
+            bankFolder: bankFolder.name,
+            error: movimientosResult.error.message
+          });
+          continue;
+        }
+
+        if (movimientosResult.value) {
+          // Use year-prefixed key to avoid collisions when same bank account exists in multiple years
+          const cacheKey = `${yearFolder.name}:${bankFolder.name}`;
+          movimientosSpreadsheets.set(cacheKey, movimientosResult.value.id);
+          debug('Discovered Movimientos spreadsheet', {
+            module: 'folder-structure',
+            phase: 'discover-movimientos',
+            year: yearFolder.name,
+            bankFolder: bankFolder.name,
+            cacheKey,
+            spreadsheetId: movimientosResult.value.id
+          });
+        }
+      }
+    }
+
+    info('Completed Movimientos spreadsheets discovery', {
+      module: 'folder-structure',
+      phase: 'discover-movimientos',
+      count: movimientosSpreadsheets.size
+    });
+
+    return { ok: true, value: movimientosSpreadsheets };
+  } catch (err) {
+    const error = err instanceof Error ? err : new Error(String(err));
+    logError('Failed to discover Movimientos spreadsheets', {
+      module: 'folder-structure',
+      phase: 'discover-movimientos',
+      error: error.message
+    });
+    return { ok: false, error };
+  }
+}
+
+/**
  * Discovers and caches the folder structure from Drive
  * Creates root-level folders and spreadsheets only
  * Year folders and classification folders are created on-demand
@@ -565,6 +682,10 @@ export async function discoverFolderStructure(): Promise<Result<FolderStructure,
     bankSpreadsheets.set(sheet.name, sheet.id);
   }
 
+  // Discover Movimientos spreadsheets across all bank account folders
+  const movimientosResult = await discoverMovimientosSpreadsheets(rootId);
+  if (!movimientosResult.ok) return movimientosResult;
+
   // Build and cache the structure
   const structure: FolderStructure = {
     rootId,
@@ -575,7 +696,7 @@ export async function discoverFolderStructure(): Promise<Result<FolderStructure,
     controlEgresosId: controlEgresosResult.value,
     dashboardOperativoId: dashboardOperativoResult.value,
     bankSpreadsheets,
-    movimientosSpreadsheets: new Map(),
+    movimientosSpreadsheets: movimientosResult.value,
     yearFolders: new Map(),
     classificationFolders: new Map(),
     monthFolders: new Map(),
@@ -594,7 +715,8 @@ export async function discoverFolderStructure(): Promise<Result<FolderStructure,
     controlIngresosId: controlIngresosResult.value,
     controlEgresosId: controlEgresosResult.value,
     dashboardOperativoId: dashboardOperativoResult.value,
-    bankSpreadsheets: bankSpreadsheets.size
+    bankSpreadsheets: bankSpreadsheets.size,
+    movimientosSpreadsheets: movimientosResult.value.size
   });
   return { ok: true, value: structure };
 }
@@ -1442,12 +1564,14 @@ export async function getOrCreateBrokerSpreadsheet(
  * Creates a spreadsheet named "Movimientos - {folderName}" in the entity folder
  *
  * @param folderId - Entity folder ID (bank account, credit card, or broker folder)
+ * @param year - Year string (e.g., "2024")
  * @param folderName - Entity folder name (e.g., "BBVA 007-009364/1 ARS")
  * @param type - Type of resumen (bancario, tarjeta, or broker)
  * @returns Spreadsheet ID for Movimientos spreadsheet
  */
 export async function getOrCreateMovimientosSpreadsheet(
   folderId: string,
+  year: string,
   folderName: string,
   type: 'bancario' | 'tarjeta' | 'broker'
 ): Promise<Result<string, Error>> {
@@ -1459,7 +1583,7 @@ export async function getOrCreateMovimientosSpreadsheet(
   }
 
   const spreadsheetName = `Movimientos - ${folderName}`;
-  const cacheKey = `movimientos:${folderName}`;
+  const cacheKey = `${year}:${folderName}`;
 
   // Use lock to prevent concurrent creation
   // 30 second timeout for spreadsheet creation
@@ -1475,6 +1599,7 @@ export async function getOrCreateMovimientosSpreadsheet(
       debug('Found existing Movimientos spreadsheet', {
         module: 'folder-structure',
         phase: 'movimientos-spreadsheet',
+        year,
         folderName,
         type,
         spreadsheetId
@@ -1487,6 +1612,7 @@ export async function getOrCreateMovimientosSpreadsheet(
       info('Created Movimientos spreadsheet', {
         module: 'folder-structure',
         phase: 'movimientos-spreadsheet',
+        year,
         folderName,
         type,
         spreadsheetId
@@ -1498,8 +1624,9 @@ export async function getOrCreateMovimientosSpreadsheet(
 
     // Cache the Movimientos spreadsheet ID for use by matchAllMovimientos
     // Only bancario type needs matching (tarjeta and broker don't have detalle column)
+    // Use year-prefixed key to avoid collisions when same bank account exists in multiple years
     if (type === 'bancario') {
-      requireCachedStructure().movimientosSpreadsheets.set(folderName, spreadsheetId);
+      requireCachedStructure().movimientosSpreadsheets.set(cacheKey, spreadsheetId);
     }
 
     return spreadsheetId;
