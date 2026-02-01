@@ -10,6 +10,12 @@ import { debug, warn, error as logError } from '../utils/logger.js';
 import { FETCH_TIMEOUT_MS } from '../config.js';
 
 /**
+ * Maximum HTTP response size (2MB)
+ * Prevents memory exhaustion from oversized API responses
+ */
+const MAX_RESPONSE_SIZE = 2_000_000;
+
+/**
  * Usage callback data structure
  */
 export interface UsageCallbackData {
@@ -233,13 +239,25 @@ export class GeminiClient {
         });
 
         clearTimeout(timeoutId);
-        const responseText = await response.text();
+        let responseText = await response.text();
+
+        // Truncate oversized responses to prevent memory exhaustion
+        if (responseText.length > MAX_RESPONSE_SIZE) {
+          warn('HTTP response exceeds size limit, truncating', {
+            module: 'gemini-client',
+            phase: 'api-call',
+            originalSize: responseText.length,
+            maxSize: MAX_RESPONSE_SIZE,
+            status: response.status
+          });
+          responseText = responseText.substring(0, MAX_RESPONSE_SIZE);
+        }
 
         const parseResult = this.parseApiResponse(responseText, response.status);
 
         // Extract usage metadata from parse result
         if (parseResult.ok && 'usageMetadata' in parseResult) {
-          usageMetadata = (parseResult as any).usageMetadata;
+          usageMetadata = parseResult.usageMetadata;
         }
 
         const duration = Date.now() - startTime;

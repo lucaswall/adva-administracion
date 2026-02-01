@@ -991,4 +991,78 @@ describe('scanner', () => {
       );
     });
   });
+
+  describe('Scan state management', () => {
+    it('resets scanState to idle after successful scan', async () => {
+      mockListFiles.mockResolvedValue({
+        ok: true,
+        value: [],
+      });
+
+      await scanFolder('entrada');
+
+      // Subsequent scan should not be blocked
+      const result2 = await scanFolder('entrada');
+      expect(result2.ok).toBe(true);
+      // Should not skip (scanState was properly reset)
+      if (result2.ok && 'skipped' in result2.value) {
+        expect(result2.value.skipped).toBe(false);
+      }
+    });
+
+    it('resets scanState to idle even if scan fails', async () => {
+      // Make listFilesInFolder fail
+      mockListFiles.mockResolvedValue({
+        ok: false,
+        error: new Error('Drive API error'),
+      });
+
+      const result1 = await scanFolder('entrada');
+      expect(result1.ok).toBe(false);
+
+      // scanState should be reset to idle, allowing next scan
+      mockListFiles.mockResolvedValue({
+        ok: true,
+        value: [],
+      });
+
+      const result2 = await scanFolder('entrada');
+      expect(result2.ok).toBe(true);
+      // Should not skip - scanState should have been reset after error
+      if (result2.ok && 'skipped' in result2.value) {
+        expect(result2.value.skipped).toBe(false);
+      }
+    });
+
+    it('resets scanState even if lock acquisition fails', async () => {
+      // Import withLock to make it throw
+      const { withLock } = await import('../utils/concurrency.js');
+
+      // Make withLock return error (not throw, to avoid unhandled rejection)
+      vi.mocked(withLock).mockResolvedValue({
+        ok: false,
+        error: new Error('Lock timeout'),
+      });
+
+      const result1 = await scanFolder('entrada');
+      expect(result1.ok).toBe(false);
+
+      // scanState should still be reset, allowing subsequent scans
+      vi.mocked(withLock).mockImplementation(async (_lockId: string, fn: () => Promise<any>) => {
+        const result = await fn();
+        return { ok: true, value: result };
+      });
+
+      mockListFiles.mockResolvedValue({
+        ok: true,
+        value: [],
+      });
+
+      const result2 = await scanFolder('entrada');
+      expect(result2.ok).toBe(true);
+      if (result2.ok && 'skipped' in result2.value) {
+        expect(result2.value.skipped).toBe(false);
+      }
+    });
+  });
 });

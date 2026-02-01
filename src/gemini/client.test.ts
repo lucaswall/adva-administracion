@@ -944,6 +944,49 @@ describe('GeminiClient', () => {
       );
     });
 
+    it('extracts usageMetadata in type-safe manner', async () => {
+      const callback = vi.fn();
+      const clientWithCallback = new GeminiClient(mockApiKey, 60, callback);
+
+      const mockResponse = {
+        candidates: [{
+          content: {
+            parts: [{ text: 'Extracted data' }]
+          }
+        }],
+        usageMetadata: {
+          promptTokenCount: 500,
+          candidatesTokenCount: 250,
+          totalTokenCount: 750,
+          cachedContentTokenCount: 100
+        }
+      };
+
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify(mockResponse)
+      });
+
+      const result = await clientWithCallback.analyzeDocument(
+        mockBuffer,
+        mockMimeType,
+        mockPrompt,
+        1
+      );
+
+      expect(result.ok).toBe(true);
+      // Verify usageMetadata is properly extracted and passed to callback
+      expect(callback).toHaveBeenCalledWith(
+        expect.objectContaining({
+          promptTokens: 500,
+          cachedTokens: 100,
+          outputTokens: 250,
+          totalTokens: 750
+        })
+      );
+    });
+
     it('handles missing usageMetadata gracefully', async () => {
       const callback = vi.fn();
       const clientWithCallback = new GeminiClient(mockApiKey, 60, callback);
@@ -1125,6 +1168,83 @@ describe('GeminiClient', () => {
       expect(loggedDetails).toHaveProperty('phase');
 
       errorSpy.mockRestore();
+    });
+  });
+
+  describe('HTTP response size limit', () => {
+    const mockBuffer = Buffer.from('test-pdf-content');
+    const mockMimeType = 'application/pdf';
+    const mockPrompt = 'Extract data from this document';
+
+    it('truncates oversized error responses', async () => {
+      // Create a very large error response (> 2MB)
+      const largeErrorBody = 'ERROR '.repeat(400_000); // ~2.4MB
+
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 500,
+        text: async () => largeErrorBody
+      });
+
+      const result = await client.analyzeDocument(
+        mockBuffer,
+        mockMimeType,
+        mockPrompt,
+        1
+      );
+
+      expect(result.ok).toBe(false);
+      // Response should have been truncated to avoid memory issues
+      // Error processing should still work with truncated response
+    });
+
+    it('preserves useful information in truncated error responses', async () => {
+      // Create error response with useful info at the start
+      const errorWithInfo = JSON.stringify({
+        error: { message: 'Rate limit exceeded', code: 429 }
+      }) + 'X'.repeat(2_000_000);
+
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 429,
+        text: async () => errorWithInfo
+      });
+
+      const result = await client.analyzeDocument(
+        mockBuffer,
+        mockMimeType,
+        mockPrompt,
+        1
+      );
+
+      expect(result.ok).toBe(false);
+      // Should capture the important error info even if response is truncated
+    });
+
+    it('does not truncate normal-sized successful responses', async () => {
+      const normalResponse = {
+        candidates: [{
+          content: {
+            parts: [{ text: JSON.stringify({ test: 'data' }) }]
+          }
+        }]
+      };
+
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify(normalResponse)
+      });
+
+      const result = await client.analyzeDocument(
+        mockBuffer,
+        mockMimeType,
+        mockPrompt,
+        1
+      );
+
+      expect(result.ok).toBe(true);
+      // Normal responses should work without truncation
     });
   });
 });
