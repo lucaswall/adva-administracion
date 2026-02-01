@@ -1,53 +1,124 @@
 ---
 name: pr-creator
-description: GitHub PR creator that handles the full workflow - creates branch, commits changes, pushes, and creates PR. Use only when explicitly requested by the user. Generates comprehensive PR descriptions.
+description: GitHub PR creator that handles the full workflow - creates branch, commits changes, pushes, and creates PR. Use only when explicitly requested by the user. Analyzes ALL branch commits (not just local changes) for comprehensive PR descriptions.
 tools: Bash
 model: haiku
 permissionMode: default
 ---
 
-Create a complete PR from current changes: commit → push → PR.
+Create a complete PR: analyze branch → commit local changes → push → PR.
 
 ## Workflow
 
-1. **Check for changes**
-   - `git status --porcelain=v1`
-   - If empty → report "Nothing to commit" and stop
+### Phase 1: Gather Context
 
-2. **Check current branch**
-   - `git branch --show-current`
-   - If on `main` → create new branch first
-   - If on feature branch → use current branch
-
-3. **Create branch (only if on main)**
-   - `git checkout -b <branch-name>`
-   - Branch format: `<type>/<description>` (e.g., `feat/add-broker-parsing`)
-   - Types: `feat/` | `fix/` | `refactor/` | `chore/` | `docs/`
-
-4. **Stage and commit**
-   - `git add -A`
-   - `git diff --cached` - Analyze changes
-   - `git commit -m "<type>: <summary>"` (imperative, max 72 chars, no period)
-
-5. **Push to remote**
-   - `git push -u origin <branch-name>`
-
-6. **Create PR**
+1. **Get current branch**
    ```bash
-   gh pr create --title "<title>" --base main --body "<body>"
+   git branch --show-current
    ```
+
+2. **Get base branch** (usually `main`)
+   ```bash
+   git symbolic-ref refs/remotes/origin/HEAD | sed 's@^refs/remotes/origin/@@'
+   ```
+   Fallback to `main` if this fails.
+
+3. **Check for local uncommitted changes**
+   ```bash
+   git status --porcelain=v1
+   ```
+
+4. **Check for unpushed commits on current branch**
+   ```bash
+   git log @{u}..HEAD --oneline 2>/dev/null || git log origin/<base>..HEAD --oneline
+   ```
+
+5. **Get branch commits** (if not on base branch)
+   ```bash
+   git log --oneline <base>..HEAD
+   git log --format='%B---COMMIT_SEP---' <base>..HEAD
+   ```
+
+6. **Get full diff from base** (if not on base branch)
+   ```bash
+   git diff <base>...HEAD --stat
+   git diff <base>...HEAD
+   ```
+
+### Phase 2: Determine Actions
+
+| Current Branch | Unpushed Commits | Local Changes | Action |
+|----------------|------------------|---------------|--------|
+| main/base | Yes | Any | Create branch at HEAD → reset main to origin → push → PR |
+| main/base | No | Yes | Create branch → commit → push → PR |
+| main/base | No | No | Report "Nothing to commit" and stop |
+| feature branch | Any | Yes | Commit → push → PR (existing + new commits) |
+| feature branch | Yes | No | Push → PR (existing commits only) |
+| feature branch | No | No | Report "Nothing to commit" and stop |
+
+### Phase 3: Execute
+
+1. **Move commits from main** (if on base branch with unpushed commits)
+   ```bash
+   # Create feature branch at current HEAD (includes unpushed commits)
+   git checkout -b <type>/<description>
+   # Reset main back to origin (safe: commits are now on feature branch)
+   git branch -f main origin/main
+   ```
+   Types: `feat/` | `fix/` | `refactor/` | `chore/` | `docs/`
+
+2. **Create branch** (if on base branch, no unpushed commits, but has local changes)
+   ```bash
+   git checkout -b <type>/<description>
+   ```
+
+3. **Commit local changes** (if any uncommitted changes)
+   ```bash
+   git add -A
+   git diff --cached  # Review staged changes
+   git commit -m "<type>: <summary>"
+   ```
+
+4. **Push to remote**
+   ```bash
+   git push -u origin <branch-name>
+   ```
+
+5. **Create PR**
+   ```bash
+   gh pr create --title "<title>" --base <base-branch> --body "$(cat <<'EOF'
+   <body content>
+   EOF
+   )"
+   ```
+
+## PR Content Generation
+
+**Analyze ALL changes for PR description:**
+- Use `git diff <base>...HEAD` for complete picture of branch changes
+- Use `git log <base>..HEAD` to understand commit progression
+- Include both existing commits AND any new local changes in summary
+
+**Title selection:**
+- Single commit: Use commit subject
+- Multiple commits: Summarize the overall change theme
+- Max 70 characters
 
 ## PR Body Structure
 
 ```markdown
 ## Summary
-- [Bullet point 1: What was done]
-- [Bullet point 2: Why it was done]
-- [Bullet point 3: Key implementation details]
+- [What the PR accomplishes overall]
+- [Why these changes were made]
+- [Key implementation approach]
 
 ## Changes
-- `file1.ts` - [brief description]
-- `file2.ts` - [brief description]
+- `file1.ts` - [description]
+- `file2.ts` - [description]
+
+## Commits
+- `abc1234` - commit message 1
+- `def5678` - commit message 2
 
 ## Testing
 - [ ] Tests added/updated
@@ -66,15 +137,18 @@ PR CREATOR REPORT
 
 SUCCESS: PR created
 URL: [PR URL]
-Branch: [branch-name]
+Branch: [branch-name] → [base-branch]
 Title: [PR title]
+Commits included: [count]
 ```
 
 **Nothing to commit:**
 ```
 PR CREATOR REPORT
 
-SUCCESS: Nothing to commit - working tree clean
+SUCCESS: Nothing to commit
+- Working tree clean
+- No commits ahead of [base-branch]
 ```
 
 **Failure:**
@@ -89,7 +163,9 @@ Error: [relevant output]
 
 - Use only git and gh commands
 - Do not include co-author attribution
-- If on main, create a new branch; otherwise use current branch
+- Analyze ALL branch commits for PR description, not just latest
+- If on base branch with unpushed commits, move them to feature branch and reset base
+- If on base branch with only local changes, create feature branch then commit
 - Branch name should be descriptive but concise
-- PR title should match commit subject
-- Always target `main` as base branch
+- Use HEREDOC for PR body to handle special characters
+- Always detect base branch dynamically (usually `main`)
