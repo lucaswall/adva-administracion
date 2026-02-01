@@ -82,7 +82,7 @@ export async function storeMovimientosBancario(
       initialRow[2],  // null (debito)
       initialRow[3],  // null (credito)
       initialRow[4],  // null (saldo)
-      initialRow[5],  // saldoInicial value (saldoCalculado)
+      { type: 'number', value: initialRow[5] } as CellNumber,  // saldoInicial value (saldoCalculado)
       '',             // matchedFileId (empty for new rows)
       '',             // detalle (empty for new rows)
     ]);

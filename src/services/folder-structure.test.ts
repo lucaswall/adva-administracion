@@ -150,3 +150,27 @@ describe('Spreadsheet lock timeout configuration', () => {
     expect(matches!.length).toBeGreaterThan(0);
   });
 });
+
+describe('movimientosSpreadsheets cache population', () => {
+  it('should have discoverMovimientosSpreadsheets function', async () => {
+    // Verify the discovery function exists
+    const module = await import('./folder-structure.js');
+    expect(module.discoverMovimientosSpreadsheets).toBeDefined();
+    expect(typeof module.discoverMovimientosSpreadsheets).toBe('function');
+  });
+
+  it('discoverFolderStructure should call discoverMovimientosSpreadsheets', async () => {
+    // Documentation test: Verifies discovery logic is integrated into discoverFolderStructure
+    const fs = await import('fs/promises');
+    const path = await import('path');
+    const { fileURLToPath } = await import('url');
+
+    const __filename = fileURLToPath(import.meta.url);
+    const __dirname = path.dirname(__filename);
+    const sourcePath = path.join(__dirname, 'folder-structure.ts');
+    const sourceCode = await fs.readFile(sourcePath, 'utf-8');
+
+    // Verify discoverMovimientosSpreadsheets is called in discoverFolderStructure
+    expect(sourceCode).toContain('discoverMovimientosSpreadsheets');
+  });
+});

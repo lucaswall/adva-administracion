@@ -1500,6 +1500,7 @@ async function storeAndSortDocument(
               const folderName = `${resumen.banco} ${resumen.numeroCuenta} ${resumen.moneda}`;
               const movSpreadsheetResult = await getOrCreateMovimientosSpreadsheet(
                 folderResult.value,
+                year,
                 folderName,
                 'bancario'
               );
@@ -1727,6 +1728,7 @@ async function storeAndSortDocument(
               const folderName = `${resumen.banco} ${resumen.tipoTarjeta} ${resumen.numeroCuenta}`;
               const movSpreadsheetResult = await getOrCreateMovimientosSpreadsheet(
                 folderResult.value,
+                year,
                 folderName,
                 'tarjeta'
               );
@@ -1942,6 +1944,7 @@ async function storeAndSortDocument(
               const folderName = `${resumen.broker} ${resumen.numeroCuenta}`;
               const movSpreadsheetResult = await getOrCreateMovimientosSpreadsheet(
                 folderResult.value,
+                year,
                 folderName,
                 'broker'
               );

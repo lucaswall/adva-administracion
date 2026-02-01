@@ -1013,6 +1013,8 @@ export interface FolderStructure {
   dashboardOperativoId: string;
   /** Map of bank spreadsheet names to IDs */
   bankSpreadsheets: Map<string, string>;
+  /** Map of Movimientos spreadsheet folder names to spreadsheet IDs */
+  movimientosSpreadsheets: Map<string, string>;
   /** Cache of year folders by year (e.g., "2024" -> folder ID) */
   yearFolders: Map<string, string>;
   /** Cache of classification folders by year:classification key (e.g., "2024:ingresos" -> folder ID) */
