@@ -65,7 +65,6 @@
       "Bash(dd:*)"
     ]
   },
-  "model": "sonnet",
   "enableAllProjectMcpServers": true,
   "enabledMcpjsonServers": [
     "Railway"
