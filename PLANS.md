@@ -790,6 +790,64 @@ No issues found - all implementations are correct and follow project conventions
 
 ---
 
-## Status: COMPLETE (Phases 1-3)
+## Iteration 4
 
-Phases 1-3 (Date/Time & Precision Fixes, Type Validation & Constraints, Data Safety & Cache Integrity) implemented and reviewed successfully. Ready for Phase 4 implementation.
+**Implemented:** 2026-01-31
+
+### Phase 4: Async & Concurrency Fixes - COMPLETED
+
+**Tasks Completed:**
+- Task 4.1: Added timezone cache size limit (bug #11) - MAX_TIMEZONE_CACHE_SIZE = 100 with LRU eviction by timestamp
+- Task 4.2: Verified triggerScan behavior (bug #12) - Added test confirming no concurrent execution pile-up; existing design is correct
+- Task 4.3: Fixed logger initialization race (bug #15) - Added try-catch around getConfig() with fallback to default log level
+- Task 4.4: Fixed resolver non-null assertion (bug #17) - Initialize resolver with no-op function before Promise constructor
+- Task 4.5: Documented correlation context behavior (bug #35) - Added comprehensive tests; existing AsyncLocalStorage mutation pattern is correct
+
+**Files Modified:**
+- `src/services/sheets.ts` - Added MAX_TIMEZONE_CACHE_SIZE, evictOldestCacheEntry(), updated setCachedTimezone()
+- `src/services/sheets.test.ts` - Added cache size limit tests
+- `src/services/watch-manager.test.ts` - Added concurrent execution test
+- `src/utils/logger.ts` - Added try-catch with fallback for getConfig() errors
+- `src/utils/logger.test.ts` - Added config error handling tests
+- `src/gemini/client.ts` - Changed resolver initialization to use no-op function, removed non-null assertion
+- `src/utils/correlation.test.ts` - New test file documenting AsyncLocalStorage behavior
+
+**Pre-commit Verification:**
+- bug-hunter: Passed (0 bugs found)
+- test-runner: All 1267 tests pass (23 new tests added)
+- builder: Zero warnings
+
+### Review Findings
+
+**Files reviewed:** 7
+- `src/services/sheets.ts`, `src/services/sheets.test.ts`
+- `src/services/watch-manager.test.ts`
+- `src/utils/logger.ts`, `src/utils/logger.test.ts`
+- `src/gemini/client.ts`
+- `src/utils/correlation.ts`, `src/utils/correlation.test.ts`
+
+**Checks applied:** Security, Logic, Async, Resources, Type Safety, Error Handling, Race Conditions, Conventions
+
+No issues found - all implementations are correct and follow project conventions.
+
+**Verification details:**
+- Task 4.1 (timezone cache): `MAX_TIMEZONE_CACHE_SIZE = 100` with LRU eviction by timestamp; `evictOldestCacheEntry()` correctly finds and removes oldest entry
+- Task 4.2 (triggerScan): Tests verify sequential execution (`maxConcurrency === 1`) and no pile-up; existing design is correct
+- Task 4.3 (logger init): Try-catch around `getConfig()` with fallback to `DEFAULT_LOG_LEVEL = 'INFO'`; handles config errors gracefully
+- Task 4.4 (resolver): Initialized with no-op `let resolver: () => void = () => {}`; Promise callback runs synchronously so assignment happens before use
+- Task 4.5 (correlation): Tests document AsyncLocalStorage behavior; each async context has isolated store, mutations cannot interleave
+
+**Documented (no fix needed):**
+- [MEDIUM] ASYNC: Direct mutation in `updateCorrelationContext()` - Acceptable because AsyncLocalStorage isolates each context, JavaScript is single-threaded, and tests confirm correct behavior
+
+**Type Safety:** ✓ Proper initialization patterns, no unsafe assertions
+**Resource Management:** ✓ Cache size limited to prevent unbounded growth
+**Conventions:** ✓ ESM imports with .js, Pino logger, Result<T,E> pattern
+
+<!-- REVIEW COMPLETE -->
+
+---
+
+## Status: COMPLETE (Phases 1-4)
+
+Phases 1-4 (Date/Time & Precision Fixes, Type Validation & Constraints, Data Safety & Cache Integrity, Async & Concurrency Fixes) implemented and reviewed successfully. Ready for Phase 5 implementation.

@@ -352,6 +352,56 @@ describe('watch-manager', () => {
     });
   });
 
+  describe('triggerScan - recursive calls in finally block', () => {
+    it('should not have concurrent execution pile-up', async () => {
+      const { scanFolder } = await import('../processing/scanner.js');
+      const mockScanFolder = vi.mocked(scanFolder);
+
+      // Track concurrent executions
+      let currentConcurrency = 0;
+      let maxConcurrency = 0;
+      const scanPromises: Array<{ resolve: () => void }> = [];
+
+      mockScanFolder.mockImplementation(() => {
+        currentConcurrency++;
+        maxConcurrency = Math.max(maxConcurrency, currentConcurrency);
+
+        return new Promise((resolve) => {
+          scanPromises.push({
+            resolve: () => {
+              currentConcurrency--;
+              resolve({
+                ok: true,
+                value: { filesProcessed: 0, errors: 0, facturasAdded: 0, pagosAdded: 0, recibosAdded: 0, matchesFound: 0, duration: 0 }
+              });
+            }
+          });
+        });
+      });
+
+      // Trigger 5 scans - first starts, others are queued
+      triggerScan('folder1');
+      await new Promise(resolve => setTimeout(resolve, 10));
+      triggerScan('folder2');
+      triggerScan('folder3');
+      triggerScan('folder4');
+      triggerScan('folder5');
+
+      // Complete all scans sequentially
+      for (let i = 0; i < 5; i++) {
+        if (scanPromises[i]) {
+          scanPromises[i].resolve();
+          await new Promise(resolve => setTimeout(resolve, 50));
+        }
+      }
+
+      // Should never have more than 1 concurrent scan
+      expect(maxConcurrency).toBe(1);
+      // All 5 folders should have been scanned
+      expect(mockScanFolder).toHaveBeenCalledTimes(5);
+    });
+  });
+
   describe('checkAndMarkNotification - concurrent calls', () => {
     it('should handle 10 concurrent calls with same messageNumber atomically', async () => {
       const channelId = 'test-channel';
