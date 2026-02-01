@@ -274,12 +274,12 @@ export class FacturaPagoMatcher {
       const qualityA: MatchQuality = {
         confidence: a.confidence,
         hasCuitMatch: a.hasCuitMatch || false,
-        dateProximityDays: a.dateProximityDays || 999
+        dateProximityDays: a.dateProximityDays ?? 999
       };
       const qualityB: MatchQuality = {
         confidence: b.confidence,
         hasCuitMatch: b.hasCuitMatch || false,
-        dateProximityDays: b.dateProximityDays || 999
+        dateProximityDays: b.dateProximityDays ?? 999
       };
       return compareMatchQuality(qualityB, qualityA); // Sort descending
     });
@@ -485,12 +485,12 @@ export class ReciboPagoMatcher {
       const qualityA: MatchQuality = {
         confidence: a.confidence,
         hasCuitMatch: a.hasCuitMatch || false,
-        dateProximityDays: a.dateProximityDays || 999
+        dateProximityDays: a.dateProximityDays ?? 999
       };
       const qualityB: MatchQuality = {
         confidence: b.confidence,
         hasCuitMatch: b.hasCuitMatch || false,
-        dateProximityDays: b.dateProximityDays || 999
+        dateProximityDays: b.dateProximityDays ?? 999
       };
       return compareMatchQuality(qualityB, qualityA); // Sort descending
     });

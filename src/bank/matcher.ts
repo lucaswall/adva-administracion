@@ -15,6 +15,7 @@ import { parseArgDate, isWithinDays } from '../utils/date.js';
 import { extractCuitFromText } from '../utils/validation.js';
 import { amountsMatch } from '../utils/numbers.js';
 import { amountsMatchCrossCurrency } from '../utils/exchange-rate.js';
+import { warn } from '../utils/logger.js';
 
 /**
  * Default tolerance percentage for cross-currency matching
@@ -291,6 +292,15 @@ export class BankMovementMatcher {
         const linkedFactura = facturas.find(f => f.fileId === pagoMatch.pago.matchedFacturaFileId);
         if (linkedFactura) {
           return this.createPagoFacturaMatch(movement, pagoMatch.pago, linkedFactura, extractedCuit, pagoMatch.reasons);
+        } else {
+          // Linked factura not found in the array - log warning and continue
+          warn(
+            'Linked factura not found in facturas array',
+            {
+              pagoFileId: pagoMatch.pago.fileId,
+              matchedFacturaFileId: pagoMatch.pago.matchedFacturaFileId
+            }
+          );
         }
       }
     }

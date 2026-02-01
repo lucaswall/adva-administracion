@@ -89,4 +89,20 @@ describe('formatMonthFolder', () => {
       expect(formatMonthFolder(date)).toBe(expectedResults[month]);
     }
   });
+
+  // Bug #23: Handle invalid dates gracefully
+  it('returns undefined for invalid date string', () => {
+    const invalidDate = new Date('invalid');
+    expect(formatMonthFolder(invalidDate)).toBeUndefined();
+  });
+
+  it('returns undefined for NaN date', () => {
+    const nanDate = new Date(NaN);
+    expect(formatMonthFolder(nanDate)).toBeUndefined();
+  });
+
+  it('returns valid format for valid date', () => {
+    const validDate = new Date('2025-03-15');
+    expect(formatMonthFolder(validDate)).toBe('03 - Marzo');
+  });
 });

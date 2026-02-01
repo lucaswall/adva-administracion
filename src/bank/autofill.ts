@@ -17,6 +17,7 @@ import { getCachedFolderStructure } from '../services/folder-structure.js';
 import { BankMovementMatcher } from './matcher.js';
 import { parseNumber } from '../utils/numbers.js';
 import { getConfig } from '../config.js';
+import { warn } from '../utils/logger.js';
 
 /**
  * Parses a row from the bank movements sheet into a BankMovement object
@@ -217,24 +218,29 @@ export async function autoFillBankMovements(
     pagoOnlyMatches: 0,
     noMatches: 0,
     errors: 0,
+    failedBanks: [],
     duration: 0,
   };
 
   // Get bank spreadsheets to process
-  const banksToProcess = bankName
+  const banksToProcess: Array<[string, string | undefined]> = bankName
     ? [[bankName, folderStructure.bankSpreadsheets.get(bankName)]]
     : Array.from(folderStructure.bankSpreadsheets.entries());
 
-  for (const [_name, spreadsheetId] of banksToProcess) {
+  for (const [bName, spreadsheetId] of banksToProcess) {
     if (!spreadsheetId) {
+      warn('Bank spreadsheet ID not found', { bankName: bName });
       result.errors++;
+      result.failedBanks.push(bName);
       continue;
     }
 
     // Get bank movements
     const movementsResult = await getValues(spreadsheetId, 'Movimientos!A:I');
     if (!movementsResult.ok) {
+      warn('Bank movement loading failed', { bankName: bName, error: movementsResult.error });
       result.errors++;
+      result.failedBanks.push(bName);
       continue;
     }
 
@@ -296,7 +302,9 @@ export async function autoFillBankMovements(
     if (updates.length > 0) {
       const updateResult = await batchUpdate(spreadsheetId, updates);
       if (!updateResult.ok) {
+        warn('Bank update failed', { bankName: bName, error: updateResult.error });
         result.errors++;
+        result.failedBanks.push(bName);
       }
     }
   }

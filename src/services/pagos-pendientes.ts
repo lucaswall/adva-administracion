@@ -4,9 +4,20 @@
  */
 
 import type { Result } from '../types/index.js';
-import { getValues, clearSheetData, appendRowsWithFormatting } from './sheets.js';
+import { getValues, setValues, clearSheetData } from './sheets.js';
 import { info, warn } from '../utils/logger.js';
 import { getCorrelationId } from '../utils/correlation.js';
+
+/**
+ * Gets the column index for a given header name
+ *
+ * @param headers - Array of header names from first row
+ * @param columnName - Name of the column to find
+ * @returns Column index (0-based), or -1 if not found
+ */
+function getColumnIndex(headers: unknown[], columnName: string): number {
+  return headers.findIndex((header) => header === columnName);
+}
 
 /**
  * Syncs unpaid invoices (facturas recibidas) to Dashboard's Pagos Pendientes sheet
@@ -52,10 +63,22 @@ export async function syncPagosPendientes(
       return { ok: true, value: 0 };
     }
 
+    // Get header row and find column indices
+    const headers = rows[0];
+    const pagadaIdx = getColumnIndex(headers, 'pagada');
+
+    // Validate required columns exist
+    if (pagadaIdx === -1) {
+      return {
+        ok: false,
+        error: new Error('Required column "pagada" not found in Facturas Recibidas sheet'),
+      };
+    }
+
     // 2. Filter where pagada !== 'SI' (includes 'NO' and empty)
     // Skip header row (index 0)
     const unpaidFacturas = rows.slice(1).filter((row) => {
-      const pagada = row[18]; // Column S (index 18)
+      const pagada = row[pagadaIdx];
       return pagada !== 'SI';
     });
 
@@ -67,47 +90,89 @@ export async function syncPagosPendientes(
       correlationId,
     });
 
-    // 3. Clear Pagos Pendientes sheet data (preserve header)
+    // Find all required column indices
+    const fechaEmisionIdx = getColumnIndex(headers, 'fechaEmision');
+    const fileIdIdx = getColumnIndex(headers, 'fileId');
+    const fileNameIdx = getColumnIndex(headers, 'fileName');
+    const tipoComprobanteIdx = getColumnIndex(headers, 'tipoComprobante');
+    const nroFacturaIdx = getColumnIndex(headers, 'nroFactura');
+    const cuitEmisorIdx = getColumnIndex(headers, 'cuitEmisor');
+    const razonSocialEmisorIdx = getColumnIndex(headers, 'razonSocialEmisor');
+    const importeTotalIdx = getColumnIndex(headers, 'importeTotal');
+    const monedaIdx = getColumnIndex(headers, 'moneda');
+    const conceptoIdx = getColumnIndex(headers, 'concepto');
+
+    // Validate all required columns exist
+    const requiredColumns = [
+      { name: 'fechaEmision', idx: fechaEmisionIdx },
+      { name: 'fileId', idx: fileIdIdx },
+      { name: 'fileName', idx: fileNameIdx },
+      { name: 'tipoComprobante', idx: tipoComprobanteIdx },
+      { name: 'nroFactura', idx: nroFacturaIdx },
+      { name: 'cuitEmisor', idx: cuitEmisorIdx },
+      { name: 'razonSocialEmisor', idx: razonSocialEmisorIdx },
+      { name: 'importeTotal', idx: importeTotalIdx },
+      { name: 'moneda', idx: monedaIdx },
+      { name: 'concepto', idx: conceptoIdx },
+    ];
+
+    for (const { name, idx } of requiredColumns) {
+      if (idx === -1) {
+        return {
+          ok: false,
+          error: new Error(`Required column "${name}" not found in Facturas Recibidas sheet`),
+        };
+      }
+    }
+
+    // 3. Map to PAGOS_PENDIENTES columns
+    // PAGOS_PENDIENTES_HEADERS: fechaEmision, fileId, fileName, tipoComprobante,
+    //   nroFactura, cuitEmisor, razonSocialEmisor, importeTotal, moneda, concepto
+    const pagosPendientesRows = unpaidFacturas.map((row) => [
+      row[fechaEmisionIdx] || '',
+      row[fileIdIdx] || '',
+      row[fileNameIdx] || '',
+      row[tipoComprobanteIdx] || '',
+      row[nroFacturaIdx] || '',
+      row[cuitEmisorIdx] || '',
+      row[razonSocialEmisorIdx] || '',
+      row[importeTotalIdx] || '',
+      row[monedaIdx] || '',
+      row[conceptoIdx] || '',
+    ]);
+
+    // 4. Clear existing data rows (preserve header)
     const clearResult = await clearSheetData(dashboardId, 'Pagos Pendientes');
     if (!clearResult.ok) {
       return clearResult;
     }
 
-    // If no unpaid facturas, we're done (sheet is already cleared)
-    if (unpaidFacturas.length === 0) {
-      info('No pending payments to sync', {
+    // 5. If no data to write, we're done (sheet is cleared)
+    if (pagosPendientesRows.length === 0) {
+      info('Pagos Pendientes sync complete - no pending payments', {
         module: 'pagos-pendientes',
         phase: 'sync',
+        syncedCount: 0,
         correlationId,
       });
       return { ok: true, value: 0 };
     }
 
-    // 4. Map to PAGOS_PENDIENTES columns
-    // PAGOS_PENDIENTES_HEADERS: fechaEmision, fileId, fileName, tipoComprobante,
-    //   nroFactura, cuitEmisor, razonSocialEmisor, importeTotal, moneda, concepto
-    const pagosPendientesRows = unpaidFacturas.map((row) => [
-      row[0] || '',  // fechaEmision (A)
-      row[1] || '',  // fileId (B)
-      row[2] || '',  // fileName (C)
-      row[3] || '',  // tipoComprobante (D)
-      row[4] || '',  // nroFactura (E)
-      row[5] || '',  // cuitEmisor (F)
-      row[6] || '',  // razonSocialEmisor (G)
-      row[9] || '',  // importeTotal (J)
-      row[10] || '', // moneda (K)
-      row[11] || '', // concepto (L)
-    ]);
-
-    // 5. Write filtered rows to Pagos Pendientes
-    const appendResult = await appendRowsWithFormatting(
+    // 6. Write new data
+    const setResult = await setValues(
       dashboardId,
-      'Pagos Pendientes!A:J',
+      'Pagos Pendientes!A2:J',
       pagosPendientesRows
     );
 
-    if (!appendResult.ok) {
-      return appendResult;
+    if (!setResult.ok) {
+      warn('Failed to write pending payments after clearing - data lost', {
+        module: 'pagos-pendientes',
+        phase: 'sync',
+        error: setResult.error.message,
+        correlationId,
+      });
+      return setResult;
     }
 
     info('Pagos Pendientes sync complete', {
@@ -117,7 +182,6 @@ export async function syncPagosPendientes(
       correlationId,
     });
 
-    // 6. Return count
     return { ok: true, value: unpaidFacturas.length };
   } catch (error) {
     warn('Pagos Pendientes sync failed', {

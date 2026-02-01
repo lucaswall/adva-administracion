@@ -5,7 +5,7 @@
 
 /**
  * Validates that a string is a valid ISO date in YYYY-MM-DD format
- * with a reasonable year (2000-2100)
+ * with a reasonable year (current year - 10 to current year + 1)
  *
  * @param dateStr - String to validate
  * @returns true if valid ISO date, false otherwise
@@ -22,9 +22,9 @@ export function isValidISODate(dateStr: string): boolean {
   const month = parseInt(monthStr, 10);
   const day = parseInt(dayStr, 10);
 
-  // Validate year is in reasonable range (2000 to current year + 1)
+  // Validate year is in reasonable range (current year - 10 to current year + 1)
   const currentYear = new Date().getFullYear();
-  if (year < 2000 || year > currentYear + 1) return false;
+  if (year < currentYear - 10 || year > currentYear + 1) return false;
 
   // Validate month (1-12)
   if (month < 1 || month > 12) return false;
@@ -127,9 +127,9 @@ export function isWithinDays(
  * @returns ISO date string
  */
 export function formatISODate(date: Date): string {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
+  const year = date.getUTCFullYear();
+  const month = String(date.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(date.getUTCDate()).padStart(2, '0');
 
   return `${year}-${month}-${day}`;
 }

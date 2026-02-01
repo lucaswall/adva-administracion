@@ -20,6 +20,12 @@ let sheetsService: sheets_v4.Sheets | null = null;
 const TIMEZONE_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 
 /**
+ * Maximum number of entries in the timezone cache
+ * Prevents unbounded memory growth in long-running processes
+ */
+const MAX_TIMEZONE_CACHE_SIZE = 100;
+
+/**
  * In-memory cache entry for timezone
  */
 interface TimezoneCacheEntry {
@@ -49,9 +55,34 @@ function getCachedTimezone(spreadsheetId: string): string | null {
 }
 
 /**
+ * Evicts the oldest cache entry when cache is at capacity
+ */
+function evictOldestCacheEntry(): void {
+  let oldestKey: string | null = null;
+  let oldestTimestamp = Infinity;
+
+  for (const [key, entry] of timezoneCache.entries()) {
+    if (entry.timestamp < oldestTimestamp) {
+      oldestTimestamp = entry.timestamp;
+      oldestKey = key;
+    }
+  }
+
+  if (oldestKey !== null) {
+    timezoneCache.delete(oldestKey);
+  }
+}
+
+/**
  * Sets cached timezone with current timestamp
+ * Evicts oldest entries if cache exceeds MAX_TIMEZONE_CACHE_SIZE
  */
 function setCachedTimezone(spreadsheetId: string, timezone: string): void {
+  // If this is a new entry and we're at capacity, evict the oldest
+  if (!timezoneCache.has(spreadsheetId) && timezoneCache.size >= MAX_TIMEZONE_CACHE_SIZE) {
+    evictOldestCacheEntry();
+  }
+
   timezoneCache.set(spreadsheetId, {
     timezone,
     timestamp: Date.now(),

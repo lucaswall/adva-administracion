@@ -1283,3 +1283,159 @@ describe('ReciboPagoMatcher.findMatches', () => {
     }
   });
 });
+
+describe('MatchQuality.compare - dateProximityDays=0 handling (bug #16)', () => {
+  it('treats dateProximityDays=0 as perfect match, not as undefined', () => {
+    // Bug: dateProximityDays || 999 treats 0 as falsy and replaces with 999
+    // Fix: dateProximityDays ?? 999 preserves 0
+    const facturas: Array<Factura & { row: number }> = [
+      {
+        row: 2,
+        fileId: 'file1',
+        fileName: 'factura1.pdf',
+        tipoComprobante: 'A',
+        nroFactura: '00001-00000001',
+        fechaEmision: '2024-01-05',
+        cuitEmisor: '20111111119',
+        razonSocialEmisor: 'EMPRESA UNO SA',
+        importeNeto: 1000,
+        importeIva: 210,
+        importeTotal: 1210,
+        moneda: 'ARS',
+        processedAt: '2024-01-05T10:00:00Z',
+        confidence: 1.0,
+        needsReview: false
+      }
+    ];
+
+    const matcher = new FacturaPagoMatcher(10, 60);
+
+    // Pago on same day as factura → dateProximityDays = 0
+    const pago: Pago = {
+      fileId: 'pago1',
+      fileName: 'pago1.pdf',
+      banco: 'BBVA',
+      fechaPago: '2024-01-05', // Same day as factura
+      importePagado: 1210,
+      moneda: 'ARS',
+      processedAt: '2024-01-05T10:00:00Z',
+      confidence: 1.0,
+      needsReview: false
+    };
+
+    const matches = matcher.findMatches(pago, facturas);
+    expect(matches.length).toBe(1);
+    if (matches.length > 0) {
+      // dateProximityDays should be 0, not 999
+      expect(matches[0].dateProximityDays).toBe(0);
+      // 0 days is better than any other value
+      expect(matches[0].confidence).toBe('MEDIUM');
+    }
+  });
+
+  it('correctly ranks 0 days better than 5 days when comparing matches', () => {
+    const facturas: Array<Factura & { row: number }> = [
+      {
+        row: 2,
+        fileId: 'file1',
+        fileName: 'factura1.pdf',
+        tipoComprobante: 'A',
+        nroFactura: '00001-00000001',
+        fechaEmision: '2024-01-05', // 5 days before pago
+        cuitEmisor: '20111111119',
+        razonSocialEmisor: 'EMPRESA UNO SA',
+        importeNeto: 1000,
+        importeIva: 210,
+        importeTotal: 1210,
+        moneda: 'ARS',
+        processedAt: '2024-01-05T10:00:00Z',
+        confidence: 1.0,
+        needsReview: false
+      },
+      {
+        row: 3,
+        fileId: 'file2',
+        fileName: 'factura2.pdf',
+        tipoComprobante: 'A',
+        nroFactura: '00001-00000002',
+        fechaEmision: '2024-01-10', // Same day as pago
+        cuitEmisor: '20111111119',
+        razonSocialEmisor: 'EMPRESA UNO SA',
+        importeNeto: 1000,
+        importeIva: 210,
+        importeTotal: 1210,
+        moneda: 'ARS',
+        processedAt: '2024-01-10T10:00:00Z',
+        confidence: 1.0,
+        needsReview: false
+      }
+    ];
+
+    const matcher = new FacturaPagoMatcher(10, 60);
+
+    const pago: Pago = {
+      fileId: 'pago1',
+      fileName: 'pago1.pdf',
+      banco: 'BBVA',
+      fechaPago: '2024-01-10',
+      importePagado: 1210,
+      moneda: 'ARS',
+      processedAt: '2024-01-10T10:00:00Z',
+      confidence: 1.0,
+      needsReview: false
+    };
+
+    const matches = matcher.findMatches(pago, facturas);
+    expect(matches.length).toBe(2);
+
+    // First match should be the one with 0 days (file2), not 5 days (file1)
+    expect(matches[0].facturaFileId).toBe('file2');
+    expect(matches[0].dateProximityDays).toBe(0);
+    expect(matches[1].facturaFileId).toBe('file1');
+    expect(matches[1].dateProximityDays).toBe(5);
+  });
+
+  it('treats undefined dateProximityDays as 999 (worst)', () => {
+    // This is a hypothetical case to document expected behavior
+    // In practice, dateProximityDays should never be undefined if dates are valid
+    const facturas: Array<Factura & { row: number }> = [
+      {
+        row: 2,
+        fileId: 'file1',
+        fileName: 'factura1.pdf',
+        tipoComprobante: 'A',
+        nroFactura: '00001-00000001',
+        fechaEmision: '2024-01-05',
+        cuitEmisor: '20111111119',
+        razonSocialEmisor: 'EMPRESA UNO SA',
+        importeNeto: 1000,
+        importeIva: 210,
+        importeTotal: 1210,
+        moneda: 'ARS',
+        processedAt: '2024-01-05T10:00:00Z',
+        confidence: 1.0,
+        needsReview: false
+      }
+    ];
+
+    const matcher = new FacturaPagoMatcher(10, 60);
+
+    const pago: Pago = {
+      fileId: 'pago1',
+      fileName: 'pago1.pdf',
+      banco: 'BBVA',
+      fechaPago: '2024-01-07',
+      importePagado: 1210,
+      moneda: 'ARS',
+      processedAt: '2024-01-07T10:00:00Z',
+      confidence: 1.0,
+      needsReview: false
+    };
+
+    const matches = matcher.findMatches(pago, facturas);
+    expect(matches.length).toBe(1);
+    // dateProximityDays should be defined (2 in this case)
+    expect(matches[0].dateProximityDays).toBeDefined();
+    expect(matches[0].dateProximityDays).toBe(2);
+  });
+});

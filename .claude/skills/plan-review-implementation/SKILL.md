@@ -19,7 +19,13 @@ Review the latest implementation iteration and either create a fix plan or mark 
 
 Find the **latest "Iteration N"** section that has:
 - "Completed" subsection (implementation was done)
-- NO "Review Findings" subsection (not yet reviewed)
+- NO `<!-- REVIEW COMPLETE -->` marker (not yet reviewed)
+
+**Detection logic:**
+1. Search PLANS.md for all `## Iteration N` sections
+2. For each iteration (latest first), check if it contains `<!-- REVIEW COMPLETE -->`
+3. If marker NOT found → This iteration needs review
+4. If marker found → Skip, already reviewed
 
 If no iteration needs review → Inform user and stop.
 
@@ -117,7 +123,11 @@ Summary: N issue(s) found
 #### Fix 3: Unhandled promise rejection
 1. Write test in `src/api.test.ts` for error handling
 2. Add try/catch in `src/api.ts:78`
+
+<!-- REVIEW COMPLETE -->
 ```
+
+**Note:** The `<!-- REVIEW COMPLETE -->` marker is added even when issues are found, because the review itself is complete. The Fix Plan will create a new iteration when implemented.
 
 ### If No Issues Found
 
@@ -130,6 +140,8 @@ Files reviewed: N
 Checks applied: Security, Logic, Async, Resources, Type Safety, Conventions
 
 No issues found - all implementations are correct and follow project conventions.
+
+<!-- REVIEW COMPLETE -->
 
 ---
 

@@ -19,7 +19,9 @@ import {
   validateTipoComprobante,
   validateMatchConfidence,
   validateMoneda,
-  validateTipoRecibo
+  validateTipoRecibo,
+  validateTipoTarjeta,
+  validateConfidence
 } from './validation.js';
 import type { Factura, Pago, Recibo } from '../types/index.js';
 
@@ -861,5 +863,89 @@ describe('validateRecibo', () => {
     const result = validateRecibo(noDashes);
     expect(result.valid).toBe(true);
     expect(result.errors).toHaveLength(0);
+  });
+});
+
+describe('validateTipoTarjeta', () => {
+  it('returns Visa for valid input', () => {
+    expect(validateTipoTarjeta('Visa')).toBe('Visa');
+  });
+
+  it('returns Mastercard for valid input', () => {
+    expect(validateTipoTarjeta('Mastercard')).toBe('Mastercard');
+  });
+
+  it('returns Amex for valid input', () => {
+    expect(validateTipoTarjeta('Amex')).toBe('Amex');
+  });
+
+  it('returns Naranja for valid input', () => {
+    expect(validateTipoTarjeta('Naranja')).toBe('Naranja');
+  });
+
+  it('returns Cabal for valid input', () => {
+    expect(validateTipoTarjeta('Cabal')).toBe('Cabal');
+  });
+
+  it('returns undefined for invalid card type', () => {
+    expect(validateTipoTarjeta('InvalidCard')).toBeUndefined();
+  });
+
+  it('returns undefined for non-string input', () => {
+    expect(validateTipoTarjeta(123)).toBeUndefined();
+  });
+
+  it('returns undefined for null', () => {
+    expect(validateTipoTarjeta(null)).toBeUndefined();
+  });
+
+  it('returns undefined for undefined', () => {
+    expect(validateTipoTarjeta(undefined)).toBeUndefined();
+  });
+});
+
+describe('validateConfidence', () => {
+  it('returns valid confidence value 0.85', () => {
+    expect(validateConfidence(0.85)).toBe(0.85);
+  });
+
+  it('returns valid confidence value 0 (minimum)', () => {
+    expect(validateConfidence(0)).toBe(0);
+  });
+
+  it('returns valid confidence value 1 (maximum)', () => {
+    expect(validateConfidence(1)).toBe(1);
+  });
+
+  it('returns undefined for negative value', () => {
+    expect(validateConfidence(-0.5)).toBeUndefined();
+  });
+
+  it('returns undefined for value greater than 1', () => {
+    expect(validateConfidence(1.5)).toBeUndefined();
+  });
+
+  it('returns undefined for NaN', () => {
+    expect(validateConfidence(NaN)).toBeUndefined();
+  });
+
+  it('returns undefined for Infinity', () => {
+    expect(validateConfidence(Infinity)).toBeUndefined();
+  });
+
+  it('returns undefined for negative Infinity', () => {
+    expect(validateConfidence(-Infinity)).toBeUndefined();
+  });
+
+  it('returns undefined for non-number input', () => {
+    expect(validateConfidence('0.5')).toBeUndefined();
+  });
+
+  it('returns undefined for null', () => {
+    expect(validateConfidence(null)).toBeUndefined();
+  });
+
+  it('returns undefined for undefined', () => {
+    expect(validateConfidence(undefined)).toBeUndefined();
   });
 });

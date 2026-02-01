@@ -282,4 +282,63 @@ describe('Logger', () => {
       expect(logger).toBe(mockPinoInstance);
     });
   });
+
+  describe('config error handling', () => {
+    it('should use default INFO level when getConfig() throws', async () => {
+      vi.resetModules();
+
+      // Mock config to throw
+      vi.doMock('../config.js', () => ({
+        getConfig: vi.fn(() => {
+          throw new Error('Config not initialized');
+        }),
+      }));
+
+      const { info } = await import('./logger.js');
+
+      // Should not throw - logger should use default level
+      expect(() => info('test')).not.toThrow();
+
+      expect(pino).toHaveBeenCalledWith(
+        expect.objectContaining({
+          level: 'info',
+        })
+      );
+    });
+
+    it('should use default INFO level when getConfig() returns null', async () => {
+      vi.resetModules();
+
+      // Mock config to return null
+      vi.doMock('../config.js', () => ({
+        getConfig: vi.fn(() => null),
+      }));
+
+      const { info } = await import('./logger.js');
+
+      // Should not throw - logger should use default level
+      expect(() => info('test')).not.toThrow();
+
+      expect(pino).toHaveBeenCalledWith(
+        expect.objectContaining({
+          level: 'info',
+        })
+      );
+    });
+
+    it('should return same logger instance on concurrent calls', async () => {
+      const loggerModule = await import('./logger.js');
+
+      // Make multiple concurrent calls
+      const [logger1, logger2, logger3] = await Promise.all([
+        Promise.resolve(loggerModule.getLogger()),
+        Promise.resolve(loggerModule.getLogger()),
+        Promise.resolve(loggerModule.getLogger()),
+      ]);
+
+      // All should return the same instance
+      expect(logger1).toBe(logger2);
+      expect(logger2).toBe(logger3);
+    });
+  });
 });

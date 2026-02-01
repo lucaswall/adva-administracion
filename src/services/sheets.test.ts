@@ -1311,6 +1311,102 @@ describe('Google Sheets API wrapper - quota retry tests', () => {
       // API should be called again after expiration
       expect(mockSheetsApi.spreadsheets.get).toHaveBeenCalledTimes(2);
     });
+
+    it('should evict oldest entries when cache exceeds MAX_TIMEZONE_CACHE_SIZE', async () => {
+      // MAX_TIMEZONE_CACHE_SIZE is 100
+      // Mock enough responses for all expected API calls
+      mockSheetsApi.spreadsheets.get.mockImplementation(({ spreadsheetId }) => {
+        const id = spreadsheetId as string;
+        return Promise.resolve({
+          data: {
+            properties: { timeZone: `America/Zone_${id}` },
+          },
+        });
+      });
+
+      // Fill cache with 100 entries (0-99)
+      for (let i = 0; i < 100; i++) {
+        const resultPromise = getSpreadsheetTimezone(`spreadsheet${i}`);
+        await vi.runAllTimersAsync();
+        const result = await resultPromise;
+        expect(result.ok).toBe(true);
+
+        // Advance time by 1ms to ensure different timestamps
+        vi.advanceTimersByTime(1);
+      }
+
+      expect(mockSheetsApi.spreadsheets.get).toHaveBeenCalledTimes(100);
+      // Cache state: entries 0-99 (size 100)
+
+      // Add one more entry - should evict the oldest (spreadsheet0)
+      const result100Promise = getSpreadsheetTimezone('spreadsheet100');
+      await vi.runAllTimersAsync();
+      const result100 = await result100Promise;
+      expect(result100.ok).toBe(true);
+
+      expect(mockSheetsApi.spreadsheets.get).toHaveBeenCalledTimes(101);
+      // Cache state: entries 1-100 (size 100, entry 0 evicted)
+
+      // Now accessing spreadsheet0 should require a new API call (was evicted)
+      // This will evict spreadsheet1 (now the oldest)
+      const result0Promise = getSpreadsheetTimezone('spreadsheet0');
+      await vi.runAllTimersAsync();
+      const result0 = await result0Promise;
+
+      expect(result0.ok).toBe(true);
+      expect(mockSheetsApi.spreadsheets.get).toHaveBeenCalledTimes(102);
+      // Cache state: entries 2-100,0 (size 100, entry 1 evicted)
+
+      // spreadsheet99 should still be in cache (was not evicted)
+      const result99Promise = getSpreadsheetTimezone('spreadsheet99');
+      await vi.runAllTimersAsync();
+      await result99Promise;
+
+      // No additional API call - still cached
+      expect(mockSheetsApi.spreadsheets.get).toHaveBeenCalledTimes(102);
+
+      // spreadsheet100 should also still be in cache
+      const result100BPromise = getSpreadsheetTimezone('spreadsheet100');
+      await vi.runAllTimersAsync();
+      await result100BPromise;
+
+      // No additional API call - still cached
+      expect(mockSheetsApi.spreadsheets.get).toHaveBeenCalledTimes(102);
+    });
+
+    it('should maintain cache at or below MAX_TIMEZONE_CACHE_SIZE', async () => {
+      // Mock all responses
+      mockSheetsApi.spreadsheets.get.mockImplementation(({ spreadsheetId }) => {
+        const id = spreadsheetId as string;
+        return Promise.resolve({
+          data: {
+            properties: { timeZone: `America/Zone_${id}` },
+          },
+        });
+      });
+
+      // Add 150 entries
+      for (let i = 0; i < 150; i++) {
+        const resultPromise = getSpreadsheetTimezone(`spreadsheet${i}`);
+        await vi.runAllTimersAsync();
+        await resultPromise;
+
+        // Advance time to ensure different timestamps
+        vi.advanceTimersByTime(1);
+      }
+
+      // All 150 entries required API calls
+      expect(mockSheetsApi.spreadsheets.get).toHaveBeenCalledTimes(150);
+
+      // The last 100 entries (50-149) should still be cached
+      // Verify by accessing spreadsheet149 (should be cached)
+      const result149Promise = getSpreadsheetTimezone('spreadsheet149');
+      await vi.runAllTimersAsync();
+      await result149Promise;
+
+      // No additional API call
+      expect(mockSheetsApi.spreadsheets.get).toHaveBeenCalledTimes(150);
+    });
   });
 
   describe('Sheet chronological ordering', () => {

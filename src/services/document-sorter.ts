@@ -91,6 +91,9 @@ function buildTargetPath(destination: SortDestination, date?: Date): string {
 
   // Ingresos/Egresos: year/classification/month
   const monthFolder = formatMonthFolder(date);
+  if (!monthFolder) {
+    throw new Error(`Invalid date for month folder: ${date.toISOString()}`);
+  }
   return `${year}/${DESTINATION_NAMES[destination]}/${monthFolder}`;
 }
 

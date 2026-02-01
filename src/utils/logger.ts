@@ -11,12 +11,25 @@ import { getConfig } from '../config.js';
 let loggerInstance: Logger | null = null;
 
 /**
+ * Default log level when config is unavailable
+ */
+const DEFAULT_LOG_LEVEL = 'INFO';
+
+/**
  * Gets or creates the logger instance
+ * Handles config errors gracefully by using default settings
  */
 function getLogger(): Logger {
   if (!loggerInstance) {
-    const config = getConfig();
-    const logLevel = config?.logLevel || 'INFO';
+    let logLevel = DEFAULT_LOG_LEVEL;
+
+    try {
+      const config = getConfig();
+      logLevel = config?.logLevel || DEFAULT_LOG_LEVEL;
+    } catch {
+      // Config not initialized - use default log level
+      // This can happen during early initialization or in test environments
+    }
 
     loggerInstance = pino({
       level: logLevel.toLowerCase(),
