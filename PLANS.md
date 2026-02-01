@@ -182,3 +182,80 @@
 
 **Dependencies/Prerequisites:**
 - None - all tasks are independent and can be implemented in any order
+
+---
+
+## Iteration 1
+
+### Completed
+
+**Task 1: Fix SALDO INICIAL number formatting** ✓
+- Added test in `movimientos-store.test.ts:245-267` verifying `saldoCalculado` is wrapped as `CellNumber`
+- Fixed `movimientos-store.ts:85` to wrap `initialRow[5]` in `CellNumber`
+
+**Task 2: Fix processedAt timestamp formatting for retry files** ✓
+- Added test in `storage/index.test.ts:106-135` verifying serial number conversion
+- Fixed `storage/index.ts:94-101` to use `dateToSerialInTimezone()` before `batchUpdate()`
+
+**Task 3: DuplicateCache failed promise caching** - NOT A BUG
+- Investigation: The test at `duplicate-cache.test.ts:621-668` PASSES with current code
+- The existing implementation already deletes failed promises (lines 40-42) enabling retry
+- No fix needed - the plan incorrectly identified this as a bug
+
+**Task 4: Fix matchAllMovimientos using empty bankSpreadsheets Map** ✓
+- Added `movimientosSpreadsheets: Map<string, string>` to `FolderStructure` interface (`types/index.ts:1017`)
+- Initialize `movimientosSpreadsheets: new Map()` in `folder-structure.ts:578`
+- Cache spreadsheet ID in `getOrCreateMovimientosSpreadsheet()` (`folder-structure.ts:1501-1503`)
+- Updated `match-movimientos.ts:784` to destructure `movimientosSpreadsheets`
+- Updated `match-movimientos.ts:805` to iterate over `movimientosSpreadsheets`
+- Added test in `match-movimientos.test.ts:271-327` verifying the correct Map is used
+
+**Task 5: Sort Pagos Pendientes by fechaEmision ascending** ✓
+- Added test in `pagos-pendientes.test.ts:400-461` verifying sort order
+- Fixed `pagos-pendientes.ts:86-95` to sort by `fechaEmision` before writing
+
+### Review Findings
+
+Summary: 0 issues found
+
+Files reviewed: 12
+- `src/processing/storage/movimientos-store.ts`
+- `src/processing/storage/movimientos-store.test.ts`
+- `src/processing/storage/index.ts`
+- `src/processing/storage/index.test.ts`
+- `src/types/index.ts`
+- `src/types/index.test.ts`
+- `src/services/folder-structure.ts`
+- `src/bank/match-movimientos.ts`
+- `src/bank/match-movimientos.test.ts`
+- `src/services/pagos-pendientes.ts`
+- `src/services/pagos-pendientes.test.ts`
+- `src/processing/caches/duplicate-cache.ts`
+
+Checks applied: Security, Logic, Async, Resources, Type Safety, Conventions
+
+**Review Details:**
+
+1. **Task 1 (SALDO INICIAL formatting):** Correctly wraps raw number in `CellNumber` type matching the pattern used for other numeric values in the same function.
+
+2. **Task 2 (processedAt timestamp):** Properly fetches timezone via `getSpreadsheetTimezone()` and converts ISO timestamp to serial number using `dateToSerialInTimezone()`. Falls back to UTC when timezone fetch fails.
+
+3. **Task 3 (DuplicateCache):** No changes made - investigation confirmed existing code already handles retries correctly by deleting failed promises.
+
+4. **Task 4 (movimientosSpreadsheets):** Clean implementation adding a new cache Map. Only caches `bancario` type (line 1501-1503) since tarjeta/broker don't have detalle column needing matching. The iteration over the new Map in `matchAllMovimientos` is correct.
+
+5. **Task 5 (Pagos Pendientes sorting):** Uses `localeCompare()` for string comparison which works correctly for ISO date format (YYYY-MM-DD). Sort happens after filtering but before mapping.
+
+**Build & Tests:**
+- All 1,363 tests pass
+- Zero build warnings
+
+No issues found - all implementations are correct and follow project conventions.
+
+<!-- REVIEW COMPLETE -->
+
+---
+
+## Status: COMPLETE
+
+All tasks implemented and reviewed successfully. Ready for human review.

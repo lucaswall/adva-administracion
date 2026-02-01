@@ -140,6 +140,7 @@ describe('FolderStructure', () => {
       controlEgresosId: 'control-egresos-id',
       dashboardOperativoId: 'dashboard-id',
       bankSpreadsheets: new Map(),
+      movimientosSpreadsheets: new Map(),
       yearFolders: new Map(),
       classificationFolders: new Map(),
       monthFolders: new Map(),

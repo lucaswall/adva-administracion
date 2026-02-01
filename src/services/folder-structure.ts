@@ -575,6 +575,7 @@ export async function discoverFolderStructure(): Promise<Result<FolderStructure,
     controlEgresosId: controlEgresosResult.value,
     dashboardOperativoId: dashboardOperativoResult.value,
     bankSpreadsheets,
+    movimientosSpreadsheets: new Map(),
     yearFolders: new Map(),
     classificationFolders: new Map(),
     monthFolders: new Map(),
@@ -1494,6 +1495,12 @@ export async function getOrCreateMovimientosSpreadsheet(
 
     // Note: We don't create sheets here - they're created per-month when storing transactions
     // The sheet creation is handled by the storage layer in movimientos-store.ts
+
+    // Cache the Movimientos spreadsheet ID for use by matchAllMovimientos
+    // Only bancario type needs matching (tarjeta and broker don't have detalle column)
+    if (type === 'bancario') {
+      requireCachedStructure().movimientosSpreadsheets.set(folderName, spreadsheetId);
+    }
 
     return spreadsheetId;
   }, SPREADSHEET_LOCK_TIMEOUT_MS); // 30 second timeout for spreadsheet creation

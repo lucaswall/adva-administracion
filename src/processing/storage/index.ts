@@ -2,7 +2,7 @@
  * Storage module index - exports all storage functions
  */
 
-import { getValues, appendRowsWithLinks, batchUpdate, getSpreadsheetTimezone } from '../../services/sheets.js';
+import { getValues, appendRowsWithLinks, batchUpdate, getSpreadsheetTimezone, dateToSerialInTimezone } from '../../services/sheets.js';
 import type { Result, DocumentType } from '../../types/index.js';
 import { info as logInfo, error as logError } from '../../utils/logger.js';
 import { getCorrelationId } from '../../utils/correlation.js';
@@ -91,8 +91,14 @@ export async function markFileProcessing(
           correlationId,
         });
 
+        // Convert ISO timestamp to serial number for proper spreadsheet formatting
+        // Use timezone if available, otherwise fall back to UTC-based conversion
+        const processedAtSerial = timeZone
+          ? dateToSerialInTimezone(new Date(processedAt), timeZone)
+          : dateToSerialInTimezone(new Date(processedAt), 'UTC');
+
         const updateResult = await batchUpdate(dashboardId, [
-          { range: `Archivos Procesados!C${existingRowIndex}:E${existingRowIndex}`, values: [[processedAt, documentType, 'processing']] },
+          { range: `Archivos Procesados!C${existingRowIndex}:E${existingRowIndex}`, values: [[processedAtSerial, documentType, 'processing']] },
         ]);
 
         if (!updateResult.ok) {

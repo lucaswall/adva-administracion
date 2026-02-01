@@ -11,6 +11,11 @@ vi.mock('../../services/sheets.js', () => ({
   getValues: vi.fn(),
   batchUpdate: vi.fn(),
   getSpreadsheetTimezone: vi.fn(() => Promise.resolve({ ok: true, value: 'America/Argentina/Buenos_Aires' })),
+  dateToSerialInTimezone: vi.fn((date: Date) => {
+    // Return a realistic serial number for testing (around 46000 for 2026 dates)
+    const epoch = new Date(Date.UTC(1899, 11, 30));
+    return (date.getTime() - epoch.getTime()) / (1000 * 60 * 60 * 24);
+  }),
 }));
 
 vi.mock('../../utils/logger.js', () => ({
@@ -92,9 +97,41 @@ describe('File Tracking Functions', () => {
       expect(batchUpdate).toHaveBeenCalledWith('dashboard-id', [
         {
           range: 'Archivos Procesados!C2:E2',
-          values: [[expect.any(String), 'factura_emitida', 'processing']],
+          // processedAt is now a serial number (converted from ISO timestamp)
+          values: [[expect.any(Number), 'factura_emitida', 'processing']],
         },
       ]);
+    });
+
+    it('converts processedAt ISO timestamp to serial number for retry updates', async () => {
+      // Mock existing failed entry for this file
+      vi.mocked(getValues).mockResolvedValue({
+        ok: true,
+        value: [
+          ['fileId', 'fileName', 'processedAt', 'documentType', 'status'],
+          ['test-file-id', 'test-document.pdf', '2025-01-15T10:00:00Z', 'factura_emitida', 'failed: Lock timeout'],
+        ],
+      });
+      vi.mocked(batchUpdate).mockResolvedValue({ ok: true, value: 1 });
+      vi.mocked(getSpreadsheetTimezone).mockResolvedValue({ ok: true, value: 'America/Argentina/Buenos_Aires' });
+
+      await markFileProcessing(
+        'dashboard-id',
+        'test-file-id',
+        'test-document.pdf',
+        'factura_emitida'
+      );
+
+      // Verify batchUpdate was called with a serial number (number), not an ISO string
+      const batchUpdateCall = vi.mocked(batchUpdate).mock.calls[0];
+      const values = batchUpdateCall[1][0].values[0];
+      const processedAtValue = values[0];
+
+      // The processedAt value should be a number (serial date), not a string
+      expect(typeof processedAtValue).toBe('number');
+      // Serial numbers for dates in 2026 should be around 46000-47000
+      expect(processedAtValue).toBeGreaterThan(45000);
+      expect(processedAtValue).toBeLessThan(50000);
     });
 
     it('fetches spreadsheet timezone for proper timestamp formatting', async () => {

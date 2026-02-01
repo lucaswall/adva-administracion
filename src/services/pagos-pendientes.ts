@@ -82,6 +82,18 @@ export async function syncPagosPendientes(
       return pagada !== 'SI';
     });
 
+    // Find fechaEmision column index early (needed for sorting)
+    const fechaEmisionIdx = getColumnIndex(headers, 'fechaEmision');
+
+    // Sort unpaid facturas by fechaEmision ascending (oldest first)
+    if (fechaEmisionIdx !== -1) {
+      unpaidFacturas.sort((a, b) => {
+        const dateA = String(a[fechaEmisionIdx] || '');
+        const dateB = String(b[fechaEmisionIdx] || '');
+        return dateA.localeCompare(dateB);
+      });
+    }
+
     info('Found unpaid facturas', {
       module: 'pagos-pendientes',
       phase: 'filter',
@@ -90,8 +102,7 @@ export async function syncPagosPendientes(
       correlationId,
     });
 
-    // Find all required column indices
-    const fechaEmisionIdx = getColumnIndex(headers, 'fechaEmision');
+    // Find remaining required column indices (fechaEmisionIdx already found above)
     const fileIdIdx = getColumnIndex(headers, 'fileId');
     const fileNameIdx = getColumnIndex(headers, 'fileName');
     const tipoComprobanteIdx = getColumnIndex(headers, 'tipoComprobante');

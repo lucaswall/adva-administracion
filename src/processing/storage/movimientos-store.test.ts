@@ -262,7 +262,8 @@ describe('storeMovimientosBancario', () => {
 
     // First row should be SALDO INICIAL
     expect(rows[0][1]).toBe('SALDO INICIAL');
-    expect(rows[0][5]).toBe(10000);  // saldoCalculado column has initial balance value
+    // saldoCalculado column should be wrapped as CellNumber for proper formatting
+    expect(rows[0][5]).toEqual({ type: 'number', value: 10000 });
   });
 
   it('should generate formula in saldoCalculado column for each transaction', async () => {

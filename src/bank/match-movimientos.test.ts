@@ -268,13 +268,21 @@ describe('matchAllMovimientos', () => {
     }
   });
 
-  it('should process all banks sequentially', async () => {
+  it('should process all banks sequentially using movimientosSpreadsheets (not bankSpreadsheets)', async () => {
+    // Bug fix: matchAllMovimientos should use movimientosSpreadsheets, not bankSpreadsheets
+    // bankSpreadsheets only contains root-level spreadsheets (Control sheets)
+    // movimientosSpreadsheets contains the actual Movimientos sheets inside bank folders
     const mockFolderStructure = {
       controlIngresosId: 'ingresos-id',
       controlEgresosId: 'egresos-id',
       bankSpreadsheets: new Map([
-        ['BBVA ARS', 'bbva-ars-id'],
-        ['BBVA USD', 'bbva-usd-id'],
+        // These are root-level Control spreadsheets - should NOT be used
+        ['Control de Ingresos', 'control-ingresos-id'],
+      ]),
+      movimientosSpreadsheets: new Map([
+        // These are the actual Movimientos spreadsheets inside bank folders
+        ['BBVA 007-009364/1 ARS', 'movimientos-bbva-ars-id'],
+        ['BBVA 007-009364/1 USD', 'movimientos-bbva-usd-id'],
       ]),
     };
 
@@ -312,17 +320,18 @@ describe('matchAllMovimientos', () => {
       expect(result.value.results).toHaveLength(2);
     }
 
-    // Should have called getMovimientosToFill for each bank
+    // Should have called getMovimientosToFill for each movimientosSpreadsheet
     expect(getMovimientosToFill).toHaveBeenCalledTimes(2);
-    expect(getMovimientosToFill).toHaveBeenCalledWith('bbva-ars-id', expect.any(Number));
-    expect(getMovimientosToFill).toHaveBeenCalledWith('bbva-usd-id', expect.any(Number));
+    expect(getMovimientosToFill).toHaveBeenCalledWith('movimientos-bbva-ars-id', expect.any(Number));
+    expect(getMovimientosToFill).toHaveBeenCalledWith('movimientos-bbva-usd-id', expect.any(Number));
   });
 
   it('should match debit movements using matchMovement', async () => {
     const mockFolderStructure = {
       controlIngresosId: 'ingresos-id',
       controlEgresosId: 'egresos-id',
-      bankSpreadsheets: new Map([['BBVA', 'bbva-id']]),
+      bankSpreadsheets: new Map(),
+      movimientosSpreadsheets: new Map([['BBVA', 'bbva-id']]),
     };
 
     vi.mocked(withLock).mockImplementation(async (_id, fn) => {
@@ -377,7 +386,8 @@ describe('matchAllMovimientos', () => {
     const mockFolderStructure = {
       controlIngresosId: 'ingresos-id',
       controlEgresosId: 'egresos-id',
-      bankSpreadsheets: new Map([['BBVA', 'bbva-id']]),
+      bankSpreadsheets: new Map(),
+      movimientosSpreadsheets: new Map([['BBVA', 'bbva-id']]),
     };
 
     vi.mocked(withLock).mockImplementation(async (_id, fn) => {
@@ -432,7 +442,8 @@ describe('matchAllMovimientos', () => {
     const mockFolderStructure = {
       controlIngresosId: 'ingresos-id',
       controlEgresosId: 'egresos-id',
-      bankSpreadsheets: new Map([['BBVA', 'bbva-id']]),
+      bankSpreadsheets: new Map(),
+      movimientosSpreadsheets: new Map([['BBVA', 'bbva-id']]),
     };
 
     vi.mocked(withLock).mockImplementation(async (_id, fn) => {
@@ -486,7 +497,8 @@ describe('matchAllMovimientos', () => {
     const mockFolderStructure = {
       controlIngresosId: 'ingresos-id',
       controlEgresosId: 'egresos-id',
-      bankSpreadsheets: new Map([['BBVA', 'bbva-id']]),
+      bankSpreadsheets: new Map(),
+      movimientosSpreadsheets: new Map([['BBVA', 'bbva-id']]),
     };
 
     vi.mocked(withLock).mockImplementation(async (_id, fn) => {
@@ -548,7 +560,8 @@ describe('matchAllMovimientos', () => {
     const mockFolderStructure = {
       controlIngresosId: 'ingresos-id',
       controlEgresosId: 'egresos-id',
-      bankSpreadsheets: new Map([
+      bankSpreadsheets: new Map(),
+      movimientosSpreadsheets: new Map([
         ['BBVA', 'bbva-id'],
         ['SANTANDER', 'santander-id'],
       ]),
@@ -589,7 +602,8 @@ describe('matchAllMovimientos', () => {
     const mockFolderStructure = {
       controlIngresosId: 'ingresos-id',
       controlEgresosId: 'egresos-id',
-      bankSpreadsheets: new Map([['BBVA', 'bbva-id']]),
+      bankSpreadsheets: new Map(),
+      movimientosSpreadsheets: new Map([['BBVA', 'bbva-id']]),
     };
 
     vi.mocked(withLock).mockImplementation(async (_id, fn) => {
@@ -650,7 +664,8 @@ describe('matchAllMovimientos', () => {
     const mockFolderStructure = {
       controlIngresosId: 'ingresos-id',
       controlEgresosId: 'egresos-id',
-      bankSpreadsheets: new Map([['BBVA', 'bbva-id']]),
+      bankSpreadsheets: new Map(),
+      movimientosSpreadsheets: new Map([['BBVA', 'bbva-id']]),
     };
 
     vi.mocked(withLock).mockImplementation(async (_id, fn) => {
@@ -722,7 +737,8 @@ describe('matchAllMovimientos', () => {
     const mockFolderStructure = {
       controlIngresosId: 'ingresos-id',
       controlEgresosId: 'egresos-id',
-      bankSpreadsheets: new Map([['BBVA', 'bbva-id']]),
+      bankSpreadsheets: new Map(),
+      movimientosSpreadsheets: new Map([['BBVA', 'bbva-id']]),
     };
 
     vi.mocked(withLock).mockImplementation(async (_id, fn) => {
@@ -789,7 +805,8 @@ describe('matchAllMovimientos', () => {
     const mockFolderStructure = {
       controlIngresosId: 'ingresos-id',
       controlEgresosId: 'egresos-id',
-      bankSpreadsheets: new Map([['BBVA', 'bbva-id']]),
+      bankSpreadsheets: new Map(),
+      movimientosSpreadsheets: new Map([['BBVA', 'bbva-id']]),
     };
 
     vi.mocked(withLock).mockImplementation(async (_id, fn) => {
@@ -860,7 +877,8 @@ describe('matchAllMovimientos', () => {
     const mockFolderStructure = {
       controlIngresosId: 'ingresos-id',
       controlEgresosId: 'egresos-id',
-      bankSpreadsheets: new Map([['BBVA ARS', 'bbva-id']]),
+      bankSpreadsheets: new Map(),
+      movimientosSpreadsheets: new Map([['BBVA ARS', 'bbva-id']]),
     };
 
     vi.mocked(withLock).mockImplementation(async (_id, fn) => {

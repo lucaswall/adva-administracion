@@ -781,7 +781,7 @@ export async function matchAllMovimientos(
         return { ok: false, error: new Error('Folder structure not cached. Run scan first.') };
       }
 
-      const { controlIngresosId, controlEgresosId, bankSpreadsheets } = folderStructure;
+      const { controlIngresosId, controlEgresosId, movimientosSpreadsheets } = folderStructure;
 
       // Load Control data ONCE
       debug('Loading Control de Ingresos data', { module: 'match-movimientos' });
@@ -802,7 +802,7 @@ export async function matchAllMovimientos(
       // Process banks SEQUENTIALLY for memory efficiency
       const results: MatchMovimientosResult[] = [];
 
-      for (const [bankName, spreadsheetId] of bankSpreadsheets) {
+      for (const [bankName, spreadsheetId] of movimientosSpreadsheets) {
         // Allow GC between banks
         await new Promise(resolve => setImmediate(resolve));
 
