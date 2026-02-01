@@ -49,6 +49,13 @@ export const PROCESSING_LOCK_ID = 'document-processing';
 export const PROCESSING_LOCK_TIMEOUT_MS = 300000;  // 5 minutes
 
 /**
+ * Spreadsheet lock timeout in milliseconds
+ * Used when creating or accessing Control de Resumenes spreadsheets
+ * Set to 30 seconds to handle Google Sheets API quota errors with exponential backoff (15s-65s delays)
+ */
+export const SPREADSHEET_LOCK_TIMEOUT_MS = 30000;  // 30 seconds
+
+/**
  * Google Sheets batch update limit
  * Maximum number of operations per batchUpdate API call
  */
@@ -65,6 +72,12 @@ export const PARALLEL_SHEET_READ_CHUNK_SIZE = 4;
  * These errors are often caused by temporary Gemini API instability
  */
 export const MAX_TRANSIENT_RETRIES = 3;
+
+/**
+ * Maximum number of retry attempts for failed files with transient failures
+ * Files that fail due to lock timeouts or quota errors will be retried up to this many times
+ */
+export const MAX_FAILED_FILE_RETRIES = 3;
 
 /**
  * Retry delays in milliseconds for exponential backoff

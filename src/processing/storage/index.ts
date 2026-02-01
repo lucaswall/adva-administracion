@@ -7,6 +7,7 @@ import type { Result, DocumentType } from '../../types/index.js';
 import { info as logInfo, error as logError } from '../../utils/logger.js';
 import { getCorrelationId } from '../../utils/correlation.js';
 import { withQuotaRetry, withLock } from '../../utils/concurrency.js';
+import { MAX_FAILED_FILE_RETRIES } from '../../config.js';
 
 /**
  * In-memory cache for file row indexes
@@ -173,8 +174,8 @@ export async function updateFileStatus(
     // This prevents TOCTOU: always re-read within lock
     fileRowIndexCache.delete(cacheKey);
 
-    // Read fresh data from sheet
-    const valuesResult = await getValues(dashboardId, 'Archivos Procesados!A:A');
+    // Read fresh data from sheet (need column E for current status)
+    const valuesResult = await getValues(dashboardId, 'Archivos Procesados!A:E');
 
     if (!valuesResult.ok) {
       logError('Failed to read tracking sheet for status update', {
@@ -186,12 +187,14 @@ export async function updateFileStatus(
       throw valuesResult.error;
     }
 
-    // Find row index (skip header)
+    // Find row index and current status (skip header)
     let rowIndex = -1;
+    let currentStatus: string | undefined;
     for (let i = 1; i < valuesResult.value.length; i++) {
       const row = valuesResult.value[i];
       if (row && row[0] === fileId) {
         rowIndex = i + 1; // 1-indexed
+        currentStatus = row[4] ? String(row[4]) : undefined;
         break;
       }
     }
@@ -210,9 +213,24 @@ export async function updateFileStatus(
     fileRowIndexCache.set(cacheKey, rowIndex);
 
     // Update status using fresh row index
-    const statusValue = status === 'failed' && errorMessage
-      ? `failed: ${errorMessage}`
-      : status;
+    // For failed status, track retry count: failed(1): message, failed(2): message, etc.
+    let statusValue: string;
+    if (status === 'failed' && errorMessage) {
+      // Check if current status is already a failed status with retry count
+      let retryCount = 1;
+      if (currentStatus && currentStatus.startsWith('failed(')) {
+        const match = currentStatus.match(/^failed\((\d+)\):/);
+        if (match) {
+          retryCount = parseInt(match[1], 10) + 1;
+        }
+      } else if (currentStatus && currentStatus.startsWith('failed:')) {
+        // Current status is failed without count - this is the first retry
+        retryCount = 1;
+      }
+      statusValue = `failed(${retryCount}): ${errorMessage}`;
+    } else {
+      statusValue = status;
+    }
 
     const updateResult = await batchUpdate(dashboardId, [
       { range: `Archivos Procesados!E${rowIndex}`, values: [[statusValue]] },
@@ -330,4 +348,79 @@ export async function getStaleProcessingFileIds(
   }
 
   return { ok: true, value: staleIds };
+}
+
+/**
+ * Gets list of file IDs with 'failed' status that should be retried
+ * Only returns files with transient failure messages (lock timeouts, quota errors)
+ * and have not exceeded the maximum retry count
+ *
+ * @param dashboardId - Dashboard Operativo Contable spreadsheet ID
+ * @returns Set of file IDs with retryable failures
+ */
+export async function getRetryableFailedFileIds(
+  dashboardId: string
+): Promise<Result<Set<string>, Error>> {
+  const retryableIds = new Set<string>();
+
+  // Read columns A (fileId) and E (status)
+  const result = await getValues(dashboardId, 'Archivos Procesados!A:E');
+
+  if (!result.ok) {
+    return result;
+  }
+
+  // Transient error patterns that should be retried
+  const transientPatterns = [
+    'Failed to acquire lock',
+    'Quota exceeded',
+    'rate limit',
+    'timeout',
+  ];
+
+  if (result.value.length > 1) {
+    // Skip header row (index 0)
+    for (let i = 1; i < result.value.length; i++) {
+      const row = result.value[i];
+      const fileId = row && row[0];
+      const status = row && row[4];
+
+      // Only consider files with 'failed' status (both with and without retry count)
+      if (!fileId || !status || typeof status !== 'string') {
+        continue;
+      }
+
+      const statusStr = String(status);
+
+      // Check for both formats: failed: message OR failed(N): message
+      const isFailed = statusStr.startsWith('failed:') || statusStr.startsWith('failed(');
+
+      if (!isFailed) {
+        continue;
+      }
+
+      // Extract retry count if present: failed(3): message -> 3
+      let retryCount = 0;
+      const retryMatch = statusStr.match(/^failed\((\d+)\):/);
+      if (retryMatch) {
+        retryCount = parseInt(retryMatch[1], 10);
+      }
+
+      // Skip if max retries exceeded
+      if (retryCount >= MAX_FAILED_FILE_RETRIES) {
+        continue;
+      }
+
+      // Check if failure message contains any transient error pattern
+      const isTransient = transientPatterns.some(pattern =>
+        statusStr.toLowerCase().includes(pattern.toLowerCase())
+      );
+
+      if (isTransient) {
+        retryableIds.add(String(fileId));
+      }
+    }
+  }
+
+  return { ok: true, value: retryableIds };
 }

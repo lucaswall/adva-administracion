@@ -3,7 +3,7 @@
  * Manages the Drive folder hierarchy for document organization
  */
 
-import { getConfig } from '../config.js';
+import { getConfig, SPREADSHEET_LOCK_TIMEOUT_MS } from '../config.js';
 import { findByName, listByMimeType, createFolder, createSpreadsheet } from './drive.js';
 import { getSheetMetadata, createSheet, setValues, getValues, formatSheet, formatStatusSheet, deleteSheet, moveSheetToFirst, applyConditionalFormat } from './sheets.js';
 import { formatMonthFolder } from '../utils/spanish-date.js';
@@ -1290,7 +1290,7 @@ export async function getOrCreateBankAccountSpreadsheet(
     requireCachedStructure().bankAccountSpreadsheets.set(cacheKey, spreadsheetId);
 
     return spreadsheetId;
-  }, 30000); // 30 second timeout for spreadsheet creation + setup
+  }, SPREADSHEET_LOCK_TIMEOUT_MS); // 30 second timeout for spreadsheet creation + setup
 
   return result;
 }
@@ -1362,7 +1362,7 @@ export async function getOrCreateCreditCardSpreadsheet(
     requireCachedStructure().bankAccountSpreadsheets.set(cacheKey, spreadsheetId);
 
     return spreadsheetId;
-  }, 30000); // 30 second timeout for spreadsheet creation + setup
+  }, SPREADSHEET_LOCK_TIMEOUT_MS); // 30 second timeout for spreadsheet creation + setup
 
   return result;
 }
@@ -1432,7 +1432,7 @@ export async function getOrCreateBrokerSpreadsheet(
     requireCachedStructure().bankAccountSpreadsheets.set(cacheKey, spreadsheetId);
 
     return spreadsheetId;
-  }, 30000); // 30 second timeout for spreadsheet creation + setup
+  }, SPREADSHEET_LOCK_TIMEOUT_MS); // 30 second timeout for spreadsheet creation + setup
 
   return result;
 }
@@ -1497,7 +1497,7 @@ export async function getOrCreateMovimientosSpreadsheet(
     // The sheet creation is handled by the storage layer in movimientos-store.ts
 
     return spreadsheetId;
-  }, 30000); // 30 second timeout for spreadsheet creation
+  }, SPREADSHEET_LOCK_TIMEOUT_MS); // 30 second timeout for spreadsheet creation
 
   return result;
 }

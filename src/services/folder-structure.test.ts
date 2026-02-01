@@ -115,3 +115,12 @@ describe('Bug #5: Folder structure cache race handling', () => {
     expect(true).toBe(true);
   });
 });
+
+describe('Spreadsheet lock timeout configuration', () => {
+  it('should have SPREADSHEET_LOCK_TIMEOUT_MS constant exported', async () => {
+    // Import the constant to verify it exists
+    const { SPREADSHEET_LOCK_TIMEOUT_MS } = await import('../config.js');
+
+    expect(SPREADSHEET_LOCK_TIMEOUT_MS).toBe(30000);
+  });
+});
