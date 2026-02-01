@@ -123,4 +123,30 @@ describe('Spreadsheet lock timeout configuration', () => {
 
     expect(SPREADSHEET_LOCK_TIMEOUT_MS).toBe(30000);
   });
+
+  it('should use SPREADSHEET_LOCK_TIMEOUT_MS in folder-structure.ts', async () => {
+    // Documentation test: Verifies the timeout constant is properly wired to withLock calls
+    // This is a static source code check - brittle but valuable for catching configuration errors
+    const fs = await import('fs/promises');
+    const path = await import('path');
+    const { fileURLToPath } = await import('url');
+
+    const __filename = fileURLToPath(import.meta.url);
+    const __dirname = path.dirname(__filename);
+    const sourcePath = path.join(__dirname, 'folder-structure.ts');
+    const sourceCode = await fs.readFile(sourcePath, 'utf-8');
+
+    // Verify SPREADSHEET_LOCK_TIMEOUT_MS is imported from config
+    expect(sourceCode).toContain('SPREADSHEET_LOCK_TIMEOUT_MS');
+    expect(sourceCode).toContain('from \'../config.js\'');
+
+    // Verify it's passed to withLock calls (at least once)
+    // Pattern: SPREADSHEET_LOCK_TIMEOUT_MS followed by ) with optional whitespace
+    const usagePattern = /SPREADSHEET_LOCK_TIMEOUT_MS\s*\)/g;
+    const matches = sourceCode.match(usagePattern);
+
+    // Verify the constant is actually used in withLock calls
+    expect(matches).not.toBeNull();
+    expect(matches!.length).toBeGreaterThan(0);
+  });
 });
