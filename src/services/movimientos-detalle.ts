@@ -23,6 +23,18 @@ export interface DetalleUpdate {
 }
 
 /**
+ * Escapes a sheet name for use in A1 notation
+ * Single quotes in sheet names must be escaped by doubling them
+ *
+ * @param sheetName - The sheet name to escape
+ * @returns Escaped sheet name suitable for A1 notation
+ */
+function escapeSheetName(sheetName: string): string {
+  // Escape single quotes by doubling them
+  return sheetName.replace(/'/g, "''");
+}
+
+/**
  * Updates matchedFileId and detalle columns for specified rows using batchUpdate
  * Automatically chunks to respect 500 operations limit per API call
  *
@@ -40,7 +52,7 @@ export async function updateDetalle(
 
   // Build update operations for batchUpdate
   const allUpdates: Array<{ range: string; values: CellValue[][] }> = updates.map(u => ({
-    range: `'${u.sheetName}'!G${u.rowNumber}:H${u.rowNumber}`,
+    range: `'${escapeSheetName(u.sheetName)}'!G${u.rowNumber}:H${u.rowNumber}`,
     values: [[u.matchedFileId, u.detalle]],
   }));
 

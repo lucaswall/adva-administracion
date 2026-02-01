@@ -286,7 +286,8 @@ export class GeminiClient {
           phase: 'api-call',
           error: errorMessage,
           isTimeout,
-          details: fetchError
+          errorName: err.name,
+          errorType: err.constructor.name
         });
 
         this.callUsageCallback(false, usageMetadata, duration, fileId, fileName, errorMessage);
@@ -308,7 +309,8 @@ export class GeminiClient {
         module: 'gemini-client',
         phase: 'api-call',
         error: err.message,
-        details: error
+        errorName: err.name,
+        errorType: err.constructor.name
       });
 
       this.callUsageCallback(false, usageMetadata, duration, fileId, fileName, err.message);

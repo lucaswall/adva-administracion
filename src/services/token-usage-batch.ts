@@ -29,12 +29,26 @@ export interface TokenUsageEntry {
 export class TokenUsageBatch {
   private entries: TokenUsageEntry[] = [];
   private timezone?: string;
+  private timezoneFetchFailed: boolean = false;
+
+  /**
+   * Maximum batch size before auto-flush
+   */
+  private static readonly MAX_BATCH_SIZE = 100;
 
   /**
    * Adds a token usage entry to the batch.
+   * Auto-flushes when MAX_BATCH_SIZE is reached if dashboardId is provided.
+   * @param entry - Token usage entry to add
+   * @param dashboardId - Optional dashboard ID for auto-flush
    */
-  add(entry: TokenUsageEntry): void {
+  async add(entry: TokenUsageEntry, dashboardId?: string): Promise<void> {
     this.entries.push(entry);
+
+    // Auto-flush if we've reached MAX_BATCH_SIZE and dashboardId provided
+    if (dashboardId && this.entries.length >= TokenUsageBatch.MAX_BATCH_SIZE) {
+      await this.flush(dashboardId);
+    }
   }
 
   /**
@@ -47,10 +61,14 @@ export class TokenUsageBatch {
       return { ok: true, value: undefined };
     }
 
-    // Get timezone once
-    if (!this.timezone) {
+    // Get timezone once (skip if previous fetch failed)
+    if (!this.timezone && !this.timezoneFetchFailed) {
       const tzResult = await getSpreadsheetTimezone(dashboardId);
-      this.timezone = tzResult.ok ? tzResult.value : undefined;
+      if (tzResult.ok) {
+        this.timezone = tzResult.value;
+      } else {
+        this.timezoneFetchFailed = true;
+      }
     }
 
     // Build all rows - must match logTokenUsage column structure exactly

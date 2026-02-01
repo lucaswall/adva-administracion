@@ -509,3 +509,98 @@ The following items are acceptable as-is per analysis:
 - Phase 3: Correctness (medium value)
 - Phase 4: Type safety (medium value)
 - Phase 5: Cleanup (low value)
+
+---
+
+## Iteration 1
+
+**Implemented:** 2026-02-01
+
+### Phase 1 Completed: Security & Validation Critical
+
+**Tasks Completed:**
+- Task 1.1: Fixed API_SECRET empty string bypass (bug #26)
+  - Added validation in auth middleware to reject requests when API_SECRET is empty
+  - Returns 500 error instead of allowing bypass
+- Task 1.2: Fixed error log sanitization (bug #10)
+  - Removed `details: fetchError` from error logs in both catch blocks
+  - Now logs only safe properties: errorName, errorType, error message
+- Task 1.3: Skipped - document type routing (bug #2)
+  - TypeScript type system prevents property overlap at compile time
+  - Acceptable as-is per code review
+- Task 1.4: Fixed sheet name A1 notation escaping (bug #3)
+  - Added `escapeSheetName()` helper function
+  - Single quotes in sheet names now properly escaped by doubling them
+- Task 1.5: Fixed column indexing beyond Z (bug #18)
+  - Added `columnIndexToLetter()` function supporting AA, AB, ..., ZZ, AAA, etc.
+  - Replaced `String.fromCharCode(64 + headers.length)` with proper conversion
+
+### Files Modified
+- `src/middleware/auth.ts` - Added API_SECRET validation check
+- `src/middleware/auth.test.ts` - Added tests for empty API_SECRET scenarios
+- `src/gemini/client.ts` - Sanitized error logging (both catch blocks)
+- `src/gemini/client.test.ts` - Added error sanitization tests + type guards
+- `src/services/movimientos-detalle.ts` - Added sheet name escaping
+- `src/services/movimientos-detalle.test.ts` - Added escaping tests
+- `src/services/sheets.ts` - Added columnIndexToLetter function + edge case validation
+- `src/services/sheets.test.ts` - Added column conversion tests
+
+### Pre-commit Verification
+- bug-hunter: Found 1 HIGH + 1 LOW issue, fixed before proceeding
+  - HIGH: Outer catch block still logging sensitive data - FIXED
+  - LOW: columnIndexToLetter edge case validation - FIXED
+- test-runner: All 1309 tests pass
+- builder: Zero warnings
+
+---
+
+## Iteration 2
+
+**Implemented:** 2026-02-01
+
+### Phase 2 Completed: Exchange Rate & Cache Safety
+
+**Tasks Completed:**
+- Task 2.1: Fixed exchange rate date parsing (bug #14)
+  - Added defensive validation after `split('-')` to ensure exactly 3 date parts
+  - Returns error for malformed dates after normalization
+- Task 2.2: Fixed silent exchange rate date drops (bug #15)
+  - Added warning logs when invalid dates are dropped during prefetch
+  - Includes original date value in warning for debugging
+- Task 2.3: Fixed computeVersion unsafe stringify (bug #21)
+  - Added try-catch around JSON.stringify
+  - Uses replacer function to handle BigInt: `typeof v === 'bigint' ? v.toString() : v`
+  - Detects circular references and cyclic structures (both V8 and Firefox messages)
+  - Returns safe fallback for unstringifiable values
+- Task 2.4: Fixed createDriveHyperlink validation (bug #22)
+  - Validates fileId is non-empty
+  - Validates length (8-50 characters)
+  - Validates only safe characters (alphanumeric, underscore, hyphen)
+  - Returns empty string for invalid input instead of broken URLs
+- Task 2.5: Fixed unbounded batch memory (bug #23)
+  - Added `MAX_BATCH_SIZE = 100` constant
+  - Made `add()` async with optional dashboardId parameter
+  - Auto-flushes when batch reaches 100 entries
+  - Preserves entries if auto-flush fails
+- Task 2.6: Fixed repeated timezone failures (bug #24)
+  - Added `timezoneFetchFailed` flag to track fetch failures
+  - Prevents repeated API calls after initial timezone fetch failure
+  - Only retries on explicit reset or success
+
+### Files Modified
+- `src/utils/exchange-rate.ts` - Added date validation + warning logs for dropped dates
+- `src/utils/exchange-rate.test.ts` - Added tests for date validation and logging
+- `src/utils/concurrency.ts` - Safe JSON.stringify with BigInt/circular handling
+- `src/utils/concurrency.test.ts` - Added tests for edge cases
+- `src/utils/spreadsheet.ts` - Added fileId validation in createDriveHyperlink
+- `src/utils/spreadsheet.test.ts` - Added validation tests
+- `src/services/token-usage-batch.ts` - Auto-flush at MAX_BATCH_SIZE + timezone retry prevention
+- `src/services/token-usage-batch.test.ts` - Added auto-flush and timezone tests
+- `src/gemini/client.test.ts` - Removed duplicate null check
+
+### Pre-commit Verification
+- bug-hunter: Found 2 MEDIUM issues, fixed before proceeding
+  - MEDIUM: Duplicate null check in test - FIXED
+  - MEDIUM: Circular reference detection too narrow - FIXED
+- test-runner: All 1330 tests pass
+- builder: Zero warnings

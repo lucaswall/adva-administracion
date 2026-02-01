@@ -1052,4 +1052,79 @@ describe('GeminiClient', () => {
       expect(callArgs.durationMs).toBeLessThan(5000); // Sanity check
     });
   });
+
+  describe('Error log sanitization', () => {
+    it('does not log sensitive data in fetchError details', async () => {
+      // Import logger module to spy on it
+      const loggerModule = await import('../utils/logger.js');
+      const errorSpy = vi.spyOn(loggerModule, 'error');
+
+      // Create error with sensitive data
+      const sensitiveError = new Error('API key rejected');
+      (sensitiveError as any).apiKey = 'secret-key-12345';
+      (sensitiveError as any).responseText = 'Detailed error with API key: secret-key-12345';
+
+      global.fetch = vi.fn().mockRejectedValue(sensitiveError);
+
+      const mockBuffer = Buffer.from('test-pdf-content');
+      const result = await client.analyzeDocument(
+        mockBuffer,
+        'application/pdf',
+        'Extract data',
+        1
+      );
+
+      expect(result.ok).toBe(false);
+
+      // Verify error was logged
+      expect(errorSpy).toHaveBeenCalled();
+
+      // Verify sensitive data is NOT in logged details
+      const logCalls = errorSpy.mock.calls;
+      expect(logCalls.length).toBeGreaterThan(0);
+
+      // Check that the logged details object doesn't contain the full error object
+      const loggedDetails = logCalls[0][1];
+      expect(loggedDetails).toBeDefined();
+      if (!loggedDetails) throw new Error('loggedDetails is undefined');
+
+      // Should log safe error info
+      expect(loggedDetails).toHaveProperty('error');
+      expect(loggedDetails).toHaveProperty('module', 'gemini-client');
+
+      // Should NOT log the full fetchError object with sensitive data
+      expect(loggedDetails.details).toBeUndefined();
+
+      errorSpy.mockRestore();
+    });
+
+    it('logs useful error information without sensitive data', async () => {
+      const loggerModule = await import('../utils/logger.js');
+      const errorSpy = vi.spyOn(loggerModule, 'error');
+
+      const networkError = new Error('Network timeout');
+      global.fetch = vi.fn().mockRejectedValue(networkError);
+
+      const mockBuffer = Buffer.from('test-pdf-content');
+      const result = await client.analyzeDocument(
+        mockBuffer,
+        'application/pdf',
+        'Extract data',
+        1
+      );
+
+      expect(result.ok).toBe(false);
+      expect(errorSpy).toHaveBeenCalled();
+
+      const loggedDetails = errorSpy.mock.calls[0][1];
+      if (!loggedDetails) throw new Error('loggedDetails is undefined');
+      // Should have useful error info
+      expect(loggedDetails).toHaveProperty('error');
+      expect(loggedDetails.error).toContain('Network timeout');
+      expect(loggedDetails).toHaveProperty('module');
+      expect(loggedDetails).toHaveProperty('phase');
+
+      errorSpy.mockRestore();
+    });
+  });
 });

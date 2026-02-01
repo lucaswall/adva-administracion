@@ -222,6 +222,41 @@ describe('TokenUsageBatch', () => {
     expect(sheets.appendRowsWithFormatting).toHaveBeenCalledTimes(2);
   });
 
+  it('does not retry timezone fetch repeatedly on failure', async () => {
+    const batch = new TokenUsageBatch();
+    const entry: TokenUsageEntry = {
+      timestamp: new Date('2026-01-25T10:00:00Z'),
+      requestId: 'req-1',
+      fileId: 'file-1',
+      fileName: 'test1.pdf',
+      model: 'gemini-2.0-flash',
+      promptTokens: 100,
+      cachedTokens: 0,
+      outputTokens: 50,
+      totalTokens: 150,
+      promptCostPerToken: 0.0001,
+      cachedCostPerToken: 0,
+      outputCostPerToken: 0.0002,
+      durationMs: 500,
+      success: true,
+    };
+
+    // First call fails
+    vi.mocked(sheets.getSpreadsheetTimezone).mockResolvedValueOnce({ ok: false, error: new Error('API error') });
+    vi.mocked(sheets.appendRowsWithFormatting).mockResolvedValue({ ok: true, value: 1 });
+
+    batch.add(entry);
+    await batch.flush('dashboard-id');
+
+    // Second flush should not retry timezone immediately
+    batch.add(entry);
+    await batch.flush('dashboard-id');
+
+    // Should have only called timezone once (failed), not retry on second flush
+    expect(sheets.getSpreadsheetTimezone).toHaveBeenCalledTimes(1);
+    expect(sheets.appendRowsWithFormatting).toHaveBeenCalledTimes(2);
+  });
+
   it('flush() preserves entries when appendRowsWithFormatting fails', async () => {
     const batch = new TokenUsageBatch();
     const entry: TokenUsageEntry = {
@@ -322,5 +357,76 @@ describe('TokenUsageBatch', () => {
 
     // Should have tried twice
     expect(sheets.appendRowsWithFormatting).toHaveBeenCalledTimes(2);
+  });
+
+  it('auto-flushes when MAX_BATCH_SIZE is reached', async () => {
+    const batch = new TokenUsageBatch();
+    const entry: TokenUsageEntry = {
+      timestamp: new Date('2026-01-25T10:00:00Z'),
+      requestId: 'req-1',
+      fileId: 'file-1',
+      fileName: 'test.pdf',
+      model: 'gemini-2.0-flash',
+      promptTokens: 100,
+      cachedTokens: 0,
+      outputTokens: 50,
+      totalTokens: 150,
+      promptCostPerToken: 0.0001,
+      cachedCostPerToken: 0,
+      outputCostPerToken: 0.0002,
+      durationMs: 500,
+      success: true,
+    };
+
+    vi.mocked(sheets.getSpreadsheetTimezone).mockResolvedValue({ ok: true, value: 'America/Argentina/Buenos_Aires' });
+    vi.mocked(sheets.appendRowsWithFormatting).mockResolvedValue({ ok: true, value: 100 });
+
+    // Add entries up to MAX_BATCH_SIZE (100)
+    for (let i = 0; i < 100; i++) {
+      await batch.add({ ...entry, requestId: `req-${i}` }, 'dashboard-id');
+    }
+
+    // Should have auto-flushed at exactly 100
+    expect(sheets.appendRowsWithFormatting).toHaveBeenCalledTimes(1);
+    expect(batch.pendingCount).toBe(0);
+
+    // Adding one more should not flush yet
+    await batch.add(entry, 'dashboard-id');
+    expect(sheets.appendRowsWithFormatting).toHaveBeenCalledTimes(1);
+    expect(batch.pendingCount).toBe(1);
+  });
+
+  it('preserves entries if auto-flush fails', async () => {
+    const batch = new TokenUsageBatch();
+    const entry: TokenUsageEntry = {
+      timestamp: new Date('2026-01-25T10:00:00Z'),
+      requestId: 'req-1',
+      fileId: 'file-1',
+      fileName: 'test.pdf',
+      model: 'gemini-2.0-flash',
+      promptTokens: 100,
+      cachedTokens: 0,
+      outputTokens: 50,
+      totalTokens: 150,
+      promptCostPerToken: 0.0001,
+      cachedCostPerToken: 0,
+      outputCostPerToken: 0.0002,
+      durationMs: 500,
+      success: true,
+    };
+
+    vi.mocked(sheets.getSpreadsheetTimezone).mockResolvedValue({ ok: true, value: 'America/Argentina/Buenos_Aires' });
+    vi.mocked(sheets.appendRowsWithFormatting).mockResolvedValue({ ok: false, error: new Error('API error') });
+
+    // Add entries up to MAX_BATCH_SIZE (100)
+    for (let i = 0; i < 100; i++) {
+      await batch.add({ ...entry, requestId: `req-${i}` }, 'dashboard-id');
+    }
+
+    // Auto-flush should have been attempted but failed
+    expect(sheets.appendRowsWithFormatting).toHaveBeenCalledTimes(1);
+
+    // Entries should be preserved for retry
+    expect(batch.pendingCount).toBe(100);
   });
 });

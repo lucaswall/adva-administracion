@@ -218,4 +218,77 @@ describe('updateDetalle', () => {
     // Sheet name should be quoted in A1 notation
     expect(ranges[0]).toBe("'2025-01'!G5:H5");
   });
+
+  it('should properly escape single quote in sheet name', async () => {
+    vi.mocked(batchUpdate).mockResolvedValue({ ok: true, value: 1 });
+
+    const updates: DetalleUpdate[] = [
+      {
+        sheetName: "Sheet'Name",
+        rowNumber: 5,
+        matchedFileId: 'file123',
+        detalle: 'Test',
+      },
+    ];
+
+    const result = await updateDetalle('spreadsheet-id', updates);
+
+    expect(result.ok).toBe(true);
+
+    // Verify the range was called with properly escaped sheet name
+    expect(batchUpdate).toHaveBeenCalledWith('spreadsheet-id', [
+      {
+        range: "'Sheet''Name'!G5:H5",
+        values: [['file123', 'Test']],
+      },
+    ]);
+  });
+
+  it('should handle sheet names with spaces', async () => {
+    vi.mocked(batchUpdate).mockResolvedValue({ ok: true, value: 1 });
+
+    const updates: DetalleUpdate[] = [
+      {
+        sheetName: "Sheet With Spaces",
+        rowNumber: 3,
+        matchedFileId: 'file456',
+        detalle: 'Another Test',
+      },
+    ];
+
+    const result = await updateDetalle('spreadsheet-id', updates);
+
+    expect(result.ok).toBe(true);
+
+    expect(batchUpdate).toHaveBeenCalledWith('spreadsheet-id', [
+      {
+        range: "'Sheet With Spaces'!G3:H3",
+        values: [['file456', 'Another Test']],
+      },
+    ]);
+  });
+
+  it('should handle normal sheet names without modification', async () => {
+    vi.mocked(batchUpdate).mockResolvedValue({ ok: true, value: 1 });
+
+    const updates: DetalleUpdate[] = [
+      {
+        sheetName: "2024-01",
+        rowNumber: 2,
+        matchedFileId: 'file789',
+        detalle: 'Normal Sheet',
+      },
+    ];
+
+    const result = await updateDetalle('spreadsheet-id', updates);
+
+    expect(result.ok).toBe(true);
+
+    expect(batchUpdate).toHaveBeenCalledWith('spreadsheet-id', [
+      {
+        range: "'2024-01'!G2:H2",
+        values: [['file789', 'Normal Sheet']],
+      },
+    ]);
+  });
 });

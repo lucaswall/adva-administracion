@@ -10,6 +10,31 @@ import { withQuotaRetry } from '../utils/concurrency.js';
 import { sanitizeForSpreadsheet } from '../utils/spreadsheet.js';
 
 /**
+ * Converts a column index (1-based) to column letter(s)
+ * Supports columns beyond Z (AA, AB, ..., ZZ, AAA, etc.)
+ *
+ * @param index - Column index (1-based: 1 = A, 26 = Z, 27 = AA)
+ * @returns Column letter(s) in A1 notation
+ */
+export function columnIndexToLetter(index: number): string {
+  if (index < 1) {
+    throw new Error(`Column index must be >= 1, got ${index}`);
+  }
+
+  let result = '';
+  let remaining = index;
+
+  while (remaining > 0) {
+    // Subtract 1 to convert to 0-based for modulo
+    const digit = (remaining - 1) % 26;
+    result = String.fromCharCode(65 + digit) + result;
+    remaining = Math.floor((remaining - 1) / 26);
+  }
+
+  return result;
+}
+
+/**
  * Sheets service instance
  */
 let sheetsService: sheets_v4.Sheets | null = null;
@@ -1442,7 +1467,7 @@ export async function getOrCreateMonthSheet(
 
   const sheetId = createResult.value;
 
-  const range = `${monthName}!A1:${String.fromCharCode(64 + headers.length)}1`;
+  const range = `${monthName}!A1:${columnIndexToLetter(headers.length)}1`;
   const headerValues = [headers];
   const setResult = await setValues(spreadsheetId, range, headerValues);
   if (!setResult.ok) return { ok: false, error: setResult.error };

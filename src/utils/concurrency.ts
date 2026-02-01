@@ -317,9 +317,31 @@ export class VersionConflictError extends Error {
 
 /**
  * Computes a simple hash for a value (for version comparison)
+ * Handles BigInt, Symbols, and circular references safely
  */
 export function computeVersion(value: unknown): string {
-  const str = JSON.stringify(value);
+  let str: string;
+
+  try {
+    // Replacer function to handle BigInt values
+    str = JSON.stringify(value, (_, v) => {
+      // Convert BigInt to string
+      if (typeof v === 'bigint') {
+        return v.toString();
+      }
+      return v;
+    });
+  } catch (error) {
+    // Handle circular references and other stringify errors
+    // Use a simple fallback that includes type information
+    // Check for both V8/Node ("circular") and Firefox ("cyclic") messages
+    if (error instanceof Error && (error.message.includes('circular') || error.message.includes('cyclic'))) {
+      str = '[Circular]';
+    } else {
+      str = String(value);
+    }
+  }
+
   let hash = 0;
   for (let i = 0; i < str.length; i++) {
     const char = str.charCodeAt(i);
