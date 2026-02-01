@@ -114,7 +114,7 @@ export async function processFile(
 
   // Create usage callback for token tracking
   const usageCallback = dashboardOperativoId
-    ? (data: UsageCallbackData) => {
+    ? async (data: UsageCallbackData) => {
         // Get current pricing for this model
         const pricing = GEMINI_PRICING[data.model];
 
@@ -139,7 +139,7 @@ export async function processFile(
 
         // If tokenBatch available, add to batch; otherwise log immediately
         if (context?.tokenBatch) {
-          context.tokenBatch.add(entry);
+          await context.tokenBatch.add(entry);
         } else {
           // Log usage to Dashboard Operativo Contable
           // Note: Fire and forget - don't await to avoid slowing down processing

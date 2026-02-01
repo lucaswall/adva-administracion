@@ -148,7 +148,7 @@ describe('TokenUsageBatch', () => {
     vi.mocked(sheets.getSpreadsheetTimezone).mockResolvedValue({ ok: true, value: 'America/Argentina/Buenos_Aires' });
     vi.mocked(sheets.appendRowsWithFormatting).mockResolvedValue({ ok: true, value: 1 });
 
-    batch.add(entry);
+    await batch.add(entry);
     expect(batch.pendingCount).toBe(1);
 
     await batch.flush('dashboard-id');
@@ -164,7 +164,7 @@ describe('TokenUsageBatch', () => {
     expect(sheets.appendRowsWithFormatting).not.toHaveBeenCalled();
   });
 
-  it('pendingCount returns correct count', () => {
+  it('pendingCount returns correct count', async () => {
     const batch = new TokenUsageBatch();
     const entry: TokenUsageEntry = {
       timestamp: new Date('2026-01-25T10:00:00Z'),
@@ -184,9 +184,9 @@ describe('TokenUsageBatch', () => {
     };
 
     expect(batch.pendingCount).toBe(0);
-    batch.add(entry);
+    await batch.add(entry);
     expect(batch.pendingCount).toBe(1);
-    batch.add(entry);
+    await batch.add(entry);
     expect(batch.pendingCount).toBe(2);
   });
 
