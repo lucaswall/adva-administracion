@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { BankMovementMatcher } from './matcher.js';
+import { BankMovementMatcher, calculateKeywordMatchScore } from './matcher.js';
 import type { BankMovement, Factura, Pago, Retencion } from '../types/index.js';
 import { setExchangeRateCache, type ExchangeRate } from '../utils/exchange-rate.js';
 
@@ -927,6 +927,50 @@ describe('BankMovementMatcher - Credit Movement Matching', () => {
 
       // Should still match factura-1 directly if it matches
       expect(result.matchType).not.toBe('no_match');
+    });
+  });
+
+  describe('calculateKeywordMatchScore - word boundary matching', () => {
+    it('should not match "SA" as substring in "COMISIONES SA"', () => {
+      const score = calculateKeywordMatchScore(
+        'PAGO SA',  // Bank concepto with "SA" as token
+        'COMISIONES SA',  // Emisor name with "SA" as suffix
+        ''
+      );
+
+      // "SA" is a common suffix and should not match as a meaningful keyword
+      expect(score).toBe(0);
+    });
+
+    it('should match "IBM" in "IBM ARGENTINA" with word boundaries', () => {
+      const score = calculateKeywordMatchScore(
+        'PAGO IBM SERVICIOS',
+        'IBM ARGENTINA SA',
+        ''
+      );
+
+      // "IBM" is a distinct word and should match
+      expect(score).toBeGreaterThan(0);
+    });
+
+    it('should not match partial words', () => {
+      const score = calculateKeywordMatchScore(
+        'PAGO TEST',  // "TEST" as token
+        'TESTIMONIO SA',  // "TEST" as prefix in different word
+        ''
+      );
+
+      expect(score).toBe(0);
+    });
+
+    it('should match complete word tokens only', () => {
+      const score = calculateKeywordMatchScore(
+        'PAGO ACME',
+        'ACME CORPORATION',
+        ''
+      );
+
+      expect(score).toBeGreaterThan(0);
     });
   });
 });

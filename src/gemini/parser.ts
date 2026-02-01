@@ -11,6 +11,12 @@ import { normalizeBankName } from '../utils/bank-names.js';
 const ADVA_CUIT = '30709076783';
 
 /**
+ * Maximum JSON response size (1MB)
+ * Prevents memory exhaustion from oversized API responses
+ */
+const MAX_JSON_SIZE = 1_000_000;
+
+/**
  * Flexible pattern to match ADVA's name in various forms.
  * Handles OCR errors, abbreviations, and variations:
  * - "ADVA"
@@ -378,6 +384,17 @@ export function parseFacturaResponse(
     }
     const jsonStr = extractResult.json;
 
+    // Check JSON size limit
+    if (jsonStr.length > MAX_JSON_SIZE) {
+      return {
+        ok: false,
+        error: new ParseError(
+          `JSON response exceeds maximum size (${jsonStr.length} > ${MAX_JSON_SIZE} bytes)`,
+          jsonStr.substring(0, 200)
+        )
+      };
+    }
+
     // Parse JSON
     const rawData = JSON.parse(jsonStr) as RawFacturaExtraction;
 
@@ -570,6 +587,17 @@ export function parsePagoResponse(
     }
     const jsonStr = extractResult.json;
 
+    // Check JSON size limit
+    if (jsonStr.length > MAX_JSON_SIZE) {
+      return {
+        ok: false,
+        error: new ParseError(
+          `JSON response exceeds maximum size (${jsonStr.length} > ${MAX_JSON_SIZE} bytes)`,
+          jsonStr.substring(0, 200)
+        )
+      };
+    }
+
     // Parse JSON
     const data = JSON.parse(jsonStr) as Partial<Pago>;
 
@@ -658,6 +686,17 @@ export function parseReciboResponse(response: string): Result<ParseResult<Partia
       };
     }
     const jsonStr = extractResult.json;
+
+    // Check JSON size limit
+    if (jsonStr.length > MAX_JSON_SIZE) {
+      return {
+        ok: false,
+        error: new ParseError(
+          `JSON response exceeds maximum size (${jsonStr.length} > ${MAX_JSON_SIZE} bytes)`,
+          jsonStr.substring(0, 200)
+        )
+      };
+    }
 
     // Parse JSON
     const data = JSON.parse(jsonStr) as Partial<Recibo>;
@@ -907,6 +946,17 @@ export function parseResumenBancarioResponse(response: string): Result<ParseResu
     }
     const jsonStr = extractResult.json;
 
+    // Check JSON size limit
+    if (jsonStr.length > MAX_JSON_SIZE) {
+      return {
+        ok: false,
+        error: new ParseError(
+          `JSON response exceeds maximum size (${jsonStr.length} > ${MAX_JSON_SIZE} bytes)`,
+          jsonStr.substring(0, 200)
+        )
+      };
+    }
+
     // Parse JSON - might include movimientos array
     const data = JSON.parse(jsonStr) as Partial<ResumenBancarioConMovimientos>;
 
@@ -1029,6 +1079,17 @@ export function parseResumenTarjetaResponse(response: string): Result<ParseResul
       };
     }
     const jsonStr = extractResult.json;
+
+    // Check JSON size limit
+    if (jsonStr.length > MAX_JSON_SIZE) {
+      return {
+        ok: false,
+        error: new ParseError(
+          `JSON response exceeds maximum size (${jsonStr.length} > ${MAX_JSON_SIZE} bytes)`,
+          jsonStr.substring(0, 200)
+        )
+      };
+    }
 
     // Parse JSON - might include movimientos array
     const data = JSON.parse(jsonStr) as Partial<ResumenTarjetaConMovimientos>;
@@ -1166,6 +1227,17 @@ export function parseResumenBrokerResponse(response: string): Result<ParseResult
       };
     }
     const jsonStr = extractResult.json;
+
+    // Check JSON size limit
+    if (jsonStr.length > MAX_JSON_SIZE) {
+      return {
+        ok: false,
+        error: new ParseError(
+          `JSON response exceeds maximum size (${jsonStr.length} > ${MAX_JSON_SIZE} bytes)`,
+          jsonStr.substring(0, 200)
+        )
+      };
+    }
 
     // Parse JSON - might include movimientos array
     const data = JSON.parse(jsonStr) as Partial<ResumenBrokerConMovimientos>;
@@ -1308,6 +1380,17 @@ export function parseClassificationResponse(
     }
     const jsonStr = extractResult.json;
 
+    // Check JSON size limit
+    if (jsonStr.length > MAX_JSON_SIZE) {
+      return {
+        ok: false,
+        error: new ParseError(
+          `JSON response exceeds maximum size (${jsonStr.length} > ${MAX_JSON_SIZE} bytes)`,
+          jsonStr.substring(0, 200)
+        )
+      };
+    }
+
     const data = JSON.parse(jsonStr);
 
     // Validate required fields
@@ -1368,6 +1451,17 @@ export function parseRetencionResponse(
       };
     }
     const jsonStr = extractResult.json;
+
+    // Check JSON size limit
+    if (jsonStr.length > MAX_JSON_SIZE) {
+      return {
+        ok: false,
+        error: new ParseError(
+          `JSON response exceeds maximum size (${jsonStr.length} > ${MAX_JSON_SIZE} bytes)`,
+          jsonStr.substring(0, 200)
+        )
+      };
+    }
 
     // Parse JSON
     const data = JSON.parse(jsonStr) as Partial<Retencion>;

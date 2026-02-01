@@ -113,11 +113,12 @@ export function parseNumber(value: unknown): number | null {
 /**
  * Parses a monetary amount to a positive number
  *
- * Same as parseNumber but always returns absolute value.
+ * Same as parseNumber but always returns absolute value using Math.abs().
  * Useful for amounts where sign is tracked separately (e.g., Debit/Credit columns).
  *
  * @param value - Value to parse
- * @returns Absolute value or null if invalid
+ * @returns Always returns a positive number (absolute value) or null if invalid.
+ *          Negative inputs are converted to positive. For example: -100 becomes 100.
  */
 export function parseAmount(value: unknown): number | null {
   const parsed = parseNumber(value);

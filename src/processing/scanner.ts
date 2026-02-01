@@ -403,9 +403,11 @@ export async function scanFolder(folderId?: string): Promise<Result<ScanResult, 
       }
     };
   }
-  scanState = 'pending';
 
   try {
+    // Set state inside try block to ensure finally block always resets it
+    scanState = 'pending';
+
     // This WAITS for lock (up to 5 min) instead of returning immediately
     const lockResult = await withLock(
       PROCESSING_LOCK_ID,
