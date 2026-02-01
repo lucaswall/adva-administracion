@@ -42,9 +42,6 @@ import { SortBatch, DuplicateCache, MetadataCache, SheetOrderBatch } from './cac
 import { TokenUsageBatch } from '../services/token-usage-batch.js';
 import { MAX_TRANSIENT_RETRIES, RETRY_DELAYS_MS } from '../config.js';
 
-// Re-export for backwards compatibility
-export { processFile, hasValidDate, type ProcessFileResult } from './extractor.js';
-
 // Module-level state for scan deferral - uses state machine to prevent TOCTOU race
 type ScanState = 'idle' | 'pending' | 'running';
 let scanState: ScanState = 'idle';

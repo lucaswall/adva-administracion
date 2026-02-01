@@ -300,7 +300,6 @@ async function ensureSheetsExist(
     // Apply formatting (skip for Status sheet - it has custom formatting)
     if (config.title !== 'Status') {
       const formatResult = await formatSheet(spreadsheetId, sheetId, {
-        monetaryColumns: config.monetaryColumns || [],
         numberFormats: config.numberFormats,
         frozenRows: 1,
       });

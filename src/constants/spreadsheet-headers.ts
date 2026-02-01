@@ -127,23 +127,6 @@ export const RECIBO_HEADERS = [
   'matchConfidence',
 ];
 
-/** Headers for Resumenes Bancarios sheet (legacy - not currently used) */
-export const RESUMEN_BANCARIO_HEADERS = [
-  'fileId',
-  'fileName',
-  'banco',
-  'numeroCuenta',
-  'fechaDesde',
-  'fechaHasta',
-  'saldoInicial',
-  'saldoFinal',
-  'moneda',
-  'cantidadMovimientos',
-  'processedAt',
-  'confidence',
-  'needsReview',
-];
-
 /**
  * Sheet configuration for Control de Resumenes spreadsheet - Bank Accounts
  * Stores bank account statements in bank account-specific folders
@@ -322,7 +305,6 @@ export type NumberFormat =
 export interface SheetConfig {
   title: string;
   headers: string[];
-  monetaryColumns?: number[]; // 0-indexed column numbers to format as currency
   numberFormats?: Map<number, NumberFormat>; // 0-indexed column number -> format
 }
 
@@ -481,7 +463,10 @@ export const DASHBOARD_OPERATIVO_SHEETS: SheetConfig[] = [
   {
     title: 'Pagos Pendientes',
     headers: PAGOS_PENDIENTES_HEADERS,
-    monetaryColumns: [7] // importeTotal (0-indexed: 7)
+    numberFormats: new Map([
+      [0, { type: 'date' }],                    // fechaEmision
+      [7, { type: 'currency', decimals: 2 }],   // importeTotal
+    ]),
   },
   {
     title: 'API Mensual',

@@ -540,7 +540,6 @@ export function dateToSerialInTimezone(date: Date, timeZone: string): number {
  * @param spreadsheetId - Spreadsheet ID
  * @param sheetId - Sheet ID (not the name, the numeric ID)
  * @param options - Formatting options
- * @param options.monetaryColumns - 0-indexed columns to format as currency with 2 decimals (backward compatibility)
  * @param options.numberFormats - Map of 0-indexed column number to NumberFormat
  * @param options.frozenRows - Number of rows to freeze at top (default: 1)
  * @returns Success or error
@@ -549,12 +548,11 @@ export async function formatSheet(
   spreadsheetId: string,
   sheetId: number,
   options: {
-    monetaryColumns?: number[];
     numberFormats?: Map<number, NumberFormat>;
     frozenRows?: number;
   } = {}
 ): Promise<Result<void, Error>> {
-  const { monetaryColumns = [], numberFormats, frozenRows = 1 } = options;
+  const { numberFormats, frozenRows = 1 } = options;
 
   return withQuotaRetry(async () => {
     const sheets = await getSheetsService();
@@ -614,7 +612,7 @@ export async function formatSheet(
       },
     });
 
-    // 4. Apply number formatting from numberFormats map (takes precedence)
+    // 4. Apply number formatting from numberFormats map
     if (numberFormats && numberFormats.size > 0) {
       for (const [columnIndex, format] of numberFormats) {
         requests.push({
@@ -630,30 +628,6 @@ export async function formatSheet(
                 numberFormat: {
                   type: format.type === 'date' ? 'DATE' : 'NUMBER',
                   pattern: getNumberFormatPattern(format),
-                },
-              },
-            },
-            fields: 'userEnteredFormat.numberFormat',
-          },
-        });
-      }
-    }
-    // 5. Apply legacy monetaryColumns formatting (backward compatibility)
-    else if (monetaryColumns.length > 0) {
-      for (const columnIndex of monetaryColumns) {
-        requests.push({
-          repeatCell: {
-            range: {
-              sheetId,
-              startColumnIndex: columnIndex,
-              endColumnIndex: columnIndex + 1,
-              startRowIndex: 1, // Skip header row
-            },
-            cell: {
-              userEnteredFormat: {
-                numberFormat: {
-                  type: 'NUMBER',
-                  pattern: '#,##0.00',
                 },
               },
             },

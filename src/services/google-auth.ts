@@ -101,40 +101,6 @@ export async function getGoogleAuthAsync(scopes: string[]): Promise<Auth.GoogleA
 }
 
 /**
- * Gets or creates the Google Auth client (synchronous - DEPRECATED)
- * Use getGoogleAuthAsync instead for proper concurrency handling
- *
- * @param scopes - OAuth scopes to request
- * @returns Authenticated GoogleAuth client
- * @deprecated Use getGoogleAuthAsync for promise-caching pattern
- */
-export function getGoogleAuth(scopes: string[]): Auth.GoogleAuth {
-  // First check (fast path)
-  if (authClient) {
-    return authClient;
-  }
-
-  // Create new client
-  const credentials = parseServiceAccountKey();
-  const newClient = new google.auth.GoogleAuth({
-    credentials: {
-      client_email: credentials.client_email,
-      private_key: credentials.private_key,
-    },
-    scopes,
-  });
-
-  // Double-check: another call may have already set authClient
-  // If so, use the existing one to avoid multiple clients
-  if (authClient) {
-    return authClient;
-  }
-
-  authClient = newClient;
-  return authClient;
-}
-
-/**
  * Gets the default scopes for Drive and Sheets access
  * Uses full Drive access for folder creation and file movement
  */

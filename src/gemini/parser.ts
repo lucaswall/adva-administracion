@@ -330,8 +330,8 @@ function validateAdvaRole(
 }
 
 /**
- * Raw extraction result from Gemini for facturas (new format)
- * Contains issuerName, clientName, allCuits separately
+ * Raw extraction result from Gemini for facturas
+ * Contains issuerName, clientName, allCuits separately for CUIT assignment
  */
 interface RawFacturaExtraction {
   issuerName?: string;
@@ -345,11 +345,6 @@ interface RawFacturaExtraction {
   importeTotal?: number;
   moneda?: string;
   concepto?: string;
-  // Legacy fields (for backwards compatibility)
-  cuitEmisor?: string;
-  razonSocialEmisor?: string;
-  cuitReceptor?: string;
-  razonSocialReceptor?: string;
 }
 
 /**
@@ -398,76 +393,63 @@ export function parseFacturaResponse(
     // Parse JSON
     const rawData = JSON.parse(jsonStr) as RawFacturaExtraction;
 
-    // Check if using new format (has issuerName/clientName) or legacy format
-    const isNewFormat = rawData.issuerName !== undefined || rawData.clientName !== undefined;
+    // Require issuerName and clientName for CUIT assignment
+    if (rawData.issuerName === undefined && rawData.clientName === undefined) {
+      return {
+        ok: false,
+        error: new ParseError('Missing issuerName and clientName in extraction', response)
+      };
+    }
 
     let data: Partial<Factura>;
     let actualDocumentType: 'factura_emitida' | 'factura_recibida' = expectedDocumentType;
 
-    if (isNewFormat) {
-      // New format: assign CUITs based on ADVA name matching
-      const issuerName = rawData.issuerName || '';
-      const clientName = rawData.clientName || '';
-      const allCuits = rawData.allCuits || [];
+    // Assign CUITs based on ADVA name matching
+    const issuerName = rawData.issuerName || '';
+    const clientName = rawData.clientName || '';
+    const allCuits = rawData.allCuits || [];
 
-      // Normalize CUITs that may still have dashes
-      const normalizedCuits = allCuits.map(normalizeCuit);
+    // Normalize CUITs that may still have dashes
+    const normalizedCuits = allCuits.map(normalizeCuit);
 
-      try {
-        const assignment = assignCuitsAndClassify(issuerName, clientName, normalizedCuits);
-        actualDocumentType = assignment.documentType;
+    try {
+      const assignment = assignCuitsAndClassify(issuerName, clientName, normalizedCuits);
+      actualDocumentType = assignment.documentType;
 
-        data = {
-          tipoComprobante: rawData.tipoComprobante as Factura['tipoComprobante'],
-          nroFactura: rawData.nroFactura,
-          fechaEmision: rawData.fechaEmision,
-          cuitEmisor: assignment.cuitEmisor,
-          razonSocialEmisor: assignment.razonSocialEmisor,
-          cuitReceptor: assignment.cuitReceptor || undefined,
-          razonSocialReceptor: assignment.razonSocialReceptor || undefined,
-          importeNeto: rawData.importeNeto,
-          importeIva: rawData.importeIva,
-          importeTotal: rawData.importeTotal,
-          moneda: rawData.moneda as Factura['moneda'],
-          concepto: rawData.concepto,
-        };
-
-        // Log if document type differs from expected
-        if (actualDocumentType !== expectedDocumentType) {
-          warn('Document type determined by CUIT assignment differs from classification', {
-            module: 'gemini-parser',
-            phase: 'factura-parse',
-            expectedType: expectedDocumentType,
-            actualType: actualDocumentType,
-            issuerName,
-            clientName,
-          });
-        }
-      } catch (assignError) {
-        // CUIT assignment failed - ADVA not found in names
-        return {
-          ok: false,
-          error: new ParseError(
-            assignError instanceof Error ? assignError.message : 'CUIT assignment failed',
-            response
-          )
-        };
-      }
-    } else {
-      // Legacy format: use data as-is (backwards compatibility)
       data = {
         tipoComprobante: rawData.tipoComprobante as Factura['tipoComprobante'],
         nroFactura: rawData.nroFactura,
         fechaEmision: rawData.fechaEmision,
-        cuitEmisor: rawData.cuitEmisor ? normalizeCuit(rawData.cuitEmisor) : undefined,
-        razonSocialEmisor: rawData.razonSocialEmisor,
-        cuitReceptor: rawData.cuitReceptor ? normalizeCuit(rawData.cuitReceptor) : undefined,
-        razonSocialReceptor: rawData.razonSocialReceptor,
+        cuitEmisor: assignment.cuitEmisor,
+        razonSocialEmisor: assignment.razonSocialEmisor,
+        cuitReceptor: assignment.cuitReceptor || undefined,
+        razonSocialReceptor: assignment.razonSocialReceptor || undefined,
         importeNeto: rawData.importeNeto,
         importeIva: rawData.importeIva,
         importeTotal: rawData.importeTotal,
         moneda: rawData.moneda as Factura['moneda'],
         concepto: rawData.concepto,
+      };
+
+      // Log if document type differs from expected
+      if (actualDocumentType !== expectedDocumentType) {
+        warn('Document type determined by CUIT assignment differs from classification', {
+          module: 'gemini-parser',
+          phase: 'factura-parse',
+          expectedType: expectedDocumentType,
+          actualType: actualDocumentType,
+          issuerName,
+          clientName,
+        });
+      }
+    } catch (assignError) {
+      // CUIT assignment failed - ADVA not found in names
+      return {
+        ok: false,
+        error: new ParseError(
+          assignError instanceof Error ? assignError.message : 'CUIT assignment failed',
+          response
+        )
       };
     }
 
@@ -543,9 +525,8 @@ export function parseFacturaResponse(
         needsReview,
         missingFields: missingFields.length > 0 ? missingFields as string[] : undefined,
         roleValidation,
-        // Include actual document type if it was determined by CUIT assignment
-        // (which happens when using the new format with issuerName/clientName)
-        actualDocumentType: isNewFormat ? actualDocumentType : undefined,
+        // Include actual document type determined by CUIT assignment
+        actualDocumentType,
       }
     };
   } catch (error) {
