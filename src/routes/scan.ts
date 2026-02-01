@@ -107,25 +107,21 @@ export async function scanRoutes(server: FastifyInstance) {
   /**
    * POST /api/rematch - Re-run matching on unmatched documents
    * Protected with authentication
+   *
+   * Note: Rematch always processes all document types (facturas, recibos, etc.).
+   * Document type filtering is not currently supported.
    */
   server.post<{ Body: RematchRequest }>('/rematch', {
     onRequest: authMiddleware,
     schema: {
       body: {
         type: 'object',
-        properties: {
-          documentType: {
-            type: 'string',
-            enum: ['factura', 'recibo', 'all'],
-          },
-        },
+        properties: {},
         additionalProperties: false,
       },
     },
-  }, async (request, reply): Promise<RematchResult | ErrorResponse> => {
-    const { documentType = 'all' } = request.body || {};
-
-    server.log.info({ documentType }, 'Starting rematch');
+  }, async (_request, reply): Promise<RematchResult | ErrorResponse> => {
+    server.log.info({}, 'Starting rematch');
 
     const result = await rematch();
 

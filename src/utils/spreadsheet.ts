@@ -55,6 +55,22 @@ export function sanitizeForSpreadsheet(value: string): string {
  * // Returns: =HYPERLINK("https://drive.google.com/file/d/abc123/view", "invoice.pdf")
  */
 export function createDriveHyperlink(fileId: string, displayText: string): string {
+  // Validate fileId
+  if (!fileId || fileId.length === 0) {
+    return '';
+  }
+
+  // Google Drive file IDs are typically 28-44 characters, but allow 8-50 for flexibility
+  if (fileId.length < 8 || fileId.length > 50) {
+    return '';
+  }
+
+  // Validate fileId only contains safe characters (alphanumeric, underscore, hyphen)
+  // This prevents path traversal and other injection attacks
+  if (!/^[a-zA-Z0-9_-]+$/.test(fileId)) {
+    return '';
+  }
+
   // Escape double quotes in display text by doubling them (Google Sheets formula syntax)
   const escapedText = displayText.replace(/"/g, '""');
 

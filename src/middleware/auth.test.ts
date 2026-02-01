@@ -233,4 +233,60 @@ describe('Authentication middleware', () => {
       expect(body.message).not.toContain('actual');
     });
   });
+
+  describe('Empty API_SECRET configuration', () => {
+    it('rejects all requests when API_SECRET is empty string', async () => {
+      // Create new server with empty API_SECRET
+      await server.close();
+      vi.mocked(getConfig).mockReturnValue({
+        ...mockConfig,
+        apiSecret: '',
+      });
+
+      server = Fastify({ logger: false });
+      server.addHook('onRequest', authMiddleware);
+      server.get('/api/test', async () => ({ success: true }));
+      await server.ready();
+
+      const response = await server.inject({
+        method: 'GET',
+        url: '/api/test',
+        headers: {
+          authorization: 'Bearer ',
+        },
+      });
+
+      expect(response.statusCode).toBe(500);
+      const body = JSON.parse(response.body);
+      expect(body.error).toBe('Internal Server Error');
+      expect(body.message).toContain('API_SECRET not configured');
+    });
+
+    it('rejects valid token when API_SECRET is empty', async () => {
+      // Create new server with empty API_SECRET
+      await server.close();
+      vi.mocked(getConfig).mockReturnValue({
+        ...mockConfig,
+        apiSecret: '',
+      });
+
+      server = Fastify({ logger: false });
+      server.addHook('onRequest', authMiddleware);
+      server.get('/api/test', async () => ({ success: true }));
+      await server.ready();
+
+      const response = await server.inject({
+        method: 'GET',
+        url: '/api/test',
+        headers: {
+          authorization: 'Bearer some-token',
+        },
+      });
+
+      expect(response.statusCode).toBe(500);
+      const body = JSON.parse(response.body);
+      expect(body.error).toBe('Internal Server Error');
+      expect(body.message).toContain('API_SECRET not configured');
+    });
+  });
 });

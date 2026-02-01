@@ -318,42 +318,28 @@ describe('Scan routes', () => {
       expect(body.error).toBe('Sheets API error');
     });
 
-    it('returns 400 for invalid documentType (bug #51)', async () => {
+    it('works without any parameters (processes all document types)', async () => {
+      mockRematch.mockResolvedValue({
+        ok: true,
+        value: {
+          matchesFound: 5,
+          duration: 150,
+        },
+      });
+
       const response = await server.inject({
         method: 'POST',
         url: '/api/rematch',
         headers: {
           authorization: 'Bearer test-secret-123',
         },
-        payload: { documentType: 'invalid_type' },
+        payload: {},
       });
 
-      expect(response.statusCode).toBe(400);
-    });
-
-    it('accepts valid documentType values (bug #51)', async () => {
-      mockRematch.mockResolvedValue({
-        ok: true,
-        value: {
-          matchesFound: 1,
-          duration: 100,
-        },
-      });
-
-      // Test each valid value
-      const validTypes = ['factura', 'recibo', 'all'];
-      for (const type of validTypes) {
-        const response = await server.inject({
-          method: 'POST',
-          url: '/api/rematch',
-          headers: {
-            authorization: 'Bearer test-secret-123',
-          },
-          payload: { documentType: type },
-        });
-
-        expect(response.statusCode).toBe(200);
-      }
+      expect(response.statusCode).toBe(200);
+      const body = JSON.parse(response.body);
+      expect(body.matchesFound).toBe(5);
+      expect(body.duration).toBe(150);
     });
   });
 

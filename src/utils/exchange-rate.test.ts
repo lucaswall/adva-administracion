@@ -100,6 +100,50 @@ describe('exchange-rate', () => {
       expect(global.fetch).toHaveBeenCalledTimes(2);
     });
 
+    it('logs warning when invalid dates are dropped', async () => {
+      // Mock logger
+      const loggerModule = await import('../utils/logger.js');
+      const warnSpy = vi.spyOn(loggerModule, 'warn');
+
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({ compra: 800, venta: 850, fecha: '2024-01-15' })
+      });
+
+      // Mix of valid and invalid dates
+      await prefetchExchangeRates(['2024-01-15', 'invalid-date', '2024/01/16', '']);
+
+      // Should log warning for each invalid date
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('Invalid date'),
+        expect.objectContaining({
+          module: 'exchange-rate',
+          originalDate: 'invalid-date'
+        })
+      );
+
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('Invalid date'),
+        expect.objectContaining({
+          module: 'exchange-rate',
+          originalDate: '2024/01/16'
+        })
+      );
+
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('Invalid date'),
+        expect.objectContaining({
+          module: 'exchange-rate',
+          originalDate: ''
+        })
+      );
+
+      // Should only fetch for the valid date
+      expect(global.fetch).toHaveBeenCalledTimes(1);
+
+      warnSpy.mockRestore();
+    });
+
     it('handles network errors gracefully', async () => {
       let callCount = 0;
       global.fetch = vi.fn().mockImplementation(() => {
@@ -351,6 +395,51 @@ describe('exchange-rate', () => {
         expect(result.value.compra).toBe(1250);
         expect(result.value.venta).toBe(1260);
       }
+    });
+  });
+
+  describe('Date parsing validation', () => {
+    it('should return error for malformed date (empty string)', async () => {
+      const { getExchangeRate } = await import('./exchange-rate.js');
+      const result = await getExchangeRate('');
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.error.message).toContain('Invalid date format');
+      }
+    });
+
+    it('should return error for malformed date (wrong format)', async () => {
+      const { getExchangeRate } = await import('./exchange-rate.js');
+      const result = await getExchangeRate('2025/01/20');
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.error.message).toContain('Invalid date format');
+      }
+    });
+
+    it('should return error for malformed date (incomplete)', async () => {
+      const { getExchangeRate } = await import('./exchange-rate.js');
+      const result = await getExchangeRate('2025-01');
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.error.message).toContain('Invalid date format');
+      }
+    });
+
+    it('should accept valid ISO date format', async () => {
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({ compra: 1250, venta: 1260, fecha: '2025-01-20' })
+      });
+
+      const { getExchangeRate } = await import('./exchange-rate.js');
+      const result = await getExchangeRate('2025-01-20');
+
+      expect(result.ok).toBe(true);
+      expect(global.fetch).toHaveBeenCalledWith(expect.stringContaining('/2025/01/20'));
     });
   });
 });

@@ -43,6 +43,20 @@ export async function authMiddleware(
 ): Promise<void> {
   const config = getConfig();
 
+  // Validate API_SECRET is configured
+  if (!config.apiSecret || config.apiSecret.length === 0) {
+    warn('API_SECRET not configured - rejecting request', {
+      module: 'auth',
+      phase: 'validate',
+      path: request.url,
+    });
+
+    return reply.code(500).send({
+      error: 'Internal Server Error',
+      message: 'API_SECRET not configured',
+    });
+  }
+
   // Extract Authorization header
   const authHeader = request.headers.authorization;
 

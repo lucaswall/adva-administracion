@@ -139,18 +139,30 @@ export function calculateKeywordMatchScore(
   let score = 0;
 
   for (const token of tokens) {
-    // Direct word match in emisor name
-    if (normalizedEmisor.includes(token)) {
+    // Word boundary match in emisor name (prevents substring false positives)
+    if (matchesWordBoundary(normalizedEmisor, token)) {
       score += 2;
     }
 
-    // Direct word match in factura concepto
-    if (normalizedConcepto && normalizedConcepto.includes(token)) {
+    // Word boundary match in factura concepto
+    if (normalizedConcepto && matchesWordBoundary(normalizedConcepto, token)) {
       score += 2;
     }
   }
 
   return score;
+}
+
+/**
+ * Checks if a token matches as a complete word (respecting word boundaries)
+ * Prevents false positives from substring matches (e.g., "SA" in "COMISIONES SA")
+ */
+function matchesWordBoundary(text: string, token: string): boolean {
+  // Escape special regex characters in the token
+  const escapedToken = token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  // Use word boundary regex to match complete words only
+  const pattern = new RegExp(`\\b${escapedToken}\\b`, 'i');
+  return pattern.test(text);
 }
 
 /**

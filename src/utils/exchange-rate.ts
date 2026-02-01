@@ -134,8 +134,15 @@ export async function getExchangeRate(date: string): Promise<Result<ExchangeRate
     return { ok: true, value: cachedValue };
   }
 
-  // Parse date for URL
-  const [year, month, day] = isoDate.split('-');
+  // Parse date for URL - validate we have all components
+  const dateParts = isoDate.split('-');
+  if (dateParts.length !== 3 || !dateParts[0] || !dateParts[1] || !dateParts[2]) {
+    return {
+      ok: false,
+      error: new Error(`Invalid date format after normalization: ${isoDate}`),
+    };
+  }
+  const [year, month, day] = dateParts;
   const url = `https://api.argentinadatos.com/v1/cotizaciones/dolares/oficial/${year}/${month}/${day}`;
 
   try {
@@ -225,7 +232,22 @@ export function getExchangeRateSync(date: string): Result<ExchangeRate, Error> {
  * @param dates - Array of date strings
  */
 export async function prefetchExchangeRates(dates: string[]): Promise<void> {
-  const uniqueDates = [...new Set(dates.map(d => normalizeDateToIso(d)).filter(Boolean) as string[])];
+  // Normalize dates and log warnings for invalid ones
+  const normalized: string[] = [];
+  for (const date of dates) {
+    const isoDate = normalizeDateToIso(date);
+    if (isoDate) {
+      normalized.push(isoDate);
+    } else {
+      warn('Invalid date format dropped during prefetch', {
+        module: 'exchange-rate',
+        originalDate: date,
+        correlationId: getCorrelationId(),
+      });
+    }
+  }
+
+  const uniqueDates = [...new Set(normalized)];
 
   const results = await Promise.allSettled(
     uniqueDates.map(async (date) => {

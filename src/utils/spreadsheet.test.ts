@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { sanitizeForSpreadsheet } from './spreadsheet.js';
+import { sanitizeForSpreadsheet, createDriveHyperlink } from './spreadsheet.js';
 
 describe('sanitizeForSpreadsheet', () => {
   it('sanitizes strings starting with = (formulas)', () => {
@@ -72,5 +72,46 @@ describe('sanitizeForSpreadsheet', () => {
 
   it('handles multiple leading whitespace with formula chars', () => {
     expect(sanitizeForSpreadsheet('   \t\n=DANGEROUS')).toBe("'   \t\n=DANGEROUS");
+  });
+});
+
+describe('createDriveHyperlink', () => {
+  it('creates valid hyperlink with valid fileId', () => {
+    const result = createDriveHyperlink('abc123xyz', 'test.pdf');
+    expect(result).toBe('=HYPERLINK("https://drive.google.com/file/d/abc123xyz/view", "test.pdf")');
+  });
+
+  it('returns empty string for empty fileId', () => {
+    const result = createDriveHyperlink('', 'test.pdf');
+    expect(result).toBe('');
+  });
+
+  it('returns empty string for fileId with special characters', () => {
+    const result = createDriveHyperlink('../malicious', 'test.pdf');
+    expect(result).toBe('');
+  });
+
+  it('returns empty string for very short fileId', () => {
+    const result = createDriveHyperlink('abc', 'test.pdf');
+    expect(result).toBe('');
+  });
+
+  it('returns empty string for very long fileId', () => {
+    const tooLong = 'a'.repeat(100);
+    const result = createDriveHyperlink(tooLong, 'test.pdf');
+    expect(result).toBe('');
+  });
+
+  it('creates valid hyperlink for valid Google Drive fileId format', () => {
+    // Real Google Drive file IDs are typically 28-44 characters, alphanumeric with _ and -
+    const validId = '1a2b3c4d5e6f7g8h9i0j1k2l3m4n5o6p';
+    const result = createDriveHyperlink(validId, 'document.pdf');
+    expect(result).toContain(validId);
+    expect(result).toContain('https://drive.google.com');
+  });
+
+  it('escapes display text correctly', () => {
+    const result = createDriveHyperlink('abc123xyz', 'file "with" quotes.pdf');
+    expect(result).toBe('=HYPERLINK("https://drive.google.com/file/d/abc123xyz/view", "file ""with"" quotes.pdf")');
   });
 });

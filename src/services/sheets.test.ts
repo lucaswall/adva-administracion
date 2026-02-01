@@ -29,6 +29,7 @@ import {
   moveSheetToPosition,
   getOrCreateMonthSheet,
   reorderMonthSheets,
+  columnIndexToLetter,
 } from './sheets.js';
 
 // Mock googleapis
@@ -2235,6 +2236,36 @@ describe('Google Sheets API wrapper - quota retry tests', () => {
           })
         );
       });
+    });
+  });
+
+  describe('columnIndexToLetter', () => {
+    it('should convert column 1 to A', () => {
+      expect(columnIndexToLetter(1)).toBe('A');
+    });
+
+    it('should convert column 26 to Z', () => {
+      expect(columnIndexToLetter(26)).toBe('Z');
+    });
+
+    it('should convert column 27 to AA', () => {
+      expect(columnIndexToLetter(27)).toBe('AA');
+    });
+
+    it('should convert column 52 to AZ', () => {
+      expect(columnIndexToLetter(52)).toBe('AZ');
+    });
+
+    it('should convert column 53 to BA', () => {
+      expect(columnIndexToLetter(53)).toBe('BA');
+    });
+
+    it('should convert column 702 to ZZ', () => {
+      expect(columnIndexToLetter(702)).toBe('ZZ');
+    });
+
+    it('should convert column 703 to AAA', () => {
+      expect(columnIndexToLetter(703)).toBe('AAA');
     });
   });
 });

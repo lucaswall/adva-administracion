@@ -975,3 +975,69 @@ describe('extractJSON', () => {
     }
   });
 });
+
+describe('Parser - JSON Size Limit', () => {
+  it('rejects oversized JSON string (> 1MB)', () => {
+    // Create a JSON string larger than 1MB
+    const largeObject = {
+      data: 'x'.repeat(1_100_000) // 1.1MB of data
+    };
+    const largeJson = JSON.stringify(largeObject);
+
+    const result = parseFacturaResponse(largeJson, 'factura_emitida');
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.message).toContain('exceeds maximum size');
+    }
+  });
+
+  it('accepts normal-sized JSON string (< 1MB)', () => {
+    const normalJson = JSON.stringify({
+      issuerName: 'ADVA',
+      clientName: 'Client SA',
+      allCuits: ['30709076783', '20123456786'],
+      tipoComprobante: 'Factura A',
+      nroFactura: '0001-00000123',
+      fechaEmision: '2025-01-15',
+      importeNeto: 10000,
+      importeIva: 2100,
+      importeTotal: 12100,
+      moneda: 'ARS',
+      concepto: 'Test'
+    });
+
+    const result = parseFacturaResponse(normalJson, 'factura_emitida');
+
+    // Should succeed (not be rejected for size)
+    // May still fail for other validation reasons, but not size
+    if (!result.ok) {
+      expect(result.error.message).not.toContain('exceeds maximum size');
+    }
+  });
+
+  it('checks size limit in all parser functions', () => {
+    const largeJson = JSON.stringify({ data: 'x'.repeat(1_100_000) });
+
+    // Test parseResumenBancarioResponse
+    const bancarioResult = parseResumenBancarioResponse(largeJson);
+    expect(bancarioResult.ok).toBe(false);
+    if (!bancarioResult.ok) {
+      expect(bancarioResult.error.message).toContain('exceeds maximum size');
+    }
+
+    // Test parseResumenTarjetaResponse
+    const tarjetaResult = parseResumenTarjetaResponse(largeJson);
+    expect(tarjetaResult.ok).toBe(false);
+    if (!tarjetaResult.ok) {
+      expect(tarjetaResult.error.message).toContain('exceeds maximum size');
+    }
+
+    // Test parseResumenBrokerResponse
+    const brokerResult = parseResumenBrokerResponse(largeJson);
+    expect(brokerResult.ok).toBe(false);
+    if (!brokerResult.ok) {
+      expect(brokerResult.error.message).toContain('exceeds maximum size');
+    }
+  });
+});

@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { isQuotaError, withQuotaRetry, SHEETS_QUOTA_RETRY_CONFIG, withLock } from './concurrency.js';
+import { isQuotaError, withQuotaRetry, SHEETS_QUOTA_RETRY_CONFIG, withLock, computeVersion } from './concurrency.js';
 
 describe('isQuotaError', () => {
   it('detects "quota exceeded" message', () => {
@@ -347,5 +347,61 @@ describe('withLock', () => {
 
       expect(overlaps).toEqual([]);
     }
+  });
+});
+
+describe('computeVersion', () => {
+  it('computes hash for normal objects', () => {
+    const obj = { foo: 'bar', num: 42 };
+    const hash = computeVersion(obj);
+
+    expect(typeof hash).toBe('string');
+    expect(hash.length).toBeGreaterThan(0);
+  });
+
+  it('returns consistent hash for same value', () => {
+    const obj = { a: 1, b: 2 };
+    const hash1 = computeVersion(obj);
+    const hash2 = computeVersion(obj);
+
+    expect(hash1).toBe(hash2);
+  });
+
+  it('handles BigInt without throwing', () => {
+    const objWithBigInt = { value: BigInt(9007199254740991) };
+
+    // Should not throw
+    expect(() => computeVersion(objWithBigInt)).not.toThrow();
+
+    const hash = computeVersion(objWithBigInt);
+    expect(typeof hash).toBe('string');
+  });
+
+  it('handles circular references without throwing', () => {
+    const obj: any = { name: 'test' };
+    obj.self = obj; // Circular reference
+
+    // Should not throw
+    expect(() => computeVersion(obj)).not.toThrow();
+
+    const hash = computeVersion(obj);
+    expect(typeof hash).toBe('string');
+  });
+
+  it('handles Symbol values without throwing', () => {
+    const objWithSymbol = { [Symbol('test')]: 'value' };
+
+    // Should not throw
+    expect(() => computeVersion(objWithSymbol)).not.toThrow();
+
+    const hash = computeVersion(objWithSymbol);
+    expect(typeof hash).toBe('string');
+  });
+
+  it('computes different hashes for different values', () => {
+    const hash1 = computeVersion({ a: 1 });
+    const hash2 = computeVersion({ a: 2 });
+
+    expect(hash1).not.toBe(hash2);
   });
 });
