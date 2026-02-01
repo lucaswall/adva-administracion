@@ -71,7 +71,9 @@ Task: Add parseResumenBroker function
 | `commit-bot` (haiku) | Commit to current branch | Only when user requests commit |
 | `pr-creator` (haiku) | Branch + commit + push + PR | Only when user requests PR |
 
-**Git agents rule:** Only use `commit-bot` or `pr-creator` if explicitly requested. If PR requested, use `pr-creator` only (it handles branch creation, commit, push, and PR creation).
+**Git agents rule:** Never commit or create PRs unless the user explicitly requests it. When requested:
+- **Commit requested** → Use `commit-bot` agent (don't commit manually)
+- **PR requested** → Use `pr-creator` agent (handles branch, commit, push, and PR)
 
 ## SKILLS
 
