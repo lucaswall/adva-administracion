@@ -617,4 +617,54 @@ describe('DuplicateCache', () => {
       expect(sheets.getValues).toHaveBeenCalledTimes(2);
     });
   });
+
+  describe('Bug #2: Silent failure handling', () => {
+    it('should retry loading after failure (not cache the failed promise)', async () => {
+      const cache = new DuplicateCache();
+
+      // First call fails
+      vi.mocked(sheets.getValues).mockResolvedValueOnce({ ok: false, error: new Error('API error') });
+
+      // First load attempt (should fail silently)
+      await cache.loadSheet('spreadsheet-123', 'TestSheet', 'A:C');
+
+      // Verify cache was NOT populated
+      const result1 = cache.isDuplicateFactura(
+        'spreadsheet-123',
+        'TestSheet',
+        'FAC-001',
+        '2025-01-15',
+        100000,
+        '20123456786'
+      );
+      expect(result1.isDuplicate).toBe(false);
+
+      // Second call succeeds
+      vi.mocked(sheets.getValues).mockResolvedValueOnce({
+        ok: true,
+        value: [
+          ['Header', 'FileId', 'C', 'D', 'NroFactura', 'CUIT', 'G', 'H', 'I', 'ImporteTotal'],
+          ['2025-01-15', 'file-123', '', '', 'FAC-001', '20123456786', '', '', '', '100000'],
+        ],
+      });
+
+      // Second load attempt (should retry and succeed)
+      await cache.loadSheet('spreadsheet-123', 'TestSheet', 'A:C');
+
+      // Verify cache was populated after retry
+      const result2 = cache.isDuplicateFactura(
+        'spreadsheet-123',
+        'TestSheet',
+        'FAC-001',
+        '2025-01-15',
+        100000,
+        '20123456786'
+      );
+
+      // This will fail with current code because the failed promise is cached
+      // The second loadSheet call sees loadPromises.has(key) = true and awaits the old failed promise
+      expect(result2.isDuplicate).toBe(true);
+      expect(result2.existingFileId).toBe('file-123');
+    });
+  });
 });

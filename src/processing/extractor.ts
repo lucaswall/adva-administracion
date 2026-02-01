@@ -143,18 +143,29 @@ export async function processFile(
         } else {
           // Log usage to Dashboard Operativo Contable
           // Note: Fire and forget - don't await to avoid slowing down processing
-          void logTokenUsage(dashboardOperativoId, entry).then(result => {
-            if (!result.ok) {
-              warn('Failed to log token usage', {
+          void logTokenUsage(dashboardOperativoId, entry)
+            .then(result => {
+              if (!result.ok) {
+                warn('Failed to log token usage', {
+                  module: 'extractor',
+                  phase: 'token-logging',
+                  fileId: data.fileId,
+                  fileName: data.fileName,
+                  error: result.error.message,
+                  correlationId,
+                });
+              }
+            })
+            .catch(error => {
+              warn('Token usage logging failed', {
                 module: 'extractor',
                 phase: 'token-logging',
                 fileId: data.fileId,
                 fileName: data.fileName,
-                error: result.error.message,
+                error: error instanceof Error ? error.message : String(error),
                 correlationId,
               });
-            }
-          });
+            });
         }
       }
     : undefined;

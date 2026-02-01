@@ -1,43 +1,43 @@
 # Code Audit Findings
 
 ## item #1 [type] [medium]
-Unsafe type assertion using any at src/gemini/client.ts:230-232. Code casts parseResult to any to access usageMetadata, bypassing TypeScript type checking.
+Unsafe type assertion using any at src/gemini/client.ts:241-242. Code casts parseResult to any to access usageMetadata, bypassing TypeScript type checking.
 
-## item #2 [edge-case] [medium]
+## item #2 [validation] [medium]
+Document type assertions in document-sorter.ts at lines 152-183 use property introspection without validation. If a document has multiple type-indicating properties, it matches the first condition checked, potentially routing to wrong folder.
+
+## item #3 [validation] [medium]
+Sheet name in movimientos-detalle.ts at lines 42-45 is not validated before being inserted into A1 notation range string. Complex sheet names could cause issues.
+
+## item #4 [edge-case] [medium]
 No size limit on JSON parsing at src/gemini/parser.ts multiple lines. JSON.parse called on response strings with no size validation. Oversized JSON could consume memory before parse error.
 
-## item #3 [practice] [medium]
+## item #5 [practice] [medium]
 Direct mutation of parsed data object at src/gemini/parser.ts:469,565,653,996,1314. Parser functions directly mutate data object. Could be clearer with immutable patterns.
 
-## item #4 [practice] [medium]
+## item #6 [practice] [medium]
 CUIT vs CUIL property naming confusion at src/matching/matcher.ts:474,487. MatchQuality uses hasCuitMatch but ReciboPagoMatcher creates hasCuilMatch. Works but confusing.
 
-## item #5 [edge-case] [medium]
+## item #7 [edge-case] [medium]
 Keyword matching substring could have false positives at src/bank/matcher.ts:136-142. Keyword matching uses substring inclusion which could match common words incorrectly.
 
-## item #6 [practice] [medium]
+## item #8 [practice] [medium]
 Unused documentType parameter in rematch endpoint at src/routes/scan.ts:98-103. Parameter parsed but completely ignored, misleading API consumers.
 
-## item #7 [security] [medium]
+## item #9 [security] [medium]
 API key stored in memory without cleanup at src/gemini/client.ts:59,75,221. Gemini API key persists in GeminiClient instance. No mechanism to clear/zero key after use.
 
-## item #8 [security] [medium]
+## item #10 [security] [medium]
 Insufficient error detail sanitization in logging at src/gemini/client.ts:254-259. Logs entire error object with details that may include sensitive API data.
 
-## item #9 [async] [medium]
+## item #11 [async] [medium]
 Rate limiter doesn't account for error responses at src/gemini/client.ts:243. Failed requests don't count toward RPM limit. Client that always fails could make unlimited requests.
 
-## item #10 [edge-case] [medium]
+## item #12 [edge-case] [medium]
 Unvalidated response structure before accessing nested properties at src/gemini/client.ts:380-382. Uses optional chaining but doesn't validate structure explicitly, masking errors.
 
-## item #11 [async] [medium]
+## item #13 [async] [medium]
 No connection pooling or resource management at src/gemini/client.ts:217-224. Each fetch creates new connection. No Keep-Alive, no pooling, no max concurrent limit.
-
-## item #12 [edge-case] [medium]
-Rate limiter cleanup method mutates while iterating at src/utils/rate-limiter.ts:98-116. Deletes entries during Map iteration which can cause items to be skipped.
-
-## item #13 [bug] [medium]
-Rate limiter doesn't clear validRequests mutation at src/utils/rate-limiter.ts:67-85. Old expired timestamps accumulate in memory. Memory leak for long-lived instances.
 
 ## item #14 [edge-case] [medium]
 Exchange rate cache date manipulation at src/utils/exchange-rate.ts:138-140. Splits isoDate by '-' without validating result format after normalization.
@@ -116,3 +116,9 @@ Empty error message on parse failure at src/bank/autofill.ts:24. When required c
 
 ## item #39 [edge-case] [low]
 Timezone cache not invalidated on spreadsheet updates at src/services/sheets.ts:32-59. If spreadsheet timezone changed by admin, cache won't update for up to 24 hours.
+
+## item #40 [edge-case] [low]
+Missing column validation in sheet parsing at factura-pago-matcher.ts lines 304-336. Assumes column indices directly without validating row has minimum required columns. Missing columns default to safe values but masks data issues.
+
+## item #41 [edge-case] [low]
+Scan state corruption window in scanner.ts lines 366-383. If an unhandled promise rejection occurs after setting scanState to pending but before proper lock context, state could block subsequent scans.

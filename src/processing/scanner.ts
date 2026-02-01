@@ -45,11 +45,6 @@ import { MAX_TRANSIENT_RETRIES, RETRY_DELAYS_MS } from '../config.js';
 // Re-export for backwards compatibility
 export { processFile, hasValidDate, type ProcessFileResult } from './extractor.js';
 
-// Track retry count for each file (to implement exponential backoff)
-// Key: fileId, Value: retry count (0 = first retry, 1 = second retry, etc.)
-// This is cleared in the finally block of each scan
-const retriedFileIds = new Map<string, number>();
-
 // Module-level state for scan deferral - uses state machine to prevent TOCTOU race
 type ScanState = 'idle' | 'pending' | 'running';
 let scanState: ScanState = 'idle';
@@ -76,7 +71,8 @@ async function processFileWithRetry(
   dashboardOperativoId: string,
   controlIngresosId: string,
   controlEgresosId: string,
-  result: ScanResult
+  result: ScanResult,
+  retriedFileIds: Map<string, number>
 ): Promise<void> {
   const correlationId = getCorrelationId();
   const retryCount = retriedFileIds.get(fileInfo.id) ?? 0;
@@ -110,7 +106,16 @@ async function processFileWithRetry(
     correlationId,
   });
 
-  const processResult = await processFile(fileInfo, context);
+  let processResult: Awaited<ReturnType<typeof processFile>>;
+  try {
+    processResult = await processFile(fileInfo, context);
+  } catch (error) {
+    // Handle unexpected exceptions from processFile
+    processResult = {
+      ok: false,
+      error: error instanceof Error ? error : new Error(String(error)),
+    };
+  }
 
   if (!processResult.ok) {
     // Check if it's a JSON parse error and we haven't exceeded retry limit
@@ -139,7 +144,8 @@ async function processFileWithRetry(
         dashboardOperativoId,
         controlIngresosId,
         controlEgresosId,
-        result
+        result,
+        retriedFileIds
       );
     }
 
@@ -154,6 +160,23 @@ async function processFileWithRetry(
       correlationId,
     });
     result.errors++;
+
+    // Update tracking sheet to mark file as failed
+    const statusUpdateResult = await updateFileStatus(
+      dashboardOperativoId,
+      fileInfo.id,
+      'failed',
+      processResult.error.message
+    );
+    if (!statusUpdateResult.ok) {
+      warn('Failed to update file status in tracking sheet', {
+        module: 'scanner',
+        phase: isRetry ? 'process-file-retry' : 'process-file',
+        fileId: fileInfo.id,
+        error: statusUpdateResult.error.message,
+        correlationId,
+      });
+    }
 
     const sortResult = await sortToSinProcesar(fileInfo.id, fileInfo.name);
     if (!sortResult.success) {
@@ -556,6 +579,11 @@ export async function scanFolder(folderId?: string): Promise<Result<ScanResult, 
         duration: 0,
       };
 
+      // Track retry count for each file (to implement exponential backoff)
+      // Key: fileId, Value: retry count (0 = first retry, 1 = second retry, etc.)
+      // Scoped to this scan invocation to prevent state leakage between concurrent scans
+      const retriedFileIds = new Map<string, number>();
+
       const queue = getProcessingQueue();
 
       // Queue all files for processing (don't await individual tasks)
@@ -572,7 +600,8 @@ export async function scanFolder(folderId?: string): Promise<Result<ScanResult, 
               dashboardOperativoId,
               controlIngresosId,
               controlEgresosId,
-              result
+              result,
+              retriedFileIds
             );
           }, { correlationId: generateCorrelationId(), fileId: fileInfo.id, fileName: fileInfo.name });
         });
@@ -671,8 +700,7 @@ export async function scanFolder(folderId?: string): Promise<Result<ScanResult, 
           context.duplicateCache.clear();
           context.metadataCache.clear();
 
-          // Clear retry tracking for next scan (CRITICAL: in finally block)
-          retriedFileIds.clear();
+          // Note: retriedFileIds is now function-scoped, no need to clear
 
           info('Caches cleared', {
             module: 'scanner',

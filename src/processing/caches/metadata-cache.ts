@@ -19,7 +19,20 @@ export class MetadataCache {
     if (!this.cache.has(spreadsheetId)) {
       // Store the PROMISE immediately (before await)
       // This ensures concurrent callers get same promise
-      this.cache.set(spreadsheetId, getSheetMetadataInternal(spreadsheetId));
+      const promise = getSheetMetadataInternal(spreadsheetId)
+        .then((result) => {
+          // If the promise rejects (error result), delete from cache to allow retry
+          if (!result.ok) {
+            this.cache.delete(spreadsheetId);
+          }
+          return result;
+        })
+        .catch((error) => {
+          // If the promise throws, delete from cache to allow retry
+          this.cache.delete(spreadsheetId);
+          throw error;
+        });
+      this.cache.set(spreadsheetId, promise);
     }
     return this.cache.get(spreadsheetId)!;
   }

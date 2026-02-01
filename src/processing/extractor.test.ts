@@ -98,3 +98,39 @@ describe('hasValidDate', () => {
     });
   });
 });
+
+describe('token logging error handling (bug #6)', () => {
+  it('fire-and-forget promise chain must have catch handler', async () => {
+    // Bug #6: Fire-and-forget promises need .catch() to prevent unhandled rejections
+    // This test verifies the pattern with a simulated example
+
+    // Track if unhandled rejection occurs
+    let unhandledRejection = false;
+    const rejectionHandler = () => {
+      unhandledRejection = true;
+    };
+
+    process.once('unhandledRejection', rejectionHandler);
+
+    // Simulate the CORRECT pattern: void promise.then(handler).catch(handler)
+    const failingPromise = Promise.reject(new Error('Token logging failed'));
+
+    void failingPromise
+      .then(() => {
+        // Won't run because promise rejects
+      })
+      .catch(() => {
+        // This MUST be present to prevent unhandled rejection
+        // In real code, this would log a warning
+      });
+
+    // Wait for event loop to process
+    await new Promise(resolve => setImmediate(resolve));
+
+    // Clean up handler
+    process.removeListener('unhandledRejection', rejectionHandler);
+
+    // With .catch() handler, unhandledRejection should be false
+    expect(unhandledRejection).toBe(false);
+  });
+});

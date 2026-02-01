@@ -294,8 +294,6 @@ async function doMatchRecibosWithPagos(
         referencia: row[6] ? String(row[6]) : undefined,
         cuitPagador: row[7] ? String(row[7]) : undefined,
         nombrePagador: row[8] ? String(row[8]) : undefined,
-        cuitBeneficiario: String(row[7] || ''), // For Pagos Enviados, beneficiary is in columns H:I
-        nombreBeneficiario: String(row[8] || ''),
         concepto: row[9] ? String(row[9]) : undefined,
         processedAt: String(row[10] || ''),
         confidence: Number(row[11]) || 0,
