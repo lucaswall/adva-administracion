@@ -1113,6 +1113,21 @@ export function parseResumenTarjetaResponse(response: string): Result<ParseResul
       }
     }
 
+    // Validate numeroCuenta
+    if (data.numeroCuenta !== undefined && data.numeroCuenta !== null) {
+      const accountNumber = String(data.numeroCuenta).trim();
+      if (accountNumber === '' || accountNumber.length < 4) {
+        // Empty or suspiciously short account number - mark for review
+        warn('Invalid numeroCuenta in credit card statement (empty or < 4 digits)', {
+          module: 'gemini-parser',
+          phase: 'resumen-tarjeta-parse',
+          numeroCuenta: accountNumber,
+          length: accountNumber.length,
+        });
+        data.needsReview = true;
+      }
+    }
+
     // Check for required fields
     const requiredFields: (keyof ResumenTarjeta)[] = [
       'banco',
@@ -1182,6 +1197,11 @@ export function parseResumenTarjetaResponse(response: string): Result<ParseResul
       if (hasValidationIssues) {
         needsReview = true;
       }
+    }
+
+    // Propagate data.needsReview to returned needsReview
+    if (data.needsReview) {
+      needsReview = true;
     }
 
     return {
