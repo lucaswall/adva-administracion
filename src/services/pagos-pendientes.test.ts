@@ -9,8 +9,8 @@ import * as sheets from './sheets.js';
 // Mock the sheets service
 vi.mock('./sheets.js', () => ({
   getValues: vi.fn(),
+  setValues: vi.fn(),
   clearSheetData: vi.fn(),
-  appendRowsWithFormatting: vi.fn(),
 }));
 
 // Mock logger
@@ -63,7 +63,7 @@ describe('syncPagosPendientes', () => {
       value: undefined,
     });
 
-    vi.mocked(sheets.appendRowsWithFormatting).mockResolvedValue({
+    vi.mocked(sheets.setValues).mockResolvedValue({
       ok: true,
       value: 20, // 2 rows * 10 columns
     });
@@ -81,16 +81,16 @@ describe('syncPagosPendientes', () => {
       'Facturas Recibidas!A:S'
     );
 
-    // Should clear Pagos Pendientes
+    // Should clear old data first
     expect(sheets.clearSheetData).toHaveBeenCalledWith(
       'dashboard456',
       'Pagos Pendientes'
     );
 
-    // Should append only unpaid facturas with correct columns
-    expect(sheets.appendRowsWithFormatting).toHaveBeenCalledWith(
+    // Should write new values
+    expect(sheets.setValues).toHaveBeenCalledWith(
       'dashboard456',
-      'Pagos Pendientes!A:J',
+      'Pagos Pendientes!A2:J',
       [
         // First unpaid factura
         ['2024-01-15', 'file123', 'Factura-001.pdf', 'A', '00001-00000001', '20123456786',
@@ -115,9 +115,8 @@ describe('syncPagosPendientes', () => {
       expect(result.value).toBe(0);
     }
 
-    // Should not clear or append
-    expect(sheets.clearSheetData).not.toHaveBeenCalled();
-    expect(sheets.appendRowsWithFormatting).not.toHaveBeenCalled();
+    // Should not set values
+    expect(sheets.setValues).not.toHaveBeenCalled();
   });
 
   it('should handle all facturas paid', async () => {
@@ -150,9 +149,14 @@ describe('syncPagosPendientes', () => {
       expect(result.value).toBe(0);
     }
 
-    // Should clear but not append
-    expect(sheets.clearSheetData).toHaveBeenCalled();
-    expect(sheets.appendRowsWithFormatting).not.toHaveBeenCalled();
+    // Should clear the sheet (no data to write)
+    expect(sheets.clearSheetData).toHaveBeenCalledWith(
+      'dashboard456',
+      'Pagos Pendientes'
+    );
+
+    // Should not write any values when no unpaid facturas
+    expect(sheets.setValues).not.toHaveBeenCalled();
   });
 
   it('should handle errors when reading facturas', async () => {
@@ -193,7 +197,7 @@ describe('syncPagosPendientes', () => {
     }
   });
 
-  it('should handle errors when appending rows', async () => {
+  it('should handle errors when setting values', async () => {
     vi.mocked(sheets.getValues).mockResolvedValue({
       ok: true,
       value: [
@@ -209,16 +213,16 @@ describe('syncPagosPendientes', () => {
       value: undefined,
     });
 
-    vi.mocked(sheets.appendRowsWithFormatting).mockResolvedValue({
+    vi.mocked(sheets.setValues).mockResolvedValue({
       ok: false,
-      error: new Error('Failed to append rows'),
+      error: new Error('Failed to set values'),
     });
 
     const result = await syncPagosPendientes('egresos123', 'dashboard456');
 
     expect(result.ok).toBe(false);
     if (!result.ok) {
-      expect(result.error.message).toBe('Failed to append rows');
+      expect(result.error.message).toBe('Failed to set values');
     }
   });
 
@@ -241,7 +245,7 @@ describe('syncPagosPendientes', () => {
       value: undefined,
     });
 
-    vi.mocked(sheets.appendRowsWithFormatting).mockResolvedValue({
+    vi.mocked(sheets.setValues).mockResolvedValue({
       ok: true,
       value: 10,
     });
@@ -250,9 +254,9 @@ describe('syncPagosPendientes', () => {
 
     // Verify column mapping: fechaEmision, fileId, fileName, tipoComprobante,
     // nroFactura, cuitEmisor, razonSocialEmisor, importeTotal, moneda, concepto
-    expect(sheets.appendRowsWithFormatting).toHaveBeenCalledWith(
+    expect(sheets.setValues).toHaveBeenCalledWith(
       'dashboard456',
-      'Pagos Pendientes!A:J',
+      'Pagos Pendientes!A2:J',
       [
         [
           '2024-01-15',              // fechaEmision (A)
@@ -268,5 +272,41 @@ describe('syncPagosPendientes', () => {
         ],
       ]
     );
+  });
+
+  it('should warn but continue if setValues fails after clear (bug #2)', async () => {
+    const facturasData = [
+      ['header'],
+      ['2024-01-15', 'file123', 'Factura-001.pdf', 'A', '00001-00000001', '20123456786',
+       'TEST SA', '1000', '210', '1210', 'ARS', 'Servicios',
+       '2024-01-16T10:00:00Z', '0.95', 'NO', '', '', 'NO', 'NO'],
+    ];
+
+    vi.mocked(sheets.getValues).mockResolvedValue({
+      ok: true,
+      value: facturasData,
+    });
+
+    vi.mocked(sheets.clearSheetData).mockResolvedValue({
+      ok: true,
+      value: undefined,
+    });
+
+    // Mock setValues to fail
+    vi.mocked(sheets.setValues).mockResolvedValue({
+      ok: false,
+      error: new Error('Failed to set values'),
+    });
+
+    const result = await syncPagosPendientes('egresos123', 'dashboard456');
+
+    // Should return error
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.message).toBe('Failed to set values');
+    }
+
+    // Note: This is acceptable because the source data (Control de Egresos) is intact
+    // The Pagos Pendientes sheet can be regenerated by re-running the sync
   });
 });

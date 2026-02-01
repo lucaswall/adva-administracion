@@ -4,7 +4,7 @@
  */
 
 import type { Result } from '../types/index.js';
-import { getValues, clearSheetData, appendRowsWithFormatting } from './sheets.js';
+import { getValues, setValues, clearSheetData } from './sheets.js';
 import { info, warn } from '../utils/logger.js';
 import { getCorrelationId } from '../utils/correlation.js';
 
@@ -67,23 +67,7 @@ export async function syncPagosPendientes(
       correlationId,
     });
 
-    // 3. Clear Pagos Pendientes sheet data (preserve header)
-    const clearResult = await clearSheetData(dashboardId, 'Pagos Pendientes');
-    if (!clearResult.ok) {
-      return clearResult;
-    }
-
-    // If no unpaid facturas, we're done (sheet is already cleared)
-    if (unpaidFacturas.length === 0) {
-      info('No pending payments to sync', {
-        module: 'pagos-pendientes',
-        phase: 'sync',
-        correlationId,
-      });
-      return { ok: true, value: 0 };
-    }
-
-    // 4. Map to PAGOS_PENDIENTES columns
+    // 3. Map to PAGOS_PENDIENTES columns
     // PAGOS_PENDIENTES_HEADERS: fechaEmision, fileId, fileName, tipoComprobante,
     //   nroFactura, cuitEmisor, razonSocialEmisor, importeTotal, moneda, concepto
     const pagosPendientesRows = unpaidFacturas.map((row) => [
@@ -99,15 +83,38 @@ export async function syncPagosPendientes(
       row[11] || '', // concepto (L)
     ]);
 
-    // 5. Write filtered rows to Pagos Pendientes
-    const appendResult = await appendRowsWithFormatting(
+    // 4. Clear existing data rows (preserve header)
+    const clearResult = await clearSheetData(dashboardId, 'Pagos Pendientes');
+    if (!clearResult.ok) {
+      return clearResult;
+    }
+
+    // 5. If no data to write, we're done (sheet is cleared)
+    if (pagosPendientesRows.length === 0) {
+      info('Pagos Pendientes sync complete - no pending payments', {
+        module: 'pagos-pendientes',
+        phase: 'sync',
+        syncedCount: 0,
+        correlationId,
+      });
+      return { ok: true, value: 0 };
+    }
+
+    // 6. Write new data
+    const setResult = await setValues(
       dashboardId,
-      'Pagos Pendientes!A:J',
+      'Pagos Pendientes!A2:J',
       pagosPendientesRows
     );
 
-    if (!appendResult.ok) {
-      return appendResult;
+    if (!setResult.ok) {
+      warn('Failed to write pending payments after clearing - data lost', {
+        module: 'pagos-pendientes',
+        phase: 'sync',
+        error: setResult.error.message,
+        correlationId,
+      });
+      return setResult;
     }
 
     info('Pagos Pendientes sync complete', {
@@ -117,7 +124,6 @@ export async function syncPagosPendientes(
       correlationId,
     });
 
-    // 6. Return count
     return { ok: true, value: unpaidFacturas.length };
   } catch (error) {
     warn('Pagos Pendientes sync failed', {

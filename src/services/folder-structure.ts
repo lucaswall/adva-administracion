@@ -80,6 +80,19 @@ export function getCachedFolderStructure(): FolderStructure | null {
 }
 
 /**
+ * Gets the cached folder structure or throws if not initialized
+ * Used internally to safely access cache with clear error messages
+ * @returns The cached folder structure
+ * @throws Error if cache is not initialized
+ */
+function requireCachedStructure(): FolderStructure {
+  if (!cachedStructure) {
+    throw new Error('Folder structure cache not initialized or was cleared');
+  }
+  return cachedStructure;
+}
+
+/**
  * Clears the cached folder structure
  * Used for testing and forced refresh
  */
@@ -620,10 +633,15 @@ async function ensureClassificationFolders(
     // Use lock to prevent concurrent creation of the same classification folder
     const lockKey = `folder:classification:${year}:${classification}`;
     const classificationResult = await withLock(lockKey, async () => {
-      // Check cache again inside lock
+      // Check cache again inside lock (use conditional access to handle concurrent clears)
       const cachedId = cachedStructure?.classificationFolders.get(cacheKey);
       if (cachedId) {
         return cachedId;
+      }
+
+      // If cache was cleared, throw error (caller should re-discover)
+      if (!cachedStructure) {
+        throw new Error('Folder structure cache was cleared during operation');
       }
 
       // Try to find existing folder
@@ -631,9 +649,9 @@ async function ensureClassificationFolders(
       if (!findResult.ok) throw findResult.error;
 
       if (findResult.value) {
-        // Cache existing folder
+        // Cache existing folder (safe - we checked cachedStructure above)
         const foundId = findResult.value.id;
-        cachedStructure!.classificationFolders.set(cacheKey, foundId);
+        cachedStructure.classificationFolders.set(cacheKey, foundId);
         debug('Found existing classification folder', {
           module: 'folder-structure',
           phase: 'classification-folders',
@@ -649,7 +667,7 @@ async function ensureClassificationFolders(
       if (!createResult.ok) throw createResult.error;
 
       const createdId = createResult.value.id;
-      cachedStructure!.classificationFolders.set(cacheKey, createdId);
+      cachedStructure.classificationFolders.set(cacheKey, createdId);
       info('Created classification folder', {
         module: 'folder-structure',
         phase: 'classification-folders',
@@ -711,12 +729,12 @@ export async function getOrCreateMonthFolder(
       }
 
       // Try to find existing year folder
-      const findYearResult = await findByName(cachedStructure!.rootId, year, FOLDER_MIME);
+      const findYearResult = await findByName(requireCachedStructure().rootId, year, FOLDER_MIME);
       if (!findYearResult.ok) throw findYearResult.error;
 
       if (findYearResult.value) {
         const foundId = findYearResult.value.id;
-        cachedStructure!.yearFolders.set(year, foundId);
+        requireCachedStructure().yearFolders.set(year, foundId);
         debug('Found existing year folder', {
           module: 'folder-structure',
           phase: 'year-folder',
@@ -727,11 +745,11 @@ export async function getOrCreateMonthFolder(
       }
 
       // Create new year folder
-      const createYearResult = await createFolder(cachedStructure!.rootId, year);
+      const createYearResult = await createFolder(requireCachedStructure().rootId, year);
       if (!createYearResult.ok) throw createYearResult.error;
 
       const createdId = createYearResult.value.id;
-      cachedStructure!.yearFolders.set(year, createdId);
+      requireCachedStructure().yearFolders.set(year, createdId);
       info('Created year folder', {
         module: 'folder-structure',
         phase: 'year-folder',
@@ -797,7 +815,7 @@ export async function getOrCreateMonthFolder(
     if (findMonthResult.value) {
       // Cache and return existing folder
       const foundId = findMonthResult.value.id;
-      cachedStructure!.monthFolders.set(monthCacheKey, foundId);
+      requireCachedStructure().monthFolders.set(monthCacheKey, foundId);
       debug('Found existing month folder', {
         module: 'folder-structure',
         phase: 'month-folder',
@@ -815,7 +833,7 @@ export async function getOrCreateMonthFolder(
 
     // Cache and return new folder
     const createdId = createMonthResult.value.id;
-    cachedStructure!.monthFolders.set(monthCacheKey, createdId);
+    requireCachedStructure().monthFolders.set(monthCacheKey, createdId);
     info('Created month folder', {
       module: 'folder-structure',
       phase: 'month-folder',
@@ -878,27 +896,27 @@ export async function getOrCreateBankAccountFolder(
     }
 
     // Get or create year folder
-    let yearFolderId = cachedStructure!.yearFolders.get(year);
+    let yearFolderId = requireCachedStructure().yearFolders.get(year);
     if (!yearFolderId) {
       const yearLockKey = `folder:year:${year}`;
       const yearResult = await withLock(yearLockKey, async () => {
         const cachedYearId = cachedStructure?.yearFolders.get(year);
         if (cachedYearId) return cachedYearId;
 
-        const findYearResult = await findByName(cachedStructure!.rootId, year, FOLDER_MIME);
+        const findYearResult = await findByName(requireCachedStructure().rootId, year, FOLDER_MIME);
         if (!findYearResult.ok) throw findYearResult.error;
 
         if (findYearResult.value) {
           const foundId = findYearResult.value.id;
-          cachedStructure!.yearFolders.set(year, foundId);
+          requireCachedStructure().yearFolders.set(year, foundId);
           return foundId;
         }
 
-        const createYearResult = await createFolder(cachedStructure!.rootId, year);
+        const createYearResult = await createFolder(requireCachedStructure().rootId, year);
         if (!createYearResult.ok) throw createYearResult.error;
 
         const createdId = createYearResult.value.id;
-        cachedStructure!.yearFolders.set(year, createdId);
+        requireCachedStructure().yearFolders.set(year, createdId);
         info('Created year folder', {
           module: 'folder-structure',
           phase: 'bank-account-folder',
@@ -916,7 +934,7 @@ export async function getOrCreateBankAccountFolder(
     const ensureResult = await ensureClassificationFolders(yearFolderId, year);
     if (!ensureResult.ok) throw ensureResult.error;
 
-    const bancosFolderId = cachedStructure!.classificationFolders.get(`${year}:bancos`);
+    const bancosFolderId = requireCachedStructure().classificationFolders.get(`${year}:bancos`);
     if (!bancosFolderId) {
       throw new Error(`Bancos folder not found for year ${year}`);
     }
@@ -927,7 +945,7 @@ export async function getOrCreateBankAccountFolder(
 
     if (findResult.value) {
       const foundId = findResult.value.id;
-      cachedStructure!.bankAccountFolders.set(cacheKey, foundId);
+      requireCachedStructure().bankAccountFolders.set(cacheKey, foundId);
       debug('Found existing bank account folder', {
         module: 'folder-structure',
         phase: 'bank-account-folder',
@@ -943,7 +961,7 @@ export async function getOrCreateBankAccountFolder(
     if (!createResult.ok) throw createResult.error;
 
     const createdId = createResult.value.id;
-    cachedStructure!.bankAccountFolders.set(cacheKey, createdId);
+    requireCachedStructure().bankAccountFolders.set(cacheKey, createdId);
     info('Created bank account folder', {
       module: 'folder-structure',
       phase: 'bank-account-folder',
@@ -1004,27 +1022,27 @@ export async function getOrCreateCreditCardFolder(
     }
 
     // Get or create year folder
-    let yearFolderId = cachedStructure!.yearFolders.get(year);
+    let yearFolderId = requireCachedStructure().yearFolders.get(year);
     if (!yearFolderId) {
       const yearLockKey = `folder:year:${year}`;
       const yearResult = await withLock(yearLockKey, async () => {
         const cachedYearId = cachedStructure?.yearFolders.get(year);
         if (cachedYearId) return cachedYearId;
 
-        const findYearResult = await findByName(cachedStructure!.rootId, year, FOLDER_MIME);
+        const findYearResult = await findByName(requireCachedStructure().rootId, year, FOLDER_MIME);
         if (!findYearResult.ok) throw findYearResult.error;
 
         if (findYearResult.value) {
           const foundId = findYearResult.value.id;
-          cachedStructure!.yearFolders.set(year, foundId);
+          requireCachedStructure().yearFolders.set(year, foundId);
           return foundId;
         }
 
-        const createYearResult = await createFolder(cachedStructure!.rootId, year);
+        const createYearResult = await createFolder(requireCachedStructure().rootId, year);
         if (!createYearResult.ok) throw createYearResult.error;
 
         const createdId = createYearResult.value.id;
-        cachedStructure!.yearFolders.set(year, createdId);
+        requireCachedStructure().yearFolders.set(year, createdId);
         return createdId;
       });
 
@@ -1036,7 +1054,7 @@ export async function getOrCreateCreditCardFolder(
     const ensureResult = await ensureClassificationFolders(yearFolderId, year);
     if (!ensureResult.ok) throw ensureResult.error;
 
-    const bancosFolderId = cachedStructure!.classificationFolders.get(`${year}:bancos`);
+    const bancosFolderId = requireCachedStructure().classificationFolders.get(`${year}:bancos`);
     if (!bancosFolderId) {
       throw new Error(`Bancos folder not found for year ${year}`);
     }
@@ -1047,7 +1065,7 @@ export async function getOrCreateCreditCardFolder(
 
     if (findResult.value) {
       const foundId = findResult.value.id;
-      cachedStructure!.bankAccountFolders.set(cacheKey, foundId);
+      requireCachedStructure().bankAccountFolders.set(cacheKey, foundId);
       debug('Found existing credit card folder', {
         module: 'folder-structure',
         phase: 'credit-card-folder',
@@ -1062,7 +1080,7 @@ export async function getOrCreateCreditCardFolder(
     if (!createResult.ok) throw createResult.error;
 
     const createdId = createResult.value.id;
-    cachedStructure!.bankAccountFolders.set(cacheKey, createdId);
+    requireCachedStructure().bankAccountFolders.set(cacheKey, createdId);
     info('Created credit card folder', {
       module: 'folder-structure',
       phase: 'credit-card-folder',
@@ -1121,27 +1139,27 @@ export async function getOrCreateBrokerFolder(
     }
 
     // Get or create year folder
-    let yearFolderId = cachedStructure!.yearFolders.get(year);
+    let yearFolderId = requireCachedStructure().yearFolders.get(year);
     if (!yearFolderId) {
       const yearLockKey = `folder:year:${year}`;
       const yearResult = await withLock(yearLockKey, async () => {
         const cachedYearId = cachedStructure?.yearFolders.get(year);
         if (cachedYearId) return cachedYearId;
 
-        const findYearResult = await findByName(cachedStructure!.rootId, year, FOLDER_MIME);
+        const findYearResult = await findByName(requireCachedStructure().rootId, year, FOLDER_MIME);
         if (!findYearResult.ok) throw findYearResult.error;
 
         if (findYearResult.value) {
           const foundId = findYearResult.value.id;
-          cachedStructure!.yearFolders.set(year, foundId);
+          requireCachedStructure().yearFolders.set(year, foundId);
           return foundId;
         }
 
-        const createYearResult = await createFolder(cachedStructure!.rootId, year);
+        const createYearResult = await createFolder(requireCachedStructure().rootId, year);
         if (!createYearResult.ok) throw createYearResult.error;
 
         const createdId = createYearResult.value.id;
-        cachedStructure!.yearFolders.set(year, createdId);
+        requireCachedStructure().yearFolders.set(year, createdId);
         return createdId;
       });
 
@@ -1153,7 +1171,7 @@ export async function getOrCreateBrokerFolder(
     const ensureResult = await ensureClassificationFolders(yearFolderId, year);
     if (!ensureResult.ok) throw ensureResult.error;
 
-    const bancosFolderId = cachedStructure!.classificationFolders.get(`${year}:bancos`);
+    const bancosFolderId = requireCachedStructure().classificationFolders.get(`${year}:bancos`);
     if (!bancosFolderId) {
       throw new Error(`Bancos folder not found for year ${year}`);
     }
@@ -1164,7 +1182,7 @@ export async function getOrCreateBrokerFolder(
 
     if (findResult.value) {
       const foundId = findResult.value.id;
-      cachedStructure!.bankAccountFolders.set(cacheKey, foundId);
+      requireCachedStructure().bankAccountFolders.set(cacheKey, foundId);
       debug('Found existing broker folder', {
         module: 'folder-structure',
         phase: 'broker-folder',
@@ -1179,7 +1197,7 @@ export async function getOrCreateBrokerFolder(
     if (!createResult.ok) throw createResult.error;
 
     const createdId = createResult.value.id;
-    cachedStructure!.bankAccountFolders.set(cacheKey, createdId);
+    requireCachedStructure().bankAccountFolders.set(cacheKey, createdId);
     info('Created broker folder', {
       module: 'folder-structure',
       phase: 'broker-folder',
@@ -1269,7 +1287,7 @@ export async function getOrCreateBankAccountSpreadsheet(
     const ensureSheetResult = await ensureSheetsExist(spreadsheetId, [CONTROL_RESUMENES_BANCARIO_SHEET]);
     if (!ensureSheetResult.ok) throw ensureSheetResult.error;
 
-    cachedStructure!.bankAccountSpreadsheets.set(cacheKey, spreadsheetId);
+    requireCachedStructure().bankAccountSpreadsheets.set(cacheKey, spreadsheetId);
 
     return spreadsheetId;
   }, 30000); // 30 second timeout for spreadsheet creation + setup
@@ -1341,7 +1359,7 @@ export async function getOrCreateCreditCardSpreadsheet(
     const ensureSheetResult = await ensureSheetsExist(spreadsheetId, [CONTROL_RESUMENES_TARJETA_SHEET]);
     if (!ensureSheetResult.ok) throw ensureSheetResult.error;
 
-    cachedStructure!.bankAccountSpreadsheets.set(cacheKey, spreadsheetId);
+    requireCachedStructure().bankAccountSpreadsheets.set(cacheKey, spreadsheetId);
 
     return spreadsheetId;
   }, 30000); // 30 second timeout for spreadsheet creation + setup
@@ -1411,7 +1429,7 @@ export async function getOrCreateBrokerSpreadsheet(
     const ensureSheetResult = await ensureSheetsExist(spreadsheetId, [CONTROL_RESUMENES_BROKER_SHEET]);
     if (!ensureSheetResult.ok) throw ensureSheetResult.error;
 
-    cachedStructure!.bankAccountSpreadsheets.set(cacheKey, spreadsheetId);
+    requireCachedStructure().bankAccountSpreadsheets.set(cacheKey, spreadsheetId);
 
     return spreadsheetId;
   }, 30000); // 30 second timeout for spreadsheet creation + setup
