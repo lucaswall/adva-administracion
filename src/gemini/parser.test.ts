@@ -156,6 +156,50 @@ describe('Parser - Bank Name Normalization', () => {
       }
     });
   });
+
+  describe('parseResumenTarjetaResponse - tipoTarjeta validation', () => {
+    it('sets needsReview for invalid tipoTarjeta', () => {
+      const response = JSON.stringify({
+        banco: 'BBVA',
+        tipoTarjeta: 'InvalidCard',
+        numeroCuenta: '4563',
+        fechaDesde: '2024-10-15',
+        fechaHasta: '2024-11-14',
+        pagoMinimo: 15000,
+        saldoActual: 150000,
+        cantidadMovimientos: 25,
+      });
+
+      const result = parseResumenTarjetaResponse(response);
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value.data.needsReview).toBe(true);
+        expect(result.value.data.tipoTarjeta).toBeUndefined();
+      }
+    });
+
+    it('does not set needsReview for valid tipoTarjeta', () => {
+      const response = JSON.stringify({
+        banco: 'BBVA',
+        tipoTarjeta: 'Visa',
+        numeroCuenta: '4563',
+        fechaDesde: '2024-10-15',
+        fechaHasta: '2024-11-14',
+        pagoMinimo: 15000,
+        saldoActual: 150000,
+        cantidadMovimientos: 25,
+      });
+
+      const result = parseResumenTarjetaResponse(response);
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value.data.needsReview).not.toBe(true);
+        expect(result.value.data.tipoTarjeta).toBe('Visa');
+      }
+    });
+  });
 });
 
 describe('Parser - Movimiento Validation', () => {
@@ -587,6 +631,83 @@ describe('Parser - Movimiento Validation', () => {
       if (result.ok) {
         // 1 vs 20 is > 10% mismatch
         expect(result.value.needsReview).toBe(true);
+      }
+    });
+  });
+
+  describe('parseResumenBrokerResponse - balance validation', () => {
+    it('sets needsReview when both saldoARS and saldoUSD are undefined', () => {
+      const response = JSON.stringify({
+        broker: 'BALANZ CAPITAL VALORES SAU',
+        numeroCuenta: '123456',
+        fechaDesde: '2024-10-01',
+        fechaHasta: '2024-10-31',
+        cantidadMovimientos: 0,
+        // No saldoARS or saldoUSD
+      });
+
+      const result = parseResumenBrokerResponse(response);
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value.needsReview).toBe(true);
+      }
+    });
+
+    it('does not set needsReview when only saldoARS is present', () => {
+      const response = JSON.stringify({
+        broker: 'BALANZ CAPITAL VALORES SAU',
+        numeroCuenta: '123456',
+        fechaDesde: '2024-10-01',
+        fechaHasta: '2024-10-31',
+        cantidadMovimientos: 0,
+        saldoARS: 100000,
+      });
+
+      const result = parseResumenBrokerResponse(response);
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        // Should not flag for review just because saldoUSD is missing
+        expect(result.value.needsReview).not.toBe(true);
+      }
+    });
+
+    it('does not set needsReview when only saldoUSD is present', () => {
+      const response = JSON.stringify({
+        broker: 'BALANZ CAPITAL VALORES SAU',
+        numeroCuenta: '123456',
+        fechaDesde: '2024-10-01',
+        fechaHasta: '2024-10-31',
+        cantidadMovimientos: 0,
+        saldoUSD: 5000,
+      });
+
+      const result = parseResumenBrokerResponse(response);
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        // Should not flag for review just because saldoARS is missing
+        expect(result.value.needsReview).not.toBe(true);
+      }
+    });
+
+    it('does not set needsReview when both balances are present', () => {
+      const response = JSON.stringify({
+        broker: 'BALANZ CAPITAL VALORES SAU',
+        numeroCuenta: '123456',
+        fechaDesde: '2024-10-01',
+        fechaHasta: '2024-10-31',
+        cantidadMovimientos: 0,
+        saldoARS: 100000,
+        saldoUSD: 5000,
+      });
+
+      const result = parseResumenBrokerResponse(response);
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value.needsReview).not.toBe(true);
       }
     });
   });

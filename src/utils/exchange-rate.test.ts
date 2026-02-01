@@ -275,4 +275,82 @@ describe('exchange-rate', () => {
       expect(result.matches).toBe(true);
     });
   });
+
+  describe('API response validation', () => {
+    it('returns error for malformed JSON with compra as string', async () => {
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({ compra: "not a number", venta: 1260 })
+      });
+
+      const { getExchangeRate } = await import('./exchange-rate.js');
+      const result = await getExchangeRate('2025-01-20');
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.error.message).toContain('Invalid API response');
+      }
+    });
+
+    it('returns error for missing compra field', async () => {
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({ venta: 1260 })
+      });
+
+      const { getExchangeRate } = await import('./exchange-rate.js');
+      const result = await getExchangeRate('2025-01-20');
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.error.message).toContain('Invalid API response');
+      }
+    });
+
+    it('returns error for missing venta field', async () => {
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({ compra: 1250 })
+      });
+
+      const { getExchangeRate } = await import('./exchange-rate.js');
+      const result = await getExchangeRate('2025-01-20');
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.error.message).toContain('Invalid API response');
+      }
+    });
+
+    it('returns error for null response object', async () => {
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => null
+      });
+
+      const { getExchangeRate } = await import('./exchange-rate.js');
+      const result = await getExchangeRate('2025-01-20');
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.error.message).toContain('Invalid API response');
+      }
+    });
+
+    it('accepts valid response with compra and venta', async () => {
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({ compra: 1250, venta: 1260, fecha: '2025-01-20' })
+      });
+
+      const { getExchangeRate } = await import('./exchange-rate.js');
+      const result = await getExchangeRate('2025-01-20');
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value.compra).toBe(1250);
+        expect(result.value.venta).toBe(1260);
+      }
+    });
+  });
 });

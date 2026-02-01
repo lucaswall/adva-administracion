@@ -1048,6 +1048,7 @@ export function parseResumenTarjetaResponse(response: string): Result<ParseResul
           tipoTarjeta: data.tipoTarjeta,
         });
         data.tipoTarjeta = undefined;
+        data.needsReview = true;
       }
     }
 
@@ -1235,6 +1236,17 @@ export function parseResumenBrokerResponse(response: string): Result<ParseResult
       if (hasValidationIssues) {
         needsReview = true;
       }
+    }
+
+    // Validate that at least one balance is present
+    if (data.saldoARS === undefined && data.saldoUSD === undefined) {
+      needsReview = true;
+      warn('No balance found in broker statement', {
+        module: 'gemini-parser',
+        phase: 'resumen-broker-parse',
+        broker: data.broker,
+        numeroCuenta: data.numeroCuenta
+      });
     }
 
     return {

@@ -664,6 +664,63 @@ No issues found - all implementations are correct and follow project conventions
 
 ---
 
-## Status: COMPLETE (Phase 1)
+## Iteration 2
 
-Phase 1 (Date/Time & Precision Fixes) implemented and reviewed successfully. Ready for Phase 2 implementation.
+**Implemented:** 2026-01-31
+
+### Phase 2: Type Validation & Constraints - COMPLETED
+
+**Tasks Completed:**
+- Task 2.1: Added validateTipoTarjeta function (bug #8) - Validates card types against TipoTarjeta enum
+- Task 2.2: Fixed needsReview flag for invalid tipoTarjeta (bug #6) - Sets needsReview=true when card type is invalid
+- Task 2.3: Added runtime validation for exchange rate response (bug #5) - Validates API response is object, not null, with finite numbers
+- Task 2.4: Added confidence validation helper (bug #9) - validateConfidence() checks range [0,1] and rejects NaN/Infinity
+- Task 2.5: Added ResumenBroker balance validation (bug #10) - Sets needsReview when both saldoARS and saldoUSD are undefined
+
+**Files Modified:**
+- `src/utils/validation.ts` - Added validateTipoTarjeta() and validateConfidence() functions
+- `src/utils/validation.test.ts` - Added comprehensive tests for new validators
+- `src/gemini/parser.ts` - Added needsReview flag for invalid tipoTarjeta, added balance validation for broker statements
+- `src/gemini/parser.test.ts` - Added tests for tipoTarjeta and balance validation
+- `src/utils/exchange-rate.ts` - Added null/object check and Number.isFinite() validation for API responses
+- `src/utils/exchange-rate.test.ts` - Added tests for malformed API responses
+
+**Checklist Results:**
+- bug-hunter: No bugs found - all implementations correct
+- test-runner: All 1238 tests pass (31 new tests added)
+- builder: Zero warnings
+
+**Notes:**
+- All Phase 2 tasks followed strict TDD workflow (test first, implement, verify)
+- validateConfidence() uses Number.isFinite() to properly reject NaN and Infinity values
+- Exchange rate validation now handles edge cases: null response, missing fields, non-numeric values
+- Broker balance validation allows zero values (uses undefined check, not falsiness)
+- Card type validation uses the same pattern as existing validators (validateMoneda, validateTipoComprobante)
+
+### Review Findings
+
+**Files reviewed:** 6
+- `src/utils/validation.ts`, `src/utils/validation.test.ts`
+- `src/gemini/parser.ts`, `src/gemini/parser.test.ts`
+- `src/utils/exchange-rate.ts`, `src/utils/exchange-rate.test.ts`
+
+**Checks applied:** Logic, Type Safety, CLAUDE.md Compliance, Input Validation, Edge Cases
+
+No issues found - all implementations are correct and follow project conventions.
+
+**Verification details:**
+- Task 2.1 (validateTipoTarjeta): Correctly validates against all 5 card types from TipoTarjeta enum
+- Task 2.2 (needsReview flag): Sets flag when tipoTarjeta is invalid, preserves existing behavior for valid types
+- Task 2.3 (exchange rate validation): Comprehensive null/object/finite checks prevent crashes on malformed API responses
+- Task 2.4 (validateConfidence): Number.isFinite() properly rejects NaN, Infinity; range check allows boundary values 0 and 1
+- Task 2.5 (broker balance): Uses undefined check (not falsiness) to allow zero balances; logs warning with context
+
+**Type Safety:** ✓ Proper type imports, unknown parameters with narrowing, correct return types
+**Edge Cases:** ✓ All boundary values tested (0, 1, null, undefined, NaN, Infinity)
+**Conventions:** ✓ ESM imports with .js, Pino logger, consistent validation patterns
+
+---
+
+## Status: COMPLETE (Phases 1-2)
+
+Phases 1-2 (Date/Time & Precision Fixes, Type Validation & Constraints) implemented and reviewed successfully. Ready for Phase 3 implementation.

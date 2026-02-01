@@ -2,7 +2,7 @@
  * Validation utilities for CUIT, CAE, and invoice data
  */
 
-import type { Factura, Pago, Recibo, ValidationResult, TipoComprobante, TipoRecibo, MatchConfidence, Moneda } from '../types/index.js';
+import type { Factura, Pago, Recibo, ValidationResult, TipoComprobante, TipoRecibo, MatchConfidence, Moneda, TipoTarjeta } from '../types/index.js';
 
 /**
  * Valid CUIT/CUIL prefix types
@@ -383,6 +383,32 @@ export function validateTipoRecibo(value: unknown): TipoRecibo | undefined {
 
   const validTypes: TipoRecibo[] = ['sueldo', 'liquidacion_final'];
   return validTypes.includes(value as TipoRecibo) ? (value as TipoRecibo) : undefined;
+}
+
+/**
+ * Validates and returns a TipoTarjeta enum value
+ *
+ * @param value - String value to validate
+ * @returns Valid TipoTarjeta or undefined
+ */
+export function validateTipoTarjeta(value: unknown): TipoTarjeta | undefined {
+  if (typeof value !== 'string') return undefined;
+
+  const validTypes: TipoTarjeta[] = ['Visa', 'Mastercard', 'Amex', 'Naranja', 'Cabal'];
+  return validTypes.includes(value as TipoTarjeta) ? (value as TipoTarjeta) : undefined;
+}
+
+/**
+ * Validates a confidence value (must be a finite number between 0 and 1 inclusive)
+ *
+ * @param value - Value to validate
+ * @returns Valid confidence number or undefined
+ */
+export function validateConfidence(value: unknown): number | undefined {
+  if (typeof value !== 'number') return undefined;
+  if (!Number.isFinite(value)) return undefined;
+  if (value < 0 || value > 1) return undefined;
+  return value;
 }
 
 /**

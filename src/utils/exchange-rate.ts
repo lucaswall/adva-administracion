@@ -151,10 +151,24 @@ export async function getExchangeRate(date: string): Promise<Result<ExchangeRate
     const data = await response.json() as { compra?: number; venta?: number; fecha?: string };
 
     // Validate response structure
+    if (typeof data !== 'object' || data === null) {
+      return {
+        ok: false,
+        error: new Error('Invalid API response: data is not an object'),
+      };
+    }
+
     if (typeof data.compra !== 'number' || typeof data.venta !== 'number') {
       return {
         ok: false,
         error: new Error('Invalid API response: missing compra or venta'),
+      };
+    }
+
+    if (!Number.isFinite(data.compra) || !Number.isFinite(data.venta)) {
+      return {
+        ok: false,
+        error: new Error('Invalid API response: compra or venta is not a valid number'),
       };
     }
 
