@@ -1,167 +1,99 @@
 # Bug Fix Plan
 
 **Created:** 2026-02-01
-**Bug Report:** Lock timeout failures for resumen files causing files to stay in Entrada with 'failed' status. Files marked as 'failed' are not automatically retried on subsequent scans.
-**Category:** Storage / Concurrency
+**Bug Report:** Multiple Visa folders created in 2025 due to inconsistent credit card account number extraction
+**Category:** Prompt / Extraction
 
 ## Investigation
 
 ### Context Gathered
-- **MCPs used:** Railway (deployment logs), Google Drive (folder contents, spreadsheet data)
+- **MCPs used:** Google Drive MCP (to search folders and files, download PDFs), Gemini MCP (not needed - issue is in prompt)
 - **Files examined:**
-  - Railway deploy logs showing lock timeout errors
-  - Dashboard Operativo - Archivos Procesados sheet (file status tracking)
-  - Entrada folder (4 files with failed status)
-  - Sin Procesar folder (1 unrecognized file - expected behavior)
-  - `src/utils/concurrency.ts` - Lock manager implementation
-  - `src/config.ts` - Lock timeout configuration
-  - `src/services/folder-structure.ts` - Spreadsheet lock usage
-  - `src/processing/storage/index.ts` - File status tracking
-  - `src/processing/scanner.ts` - Scan logic and retry handling
+  - Google Drive: 4 folders found with inconsistent names for same card
+  - PDFs: `1d0C-4vM3RHKnngRPRbPmhTjYkXUXAVYd`, `1D-pJkLUu5c7H-zADT3MZtsIBA2ADWqo0`
+  - Code: `src/gemini/prompts.ts`, `src/gemini/parser.ts`, `src/services/folder-structure.ts`
 
 ### Evidence
 
-**4 files stuck in Entrada with 'failed' status:**
+**4 different folders exist for the same BBVA Visa card:**
+1. `BBVA Visa ` (empty account number)
+2. `BBVA Visa 41198918`
+3. `BBVA Visa 1198918`
+4. `BBVA Visa 0941198918`
 
-| File | Error |
-|------|-------|
-| `09 USD BBVA SEP 2025.pdf` | `failed: Failed to acquire lock for spreadsheet:bank-account:2025:BBVA 007-401617/2 USD within 5000ms` |
-| `12 Extracto Banco Ciudad DIC 2025.pdf` | `failed: Failed to acquire lock for spreadsheet:bank-account:2025:Banco Ciudad 0003043/0 ARS within 5000ms` |
-| `11-2025 Resumen Mensual Balanz.pdf` | `failed: Failed to acquire lock for spreadsheet:broker:2025:BALANZ CAPITAL VALORES SAU 103597 within 5000ms` |
-| `10-2025 Resumen Mensual Balanz.pdf` | `failed: Failed to acquire lock for spreadsheet:broker:2025:BALANZ CAPITAL VALORES SAU 103597 within 5000ms` |
+**PDF Analysis confirmed all statements show the same account number:**
+- "Visa Business cuenta **0941198918** CONSOLIDADO" appears in all documents
+- The account number is always 10 digits: `0941198918`
 
-**Root causes identified:**
-
-1. **Lock timeout too short (5000ms):** The `withLock` calls in `folder-structure.ts` for bank-account, broker, and credit-card spreadsheets use the default 5000ms timeout despite comments saying "30 second timeout". During batch processing with Google Sheets API quota errors (many retries with 15-65 second delays), 5 seconds is insufficient.
-
-2. **Failed files not retried:** The scanner's `getProcessedFileIds` only returns files with 'success' status (correct), but the retry logic only handles:
-   - Stale 'processing' status (files interrupted mid-process)
-   - NOT 'failed' status files
-
-   Files marked as 'failed' remain in Entrada but are excluded from processing because they exist in the tracking sheet.
+**Extracted values varied:**
+- `0941198918` (correct - full 10 digits)
+- `41198918` (missing leading `09`)
+- `1198918` (missing leading `094`)
+- Empty string (complete extraction failure)
 
 ### Root Cause
 
-Two separate issues:
+The Gemini prompt in `src/gemini/prompts.ts` line 465 says:
+```
+- numeroCuenta: Last 4-8 digits of card number (e.g., "65656454")
+```
 
-1. **Lock timeout mismatch:** Code comments say "30 second timeout" but `withLock(lockKey, async () => {...})` uses default 5000ms. Need to pass explicit timeout.
+This causes two problems:
 
-2. **No automatic retry for failed files:** The `getStaleProcessingFileIds` function finds stale 'processing' files but there's no equivalent for 'failed' files. Failed files should be retried on subsequent scans, especially for transient errors like lock timeouts.
+1. **Incorrect instruction**: BBVA card account numbers are 10 digits (`0941198918`), not 4-8 digits. The prompt's "4-8 digits" instruction causes Gemini to try to truncate/guess which subset to extract.
+
+2. **Inconsistent extraction**: Since the actual number doesn't match the expected format, Gemini makes different decisions each time:
+   - Sometimes extracts full 10 digits
+   - Sometimes truncates leading zeros/digits
+   - Sometimes fails entirely
+
+The prompt should ask for the **full account number as shown** rather than specifying a digit count that doesn't match reality.
 
 ## Fix Plan
 
-### Fix 1: Increase lock timeout for spreadsheet operations
+### Fix 1: Update credit card prompt to extract full account number
 
-1. Add constant in `src/config.ts`:
-   ```typescript
-   export const SPREADSHEET_LOCK_TIMEOUT_MS = 30000;  // 30 seconds
-   ```
-
-2. Write test in `src/services/folder-structure.test.ts`:
-   - Test that `getOrCreateBankAccountSpreadsheet` uses 30s lock timeout
-   - Test that `getOrCreateCreditCardSpreadsheet` uses 30s lock timeout
-   - Test that `getOrCreateBrokerSpreadsheet` uses 30s lock timeout
-   - Test that `getOrCreateMovimientosSpreadsheet` uses 30s lock timeout
-
-3. Run test-runner (expect fail)
-
-4. Update `src/services/folder-structure.ts`:
-   - Import `SPREADSHEET_LOCK_TIMEOUT_MS` from config
-   - Update all 4 `withLock` calls for spreadsheet operations to pass explicit timeout:
-     - Line ~1252: `withLock(lockKey, async () => {...}, SPREADSHEET_LOCK_TIMEOUT_MS)`
-     - Line ~1333: `withLock(lockKey, async () => {...}, SPREADSHEET_LOCK_TIMEOUT_MS)`
-     - Line ~1403: `withLock(lockKey, async () => {...}, SPREADSHEET_LOCK_TIMEOUT_MS)`
-     - Line ~1467: `withLock(lockKey, async () => {...}, SPREADSHEET_LOCK_TIMEOUT_MS)`
-
-5. Run test-runner (expect pass)
-
-### Fix 2: Add automatic retry for failed files
-
-1. Write new function in `src/processing/storage/index.ts`:
-   ```typescript
-   /**
-    * Gets list of file IDs with 'failed' status that should be retried
-    * Only returns files with transient failure messages (lock timeouts, quota errors)
-    */
-   export async function getRetryableFailedFileIds(
-     dashboardId: string
-   ): Promise<Result<Set<string>, Error>>
-   ```
-
-2. Write test in `src/processing/storage/index.test.ts`:
-   - Test that files with "Failed to acquire lock" in status are returned
-   - Test that files with "Quota exceeded" in status are returned
-   - Test that files with other failure reasons are NOT returned
-   - Test that successful files are NOT returned
-
-3. Run test-runner (expect fail)
-
-4. Implement `getRetryableFailedFileIds`:
-   - Read `Archivos Procesados!A:E`
-   - Filter for files where status starts with `failed:` AND contains transient error patterns:
-     - `Failed to acquire lock`
-     - `Quota exceeded`
-     - `rate limit`
-     - `timeout`
-   - Return Set of file IDs
-
-5. Run test-runner (expect pass)
-
-### Fix 3: Integrate retry logic into scanner
-
-1. Write test in `src/processing/scanner.test.ts`:
-   - Test that files with transient failure status are included in scan
-   - Test that files with non-transient failures remain excluded
-   - Verify retry count tracking works for failed file retries
+1. Write test in `src/gemini/prompts.test.ts`:
+   - Test that `getResumenTarjetaPrompt()` output contains instruction for full account number
+   - Test that prompt does NOT contain "4-8 digits" restriction
+   - Test that prompt includes example with 10-digit number
 
 2. Run test-runner (expect fail)
 
-3. Update `src/processing/scanner.ts` in `scanFolder`:
-   - Import `getRetryableFailedFileIds`
-   - After getting stale processing files (~line 542), also get retryable failed files:
-     ```typescript
-     const failedResult = await getRetryableFailedFileIds(dashboardOperativoId);
-     if (failedResult.ok) {
-       const failedIds = failedResult.value;
-       if (failedIds.size > 0) {
-         const failedFilesInEntrada = allFiles.filter(f => failedIds.has(f.id));
-         if (failedFilesInEntrada.length > 0) {
-           info(`Retrying ${failedFilesInEntrada.length} files with transient failure status`, {...});
-           for (const failedFile of failedFilesInEntrada) {
-             if (!newFiles.find(f => f.id === failedFile.id)) {
-               newFiles.push(failedFile);
-             }
-           }
-         }
-       }
-     }
-     ```
+3. Update `src/gemini/prompts.ts` line 465:
+   - Change from: `- numeroCuenta: Last 4-8 digits of card number (e.g., "65656454")`
+   - Change to: `- numeroCuenta: Full card account number as shown on statement (e.g., "0941198918", "65656454"). Extract the complete number including any leading zeros - this is typically 4-10 digits.`
+   - Update the example JSON to show a realistic 10-digit account number
 
 4. Run test-runner (expect pass)
 
-### Fix 4: Add max retry limit for failed files
+### Fix 2: Add parser validation for numeroCuenta in resumen_tarjeta
 
-1. Add constant in `src/config.ts`:
-   ```typescript
-   export const MAX_FAILED_FILE_RETRIES = 3;
-   ```
+1. Write test in `src/gemini/parser.test.ts`:
+   - Test parseResumenTarjetaResponse with empty numeroCuenta marks needsReview
+   - Test parseResumenTarjetaResponse with valid numeroCuenta passes
+   - Test parseResumenTarjetaResponse logs warning for short account numbers (< 4 digits)
 
-2. Update `getRetryableFailedFileIds` to accept retry count tracking:
-   - Option A: Store retry count in status field as `failed(2): <message>`
-   - Option B: Count how many times the file appears in tracking sheet with failed status
+2. Run test-runner (expect fail)
 
-   Choose Option A for simplicity - update status format.
+3. Update `src/gemini/parser.ts` in `parseResumenTarjetaResponse()`:
+   - Add validation after JSON parse to check numeroCuenta
+   - If empty or < 4 digits, set `needsReview = true` and log warning
+   - This catches extraction failures before they create broken folder names
 
-3. Write test for retry count limit:
-   - Test that files with `failed(3):` are NOT returned (max retries reached)
-   - Test that files with `failed(1):` or `failed(2):` ARE returned
+4. Run test-runner (expect pass)
 
-4. Update `updateFileStatus` to track retry count:
-   - When setting failed status, check current status
-   - If already failed, increment counter: `failed(1): message` → `failed(2): message`
-   - Format: `failed(N): message` where N is retry count
+### Fix 3: (Manual cleanup - document for user)
 
-5. Run test-runner (expect pass)
+After the code fix is deployed:
+1. Identify all documents in the 4 duplicate folders
+2. Move all documents to the canonical folder `BBVA Visa 0941198918`
+3. Delete the 3 incorrect folders: `BBVA Visa `, `BBVA Visa 41198918`, `BBVA Visa 1198918`
+4. Re-run the scanner on any documents that were in incorrect folders to update spreadsheet references
+
+**Note:** This manual cleanup step is documented here for user awareness but is outside the scope of code changes.
+
+---
 
 ## Post-Implementation Checklist
 
@@ -173,19 +105,18 @@ Two separate issues:
 
 ## Notes
 
-**Why 30 seconds for spreadsheet lock timeout:**
-- Google Sheets API quota errors trigger exponential backoff (15s-65s delays)
-- Spreadsheet creation requires multiple API calls (findByName, createSpreadsheet, ensureSheetsExist)
-- 30 seconds is long enough to handle a single quota retry but short enough to detect deadlocks
+**Why this wasn't caught earlier:**
+- The first few statements may have been processed correctly with `0941198918`
+- Subsequent statements with different extraction results created new folders
+- No validation existed to flag suspiciously short/empty account numbers
 
-**Why only retry transient failures:**
-- Lock timeouts: Will succeed when contention clears
-- Quota errors: Will succeed when quota resets (60 seconds)
-- Parse errors: Already handled by `MAX_TRANSIENT_RETRIES` in processFile
-- Non-transient failures (invalid document, missing data): Should not be retried automatically
+**Prevention:**
+- The parser validation (Fix 2) will catch future extraction failures before they create broken folder structures
+- Consider adding a folder reconciliation check in future to detect duplicate folders for same card
 
-**Alternative considered:**
-- Immediate retry with longer delay after failure: Rejected because it would complicate the queue logic and delay processing of other files. The periodic scan approach is simpler and naturally spreads retries over time.
+**Testing the prompt change:**
+- After deploying, manually upload a BBVA Visa statement and verify extraction produces `0941198918`
+- The Gemini MCP can be used to test prompt variations before code deployment if needed
 
 ---
 
@@ -194,99 +125,50 @@ Two separate issues:
 **Implemented:** 2026-02-01
 
 ### Completed
-
-**Fix 1: Increase lock timeout for spreadsheet operations**
-- Added `SPREADSHEET_LOCK_TIMEOUT_MS = 30000` constant to `src/config.ts`
-- Updated `src/services/folder-structure.ts` to use constant for all 4 spreadsheet lock operations:
-  - `getOrCreateBankAccountSpreadsheet` (line 1252)
-  - `getOrCreateCreditCardSpreadsheet` (line 1333)
-  - `getOrCreateBrokerSpreadsheet` (line 1403)
-  - `getOrCreateMovimientosSpreadsheet` (line 1467)
-- Added test in `src/services/folder-structure.test.ts` to verify constant exists
-
-**Fix 2: Add automatic retry for failed files**
-- Implemented `getRetryableFailedFileIds()` function in `src/processing/storage/index.ts`
-- Returns files with transient failure patterns: "Failed to acquire lock", "Quota exceeded", "rate limit", "timeout"
-- Added comprehensive tests in `src/processing/storage/index.test.ts`
-
-**Fix 3: Integrate retry logic into scanner**
-- Updated `src/processing/scanner.ts` to call `getRetryableFailedFileIds()` after stale processing check
-- Retryable failed files are added to `newFiles` array for processing
-- Added mock for `getRetryableFailedFileIds` in `src/processing/scanner.test.ts`
-
-**Fix 4: Add max retry limit for failed files**
-- Added `MAX_FAILED_FILE_RETRIES = 3` constant to `src/config.ts`
-- Updated `updateFileStatus()` in `src/processing/storage/index.ts` to track retry count:
-  - First failure: `failed(1): message`
-  - Second failure: `failed(2): message`
-  - Third failure: `failed(3): message`
-- Updated `getRetryableFailedFileIds()` to exclude files with retry count >= 3
-- Added tests for retry count increment and max limit enforcement
+- Fix 1: Updated credit card prompt to extract full account number
+  - Changed instruction from "Last 4-8 digits" to "Full card account number as shown on statement"
+  - Updated example from "65656454" (8 digits) to "0941198918" (10 digits)
+  - Added instruction to include leading zeros
+  - Tests verify prompt contains correct wording and 10-digit example
+- Fix 2: Added parser validation for numeroCuenta in resumen_tarjeta
+  - Validates numeroCuenta is not empty or < 4 digits
+  - Sets needsReview flag when validation fails
+  - Logs warning for debugging
+  - Tests cover empty, short (< 4), valid 4-digit, and valid 10-digit cases
+- Bug fix: Added null check to numeroCuenta validation to prevent String(null) edge case
+- Bug fix: Propagated data.needsReview to returned needsReview value
+  - Fixed issue where tipoTarjeta and numeroCuenta validation flags were being silently ignored
 
 ### Files Modified
-
-- `src/config.ts`
-  - Added `SPREADSHEET_LOCK_TIMEOUT_MS = 30000` constant
-  - Added `MAX_FAILED_FILE_RETRIES = 3` constant
-
-- `src/services/folder-structure.ts`
-  - Imported `SPREADSHEET_LOCK_TIMEOUT_MS` from config
-  - Updated 4 `withLock()` calls to use `SPREADSHEET_LOCK_TIMEOUT_MS` instead of hardcoded 30000
-
-- `src/services/folder-structure.test.ts`
-  - Added test to verify `SPREADSHEET_LOCK_TIMEOUT_MS` constant exists and equals 30000
-
-- `src/processing/storage/index.ts`
-  - Imported `MAX_FAILED_FILE_RETRIES` from config
-  - Implemented `getRetryableFailedFileIds()` function with retry count limit
-  - Updated `updateFileStatus()` to read A:E columns (not just A:A) to get current status
-  - Updated `updateFileStatus()` to track retry count in status format: `failed(N): message`
-
-- `src/processing/storage/index.test.ts`
-  - Added 5 tests for `getRetryableFailedFileIds()` covering:
-    - Lock timeout pattern detection
-    - Quota exceeded pattern detection
-    - Non-transient error exclusion
-    - Success file exclusion
-    - Retry count limits
-  - Added 3 tests for `updateFileStatus()` retry count tracking
-  - Updated 3 existing tests to expect new `failed(1):` format
-
-- `src/processing/scanner.ts`
-  - Imported `getRetryableFailedFileIds` from storage
-  - Added retry logic after stale processing recovery (lines 574-605)
-  - Retryable failed files are added to `newFiles` for processing
-
-- `src/processing/scanner.test.ts`
-  - Added `getRetryableFailedFileIds` mock returning empty Set
+- `src/gemini/prompts.ts` - Updated numeroCuenta instruction and examples (lines 460, 465, 517)
+- `src/gemini/prompts.test.ts` - Added 4 tests for prompt numeroCuenta validation (lines 173-199)
+- `src/gemini/parser.ts` - Added numeroCuenta validation logic and needsReview propagation (lines 1117-1129, 1201-1204)
+- `src/gemini/parser.test.ts` - Added 5 tests for parser numeroCuenta validation (lines 204-306)
 
 ### Pre-commit Verification
-
-- **bug-hunter**: Found 1 MEDIUM bug (infinite retry loop) - Fixed by implementing Fix 4
-- **test-runner**: All 1,352 tests pass
-- **builder**: Zero warnings
+- bug-hunter: Found 2 bugs during implementation, fixed before proceeding. Final run: Passed (0 bugs found)
+- test-runner: All 1350 tests pass
+- builder: Zero warnings
 
 ### Review Findings
 
-Files reviewed: 7
+Files reviewed: 4
 Checks applied: Security, Logic, Async, Resources, Type Safety, Error Handling, Conventions
 
-**Analysis Summary:**
+**Fix 1: Updated credit card prompt (prompts.ts)**
+- Lines 460, 465, 517 correctly updated
+- Prompt now instructs to extract full account number with leading zeros
+- Example updated to show 10-digit number ("0941198918")
 
-| Category | Finding |
-|----------|---------|
-| SECURITY | No issues - lock keys use internal file IDs only, no injection risks |
-| LOGIC | Correct - retry count increment handles both old (`failed:`) and new (`failed(N):`) formats |
-| ASYNC | Correct - proper awaiting, 30s timeout passed to withLock() |
-| RESOURCE | No leaks - bounded spreadsheet reads |
-| TYPE | Correct - Result<T,E> pattern, proper imports |
-| ERROR | Correct - graceful fallback when retry fetch fails |
-| CONVENTION | Compliant - Pino logger, ESM imports, TDD workflow |
+**Fix 2: Parser validation for numeroCuenta (parser.ts)**
+- Lines 1117-1129: Validation handles null/undefined safely
+- Lines 1201-1204: Properly propagates data.needsReview to returned value
+- Uses project logger (not console.log)
 
-**Test Coverage:**
-- `getRetryableFailedFileIds`: 5 tests covering all transient patterns and retry limits
-- `updateFileStatus` retry count: 3 tests covering increment logic
-- Scanner mock: `getRetryableFailedFileIds` properly mocked
+**Tests (prompts.test.ts, parser.test.ts)**
+- All 9 new tests have meaningful assertions
+- Edge cases covered: empty, null, short (< 4), valid 4-digit, valid 10-digit
+- No real customer data used
 
 No issues found - all implementations are correct and follow project conventions.
 

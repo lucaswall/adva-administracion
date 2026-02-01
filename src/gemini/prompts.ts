@@ -457,12 +457,12 @@ export function getResumenTarjetaPrompt(currentDate: Date = new Date()): string 
 
   return `Extract data from this Argentine credit card statement (Resumen de Tarjeta de Crédito).
 
-Look for: card type (Visa, Mastercard, Amex, Naranja, Cabal), last 4-8 digits, PAGO MÍNIMO, SALDO ACTUAL.
+Look for: card type (Visa, Mastercard, Amex, Naranja, Cabal), account number, PAGO MÍNIMO, SALDO ACTUAL.
 
 Required fields:
 - banco: Bank name (e.g., "BBVA", "Santander", "Galicia")
 - tipoTarjeta: One of: Visa, Mastercard, Amex, Naranja, Cabal
-- numeroCuenta: Last 4-8 digits of card number (e.g., "65656454")
+- numeroCuenta: Full card account number as shown on statement (e.g., "0941198918", "65656454"). Extract the complete number including any leading zeros - this is typically 4-10 digits.
 - fechaDesde, fechaHasta: YYYY-MM-DD (statement period - look for "CIERRE ANTERIOR" and "CIERRE ACTUAL")
 - pagoMinimo: Minimum payment due (may be labeled "PAGO MÍNIMO")
 - saldoActual: Current balance owed (may be labeled "SALDO ACTUAL", "TOTAL A PAGAR")
@@ -514,7 +514,7 @@ Return ONLY valid JSON:
 {
   "banco": "BBVA",
   "tipoTarjeta": "Visa",
-  "numeroCuenta": "65656454",
+  "numeroCuenta": "0941198918",
   "fechaDesde": "2024-01-01",
   "fechaHasta": "2024-01-31",
   "pagoMinimo": 25000.00,

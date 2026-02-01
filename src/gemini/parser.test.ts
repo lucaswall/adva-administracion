@@ -200,6 +200,110 @@ describe('Parser - Bank Name Normalization', () => {
       }
     });
   });
+
+  describe('parseResumenTarjetaResponse - numeroCuenta validation', () => {
+    it('sets needsReview for empty numeroCuenta', () => {
+      const response = JSON.stringify({
+        banco: 'BBVA',
+        tipoTarjeta: 'Visa',
+        numeroCuenta: '',
+        fechaDesde: '2024-10-15',
+        fechaHasta: '2024-11-14',
+        pagoMinimo: 15000,
+        saldoActual: 150000,
+        cantidadMovimientos: 25,
+      });
+
+      const result = parseResumenTarjetaResponse(response);
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value.data.needsReview).toBe(true);
+      }
+    });
+
+    it('does not crash with null numeroCuenta and sets needsReview via missingFields', () => {
+      const response = JSON.stringify({
+        banco: 'BBVA',
+        tipoTarjeta: 'Visa',
+        numeroCuenta: null,
+        fechaDesde: '2024-10-15',
+        fechaHasta: '2024-11-14',
+        pagoMinimo: 15000,
+        saldoActual: 150000,
+        cantidadMovimientos: 25,
+      });
+
+      const result = parseResumenTarjetaResponse(response);
+
+      // Should not crash. needsReview should be true because numeroCuenta is in missingFields
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value.needsReview).toBe(true);
+        expect(result.value.missingFields).toContain('numeroCuenta');
+      }
+    });
+
+    it('sets needsReview for suspiciously short numeroCuenta (< 4 digits)', () => {
+      const response = JSON.stringify({
+        banco: 'BBVA',
+        tipoTarjeta: 'Visa',
+        numeroCuenta: '123',
+        fechaDesde: '2024-10-15',
+        fechaHasta: '2024-11-14',
+        pagoMinimo: 15000,
+        saldoActual: 150000,
+        cantidadMovimientos: 25,
+      });
+
+      const result = parseResumenTarjetaResponse(response);
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value.data.needsReview).toBe(true);
+      }
+    });
+
+    it('does not set needsReview for valid 4-digit numeroCuenta', () => {
+      const response = JSON.stringify({
+        banco: 'BBVA',
+        tipoTarjeta: 'Visa',
+        numeroCuenta: '4563',
+        fechaDesde: '2024-10-15',
+        fechaHasta: '2024-11-14',
+        pagoMinimo: 15000,
+        saldoActual: 150000,
+        cantidadMovimientos: 25,
+      });
+
+      const result = parseResumenTarjetaResponse(response);
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value.data.needsReview).not.toBe(true);
+      }
+    });
+
+    it('does not set needsReview for valid 10-digit numeroCuenta', () => {
+      const response = JSON.stringify({
+        banco: 'BBVA',
+        tipoTarjeta: 'Visa',
+        numeroCuenta: '0941198918',
+        fechaDesde: '2024-10-15',
+        fechaHasta: '2024-11-14',
+        pagoMinimo: 15000,
+        saldoActual: 150000,
+        cantidadMovimientos: 25,
+      });
+
+      const result = parseResumenTarjetaResponse(response);
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value.data.needsReview).not.toBe(true);
+      }
+    });
+  });
 });
 
 describe('Parser - Movimiento Validation', () => {

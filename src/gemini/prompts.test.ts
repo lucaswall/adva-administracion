@@ -171,6 +171,32 @@ describe('getResumenTarjetaPrompt', () => {
     expect(prompt).toContain('saldoActual');
   });
 
+  it('should instruct to extract full account number without digit restriction', () => {
+    const prompt = getResumenTarjetaPrompt();
+    expect(prompt).toContain('numeroCuenta');
+    expect(prompt).toContain('Full card account number');
+    expect(prompt).not.toContain('Last 4-8 digits');
+  });
+
+  it('should include example with 10-digit account number', () => {
+    const prompt = getResumenTarjetaPrompt();
+    // Check for a 10-digit example in the numeroCuenta context
+    const numeroCuentaSection = prompt.substring(
+      prompt.indexOf('numeroCuenta'),
+      prompt.indexOf('numeroCuenta') + 300
+    );
+    expect(numeroCuentaSection).toMatch(/\d{10}/);
+  });
+
+  it('should instruct to extract complete number including leading zeros', () => {
+    const prompt = getResumenTarjetaPrompt();
+    const numeroCuentaSection = prompt.substring(
+      prompt.indexOf('numeroCuenta'),
+      prompt.indexOf('numeroCuenta') + 300
+    );
+    expect(numeroCuentaSection).toContain('including any leading zeros');
+  });
+
   describe('transaction extraction', () => {
     const prompt = getResumenTarjetaPrompt();
 
