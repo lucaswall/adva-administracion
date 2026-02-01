@@ -31,14 +31,14 @@ For each task in the plan:
    └─ Add test cases in [file].test.ts
 
 2. RUN TEST (expect fail)
-   └─ Use test-runner agent
+   └─ Use verifier agent
    └─ If test passes: warning - test may not be testing the right thing
 
 3. IMPLEMENT
    └─ Write minimal code to make test pass
 
 4. RUN TEST (expect pass)
-   └─ Use test-runner agent
+   └─ Use verifier agent
    └─ If fail: fix implementation, repeat step 4
 ```
 
@@ -48,10 +48,8 @@ After completing ALL tasks:
 
 1. **Run `bug-hunter` agent** - Review changes for bugs
    - If bugs found → Fix immediately before proceeding
-2. **Run `test-runner` agent** - Verify all tests pass
-   - If failures → Fix immediately before proceeding
-3. **Run `builder` agent** - Verify zero warnings
-   - If warnings → Fix immediately before proceeding
+2. **Run `verifier` agent** - Verify all tests pass and zero warnings
+   - If failures or warnings → Fix immediately before proceeding
 
 ## Handling Failures
 
@@ -60,8 +58,7 @@ After completing ALL tasks:
 | Test won't fail (step 2) | Review test - ensure it tests new behavior |
 | Test won't pass (step 4) | Debug implementation, do not skip |
 | bug-hunter finds issues | Fix bugs, re-run checklist |
-| test-runner fails | Fix tests, re-run checklist |
-| builder has warnings | Fix warnings, re-run checklist |
+| verifier has failures or warnings | Fix issues, re-run checklist |
 
 **Never mark tasks complete with failing tests or warnings.**
 
@@ -85,8 +82,7 @@ After execution, append a new "Iteration N" section to PLANS.md:
 
 ### Pre-commit Verification
 - bug-hunter: [Passed | Found N bugs, fixed before proceeding]
-- test-runner: All N tests pass
-- builder: Zero warnings
+- verifier: All N tests pass, zero warnings
 ```
 
 **IMPORTANT:** Do NOT add "Review Findings" or "Notes" sections. Those are reserved for `plan-review-implementation`. The iteration section should end after "Pre-commit Verification".
@@ -98,7 +94,7 @@ After completing each iteration, estimate remaining context:
 **Rough estimation heuristics:**
 - Each large file read (~500 lines): ~2-3% context
 - Each file written/edited: ~1-2% context
-- Each test-runner/builder/bug-hunter invocation: ~2-4% context
+- Each verifier/bug-hunter invocation: ~2-4% context
 - Conversation messages accumulate over time
 
 **Decision logic:**
@@ -108,7 +104,7 @@ After completing each iteration, estimate remaining context:
 
 **Why 60% threshold:** Leaves buffer for:
 - Potential bug fixes
-- test-runner/builder verification
+- verifier verification
 - User interactions
 - Unexpected issues
 
@@ -126,8 +122,7 @@ After completing each iteration, estimate remaining context:
 | Test won't fail in step 2 | Review test logic - ensure it tests new behavior, not existing |
 | Test won't pass in step 4 | Debug implementation, do not skip or delete test |
 | bug-hunter finds issues | Fix all bugs before marking tasks complete |
-| test-runner has failures | Fix all failures before proceeding |
-| builder has warnings | Fix all warnings before proceeding |
+| verifier has failures or warnings | Fix all issues before proceeding |
 | Task references file that doesn't exist | Create the file as part of implementation |
 | Task is ambiguous | Re-read PLANS.md context section, infer from codebase patterns |
 

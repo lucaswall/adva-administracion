@@ -190,3 +190,63 @@ From `.claude/skills/tools-improve/SKILL.md`:
 **Dependencies/Prerequisites:**
 - Task 4 depends on Task 3 (verifier must exist before adding trigger phrases)
 - All other tasks are independent
+
+---
+
+## Iteration 1
+
+**Implemented:** 2026-02-01
+
+### Completed
+- Task 1: Updated commit-bot to stage specific files instead of git add -A, added sensitive file filtering
+- Task 2: Changed pr-creator model from haiku to sonnet
+- Task 3: Created verifier agent by merging test-runner and builder, deleted old agents, updated all references in CLAUDE.md and 5 skill files
+- Task 4: Trigger phrases included in verifier agent description (handled within Task 3)
+- Task 5: Added MCP wildcard tools (mcp__Railway__*, mcp__gdrive__*, mcp__gemini__*) to investigate skill allowed-tools
+- Task 6: Added context management section to plan-review-implementation skill
+- Task 7: Updated investigate skill description to emphasize read-only nature, added skill chaining offer when issues found, updated plan-fix description to note it can be chained from investigate
+
+### Files Modified
+- `.claude/agents/commit-bot.md` - Replaced git add -A with specific file staging, added sensitive file filtering rule
+- `.claude/agents/pr-creator.md` - Changed model to sonnet, added sensitive file filtering for commit step
+- `.claude/agents/verifier.md` - New file: merged test-runner and builder functionality
+- `.claude/agents/test-runner.md` - Deleted
+- `.claude/agents/builder.md` - Deleted
+- `CLAUDE.md` - Updated SUBAGENTS table, TDD workflow, Post-Implementation Checklist, Plan Requirements, COMMANDS section, investigate skill description
+- `.claude/skills/plan-implement/SKILL.md` - Replaced all test-runner/builder references with verifier
+- `.claude/skills/plan-fix/SKILL.md` - Updated post-implementation checklist, updated description for skill chaining
+- `.claude/skills/plan-inline/SKILL.md` - Replaced test-runner references with verifier in templates and examples
+- `.claude/skills/plan-todo/SKILL.md` - Replaced test-runner references with verifier in templates and examples
+- `.claude/skills/investigate/SKILL.md` - Added MCP wildcards to allowed-tools, updated description, added skill chaining termination message
+- `.claude/skills/plan-review-implementation/SKILL.md` - Added context management section
+
+### Pre-commit Verification
+- bug-hunter: Found 4 issues (2 HIGH, 2 MEDIUM), all fixed before proceeding
+- verifier: All 1365 tests pass, zero warnings
+
+### Review Findings
+
+Files reviewed: 12 (markdown configuration files for agents and skills)
+Checks applied: Security, Logic, Conventions, Edge Cases
+
+No issues found - all implementations are correct and follow project conventions.
+
+**Summary of verified changes:**
+- commit-bot.md: Secure file staging with sensitive file filtering ✓
+- pr-creator.md: Model upgrade to sonnet, sensitive file filtering ✓
+- verifier.md: Clean merge of test-runner and builder ✓
+- investigate/SKILL.md: MCP wildcards and skill chaining ✓
+- plan-fix/SKILL.md: Updated description for chaining ✓
+- plan-implement/SKILL.md: verifier references updated ✓
+- plan-inline/SKILL.md: verifier references updated ✓
+- plan-todo/SKILL.md: verifier references updated ✓
+- plan-review-implementation/SKILL.md: Context management added ✓
+- CLAUDE.md: All references updated ✓
+
+<!-- REVIEW COMPLETE -->
+
+---
+
+## Status: COMPLETE
+
+All tasks implemented and reviewed successfully. Ready for human review.

@@ -1,8 +1,8 @@
 ---
 name: investigate
-description: Investigates issues and reports findings without creating plans. Use when user says "investigate", "check why", "look into", "diagnose", or wants to understand a problem before deciding on action. Accesses Railway logs, Drive files, Gemini prompts, and codebase.
+description: Read-only investigation that reports findings WITHOUT creating plans or modifying code. Use when user says "investigate", "check why", "look into", "diagnose", or wants to understand a problem before deciding on action. Accesses Railway logs, Drive files, Gemini prompts, and codebase.
 argument-hint: <what to investigate>
-allowed-tools: Read, Glob, Grep, Task, Bash
+allowed-tools: Read, Glob, Grep, Task, Bash, mcp__Railway__*, mcp__gdrive__*, mcp__gemini__*
 disable-model-invocation: true
 ---
 
@@ -196,7 +196,18 @@ When investigating file sorting or processing:
 
 ## Termination
 
-When you finish investigating, output the investigation report and this message:
+When you finish investigating, output the investigation report.
+
+**If bugs or issues were found that need fixing**, end with:
+
+```
+---
+Investigation complete. Issues found that may need fixing.
+
+Would you like me to create a fix plan? Say 'yes' or run `/plan-fix` with the context above.
+```
+
+**If nothing wrong was found or no fix needed**, end with:
 
 ```
 ---
@@ -208,4 +219,4 @@ To take action based on these findings:
 - For further investigation: Provide more details and run investigate again
 ```
 
-Do not ask follow-up questions. Do not offer to implement fixes. Report findings and stop.
+Do not offer to implement fixes directly. Report findings and offer skill chaining if appropriate.

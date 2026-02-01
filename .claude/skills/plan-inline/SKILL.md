@@ -123,20 +123,19 @@ Example arguments:
 
 ### Task 1: [Name]
 1. Write test in [file].test.ts for [function/scenario]
-2. Run test-runner (expect fail)
+2. Run verifier (expect fail)
 3. Implement [function] in [file].ts
-4. Run test-runner (expect pass)
+4. Run verifier (expect pass)
 
 ### Task 2: [Name]
 1. Write test...
-2. Run test-runner...
+2. Run verifier...
 3. Implement...
-4. Run test-runner...
+4. Run verifier...
 
 ## Post-Implementation Checklist
 1. Run `bug-hunter` agent - Review changes for bugs
-2. Run `test-runner` agent - Verify all tests pass
-3. Run `builder` agent - Verify zero warnings
+2. Run `verifier` agent - Verify all tests pass and zero warnings
 
 ---
 
@@ -178,11 +177,11 @@ Good task example:
    - Test invalid checksum returns false
    - Test invalid format returns false
    - Follow existing validation function patterns
-2. Run test-runner (expect fail)
+2. Run verifier (expect fail)
 3. Implement validateCuit in src/utils/validation.ts
    - Use modulo 11 algorithm
    - Follow existing function signature patterns
-4. Run test-runner (expect pass)
+4. Run verifier (expect pass)
 ```
 
 Bad task example:

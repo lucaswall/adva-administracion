@@ -2,7 +2,7 @@
 name: pr-creator
 description: GitHub PR creator that handles the full workflow - creates branch, commits changes, pushes, and creates PR. Use only when explicitly requested by the user. Analyzes ALL branch commits (not just local changes) for comprehensive PR descriptions.
 tools: Bash
-model: haiku
+model: sonnet
 permissionMode: default
 ---
 
@@ -74,7 +74,9 @@ Create a complete PR: analyze branch → commit local changes → push → PR.
 
 3. **Commit local changes** (if any uncommitted changes)
    ```bash
-   git add -A
+   git status --porcelain=v1  # Get list of changed files
+   # Skip files matching: .env*, *.key, *.pem, credentials*, secrets*, node_modules/, dist/, *.log
+   git add <file1> <file2> ...  # Stage specific safe files
    git diff --cached  # Review staged changes
    git commit -m "<type>: <summary>"
    ```
@@ -169,3 +171,4 @@ Error: [relevant output]
 - Branch name should be descriptive but concise
 - Use HEREDOC for PR body to handle special characters
 - Always detect base branch dynamically (usually `main`)
+- Never stage files matching sensitive patterns (.env*, credentials*, secrets*, *.key, *.pem)

@@ -213,3 +213,28 @@ This prompts the user to invoke the `pr-creator` agent if they want to submit th
 - **Never modify previous sections** - Only add to current iteration or append status
 - **Mark COMPLETE only when ALL iterations pass** - No fix plans pending, all reviewed
 - If no iteration needs review, inform the user and stop
+
+## Context Management & Continuation
+
+After completing review of each iteration, estimate remaining context:
+
+**Rough estimation heuristics:**
+- Each file reviewed: ~1-2% context
+- Each iteration reviewed: ~3-5% context
+- Conversation messages accumulate over time
+
+**Decision logic:**
+- If estimated remaining context **> 60%** → Automatically continue to next pending iteration
+- If estimated remaining context **≤ 60%** → Stop and inform user:
+  > "Iteration N review complete. Context is running low (~X% estimated remaining). Run `/plan-review-implementation` again to continue."
+
+**Why 60% threshold:** Leaves buffer for:
+- Documenting review findings
+- Creating fix plans
+- User interactions
+- Unexpected issues
+
+**When to continue automatically:**
+1. Current iteration review completed
+2. There are more pending iterations to review
+3. Estimated remaining context > 60%
