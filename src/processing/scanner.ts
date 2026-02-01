@@ -45,11 +45,6 @@ import { MAX_TRANSIENT_RETRIES, RETRY_DELAYS_MS } from '../config.js';
 // Re-export for backwards compatibility
 export { processFile, hasValidDate, type ProcessFileResult } from './extractor.js';
 
-// Track retry count for each file (to implement exponential backoff)
-// Key: fileId, Value: retry count (0 = first retry, 1 = second retry, etc.)
-// This is cleared in the finally block of each scan
-const retriedFileIds = new Map<string, number>();
-
 // Module-level state for scan deferral - uses state machine to prevent TOCTOU race
 type ScanState = 'idle' | 'pending' | 'running';
 let scanState: ScanState = 'idle';
@@ -76,7 +71,8 @@ async function processFileWithRetry(
   dashboardOperativoId: string,
   controlIngresosId: string,
   controlEgresosId: string,
-  result: ScanResult
+  result: ScanResult,
+  retriedFileIds: Map<string, number>
 ): Promise<void> {
   const correlationId = getCorrelationId();
   const retryCount = retriedFileIds.get(fileInfo.id) ?? 0;
@@ -139,7 +135,8 @@ async function processFileWithRetry(
         dashboardOperativoId,
         controlIngresosId,
         controlEgresosId,
-        result
+        result,
+        retriedFileIds
       );
     }
 
@@ -556,6 +553,11 @@ export async function scanFolder(folderId?: string): Promise<Result<ScanResult, 
         duration: 0,
       };
 
+      // Track retry count for each file (to implement exponential backoff)
+      // Key: fileId, Value: retry count (0 = first retry, 1 = second retry, etc.)
+      // Scoped to this scan invocation to prevent state leakage between concurrent scans
+      const retriedFileIds = new Map<string, number>();
+
       const queue = getProcessingQueue();
 
       // Queue all files for processing (don't await individual tasks)
@@ -572,7 +574,8 @@ export async function scanFolder(folderId?: string): Promise<Result<ScanResult, 
               dashboardOperativoId,
               controlIngresosId,
               controlEgresosId,
-              result
+              result,
+              retriedFileIds
             );
           }, { correlationId: generateCorrelationId(), fileId: fileInfo.id, fileName: fileInfo.name });
         });
@@ -671,8 +674,7 @@ export async function scanFolder(folderId?: string): Promise<Result<ScanResult, 
           context.duplicateCache.clear();
           context.metadataCache.clear();
 
-          // Clear retry tracking for next scan (CRITICAL: in finally block)
-          retriedFileIds.clear();
+          // Note: retriedFileIds is now function-scoped, no need to clear
 
           info('Caches cleared', {
             module: 'scanner',

@@ -296,6 +296,119 @@ While the lock prevents concurrent calls to the same folder creation, it doesn't
 
 ---
 
-## Status: PENDING
+## Iteration 1
 
-Waiting for user approval before implementation.
+**Implemented:** 2026-02-01
+
+### Phase 1: Matching & Cache Reliability - Completed
+
+#### Task 1.1: Fix CUIT field assignment (bug #1)
+- Created test in `src/processing/matching/recibo-pago-matcher.test.ts`
+- Test confirmed pago parsing incorrectly assigned `cuitBeneficiario` and `nombreBeneficiario` from columns H:I
+- Fixed by removing these fields from pago parsing in `recibo-pago-matcher.ts:297-298`
+- Pagos Enviados sheet only contains pagador info (ADVA); beneficiary comes from matched recibo
+- Test passes ✓
+
+#### Task 1.2: Fix cascading displacement edge case (bug #9)
+- Created test in `src/processing/matching/factura-pago-matcher.test.ts`
+- Test confirmed displaced pagos with no matches retained old `matchedFacturaFileId`
+- Fixed by adding unmatch update with `pago:` prefix key when no matches found
+- Updated `MatchUpdate` interface to include `pagoRow` field
+- Modified update application logic to handle pago unmatch updates
+- Files modified: `factura-pago-matcher.ts`, `cascade-matcher.ts`
+- Test passes ✓
+
+#### Task 1.3: Fix DuplicateCache silent failure (bug #2)
+- Created test in `src/processing/caches/duplicate-cache.test.ts`
+- Test confirmed failed promises were cached, preventing retry
+- Fixed by deleting `loadPromise` from cache on failure in `doLoadSheet()`
+- Added try-catch to handle both Result errors and thrown exceptions
+- Test passes ✓
+
+#### Task 1.4: Fix MetadataCache negative cache entries (bug #8)
+- Created test in `src/processing/caches/metadata-cache.test.ts`
+- Test confirmed rejected promises were permanently cached
+- Fixed by chaining `.then()` and `.catch()` to delete cache entry on failure
+- Allows retry for transient API failures
+- Test passes ✓
+
+### Files Modified
+- `src/processing/matching/recibo-pago-matcher.ts` - Removed incorrect CUIT field assignments
+- `src/processing/matching/recibo-pago-matcher.test.ts` - Added test for bug #1
+- `src/processing/matching/factura-pago-matcher.ts` - Added pago unmatch updates, updated application logic
+- `src/processing/matching/factura-pago-matcher.test.ts` - Added test for bug #9
+- `src/matching/cascade-matcher.ts` - Added `pagoRow` field to `MatchUpdate` interface
+- `src/processing/caches/duplicate-cache.ts` - Added retry logic with loadPromise cleanup
+- `src/processing/caches/duplicate-cache.test.ts` - Added test for bug #2
+- `src/processing/caches/metadata-cache.ts` - Added promise rejection cleanup
+- `src/processing/caches/metadata-cache.test.ts` - Added test for bug #8
+
+### Pre-commit Verification
+- bug-hunter: Passed - No bugs found
+- test-runner: All 1289 tests pass
+- builder: Zero warnings
+
+### Review Findings
+
+Files reviewed: 9
+Checks applied: Security, Logic, Async, Resources, Type Safety, Conventions, Edge Cases
+
+**Summary:** 0 CRITICAL, 0 HIGH, 2 MEDIUM (documented only)
+
+**Documented (no fix needed):**
+- [MEDIUM] EDGE CASE: `factura-pago-matcher.ts:553` - When handling pago unmatch, `pagosMap.get(update.pagoFileId)` may return undefined if pago not in map. However, this is defensive - the pago was just processed and should always exist. Silent skip is acceptable.
+- [MEDIUM] TYPE: `cascade-matcher.ts:86-88` - `pagoFileId` is required but set to empty string for unmatch updates. Acceptable since interface documents empty string means unmatch.
+
+No issues found - all implementations are correct and follow project conventions.
+
+<!-- REVIEW COMPLETE -->
+
+---
+
+## Iteration 2
+
+**Implemented:** 2026-02-01
+
+### Phase 2: Concurrency & Data Safety - In Progress
+
+#### Task 2.1: Fix module-level retry Map (bug #3) - COMPLETED
+- Created test in `src/processing/scanner.test.ts`
+- Test documented that retry state should be isolated per scan invocation
+- Fixed by moving `retriedFileIds` from module level into `scanFolder` function scope
+- Added `retriedFileIds` parameter to `processFileWithRetry` function
+- Updated recursive retry call to pass `retriedFileIds`
+- Removed `retriedFileIds.clear()` from finally block (no longer needed)
+- Benefits:
+  - Concurrent scans no longer share retry counts
+  - No memory leak (Map is garbage collected with function scope)
+  - No stale retry state between scans
+- Test passes ✓
+
+### Files Modified (Phase 2 so far)
+- `src/processing/scanner.ts` - Moved retriedFileIds to function scope, added parameter
+- `src/processing/scanner.test.ts` - Added test for bug #3
+
+### Pre-commit Verification (Phase 2 in progress)
+- test-runner: All 1290 tests pass
+- Remaining tasks: 2.2, 2.3, 2.4, 2.5
+- Post-phase checklist pending completion
+
+---
+
+## Status: IN PROGRESS
+
+Phase 1 complete (4/4 tasks). Phase 2 in progress (1/5 tasks complete).
+
+**Summary:**
+- ✅ Bug #1 (CRITICAL): CUIT field assignment fixed
+- ✅ Bug #9 (MEDIUM): Cascading displacement edge case fixed
+- ✅ Bug #2 (HIGH): DuplicateCache silent failure fixed
+- ✅ Bug #8 (MEDIUM): MetadataCache negative cache entries fixed
+- ✅ Bug #3 (HIGH): Module-level retry Map fixed
+- ⏳ Bug #6 (MEDIUM): Async unhandled promises - pending
+- ⏳ Bug #7 (MEDIUM): Dual-status processing gap - pending
+- ⏳ Bug #4 (HIGH): Pagos-pendientes data loss - pending
+- ⏳ Bug #5 (HIGH): Folder-structure cache race - pending
+
+**Remaining Work:**
+Continue with Task 2.2 through 2.5 to complete Phase 2, then run post-implementation checklist.

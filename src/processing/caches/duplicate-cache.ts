@@ -34,19 +34,29 @@ export class DuplicateCache {
     range: string,
     key: string
   ): Promise<void> {
-    const rowsResult = await getValues(spreadsheetId, `${sheetName}!${range}`);
-    if (!rowsResult.ok) return;
-
-    const data = new Map<string, unknown[]>();
-    // Skip header row (index 0)
-    for (let i = 1; i < rowsResult.value.length; i++) {
-      const row = rowsResult.value[i];
-      if (row && row[1]) {
-        // fileId is in column B (index 1)
-        data.set(String(row[1]), row);
+    try {
+      const rowsResult = await getValues(spreadsheetId, `${sheetName}!${range}`);
+      if (!rowsResult.ok) {
+        // Remove failed promise from cache to allow retry
+        this.loadPromises.delete(key);
+        return;
       }
+
+      const data = new Map<string, unknown[]>();
+      // Skip header row (index 0)
+      for (let i = 1; i < rowsResult.value.length; i++) {
+        const row = rowsResult.value[i];
+        if (row && row[1]) {
+          // fileId is in column B (index 1)
+          data.set(String(row[1]), row);
+        }
+      }
+      this.cache.set(key, data);
+    } catch (error) {
+      // Remove failed promise from cache to allow retry
+      this.loadPromises.delete(key);
+      throw error;
     }
-    this.cache.set(key, data);
   }
 
   /**

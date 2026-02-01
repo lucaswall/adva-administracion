@@ -96,4 +96,52 @@ describe('MetadataCache', () => {
     expect(sheets.getSheetMetadataInternal).toHaveBeenCalledWith('spreadsheet-1');
     expect(sheets.getSheetMetadataInternal).toHaveBeenCalledWith('spreadsheet-2');
   });
+
+  describe('Bug #8: Negative cache entries', () => {
+    it('should retry after transient failure (not cache rejected promise)', async () => {
+      const cache = new MetadataCache();
+      const mockMetadata = [{ title: 'Sheet1', sheetId: 0, index: 0 }];
+
+      // First call fails (transient error)
+      vi.mocked(sheets.getSheetMetadataInternal)
+        .mockResolvedValueOnce({ ok: false, error: new Error('Transient API error') });
+
+      const result1 = await cache.get('spreadsheet-id');
+      expect(result1.ok).toBe(false);
+
+      // Second call succeeds (API recovered)
+      vi.mocked(sheets.getSheetMetadataInternal)
+        .mockResolvedValueOnce({ ok: true, value: mockMetadata });
+
+      const result2 = await cache.get('spreadsheet-id');
+
+      // This will fail with current code because the rejected promise is cached
+      // The cache stores the promise directly: this.cache.set(spreadsheetId, getSheetMetadataInternal(spreadsheetId))
+      // If the promise rejects, subsequent calls await the same rejected promise
+      expect(result2.ok).toBe(true);
+      if (result2.ok) {
+        expect(result2.value).toEqual(mockMetadata);
+      }
+    });
+
+    it('should make new API call after rejection', async () => {
+      const cache = new MetadataCache();
+
+      // First call fails
+      vi.mocked(sheets.getSheetMetadataInternal)
+        .mockResolvedValueOnce({ ok: false, error: new Error('Error 1') });
+
+      await cache.get('spreadsheet-id');
+
+      // Second call should make new API request
+      vi.mocked(sheets.getSheetMetadataInternal)
+        .mockResolvedValueOnce({ ok: false, error: new Error('Error 2') });
+
+      await cache.get('spreadsheet-id');
+
+      // With current code, getSheetMetadataInternal is only called once
+      // because the failed promise is cached
+      expect(sheets.getSheetMetadataInternal).toHaveBeenCalledTimes(2);
+    });
+  });
 });

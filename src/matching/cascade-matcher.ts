@@ -84,6 +84,8 @@ export interface MatchUpdate {
   reciboRow?: number;
   /** File ID of the matched pago (or empty string to unmatch) */
   pagoFileId: string;
+  /** Row number of the pago in the spreadsheet (for unmatch updates) */
+  pagoRow?: number;
   /** Match confidence level */
   confidence: MatchConfidence;
   /** Whether the match has CUIT/CUIL match */

@@ -196,6 +196,21 @@ async function processCascadingFacturaDisplacements(
         }
       }
 
+      // Store unmatch update for pago (clear matchedFacturaFileId)
+      // Use negative key to distinguish pago updates from factura updates
+      cascadeState.updates.set(
+        `pago:${displacedPago.fileId}`,
+        {
+          pagoFileId: displacedPago.fileId,
+          pagoRow: displaced.row,
+          facturaFileId: '',
+          facturaRow: 0,
+          confidence: 'LOW',
+          hasCuitMatch: false,
+          pagada: false,
+        }
+      );
+
       debug('Displaced pago has no remaining matches', {
         module: 'matching',
         phase: 'cascade',
@@ -532,8 +547,18 @@ async function doMatchFacturasWithPagos(
   const updates: Array<{ range: string; values: (string | number)[][] }> = [];
   let matchesFound = 0;
 
-  for (const [facturaFileId, update] of cascadeState.updates) {
-    if (update.facturaFileId && update.facturaRow && update.pagoFileId) {
+  for (const [key, update] of cascadeState.updates) {
+    // Check if this is a pago unmatch update (key starts with "pago:")
+    if (key.startsWith('pago:')) {
+      const pago = pagosMap.get(update.pagoFileId);
+      if (pago) {
+        // Clear pago match (columns N:O)
+        updates.push({
+          range: `'${pagosSheetName}'!N${pago.row}:O${pago.row}`,
+          values: [['', '']],
+        });
+      }
+    } else if (update.facturaFileId && update.facturaRow && update.pagoFileId) {
       matchesFound++;
 
       // Update factura with match info
@@ -566,9 +591,22 @@ async function doMatchFacturasWithPagos(
         updates.push({
           range: `'${pagosSheetName}'!N${pago.row}:O${pago.row}`,
           values: [[
-            facturaFileId,
+            key, // Use key as facturaFileId
             update.confidence,
           ]],
+        });
+      }
+    } else if (update.facturaFileId && update.facturaRow && !update.pagoFileId) {
+      // Factura unmatch update
+      if (facturasSheetName === 'Facturas Recibidas') {
+        updates.push({
+          range: `'${facturasSheetName}'!P${update.facturaRow}:S${update.facturaRow}`,
+          values: [['', '', '', '']],
+        });
+      } else {
+        updates.push({
+          range: `'${facturasSheetName}'!P${update.facturaRow}:R${update.facturaRow}`,
+          values: [['', '', '']],
         });
       }
     }
