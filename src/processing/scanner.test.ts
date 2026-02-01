@@ -27,6 +27,7 @@ vi.mock('./extractor.js', () => ({
 vi.mock('./storage/index.js', () => ({
   getProcessedFileIds: vi.fn(async () => ({ ok: true, value: new Set() })),
   getStaleProcessingFileIds: vi.fn(async () => ({ ok: true, value: new Set() })),
+  getRetryableFailedFileIds: vi.fn(async () => ({ ok: true, value: new Set() })),
   markFileProcessing: vi.fn(async () => ({ ok: true, value: undefined })),
   updateFileStatus: vi.fn(async () => ({ ok: true, value: undefined })),
   storeFactura: vi.fn(async () => ({ ok: true, value: { stored: true } })),

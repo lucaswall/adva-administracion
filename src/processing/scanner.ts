@@ -35,7 +35,7 @@ import { withLock } from '../utils/concurrency.js';
 
 // Import from refactored modules
 import { processFile, hasValidDate } from './extractor.js';
-import { storeFactura, storePago, storeRecibo, storeRetencion, storeResumenBancario, storeResumenTarjeta, storeResumenBroker, storeMovimientosBancario, storeMovimientosTarjeta, storeMovimientosBroker, getProcessedFileIds, getStaleProcessingFileIds, markFileProcessing, updateFileStatus } from './storage/index.js';
+import { storeFactura, storePago, storeRecibo, storeRetencion, storeResumenBancario, storeResumenTarjeta, storeResumenBroker, storeMovimientosBancario, storeMovimientosTarjeta, storeMovimientosBroker, getProcessedFileIds, getStaleProcessingFileIds, getRetryableFailedFileIds, markFileProcessing, updateFileStatus } from './storage/index.js';
 import { runMatching } from './matching/index.js';
 import { matchAllMovimientos } from '../bank/match-movimientos.js';
 import { SortBatch, DuplicateCache, MetadataCache, SheetOrderBatch } from './caches/index.js';
@@ -565,6 +565,39 @@ export async function scanFolder(folderId?: string): Promise<Result<ScanResult, 
             for (const staleFile of staleFilesInEntrada) {
               if (!newFiles.find(f => f.id === staleFile.id)) {
                 newFiles.push(staleFile);
+              }
+            }
+          }
+        }
+      }
+
+      // Check for failed files with transient errors that should be retried
+      const failedResult = await getRetryableFailedFileIds(dashboardOperativoId);
+      if (!failedResult.ok) {
+        warn('Failed to get retryable failed files, continuing without retry', {
+          module: 'scanner',
+          phase: 'scan-start',
+          error: failedResult.error.message,
+          correlationId,
+        });
+      } else {
+        const failedIds = failedResult.value;
+        if (failedIds.size > 0) {
+          // Find failed files that are still in Entrada folder
+          const failedFilesInEntrada = allFiles.filter(f => failedIds.has(f.id));
+
+          if (failedFilesInEntrada.length > 0) {
+            info(`Retrying ${failedFilesInEntrada.length} files with transient failure status`, {
+              module: 'scanner',
+              phase: 'scan-start',
+              retryCount: failedFilesInEntrada.length,
+              correlationId,
+            });
+
+            // Add failed files to the new files list for processing
+            for (const failedFile of failedFilesInEntrada) {
+              if (!newFiles.find(f => f.id === failedFile.id)) {
+                newFiles.push(failedFile);
               }
             }
           }

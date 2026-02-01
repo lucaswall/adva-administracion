@@ -232,7 +232,51 @@ describe('File Tracking Functions', () => {
       expect(batchUpdate).toHaveBeenCalledWith('dashboard-id', [
         {
           range: 'Archivos Procesados!E2',
-          values: [['failed: Extraction error']],
+          values: [['failed(1): Extraction error']],
+        },
+      ]);
+    });
+
+    it('increments retry count when file already has failed status', async () => {
+      vi.mocked(getValues).mockResolvedValue({
+        ok: true,
+        value: [
+          ['fileId', 'fileName', 'processedAt', 'documentType', 'status'],
+          ['test-file-id', 'test-document.pdf', '2025-01-15T10:00:00Z', 'factura_emitida', 'failed(1): Lock timeout'],
+        ],
+      });
+
+      vi.mocked(batchUpdate).mockResolvedValue({ ok: true, value: 1 });
+
+      const result = await updateFileStatus('dashboard-id', 'test-file-id', 'failed', 'Lock timeout');
+
+      expect(result.ok).toBe(true);
+      expect(batchUpdate).toHaveBeenCalledWith('dashboard-id', [
+        {
+          range: 'Archivos Procesados!E2',
+          values: [['failed(2): Lock timeout']],
+        },
+      ]);
+    });
+
+    it('handles retry count increment from failed(2) to failed(3)', async () => {
+      vi.mocked(getValues).mockResolvedValue({
+        ok: true,
+        value: [
+          ['fileId', 'fileName', 'processedAt', 'documentType', 'status'],
+          ['test-file-id', 'test-document.pdf', '2025-01-15T10:00:00Z', 'factura_emitida', 'failed(2): Quota exceeded'],
+        ],
+      });
+
+      vi.mocked(batchUpdate).mockResolvedValue({ ok: true, value: 1 });
+
+      const result = await updateFileStatus('dashboard-id', 'test-file-id', 'failed', 'Quota exceeded');
+
+      expect(result.ok).toBe(true);
+      expect(batchUpdate).toHaveBeenCalledWith('dashboard-id', [
+        {
+          range: 'Archivos Procesados!E2',
+          values: [['failed(3): Quota exceeded']],
         },
       ]);
     });
@@ -268,7 +312,7 @@ describe('File Tracking Functions', () => {
       }
     });
 
-    it('should read column on first status update', async () => {
+    it('should read columns A:E on first status update', async () => {
       vi.mocked(getValues).mockResolvedValue({
         ok: true,
         value: [
@@ -283,7 +327,7 @@ describe('File Tracking Functions', () => {
 
       expect(result.ok).toBe(true);
       expect(getValues).toHaveBeenCalledTimes(1);
-      expect(getValues).toHaveBeenCalledWith('dashboard-id', 'Archivos Procesados!A:A');
+      expect(getValues).toHaveBeenCalledWith('dashboard-id', 'Archivos Procesados!A:E');
     });
 
     it('should re-read on each update for safety (lock-based)', async () => {
@@ -614,7 +658,7 @@ describe('File Tracking Functions', () => {
         { range: 'Archivos Procesados!E2', values: [['success']] },
       ]);
       expect(batchUpdate).toHaveBeenNthCalledWith(2, dashboardId, [
-        { range: 'Archivos Procesados!E2', values: [['failed: Test error']] },
+        { range: 'Archivos Procesados!E2', values: [['failed(1): Test error']] },
       ]);
     });
 
@@ -697,7 +741,7 @@ describe('File Tracking Functions', () => {
 
       // Should update row 3 (new position), not row 2 (cached position)
       expect(batchUpdate).toHaveBeenNthCalledWith(2, dashboardId, [
-        { range: 'Archivos Procesados!E3', values: [['failed: Extraction error']] },
+        { range: 'Archivos Procesados!E3', values: [['failed(1): Extraction error']] },
       ]);
     });
   });
@@ -811,6 +855,143 @@ describe('File Tracking Functions', () => {
 
       const { getStaleProcessingFileIds } = await import('./index.js');
       const result = await getStaleProcessingFileIds('dashboard-id', 5 * 60 * 1000);
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.error.message).toBe('Sheets API error');
+      }
+    });
+  });
+
+  describe('getRetryableFailedFileIds', () => {
+    it('returns files with "Failed to acquire lock" in status', async () => {
+      vi.mocked(getValues).mockResolvedValue({
+        ok: true,
+        value: [
+          ['fileId', 'fileName', 'processedAt', 'documentType', 'status'],
+          ['file-1', 'doc1.pdf', '2025-01-15T10:00:00Z', 'factura_emitida', 'failed: Failed to acquire lock for spreadsheet within 5000ms'],
+          ['file-2', 'doc2.pdf', '2025-01-15T11:00:00Z', 'pago_enviado', 'success'],
+        ],
+      });
+
+      const { getRetryableFailedFileIds } = await import('./index.js');
+      const result = await getRetryableFailedFileIds('dashboard-id');
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value.has('file-1')).toBe(true);
+        expect(result.value.has('file-2')).toBe(false);
+        expect(result.value.size).toBe(1);
+      }
+    });
+
+    it('returns files with retry count below max (failed(1): message)', async () => {
+      vi.mocked(getValues).mockResolvedValue({
+        ok: true,
+        value: [
+          ['fileId', 'fileName', 'processedAt', 'documentType', 'status'],
+          ['file-1', 'doc1.pdf', '2025-01-15T10:00:00Z', 'factura_emitida', 'failed(1): Failed to acquire lock'],
+          ['file-2', 'doc2.pdf', '2025-01-15T11:00:00Z', 'pago_enviado', 'failed(2): Quota exceeded'],
+        ],
+      });
+
+      const { getRetryableFailedFileIds } = await import('./index.js');
+      const result = await getRetryableFailedFileIds('dashboard-id');
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value.has('file-1')).toBe(true);
+        expect(result.value.has('file-2')).toBe(true);
+        expect(result.value.size).toBe(2);
+      }
+    });
+
+    it('does NOT return files with retry count at max (failed(3): message)', async () => {
+      vi.mocked(getValues).mockResolvedValue({
+        ok: true,
+        value: [
+          ['fileId', 'fileName', 'processedAt', 'documentType', 'status'],
+          ['file-1', 'doc1.pdf', '2025-01-15T10:00:00Z', 'factura_emitida', 'failed(3): Failed to acquire lock'],
+          ['file-2', 'doc2.pdf', '2025-01-15T11:00:00Z', 'pago_enviado', 'failed(4): Quota exceeded'],
+        ],
+      });
+
+      const { getRetryableFailedFileIds } = await import('./index.js');
+      const result = await getRetryableFailedFileIds('dashboard-id');
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        // Both files have exceeded max retries (3)
+        expect(result.value.size).toBe(0);
+      }
+    });
+
+    it('returns files with "Quota exceeded" in status', async () => {
+      vi.mocked(getValues).mockResolvedValue({
+        ok: true,
+        value: [
+          ['fileId', 'fileName', 'processedAt', 'documentType', 'status'],
+          ['file-1', 'doc1.pdf', '2025-01-15T10:00:00Z', 'factura_emitida', 'failed: Quota exceeded'],
+          ['file-2', 'doc2.pdf', '2025-01-15T11:00:00Z', 'pago_enviado', 'success'],
+        ],
+      });
+
+      const { getRetryableFailedFileIds } = await import('./index.js');
+      const result = await getRetryableFailedFileIds('dashboard-id');
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value.has('file-1')).toBe(true);
+        expect(result.value.size).toBe(1);
+      }
+    });
+
+    it('does NOT return files with other failure reasons', async () => {
+      vi.mocked(getValues).mockResolvedValue({
+        ok: true,
+        value: [
+          ['fileId', 'fileName', 'processedAt', 'documentType', 'status'],
+          ['file-1', 'doc1.pdf', '2025-01-15T10:00:00Z', 'factura_emitida', 'failed: Extraction error'],
+          ['file-2', 'doc2.pdf', '2025-01-15T11:00:00Z', 'pago_enviado', 'failed: Parse error'],
+        ],
+      });
+
+      const { getRetryableFailedFileIds } = await import('./index.js');
+      const result = await getRetryableFailedFileIds('dashboard-id');
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value.size).toBe(0);
+      }
+    });
+
+    it('does NOT return successful files', async () => {
+      vi.mocked(getValues).mockResolvedValue({
+        ok: true,
+        value: [
+          ['fileId', 'fileName', 'processedAt', 'documentType', 'status'],
+          ['file-1', 'doc1.pdf', '2025-01-15T10:00:00Z', 'factura_emitida', 'success'],
+          ['file-2', 'doc2.pdf', '2025-01-15T11:00:00Z', 'pago_enviado', 'processing'],
+        ],
+      });
+
+      const { getRetryableFailedFileIds } = await import('./index.js');
+      const result = await getRetryableFailedFileIds('dashboard-id');
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value.size).toBe(0);
+      }
+    });
+
+    it('returns error when getValues fails', async () => {
+      vi.mocked(getValues).mockResolvedValue({
+        ok: false,
+        error: new Error('Sheets API error'),
+      });
+
+      const { getRetryableFailedFileIds } = await import('./index.js');
+      const result = await getRetryableFailedFileIds('dashboard-id');
 
       expect(result.ok).toBe(false);
       if (!result.ok) {
