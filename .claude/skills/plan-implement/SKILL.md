@@ -80,14 +80,16 @@ After execution, append a new "Iteration N" section to PLANS.md:
 - Task 1: [Brief description of what was done]
 - Task 2: [Brief description of what was done]
 
-### Checklist Results
-- bug-hunter: [Passed | Found N bugs, fixed]
-- test-runner: [Passed | Failed, fixed]
-- builder: [Passed | Had warnings, fixed]
+### Files Modified
+- `path/to/file.ts` - Description of changes
 
-### Notes
-[Any important observations, edge cases discovered, or deviations from plan]
+### Pre-commit Verification
+- bug-hunter: [Passed | Found N bugs, fixed before proceeding]
+- test-runner: All N tests pass
+- builder: Zero warnings
 ```
+
+**IMPORTANT:** Do NOT add "Review Findings" or "Notes" sections. Those are reserved for `plan-review-implementation`. The iteration section should end after "Pre-commit Verification".
 
 ## Error Handling
 
