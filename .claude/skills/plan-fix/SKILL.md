@@ -1,12 +1,12 @@
 ---
 name: plan-fix
-description: Investigates bugs AND creates actionable TDD fix plans. Use when you know you want to fix something - user reports extraction errors, deployment failures, wrong data, missing matches, or prompt issues. Can be chained from investigate skill. Discovers MCPs from CLAUDE.md for debugging (logs, files, prompts).
+description: Investigates bugs AND creates actionable TDD fix plans. Creates Linear issues in Todo state. Use when you know you want to fix something - user reports extraction errors, deployment failures, wrong data, missing matches, or prompt issues. Can be chained from investigate skill. Discovers MCPs from CLAUDE.md for debugging (logs, files, prompts).
 argument-hint: <bug description>
-allowed-tools: Read, Edit, Write, Glob, Grep, Task
+allowed-tools: Read, Edit, Write, Glob, Grep, Task, mcp__linear__list_issues, mcp__linear__get_issue, mcp__linear__create_issue, mcp__linear__update_issue, mcp__linear__list_issue_labels, mcp__linear__list_issue_statuses
 disable-model-invocation: true
 ---
 
-Investigate bugs and create TDD fix plans in PLANS.md.
+Investigate bugs and create TDD fix plans in PLANS.md. Creates Linear issues in Todo state.
 
 ## Purpose
 
@@ -14,7 +14,8 @@ Investigate bugs and create TDD fix plans in PLANS.md.
 - Debug deployment failures using Railway MCP
 - Test and iterate Gemini prompts when extraction issues are suspected
 - Create investigation report documenting findings and root cause
-- Generate TDD-based fix plan in PLANS.md
+- Generate TDD-based fix plan in PLANS.md with Linear issue links
+- Create Linear issues in Todo state for each fix task
 - Does NOT implement fixes (integrates with plan-implement)
 
 ## Pre-flight Check
@@ -103,6 +104,7 @@ Write PLANS.md with this structure:
 **Created:** YYYY-MM-DD
 **Bug Report:** [Summary from $ARGUMENTS]
 **Category:** [Extraction | Deployment | Matching | Storage | Prompt]
+**Linear Issues:** [ADVA-123](https://linear.app/...), [ADVA-124](https://linear.app/...)
 
 ## Investigation
 
@@ -119,10 +121,13 @@ Write PLANS.md with this structure:
 ## Fix Plan
 
 ### Fix 1: [Title matching the issue]
+**Linear Issue:** [ADVA-123](https://linear.app/...)
+
 1. Write test in [file].test.ts for [scenario that reproduces the bug]
 2. Implement fix in [file].ts
 
 ### Fix 2: [Title]
+**Linear Issue:** [ADVA-124](https://linear.app/...)
 ...
 
 ## Post-Implementation Checklist
@@ -137,6 +142,8 @@ Write PLANS.md with this structure:
 
 **Root Cause:** [One sentence explaining why it happens]
 
+**Linear Issues:** [ADVA-123, ADVA-124, ...]
+
 **Solution Approach:** [2-3 sentences describing the fix strategy at a high level]
 
 **Scope:**
@@ -148,6 +155,19 @@ Write PLANS.md with this structure:
 - [Key risk or consideration 1]
 - [Key risk or consideration 2, if any]
 ```
+
+## Linear Issue Creation
+
+After writing the fix plan to PLANS.md, create a Linear issue for each fix:
+
+1. Use `mcp__linear__create_issue` with:
+   - `team`: "ADVA Administracion"
+   - `title`: Fix description
+   - `description`: Root cause and fix details
+   - `state`: "Todo"
+   - `labels`: Bug (or Security if security-related)
+
+2. Update PLANS.md to add `**Linear Issue:** [ADVA-N](url)` to each fix task
 
 ## Prompt/AI Testing Guidelines
 
@@ -200,6 +220,8 @@ When investigating deployment issues (if deployment MCPs available):
 - Include enough detail for another model to implement without context
 - Always include post-implementation checklist
 - For prompt issues, test multiple variations before recommending changes
+- Create Linear issues in Todo state for each fix task
+- Include Linear issue links in PLANS.md
 
 ## CRITICAL: Scope Boundaries
 
@@ -212,16 +234,19 @@ When investigating deployment issues (if deployment MCPs available):
 
 ## Termination
 
-When you finish writing PLANS.md, output the plan summary followed by the completion message:
+When you finish writing PLANS.md (and creating Linear issues), output the plan summary followed by the completion message:
 
 ```
 ✓ Plan created in PLANS.md
+✓ Linear issues created in Todo: ADVA-123, ADVA-124, ...
 
 ## Plan Summary
 
 **Problem:** [Copy from PLANS.md summary]
 
 **Root Cause:** [Copy from PLANS.md summary]
+
+**Linear Issues:** [Copy from PLANS.md summary]
 
 **Solution Approach:** [Copy from PLANS.md summary]
 

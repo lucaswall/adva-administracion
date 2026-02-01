@@ -1,20 +1,22 @@
 ---
 name: code-audit
-description: Audits codebase for bugs, security issues, memory leaks, and CLAUDE.md violations. Validates existing TODO.md items, merges with new findings, and writes reprioritized TODO.md. Use when user says "audit", "find bugs", "check security", or "review codebase". Analysis only.
+description: Audits codebase for bugs, security issues, memory leaks, and CLAUDE.md violations. Creates Linear issues in Backlog state for findings. Use when user says "audit", "find bugs", "check security", or "review codebase". Analysis only.
 argument-hint: [optional: specific area like "services" or "tests"]
-allowed-tools: Read, Edit, Write, Glob, Grep, Task, Bash
+allowed-tools: Read, Edit, Write, Glob, Grep, Task, Bash, mcp__linear__list_issues, mcp__linear__get_issue, mcp__linear__create_issue, mcp__linear__update_issue, mcp__linear__list_issue_labels, mcp__linear__list_issue_statuses
 disable-model-invocation: true
 ---
 
-Perform a comprehensive code audit and write findings to TODO.md.
+Perform a comprehensive code audit and create Linear issues in Backlog for findings.
 
 ## Pre-flight
 
 1. **Read CLAUDE.md** - Load project-specific rules to audit against (if exists)
-2. **Parse TODO.md** - Extract existing items into a tracking list (if exists):
-   - For each `## item #N [tag] [priority]` entry, record: number, tag, priority, description, file path
-   - **Audit items** (tags like `[bug]`, `[security]`, `[memory-leak]`, etc.) → mark as `pending_validation`
-   - **Non-audit items** (tags like `[feature]`, `[improvement]`, `[enhancement]`, `[refactor]`) → mark as `preserve` (skip validation, keep at top)
+2. **Query Linear Backlog** - Get existing issues using `mcp__linear__list_issues` with:
+   - `team`: "ADVA Administracion"
+   - `state`: "Backlog"
+   - For each issue, record: ID, title, labels, priority, description
+   - **Audit issues** (labels: Bug, Security, Performance, Convention, Technical Debt) → mark as `pending_validation`
+   - **Non-audit issues** (labels: Feature, Improvement) → mark as `preserve` (skip validation)
 3. **Read project config** - `tsconfig.json`, `package.json`, `.gitignore` for structure discovery
 
 ## Audit Process
@@ -24,12 +26,12 @@ Copy this checklist and track progress:
 ```
 Audit Progress:
 - [ ] Step 1: Discover project structure
-- [ ] Step 2: Validate existing TODO.md items
+- [ ] Step 2: Validate existing Linear Backlog issues
 - [ ] Step 3: Explore discovered areas systematically
 - [ ] Step 4: Check CLAUDE.md compliance
 - [ ] Step 5: Check dependency vulnerabilities
 - [ ] Step 6: Merge, deduplicate, and reprioritize
-- [ ] Step 7: Write TODO.md
+- [ ] Step 7: Create Linear Issues
 ```
 
 ### Step 1: Discover Project Structure
@@ -49,12 +51,12 @@ Dynamically discover the project structure (do NOT hardcode paths):
    - Use Task tool with `subagent_type=Explore` to understand architecture
    - If `$ARGUMENTS` specifies a focus area, prioritize that
 
-### Step 2: Validate Existing TODO.md Items
+### Step 2: Validate Existing Linear Backlog Issues
 
-For each existing item marked `pending_validation`:
+For each existing issue marked `pending_validation`:
 
 1. **Check if the issue still exists:**
-   - Read the referenced file path and line numbers
+   - Read the referenced file path and line numbers from issue description
    - Verify the problematic code is still present
    - Check git history if needed to see if it was fixed
 
@@ -62,10 +64,10 @@ For each existing item marked `pending_validation`:
 
    | Status | Criteria | Action |
    |--------|----------|--------|
-   | `fixed` | Code corrected or file removed | Remove from TODO.md |
+   | `fixed` | Code corrected or file removed | Close issue with comment |
    | `pending` | Issue appears to still exist | Carry forward to Step 6 for final classification |
 
-3. **Track validation results** - Log which items were removed as fixed
+3. **Track validation results** - Log which issues were closed as fixed
 
 Note: Final classification (`still_valid`, `needs_update`, `superseded`) happens in Step 6 after new findings are known.
 
@@ -111,18 +113,18 @@ Include critical/high vulnerabilities in findings.
 
 ### Step 6: Merge, Deduplicate, and Reprioritize
 
-Now that you have both `pending` existing items and new findings, perform final classification:
+Now that you have both `pending` existing issues and new findings, perform final classification:
 
-1. **Classify pending existing items:**
+1. **Classify pending existing issues:**
 
    | Status | Criteria | Action |
    |--------|----------|--------|
-   | `superseded` | New finding covers same issue | Remove (new finding wins) |
-   | `needs_update` | Issue exists but line numbers or severity changed | Update description/priority |
+   | `superseded` | New finding covers same issue | Close issue (new finding wins) |
+   | `needs_update` | Issue exists but line numbers or severity changed | Update issue description/priority |
    | `still_valid` | Issue unchanged, no overlapping new finding | Keep as-is |
 
 2. **Merge sources:**
-   - `still_valid` and `needs_update` existing items
+   - `still_valid` and `needs_update` existing issues
    - New findings from Steps 3-5
 
 3. **Deduplicate:**
@@ -132,46 +134,51 @@ Now that you have both `pending` existing items and new findings, perform final 
    - See [references/priority-assessment.md](references/priority-assessment.md) for impact×likelihood matrix
    - Document priority changes with reason
 
-**For category tags, see [references/category-tags.md](references/category-tags.md).**
+**For category tags and label mapping, see [references/category-tags.md](references/category-tags.md).**
 
-**For each issue, document:**
+**For each new finding, prepare:**
 - File path and approximate location
 - Clear problem description
-- Category tag
-- Priority level (critical/high/medium/low)
+- Linear label (mapped from category tag)
+- Linear priority (1=Urgent, 2=High, 3=Medium, 4=Low)
 
 **Do NOT document solutions.** Identify problems only.
 
-### Step 7: Write TODO.md
+### Step 7: Create Linear Issues
 
-Format example:
+For each new finding, use `mcp__linear__create_issue`:
 
-```markdown
-# TODO
-
-## item #1 [feature] [high]
-Add user authentication endpoint.
-
-## item #2 [improvement] [medium]
-Refactor date parsing to use shared utility.
-
-## item #3 [security] [critical]
-SQL injection vulnerability in query builder at src/db.ts:45.
-
-## item #4 [bug] [high]
-Race condition in cache invalidation at src/cache.ts:120.
+```
+team: "ADVA Administracion"
+state: "Backlog"
+title: "[Brief description of the issue]"
+description: "[File path]\n\n[Problem description]"
+priority: [1|2|3|4] (mapped from critical/high/medium/low)
+labels: [Mapped label(s)]
 ```
 
+**Label Mapping (from category tags):**
+
+| Category Tags | Linear Label |
+|---------------|--------------|
+| `[security]`, `[dependency]` | Security |
+| `[bug]`, `[async]`, `[shutdown]`, `[edge-case]`, `[type]` | Bug |
+| `[memory-leak]`, `[resource-leak]`, `[timeout]`, `[rate-limit]` | Performance |
+| `[convention]` | Convention |
+| `[dead-code]`, `[duplicate]`, `[test]`, `[practice]`, `[docs]`, `[chore]` | Technical Debt |
+| `[feature]` | Feature |
+| `[improvement]`, `[enhancement]`, `[refactor]` | Improvement |
+
+**Priority Mapping:**
+- `[critical]` → 1 (Urgent)
+- `[high]` → 2 (High)
+- `[medium]` → 3 (Medium)
+- `[low]` → 4 (Low)
+
 **Rules:**
-- Each item: `## item #N [tag] [priority]`
-- Priority: `[critical]`, `[high]`, `[medium]`, or `[low]`
-- Content: Simple paragraph explaining the problem
-- NO solutions for audit items
-- All items renumbered sequentially starting from #1
-- **Order:**
-  1. Preserved non-audit items (features, improvements) - keep original order
-  2. Audit findings by priority: critical → high → medium → low
-  3. Within same priority tier: new items first, then validated existing items
+- NO solutions in issue descriptions - identify problems only
+- Include file paths in description
+- One issue per distinct finding
 
 ## Error Handling
 
@@ -180,10 +187,10 @@ Race condition in cache invalidation at src/cache.ts:120.
 | No tsconfig.json or package.json | Use conventions: `src/`, `lib/`, `app/` |
 | npm audit fails | Note skip, continue with code audit |
 | CLAUDE.md doesn't exist | Skip project-specific checks |
-| TODO.md doesn't exist | Create new (skip validation step) |
-| TODO.md empty or malformed | Treat as no existing items |
-| Referenced file no longer exists | Mark item as `fixed` |
-| Cannot determine if item is fixed | Keep as `still_valid` |
+| Linear Backlog query fails | Continue with fresh audit (no existing issues to validate) |
+| No existing Backlog issues | Start fresh (skip validation step) |
+| Referenced file no longer exists | Mark issue as `fixed`, close in Linear |
+| Cannot determine if issue is fixed | Keep as `still_valid` |
 | Explore agent times out | Continue with Glob/Grep |
 | Large codebase (>1000 files) | Focus on `$ARGUMENTS` area or entry points |
 
@@ -199,24 +206,25 @@ Race condition in cache invalidation at src/cache.ts:120.
 Output this message and STOP:
 
 ```
-✓ Code audit complete. Findings written to TODO.md.
+✓ Code audit complete. Findings created as Linear issues in Backlog.
 
-Preserved: P non-audit items (features, improvements)
+Preserved: P non-audit issues (features, improvements)
 
-Existing audit items:
+Existing Backlog issues:
 - A kept (still valid)
-- B removed (fixed or superseded)
+- B closed (fixed or superseded)
 - C updated (description/priority changed)
 
-New findings: D issues
+New issues created: D
 
-Final TODO.md: N total items
-- P non-audit (top)
-- X critical/high priority
-- Y medium priority
-- Z low priority
+Linear Backlog summary:
+- X Urgent/High priority issues
+- Y Medium priority issues
+- Z Low priority issues
 
-Next step: Review TODO.md and use `plan-todo` to create implementation plans.
+Issue IDs: ADVA-N1, ADVA-N2, ...
+
+Next step: Review Backlog in Linear and use `plan-todo` to create implementation plans.
 ```
 
 Do not ask follow-up questions. Do not offer to fix issues.

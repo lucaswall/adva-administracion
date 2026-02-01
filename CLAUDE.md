@@ -79,12 +79,12 @@ Skills are specialized workflows in `.claude/skills/`. Descriptions drive automa
 | Skill | When to Invoke |
 |-------|----------------|
 | `investigate` | Read-only investigation that reports findings without creating plans. Use when user says "investigate", "check why", "look into", "diagnose", or wants to understand a problem before deciding action. Accesses Railway logs, Drive files, Gemini prompts. Offers to chain to plan-fix if issues are found. |
-| `plan-todo` | Convert TODO.md backlog items into TDD implementation plans. Use when user says "plan item #N", "plan all bugs", or wants to work on backlog items. Explores codebase and uses MCPs for context. |
-| `plan-inline` | Create TDD plans from direct feature requests without TODO.md. Use when user provides a task description directly like "add X feature" or "create Y function". Faster than plan-todo for ad-hoc requests. |
-| `plan-fix` | Investigate bugs and create fix plans. Use when user reports extraction errors, deployment failures, wrong data, or prompt issues. Uses Railway logs, Drive files, and Gemini prompt testing. |
-| `plan-implement` | Execute the pending plan in PLANS.md following TDD. Use after any plan-* skill creates a plan, or when user says "implement the plan". Runs tests, writes code, documents results. |
-| `plan-review-implementation` | QA review of completed implementation. Use after plan-implement finishes to verify correctness. Creates fix plans for issues found or marks COMPLETE. |
-| `code-audit` | Audit codebase for bugs, security issues, memory leaks, and violations. Use when user says "audit", "find bugs", "check security", or "review codebase". Validates existing TODO.md items, merges with new findings, and writes reprioritized TODO.md. Analysis only. |
+| `plan-todo` | Convert Linear Backlog issues into TDD implementation plans. Use when user says "plan ADVA-123", "plan all bugs", or wants to work on backlog items. Moves planned issues to Todo state. |
+| `plan-inline` | Create TDD plans from direct feature requests. Use when user provides a task description directly like "add X feature" or "create Y function". Creates Linear issues in Todo state. |
+| `plan-fix` | Investigate bugs and create fix plans. Use when user reports extraction errors, deployment failures, wrong data, or prompt issues. Creates Linear issues in Todo state. |
+| `plan-implement` | Execute the pending plan in PLANS.md following TDD. Use after any plan-* skill creates a plan, or when user says "implement the plan". Updates Linear issues: Todo→In Progress→Review. |
+| `plan-review-implementation` | QA review of completed implementation. Use after plan-implement finishes to verify correctness. Moves issues Review→Done or creates new issues in Todo for bugs found. |
+| `code-audit` | Audit codebase for bugs, security issues, memory leaks, and violations. Use when user says "audit", "find bugs", "check security", or "review codebase". Creates Linear issues in Backlog. Analysis only. |
 
 **Skill workflow:** `investigate` (optional) → `code-audit` → `plan-todo` → `plan-implement` → `plan-review-implementation` (repeat until COMPLETE)
 
@@ -118,6 +118,84 @@ Allowed: `get-logs`, `list-deployments`, `list-services`, `list-variables`, `che
 - Debug unexpected parsing results
 
 **NOT for:** Actual document analysis. If the agent needs to analyze a PDF, it should read the file directly with the Read tool.
+
+### Linear MCP (ISSUE TRACKING)
+Allowed: `list_issues`, `get_issue`, `create_issue`, `update_issue`, `list_issue_labels`, `list_issue_statuses`
+
+**Team:** ADVA Administracion
+
+**Purpose:** Issue tracking and workflow management integrated with skills.
+
+**Use cases:**
+- `code-audit` creates issues in Backlog
+- `plan-todo` reads Backlog, moves to Todo
+- `plan-inline`/`plan-fix` creates issues in Todo
+- `plan-implement` moves Todo→In Progress→Review
+- `plan-review-implementation` moves Review→Done, creates bugs in Todo
+
+## LINEAR INTEGRATION
+
+### State Flow
+
+```
+Backlog → Todo → In Progress → Review → Done
+```
+
+| State | Type | Usage |
+|-------|------|-------|
+| Backlog | backlog | New issues from code-audit, manual creation |
+| Todo | unstarted | Issues ready for implementation (moved by plan-* skills) |
+| In Progress | started | Being implemented (moved by plan-implement at task start) |
+| Review | started | Implementation complete, awaiting review |
+| Done | completed | Reviewed and approved |
+
+### State Transition Triggers
+
+| Transition | Triggered By | When |
+|------------|--------------|------|
+| → Backlog | code-audit, manual | Issue discovered or created |
+| Backlog → Todo | plan-todo | Issue selected for planning |
+| → Todo | plan-inline, plan-fix, plan-review (bugs) | Task enters PLANS.md |
+| Todo → In Progress | plan-implement | Task work **starts** (real-time) |
+| In Progress → Review | plan-implement | Task work **completes** (real-time) |
+| Review → Done | plan-review-implementation | Task passes review |
+
+### Label Mapping (code-audit tags → Linear labels)
+
+| Linear Label | code-audit Tags |
+|--------------|-----------------|
+| Security | `[security]`, `[dependency]` |
+| Bug | `[bug]`, `[async]`, `[shutdown]`, `[edge-case]`, `[type]` |
+| Performance | `[memory-leak]`, `[resource-leak]`, `[timeout]`, `[rate-limit]` |
+| Convention | `[convention]` |
+| Technical Debt | `[dead-code]`, `[duplicate]`, `[test]`, `[practice]`, `[docs]`, `[chore]` |
+| Feature | `[feature]` |
+| Improvement | `[improvement]`, `[enhancement]`, `[refactor]` |
+
+### Priority Mapping
+
+| code-audit Priority | Linear Priority |
+|---------------------|-----------------|
+| `[critical]` | 1 (Urgent) |
+| `[high]` | 2 (High) |
+| `[medium]` | 3 (Medium) |
+| `[low]` | 4 (Low) |
+
+### PLANS.md Format with Linear Links
+
+Each task in PLANS.md includes a Linear issue link:
+
+```markdown
+### Task 1: Add parseResumenBroker function
+**Linear Issue:** [ADVA-123](https://linear.app/...)
+
+1. Write test in src/gemini/parser.test.ts
+2. Run verifier (expect fail)
+3. Implement in src/gemini/parser.ts
+4. Run verifier (expect pass)
+```
+
+**Manual Issue Creation:** Create issues directly in Linear's Backlog state (equivalent to the former TODO.md editing).
 
 ## STYLE GUIDE
 

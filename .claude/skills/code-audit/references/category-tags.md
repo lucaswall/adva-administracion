@@ -39,4 +39,29 @@
 | `[docs]` | Documentation updates |
 | `[chore]` | Maintenance tasks |
 
-Non-audit items are preserved at the top of TODO.md in their original order.
+Non-audit issues are preserved in Linear Backlog without validation.
+
+## Linear Label Mapping
+
+When creating Linear issues, map category tags to Linear labels:
+
+| Category Tags | Linear Label |
+|---------------|--------------|
+| `[security]`, `[dependency]` | Security |
+| `[bug]`, `[async]`, `[shutdown]`, `[edge-case]`, `[type]` | Bug |
+| `[memory-leak]`, `[resource-leak]`, `[timeout]`, `[rate-limit]` | Performance |
+| `[convention]` | Convention |
+| `[dead-code]`, `[duplicate]`, `[test]`, `[practice]`, `[docs]`, `[chore]` | Technical Debt |
+| `[feature]` | Feature |
+| `[improvement]`, `[enhancement]`, `[refactor]` | Improvement |
+
+## Linear Priority Mapping
+
+Map priority levels to Linear priority values:
+
+| Priority Tag | Linear Priority |
+|--------------|-----------------|
+| `[critical]` | 1 (Urgent) |
+| `[high]` | 2 (High) |
+| `[medium]` | 3 (Medium) |
+| `[low]` | 4 (Low) |

@@ -1,19 +1,20 @@
 ---
 name: plan-todo
-description: Convert TODO.md backlog items into TDD implementation plans. Use when user says "plan item #N", "plan all bugs", "work on backlog", or wants to implement items from TODO.md. Explores codebase for patterns and discovers available MCPs from CLAUDE.md.
-argument-hint: [item-selector] e.g., "item #2", "all bugs", "the file naming issue"
-allowed-tools: Read, Edit, Write, Glob, Grep, Task
+description: Convert Linear Backlog issues into TDD implementation plans. Use when user says "plan ADVA-123", "plan all bugs", "work on backlog", or wants to implement issues from Linear. Moves planned issues to Todo state. Explores codebase for patterns and discovers available MCPs from CLAUDE.md.
+argument-hint: [issue-selector] e.g., "ADVA-123", "all Bug issues", "the file naming issue"
+allowed-tools: Read, Edit, Write, Glob, Grep, Task, mcp__linear__list_issues, mcp__linear__get_issue, mcp__linear__update_issue, mcp__linear__list_issue_labels, mcp__linear__list_issue_statuses
 disable-model-invocation: true
 ---
 
-Convert TODO.md items into a structured TDD implementation plan in PLANS.md.
+Convert Linear Backlog issues into a structured TDD implementation plan in PLANS.md.
 
 ## Purpose
 
-- Convert backlog items from TODO.md into actionable TDD implementation plans
+- Convert backlog issues from Linear into actionable TDD implementation plans
+- Move planned issues from Backlog to Todo state in Linear
 - Explore codebase to understand existing patterns and find relevant files
 - Use MCPs to gather additional context (Drive files, spreadsheets, deployments)
-- Generate detailed, implementable plans with full file paths
+- Generate detailed, implementable plans with full file paths and Linear issue links
 
 ## Pre-flight Check
 
@@ -26,13 +27,13 @@ If PLANS.md is empty or has "Status: COMPLETE" → proceed with planning.
 
 ## Arguments
 
-Default: plan the **first item** in TODO.md. Override with $ARGUMENTS:
+Default: plan the **first issue** in Linear Backlog. Override with $ARGUMENTS:
 
 | Selector | Example | Result |
 |----------|---------|--------|
-| Item number | `bug #2`, `improvement #5` | Specific item |
-| Category | `all bugs`, `all improvements` | All items in category |
-| Natural language | `the file naming issue` | Fuzzy match |
+| Issue ID | `ADVA-123` | Specific issue |
+| Label filter | `all Bug issues`, `all Security issues` | All issues with label |
+| Natural language | `the file naming issue` | Fuzzy match on title/description |
 
 ## Context Gathering
 
@@ -57,16 +58,16 @@ Default: plan the **first item** in TODO.md. Override with $ARGUMENTS:
 ## Workflow
 
 1. **Read PLANS.md** - Pre-flight check
-2. **Read TODO.md** - Identify items to plan
+2. **Query Linear Backlog** - Use `mcp__linear__list_issues` with `team=ADVA Administracion, state=Backlog` to identify issues to plan
 3. **Read CLAUDE.md** - Understand TDD workflow, agents, project rules, available MCPs
 4. **Explore codebase** - Use Glob/Grep/Task to find relevant files and understand patterns
-5. **Gather MCP context** - If the TODO item relates to:
+5. **Gather MCP context** - If the issue relates to:
    - Document processing → Check Drive files, spreadsheet schemas
    - Deployment → Check service status, recent logs
    - Extraction issues → Check current prompts, test with Gemini MCP
 6. **Generate plan** - Create TDD tasks with test-first approach
-7. **Write PLANS.md** - Overwrite with new plan
-8. **Update TODO.md** - Remove planned items and reformat remaining items
+7. **Write PLANS.md** - Overwrite with new plan, include Linear issue links
+8. **Move issues to Todo** - Use `mcp__linear__update_issue` to change state from Backlog to Todo
 
 ## Codebase Exploration Guidelines
 
@@ -92,7 +93,8 @@ Default: plan the **first item** in TODO.md. Override with $ARGUMENTS:
 # Implementation Plan
 
 **Created:** YYYY-MM-DD
-**Source:** [Which items from TODO.md]
+**Source:** Linear Backlog issues
+**Linear Issues:** [ADVA-123](https://linear.app/...), [ADVA-124](https://linear.app/...)
 
 ## Context Gathered
 
@@ -108,12 +110,16 @@ Default: plan the **first item** in TODO.md. Override with $ARGUMENTS:
 ## Original Plan
 
 ### Task 1: [Name]
+**Linear Issue:** [ADVA-123](https://linear.app/...)
+
 1. Write test in [file].test.ts for [function/scenario]
 2. Run verifier (expect fail)
 3. Implement [function] in [file].ts
 4. Run verifier (expect pass)
 
 ### Task 2: [Name]
+**Linear Issue:** [ADVA-124](https://linear.app/...)
+
 1. Write test...
 2. Run verifier...
 3. Implement...
@@ -129,7 +135,7 @@ Default: plan the **first item** in TODO.md. Override with $ARGUMENTS:
 
 **Objective:** [One sentence describing what this plan accomplishes]
 
-**Source Items:** [List the TODO.md items being planned, e.g., "#1, #3, #5"]
+**Linear Issues:** [ADVA-123, ADVA-124, ...]
 
 **Approach:** [2-3 sentences describing the implementation strategy at a high level]
 
@@ -198,37 +204,27 @@ Discover available MCPs from CLAUDE.md's "MCP SERVERS" section. Common patterns:
 
 If CLAUDE.md doesn't list MCPs, skip MCP context gathering.
 
-## TODO.md Reformatting
+## Linear State Management
 
-After removing planned items, **always reformat TODO.md** using the standard item format:
+After writing PLANS.md, move the planned issues to Todo state:
 
-```markdown
-## item #1 [tag]
-Description of first issue.
+1. For each issue included in the plan:
+   - Use `mcp__linear__update_issue` with `state: "Todo"`
+   - This moves the issue from Backlog to Todo
 
-## item #2 [tag]
-Description of second issue.
-```
+2. Issues remain in Backlog if not selected for planning
 
-**Reformatting rules:**
-- Preserve the existing top-level heading (if any)
-- Renumber all remaining items sequentially starting from #1
-- Preserve relative order (priority ordering)
-- Keep original tags in brackets: `[security]`, `[bug]`, `[convention]`, etc.
-- Each item is a `## item #N [tag]` heading followed by a description paragraph
-- If original items had different formats, normalize them to this structure
-- If the item had no tag, infer one from context or use `[task]`
-
-This ensures TODO.md stays consistent regardless of how items were originally added.
+**State flow:** Backlog → Todo (when planned) → In Progress → Review → Done
 
 ## Error Handling
 
 | Situation | Action |
 |-----------|--------|
 | PLANS.md has incomplete work | Stop and tell user to review/clear PLANS.md first |
-| TODO.md doesn't exist or is empty | Stop and tell user "No items in TODO.md to plan" |
+| Linear Backlog is empty | Stop and tell user "No issues in Linear Backlog to plan" |
+| Linear MCP unavailable | Stop and tell user to authenticate with Linear |
 | CLAUDE.md doesn't exist | Continue without project-specific rules, use general TDD practices |
-| Item selector matches nothing | List available items and ask user to clarify |
+| Issue selector matches nothing | List available Backlog issues and ask user to clarify |
 | Codebase exploration times out | Continue with partial context, note limitation in plan |
 | MCP not available | Skip MCP context gathering, note in plan what was skipped |
 
@@ -241,7 +237,8 @@ This ensures TODO.md stays consistent regardless of how items were originally ad
 - No manual verification steps - use agents only
 - Tasks must be implementable without additional context
 - Always include post-implementation checklist
-- Remove planned items from TODO.md and reformat remaining items
+- Move planned issues from Backlog to Todo in Linear
+- Include Linear issue links in PLANS.md tasks
 
 ## CRITICAL: Scope Boundaries
 
@@ -254,17 +251,17 @@ This ensures TODO.md stays consistent regardless of how items were originally ad
 
 ## Termination
 
-When you finish writing PLANS.md (and updating TODO.md), output the plan summary followed by the completion message:
+When you finish writing PLANS.md (and moving issues to Todo), output the plan summary followed by the completion message:
 
 ```
 ✓ Plan created in PLANS.md
-✓ TODO.md updated (planned items removed, remaining items renumbered)
+✓ Linear issues moved to Todo: ADVA-123, ADVA-124, ...
 
 ## Plan Summary
 
 **Objective:** [Copy from PLANS.md summary]
 
-**Source Items:** [Copy from PLANS.md summary]
+**Linear Issues:** [Copy from PLANS.md summary]
 
 **Approach:** [Copy from PLANS.md summary]
 

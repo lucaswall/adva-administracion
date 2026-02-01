@@ -243,3 +243,28 @@ Follow conventional commits format:
 | Tests failing | Run `npm run test:watch` to debug in TDD mode |
 | Google API errors | Verify service account key is base64-encoded correctly |
 | "Permission denied" | Share Drive folder with service account email |
+
+---
+
+## Linear Integration
+
+This project uses Linear for issue tracking via MCP (Model Context Protocol).
+
+### Authentication
+
+1. Run `/mcp` in Claude Code to authenticate with Linear
+2. Follow the OAuth flow in your browser
+3. Authentication tokens are stored in `~/.mcp-auth`
+
+### Workflow
+
+- **Create issues:** Use Linear UI or `code-audit` skill
+- **Plan work:** Use `plan-todo` to convert Backlog issues to plans
+- **Track progress:** Issues move through states automatically:
+  - Backlog → Todo → In Progress → Review → Done
+
+### Required Linear Setup
+
+Team "ADVA Administracion" must have:
+- **States:** Backlog, Todo, In Progress, Review, Done
+- **Labels:** Security, Bug, Performance, Convention, Technical Debt, Feature, Improvement

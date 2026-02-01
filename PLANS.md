@@ -1,195 +1,389 @@
 # Implementation Plan
 
 **Created:** 2026-02-01
-**Source:** TODO.md items #1, #2, #3, #4, #5, #6, #7
+**Source:** Linear integration for project workflow management
 
 ## Context Gathered
 
-### Codebase Analysis
+### Current Workflow Analysis
 
-**Agent files:**
-- `.claude/agents/commit-bot.md` - Uses `git add -A` at line 18 (item #1)
-- `.claude/agents/pr-creator.md` - Uses `model: haiku` at line 5 (item #2)
-- `.claude/agents/test-runner.md` - To be merged (item #3)
-- `.claude/agents/builder.md` - To be merged (item #3)
+**File-based workflow (to be replaced):**
+- `TODO.md` - Backlog items with `## item #N [tag] [priority]` format
+- `PLANS.md` - Implementation plans with tasks, iterations, and status
 
-**Skill files:**
-- `.claude/skills/investigate/SKILL.md` - Missing MCP documentation (item #5), needs differentiation (item #7)
-- `.claude/skills/plan-fix/SKILL.md` - Needs differentiation (item #7)
-- `.claude/skills/plan-review-implementation/SKILL.md` - Missing context management (item #6)
+**Skills that interact with TODO.md/PLANS.md:**
+| Skill | Current Behavior | Linear Integration |
+|-------|------------------|-------------------|
+| `code-audit` | Writes findings to TODO.md | Creates Linear issues in **Backlog** |
+| *(manual)* | User edits TODO.md directly | User creates issues in **Backlog** via Linear UI |
+| `plan-todo` | Reads TODO.md, writes PLANS.md, removes items | Reads Linear **Backlog**, writes PLANS.md with links, moves to **Todo** |
+| `plan-inline` | Writes PLANS.md directly | Writes PLANS.md, creates issues in **Todo** |
+| `plan-fix` | Writes PLANS.md directly | Writes PLANS.md, creates issues in **Todo** |
+| `plan-implement` | Adds iterations to PLANS.md | + Real-time per task: **Todo** → **In Progress** (start) → **Review** (complete) |
+| `plan-review-implementation` | Adds review findings, marks COMPLETE | + Moves **Review** → **Done**; creates new **Todo** issues for bugs found |
+| `investigate` | References TODO.md in chaining | Update to reference Linear instead |
 
-**Files referencing test-runner/builder (need updates for item #3):**
-- `CLAUDE.md` - SUBAGENTS table, TDD workflow, commands section
-- `.claude/skills/plan-implement/SKILL.md` - TDD cycle, checklist, error handling
-- `.claude/skills/plan-fix/SKILL.md` - Post-implementation checklist
-- `.claude/skills/plan-inline/SKILL.md` - Examples and checklist
-- `.claude/skills/plan-todo/SKILL.md` - Examples and checklist
+### Linear Team Configuration
 
-### tools-improve Guidance
+**Team:** ADVA Administracion
 
-From `.claude/skills/tools-improve/SKILL.md`:
-- **Max 3-4 custom subagents** - Currently 5 (commit-bot, pr-creator, bug-hunter, test-runner, builder)
-- **Model selection:** haiku=fast/cheap, sonnet=balanced, opus=complex reasoning
-- **Descriptions are critical** - Include trigger phrases ("Use when...", "Use proactively after...")
+**Workflow States:**
+| State | Type | Usage |
+|-------|------|-------|
+| Backlog | backlog | New issues from code-audit, manual creation |
+| Todo | unstarted | Issues ready for implementation (moved by plan-todo/inline/fix) |
+| In Progress | started | Being implemented (moved by plan-implement at task start) |
+| Review | started | Implementation complete, awaiting review (moved by plan-implement at task end) |
+| Done | completed | Reviewed and approved (moved by plan-review-implementation) |
+| Canceled | canceled | Abandoned issues |
+| Duplicate | canceled | Duplicate of another issue |
+
+**State Flow:** Backlog → Todo → In Progress → Review → Done
+
+**Bug Loop:** When plan-review-implementation finds bugs, it creates NEW issues in Todo. These new issues go through the full cycle (Todo → In Progress → Review → Done) when the Fix Plan is implemented.
+
+**State Transition Triggers:**
+| Transition | Triggered By | When |
+|------------|--------------|------|
+| → Todo | plan-todo, plan-inline, plan-fix, plan-review (bugs) | Task enters PLANS.md |
+| Todo → In Progress | plan-implement | Task work **starts** (real-time) |
+| In Progress → Review | plan-implement | Task work **completes** (real-time) |
+| Review → Done | plan-review-implementation | Task passes review |
+
+**Labels:**
+| Label | Color | Maps to code-audit tags |
+|-------|-------|------------------------|
+| Security | Red | `[security]`, `[dependency]` |
+| Bug | Pink | `[bug]`, `[async]`, `[shutdown]`, `[edge-case]`, `[type]` |
+| Performance | Green | `[memory-leak]`, `[resource-leak]`, `[timeout]`, `[rate-limit]` |
+| Convention | Gray | `[convention]` |
+| Technical Debt | Orange | `[dead-code]`, `[duplicate]`, `[test]`, `[practice]`, `[docs]`, `[chore]` |
+| Feature | Purple | `[feature]` |
+| Improvement | Blue | `[improvement]`, `[enhancement]`, `[refactor]` |
+
+**Priority Mapping:**
+| TODO.md Priority | Linear Priority |
+|------------------|-----------------|
+| `[critical]` | 1 (Urgent) |
+| `[high]` | 2 (High) |
+| `[medium]` | 3 (Medium) |
+| `[low]` | 4 (Low) |
+
+### Skills Architecture Understanding
+
+**Skills are markdown instruction files, not TypeScript modules:**
+- Skills live in `.claude/skills/<name>/SKILL.md`
+- They contain frontmatter (`allowed-tools`, `description`, etc.) + instructions
+- MCP tools are used directly via frontmatter permissions
+- No TypeScript code or unit tests for skills
+
+**To add Linear MCP to a skill:**
+1. Add `mcp__linear__*` to `allowed-tools` in frontmatter
+2. Update instructions to use Linear MCP tools (list_issues, create_issue, update_issue)
+
+### PLANS.md Format with Linear Links
+
+Each task will include a Linear issue link:
+
+```markdown
+### Task 1: Add parseResumenBroker function
+**Linear Issue:** [ADVA-123](https://linear.app/...)
+
+1. Write test in src/gemini/parser.test.ts
+2. Run verifier (expect fail)
+3. Implement in src/gemini/parser.ts
+4. Run verifier (expect pass)
+```
 
 ---
 
 ## Original Plan
 
-### Task 1: Fix commit-bot to stage specific files instead of git add -A
+### Task 1: Update CLAUDE.md with Linear integration documentation
 
-**Problem:** `commit-bot` uses `git add -A` which can stage sensitive files (.env, credentials) or large binaries.
+1. Edit `CLAUDE.md`:
+   - Add Linear MCP to "MCP SERVERS" section with allowed operations:
+     - `list_issues`, `get_issue`, `create_issue`, `update_issue`
+     - `list_issue_labels`, `list_issue_statuses`
+   - Remove TODO.md references from skill workflow section
+   - Add "LINEAR INTEGRATION" section documenting:
+     - State flow: Backlog → Todo → In Progress → Review → Done
+     - Label mapping table (code-audit tags → Linear labels)
+     - Priority mapping table
+     - Which skills trigger which state transitions
+     - PLANS.md format with Linear issue links
+     - Manual issue creation in Backlog (equivalent to TODO.md editing)
 
-1. Edit `.claude/agents/commit-bot.md`:
-   - Replace step 2 "Stage changes" workflow from:
+2. Verify: Read updated CLAUDE.md
+
+### Task 2: Update code-audit skill to create Linear issues
+
+1. Edit `.claude/skills/code-audit/SKILL.md`:
+   - Add `mcp__linear__*` to `allowed-tools` frontmatter
+   - Update description: "Creates Linear issues in Backlog" instead of "writes TODO.md"
+   - Update "Pre-flight" section:
+     - Query existing Backlog issues using `mcp__linear__list_issues` with `state=Backlog, team=ADVA Administracion`
+     - Remove TODO.md parsing
+   - Update "Step 6: Merge, Deduplicate, and Reprioritize":
+     - Merge new findings with existing Backlog issues (match by title similarity)
+   - Update "Step 7: Write TODO.md" → "Step 7: Create Linear Issues":
+     - Use `mcp__linear__create_issue` for each new finding
+     - Set `team` to "ADVA Administracion"
+     - Set `state` to "Backlog"
+     - Map priority: critical→1, high→2, medium→3, low→4
+     - Map tags to labels:
+       - `[security]`, `[dependency]` → Security
+       - `[bug]`, `[async]`, `[shutdown]`, `[edge-case]`, `[type]` → Bug
+       - `[memory-leak]`, `[resource-leak]`, `[timeout]`, `[rate-limit]` → Performance
+       - `[convention]` → Convention
+       - `[dead-code]`, `[duplicate]`, `[test]`, `[practice]` → Technical Debt
+       - `[feature]` → Feature
+       - `[improvement]`, `[enhancement]`, `[refactor]` → Improvement
+   - Update "Termination" message to reference Linear and show issue count
+
+2. Update `.claude/skills/code-audit/references/category-tags.md`:
+   - Add "Linear Label Mapping" section with the tag-to-label mapping
+
+3. Verify: Read updated skill files
+
+### Task 3: Update plan-todo skill to read from Linear Backlog
+
+1. Edit `.claude/skills/plan-todo/SKILL.md`:
+   - Add `mcp__linear__*` to `allowed-tools` frontmatter
+   - Update description: "Convert Linear Backlog issues into TDD plans"
+   - Remove all TODO.md references throughout
+   - Update "Arguments" section:
+     - Selectors now reference Linear issues: `ADVA-123`, `all bugs`, `all security`, `backlog items`
+     - Can filter by label: "all Bug issues", "all Security issues"
+   - Update "Workflow":
+     - Step 2: Query Linear Backlog using `mcp__linear__list_issues` with `state=Backlog, team=ADVA Administracion`
+     - Step 7: Write PLANS.md with Linear issue links in each task header
+     - Step 8: Move selected issues to "Todo" state using `mcp__linear__update_issue`
+   - Update "PLANS.md Structure":
+     - Add `**Linear Issues:** [ADVA-123](url), [ADVA-124](url)` to header
+     - Add `**Linear Issue:** [ADVA-123](url)` to each task
+   - Remove "TODO.md Reformatting" section entirely
+   - Update "Termination" message
+
+2. Verify: Read updated skill file
+
+### Task 4: Update plan-inline skill to create Linear issues
+
+1. Edit `.claude/skills/plan-inline/SKILL.md`:
+   - Add `mcp__linear__*` to `allowed-tools` frontmatter
+   - Update description to mention Linear issue creation
+   - Add "Linear Issue Creation" section after "Generate plan":
+     ```markdown
+     ## Linear Issue Creation
+
+     After writing PLANS.md, create a Linear issue for each task:
+     1. Use `mcp__linear__create_issue` with:
+        - `team`: "ADVA Administracion"
+        - `title`: Task name
+        - `description`: Task details from PLANS.md
+        - `state`: "Todo"
+        - `labels`: Infer from task type (Feature, Improvement, Bug)
+     2. Update PLANS.md to add `**Linear Issue:** [ADVA-N](url)` to each task
      ```
-     2. **Stage changes**
-        - `git add -A`
+   - Update "PLANS.md Structure":
+     - Add `**Linear Issues:** [ADVA-123](url), [ADVA-124](url)` to header
+     - Add `**Linear Issue:** [ADVA-123](url)` to each task
+   - Update "Termination" message to include Linear issue links
+
+2. Verify: Read updated skill file
+
+### Task 5: Update plan-fix skill to create Linear issues
+
+1. Edit `.claude/skills/plan-fix/SKILL.md`:
+   - Add `mcp__linear__*` to `allowed-tools` frontmatter
+   - Update description to mention Linear issue creation
+   - Add "Linear Issue Creation" section after documenting findings:
+     ```markdown
+     ## Linear Issue Creation
+
+     After writing the fix plan to PLANS.md, create a Linear issue for each fix:
+     1. Use `mcp__linear__create_issue` with:
+        - `team`: "ADVA Administracion"
+        - `title`: Fix description
+        - `description`: Root cause and fix details
+        - `state`: "Todo"
+        - `labels`: Bug (or Security if security-related)
+     2. Update PLANS.md to add `**Linear Issue:** [ADVA-N](url)` to each fix task
      ```
-   - To analyzing untracked/modified files and staging specific files:
+   - Update "PLANS.md Structure" in "Document Findings":
+     - Add `**Linear Issues:** [ADVA-123](url)` to header
+     - Add `**Linear Issue:** [ADVA-123](url)` to each fix task
+   - Update "Termination" message
+
+2. Verify: Read updated skill file
+
+### Task 6: Update plan-implement skill for Linear state transitions
+
+1. Edit `.claude/skills/plan-implement/SKILL.md`:
+   - Add `mcp__linear__*` to `allowed-tools` frontmatter
+   - Add "Linear State Management" section after "Identify What to Execute":
+     ```markdown
+     ## Linear State Management
+
+     State transitions happen **in real-time, task by task** (not batched at the end).
+
+     **When STARTING a task:**
+     1. Extract Linear issue ID from task's `**Linear Issue:** [ADVA-N](url)` line
+     2. IMMEDIATELY move issue to "In Progress" using `mcp__linear__update_issue`
+     3. Then begin the TDD cycle
+
+     **When COMPLETING a task:**
+     1. After verifier passes, IMMEDIATELY move issue to "Review" using `mcp__linear__update_issue`
+     2. Then proceed to the next task
+
+     If task has no Linear issue link, skip state updates (legacy plan).
      ```
-     2. **Analyze and stage changes**
-        - `git status --porcelain=v1` - Get list of changed files
-        - Review each file - skip if matches: `.env*`, `*.key`, `*.pem`, `credentials*`, `secrets*`, `node_modules/`, `dist/`, `*.log`
-        - Stage specific files: `git add <file1> <file2> ...`
-        - If all files were skipped → report "No safe files to commit" and stop
+   - Update "Execution Workflow" - integrate state transitions into the TDD cycle:
+     ```markdown
+     For each task:
+     1. Move Linear issue: Todo → In Progress
+     2. Write test
+     3. Run verifier (expect fail)
+     4. Implement
+     5. Run verifier (expect pass)
+     6. Move Linear issue: In Progress → Review
+     7. Proceed to next task
      ```
-   - Update the Rules section to add: "Never stage files matching sensitive patterns (.env*, credentials, secrets, *.key, *.pem)"
+   - Update "Document Results" section:
+     - Include Linear state changes in iteration summary:
+       ```markdown
+       ### Linear Updates
+       - ADVA-123: Todo → In Progress → Review
+       - ADVA-124: Todo → In Progress → Review
+       ```
 
-2. Verify: Read the updated file to confirm changes are correct
+2. Verify: Read updated skill file
 
-### Task 2: Change pr-creator model from haiku to sonnet
-
-**Problem:** `pr-creator` performs complex analysis but uses `haiku` model.
-
-1. Edit `.claude/agents/pr-creator.md` line 5:
-   - Change `model: haiku` to `model: sonnet`
-
-2. Verify: Read the updated file to confirm the model is now sonnet
-
-### Task 3: Create verifier agent by merging test-runner and builder
-
-**Problem:** Too many custom subagents (5) exceeds recommended 3-4 limit.
-
-1. Create `.claude/agents/verifier.md` with combined functionality:
-   - Runs tests first (`npm test`)
-   - Then runs build (`npm run build`)
-   - Reports combined results
-   - Include trigger phrases for better auto-discovery
-
-2. Delete `.claude/agents/test-runner.md`
-
-3. Delete `.claude/agents/builder.md`
-
-4. Update `CLAUDE.md`:
-   - Replace `test-runner` and `builder` entries in SUBAGENTS table with single `verifier` entry
-   - Update TDD workflow references
-   - Update Post-Implementation Checklist
-   - Update COMMANDS section comments
-
-5. Update `.claude/skills/plan-implement/SKILL.md`:
-   - Replace all `test-runner` references with `verifier`
-   - Replace all `builder` references with `verifier`
-   - Update TDD cycle to use single agent
-   - Update error handling table
-
-6. Update `.claude/skills/plan-fix/SKILL.md`:
-   - Update Post-Implementation Checklist
-
-7. Update `.claude/skills/plan-inline/SKILL.md`:
-   - Update examples and checklist
-
-8. Update `.claude/skills/plan-todo/SKILL.md`:
-   - Update examples and checklist
-
-9. Verify: Run `verifier` agent to confirm it works (tests pass, build succeeds)
-
-### Task 4: Add trigger phrases to verifier agent
-
-**Depends on:** Task 3
-
-**Problem:** Merged agent needs trigger phrases for better auto-discovery.
-
-1. This is handled in Task 3 when creating verifier.md - the description will include:
-   - "Use proactively after writing tests or modifying code"
-   - "Use when user says 'run tests', 'check tests', 'verify build', 'check warnings'"
-
-2. Verify: Confirm description includes trigger phrases
-
-### Task 5: Add MCP tools to investigate skill allowed-tools
-
-**Problem:** `investigate` skill references MCPs but allowed-tools doesn't include them.
-
-1. Edit `.claude/skills/investigate/SKILL.md` line 5:
-   - Change from: `allowed-tools: Read, Glob, Grep, Task, Bash`
-   - Change to: `allowed-tools: Read, Glob, Grep, Task, Bash, mcp__Railway__*, mcp__gdrive__*, mcp__gemini__*`
-   - This allows the skill to use Railway, Google Drive, and Gemini MCP tools without permission prompts
-
-2. Verify: Read the updated file to confirm MCP tools are in allowed-tools
-
-### Task 6: Add context management to plan-review-implementation
-
-**Problem:** Skill can run out of context on large reviews without graceful handling.
+### Task 7: Update plan-review-implementation skill for Linear state transitions
 
 1. Edit `.claude/skills/plan-review-implementation/SKILL.md`:
-   - Add "Context Management & Continuation" section after "Rules" section
-   - Copy the pattern from plan-implement with adjusted heuristics:
-     - Each file reviewed: ~1-2% context
-     - Each iteration reviewed: ~3-5% context
-     - Use same 60% threshold and decision logic
-   - Add instruction to stop gracefully and tell user to run `/plan-review-implementation` again
+   - Add `mcp__linear__*` to `allowed-tools` frontmatter
+   - Add "Linear State Management" section after "Pre-flight Check":
+     ```markdown
+     ## Linear State Management
 
-2. Verify: Read the updated file to confirm context management is in place
+     This skill moves issues from **Review → Done** (the final transition).
 
-### Task 7: Clarify investigate vs plan-fix differentiation and add skill chaining
+     **If task passes review (no issues):**
+     - Move issue from "Review" to "Done" using `mcp__linear__update_issue`
 
-**Problem:** Skills have overlapping evidence gathering but different purposes. Users may choose wrong skill.
+     **If task needs fixes (issues found):**
+     - Move original issue from "Review" to "Done" (the original task was completed)
+     - Create NEW Linear issue(s) in "Todo" for each bug/fix using `mcp__linear__create_issue`:
+       - `team`: "ADVA Administracion"
+       - `state`: "Todo" (will enter PLANS.md via Fix Plan)
+       - `labels`: Bug
+     - Add new issue links to the Fix Plan section in PLANS.md
+     - These new issues will go through the full cycle when plan-implement runs the Fix Plan
+     ```
+   - Update "Document Findings" sections to include Linear updates
+   - Update "After ALL Iterations Reviewed":
+     - When marking COMPLETE, all issues should be in Done state
+
+2. Verify: Read updated skill file
+
+### Task 8: Update investigate skill to reference Linear
 
 1. Edit `.claude/skills/investigate/SKILL.md`:
-   - Update description to be more explicit: "Read-only investigation that reports findings WITHOUT creating plans or modifying code"
-   - Update Termination section to actively offer skill chaining:
-     ```
-     If bugs or issues were found that need fixing:
-     > "Would you like me to create a fix plan? Say 'yes' or run `/plan-fix` with the context above."
-     ```
+   - Update "Termination" section:
+     - Change references from TODO.md to Linear
+     - Update chaining message:
+       ```markdown
+       Would you like me to create a fix plan? Say 'yes' or run `/plan-fix` with the context above.
+       (Fix plans will create Linear issues in Todo state)
+       ```
+   - No need for Linear MCP access (investigate is read-only)
 
-2. Edit `.claude/skills/plan-fix/SKILL.md`:
-   - Update description to be more explicit: "Investigates bugs AND creates actionable TDD fix plans. Use when you know you want to fix something."
-   - Add note that this skill can be chained from investigate
+2. Verify: Read updated skill file
 
-3. Verify: Read both files to confirm differentiation is clear
+### Task 9: Delete TODO.md and update references
+
+1. Delete `TODO.md` file (if it exists)
+2. Search for remaining TODO.md references using Grep in `.claude/` directory
+3. Update any remaining references found
+4. Verify: Confirm no TODO.md references remain
+
+### Task 10: Add Linear authentication documentation
+
+1. Edit `DEVELOPMENT.md` to add "Linear Integration" section:
+   ```markdown
+   ## Linear Integration
+
+   This project uses Linear for issue tracking via MCP (Model Context Protocol).
+
+   ### Authentication
+
+   1. Run `/mcp` in Claude Code to authenticate with Linear
+   2. Follow the OAuth flow in your browser
+   3. Authentication tokens are stored in `~/.mcp-auth`
+
+   ### Workflow
+
+   - **Create issues:** Use Linear UI or `code-audit` skill
+   - **Plan work:** Use `plan-todo` to convert Backlog issues to plans
+   - **Track progress:** Issues move through states automatically:
+     - Backlog → Todo → In Progress → Review → Done
+
+   ### Required Linear Setup
+
+   Team "ADVA Administracion" must have:
+   - **States:** Backlog, Todo, In Progress, Review, Done
+   - **Labels:** Security, Bug, Performance, Convention, Technical Debt, Feature, Improvement
+   ```
+
+2. Verify: Read the documentation file
 
 ---
 
 ## Post-Implementation Checklist
 
-1. Run `bug-hunter` agent - Review changes for bugs (n/a for markdown changes)
-2. Run `verifier` agent - Verify all tests pass and build succeeds (after Task 3)
-3. Verify all modified files are syntactically correct markdown
+1. Run `bug-hunter` agent - Review changes for bugs
+2. Run `verifier` agent - Verify all tests pass and zero warnings
 
 ---
 
 ## Plan Summary
 
-**Objective:** Improve Claude Code agents and skills by fixing a security issue, upgrading model quality, reducing agent count, and improving skill documentation and workflow.
+**Objective:** Replace file-based TODO.md workflow with Linear issue tracking, keeping PLANS.md as the implementation detail record while synchronizing issue states with Linear.
 
-**Source Items:** #1, #2, #3, #4, #5, #6, #7
+**Source:** Direct feature request for Linear integration
 
-**Approach:** Fix commit-bot to stage specific files instead of using dangerous `git add -A`. Upgrade pr-creator to sonnet for better analysis quality. Merge test-runner and builder into a single verifier agent to reduce agent count from 5 to 4. Add context management to plan-review-implementation skill. Clarify skill differentiation and add chaining between investigate and plan-fix.
+**Approach:** Update all skills that interact with TODO.md/PLANS.md to use Linear MCP for issue management. Each task in PLANS.md maps 1:1 to a Linear issue. Skills trigger state transitions as work progresses through the pipeline.
 
 **Scope:**
-- Tasks: 7 (with Task 4 handled within Task 3)
-- Files affected: 12 (5 agents, 6 skills, CLAUDE.md)
-- New tests: no (these are configuration files, not code)
+- Tasks: 10
+- Files affected: 11 (7 skills + 1 reference file, CLAUDE.md, DEVELOPMENT.md, TODO.md deletion)
+- New tests: No (skills are markdown instructions, not code)
 
 **Key Decisions:**
-- Merge test-runner + builder accepts sequential execution trade-off for simpler agent selection
-- Add MCP tools to investigate's allowed-tools using wildcard patterns (mcp__Railway__*, mcp__gdrive__*, mcp__gemini__*)
-- Skill chaining offers user choice rather than auto-invoking plan-fix
+- PLANS.md remains the source of implementation details (Linear issues link to it, not replace it)
+- 1:1 mapping between PLANS.md tasks and Linear issues
+- All tasks start in **Todo** when they enter PLANS.md
+- State transitions happen **real-time, task by task** in plan-implement:
+  - Todo → In Progress (when task work starts)
+  - In Progress → Review (when task work completes)
+- plan-review-implementation moves Review → Done (for all tasks, even those with bugs found)
+- Bugs found during review create NEW issues in Todo (they go through the full cycle)
+- Label mapping from code-audit tags to Linear labels documented in skills
+- Priority mapping: critical→1(Urgent), high→2, medium→3, low→4
 
 **Dependencies/Prerequisites:**
-- Task 4 depends on Task 3 (verifier must exist before adding trigger phrases)
-- All other tasks are independent
+- Linear MCP already configured in `.mcp.json` ✓
+- Linear team "ADVA Administracion" with all states ✓
+- Linear labels configured ✓
+- Task 1 (CLAUDE.md) documents integration for all other tasks
+- Tasks 2-8 can be done in any order after Task 1
+- Task 9 (cleanup) should be last after skills are updated
+
+**Risks/Considerations:**
+- Rate limiting considerations for bulk issue creation in code-audit
+- Manual issue creation in Linear Backlog is fully supported (equivalent to TODO.md editing)
+- Legacy plans without Linear links will still work (state updates skipped)
 
 ---
 
@@ -198,50 +392,61 @@ From `.claude/skills/tools-improve/SKILL.md`:
 **Implemented:** 2026-02-01
 
 ### Completed
-- Task 1: Updated commit-bot to stage specific files instead of git add -A, added sensitive file filtering
-- Task 2: Changed pr-creator model from haiku to sonnet
-- Task 3: Created verifier agent by merging test-runner and builder, deleted old agents, updated all references in CLAUDE.md and 5 skill files
-- Task 4: Trigger phrases included in verifier agent description (handled within Task 3)
-- Task 5: Added MCP wildcard tools (mcp__Railway__*, mcp__gdrive__*, mcp__gemini__*) to investigate skill allowed-tools
-- Task 6: Added context management section to plan-review-implementation skill
-- Task 7: Updated investigate skill description to emphasize read-only nature, added skill chaining offer when issues found, updated plan-fix description to note it can be chained from investigate
+- Task 1: Updated CLAUDE.md with Linear MCP section and LINEAR INTEGRATION documentation including state flow, label mapping, priority mapping, and PLANS.md format with Linear links
+- Task 2: Updated code-audit skill to create Linear issues in Backlog instead of writing TODO.md, with label and priority mappings
+- Task 3: Updated plan-todo skill to read from Linear Backlog instead of TODO.md, moves planned issues to Todo state
+- Task 4: Updated plan-inline skill to create Linear issues in Todo state when creating plans
+- Task 5: Updated plan-fix skill to create Linear issues in Todo state when creating fix plans
+- Task 6: Updated plan-implement skill with real-time Linear state transitions (Todo→In Progress at task start, In Progress→Review at task end)
+- Task 7: Updated plan-review-implementation skill to move Review→Done on pass, create new bug issues in Todo when fixes needed
+- Task 8: Updated investigate skill termination message to reference Linear instead of TODO.md
+- Task 9: Deleted TODO.md and removed all remaining TODO.md references from skill files
+- Task 10: Added Linear Integration section to DEVELOPMENT.md with authentication, workflow, and required setup documentation
 
 ### Files Modified
-- `.claude/agents/commit-bot.md` - Replaced git add -A with specific file staging, added sensitive file filtering rule
-- `.claude/agents/pr-creator.md` - Changed model to sonnet, added sensitive file filtering for commit step
-- `.claude/agents/verifier.md` - New file: merged test-runner and builder functionality
-- `.claude/agents/test-runner.md` - Deleted
-- `.claude/agents/builder.md` - Deleted
-- `CLAUDE.md` - Updated SUBAGENTS table, TDD workflow, Post-Implementation Checklist, Plan Requirements, COMMANDS section, investigate skill description
-- `.claude/skills/plan-implement/SKILL.md` - Replaced all test-runner/builder references with verifier
-- `.claude/skills/plan-fix/SKILL.md` - Updated post-implementation checklist, updated description for skill chaining
-- `.claude/skills/plan-inline/SKILL.md` - Replaced test-runner references with verifier in templates and examples
-- `.claude/skills/plan-todo/SKILL.md` - Replaced test-runner references with verifier in templates and examples
-- `.claude/skills/investigate/SKILL.md` - Added MCP wildcards to allowed-tools, updated description, added skill chaining termination message
-- `.claude/skills/plan-review-implementation/SKILL.md` - Added context management section
+- `CLAUDE.md` - Added Linear MCP to MCP SERVERS section, added LINEAR INTEGRATION section
+- `.claude/skills/code-audit/SKILL.md` - Replaced TODO.md with Linear Backlog integration
+- `.claude/skills/code-audit/references/category-tags.md` - Added Linear Label Mapping section
+- `.claude/skills/plan-todo/SKILL.md` - Replaced TODO.md with Linear Backlog, added state management
+- `.claude/skills/plan-inline/SKILL.md` - Added Linear issue creation in Todo state
+- `.claude/skills/plan-fix/SKILL.md` - Added Linear issue creation in Todo state
+- `.claude/skills/plan-implement/SKILL.md` - Added real-time Linear state transitions
+- `.claude/skills/plan-review-implementation/SKILL.md` - Added Review→Done transitions and bug issue creation
+- `.claude/skills/investigate/SKILL.md` - Updated termination message to reference Linear
+- `DEVELOPMENT.md` - Added Linear Integration section
 
 ### Pre-commit Verification
-- bug-hunter: Found 4 issues (2 HIGH, 2 MEDIUM), all fixed before proceeding
+- bug-hunter: Found 3 medium issues, fixed before proceeding (Technical Debt mapping consistency, unnecessary create permission in plan-todo)
 - verifier: All 1365 tests pass, zero warnings
 
 ### Review Findings
 
-Files reviewed: 12 (markdown configuration files for agents and skills)
-Checks applied: Security, Logic, Conventions, Edge Cases
+Files reviewed: 10
+Checks applied: Consistency, Completeness, Correctness of Instructions, Convention Compliance
+
+**Files Reviewed:**
+1. `CLAUDE.md` - Linear MCP section, LINEAR INTEGRATION section
+2. `.claude/skills/code-audit/SKILL.md` - Linear Backlog integration
+3. `.claude/skills/code-audit/references/category-tags.md` - Linear Label Mapping section
+4. `.claude/skills/plan-todo/SKILL.md` - Linear Backlog to Todo workflow
+5. `.claude/skills/plan-inline/SKILL.md` - Linear issue creation in Todo
+6. `.claude/skills/plan-fix/SKILL.md` - Linear issue creation in Todo
+7. `.claude/skills/plan-implement/SKILL.md` - Linear state transitions
+8. `.claude/skills/plan-review-implementation/SKILL.md` - Linear Review→Done transitions
+9. `.claude/skills/investigate/SKILL.md` - Linear termination message
+10. `DEVELOPMENT.md` - Linear Integration section
+
+**Verification Results:**
+- State flow documentation is consistent across CLAUDE.md and all skills
+- Label and priority mappings match in CLAUDE.md, code-audit skill, and category-tags.md
+- TODO.md properly deleted with no lingering references
+- All skills have correct `mcp__linear__*` tools in allowed-tools frontmatter
+- Instructions are clear, specific, and implementable
 
 No issues found - all implementations are correct and follow project conventions.
 
-**Summary of verified changes:**
-- commit-bot.md: Secure file staging with sensitive file filtering ✓
-- pr-creator.md: Model upgrade to sonnet, sensitive file filtering ✓
-- verifier.md: Clean merge of test-runner and builder ✓
-- investigate/SKILL.md: MCP wildcards and skill chaining ✓
-- plan-fix/SKILL.md: Updated description for chaining ✓
-- plan-implement/SKILL.md: verifier references updated ✓
-- plan-inline/SKILL.md: verifier references updated ✓
-- plan-todo/SKILL.md: verifier references updated ✓
-- plan-review-implementation/SKILL.md: Context management added ✓
-- CLAUDE.md: All references updated ✓
+### Linear Updates
+- N/A (plan created before Linear integration - no Linear issues to transition)
 
 <!-- REVIEW COMPLETE -->
 

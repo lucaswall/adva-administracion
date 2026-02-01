@@ -205,6 +205,7 @@ When you finish investigating, output the investigation report.
 Investigation complete. Issues found that may need fixing.
 
 Would you like me to create a fix plan? Say 'yes' or run `/plan-fix` with the context above.
+(Fix plans will create Linear issues in Todo state)
 ```
 
 **If nothing wrong was found or no fix needed**, end with:
@@ -214,8 +215,8 @@ Would you like me to create a fix plan? Say 'yes' or run `/plan-fix` with the co
 Investigation complete.
 
 To take action based on these findings:
-- For bug fixes: Use `plan-fix` with this context
-- For feature changes: Use `plan-inline` with specific request
+- For bug fixes: Use `plan-fix` with this context (creates Linear issues in Todo)
+- For feature changes: Use `plan-inline` with specific request (creates Linear issues in Todo)
 - For further investigation: Provide more details and run investigate again
 ```
 

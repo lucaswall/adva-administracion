@@ -54,7 +54,11 @@
       "Bash(railway logs:*)",
       "Bash(wc:*)",
       "WebFetch(domain:www.anthropic.com)",
-      "WebFetch(domain:docs.claude.com)"
+      "WebFetch(domain:docs.claude.com)",
+      "WebFetch(domain:linear.app)",
+      "mcp__linear__list_teams",
+      "mcp__linear__list_issue_statuses",
+      "mcp__linear__list_issue_labels"
     ],
     "deny": [
       "Bash(rm -rf *)",

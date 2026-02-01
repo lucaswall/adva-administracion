@@ -1,26 +1,26 @@
 ---
 name: plan-inline
-description: Create TDD implementation plans from direct feature requests. Use when user provides a task description like "add X feature", "create Y function", or "implement Z". Faster than plan-todo for ad-hoc requests that don't need backlog tracking.
+description: Create TDD implementation plans from direct feature requests. Use when user provides a task description like "add X feature", "create Y function", or "implement Z". Creates Linear issues in Todo state. Faster than plan-todo for ad-hoc requests that don't need backlog tracking.
 argument-hint: <task description>
-allowed-tools: Read, Edit, Write, Glob, Grep, Task
+allowed-tools: Read, Edit, Write, Glob, Grep, Task, mcp__linear__list_issues, mcp__linear__get_issue, mcp__linear__create_issue, mcp__linear__update_issue, mcp__linear__list_issue_labels, mcp__linear__list_issue_statuses
 disable-model-invocation: true
 ---
 
-Create a TDD implementation plan directly from inline instructions in $ARGUMENTS.
+Create a TDD implementation plan directly from inline instructions in $ARGUMENTS. Creates Linear issues in Todo state.
 
 ## Purpose
 
 - Convert inline task descriptions into actionable TDD implementation plans
-- Skip the TODO.md intermediary when task is already well-defined
+- Create Linear issues in Todo state for each task (bypasses Backlog)
 - Explore codebase to understand existing patterns and find relevant files
 - Use MCPs to gather additional context (Drive files, spreadsheets, deployments)
-- Generate detailed, implementable plans with full file paths
+- Generate detailed, implementable plans with full file paths and Linear issue links
 
 ## When to Use
 
 Use `plan-inline` instead of `plan-todo` when:
 - The user provides a clear feature request or task description directly
-- The task doesn't need to be tracked in TODO.md backlog
+- The task doesn't need to go through Linear Backlog first
 - Quick planning without backlog management overhead
 
 Use `plan-todo` instead when:
@@ -81,6 +81,7 @@ Example arguments:
    - Extraction issues → Check current prompts, test with Gemini MCP
 6. **Generate plan** - Create TDD tasks with test-first approach
 7. **Write PLANS.md** - Overwrite with new plan
+8. **Create Linear issues** - Create issues in Todo state for each task
 
 ## Codebase Exploration Guidelines
 
@@ -107,6 +108,7 @@ Example arguments:
 
 **Created:** YYYY-MM-DD
 **Source:** Inline request: [Summary of $ARGUMENTS]
+**Linear Issues:** [ADVA-123](https://linear.app/...), [ADVA-124](https://linear.app/...)
 
 ## Context Gathered
 
@@ -122,12 +124,16 @@ Example arguments:
 ## Original Plan
 
 ### Task 1: [Name]
+**Linear Issue:** [ADVA-123](https://linear.app/...)
+
 1. Write test in [file].test.ts for [function/scenario]
 2. Run verifier (expect fail)
 3. Implement [function] in [file].ts
 4. Run verifier (expect pass)
 
 ### Task 2: [Name]
+**Linear Issue:** [ADVA-124](https://linear.app/...)
+
 1. Write test...
 2. Run verifier...
 3. Implement...
@@ -145,6 +151,8 @@ Example arguments:
 
 **Request:** [Brief paraphrase of the original $ARGUMENTS]
 
+**Linear Issues:** [ADVA-123, ADVA-124, ...]
+
 **Approach:** [2-3 sentences describing the implementation strategy at a high level]
 
 **Scope:**
@@ -159,6 +167,19 @@ Example arguments:
 **Risks/Considerations:**
 - [Any risks or things to watch out for]
 ```
+
+## Linear Issue Creation
+
+After writing PLANS.md, create a Linear issue for each task:
+
+1. Use `mcp__linear__create_issue` with:
+   - `team`: "ADVA Administracion"
+   - `title`: Task name
+   - `description`: Task details from PLANS.md
+   - `state`: "Todo"
+   - `labels`: Infer from task type (Feature, Improvement, Bug)
+
+2. Update PLANS.md to add `**Linear Issue:** [ADVA-N](url)` to each task
 
 ## Task Writing Guidelines
 
@@ -232,7 +253,8 @@ If CLAUDE.md doesn't list MCPs, skip MCP context gathering.
 - No manual verification steps - use agents only
 - Tasks must be implementable without additional context
 - Always include post-implementation checklist
-- Do NOT modify TODO.md (this skill bypasses backlog management)
+- Create Linear issues in Todo state (bypasses Backlog)
+- Include Linear issue links in PLANS.md tasks
 
 ## CRITICAL: Scope Boundaries
 
@@ -245,16 +267,19 @@ If CLAUDE.md doesn't list MCPs, skip MCP context gathering.
 
 ## Termination
 
-When you finish writing PLANS.md, output the plan summary followed by the completion message:
+When you finish writing PLANS.md (and creating Linear issues), output the plan summary followed by the completion message:
 
 ```
 ✓ Plan created in PLANS.md
+✓ Linear issues created in Todo: ADVA-123, ADVA-124, ...
 
 ## Plan Summary
 
 **Objective:** [Copy from PLANS.md summary]
 
 **Request:** [Copy from PLANS.md summary]
+
+**Linear Issues:** [Copy from PLANS.md summary]
 
 **Approach:** [Copy from PLANS.md summary]
 

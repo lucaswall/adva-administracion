@@ -1,11 +1,11 @@
 ---
 name: plan-review-implementation
-description: QA review of completed implementation. Use after plan-implement finishes, or when user says "review the implementation". Identifies bugs, edge cases, security issues (OWASP-based), type safety, resource leaks, and async issues. Creates fix plans for issues found or marks COMPLETE.
-allowed-tools: Read, Edit, Glob, Grep
+description: QA review of completed implementation. Use after plan-implement finishes, or when user says "review the implementation". Moves Linear issues Review→Done. Creates new issues in Todo for bugs found. Identifies bugs, edge cases, security issues (OWASP-based), type safety, resource leaks, and async issues. Creates fix plans for issues found or marks COMPLETE.
+allowed-tools: Read, Edit, Glob, Grep, mcp__linear__list_issues, mcp__linear__get_issue, mcp__linear__create_issue, mcp__linear__update_issue, mcp__linear__list_issue_labels, mcp__linear__list_issue_statuses
 disable-model-invocation: true
 ---
 
-Review **ALL** implementation iterations that need review, then mark complete or create fix plans.
+Review **ALL** implementation iterations that need review, then mark complete or create fix plans. Moves Linear issues Review→Done.
 
 **Reference:** See [references/code-review-checklist.md](references/code-review-checklist.md) for comprehensive checklist.
 
@@ -14,6 +14,22 @@ Review **ALL** implementation iterations that need review, then mark complete or
 1. **Read PLANS.md** - Understand the full plan and iteration history
 2. **Read CLAUDE.md** - Understand project standards and conventions
 3. **Assess AI-generated code risk** - If implementation is large or shows AI patterns, apply extra scrutiny
+
+## Linear State Management
+
+This skill moves issues from **Review → Done** (the final transition).
+
+**If task passes review (no issues):**
+- Move issue from "Review" to "Done" using `mcp__linear__update_issue`
+
+**If task needs fixes (issues found):**
+- Move original issue from "Review" to "Done" (the original task was completed)
+- Create NEW Linear issue(s) in "Todo" for each bug/fix using `mcp__linear__create_issue`:
+  - `team`: "ADVA Administracion"
+  - `state`: "Todo" (will enter PLANS.md via Fix Plan)
+  - `labels`: Bug
+- Add new issue links to the Fix Plan section in PLANS.md
+- These new issues will go through the full cycle when plan-implement runs the Fix Plan
 
 ## Identify What to Review
 
@@ -118,17 +134,29 @@ Summary: N issue(s) found
 **Documented (no fix needed):**
 - [MEDIUM] EDGE CASE: Unicode filenames not tested (`src/upload.ts:30`)
 
+### Linear Updates
+- ADVA-123: Review → Done (original task completed)
+- ADVA-125: Created in Todo (Fix: SQL injection)
+- ADVA-126: Created in Todo (Fix: Race condition)
+- ADVA-127: Created in Todo (Fix: Unhandled promise)
+
 ### Fix Plan
 
 #### Fix 1: SQL injection in query builder
+**Linear Issue:** [ADVA-125](https://linear.app/...)
+
 1. Write test in `src/db.test.ts` for malicious input escaping
 2. Use parameterized query in `src/db.ts:45`
 
 #### Fix 2: Race condition in cache invalidation
+**Linear Issue:** [ADVA-126](https://linear.app/...)
+
 1. Write test in `src/cache.test.ts` for concurrent invalidation
 2. Add mutex/lock in `src/cache.ts:120`
 
 #### Fix 3: Unhandled promise rejection
+**Linear Issue:** [ADVA-127](https://linear.app/...)
+
 1. Write test in `src/api.test.ts` for error handling
 2. Add try/catch in `src/api.ts:78`
 
@@ -136,6 +164,8 @@ Summary: N issue(s) found
 ```
 
 **Note:** The `<!-- REVIEW COMPLETE -->` marker is added even when issues are found, because the review itself is complete. The Fix Plan will create a new iteration when implemented.
+
+**Linear workflow:** Original issues move to Done (the original task was completed). Bug issues are created in Todo state for the fix plan.
 
 ### If No Issues Found
 
@@ -148,6 +178,10 @@ Files reviewed: N
 Checks applied: Security, Logic, Async, Resources, Type Safety, Conventions
 
 No issues found - all implementations are correct and follow project conventions.
+
+### Linear Updates
+- ADVA-123: Review → Done
+- ADVA-124: Review → Done
 
 <!-- REVIEW COMPLETE -->
 ```
@@ -166,13 +200,16 @@ When all pending iterations have been reviewed:
 
 ## Status: COMPLETE
 
-All tasks implemented and reviewed successfully. Ready for human review.
+All tasks implemented and reviewed successfully. All Linear issues moved to Done.
+Ready for human review.
 ```
 
 **Then suggest to the user:**
 > "Plan complete! Would you like me to create a PR for these changes?"
 
 This prompts the user to invoke the `pr-creator` agent if they want to submit the work.
+
+**Note:** When marking COMPLETE, all issues from the plan should be in Done state.
 
 ## Issue Categories Reference
 
@@ -208,10 +245,12 @@ This prompts the user to invoke the `pr-creator` agent if they want to submit th
 - **Review ALL pending iterations** - Don't stop after one; process every iteration lacking `<!-- REVIEW COMPLETE -->`
 - **Do not modify source code** - Review only, document findings
 - **Be specific** - Include file paths and line numbers for every issue
-- **One fix per issue** - Each Review Finding must have a matching Fix task
+- **One fix per issue** - Each Review Finding must have a matching Fix task with Linear issue
 - **Fix Plan follows TDD** - Test first for each fix
 - **Never modify previous sections** - Only add to current iteration or append status
 - **Mark COMPLETE only when ALL iterations pass** - No fix plans pending, all reviewed
+- **Move issues to Done** - All reviewed issues that pass go Review→Done
+- **Create bug issues in Todo** - All bugs found create new issues in Todo state
 - If no iteration needs review, inform the user and stop
 
 ## Context Management & Continuation

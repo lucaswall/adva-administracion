@@ -1,11 +1,11 @@
 ---
 name: plan-implement
-description: Execute the pending plan in PLANS.md following TDD workflow. Use when user says "implement the plan", "execute the plan", or after any plan-* skill creates a plan. Runs tests, writes code, documents results.
-allowed-tools: Read, Edit, Write, Bash, Task, Glob, Grep
+description: Execute the pending plan in PLANS.md following TDD workflow. Use when user says "implement the plan", "execute the plan", or after any plan-* skill creates a plan. Updates Linear issues in real-time: Todo→In Progress→Review. Runs tests, writes code, documents results.
+allowed-tools: Read, Edit, Write, Bash, Task, Glob, Grep, mcp__linear__list_issues, mcp__linear__get_issue, mcp__linear__update_issue, mcp__linear__list_issue_statuses
 disable-model-invocation: true
 ---
 
-Execute the current pending work in PLANS.md following strict TDD workflow.
+Execute the current pending work in PLANS.md following strict TDD workflow. Updates Linear issues in real-time.
 
 ## Pre-flight Check
 
@@ -20,6 +20,21 @@ Look in PLANS.md for pending work in this priority order:
 2. **Original Plan** with no "Iteration 1" → Execute the original plan
 3. **Nothing pending** → Inform user "No pending work in PLANS.md"
 
+## Linear State Management
+
+State transitions happen **in real-time, task by task** (not batched at the end).
+
+**When STARTING a task:**
+1. Extract Linear issue ID from task's `**Linear Issue:** [ADVA-N](url)` line
+2. IMMEDIATELY move issue to "In Progress" using `mcp__linear__update_issue`
+3. Then begin the TDD cycle
+
+**When COMPLETING a task:**
+1. After verifier passes, IMMEDIATELY move issue to "Review" using `mcp__linear__update_issue`
+2. Then proceed to the next task
+
+If task has no Linear issue link, skip state updates (legacy plan).
+
 ## Execution Workflow
 
 For each task in the plan:
@@ -27,19 +42,25 @@ For each task in the plan:
 ### TDD Cycle (MANDATORY)
 
 ```
-1. WRITE TEST
+1. MOVE LINEAR ISSUE: Todo → In Progress
+   └─ Use mcp__linear__update_issue (skip if no issue link)
+
+2. WRITE TEST
    └─ Add test cases in [file].test.ts
 
-2. RUN TEST (expect fail)
+3. RUN TEST (expect fail)
    └─ Use verifier agent
    └─ If test passes: warning - test may not be testing the right thing
 
-3. IMPLEMENT
+4. IMPLEMENT
    └─ Write minimal code to make test pass
 
-4. RUN TEST (expect pass)
+5. RUN TEST (expect pass)
    └─ Use verifier agent
-   └─ If fail: fix implementation, repeat step 4
+   └─ If fail: fix implementation, repeat step 5
+
+6. MOVE LINEAR ISSUE: In Progress → Review
+   └─ Use mcp__linear__update_issue (skip if no issue link)
 ```
 
 ### Task Completion Checklist
@@ -79,6 +100,10 @@ After execution, append a new "Iteration N" section to PLANS.md:
 
 ### Files Modified
 - `path/to/file.ts` - Description of changes
+
+### Linear Updates
+- ADVA-123: Todo → In Progress → Review
+- ADVA-124: Todo → In Progress → Review
 
 ### Pre-commit Verification
 - bug-hunter: [Passed | Found N bugs, fixed before proceeding]
@@ -144,4 +169,5 @@ After completing each iteration, estimate remaining context:
 - **Never modify previous sections** - Only append new Iteration section
 - **Do not commit or create PR** - Unless explicitly requested
 - **Document everything** - Include all checklist results in iteration
+- **Update Linear in real-time** - Move issues Todo→In Progress at task start, In Progress→Review at task end
 - If nothing to execute, inform the user and stop
