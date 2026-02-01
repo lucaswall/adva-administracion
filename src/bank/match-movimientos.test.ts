@@ -57,6 +57,7 @@ import { getCachedFolderStructure } from '../services/folder-structure.js';
 import { getValues } from '../services/sheets.js';
 import { getMovimientosToFill } from '../services/movimientos-reader.js';
 import { updateDetalle } from '../services/movimientos-detalle.js';
+import { warn } from '../utils/logger.js';
 
 describe('isBetterMatch', () => {
   it('should prefer CUIT match over no CUIT match', () => {
@@ -848,6 +849,87 @@ describe('matchAllMovimientos', () => {
 
     expect(result.ok).toBe(true);
     // Should NOT replace - equal quality, keep existing (no churn)
+    expect(updateDetalle).toHaveBeenCalledWith('bbva-id', []);
+  });
+
+  it('keeps existing match when buildMatchQualityFromFileId returns null (bug #18)', async () => {
+    // Bug: Code replaces match when existingQuality is null, but should keep it
+    // and log a warning instead (can't compare quality if document doesn't exist)
+
+    // Mock folder structure using the same structure as other tests
+    const mockFolderStructure = {
+      controlIngresosId: 'ingresos-id',
+      controlEgresosId: 'egresos-id',
+      bankSpreadsheets: new Map([['BBVA ARS', 'bbva-id']]),
+    };
+
+    vi.mocked(withLock).mockImplementation(async (_id, fn) => {
+      const result = await fn();
+      return { ok: true, value: result };
+    });
+
+    vi.mocked(getCachedFolderStructure).mockReturnValue(mockFolderStructure as any);
+
+    // Mock Control data - only one factura exists (factura-b)
+    vi.mocked(getValues).mockImplementation(async (_spreadsheetId, range) => {
+      if (range === 'Facturas Recibidas!A:S') {
+        return {
+          ok: true,
+          value: [
+            ['fechaemision', 'fileid', 'filename', 'tipocomprobante', 'puntoventa', 'numerocomprobante', 'cuitemisor', 'razonsocialemisor', 'cuitreceptor', 'razonsocialreceptor', 'importetotal', 'moneda', 'formadepago', 'cbu', 'processedat', 'confidence', 'needsreview', 'matchedpagofileid', 'matchconfidence'],
+            ['2025-01-20', 'factura-b', 'b.pdf', 'B', '1', '124', '20123456786', 'PROVEEDOR SA', '30709076783', 'ADVA', '1000', 'ARS', '', '', '2025-01-20T10:00:00Z', '0.95', 'NO', '', ''],
+          ],
+        };
+      }
+      return { ok: true, value: [['header']] };
+    });
+
+    // Movement with existing match to factura-a (which no longer exists in Control)
+    vi.mocked(getMovimientosToFill).mockResolvedValue({
+      ok: true,
+      value: [
+        {
+          sheetName: '2025-01',
+          rowNumber: 2,
+          fecha: '2025-01-15',
+          origenConcepto: 'PAGO 20123456786',
+          debito: 1000,
+          credito: null,
+          saldo: 9000,
+          saldoCalculado: 9000,
+          matchedFileId: 'factura-a',  // Document no longer exists
+          detalle: 'Pago Factura a PROVEEDOR SA',
+        },
+      ],
+    });
+
+    // New match to factura-b (which does exist)
+    mockMatchMovement.mockReturnValue({
+      matchType: 'direct_factura',
+      description: 'Pago Factura a PROVEEDOR SA',
+      matchedFileId: 'factura-b',
+      confidence: 'HIGH',
+    });
+
+    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: 0 });
+
+    const resultPromise = matchAllMovimientos();
+    await vi.runAllTimersAsync();
+    const result = await resultPromise;
+
+    expect(result.ok).toBe(true);
+
+    // Should keep existing match (factura-a) even though it can't be found
+    // because we can't compare quality when buildMatchQualityFromFileId returns null
+    // A warning should be logged about the orphaned fileId
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining('no longer exists'),
+      expect.objectContaining({
+        matchedFileId: 'factura-a',
+      })
+    );
+
+    // Should NOT replace the match
     expect(updateDetalle).toHaveBeenCalledWith('bbva-id', []);
   });
 });

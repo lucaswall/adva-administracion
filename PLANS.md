@@ -848,6 +848,70 @@ No issues found - all implementations are correct and follow project conventions
 
 ---
 
-## Status: COMPLETE (Phases 1-4)
+## Iteration 5
 
-Phases 1-4 (Date/Time & Precision Fixes, Type Validation & Constraints, Data Safety & Cache Integrity, Async & Concurrency Fixes) implemented and reviewed successfully. Ready for Phase 5 implementation.
+**Implemented:** 2026-01-31
+
+### Phase 5: Match Logic & Defaults - COMPLETED
+
+**Tasks Completed:**
+- Task 5.1: Fixed dateProximityDays falsy default (bug #16) - Changed `||` to `??` to preserve 0 as valid value
+- Task 5.2: Fixed match-movimientos quality null check (bug #18) - Log warning and keep existing match when document not found
+- Task 5.3: Fixed autofill error context logging (bug #19) - Added failedBanks tracking and warning logs with bank names
+- Task 5.4: Fixed matchedFacturaFileId null check (bug #44) - Log warning when linked factura not found in array
+- Task 5.5: Bug #53 already addressed - File/function doesn't exist (dead code removed in previous refactoring)
+
+**Files Modified:**
+- `src/matching/matcher.ts` - Changed `dateProximityDays || 999` to `dateProximityDays ?? 999` (4 locations)
+- `src/matching/matcher.test.ts` - Added tests for 0 vs 5 day comparison and undefined handling
+- `src/bank/match-movimientos.ts` - Added null check with warning when existingQuality is null
+- `src/bank/match-movimientos.test.ts` - Added test for orphaned document handling
+- `src/bank/autofill.ts` - Added failedBanks tracking, warning logs with bank names, imported warn logger
+- `src/bank/autofill.test.ts` - Added comprehensive tests for error context logging
+- `src/bank/matcher.ts` - Added warning when linked factura not found, imported warn logger
+- `src/bank/matcher.test.ts` - Added test for missing linked factura warning
+- `src/types/index.ts` - Added `failedBanks: string[]` to BankAutoFillResult interface
+
+**Pre-commit Verification:**
+- bug-hunter: Passed (0 bugs found)
+- test-runner: All 1274 tests pass
+- builder: Zero warnings
+
+**Notes:**
+- All Phase 5 tasks followed strict TDD workflow (test first, implement, verify)
+- Nullish coalescing (`??`) correctly preserves 0 as a valid date proximity value
+- Orphaned document matches are kept with warnings instead of being replaced blindly
+- Failed banks are tracked and logged for better operational visibility
+- Bug #53 was already fixed in a previous refactoring (file no longer exists)
+
+### Review Findings
+
+**Files reviewed:** 9
+- `src/matching/matcher.ts`, `src/matching/matcher.test.ts`
+- `src/bank/match-movimientos.ts`, `src/bank/match-movimientos.test.ts`
+- `src/bank/autofill.ts`, `src/bank/autofill.test.ts`
+- `src/bank/matcher.ts`, `src/bank/matcher.test.ts`
+- `src/types/index.ts`
+
+**Checks applied:** Security, Logic, Type Safety, Error Handling, Conventions
+
+No issues found - all implementations are correct and follow project conventions.
+
+**Verification details:**
+- Task 5.1 (dateProximityDays): Nullish coalescing preserves 0 as perfect match, undefined defaults to 999
+- Task 5.2 (quality null check): Logs warning with context (matchedFileId, bankName, fecha) and keeps existing match
+- Task 5.3 (autofill errors): failedBanks array tracks failures, warnings logged with bank names for all error paths
+- Task 5.4 (linked factura): Warning logged with pagoFileId and matchedFacturaFileId when factura not found
+- Task 5.5 (daysBetween NaN): Already addressed (file doesn't exist)
+
+**Type Safety:** ✓ Proper type annotations, no unsafe casts
+**Error Handling:** ✓ All error cases logged with context
+**Conventions:** ✓ ESM imports with .js, Pino logger (message, context) pattern, Result<T,E>
+
+<!-- REVIEW COMPLETE -->
+
+---
+
+## Status: COMPLETE (Phases 1-5)
+
+Phases 1-5 (Date/Time & Precision Fixes, Type Validation & Constraints, Data Safety & Cache Integrity, Async & Concurrency Fixes, Match Logic & Defaults) implemented and reviewed successfully. Ready for Phase 6 implementation.

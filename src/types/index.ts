@@ -929,6 +929,8 @@ export interface BankAutoFillResult {
   noMatches: number;
   /** Errors encountered */
   errors: number;
+  /** Banks that failed to load */
+  failedBanks: string[];
   /** Execution duration in milliseconds */
   duration: number;
 }

@@ -647,8 +647,12 @@ async function matchBankMovimientos(
         );
 
         if (!existingQuality) {
-          // Couldn't find existing document - replace with new match
-          shouldUpdate = true;
+          // Couldn't find existing document - can't compare quality, keep existing match
+          warn(
+            'Existing matched document no longer exists in Control sheets, keeping orphaned match',
+            { matchedFileId: mov.matchedFileId, bankName, fecha: mov.fecha }
+          );
+          shouldUpdate = false;
         } else {
           // Build candidate quality
           // Note: matchResult doesn't provide all fields we need, so we need to look up the document

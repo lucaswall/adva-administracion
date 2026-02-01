@@ -2,10 +2,20 @@
  * Unit tests for bank movement matcher
  */
 
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { BankMovementMatcher } from './matcher.js';
 import type { BankMovement, Factura, Pago, Retencion } from '../types/index.js';
 import { setExchangeRateCache, type ExchangeRate } from '../utils/exchange-rate.js';
+
+// Mock logger
+vi.mock('../utils/logger.js', () => ({
+  debug: vi.fn(),
+  info: vi.fn(),
+  warn: vi.fn(),
+  error: vi.fn(),
+}));
+
+import { warn } from '../utils/logger.js';
 
 describe('BankMovementMatcher - Cross-Currency Confidence', () => {
   let matcher: BankMovementMatcher;
@@ -837,6 +847,86 @@ describe('BankMovementMatcher - Credit Movement Matching', () => {
       const result = matcher.compareMatches(existing, candidate);
 
       expect(result).toBe('existing'); // No churn
+    });
+  });
+
+  describe('matchedFacturaFileId null check (bug #44)', () => {
+    beforeEach(() => {
+      vi.clearAllMocks();
+    });
+
+    it('logs warning and continues when matchedFacturaFileId exists but factura not in array', () => {
+      // Bug: Code doesn't log warning when linked factura doesn't exist
+      // This can happen if:
+      // - The linked factura was deleted
+      // - The linked factura is in a different spreadsheet
+      // - Data inconsistency
+
+      const facturas: Array<Factura & { row: number }> = [
+        {
+          fileId: 'factura-1',
+          fileName: 'factura-1.pdf',
+          tipoComprobante: 'A',
+          nroFactura: '00001-00000001',
+          fechaEmision: '2024-01-15',
+          cuitEmisor: '20123456786',
+          razonSocialEmisor: 'TEST SA',
+          cuitReceptor: '30709076783',
+          razonSocialReceptor: 'ADVA',
+          importeNeto: 1000,
+          importeIva: 210,
+          importeTotal: 1210,
+          moneda: 'ARS',
+          processedAt: '2024-01-15T10:00:00Z',
+          needsReview: false,
+          confidence: 0.95,
+          row: 2
+        }
+      ];
+
+      const pagos: Array<Pago & { row: number }> = [
+        {
+          fileId: 'pago-1',
+          fileName: 'pago-1.pdf',
+          banco: 'BBVA',
+          fechaPago: '2024-01-15',
+          importePagado: 1210,
+          moneda: 'ARS',
+          matchedFacturaFileId: 'factura-missing', // Links to factura not in array
+          processedAt: '2024-01-15T10:00:00Z',
+          needsReview: false,
+          confidence: 0.95,
+          row: 3
+        }
+      ];
+
+      const movement: BankMovement = {
+        row: 1,
+        fecha: '2024-01-15',
+        fechaValor: '2024-01-15',
+        concepto: 'PAGO 20123456786',
+        codigo: '',
+        oficina: '',
+        areaAdva: '',
+        debito: 1210,
+        credito: null,
+        detalle: ''
+      };
+
+      // Should not crash, should log warning and continue
+      const result = matcher.matchMovement(movement, facturas, [], pagos);
+
+      // Should log warning about missing linked factura
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining('not found'),
+        expect.objectContaining({
+          pagoFileId: 'pago-1',
+          matchedFacturaFileId: 'factura-missing'
+        })
+      );
+
+      // Should still match factura-1 directly if it matches
+      expect(result.matchType).not.toBe('no_match');
     });
   });
 });
