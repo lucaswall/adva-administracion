@@ -912,6 +912,69 @@ No issues found - all implementations are correct and follow project conventions
 
 ---
 
-## Status: COMPLETE (Phases 1-5)
+## Iteration 6
 
-Phases 1-5 (Date/Time & Precision Fixes, Type Validation & Constraints, Data Safety & Cache Integrity, Async & Concurrency Fixes, Match Logic & Defaults) implemented and reviewed successfully. Ready for Phase 6 implementation.
+**Implemented:** 2026-01-31
+
+### Phase 6: Column Validation & Input Validation - COMPLETED
+
+**Tasks Completed:**
+- Task 6.1: Added header-based column lookup (bug #1) - Replaced hardcoded column indices with getColumnIndex() helper
+- Task 6.2: Added Fastify JSON schema validation (bug #49) - Added schema validation for /api/scan request body
+- Task 6.3: Added bankName validation (bug #50) - Validates empty string and checks existence in folder structure
+- Task 6.4: Added documentType enum validation (bug #51) - Added JSON schema enum for /api/rematch documentType parameter
+
+**Files Modified:**
+- `src/services/pagos-pendientes.ts` - Added getColumnIndex() helper, replaced row[18] with header-based lookup, validate all required columns exist
+- `src/services/pagos-pendientes.test.ts` - Fixed test data to include proper header names, added tests for column lookup, reordering, and missing columns
+- `src/routes/scan.ts` - Added JSON schema validation for /api/scan body, documentType enum for /api/rematch, bankName validation for /api/autofill-bank
+- `src/routes/scan.test.ts` - Added comprehensive tests for JSON validation, bankName validation, and documentType enum validation
+
+**Pre-commit Verification:**
+- bug-hunter: Passed (0 bugs found)
+- test-runner: All 1,284 tests pass (10 new tests added)
+- builder: Zero warnings
+
+**Notes:**
+- All Phase 6 tasks followed strict TDD workflow (test first, implement, verify)
+- Header-based column lookup eliminates fragility from column reordering
+- JSON schema validation provides automatic 400 responses for invalid input
+- bankName validation prevents 500 errors by checking existence before processing
+- documentType enum validation ensures only valid values ('factura', 'recibo', 'all') are accepted
+
+### Review Findings
+
+**Files reviewed:** 4
+- `src/services/pagos-pendientes.ts`, `src/services/pagos-pendientes.test.ts`
+- `src/routes/scan.ts`, `src/routes/scan.test.ts`
+
+**Checks applied:** Security (input validation, auth middleware), Logic, Type Safety, Error Handling, Conventions
+
+No issues found - all implementations are correct and follow project conventions.
+
+**Verification details:**
+- Task 6.1 (header-based lookup): `getColumnIndex()` correctly finds columns by name, returns -1 when not found, all required columns validated
+- Task 6.2 (JSON schema): `/api/scan` schema validates `folderId` (string) and `force` (boolean) with `additionalProperties: false`
+- Task 6.3 (bankName validation): Empty string returns 400, non-existent bank returns 404, valid bank proceeds to processing
+- Task 6.4 (documentType enum): JSON schema enforces `['factura', 'recibo', 'all']`, invalid values return 400
+
+**Type Safety:** ✓ Proper type annotations, nullable handling with -1 sentinel for column indices
+**Error Handling:** ✓ All error cases return descriptive messages
+**Conventions:** ✓ ESM imports with .js, Fastify logger, Result<T,E> pattern
+
+<!-- REVIEW COMPLETE -->
+
+---
+
+## Status: COMPLETE (All Phases)
+
+All 6 phases (Date/Time & Precision Fixes, Type Validation & Constraints, Data Safety & Cache Integrity, Async & Concurrency Fixes, Match Logic & Defaults, Column Validation & Input Validation) implemented and verified successfully.
+
+**Total bugs fixed:** 19 HIGH priority bugs (#1-19) plus 13 related MEDIUM items (#22, #23, #35, #41, #42, #44, #49, #50, #51, #52, #53) = 32 bugs fixed
+
+**Implementation stats:**
+- Iterations: 6
+- Files modified: 30+
+- Tests added: 80+
+- Total test count: 1,284 passing
+- Build: Zero warnings

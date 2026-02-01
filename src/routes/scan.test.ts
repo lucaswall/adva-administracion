@@ -223,6 +223,33 @@ describe('Scan routes', () => {
       const body = JSON.parse(response.payload);
       expect(body.error).toBe('Drive API error');
     });
+
+    it('returns 400 for invalid JSON body (bug #49)', async () => {
+      const response = await server.inject({
+        method: 'POST',
+        url: '/api/scan',
+        headers: {
+          authorization: 'Bearer test-secret-123',
+          'content-type': 'application/json',
+        },
+        payload: 'not-valid-json',
+      });
+
+      expect(response.statusCode).toBe(400);
+    });
+
+    it('returns 400 for invalid body type (bug #49)', async () => {
+      const response = await server.inject({
+        method: 'POST',
+        url: '/api/scan',
+        headers: {
+          authorization: 'Bearer test-secret-123',
+        },
+        payload: { folderId: 123 }, // Should be string, not number
+      });
+
+      expect(response.statusCode).toBe(400);
+    });
   });
 
   describe('POST /api/rematch', () => {
@@ -290,6 +317,44 @@ describe('Scan routes', () => {
       const body = JSON.parse(response.payload);
       expect(body.error).toBe('Sheets API error');
     });
+
+    it('returns 400 for invalid documentType (bug #51)', async () => {
+      const response = await server.inject({
+        method: 'POST',
+        url: '/api/rematch',
+        headers: {
+          authorization: 'Bearer test-secret-123',
+        },
+        payload: { documentType: 'invalid_type' },
+      });
+
+      expect(response.statusCode).toBe(400);
+    });
+
+    it('accepts valid documentType values (bug #51)', async () => {
+      mockRematch.mockResolvedValue({
+        ok: true,
+        value: {
+          matchesFound: 1,
+          duration: 100,
+        },
+      });
+
+      // Test each valid value
+      const validTypes = ['factura', 'recibo', 'all'];
+      for (const type of validTypes) {
+        const response = await server.inject({
+          method: 'POST',
+          url: '/api/rematch',
+          headers: {
+            authorization: 'Bearer test-secret-123',
+          },
+          payload: { documentType: type },
+        });
+
+        expect(response.statusCode).toBe(200);
+      }
+    });
   });
 
   describe('POST /api/autofill-bank', () => {
@@ -344,6 +409,68 @@ describe('Scan routes', () => {
       expect(response.statusCode).toBe(500);
       const body = JSON.parse(response.payload);
       expect(body.error).toBe('Bank sheet not found');
+    });
+
+    it('returns 400 for empty bankName (bug #50)', async () => {
+      const response = await server.inject({
+        method: 'POST',
+        url: '/api/autofill-bank',
+        headers: {
+          authorization: 'Bearer test-secret-123',
+        },
+        payload: { bankName: '' },
+      });
+
+      expect(response.statusCode).toBe(400);
+      const body = JSON.parse(response.payload);
+      expect(body.error).toContain('bankName');
+    });
+
+    it('returns 404 for non-existent bankName (bug #50)', async () => {
+      const response = await server.inject({
+        method: 'POST',
+        url: '/api/autofill-bank',
+        headers: {
+          authorization: 'Bearer test-secret-123',
+        },
+        payload: { bankName: 'NonExistentBank' },
+      });
+
+      expect(response.statusCode).toBe(404);
+      const body = JSON.parse(response.payload);
+      expect(body.error.toLowerCase()).toContain('bank');
+    });
+
+    it('accepts valid bankName (bug #50)', async () => {
+      mockAutoFillBankMovements.mockResolvedValue({
+        ok: true,
+        value: {
+          rowsProcessed: 10,
+          rowsFilled: 5,
+          bankFeeMatches: 0,
+          creditCardPaymentMatches: 0,
+          pagoFacturaMatches: 3,
+          directFacturaMatches: 1,
+          reciboMatches: 0,
+          pagoOnlyMatches: 0,
+          noMatches: 5,
+          failedBanks: [],
+          errors: 0,
+          duration: 500,
+        },
+      });
+
+      const response = await server.inject({
+        method: 'POST',
+        url: '/api/autofill-bank',
+        headers: {
+          authorization: 'Bearer test-secret-123',
+        },
+        payload: { bankName: 'BBVA' },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(mockAutoFillBankMovements).toHaveBeenCalledWith('BBVA');
     });
   });
 

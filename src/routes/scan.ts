@@ -51,7 +51,19 @@ export async function scanRoutes(server: FastifyInstance) {
    * POST /api/scan - Trigger a manual scan of the Drive folder
    * Protected with authentication
    */
-  server.post<{ Body: ScanRequest }>('/scan', { onRequest: authMiddleware }, async (request, reply): Promise<ScanResult | ErrorResponse> => {
+  server.post<{ Body: ScanRequest }>('/scan', {
+    onRequest: authMiddleware,
+    schema: {
+      body: {
+        type: 'object',
+        properties: {
+          folderId: { type: 'string' },
+          force: { type: 'boolean' },
+        },
+        additionalProperties: false,
+      },
+    },
+  }, async (request, reply): Promise<ScanResult | ErrorResponse> => {
     const { folderId: rawFolderId } = request.body || {};
 
     // Validate and extract folderId if provided
@@ -96,7 +108,21 @@ export async function scanRoutes(server: FastifyInstance) {
    * POST /api/rematch - Re-run matching on unmatched documents
    * Protected with authentication
    */
-  server.post<{ Body: RematchRequest }>('/rematch', { onRequest: authMiddleware }, async (request, reply): Promise<RematchResult | ErrorResponse> => {
+  server.post<{ Body: RematchRequest }>('/rematch', {
+    onRequest: authMiddleware,
+    schema: {
+      body: {
+        type: 'object',
+        properties: {
+          documentType: {
+            type: 'string',
+            enum: ['factura', 'recibo', 'all'],
+          },
+        },
+        additionalProperties: false,
+      },
+    },
+  }, async (request, reply): Promise<RematchResult | ErrorResponse> => {
     const { documentType = 'all' } = request.body || {};
 
     server.log.info({ documentType }, 'Starting rematch');
@@ -119,6 +145,35 @@ export async function scanRoutes(server: FastifyInstance) {
    */
   server.post<{ Body: AutofillRequest }>('/autofill-bank', { onRequest: authMiddleware }, async (request, reply): Promise<BankAutoFillResult | ErrorResponse> => {
     const { bankName } = request.body || {};
+
+    // Validate bankName is non-empty
+    if (bankName !== undefined && typeof bankName === 'string' && bankName.trim() === '') {
+      reply.status(400);
+      return {
+        error: 'Invalid bankName',
+        details: 'bankName must be a non-empty string',
+      };
+    }
+
+    // Check if bankName exists in folder structure
+    if (bankName) {
+      const folderStructure = getCachedFolderStructure();
+      if (!folderStructure) {
+        reply.status(500);
+        return {
+          error: 'Folder structure not cached',
+          details: 'Run /api/scan first to initialize folder structure',
+        };
+      }
+
+      if (!folderStructure.bankSpreadsheets.has(bankName)) {
+        reply.status(404);
+        return {
+          error: 'Bank not found',
+          details: `Bank "${bankName}" does not exist in folder structure`,
+        };
+      }
+    }
 
     server.log.info({ bankName }, 'Starting bank autofill');
 
