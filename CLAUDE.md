@@ -27,9 +27,9 @@ Breaking changes OK. Delete unused code immediately. Update refs when changing A
 Every new function/feature follows this sequence:
 
 1. Write failing test that defines expected behavior
-2. Run `test-runner` agent - confirm test fails (red)
+2. Run `verifier` agent - confirm test fails (red)
 3. Write minimal implementation code
-4. Run `test-runner` agent - confirm test passes (green)
+4. Run `verifier` agent - confirm test passes (green)
 5. Refactor while keeping tests green
 
 **Coverage requirement:** >=80%
@@ -38,8 +38,7 @@ Every new function/feature follows this sequence:
 
 After completing work, run these agents in order:
 1. `bug-hunter` - Review git changes for bugs - Fix any issues found
-2. `test-runner` - Verify all tests pass - Fix any failures
-3. `builder` - Verify zero warnings - Fix any warnings
+2. `verifier` - Verify all tests pass and zero warnings - Fix any issues
 
 ### TDD in Plans
 
@@ -47,17 +46,16 @@ Each implementation task MUST include writing tests as its first step. Example:
 ```
 Task: Add parseResumenBroker function
 1. Write test in parser.test.ts for parseResumenBrokerResponse
-2. Run test-runner (expect fail)
+2. Run verifier (expect fail)
 3. Implement parseResumenBrokerResponse in parser.ts
-4. Run test-runner (expect pass)
+4. Run verifier (expect pass)
 ```
 
 ### Plan Requirements
 
 **No manual steps:** Plans must NEVER include manual verification steps for humans. All verification must be automated through agents:
-- Testing: Use `test-runner` agent
+- Testing and build validation: Use `verifier` agent
 - Bug detection: Use `bug-hunter` agent
-- Build validation: Use `builder` agent
 
 **Every plan must end with the post-implementation checklist** (see below).
 
@@ -66,12 +64,13 @@ Task: Add parseResumenBroker function
 | Agent | Purpose | When to Use |
 |-------|---------|-------------|
 | `bug-hunter` (opus) | Find bugs in git changes | After implementation, before commit |
-| `test-runner` (haiku) | Run tests | After writing/changing code |
-| `builder` (haiku) | Build project | Before commit to verify no warnings |
+| `verifier` (haiku) | Run tests and build | After writing/changing code, before commit |
 | `commit-bot` (haiku) | Commit to current branch | Only when user requests commit |
-| `pr-creator` (haiku) | Branch + commit + push + PR | Only when user requests PR |
+| `pr-creator` (sonnet) | Branch + commit + push + PR | Only when user requests PR |
 
-**Git agents rule:** Only use `commit-bot` or `pr-creator` if explicitly requested. If PR requested, use `pr-creator` only (it handles branch creation, commit, push, and PR creation).
+**Git agents rule:** Never commit or create PRs unless the user explicitly requests it. When requested:
+- **Commit requested** → Use `commit-bot` agent (don't commit manually)
+- **PR requested** → Use `pr-creator` agent (handles branch, commit, push, and PR)
 
 ## SKILLS
 
@@ -79,7 +78,7 @@ Skills are specialized workflows in `.claude/skills/`. Descriptions drive automa
 
 | Skill | When to Invoke |
 |-------|----------------|
-| `investigate` | Investigate issues and report findings without creating plans. Use when user says "investigate", "check why", "look into", "diagnose", or wants to understand a problem before deciding action. Accesses Railway logs, Drive files, Gemini prompts. Reports only. |
+| `investigate` | Read-only investigation that reports findings without creating plans. Use when user says "investigate", "check why", "look into", "diagnose", or wants to understand a problem before deciding action. Accesses Railway logs, Drive files, Gemini prompts. Offers to chain to plan-fix if issues are found. |
 | `plan-todo` | Convert TODO.md backlog items into TDD implementation plans. Use when user says "plan item #N", "plan all bugs", or wants to work on backlog items. Explores codebase and uses MCPs for context. |
 | `plan-inline` | Create TDD plans from direct feature requests without TODO.md. Use when user provides a task description directly like "add X feature" or "create Y function". Faster than plan-todo for ad-hoc requests. |
 | `plan-fix` | Investigate bugs and create fix plans. Use when user reports extraction errors, deployment failures, wrong data, or prompt issues. Uses Railway logs, Drive files, and Gemini prompt testing. |
@@ -308,8 +307,8 @@ server.post('/api/new', { onRequest: authMiddleware }, handler);
 
 ```bash
 npm run dev           # Dev with watch
-npm test              # Vitest (use test-runner agent)
-npm run build         # Compile (use builder agent)
+npm test              # Vitest (use verifier agent)
+npm run build         # Compile (use verifier agent)
 npm run build:script  # Build Apps Script (requires API_BASE_URL, API_SECRET)
 npm run deploy:script # Build + deploy to Dashboard
 ```

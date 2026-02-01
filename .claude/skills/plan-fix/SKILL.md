@@ -1,6 +1,6 @@
 ---
 name: plan-fix
-description: Investigate bugs and create TDD fix plans. Use when user reports extraction errors, deployment failures, wrong data, missing matches, or prompt issues. Discovers MCPs from CLAUDE.md for debugging (logs, files, prompts).
+description: Investigates bugs AND creates actionable TDD fix plans. Use when you know you want to fix something - user reports extraction errors, deployment failures, wrong data, missing matches, or prompt issues. Can be chained from investigate skill. Discovers MCPs from CLAUDE.md for debugging (logs, files, prompts).
 argument-hint: <bug description>
 allowed-tools: Read, Edit, Write, Glob, Grep, Task
 disable-model-invocation: true
@@ -127,8 +127,7 @@ Write PLANS.md with this structure:
 
 ## Post-Implementation Checklist
 1. Run `bug-hunter` agent - Review changes for bugs
-2. Run `test-runner` agent - Verify all tests pass
-3. Run `builder` agent - Verify zero warnings
+2. Run `verifier` agent - Verify all tests pass and zero warnings
 
 ---
 

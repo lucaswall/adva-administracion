@@ -14,10 +14,13 @@ Create a well-crafted commit from current changes.
    - `git status --porcelain=v1`
    - If empty → report "Nothing to commit" and stop
 
-2. **Stage changes**
-   - `git add -A`
+2. **Analyze and stage changes**
+   - `git status --porcelain=v1` - Get list of changed files
+   - Review each file - skip if matches: `.env*`, `*.key`, `*.pem`, `credentials*`, `secrets*`, `node_modules/`, `dist/`, `*.log`
+   - Stage specific files: `git add <file1> <file2> ...`
+   - If all files were skipped → report "No safe files to commit" and stop
 
-3. **Analyze changes**
+3. **Review staged changes**
    - `git diff --cached --name-only` - List changed files
    - `git diff --cached` - Review actual changes
 
@@ -77,3 +80,4 @@ Error: [relevant output]
 - Do not include co-author attribution
 - Do not enumerate test names in body
 - Analyze changes to choose appropriate type
+- Never stage files matching sensitive patterns (.env*, credentials*, secrets*, *.key, *.pem)
