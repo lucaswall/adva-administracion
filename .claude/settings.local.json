@@ -53,7 +53,8 @@
       "Bash(md5:*)",
       "Bash(railway logs:*)",
       "Bash(wc:*)",
-      "WebFetch(domain:www.anthropic.com)"
+      "WebFetch(domain:www.anthropic.com)",
+      "WebFetch(domain:docs.claude.com)"
     ],
     "deny": [
       "Bash(rm -rf *)",
