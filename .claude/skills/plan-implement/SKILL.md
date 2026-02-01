@@ -91,6 +91,32 @@ After execution, append a new "Iteration N" section to PLANS.md:
 
 **IMPORTANT:** Do NOT add "Review Findings" or "Notes" sections. Those are reserved for `plan-review-implementation`. The iteration section should end after "Pre-commit Verification".
 
+## Context Management & Continuation
+
+After completing each iteration, estimate remaining context:
+
+**Rough estimation heuristics:**
+- Each large file read (~500 lines): ~2-3% context
+- Each file written/edited: ~1-2% context
+- Each test-runner/builder/bug-hunter invocation: ~2-4% context
+- Conversation messages accumulate over time
+
+**Decision logic:**
+- If estimated remaining context **> 60%** → Automatically continue to next pending work (Fix Plan or next iteration)
+- If estimated remaining context **≤ 60%** → Stop and inform user:
+  > "Iteration N complete. Context is running low (~X% estimated remaining). Run `/plan-implement` again to continue."
+
+**Why 60% threshold:** Leaves buffer for:
+- Potential bug fixes
+- test-runner/builder verification
+- User interactions
+- Unexpected issues
+
+**When to continue automatically:**
+1. Current iteration completed successfully
+2. There is more pending work in PLANS.md (another Fix Plan or the plan isn't fully implemented)
+3. Estimated remaining context > 60%
+
 ## Error Handling
 
 | Situation | Action |
@@ -117,6 +143,7 @@ After execution, append a new "Iteration N" section to PLANS.md:
 ## Rules
 
 - **Execute ALL pending tasks** - Never leave work incomplete
+- **Continue automatically if context allows** - If > 60% context remains, proceed to next iteration
 - **Follow TDD strictly** - Test before implementation, always
 - **Fix failures immediately** - Do not proceed with failing tests or warnings
 - **Never modify previous sections** - Only append new Iteration section
