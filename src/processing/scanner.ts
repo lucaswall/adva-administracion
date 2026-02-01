@@ -106,7 +106,16 @@ async function processFileWithRetry(
     correlationId,
   });
 
-  const processResult = await processFile(fileInfo, context);
+  let processResult: Awaited<ReturnType<typeof processFile>>;
+  try {
+    processResult = await processFile(fileInfo, context);
+  } catch (error) {
+    // Handle unexpected exceptions from processFile
+    processResult = {
+      ok: false,
+      error: error instanceof Error ? error : new Error(String(error)),
+    };
+  }
 
   if (!processResult.ok) {
     // Check if it's a JSON parse error and we haven't exceeded retry limit
@@ -151,6 +160,23 @@ async function processFileWithRetry(
       correlationId,
     });
     result.errors++;
+
+    // Update tracking sheet to mark file as failed
+    const statusUpdateResult = await updateFileStatus(
+      dashboardOperativoId,
+      fileInfo.id,
+      'failed',
+      processResult.error.message
+    );
+    if (!statusUpdateResult.ok) {
+      warn('Failed to update file status in tracking sheet', {
+        module: 'scanner',
+        phase: isRetry ? 'process-file-retry' : 'process-file',
+        fileId: fileInfo.id,
+        error: statusUpdateResult.error.message,
+        correlationId,
+      });
+    }
 
     const sortResult = await sortToSinProcesar(fileInfo.id, fileInfo.name);
     if (!sortResult.success) {
