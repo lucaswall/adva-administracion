@@ -6,31 +6,27 @@
 import type { FastifyRequest, FastifyReply } from 'fastify';
 import { getConfig } from '../config.js';
 import { warn } from '../utils/logger.js';
-import { timingSafeEqual } from 'crypto';
+import { timingSafeEqual, createHash } from 'crypto';
 
 /**
  * Constant-time string comparison to prevent timing attacks
+ * ADV-6: Uses SHA-256 hashing to normalize string lengths before comparison.
+ * This prevents timing leaks from buffer padding differences.
+ *
  * @param a - First string to compare
  * @param b - Second string to compare
  * @returns true if strings are equal
  */
 function constantTimeCompare(a: string, b: string): boolean {
-  // If lengths differ, still perform comparison to avoid timing leak
-  // Pad shorter string with null bytes
-  const maxLength = Math.max(a.length, b.length);
-  const bufferA = Buffer.alloc(maxLength);
-  const bufferB = Buffer.alloc(maxLength);
+  // Hash both strings with SHA-256 to normalize length
+  // This ensures timingSafeEqual always compares 32-byte buffers,
+  // eliminating timing leaks from padding different-length strings
+  const hashA = createHash('sha256').update(a, 'utf-8').digest();
+  const hashB = createHash('sha256').update(b, 'utf-8').digest();
 
-  bufferA.write(a, 0, a.length, 'utf-8');
-  bufferB.write(b, 0, b.length, 'utf-8');
-
-  try {
-    return timingSafeEqual(bufferA, bufferB);
-  } catch {
-    // timingSafeEqual throws if buffers have different lengths
-    // This shouldn't happen with our padding, but return false just in case
-    return false;
-  }
+  // Both hashes are always exactly 32 bytes, so timingSafeEqual
+  // performs a true constant-time comparison
+  return timingSafeEqual(hashA, hashB);
 }
 
 /**

@@ -16,6 +16,12 @@ import { info, warn, error as logError } from './utils/logger.js';
 import type { Result } from './types/index.js';
 
 /**
+ * Maximum time to wait for graceful shutdown before forcing exit
+ * ADV-7: Prevent infinite hanging during shutdown
+ */
+export const SHUTDOWN_TIMEOUT_MS = 30000;
+
+/**
  * Build and configure the Fastify server
  */
 export async function buildServer() {
@@ -239,6 +245,73 @@ export async function performStartupScan(): Promise<Result<void, Error>> {
 }
 
 /**
+ * Creates a shutdown handler that properly awaits all cleanup operations
+ * ADV-7: Fix shutdown handlers not awaited - was causing unclean shutdown
+ *
+ * @param shutdownWatchManager - Function to shutdown watch manager
+ * @param serverClose - Function to close the server
+ * @param processExit - Function to exit the process (allows injection for testing)
+ * @param timeoutMs - Maximum time to wait for shutdown (defaults to SHUTDOWN_TIMEOUT_MS)
+ * @returns Async handler function that properly awaits cleanup
+ */
+export function createShutdownHandler(
+  shutdownWatchManager: () => Promise<void>,
+  serverClose: () => Promise<void>,
+  processExit: (code: number) => void,
+  timeoutMs: number = SHUTDOWN_TIMEOUT_MS
+): (signal: string) => Promise<void> {
+  return async (signal: string) => {
+    info('Received shutdown signal', {
+      module: 'server',
+      phase: 'shutdown',
+      signal
+    });
+
+    // Create timeout promise to prevent infinite hanging
+    const timeoutPromise = new Promise<'timeout'>((resolve) => {
+      setTimeout(() => resolve('timeout'), timeoutMs);
+    });
+
+    // Create shutdown promise that awaits all cleanup operations
+    const shutdownPromise = (async () => {
+      try {
+        // Stop watching before closing
+        await shutdownWatchManager();
+        info('Watch channels stopped', { module: 'server', phase: 'shutdown' });
+
+        await serverClose();
+        info('Server closed', { module: 'server', phase: 'shutdown' });
+
+        return 'success' as const;
+      } catch (err) {
+        logError('Shutdown error', {
+          module: 'server',
+          phase: 'shutdown',
+          error: err instanceof Error ? err.message : String(err)
+        });
+        return 'error' as const;
+      }
+    })();
+
+    // Race between shutdown and timeout
+    const result = await Promise.race([shutdownPromise, timeoutPromise]);
+
+    if (result === 'timeout') {
+      warn('Shutdown timed out, forcing exit', {
+        module: 'server',
+        phase: 'shutdown',
+        timeoutMs
+      });
+      processExit(1);
+    } else if (result === 'error') {
+      processExit(1);
+    } else {
+      processExit(0);
+    }
+  };
+}
+
+/**
  * Start the server
  */
 async function start() {
@@ -286,25 +359,17 @@ async function start() {
       throw scanResult.error;
     }
 
-    // Graceful shutdown handler
-    const shutdown = async (signal: string) => {
-      info('Received shutdown signal', {
-        module: 'server',
-        phase: 'shutdown',
-        signal
-      });
+    // Graceful shutdown handler - ADV-7: Properly await shutdown operations
+    const shutdown = createShutdownHandler(
+      shutdownWatchManager,
+      () => server.close(),
+      (code) => process.exit(code)
+    );
 
-      // Stop watching before closing
-      await shutdownWatchManager();
-      info('Watch channels stopped', { module: 'server', phase: 'shutdown' });
-
-      await server.close();
-      info('Server closed', { module: 'server', phase: 'shutdown' });
-      process.exit(0);
-    };
-
-    process.on('SIGTERM', () => shutdown('SIGTERM'));
-    process.on('SIGINT', () => shutdown('SIGINT'));
+    // Note: The handlers call async shutdown() which is now properly awaited internally
+    // The handler returns a promise, and process.exit() is called only after completion
+    process.on('SIGTERM', () => { shutdown('SIGTERM'); });
+    process.on('SIGINT', () => { shutdown('SIGINT'); });
 
   } catch (err) {
     logError('Failed to start server', {

@@ -55,6 +55,7 @@ import { getConfig } from './config.js';
 import { scanFolder } from './processing/scanner.js';
 import { getCachedFolderStructure } from './services/folder-structure.js';
 
+
 // Reset module cache between tests to get fresh imports
 afterEach(async () => {
   vi.resetModules();
@@ -315,6 +316,113 @@ describe('Server startup scan (ADV-26)', () => {
       expect(result.ok).toBe(true);
       // scanFolder should NOT be called in test mode
       expect(scanFolder).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('createShutdownHandler (ADV-7)', () => {
+    it('should create a handler that properly awaits shutdown operations', async () => {
+      const { createShutdownHandler } = await import('./server.js');
+
+      // Track operation order and completion
+      const operations: string[] = [];
+      let watchManagerResolved = false;
+      let serverCloseResolved = false;
+
+      const mockShutdownWatchManager = vi.fn(async () => {
+        await new Promise(resolve => setTimeout(resolve, 10));
+        operations.push('watchManager');
+        watchManagerResolved = true;
+      });
+
+      const mockServerClose = vi.fn(async () => {
+        await new Promise(resolve => setTimeout(resolve, 10));
+        operations.push('serverClose');
+        serverCloseResolved = true;
+      });
+
+      const mockProcessExit = vi.fn((code: number) => {
+        operations.push(`exit:${code}`);
+      });
+
+      const handler = createShutdownHandler(
+        mockShutdownWatchManager,
+        mockServerClose,
+        mockProcessExit
+      );
+
+      // Call handler and wait for it to complete
+      await handler('SIGTERM');
+
+      // Verify all operations completed IN ORDER
+      expect(watchManagerResolved).toBe(true);
+      expect(serverCloseResolved).toBe(true);
+      expect(operations).toEqual(['watchManager', 'serverClose', 'exit:0']);
+    });
+
+    it('should exit with code 0 after successful shutdown', async () => {
+      const { createShutdownHandler } = await import('./server.js');
+
+      let exitCode = -1;
+      const mockProcessExit = vi.fn((code: number) => {
+        exitCode = code;
+      });
+
+      const handler = createShutdownHandler(
+        vi.fn().mockResolvedValue(undefined),
+        vi.fn().mockResolvedValue(undefined),
+        mockProcessExit
+      );
+
+      await handler('SIGINT');
+
+      expect(exitCode).toBe(0);
+    });
+
+    it('should exit with code 1 if shutdown operations fail', async () => {
+      const { createShutdownHandler } = await import('./server.js');
+
+      let exitCode = -1;
+      const mockProcessExit = vi.fn((code: number) => {
+        exitCode = code;
+      });
+
+      const handler = createShutdownHandler(
+        vi.fn().mockRejectedValue(new Error('Watch manager cleanup failed')),
+        vi.fn().mockResolvedValue(undefined),
+        mockProcessExit
+      );
+
+      await handler('SIGTERM');
+
+      // Should exit with error code on failure
+      expect(exitCode).toBe(1);
+    });
+
+    it('should timeout after 30 seconds to prevent infinite hanging', async () => {
+      const { createShutdownHandler, SHUTDOWN_TIMEOUT_MS } = await import('./server.js');
+
+      // Verify timeout constant exists and is 30 seconds
+      expect(SHUTDOWN_TIMEOUT_MS).toBe(30000);
+
+      let exitCode = -1;
+      const mockProcessExit = vi.fn((code: number) => {
+        exitCode = code;
+      });
+
+      // Create a shutdown handler with operations that never complete
+      const neverResolves = () => new Promise<void>(() => {});
+
+      const handler = createShutdownHandler(
+        neverResolves,
+        neverResolves,
+        mockProcessExit,
+        50 // Use 50ms timeout for test instead of 30s
+      );
+
+      await handler('SIGTERM');
+
+      // Should exit with code 1 on timeout
+      expect(exitCode).toBe(1);
     });
   });
 });
