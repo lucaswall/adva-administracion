@@ -110,6 +110,52 @@ Backlog → Todo → In Progress → Review → Merge → Done
 
 ---
 
+## Iteration 1
+
+**Implemented:** 2026-02-02
+
+### Tasks Completed This Iteration
+- Task 1: Update plan-review-implementation to use Merge status - Changed all "Review → Done" to "Review → Merge" throughout the skill
+- Task 2: Update pr-creator to include Linear magic keywords - Added step to extract issue IDs from PLANS.md, added "Linear Issues" section with `Closes ADV-XXX` format
+- Task 3: Update plan-todo state flow documentation - Added Merge to state flow comment
+- Task 4: Update CLAUDE.md Linear Integration section - Added Merge state to diagram, table, and transitions; added Linear GitHub Integration section
+
+### Files Modified
+- `.claude/skills/plan-review-implementation/SKILL.md` - Updated all Done references to Merge
+- `.claude/agents/pr-creator.md` - Added Linear issue extraction and magic keywords in PR body
+- `.claude/skills/plan-todo/SKILL.md` - Updated state flow to include Merge
+- `CLAUDE.md` - Updated LINEAR INTEGRATION section with Merge state and GitHub automation docs
+
+### Linear Updates
+- ADV-42: Todo → In Progress → Review
+
+### Pre-commit Verification
+- bug-hunter: Passed - no bugs found
+- verifier: All 1506 tests pass, zero warnings
+
+### Continuation Status
+All tasks completed.
+
+### Review Findings
+
+Files reviewed: 4
+Checks applied: Security, Logic, Async, Resources, Type Safety, Conventions
+
+No issues found - all implementations are correct and follow project conventions.
+
+**Files reviewed:**
+- `.claude/skills/plan-review-implementation/SKILL.md` - All "Review → Done" correctly changed to "Review → Merge"
+- `.claude/agents/pr-creator.md` - Added Linear issue extraction and magic keywords in PR body
+- `.claude/skills/plan-todo/SKILL.md` - State flow correctly updated to include Merge
+- `CLAUDE.md` - Linear Integration section updated with Merge state and GitHub automation docs
+
+### Linear Updates
+- ADV-42: Review → Merge
+
+<!-- REVIEW COMPLETE -->
+
+---
+
 ## Plan Summary
 
 **Objective:** Implement Merge status in skill workflow so issues move to Merge after review, then automatically to Done when PR is merged via Linear's GitHub integration.
@@ -136,3 +182,10 @@ Backlog → Todo → In Progress → Review → Merge → Done
 **Dependencies/Prerequisites:**
 - Linear GitHub integration must be configured (assumed already set up)
 - Tasks can be done in any order, but Task 4 (CLAUDE.md) should be last to reflect final state
+
+---
+
+## Status: COMPLETE
+
+All tasks implemented and reviewed successfully. ADV-42 moved to Merge.
+Ready for PR creation.

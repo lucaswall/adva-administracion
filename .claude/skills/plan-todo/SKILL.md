@@ -231,7 +231,7 @@ After writing PLANS.md, move the planned issues to Todo state:
 
 2. Issues remain in Backlog if not selected for planning
 
-**State flow:** Backlog → Todo (when planned) → In Progress → Review → Done
+**State flow:** Backlog → Todo (when planned) → In Progress → Review → Merge → Done
 
 ## Error Handling
 
