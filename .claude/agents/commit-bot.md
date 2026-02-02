@@ -3,7 +3,7 @@ name: commit-bot
 description: Git commit creator that stages changes and creates well-crafted commits. Use only when explicitly requested by the user. Analyzes changes to generate appropriate commit messages.
 tools: Bash
 model: sonnet
-permissionMode: dontAsk
+permissionMode: default
 ---
 
 Create a well-crafted commit from current changes.
