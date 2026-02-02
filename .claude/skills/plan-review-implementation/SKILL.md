@@ -196,11 +196,24 @@ No issues found - all implementations are correct and follow project conventions
 
 **Then continue to the next iteration needing review.**
 
+### When Stopping Due to Context Limits
+
+If context is low (≤60%) after completing an iteration review but MORE iterations remain:
+
+1. Document the completed iteration's findings (as normal)
+2. Inform user about remaining iterations
+3. **Suggest commit to preserve progress:**
+   > "Iteration N review complete. Context is running low (~X% estimated remaining). Would you like me to commit these changes before continuing? Run `/plan-review-implementation` again to review the remaining iterations."
+
+This ensures work is preserved even if the session ends.
+
 ### After ALL Iterations Reviewed
 
 When all pending iterations have been reviewed:
 
 - **If any iteration has a Fix Plan** → Do NOT mark complete. Fix plans must be implemented first.
+  > "Review complete. Found issues requiring fixes. Run `/plan-implement` to execute the Fix Plan, then `/plan-review-implementation` again."
+
 - **If all iterations passed with no issues** → Append final status and suggest PR:
 
 ```markdown
@@ -263,7 +276,13 @@ This prompts the user to invoke the `pr-creator` agent if they want to submit th
 
 ## Context Management & Continuation
 
-After completing review of each iteration, estimate remaining context:
+**CRITICAL:** Context is checked ONLY at iteration boundaries. Never stop mid-iteration review.
+
+**When to check context:**
+- AFTER completing each iteration's full review (Step 1-3 + documenting findings)
+- BEFORE starting the next iteration's review
+
+**After completing each iteration review**, estimate remaining context:
 
 **Rough estimation heuristics:**
 - Each file reviewed: ~1-2% context
@@ -282,6 +301,11 @@ After completing review of each iteration, estimate remaining context:
 - 60% leaves sufficient buffer for documenting and creating Linear issues
 
 **When to continue automatically:**
-1. Current iteration review completed
+1. Current iteration review FULLY completed (all files reviewed, findings documented)
 2. There are more pending iterations to review
 3. Estimated remaining context > 60%
+
+**Never stop mid-iteration:**
+- Once you start reviewing an iteration, you MUST complete it before stopping
+- This ensures each iteration has complete review findings documented
+- Partial reviews leave the plan in an inconsistent state
