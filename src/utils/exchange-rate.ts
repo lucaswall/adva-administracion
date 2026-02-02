@@ -155,15 +155,18 @@ export async function getExchangeRate(date: string): Promise<Result<ExchangeRate
       };
     }
 
-    const data = await response.json() as { compra?: number; venta?: number; fecha?: string };
+    const rawData: unknown = await response.json();
 
-    // Validate response structure
-    if (typeof data !== 'object' || data === null) {
+    // Validate response structure before type assertion
+    if (rawData === null || typeof rawData !== 'object' || Array.isArray(rawData)) {
       return {
         ok: false,
         error: new Error('Invalid API response: data is not an object'),
       };
     }
+
+    // Now safe to treat as potential exchange rate object
+    const data = rawData as { compra?: number; venta?: number; fecha?: string };
 
     if (typeof data.compra !== 'number' || typeof data.venta !== 'number') {
       return {

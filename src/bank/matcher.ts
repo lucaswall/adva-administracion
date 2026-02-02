@@ -1244,6 +1244,8 @@ export class BankMovementMatcher {
  */
 export interface MatchQuality {
   fileId: string;
+  /** Confidence level: HIGH > MEDIUM > LOW (ADV-34) */
+  confidence: 'HIGH' | 'MEDIUM' | 'LOW';
   hasCuitMatch: boolean;
   dateDistance: number;
   isExactAmount: boolean;

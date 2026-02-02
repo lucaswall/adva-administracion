@@ -74,13 +74,15 @@ export function parseNumber(value: unknown): number | null {
     return null;
   }
 
-  // Remove currency symbols and whitespace
+  // Remove currency symbols and whitespace FIRST (before negative detection)
+  // This ensures ($1,234.56) becomes (1,234.56) before checking for parentheses
   str = str.replace(/[$\s]/g, '');
 
-  // Handle negative numbers
-  const isNegative = str.startsWith('-') || str.startsWith('(');
+  // Handle negative numbers: -X, (X), or (-X)
+  const isNegative = str.startsWith('-') || str.startsWith('(') || str.startsWith('(-');
   if (isNegative) {
-    str = str.replace(/^[-()]/g, '').replace(/\)$/g, '');
+    // Remove leading negative indicators and trailing parenthesis
+    str = str.replace(/^[-(]+/g, '').replace(/\)$/g, '');
   }
 
   // Detect format and normalize to standard decimal format

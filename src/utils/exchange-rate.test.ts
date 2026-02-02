@@ -381,6 +381,67 @@ describe('exchange-rate', () => {
       }
     });
 
+    it('returns error for array response instead of object', async () => {
+      // API might return an array in some error conditions
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => []
+      });
+
+      const { getExchangeRate } = await import('./exchange-rate.js');
+      const result = await getExchangeRate('2025-01-20');
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.error.message).toContain('Invalid API response');
+      }
+    });
+
+    it('returns error for unexpected structure without compra/venta', async () => {
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({ unexpected: 'structure', data: 123 })
+      });
+
+      const { getExchangeRate } = await import('./exchange-rate.js');
+      const result = await getExchangeRate('2025-01-20');
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.error.message).toContain('Invalid API response');
+      }
+    });
+
+    it('returns error for NaN values in compra', async () => {
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({ compra: NaN, venta: 1260 })
+      });
+
+      const { getExchangeRate } = await import('./exchange-rate.js');
+      const result = await getExchangeRate('2025-01-20');
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.error.message).toContain('Invalid API response');
+      }
+    });
+
+    it('returns error for Infinity values in venta', async () => {
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({ compra: 1250, venta: Infinity })
+      });
+
+      const { getExchangeRate } = await import('./exchange-rate.js');
+      const result = await getExchangeRate('2025-01-20');
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.error.message).toContain('Invalid API response');
+      }
+    });
+
     it('accepts valid response with compra and venta', async () => {
       global.fetch = vi.fn().mockResolvedValue({
         ok: true,

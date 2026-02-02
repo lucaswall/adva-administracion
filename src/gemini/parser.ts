@@ -793,6 +793,52 @@ function isValidDateFormat(dateStr: string): boolean {
  * @param movimientos - Array of movimientos to validate
  * @returns True if any validation issues found
  */
+/** Maximum reasonable value for financial amounts (1 quadrillion) */
+const MAX_FINANCIAL_VALUE = 1e15;
+
+/**
+ * Validates that a numeric value is within reasonable bounds
+ * @param value - The number to validate (can be null)
+ * @param fieldName - Name of the field for logging
+ * @param context - Additional context for logging
+ * @returns True if the value is invalid
+ */
+function isInvalidNumericValue(value: number | null, fieldName: string, context: Record<string, unknown>): boolean {
+  if (value === null) return false;
+
+  if (!Number.isFinite(value)) {
+    warn(`Invalid ${fieldName}: not a finite number`, {
+      module: 'gemini-parser',
+      phase: 'movimiento-validation',
+      [fieldName]: value,
+      ...context,
+    });
+    return true;
+  }
+
+  if (value < 0) {
+    warn(`Invalid ${fieldName}: negative value`, {
+      module: 'gemini-parser',
+      phase: 'movimiento-validation',
+      [fieldName]: value,
+      ...context,
+    });
+    return true;
+  }
+
+  if (Math.abs(value) > MAX_FINANCIAL_VALUE) {
+    warn(`Invalid ${fieldName}: exceeds maximum reasonable value`, {
+      module: 'gemini-parser',
+      phase: 'movimiento-validation',
+      [fieldName]: value,
+      ...context,
+    });
+    return true;
+  }
+
+  return false;
+}
+
 function validateMovimientosBancario(movimientos: Array<{
   fecha: string;
   origenConcepto: string;
@@ -822,6 +868,12 @@ function validateMovimientosBancario(movimientos: Array<{
       });
       hasIssues = true;
     }
+
+    // Validate numeric ranges
+    const context = { origenConcepto: mov.origenConcepto };
+    if (isInvalidNumericValue(mov.debito, 'debito', context)) hasIssues = true;
+    if (isInvalidNumericValue(mov.credito, 'credito', context)) hasIssues = true;
+    if (isInvalidNumericValue(mov.saldo, 'saldo', context)) hasIssues = true;
   }
 
   return hasIssues;
@@ -861,6 +913,11 @@ function validateMovimientosTarjeta(movimientos: Array<{
       });
       hasIssues = true;
     }
+
+    // Validate numeric ranges
+    const context = { descripcion: mov.descripcion };
+    if (isInvalidNumericValue(mov.pesos, 'pesos', context)) hasIssues = true;
+    if (isInvalidNumericValue(mov.dolares, 'dolares', context)) hasIssues = true;
   }
 
   return hasIssues;
@@ -905,6 +962,16 @@ function validateMovimientosBroker(movimientos: Array<{
       });
       hasIssues = true;
     }
+
+    // Validate numeric ranges
+    const context = { descripcion: mov.descripcion };
+    if (isInvalidNumericValue(mov.cantidadVN, 'cantidadVN', context)) hasIssues = true;
+    if (isInvalidNumericValue(mov.saldo, 'saldo', context)) hasIssues = true;
+    if (isInvalidNumericValue(mov.precio, 'precio', context)) hasIssues = true;
+    if (isInvalidNumericValue(mov.bruto, 'bruto', context)) hasIssues = true;
+    if (isInvalidNumericValue(mov.arancel, 'arancel', context)) hasIssues = true;
+    if (isInvalidNumericValue(mov.iva, 'iva', context)) hasIssues = true;
+    if (isInvalidNumericValue(mov.neto, 'neto', context)) hasIssues = true;
   }
 
   return hasIssues;

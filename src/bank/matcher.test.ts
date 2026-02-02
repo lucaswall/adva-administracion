@@ -742,6 +742,7 @@ describe('BankMovementMatcher - Credit Movement Matching', () => {
     it('prefers CUIT match over no CUIT match', () => {
       const withoutCuit = {
         fileId: 'doc1',
+        confidence: 'HIGH' as const,
         hasCuitMatch: false,
         dateDistance: 2,
         isExactAmount: true,
@@ -750,6 +751,7 @@ describe('BankMovementMatcher - Credit Movement Matching', () => {
 
       const withCuit = {
         fileId: 'doc2',
+        confidence: 'HIGH' as const,
         hasCuitMatch: true,
         dateDistance: 10,
         isExactAmount: false,
@@ -764,6 +766,7 @@ describe('BankMovementMatcher - Credit Movement Matching', () => {
     it('prefers closer date when CUIT match is equal', () => {
       const further = {
         fileId: 'doc1',
+        confidence: 'HIGH' as const,
         hasCuitMatch: true,
         dateDistance: 10,
         isExactAmount: true,
@@ -772,6 +775,7 @@ describe('BankMovementMatcher - Credit Movement Matching', () => {
 
       const closer = {
         fileId: 'doc2',
+        confidence: 'HIGH' as const,
         hasCuitMatch: true,
         dateDistance: 2,
         isExactAmount: true,
@@ -786,6 +790,7 @@ describe('BankMovementMatcher - Credit Movement Matching', () => {
     it('prefers exact amount over tolerance match', () => {
       const withTolerance = {
         fileId: 'doc1',
+        confidence: 'HIGH' as const,
         hasCuitMatch: true,
         dateDistance: 2,
         isExactAmount: false,
@@ -794,6 +799,7 @@ describe('BankMovementMatcher - Credit Movement Matching', () => {
 
       const exact = {
         fileId: 'doc2',
+        confidence: 'HIGH' as const,
         hasCuitMatch: true,
         dateDistance: 2,
         isExactAmount: true,
@@ -808,6 +814,7 @@ describe('BankMovementMatcher - Credit Movement Matching', () => {
     it('prefers Factura with linked Pago over Factura alone', () => {
       const withoutPago = {
         fileId: 'doc1',
+        confidence: 'HIGH' as const,
         hasCuitMatch: true,
         dateDistance: 2,
         isExactAmount: true,
@@ -816,6 +823,7 @@ describe('BankMovementMatcher - Credit Movement Matching', () => {
 
       const withPago = {
         fileId: 'doc2',
+        confidence: 'HIGH' as const,
         hasCuitMatch: true,
         dateDistance: 2,
         isExactAmount: true,
@@ -830,6 +838,7 @@ describe('BankMovementMatcher - Credit Movement Matching', () => {
     it('keeps existing when quality is equal', () => {
       const existing = {
         fileId: 'doc1',
+        confidence: 'HIGH' as const,
         hasCuitMatch: true,
         dateDistance: 2,
         isExactAmount: true,
@@ -838,6 +847,7 @@ describe('BankMovementMatcher - Credit Movement Matching', () => {
 
       const candidate = {
         fileId: 'doc2',
+        confidence: 'HIGH' as const,
         hasCuitMatch: true,
         dateDistance: 2,
         isExactAmount: true,

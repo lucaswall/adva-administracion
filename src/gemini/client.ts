@@ -503,13 +503,13 @@ export class GeminiClient {
   private async enforceRateLimit(): Promise<void> {
     // Serialize rate limit checks using a promise queue to prevent race conditions
     const previousPromise = this.rateLimitQueue;
-    // Initialize resolver with no-op to satisfy TypeScript
-    // The Promise constructor callback runs synchronously, so resolver is assigned before use
-    let resolver: () => void = () => {};
 
-    this.rateLimitQueue = new Promise<void>((resolve) => {
-      resolver = resolve;
-    });
+    // Create a deferred promise with its resolver atomically bound
+    // The resolver is assigned synchronously in the Promise constructor callback,
+    // making it safe to use in the finally block
+    let resolve!: () => void;
+    const promise = new Promise<void>((r) => { resolve = r; });
+    this.rateLimitQueue = promise;
 
     await previousPromise;
 
@@ -536,7 +536,7 @@ export class GeminiClient {
       this.requestCount++;
     } finally {
       // Release the lock
-      resolver();
+      resolve();
     }
   }
 

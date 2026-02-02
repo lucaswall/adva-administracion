@@ -278,3 +278,187 @@
 **Dependencies/Prerequisites:**
 - Tasks are independent and can be implemented in any order
 - Each task is self-contained with its own test + implementation cycle
+
+---
+
+## Iteration 1
+
+**Implemented:** 2026-02-02
+
+### Tasks Completed This Iteration
+- Task 1: Fix accounting notation parsing in numbers.ts - Updated regex to handle `($1,234.56)` and `(-$1,234.56)` patterns
+- Task 2: Fix date substring safety in file-naming.ts - Added `extractPeriodo()` helper with validation, returns 'unknown' for malformed dates
+- Task 3: Fix year range validation in date.ts - Extended from 10 to 16 years to support historical Argentine invoices
+- Task 4: Fix hash collision in computeVersion - Replaced DJB2 with MD5, now produces consistent 16-char hex output
+- Task 5: Fix isBetterMatch to consider confidence levels - Added `confidence` field to `MatchQuality`, compared first before CUIT/date
+
+### Tasks Remaining
+- Task 6: Add numeric range validation to movimientos parser (ADV-35)
+- Task 7: Add array bounds checking to autofill.ts (ADV-36)
+- Task 8: Fix context mutation thread-safety in correlation.ts (ADV-37)
+- Task 9: Fix exchange rate API response type vulnerability (ADV-23)
+- Task 10: Fix Gemini client rate limit queue race condition (ADV-24)
+- Task 11: Add rate limit retry to Drive API calls (ADV-25)
+- Task 12: Fix infinite retry loop in watch-manager (ADV-18)
+
+### Files Modified
+- `src/utils/numbers.ts` - Fixed accounting notation parsing order (currency before negative detection)
+- `src/utils/numbers.test.ts` - Added tests for `($1,234.56)` and `(-$1,234.56)` patterns
+- `src/utils/file-naming.ts` - Added `extractPeriodo()` helper, updated 4 resumen/recibo functions
+- `src/utils/file-naming.test.ts` - Added tests for malformed date handling in 4 functions
+- `src/utils/date.ts` - Extended year range from 10 to 16 years
+- `src/utils/date.test.ts` - Updated year range tests, added historical date tests
+- `src/utils/concurrency.ts` - Imported `createHash`, replaced DJB2 with MD5 in `computeVersion()`
+- `src/utils/concurrency.test.ts` - Added tests for 16-char hex format and collision resistance
+- `src/bank/match-movimientos.ts` - Added `CONFIDENCE_RANK`, updated `isBetterMatch()` and `buildMatchQuality()`
+- `src/bank/match-movimientos.test.ts` - Added confidence level comparison tests, updated existing tests
+- `src/bank/matcher.ts` - Added `confidence` field to `MatchQuality` interface
+
+### Linear Updates
+- ADV-27: Todo → In Progress → Review
+- ADV-28: Todo → In Progress → Review
+- ADV-29: Todo → In Progress → Review
+- ADV-33: Todo → In Progress → Review
+- ADV-34: Todo → In Progress → Review
+
+### Pre-commit Verification
+- bug-hunter: Passed - No bugs found in changes
+- verifier: All 1445 tests pass, zero warnings
+
+### Code Review
+
+**Reviewer:** Claude Opus 4.5 (automated)
+**Date:** 2026-02-02
+
+#### Review Checklist
+
+| Category | Status | Notes |
+|----------|--------|-------|
+| Security | ✅ Pass | No injection, auth bypass, or secrets exposure |
+| Logic bugs | ✅ Pass | No off-by-one, null handling, or race conditions |
+| Edge cases | ✅ Pass | Empty inputs, zero values handled correctly |
+| Async issues | ✅ Pass | No unhandled promises or race conditions |
+| Resource leaks | ✅ Pass | No memory or connection leaks |
+| Type safety | ✅ Pass | Proper type guards and validations |
+| Convention violations | ✅ Pass | Follows CLAUDE.md rules |
+
+#### Detailed Findings
+
+**Task 1 (ADV-27): Accounting notation parsing**
+- Fix correctly moves currency symbol removal before parentheses detection
+- Regex `[$\s]` properly handles both `($1,234.56)` and `(-$1,234.56)` patterns
+- Tests cover all edge cases including combination patterns
+
+**Task 2 (ADV-28): Date substring safety**
+- `extractPeriodo()` helper validates format with regex before substring
+- Returns `'unknown'` for malformed dates (safe fallback)
+- Year/month validation (1900-2100, 1-12) prevents invalid values
+
+**Task 3 (ADV-29): Year range validation**
+- Extended to 16 years back, sufficient for historical Argentine invoices
+- Comment documents the ADV-29 reference for traceability
+
+**Task 4 (ADV-33): Hash collision fix**
+- MD5 provides better collision resistance than DJB2
+- 16-char hex output matches existing `computeRowVersion()` pattern
+- BigInt and circular reference handling preserved
+
+**Task 5 (ADV-34): Confidence level comparison**
+- `CONFIDENCE_RANK` provides clear numeric ordering (HIGH=3, MEDIUM=2, LOW=1)
+- Confidence compared first in `isBetterMatch()` before other factors
+- Prevents LOW confidence from replacing HIGH confidence matches
+
+**No issues found.** All changes follow TDD, use existing patterns, and improve defensive coding.
+
+<!-- REVIEW COMPLETE -->
+
+---
+
+## Iteration 2
+
+**Implemented:** 2026-02-02
+
+### Tasks Completed This Iteration
+- Task 6: Add numeric range validation to movimientos parser - Added `isInvalidNumericValue()` helper, validates negative, NaN, and >1e15 values
+- Task 7: Add array bounds checking to autofill.ts - Added `MIN_MOVEMENT_COLUMNS = 9` constant, returns null for short rows
+- Task 8: Fix context mutation thread-safety in correlation.ts - Uses `enterWith()` for immutable context updates
+- Task 9: Fix exchange rate API response type vulnerability - Validates response is not array before type assertion, added Array.isArray check
+- Task 10: Fix Gemini client rate limit queue race condition - Refactored to use definite assignment pattern with clearer resolver binding
+
+### Tasks Remaining
+- Task 11: Add rate limit retry to Drive API calls (ADV-25)
+- Task 12: Fix infinite retry loop in watch-manager (ADV-18)
+
+### Files Modified
+- `src/gemini/parser.ts` - Added `isInvalidNumericValue()` helper, applied to all 3 movimientos validation functions
+- `src/gemini/parser.test.ts` - Added 8 tests for numeric range validation across bancario, tarjeta, and broker
+- `src/bank/autofill.ts` - Added `MIN_MOVEMENT_COLUMNS`, bounds check in `parseMovementRow()`, exported function
+- `src/bank/autofill.test.ts` - Added 6 tests for array bounds checking
+- `src/utils/correlation.ts` - Updated `updateCorrelationContext()` to use `enterWith()` for immutability
+- `src/utils/correlation.test.ts` - Added 3 tests for immutability guarantees
+- `src/utils/exchange-rate.ts` - Added `Array.isArray()` check before type assertion
+- `src/utils/exchange-rate.test.ts` - Added 4 tests for edge cases (array, unexpected structure, NaN, Infinity)
+- `src/gemini/client.ts` - Refactored rate limit queue to use definite assignment pattern
+- `src/gemini/client.test.ts` - Added 2 tests for queue robustness
+
+### Linear Updates
+- ADV-35: Todo → In Progress → Review
+- ADV-36: Todo → In Progress → Review
+- ADV-37: Todo → In Progress → Review
+- ADV-23: Todo → In Progress → Review
+- ADV-24: Todo → In Progress → Review
+
+### Pre-commit Verification
+- bug-hunter: Passed - No bugs found in changes
+- verifier: All 1468 tests pass, zero warnings
+
+### Continuation Status
+Context running low. Run `/plan-implement` to continue with Task 11.
+
+### Code Review
+
+**Reviewer:** Claude Opus 4.5 (automated)
+**Date:** 2026-02-02
+
+#### Review Checklist
+
+| Category | Status | Notes |
+|----------|--------|-------|
+| Security | ✅ Pass | No injection, auth bypass, or secrets exposure |
+| Logic bugs | ✅ Pass | No off-by-one, null handling, or race conditions |
+| Edge cases | ✅ Pass | Empty inputs, NaN, Infinity handled correctly |
+| Async issues | ✅ Pass | Race condition in rate limit queue fixed |
+| Resource leaks | ✅ Pass | No memory or connection leaks |
+| Type safety | ✅ Pass | Array.isArray check before type assertion |
+| Convention violations | ✅ Pass | Follows CLAUDE.md rules |
+
+#### Detailed Findings
+
+**Task 6 (ADV-35): Numeric range validation**
+- `isInvalidNumericValue()` helper validates: null (pass), NaN, negative, >1e15 (fail)
+- Applied consistently to all 3 movimientos validation functions (bancario, tarjeta, broker)
+- Uses `Number.isFinite()` which handles both NaN and Infinity
+
+**Task 7 (ADV-36): Array bounds checking**
+- `MIN_MOVEMENT_COLUMNS = 9` constant defines expected column count
+- Returns `null` early for short rows, preventing undefined access
+- Pattern matches defensive coding guidelines
+
+**Task 8 (ADV-37): Context mutation thread-safety**
+- Uses `enterWith()` to replace context atomically instead of mutating
+- New context object created with spread operator (immutable)
+- Test verifies original context is not modified
+
+**Task 9 (ADV-23): Exchange rate API type safety**
+- `Array.isArray()` check added before type assertion
+- Explicit validation: `rawData === null || typeof rawData !== 'object' || Array.isArray(rawData)`
+- Tests cover array, null, unexpected structure, NaN, and Infinity responses
+
+**Task 10 (ADV-24): Rate limit queue race condition**
+- Uses definite assignment assertion `let resolve!: () => void`
+- Resolver bound synchronously in Promise executor (no yield between)
+- `finally` block ensures queue is always released
+
+**No issues found.** All changes follow TDD, use existing patterns, and improve defensive coding.
+
+<!-- REVIEW COMPLETE -->

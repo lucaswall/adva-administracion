@@ -149,6 +149,15 @@ interface EgresosData {
 }
 
 /**
+ * Numeric value for confidence levels (higher is better)
+ */
+const CONFIDENCE_RANK: Record<'HIGH' | 'MEDIUM' | 'LOW', number> = {
+  HIGH: 3,
+  MEDIUM: 2,
+  LOW: 1,
+};
+
+/**
  * Returns true if candidate match is strictly better than existing match
  * Used for replacement logic
  */
@@ -156,19 +165,25 @@ export function isBetterMatch(
   existing: MatchQuality,
   candidate: MatchQuality
 ): boolean {
-  // 1. CUIT match beats no CUIT match
+  // 1. Compare confidence levels first (ADV-34: prevents LOW replacing HIGH)
+  const existingConfRank = CONFIDENCE_RANK[existing.confidence];
+  const candidateConfRank = CONFIDENCE_RANK[candidate.confidence];
+  if (candidateConfRank > existingConfRank) return true;
+  if (candidateConfRank < existingConfRank) return false;
+
+  // 2. CUIT match beats no CUIT match (when confidence is equal)
   if (candidate.hasCuitMatch && !existing.hasCuitMatch) return true;
   if (!candidate.hasCuitMatch && existing.hasCuitMatch) return false;
 
-  // 2. Closer date wins (when CUIT match is equal)
+  // 3. Closer date wins (when CUIT match is equal)
   if (candidate.dateDistance < existing.dateDistance) return true;
   if (candidate.dateDistance > existing.dateDistance) return false;
 
-  // 3. Exact amount beats tolerance match
+  // 4. Exact amount beats tolerance match
   if (candidate.isExactAmount && !existing.isExactAmount) return true;
   if (!candidate.isExactAmount && existing.isExactAmount) return false;
 
-  // 4. Has linked pago beats no linked pago
+  // 5. Has linked pago beats no linked pago
   if (candidate.hasLinkedPago && !existing.hasLinkedPago) return true;
 
   // Equal quality - keep existing (no churn)
@@ -499,6 +514,7 @@ async function loadControlEgresos(spreadsheetId: string): Promise<Result<Egresos
  */
 function buildMatchQuality(
   fileId: string,
+  confidence: 'HIGH' | 'MEDIUM' | 'LOW',
   fechaDocumento: string,
   fechaMovimiento: string,
   cuitDocumento: string,
@@ -520,6 +536,7 @@ function buildMatchQuality(
 
   return {
     fileId,
+    confidence,
     hasCuitMatch,
     dateDistance,
     isExactAmount,
@@ -601,6 +618,8 @@ function buildMatchQualityFromFileId(
   let fechaDocumento: string;
   let cuitDocumento: string;
   let hasLinkedPago = false;
+  // Use document's matchConfidence if available, default to HIGH for existing matches
+  const confidence: 'HIGH' | 'MEDIUM' | 'LOW' = document.matchConfidence || 'HIGH';
 
   if (type === 'factura_emitida' || type === 'factura_recibida') {
     fechaDocumento = document.fechaEmision;
@@ -622,6 +641,7 @@ function buildMatchQualityFromFileId(
   // Set to true for both existing and candidate to ensure fair comparison on other dimensions
   return buildMatchQuality(
     fileId,
+    confidence,
     fechaDocumento,
     fechaMovimiento,
     cuitDocumento,
@@ -766,9 +786,10 @@ async function matchBankMovimientos(
             if (fechaDocumento && cuitDocumento) {
               // For isExactAmount, we can't reliably determine this without re-running complex matching
               // Use the same value for both (true) so they compare equally on this dimension
-              // This ensures the comparison focuses on CUIT match and date proximity
+              // This ensures the comparison focuses on confidence, CUIT match, and date proximity
               const candidateQuality = buildMatchQuality(
                 matchResult.matchedFileId,
+                matchResult.confidence,  // Use confidence from matcher result (ADV-34)
                 fechaDocumento,
                 mov.fecha,
                 cuitDocumento,

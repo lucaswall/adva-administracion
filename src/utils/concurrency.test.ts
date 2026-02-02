@@ -492,6 +492,64 @@ describe('computeVersion', () => {
     expect(hash1).toBe(hash2);
   });
 
+  // ADV-33: MD5 hash should produce consistent 16-char hex output
+  it('produces consistent 16-char hex output', () => {
+    const hash = computeVersion({ test: 'value', count: 123 });
+
+    // Should be exactly 16 hex characters
+    expect(hash).toMatch(/^[0-9a-f]{16}$/);
+    expect(hash.length).toBe(16);
+  });
+
+  it('produces different hashes for different inputs (collision resistance)', () => {
+    // Test multiple different inputs produce unique hashes
+    const hashes = new Set<string>();
+    const testCases = [
+      { a: 1 },
+      { a: 2 },
+      { a: 1, b: 1 },
+      { b: 1 },
+      { x: 'hello' },
+      { x: 'world' },
+      [1, 2, 3],
+      [1, 2, 4],
+      'string1',
+      'string2',
+      12345,
+      12346,
+    ];
+
+    for (const value of testCases) {
+      hashes.add(computeVersion(value));
+    }
+
+    // All hashes should be unique (no collisions for these distinct inputs)
+    expect(hashes.size).toBe(testCases.length);
+  });
+
+  it('handles large objects correctly', () => {
+    // Create a larger object to test hash stability
+    const largeObj = {
+      items: Array.from({ length: 100 }, (_, i) => ({
+        id: i,
+        name: `item-${i}`,
+        value: Math.random().toString(36),
+      })),
+      metadata: {
+        created: '2025-01-01',
+        version: '1.0.0',
+      },
+    };
+
+    const hash = computeVersion(largeObj);
+
+    // Should still be 16-char hex
+    expect(hash).toMatch(/^[0-9a-f]{16}$/);
+
+    // Should be consistent
+    expect(computeVersion(largeObj)).toBe(hash);
+  });
+
   it('handles BigInt without throwing', () => {
     const objWithBigInt = { value: BigInt(9007199254740991) };
 

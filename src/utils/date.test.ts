@@ -229,16 +229,16 @@ describe('isValidISODate', () => {
 
   it('returns false for years outside reasonable range', () => {
     const currentYear = new Date().getFullYear();
-    const elevenYearsAgo = currentYear - 11;
-    expect(isValidISODate(`${elevenYearsAgo}-01-01`)).toBe(false); // Before current-10
+    const seventeenYearsAgo = currentYear - 17;
+    expect(isValidISODate(`${seventeenYearsAgo}-01-01`)).toBe(false); // Before current-16
     const farFuture = currentYear + 2;
     expect(isValidISODate(`${farFuture}-01-01`)).toBe(false); // More than 1 year in future
   });
 
-  it('returns true for years in reasonable range (current-10 to current+1)', () => {
+  it('returns true for years in reasonable range (current-15 to current+1)', () => {
     const currentYear = new Date().getFullYear();
-    const tenYearsAgo = currentYear - 10;
-    expect(isValidISODate(`${tenYearsAgo}-01-01`)).toBe(true);
+    const fifteenYearsAgo = currentYear - 15;
+    expect(isValidISODate(`${fifteenYearsAgo}-01-01`)).toBe(true);
     expect(isValidISODate(`${currentYear}-12-31`)).toBe(true);
     expect(isValidISODate(`${currentYear + 1}-01-01`)).toBe(true);
   });
@@ -256,15 +256,31 @@ describe('isValidISODate', () => {
     expect(isValidISODate(`${sixYearsAgo}-01-01`)).toBe(true);
   });
 
-  it('returns false for dates more than 10 years in the past', () => {
+  it('returns false for dates more than 15 years in the past', () => {
     const currentYear = new Date().getFullYear();
-    const elevenYearsAgo = currentYear - 11;
-    expect(isValidISODate(`${elevenYearsAgo}-12-31`)).toBe(false);
+    const seventeenYearsAgo = currentYear - 17;
+    expect(isValidISODate(`${seventeenYearsAgo}-12-31`)).toBe(false);
   });
 
   it('returns false for dates more than 1 year in the future', () => {
     const currentYear = new Date().getFullYear();
     const twoYearsFromNow = currentYear + 2;
     expect(isValidISODate(`${twoYearsFromNow}-01-01`)).toBe(false);
+  });
+
+  // ADV-29: Extended year range to allow 15 years back for historical Argentine invoices
+  it('returns true for dates 11-15 years in the past (historical invoices)', () => {
+    expect(isValidISODate('2015-01-15')).toBe(true);
+    expect(isValidISODate('2010-06-30')).toBe(true);
+    expect(isValidISODate('2012-12-31')).toBe(true);
+  });
+
+  it('returns false for dates too old (before 15 years ago)', () => {
+    expect(isValidISODate('1999-12-31')).toBe(false);
+    expect(isValidISODate('2005-01-01')).toBe(false);
+  });
+
+  it('returns false for dates too far in the future', () => {
+    expect(isValidISODate('2030-01-01')).toBe(false);
   });
 });
