@@ -134,14 +134,17 @@ Allowed: `list_issues`, `get_issue`, `create_issue`, `update_issue`, `list_issue
 - `plan-todo` reads Backlog, moves to Todo
 - `plan-inline`/`plan-fix` creates issues in Todo
 - `plan-implement` moves Todo→In Progress→Review
-- `plan-review-implementation` moves Review→Done, creates bugs in Todo
+- `plan-review-implementation` moves Review→Merge, creates bugs in Todo
+- `pr-creator` includes Linear issue IDs in PR body for Merge→Done automation
 
 ## LINEAR INTEGRATION
 
 ### State Flow
 
 ```
-Backlog → Todo → In Progress → Review → Done
+Backlog → Todo → In Progress → Review → Merge → Done
+                                          ↑        ↑
+                                    (review OK)  (PR merged)
 ```
 
 | State | Type | Usage |
@@ -150,7 +153,8 @@ Backlog → Todo → In Progress → Review → Done
 | Todo | unstarted | Issues ready for implementation (moved by plan-* skills) |
 | In Progress | started | Being implemented (moved by plan-implement at task start) |
 | Review | started | Implementation complete, awaiting review |
-| Done | completed | Reviewed and approved |
+| Merge | started | Code review passed, awaiting PR merge |
+| Done | completed | PR merged (via Linear GitHub automation) |
 
 ### State Transition Triggers
 
@@ -161,7 +165,19 @@ Backlog → Todo → In Progress → Review → Done
 | → Todo | plan-inline, plan-fix, plan-review (bugs) | Task enters PLANS.md |
 | Todo → In Progress | plan-implement | Task work **starts** (real-time) |
 | In Progress → Review | plan-implement | Task work **completes** (real-time) |
-| Review → Done | plan-review-implementation | Task passes review |
+| Review → Merge | plan-review-implementation | Task passes review |
+| Merge → Done | Linear GitHub automation | PR is merged (via `Closes ADV-XXX` in PR body) |
+
+### Linear GitHub Integration
+
+PRs created by `pr-creator` include Linear magic keywords in the body:
+
+```markdown
+## Linear Issues
+Closes ADV-123, ADV-124
+```
+
+When the PR is merged, Linear's GitHub integration automatically moves the linked issues from Merge to Done. This enables automated issue lifecycle completion without manual intervention.
 
 ### Label Mapping (code-audit tags → Linear labels)
 
