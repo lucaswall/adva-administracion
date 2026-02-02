@@ -522,3 +522,65 @@ Context running low (~35% remaining). Run `/plan-implement` to continue with Tas
 - Tests verify only one operation acquires expired lock, sequential execution maintained
 
 **Linear:** ADV-19, ADV-8 → Done
+
+---
+
+## Iteration 4
+
+**Implemented:** 2026-02-01
+
+### Tasks Completed This Iteration
+- Task 11: Fix scanner state machine race condition (ADV-15) - Verified existing implementation is correct (no await between check and set), added comprehensive tests for atomic state transitions
+- Task 12: Add lock timeout to markFileProcessing (ADV-22) - Added FILE_STATUS_LOCK_TIMEOUT_MS constant (30s for API quota handling), explicit timeout parameters to markFileProcessing and updateFileStatus
+- Task 13: Fix startup scan silent failure (ADV-26) - Changed performStartupScan to return Result<void, Error>, added isCriticalScanError function to distinguish critical vs transient errors
+
+### Tasks Remaining
+- Task 14: Fix shutdown handlers not awaited (ADV-7)
+- Task 15: Fix data loss in pagos-pendientes after sheet clear (ADV-13)
+- Task 16: Fix timing leak in auth middleware (ADV-6)
+
+### Files Modified
+- `src/processing/scanner.test.ts` - Added 3 new tests for scanner state machine race condition verification
+- `src/config.ts` - Added FILE_STATUS_LOCK_TIMEOUT_MS constant (30 seconds to handle API quota backoff)
+- `src/processing/storage/index.ts` - Added explicit timeout parameters to withLock calls in markFileProcessing and updateFileStatus
+- `src/processing/storage/index.test.ts` - Added 3 tests for lock timeout configuration
+- `src/server.ts` - Added Result import, isCriticalScanError function, changed performStartupScan to return Result<void, Error>
+- `src/server.test.ts` - Created new test file with 9 tests for startup scan error handling
+
+### Linear Updates
+- ADV-15: Todo → In Progress → Review
+- ADV-22: Todo → In Progress → Review
+- ADV-26: Todo → In Progress → Review
+
+### Pre-commit Verification
+- bug-hunter: Found 1 medium issue (overly broad "not found" pattern) - Fixed before documenting
+- verifier: All 1421 tests pass, zero warnings
+
+### Continuation Status
+Context running low (~35% remaining). Run `/plan-implement` to continue with Task 14.
+
+### Review
+<!-- REVIEW COMPLETE -->
+**Reviewed:** 2026-02-01
+**Result:** ✅ PASS - All 3 tasks implemented correctly
+
+**Task 11 (ADV-15):** Scanner state machine verified safe.
+- In JavaScript async, code executes synchronously until first `await`
+- State check (`scanState !== 'idle'`) and set (`scanState = 'pending'`) happen before `await withLock()` (line 409)
+- Therefore transition is atomic - no interleaving possible
+- Tests verify 10 concurrent scans → exactly 1 lock acquisition
+
+**Task 12 (ADV-22):** Lock timeout added correctly.
+- `FILE_STATUS_LOCK_TIMEOUT_MS = 30000` (30 seconds) in config.ts
+- Both `markFileProcessing()` (line 149) and `updateFileStatus()` (line 267) use explicit timeout
+- 30s chosen to handle API quota backoff (15s-65s delays)
+- Tests verify functions complete within expected time
+
+**Task 13 (ADV-26):** Startup scan error handling fixed.
+- `performStartupScan()` now returns `Result<void, Error>`
+- `isCriticalScanError()` distinguishes critical vs transient errors
+- Critical (fail startup): auth failures, missing folders
+- Transient (log warning, continue): rate limits, timeouts
+- Line 284-287 in `start()` throws on critical errors
+
+**Linear:** ADV-15, ADV-22, ADV-26 → Done

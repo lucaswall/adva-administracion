@@ -56,6 +56,14 @@ export const PROCESSING_LOCK_TIMEOUT_MS = 300000;  // 5 minutes
 export const SPREADSHEET_LOCK_TIMEOUT_MS = 30000;  // 30 seconds
 
 /**
+ * File status lock timeout in milliseconds
+ * Used for markFileProcessing and updateFileStatus operations
+ * Set to 30 seconds to handle Google Sheets API quota errors with exponential backoff (15s-65s delays)
+ * ADV-22: Explicit timeout prevents indefinite wait if lock is held
+ */
+export const FILE_STATUS_LOCK_TIMEOUT_MS = 30000;  // 30 seconds
+
+/**
  * Google Sheets batch update limit
  * Maximum number of operations per batchUpdate API call
  */

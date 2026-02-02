@@ -12,7 +12,8 @@ import { discoverFolderStructure, getCachedFolderStructure } from './services/fo
 import { initWatchManager, startWatching, shutdownWatchManager, updateLastScanTime } from './services/watch-manager.js';
 import { scanFolder } from './processing/scanner.js';
 import { updateStatusSheet } from './services/status-sheet.js';
-import { info, error as logError } from './utils/logger.js';
+import { info, warn, error as logError } from './utils/logger.js';
+import type { Result } from './types/index.js';
 
 /**
  * Build and configure the Fastify server
@@ -125,14 +126,71 @@ async function initializeRealTimeMonitoring(): Promise<void> {
 }
 
 /**
- * Perform startup scan to process any pending documents
+ * Checks if an error is a critical scan error that should prevent server startup
+ * Critical errors indicate fundamental configuration or authentication issues
+ * that won't be resolved by retrying later.
+ *
+ * @param error - Error from scanFolder
+ * @returns true if the error is critical and should prevent startup
  */
-async function performStartupScan(): Promise<void> {
+export function isCriticalScanError(error: Error): boolean {
+  const message = error.message.toLowerCase();
+
+  // Authentication errors - credentials/permissions are wrong
+  const authPatterns = [
+    'authentication',
+    'unauthorized',
+    'forbidden',
+    'invalid credentials',
+    'access denied',
+    'insufficient',
+    '401',
+    '403',
+  ];
+
+  // Folder structure errors - fundamental configuration issues
+  // Note: patterns must be specific to avoid matching transient errors like "File temporarily not found"
+  const folderPatterns = [
+    'folder structure not initialized',
+    'entrada folder not found',
+    'root folder does not exist',
+    'control de ingresos not found',
+    'control de egresos not found',
+    'dashboard operativo not found',
+  ];
+
+  // Check for auth errors
+  for (const pattern of authPatterns) {
+    if (message.includes(pattern)) {
+      return true;
+    }
+  }
+
+  // Check for folder structure errors
+  for (const pattern of folderPatterns) {
+    if (message.includes(pattern)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+/**
+ * Perform startup scan to process any pending documents
+ * ADV-26: Returns Result to allow proper error handling by caller
+ *
+ * @returns Result indicating success or error
+ *   - On success: { ok: true, value: undefined }
+ *   - On critical error: { ok: false, error: Error } - should prevent startup
+ *   - On transient error: { ok: true, value: undefined } - logged but startup continues
+ */
+export async function performStartupScan(): Promise<Result<void, Error>> {
   const config = getConfig();
 
   // Skip scan in test mode
   if (config.nodeEnv === 'test') {
-    return;
+    return { ok: true, value: undefined };
   }
 
   info('Performing startup scan', { module: 'server', phase: 'startup-scan' });
@@ -154,13 +212,30 @@ async function performStartupScan(): Promise<void> {
     if (folderStructure?.dashboardOperativoId) {
       await updateStatusSheet(folderStructure.dashboardOperativoId);
     }
-  } else {
-    logError('Startup scan failed', {
+
+    return { ok: true, value: undefined };
+  }
+
+  // Scan failed - check if it's a critical error
+  if (isCriticalScanError(result.error)) {
+    logError('Startup scan failed with critical error', {
       module: 'server',
       phase: 'startup-scan',
-      error: result.error.message
+      error: result.error.message,
+      critical: true,
     });
+    return { ok: false, error: result.error };
   }
+
+  // Transient error - log warning but allow startup to continue
+  warn('Startup scan failed with transient error, server will continue', {
+    module: 'server',
+    phase: 'startup-scan',
+    error: result.error.message,
+    critical: false,
+  });
+
+  return { ok: true, value: undefined };
 }
 
 /**
@@ -205,7 +280,11 @@ async function start() {
     }
 
     // Perform startup scan
-    await performStartupScan();
+    // ADV-26: Check result and fail startup on critical errors
+    const scanResult = await performStartupScan();
+    if (!scanResult.ok) {
+      throw scanResult.error;
+    }
 
     // Graceful shutdown handler
     const shutdown = async (signal: string) => {
