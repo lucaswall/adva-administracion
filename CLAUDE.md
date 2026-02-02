@@ -64,8 +64,8 @@ Task: Add parseResumenBroker function
 | Agent | Purpose | When to Use |
 |-------|---------|-------------|
 | `bug-hunter` (opus) | Find bugs in git changes | After implementation, before commit |
-| `verifier` (haiku) | Run tests and build | After writing/changing code, before commit |
-| `commit-bot` (haiku) | Commit to current branch | Only when user requests commit |
+| `verifier` (haiku) | Run tests and build | TDD mode: `verifier "pattern"` (filtered tests, no build). Full mode: `verifier` (all tests + build). Use TDD mode during development, Full mode for final verification. |
+| `commit-bot` (sonnet) | Commit to current branch | Only when user requests commit |
 | `pr-creator` (sonnet) | Branch + commit + push + PR | Only when user requests PR |
 
 **Git agents rule:** Never commit or create PRs unless the user explicitly requests it. When requested:
