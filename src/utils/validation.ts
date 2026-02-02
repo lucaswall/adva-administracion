@@ -133,11 +133,14 @@ export function formatDni(dni: string): string {
  *
  * CUIT structure: XX-XXXXXXXX-X
  * - First 2 digits: Type prefix (20=male, 27=female, 23/24=unisex, 30/33/34=company)
- * - Middle 7-8 digits: DNI
+ * - Middle 8 digits: DNI (zero-padded to 8 digits)
  * - Last 1 digit: Check digit
  *
+ * The DNI portion is always 8 digits in a CUIT. Smaller DNIs are left-padded
+ * with zeros (e.g., DNI 1234567 becomes 01234567 in a CUIT).
+ *
  * @param cuit - CUIT string (with or without dashes)
- * @returns DNI portion (7-8 digits) or empty string if invalid CUIT
+ * @returns DNI portion (8 digits, with leading zeros preserved) or empty string if invalid CUIT
  */
 export function extractDniFromCuit(cuit: string): string {
   if (!cuit) return '';
@@ -151,12 +154,10 @@ export function extractDniFromCuit(cuit: string): string {
   }
 
   // Extract middle portion (skip first 2 digits and last 1 digit)
+  // Always returns 8 digits with leading zeros preserved
   const dniPortion = cleaned.substring(2, 10);
 
-  // Remove leading zeros to get actual DNI
-  const dni = dniPortion.replace(/^0+/, '');
-
-  return dni;
+  return dniPortion;
 }
 
 /**
@@ -164,6 +165,9 @@ export function extractDniFromCuit(cuit: string): string {
  *
  * This handles the common case where payment documents show only
  * the DNI (7-8 digits) while invoices have the full CUIT (11 digits).
+ *
+ * The comparison normalizes both DNIs to 8 digits with leading zeros
+ * to handle cases where the input DNI may or may not have leading zeros.
  *
  * @param cuit - Full CUIT (11 digits)
  * @param dni - DNI to check (7-8 digits)
@@ -179,8 +183,13 @@ export function cuitContainsDni(cuit: string, dni: string): boolean {
   const formattedDni = formatDni(dni);
   if (!formattedDni) return false;
 
-  // Compare the DNI portions
-  return extractedDni === formattedDni;
+  // Normalize both to 8 digits with leading zeros for comparison
+  // extractedDni is already 8 digits (from CUIT extraction)
+  // formattedDni may be 7-8 digits, pad to 8
+  const normalizedDni = formattedDni.padStart(8, '0');
+
+  // Compare the normalized DNI portions
+  return extractedDni === normalizedDni;
 }
 
 /**

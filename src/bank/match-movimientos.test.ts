@@ -7,6 +7,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   matchAllMovimientos,
   isBetterMatch,
+  getRequiredColumnIndex,
   type MatchQuality,
 } from './match-movimientos.js';
 
@@ -58,6 +59,49 @@ import { getValues } from '../services/sheets.js';
 import { getMovimientosToFill } from '../services/movimientos-reader.js';
 import { updateDetalle } from '../services/movimientos-detalle.js';
 import { warn } from '../utils/logger.js';
+
+describe('getRequiredColumnIndex', () => {
+  it('returns correct index when header exists', () => {
+    const headers = ['fechaemision', 'fileid', 'importetotal'];
+    expect(getRequiredColumnIndex(headers, 'fileid')).toBe(1);
+    expect(getRequiredColumnIndex(headers, 'fechaemision')).toBe(0);
+    expect(getRequiredColumnIndex(headers, 'importetotal')).toBe(2);
+  });
+
+  it('throws error when required header is missing', () => {
+    const headers = ['fechaemision', 'fileid', 'importetotal'];
+    expect(() => getRequiredColumnIndex(headers, 'cuitemisor')).toThrow(
+      /Required header 'cuitemisor' not found/
+    );
+  });
+
+  it('throws error with case mismatch (exact match required)', () => {
+    const headers = ['FechaEmision', 'FileId', 'ImporteTotal'];
+    // Headers should be lowercased before calling this function
+    // If not lowercased, it should fail
+    expect(() => getRequiredColumnIndex(headers, 'fechaemision')).toThrow(
+      /Required header 'fechaemision' not found/
+    );
+  });
+
+  it('throws error with empty headers array', () => {
+    const headers: string[] = [];
+    expect(() => getRequiredColumnIndex(headers, 'fileid')).toThrow(
+      /Required header 'fileid' not found/
+    );
+  });
+
+  it('lists available headers in error message', () => {
+    const headers = ['fechaemision', 'fileid'];
+    try {
+      getRequiredColumnIndex(headers, 'cuitemisor');
+      expect.fail('Should have thrown');
+    } catch (e) {
+      expect((e as Error).message).toContain('fechaemision');
+      expect((e as Error).message).toContain('fileid');
+    }
+  });
+});
 
 describe('isBetterMatch', () => {
   it('should prefer CUIT match over no CUIT match', () => {
@@ -681,9 +725,9 @@ describe('matchAllMovimientos', () => {
         return {
           ok: true,
           value: [
-            ['fechaemision', 'fileid', 'filename', 'tipocomprobante', 'puntoventa', 'numerocomprobante', 'cuitemisor', 'razonsocialemisor', 'cuitreceptor', 'razonsocialreceptor', 'importetotal', 'moneda', 'formadepago', 'cbu', 'processedat', 'confidence', 'needsreview', 'matchedpagofileid', 'matchconfidence'],
-            ['2025-01-01', 'factura-far', 'far.pdf', 'B', '1', '123', '20123456786', 'PROVEEDOR SA', '30709076783', 'ADVA', '1000', 'ARS', '', '', '2025-01-01T10:00:00Z', '0.95', 'NO', '', ''],
-            ['2025-01-16', 'factura-close', 'close.pdf', 'B', '1', '124', '20123456786', 'PROVEEDOR SA', '30709076783', 'ADVA', '1000', 'ARS', '', '', '2025-01-16T10:00:00Z', '0.95', 'NO', '', ''],
+            ['fechaemision', 'fileid', 'filename', 'tipocomprobante', 'nrofactura', 'cuitemisor', 'razonsocialemisor', 'importeneto', 'importeiva', 'importetotal', 'moneda', 'concepto', 'processedat', 'confidence', 'needsreview', 'matchedpagofileid', 'matchconfidence', 'hascuitmatch', 'pagada'],
+            ['2025-01-01', 'factura-far', 'far.pdf', 'B', '123', '20123456786', 'PROVEEDOR SA', '', '', '1000', 'ARS', '', '2025-01-01T10:00:00Z', '0.95', 'NO', '', '', '', ''],
+            ['2025-01-16', 'factura-close', 'close.pdf', 'B', '124', '20123456786', 'PROVEEDOR SA', '', '', '1000', 'ARS', '', '2025-01-16T10:00:00Z', '0.95', 'NO', '', '', '', ''],
           ],
         };
       }
@@ -754,9 +798,9 @@ describe('matchAllMovimientos', () => {
         return {
           ok: true,
           value: [
-            ['fechaemision', 'fileid', 'filename', 'tipocomprobante', 'puntoventa', 'numerocomprobante', 'cuitemisor', 'razonsocialemisor', 'cuitreceptor', 'razonsocialreceptor', 'importetotal', 'moneda', 'formadepago', 'cbu', 'processedat', 'confidence', 'needsreview', 'matchedpagofileid', 'matchconfidence'],
-            ['2025-01-10', 'factura-with-cuit', 'cuit.pdf', 'B', '1', '123', '20123456786', 'PROVEEDOR SA', '30709076783', 'ADVA', '1000', 'ARS', '', '', '2025-01-10T10:00:00Z', '0.95', 'NO', '', ''],
-            ['2025-01-15', 'factura-no-cuit', 'nocuit.pdf', 'B', '1', '124', '00000000000', 'OTRO SA', '30709076783', 'ADVA', '1000', 'ARS', '', '', '2025-01-15T10:00:00Z', '0.95', 'NO', '', ''],
+            ['fechaemision', 'fileid', 'filename', 'tipocomprobante', 'nrofactura', 'cuitemisor', 'razonsocialemisor', 'importeneto', 'importeiva', 'importetotal', 'moneda', 'concepto', 'processedat', 'confidence', 'needsreview', 'matchedpagofileid', 'matchconfidence', 'hascuitmatch', 'pagada'],
+            ['2025-01-10', 'factura-with-cuit', 'cuit.pdf', 'B', '123', '20123456786', 'PROVEEDOR SA', '', '', '1000', 'ARS', '', '2025-01-10T10:00:00Z', '0.95', 'NO', '', '', 'YES', ''],
+            ['2025-01-15', 'factura-no-cuit', 'nocuit.pdf', 'B', '124', '00000000000', 'OTRO SA', '', '', '1000', 'ARS', '', '2025-01-15T10:00:00Z', '0.95', 'NO', '', '', '', ''],
           ],
         };
       }
@@ -822,7 +866,7 @@ describe('matchAllMovimientos', () => {
         return {
           ok: true,
           value: [
-            ['fechaemision', 'fileid', 'filename', 'tipocomprobante', 'puntoventa', 'numerocomprobante', 'cuitemisor', 'razonsocialemisor', 'cuitreceptor', 'razonsocialreceptor', 'importetotal', 'moneda', 'formadepago', 'cbu', 'processedat', 'confidence', 'needsreview', 'matchedpagofileid', 'matchconfidence'],
+            ['fechaemision', 'fileid', 'filename', 'tipocomprobante', 'nrofactura', 'cuitemisor', 'razonsocialemisor', 'importeneto', 'importeiva', 'importetotal', 'moneda', 'concepto', 'processedat', 'confidence', 'needsreview', 'matchedpagofileid', 'matchconfidence', 'hascuitmatch', 'pagada'],
             ['2025-01-10', 'factura-a', 'a.pdf', 'B', '1', '123', '20123456786', 'PROVEEDOR SA', '30709076783', 'ADVA', '1000', 'ARS', '', '', '2025-01-10T10:00:00Z', '0.95', 'NO', '', ''],
             ['2025-01-20', 'factura-b', 'b.pdf', 'B', '1', '124', '20123456786', 'PROVEEDOR SA', '30709076783', 'ADVA', '1000', 'ARS', '', '', '2025-01-20T10:00:00Z', '0.95', 'NO', '', ''],
           ],
@@ -894,7 +938,7 @@ describe('matchAllMovimientos', () => {
         return {
           ok: true,
           value: [
-            ['fechaemision', 'fileid', 'filename', 'tipocomprobante', 'puntoventa', 'numerocomprobante', 'cuitemisor', 'razonsocialemisor', 'cuitreceptor', 'razonsocialreceptor', 'importetotal', 'moneda', 'formadepago', 'cbu', 'processedat', 'confidence', 'needsreview', 'matchedpagofileid', 'matchconfidence'],
+            ['fechaemision', 'fileid', 'filename', 'tipocomprobante', 'nrofactura', 'cuitemisor', 'razonsocialemisor', 'importeneto', 'importeiva', 'importetotal', 'moneda', 'concepto', 'processedat', 'confidence', 'needsreview', 'matchedpagofileid', 'matchconfidence', 'hascuitmatch', 'pagada'],
             ['2025-01-20', 'factura-b', 'b.pdf', 'B', '1', '124', '20123456786', 'PROVEEDOR SA', '30709076783', 'ADVA', '1000', 'ARS', '', '', '2025-01-20T10:00:00Z', '0.95', 'NO', '', ''],
           ],
         };

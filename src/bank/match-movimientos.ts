@@ -28,6 +28,26 @@ import { updateDetalle, type DetalleUpdate } from '../services/movimientos-detal
 export type { MatchQuality };
 
 /**
+ * Gets the column index for a required header, throwing if not found.
+ * This prevents silent failures when headers are missing or have case mismatches.
+ *
+ * @param headers - Array of lowercase header strings
+ * @param headerName - The header name to find (should be lowercase)
+ * @returns The column index
+ * @throws Error if header is not found
+ */
+export function getRequiredColumnIndex(headers: string[], headerName: string): number {
+  const index = headers.indexOf(headerName);
+  if (index === -1) {
+    throw new Error(
+      `Required header '${headerName}' not found in spreadsheet. ` +
+      `Available headers: [${headers.join(', ')}]`
+    );
+  }
+  return index;
+}
+
+/**
  * Options for matching
  */
 export interface MatchOptions {
@@ -137,20 +157,22 @@ function parseFacturas(data: CellValue[][]): Array<Factura & { row: number }> {
   const headers = data[0].map(h => String(h || '').toLowerCase());
   const facturas: Array<Factura & { row: number }> = [];
 
+  // Required headers - throw if missing (critical for matching)
   const colIndex = {
-    fechaEmision: headers.indexOf('fechaemision'),
-    fileId: headers.indexOf('fileid'),
+    fechaEmision: getRequiredColumnIndex(headers, 'fechaemision'),
+    fileId: getRequiredColumnIndex(headers, 'fileid'),
+    tipoComprobante: getRequiredColumnIndex(headers, 'tipocomprobante'),
+    nroFactura: getRequiredColumnIndex(headers, 'nrofactura'),
+    cuitEmisor: getRequiredColumnIndex(headers, 'cuitemisor'),
+    razonSocialEmisor: getRequiredColumnIndex(headers, 'razonsocialemisor'),
+    importeTotal: getRequiredColumnIndex(headers, 'importetotal'),
+    moneda: getRequiredColumnIndex(headers, 'moneda'),
+    // Optional headers - use indexOf (returns -1 if missing, which is safe)
     fileName: headers.indexOf('filename'),
-    tipoComprobante: headers.indexOf('tipocomprobante'),
-    nroFactura: headers.indexOf('nrofactura'),
-    cuitEmisor: headers.indexOf('cuitemisor'),
-    razonSocialEmisor: headers.indexOf('razonsocialemisor'),
     cuitReceptor: headers.indexOf('cuitreceptor'),
     razonSocialReceptor: headers.indexOf('razonsocialreceptor'),
     importeNeto: headers.indexOf('importeneto'),
     importeIva: headers.indexOf('importeiva'),
-    importeTotal: headers.indexOf('importetotal'),
-    moneda: headers.indexOf('moneda'),
     concepto: headers.indexOf('concepto'),
     processedAt: headers.indexOf('processedat'),
     confidence: headers.indexOf('confidence'),
@@ -199,13 +221,15 @@ function parsePagos(data: CellValue[][]): Array<Pago & { row: number }> {
   const headers = data[0].map(h => String(h || '').toLowerCase());
   const pagos: Array<Pago & { row: number }> = [];
 
+  // Required headers - throw if missing (critical for matching)
   const colIndex = {
-    fechaPago: headers.indexOf('fechapago'),
-    fileId: headers.indexOf('fileid'),
+    fechaPago: getRequiredColumnIndex(headers, 'fechapago'),
+    fileId: getRequiredColumnIndex(headers, 'fileid'),
+    banco: getRequiredColumnIndex(headers, 'banco'),
+    importePagado: getRequiredColumnIndex(headers, 'importepagado'),
+    moneda: getRequiredColumnIndex(headers, 'moneda'),
+    // Optional headers - use indexOf (returns -1 if missing, which is safe)
     fileName: headers.indexOf('filename'),
-    banco: headers.indexOf('banco'),
-    importePagado: headers.indexOf('importepagado'),
-    moneda: headers.indexOf('moneda'),
     referencia: headers.indexOf('referencia'),
     cuitPagador: headers.indexOf('cuitpagador'),
     nombrePagador: headers.indexOf('nombrepagador'),
@@ -257,20 +281,22 @@ function parseRecibos(data: CellValue[][]): Array<Recibo & { row: number }> {
   const headers = data[0].map(h => String(h || '').toLowerCase());
   const recibos: Array<Recibo & { row: number }> = [];
 
+  // Required headers - throw if missing (critical for matching)
   const colIndex = {
-    fechaPago: headers.indexOf('fechapago'),
-    fileId: headers.indexOf('fileid'),
+    fechaPago: getRequiredColumnIndex(headers, 'fechapago'),
+    fileId: getRequiredColumnIndex(headers, 'fileid'),
+    nombreEmpleado: getRequiredColumnIndex(headers, 'nombreempleado'),
+    cuilEmpleado: getRequiredColumnIndex(headers, 'cuilempleado'),
+    totalNeto: getRequiredColumnIndex(headers, 'totalneto'),
+    // Optional headers - use indexOf (returns -1 if missing, which is safe)
     fileName: headers.indexOf('filename'),
     tipoRecibo: headers.indexOf('tiporecibo'),
-    nombreEmpleado: headers.indexOf('nombreempleado'),
-    cuilEmpleado: headers.indexOf('cuilempleado'),
     legajo: headers.indexOf('legajo'),
     tareaDesempenada: headers.indexOf('tareadesempenada'),
     cuitEmpleador: headers.indexOf('cuitempleador'),
     periodoAbonado: headers.indexOf('periodoabonado'),
     subtotalRemuneraciones: headers.indexOf('subtotalremuneraciones'),
     subtotalDescuentos: headers.indexOf('subtotaldescuentos'),
-    totalNeto: headers.indexOf('totalneto'),
     processedAt: headers.indexOf('processedat'),
     confidence: headers.indexOf('confidence'),
     needsReview: headers.indexOf('needsreview'),
@@ -313,9 +339,12 @@ function parseRetenciones(data: CellValue[][]): Array<Retencion & { row: number 
   const headers = data[0].map(h => String(h || '').toLowerCase());
   const retenciones: Array<Retencion & { row: number }> = [];
 
+  // Required headers - throw if missing (critical for matching)
   const colIndex = {
-    fechaEmision: headers.indexOf('fechaemision'),
-    fileId: headers.indexOf('fileid'),
+    fechaEmision: getRequiredColumnIndex(headers, 'fechaemision'),
+    fileId: getRequiredColumnIndex(headers, 'fileid'),
+    montoRetencion: getRequiredColumnIndex(headers, 'montoretencion'),
+    // Optional headers - use indexOf (returns -1 if missing, which is safe)
     fileName: headers.indexOf('filename'),
     nroCertificado: headers.indexOf('nrocertificado'),
     cuitAgenteRetencion: headers.indexOf('cuitagenteretencion'),
@@ -323,7 +352,6 @@ function parseRetenciones(data: CellValue[][]): Array<Retencion & { row: number 
     impuesto: headers.indexOf('impuesto'),
     regimen: headers.indexOf('regimen'),
     montoComprobante: headers.indexOf('montocomprobante'),
-    montoRetencion: headers.indexOf('montoretencion'),
     processedAt: headers.indexOf('processedat'),
     confidence: headers.indexOf('confidence'),
     needsReview: headers.indexOf('needsreview'),

@@ -6,7 +6,7 @@
 import { google, sheets_v4 } from 'googleapis';
 import { getGoogleAuthAsync, getDefaultScopes } from './google-auth.js';
 import type { Result } from '../types/index.js';
-import { withQuotaRetry } from '../utils/concurrency.js';
+import { withQuotaRetry, withLock } from '../utils/concurrency.js';
 import { sanitizeForSpreadsheet } from '../utils/spreadsheet.js';
 
 /**
@@ -65,6 +65,7 @@ const timezoneCache = new Map<string, TimezoneCacheEntry>();
 
 /**
  * Gets cached timezone if valid (not expired)
+ * Updates timestamp on access for LRU eviction behavior
  */
 function getCachedTimezone(spreadsheetId: string): string | null {
   const entry = timezoneCache.get(spreadsheetId);
@@ -76,6 +77,8 @@ function getCachedTimezone(spreadsheetId: string): string | null {
     return null;
   }
 
+  // Update timestamp for LRU eviction - recently accessed entries stay in cache
+  entry.timestamp = now;
   return entry.timezone;
 }
 
@@ -1428,6 +1431,7 @@ export async function getOrCreateMonthSheet(
   headers: string[],
   sheetOrderBatch?: import('../processing/caches/index.js').SheetOrderBatch
 ): Promise<Result<number, Error>> {
+  // First check without lock - fast path for existing sheets
   const metadataResult = await getSheetMetadata(spreadsheetId);
   if (!metadataResult.ok) return metadataResult;
 
@@ -1436,58 +1440,74 @@ export async function getOrCreateMonthSheet(
     return { ok: true, value: existing.sheetId };
   }
 
-  const createResult = await createSheet(spreadsheetId, monthName);
-  if (!createResult.ok) return createResult;
+  // Sheet doesn't exist - use lock to prevent race condition during creation
+  // Lock key is unique per spreadsheet+month combination
+  const lockKey = `sheet-create:${spreadsheetId}:${monthName}`;
 
-  const sheetId = createResult.value;
+  return withLock(lockKey, async () => {
+    // Re-check after acquiring lock - another request may have created the sheet
+    const recheckResult = await getSheetMetadata(spreadsheetId);
+    if (!recheckResult.ok) throw recheckResult.error;
 
-  const range = `${monthName}!A1:${columnIndexToLetter(headers.length)}1`;
-  const headerValues = [headers];
-  const setResult = await setValues(spreadsheetId, range, headerValues);
-  if (!setResult.ok) return { ok: false, error: setResult.error };
-
-  const formatResult = await formatSheet(spreadsheetId, sheetId, { frozenRows: 1 });
-  if (!formatResult.ok) return { ok: false, error: formatResult.error };
-
-  // If batch is provided, defer reordering to avoid race conditions during concurrent processing
-  if (sheetOrderBatch) {
-    sheetOrderBatch.addPendingReorder(spreadsheetId);
-    return { ok: true, value: sheetId };
-  }
-
-  // Immediate ordering mode (standalone calls without batch)
-  // Get updated metadata to determine correct position for chronological ordering
-  const updatedMetadataResult = await getSheetMetadata(spreadsheetId);
-  if (!updatedMetadataResult.ok) return updatedMetadataResult;
-
-  // Calculate correct position for this month sheet
-  const targetPosition = getMonthSheetPosition(updatedMetadataResult.value, monthName);
-
-  // Find current position of the newly created sheet
-  const currentSheet = updatedMetadataResult.value.find(s => s.sheetId === sheetId);
-
-  // Move sheet to correct position if needed
-  if (currentSheet && currentSheet.index !== targetPosition) {
-    const moveResult = await moveSheetToPosition(spreadsheetId, sheetId, targetPosition);
-    if (!moveResult.ok) return { ok: false, error: moveResult.error };
-  }
-
-  // Delete Sheet1 if it exists and is the only non-month sheet
-  // (This is the default sheet created with new spreadsheets)
-  const sheet1 = updatedMetadataResult.value.find(s => s.title === 'Sheet1');
-  if (sheet1) {
-    // Only delete Sheet1 if all other sheets are month sheets (YYYY-MM format)
-    const nonMonthSheets = updatedMetadataResult.value.filter(
-      s => s.title !== 'Sheet1' && !/^\d{4}-\d{2}$/.test(s.title)
-    );
-
-    if (nonMonthSheets.length === 0) {
-      const deleteResult = await deleteSheet(spreadsheetId, sheet1.sheetId);
-      if (!deleteResult.ok) return { ok: false, error: deleteResult.error };
+    const existingAfterLock = recheckResult.value.find(s => s.title === monthName);
+    if (existingAfterLock) {
+      return existingAfterLock.sheetId;
     }
-  }
 
-  return { ok: true, value: sheetId };
+    // Sheet still doesn't exist - safe to create now
+    const createResult = await createSheet(spreadsheetId, monthName);
+    if (!createResult.ok) throw createResult.error;
+
+    const sheetId = createResult.value;
+
+    const range = `${monthName}!A1:${columnIndexToLetter(headers.length)}1`;
+    const headerValues = [headers];
+    const setResult = await setValues(spreadsheetId, range, headerValues);
+    if (!setResult.ok) throw setResult.error;
+
+    const formatResult = await formatSheet(spreadsheetId, sheetId, { frozenRows: 1 });
+    if (!formatResult.ok) throw formatResult.error;
+
+    // If batch is provided, defer reordering to avoid race conditions during concurrent processing
+    if (sheetOrderBatch) {
+      sheetOrderBatch.addPendingReorder(spreadsheetId);
+      return sheetId;
+    }
+
+    // Immediate ordering mode (standalone calls without batch)
+    // Get updated metadata to determine correct position for chronological ordering
+    const updatedMetadataResult = await getSheetMetadata(spreadsheetId);
+    if (!updatedMetadataResult.ok) throw updatedMetadataResult.error;
+
+    // Calculate correct position for this month sheet
+    const targetPosition = getMonthSheetPosition(updatedMetadataResult.value, monthName);
+
+    // Find current position of the newly created sheet
+    const currentSheet = updatedMetadataResult.value.find(s => s.sheetId === sheetId);
+
+    // Move sheet to correct position if needed
+    if (currentSheet && currentSheet.index !== targetPosition) {
+      const moveResult = await moveSheetToPosition(spreadsheetId, sheetId, targetPosition);
+      if (!moveResult.ok) throw moveResult.error;
+    }
+
+    // Delete Sheet1 if it exists and is the only non-month sheet
+    // (This is the default sheet created with new spreadsheets)
+    const sheet1 = updatedMetadataResult.value.find(s => s.title === 'Sheet1');
+    if (sheet1) {
+      // Only delete Sheet1 if all other sheets are month sheets (YYYY-MM format)
+      const nonMonthSheets = updatedMetadataResult.value.filter(
+        s => s.title !== 'Sheet1' && !/^\d{4}-\d{2}$/.test(s.title)
+      );
+
+      if (nonMonthSheets.length === 0) {
+        const deleteResult = await deleteSheet(spreadsheetId, sheet1.sheetId);
+        if (!deleteResult.ok) throw deleteResult.error;
+      }
+    }
+
+    return sheetId;
+  });
 }
 
 /**

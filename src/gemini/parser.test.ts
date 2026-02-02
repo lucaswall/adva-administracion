@@ -9,7 +9,9 @@ import {
   parseResumenBrokerResponse,
   assignCuitsAndClassify,
   parseFacturaResponse,
-  extractJSON
+  parsePagoResponse,
+  extractJSON,
+  isAdvaName
 } from './parser.js';
 
 describe('Parser - Bank Name Normalization', () => {
@@ -886,6 +888,56 @@ describe('Parser - CUIT Assignment for Consumidor Final', () => {
       }
     });
 
+    it('lowers confidence when counterparty CUIT is missing in factura_emitida', () => {
+      // All required fields present but no counterparty CUIT
+      const response = JSON.stringify({
+        issuerName: 'ASOCIACION CIVIL DE DESARROLLADORES DE VIDEOJUEGOS ARGENTINOS',
+        clientName: 'Consumidor Final',
+        allCuits: ['30709076783'], // Only ADVA CUIT - no counterparty CUIT
+        tipoComprobante: 'B',
+        nroFactura: '00001-00000001',
+        fechaEmision: '2025-01-15',
+        importeNeto: 10000,
+        importeIva: 0,
+        importeTotal: 10000,
+        moneda: 'ARS',
+      });
+
+      const result = parseFacturaResponse(response, 'factura_emitida');
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        // Confidence should be significantly lowered (0.3) due to missing counterparty CUIT
+        expect(result.value.confidence).toBeLessThanOrEqual(0.3);
+        expect(result.value.needsReview).toBe(true);
+      }
+    });
+
+    it('maintains high confidence when all CUITs are present', () => {
+      // Complete data with both ADVA and counterparty CUIT
+      const response = JSON.stringify({
+        issuerName: 'ASOCIACION CIVIL DE DESARROLLADORES DE VIDEOJUEGOS ARGENTINOS',
+        clientName: 'Empresa Cliente SA',
+        allCuits: ['30709076783', '20123456786'], // Both CUITs present
+        tipoComprobante: 'A',
+        nroFactura: '00001-00000001',
+        fechaEmision: '2025-01-15',
+        importeNeto: 100000,
+        importeIva: 21000,
+        importeTotal: 121000,
+        moneda: 'ARS',
+      });
+
+      const result = parseFacturaResponse(response, 'factura_emitida');
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        // Confidence should be high (>= 0.9) when all fields including CUIT are present
+        expect(result.value.confidence).toBeGreaterThanOrEqual(0.9);
+        expect(result.value.needsReview).toBe(false);
+      }
+    });
+
     it('does not flag when cuitReceptor is present', () => {
       // Complete data: all required fields present, confidence > 0.9, no suspicious fields
       const response = JSON.stringify({
@@ -1143,5 +1195,137 @@ describe('Parser - JSON Size Limit', () => {
     if (!brokerResult.ok) {
       expect(brokerResult.error.message).toContain('exceeds maximum size');
     }
+  });
+});
+
+describe('isAdvaName', () => {
+  // Valid ADVA names - should return true
+  it('accepts "ADVA" (acronym)', () => {
+    expect(isAdvaName('ADVA')).toBe(true);
+  });
+
+  it('accepts full official name', () => {
+    expect(isAdvaName('ASOCIACION CIVIL DE DESARROLLADORES DE VIDEOJUEGOS ARGENTINOS')).toBe(true);
+  });
+
+  it('accepts abbreviated form with VIDEOJUEGOS', () => {
+    expect(isAdvaName('ASOC CIVIL DESARROLLADORES VIDEOJUEGOS')).toBe(true);
+  });
+
+  it('accepts variation with VIDEOJUEGO (singular)', () => {
+    expect(isAdvaName('ASOCIACION DE DESARROLLADORES DE VIDEOJUEGO')).toBe(true);
+  });
+
+  it('accepts case insensitive match', () => {
+    expect(isAdvaName('Asociacion Civil de Desarrolladores de Videojuegos Argentinos')).toBe(true);
+  });
+
+  // Invalid names - should return false (these were matching incorrectly before)
+  it('rejects "ASOCIACION DE DESARROLLADORES DE SOFTWARE" (no VIDEOJUEGO)', () => {
+    expect(isAdvaName('ASOCIACION DE DESARROLLADORES DE SOFTWARE')).toBe(false);
+  });
+
+  it('rejects "ASOCIACION DESARROLLADORES DE APPS" (no VIDEOJUEGO)', () => {
+    expect(isAdvaName('ASOCIACION DESARROLLADORES DE APPS')).toBe(false);
+  });
+
+  it('rejects "CAMARA DE DESARROLLADORES DE SOFTWARE" (no VIDEOJUEGO)', () => {
+    expect(isAdvaName('CAMARA DE DESARROLLADORES DE SOFTWARE')).toBe(false);
+  });
+
+  it('rejects "ASOCIACION ARGENTINA DE DESARROLLADORES" (no VIDEOJUEGO)', () => {
+    expect(isAdvaName('ASOCIACION ARGENTINA DE DESARROLLADORES')).toBe(false);
+  });
+
+  it('rejects company names with only DESARROLL* substring', () => {
+    expect(isAdvaName('EMPRESA DESARROLLADORA SA')).toBe(false);
+  });
+
+  it('rejects random company names', () => {
+    expect(isAdvaName('EMPRESA TEST SA')).toBe(false);
+  });
+
+  it('rejects empty string', () => {
+    expect(isAdvaName('')).toBe(false);
+  });
+});
+
+describe('Confidence calculation without artificial floor', () => {
+  describe('parsePagoResponse', () => {
+    it('returns low confidence when most required fields missing', () => {
+      // Only provide fechaPago - missing banco, importePagado which are also required
+      const response = JSON.stringify({
+        fechaPago: '2025-01-15',
+        // Missing: banco, importePagado, moneda, cuitPagador, cuitBeneficiario, etc.
+      });
+
+      const result = parsePagoResponse(response, 'pago_enviado');
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        // With most fields missing, confidence should be well below 0.5
+        expect(result.value.confidence).toBeLessThan(0.5);
+        expect(result.value.needsReview).toBe(true);
+      }
+    });
+
+    it('returns high confidence when all required fields present', () => {
+      const response = JSON.stringify({
+        fechaPago: '2025-01-15',
+        banco: 'BBVA',
+        importePagado: 10000,
+        moneda: 'ARS',
+        cuitPagador: '30709076783', // ADVA
+        nombrePagador: 'ADVA',
+        cuitBeneficiario: '20123456786',
+        nombreBeneficiario: 'Proveedor SA',
+      });
+
+      const result = parsePagoResponse(response, 'pago_enviado');
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value.confidence).toBeGreaterThanOrEqual(0.9);
+      }
+    });
+  });
+
+  describe('parseResumenBancarioResponse', () => {
+    it('returns low confidence when most required fields missing', () => {
+      // Only provide banco - missing numeroCuenta, fechaDesde, fechaHasta, etc.
+      const response = JSON.stringify({
+        banco: 'BBVA',
+        // Missing: numeroCuenta, fechaDesde, fechaHasta, saldoInicial, saldoFinal, moneda
+      });
+
+      const result = parseResumenBancarioResponse(response);
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        // With most fields missing, confidence should be well below 0.5
+        expect(result.value.confidence).toBeLessThan(0.5);
+        expect(result.value.needsReview).toBe(true);
+      }
+    });
+
+    it('returns high confidence when all required fields present', () => {
+      const response = JSON.stringify({
+        banco: 'BBVA',
+        numeroCuenta: '1234567890',
+        fechaDesde: '2025-01-01',
+        fechaHasta: '2025-01-31',
+        saldoInicial: 100000,
+        saldoFinal: 150000,
+        moneda: 'ARS',
+        cantidadMovimientos: 5,
+      });
+
+      const result = parseResumenBancarioResponse(response);
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value.confidence).toBeGreaterThanOrEqual(0.9);
+      }
+    });
   });
 });

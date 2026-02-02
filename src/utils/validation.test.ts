@@ -194,9 +194,22 @@ describe('extractDniFromCuit', () => {
     expect(extractDniFromCuit('30709076783')).toBe('70907678');
   });
 
-  it('handles CUIT with leading zeros in DNI portion', () => {
-    // CUIT: 20-01234567-8 -> DNI: 1234567 (leading zero removed)
-    expect(extractDniFromCuit('20012345678')).toBe('1234567');
+  it('preserves leading zeros in DNI portion', () => {
+    // CUIT: 20-01234567-X -> DNI: 01234567 (8 digits, leading zero preserved)
+    // This is critical for CUIT-DNI matching to work correctly
+    expect(extractDniFromCuit('20012345678')).toBe('01234567');
+  });
+
+  it('preserves multiple leading zeros in DNI portion', () => {
+    // CUIT: 20-00123456-X -> DNI: 00123456 (8 digits)
+    // Small DNI numbers have multiple leading zeros
+    expect(extractDniFromCuit('20001234563')).toBe('00123456');
+  });
+
+  it('preserves many leading zeros for very small DNI', () => {
+    // CUIT: 20-00000001-X -> DNI: 00000001 (8 digits)
+    // Edge case: smallest possible DNI
+    expect(extractDniFromCuit('20000000014')).toBe('00000001');
   });
 
   it('returns empty string for invalid CUIT', () => {
@@ -232,6 +245,23 @@ describe('cuitContainsDni', () => {
 
   it('returns false for invalid CUIT', () => {
     expect(cuitContainsDni('123456', '40535475')).toBe(false);
+  });
+
+  it('returns true for CUIT with leading zeros matching zero-padded DNI', () => {
+    // CUIT 20-00123456-X contains DNI 00123456
+    // The DNI portion in CUIT is always 8 digits with leading zeros
+    expect(cuitContainsDni('20001234563', '00123456')).toBe(true);
+  });
+
+  it('returns true for CUIT with leading zeros matching 7-digit DNI', () => {
+    // CUIT 20-01234567-X should match DNI 1234567 (7 digits without leading zero)
+    // cuitContainsDni should normalize by zero-padding the DNI
+    expect(cuitContainsDni('20012345678', '1234567')).toBe(true);
+  });
+
+  it('returns true for CUIT with many leading zeros matching small DNI', () => {
+    // CUIT 20-00000001-X should match DNI 1 or 00000001
+    expect(cuitContainsDni('20000000014', '00000001')).toBe(true);
   });
 });
 
