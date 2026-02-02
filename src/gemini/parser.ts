@@ -19,13 +19,18 @@ const MAX_JSON_SIZE = 1_000_000;
 /**
  * Flexible pattern to match ADVA's name in various forms.
  * Handles OCR errors, abbreviations, and variations:
- * - "ADVA"
+ * - "ADVA" (the acronym)
  * - "ASOCIACION CIVIL DE DESARROLLADORES DE VIDEOJUEGOS ARGENTINOS" (full name)
- * - "ASOC CIVIL DESARROLLADORES..." (abbreviated)
- * - "ASOCIACION CIVIL DE DESARROLLARODES..." (OCR error)
- * - "...VIDEOJUEGOS ARGENTINO..." (keyword match)
+ * - "ASOC CIVIL DESARROLLADORES VIDEOJUEGOS" (abbreviated)
+ * - Requires VIDEOJUEGO to be present when matching ASOC/DESARROLL patterns
+ *   to avoid false positives like "ASOCIACION DE DESARROLLADORES DE SOFTWARE"
+ *
+ * Pattern breakdown:
+ * - `ADVA` - Matches the acronym directly
+ * - `(?=.*VIDEOJUEGO)(?=.*ASOC)(?=.*DESARROLL)` - Lookaheads require all three
+ *   keywords to be present (in any order) for association name matches
  */
-const ADVA_NAME_PATTERN = /ADVA|ASOC.*DESARROLL|VIDEOJUEGO/i;
+const ADVA_NAME_PATTERN = /ADVA|(?=.*VIDEOJUEGO)(?=.*ASOC)(?=.*DESARROLL)/i;
 
 /**
  * Normalizes a CUIT by removing dashes, spaces, and slashes.
@@ -486,13 +491,13 @@ export function parseFacturaResponse(
 
     // Calculate confidence based on completeness
     const completeness = (requiredFields.length - missingFields.length) / requiredFields.length;
-    const confidence = Math.max(0.5, completeness); // Minimum 0.5 if we got some data
+    let confidence = completeness; // No artificial floor - let completeness drive confidence
 
     // If confidence > 0.9, no review needed; otherwise check for issues
     let needsReview = confidence <= 0.9 && (missingFields.length > 0 || hasSuspiciousEmptyFields);
 
     // CRITICAL: For factura_emitida, empty cuitReceptor indicates Consumidor Final or extraction failure
-    // Flag for review to ensure human verification
+    // Flag for review to ensure human verification and significantly lower confidence
     if (actualDocumentType === 'factura_emitida' && (!data.cuitReceptor || data.cuitReceptor === '')) {
       warn('Empty cuitReceptor in factura_emitida - likely Consumidor Final or extraction issue', {
         module: 'gemini-parser',
@@ -500,6 +505,8 @@ export function parseFacturaResponse(
         clientName: data.razonSocialReceptor,
       });
       needsReview = true;
+      // Lower confidence significantly to indicate missing counterparty data
+      confidence = Math.min(confidence, 0.3);
     }
 
     // Validate ADVA role using the actual document type (may differ from expected)
@@ -610,7 +617,7 @@ export function parsePagoResponse(
 
     // Calculate confidence based on completeness
     const completeness = (requiredFields.length - missingFields.length) / requiredFields.length;
-    const confidence = Math.max(0.5, completeness);
+    const confidence = completeness;
 
     // If confidence > 0.9, no review needed; otherwise check for issues
     const needsReview = confidence <= 0.9 && (missingFields.length > 0 || hasSuspiciousEmptyFields);
@@ -716,7 +723,7 @@ export function parseReciboResponse(response: string): Result<ParseResult<Partia
 
     // Calculate confidence based on completeness
     const completeness = (requiredFields.length - missingFields.length) / requiredFields.length;
-    const confidence = Math.max(0.5, completeness);
+    const confidence = completeness;
 
     // If confidence > 0.9, no review needed; otherwise check for issues
     const needsReview = confidence <= 0.9 && (missingFields.length > 0 || hasSuspiciousEmptyFields);
@@ -966,7 +973,7 @@ export function parseResumenBancarioResponse(response: string): Result<ParseResu
 
     // Calculate confidence based on completeness
     const completeness = (requiredFields.length - missingFields.length) / requiredFields.length;
-    let confidence = Math.max(0.5, completeness);
+    let confidence = completeness;
 
     // Verify movimientos count if movimientos array is present
     let needsReview = confidence <= 0.9 && missingFields.length > 0;
@@ -1129,7 +1136,7 @@ export function parseResumenTarjetaResponse(response: string): Result<ParseResul
 
     // Calculate confidence based on completeness
     const completeness = (requiredFields.length - missingFields.length) / requiredFields.length;
-    let confidence = Math.max(0.5, completeness);
+    let confidence = completeness;
 
     // Verify movimientos count if movimientos array is present
     let needsReview = confidence <= 0.9 && missingFields.length > 0;
@@ -1260,7 +1267,7 @@ export function parseResumenBrokerResponse(response: string): Result<ParseResult
 
     // Calculate confidence based on completeness
     const completeness = (requiredFields.length - missingFields.length) / requiredFields.length;
-    let confidence = Math.max(0.5, completeness);
+    let confidence = completeness;
 
     // Verify movimientos count if movimientos array is present
     let needsReview = confidence <= 0.9 && missingFields.length > 0;
@@ -1499,7 +1506,7 @@ export function parseRetencionResponse(
 
     // Calculate confidence based on completeness
     const completeness = (requiredFields.length - missingFields.length) / requiredFields.length;
-    const confidence = Math.max(0.5, completeness);
+    const confidence = completeness;
 
     // If confidence > 0.9, no review needed; otherwise check for issues
     const needsReview = confidence <= 0.9 && (missingFields.length > 0 || hasSuspiciousEmptyFields);

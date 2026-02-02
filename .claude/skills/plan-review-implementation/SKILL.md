@@ -37,7 +37,8 @@ This skill moves issues from **Review → Done** (the final transition).
 
 1. Search PLANS.md for `## Iteration N` sections
 2. **If iterations exist:** Build list of iterations needing review:
-   - Has "Completed" or "### Completed" subsection
+   - Has "Tasks Completed This Iteration" or "### Completed" subsection
+   - Does NOT contain `### Tasks Remaining` (partial iteration, not ready for review)
    - Does NOT contain `<!-- REVIEW COMPLETE -->` marker
    - Process in order (Iteration 1 first, then 2, etc.)
 3. **If NO iterations exist:** Treat entire plan as single iteration:
@@ -47,9 +48,11 @@ This skill moves issues from **Review → Done** (the final transition).
 
 **Iteration detection:** A plan has iterations if it contains `## Iteration` (with or without number).
 
+**Partial iterations:** If an iteration has `### Tasks Remaining`, it's incomplete - skip it and inform user to run `plan-implement` first.
+
 If no iteration/plan needs review → Inform user and stop.
 
-**Important:** Review ALL pending iterations in a single session, not just one.
+**Important:** Review ALL complete pending iterations in a single session, not just one.
 
 ## Review Process
 
@@ -57,7 +60,7 @@ If no iteration/plan needs review → Inform user and stop.
 
 ### Step 1: Identify Implemented Code
 
-From the iteration's "Completed" section, list all files that were:
+From the iteration's "Tasks Completed This Iteration" (or legacy "Completed") section, list all files that were:
 - Created
 - Modified
 - Added tests to
@@ -116,7 +119,7 @@ Use the Priority Tiers from code-review-checklist.md:
 
 ### If Issues Found (CRITICAL/HIGH)
 
-Add to the current Iteration section:
+Add Review Findings to the current Iteration section, then add Fix Plan at h2 level AFTER the iteration:
 
 ```markdown
 ### Review Findings
@@ -140,30 +143,35 @@ Summary: N issue(s) found
 - ADVA-126: Created in Todo (Fix: Race condition)
 - ADVA-127: Created in Todo (Fix: Unhandled promise)
 
-### Fix Plan
+<!-- REVIEW COMPLETE -->
 
-#### Fix 1: SQL injection in query builder
+---
+
+## Fix Plan
+
+**Source:** Review findings from Iteration N
+**Linear Issues:** [ADVA-125](https://linear.app/...), [ADVA-126](https://linear.app/...), [ADVA-127](https://linear.app/...)
+
+### Fix 1: SQL injection in query builder
 **Linear Issue:** [ADVA-125](https://linear.app/...)
 
 1. Write test in `src/db.test.ts` for malicious input escaping
 2. Use parameterized query in `src/db.ts:45`
 
-#### Fix 2: Race condition in cache invalidation
+### Fix 2: Race condition in cache invalidation
 **Linear Issue:** [ADVA-126](https://linear.app/...)
 
 1. Write test in `src/cache.test.ts` for concurrent invalidation
 2. Add mutex/lock in `src/cache.ts:120`
 
-#### Fix 3: Unhandled promise rejection
+### Fix 3: Unhandled promise rejection
 **Linear Issue:** [ADVA-127](https://linear.app/...)
 
 1. Write test in `src/api.test.ts` for error handling
 2. Add try/catch in `src/api.ts:78`
-
-<!-- REVIEW COMPLETE -->
 ```
 
-**Note:** The `<!-- REVIEW COMPLETE -->` marker is added even when issues are found, because the review itself is complete. The Fix Plan will create a new iteration when implemented.
+**Note:** The `<!-- REVIEW COMPLETE -->` marker is added to the iteration even when issues are found, because the review itself is complete. The Fix Plan is at h2 level so `plan-implement` can find and execute it.
 
 **Linear workflow:** Original issues move to Done (the original task was completed). Bug issues are created in Todo state for the fix plan.
 
@@ -267,11 +275,11 @@ After completing review of each iteration, estimate remaining context:
 - If estimated remaining context **≤ 60%** → Stop and inform user:
   > "Iteration N review complete. Context is running low (~X% estimated remaining). Run `/plan-review-implementation` again to continue."
 
-**Why 60% threshold:** Leaves buffer for:
-- Documenting review findings
-- Creating fix plans
-- User interactions
-- Unexpected issues
+**Why 60% threshold (vs 40% for plan-implement):**
+- Review is read-heavy (less context than writing code)
+- Documenting findings is lighter than writing tests + implementation
+- Fix plans (if created) are structured summaries
+- 60% leaves sufficient buffer for documenting and creating Linear issues
 
 **When to continue automatically:**
 1. Current iteration review completed

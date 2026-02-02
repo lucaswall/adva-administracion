@@ -3,6 +3,7 @@
  * Matches bank movements against Control de Ingresos/Egresos
  */
 
+import { createHash } from 'crypto';
 import type {
   Result,
   Factura,
@@ -26,6 +27,70 @@ import { updateDetalle, type DetalleUpdate } from '../services/movimientos-detal
 
 // Re-export MatchQuality for test compatibility
 export type { MatchQuality };
+
+/**
+ * Gets the column index for a required header, throwing if not found.
+ * This prevents silent failures when headers are missing or have case mismatches.
+ *
+ * @param headers - Array of lowercase header strings
+ * @param headerName - The header name to find (should be lowercase)
+ * @returns The column index
+ * @throws Error if header is not found
+ */
+export function getRequiredColumnIndex(headers: string[], headerName: string): number {
+  const index = headers.indexOf(headerName);
+  if (index === -1) {
+    throw new Error(
+      `Required header '${headerName}' not found in spreadsheet. ` +
+      `Available headers: [${headers.join(', ')}]`
+    );
+  }
+  return index;
+}
+
+/**
+ * Row data used for computing version hash
+ * Used for TOCTOU protection - only includes mutable fields that matter for matching
+ */
+interface VersionableRow {
+  /** Transaction date */
+  fecha: string;
+  /** Origin/concept description */
+  origenConcepto: string;
+  /** Debit amount */
+  debito: number | null;
+  /** Credit amount */
+  credito: number | null;
+  /** Google Drive fileId of matched document */
+  matchedFileId: string;
+  /** Human-readable match description */
+  detalle: string;
+}
+
+/**
+ * Computes a version hash for a movimiento row.
+ * Used for TOCTOU protection - if the version changes between read and write,
+ * the update should be skipped to avoid overwriting concurrent modifications.
+ *
+ * The version is based on fields that could change during concurrent updates:
+ * - matchedFileId and detalle (the fields we're updating)
+ * - fecha, origenConcepto, debito, credito (immutable but included for row identity)
+ *
+ * @param row - Row data to compute version for
+ * @returns Hex string hash of the row data
+ */
+export function computeRowVersion(row: VersionableRow): string {
+  const data = [
+    row.fecha,
+    row.origenConcepto,
+    row.debito?.toString() ?? '',
+    row.credito?.toString() ?? '',
+    row.matchedFileId,
+    row.detalle,
+  ].join('|');
+
+  return createHash('md5').update(data).digest('hex').slice(0, 16);
+}
 
 /**
  * Options for matching
@@ -137,20 +202,22 @@ function parseFacturas(data: CellValue[][]): Array<Factura & { row: number }> {
   const headers = data[0].map(h => String(h || '').toLowerCase());
   const facturas: Array<Factura & { row: number }> = [];
 
+  // Required headers - throw if missing (critical for matching)
   const colIndex = {
-    fechaEmision: headers.indexOf('fechaemision'),
-    fileId: headers.indexOf('fileid'),
+    fechaEmision: getRequiredColumnIndex(headers, 'fechaemision'),
+    fileId: getRequiredColumnIndex(headers, 'fileid'),
+    tipoComprobante: getRequiredColumnIndex(headers, 'tipocomprobante'),
+    nroFactura: getRequiredColumnIndex(headers, 'nrofactura'),
+    cuitEmisor: getRequiredColumnIndex(headers, 'cuitemisor'),
+    razonSocialEmisor: getRequiredColumnIndex(headers, 'razonsocialemisor'),
+    importeTotal: getRequiredColumnIndex(headers, 'importetotal'),
+    moneda: getRequiredColumnIndex(headers, 'moneda'),
+    // Optional headers - use indexOf (returns -1 if missing, which is safe)
     fileName: headers.indexOf('filename'),
-    tipoComprobante: headers.indexOf('tipocomprobante'),
-    nroFactura: headers.indexOf('nrofactura'),
-    cuitEmisor: headers.indexOf('cuitemisor'),
-    razonSocialEmisor: headers.indexOf('razonsocialemisor'),
     cuitReceptor: headers.indexOf('cuitreceptor'),
     razonSocialReceptor: headers.indexOf('razonsocialreceptor'),
     importeNeto: headers.indexOf('importeneto'),
     importeIva: headers.indexOf('importeiva'),
-    importeTotal: headers.indexOf('importetotal'),
-    moneda: headers.indexOf('moneda'),
     concepto: headers.indexOf('concepto'),
     processedAt: headers.indexOf('processedat'),
     confidence: headers.indexOf('confidence'),
@@ -199,13 +266,15 @@ function parsePagos(data: CellValue[][]): Array<Pago & { row: number }> {
   const headers = data[0].map(h => String(h || '').toLowerCase());
   const pagos: Array<Pago & { row: number }> = [];
 
+  // Required headers - throw if missing (critical for matching)
   const colIndex = {
-    fechaPago: headers.indexOf('fechapago'),
-    fileId: headers.indexOf('fileid'),
+    fechaPago: getRequiredColumnIndex(headers, 'fechapago'),
+    fileId: getRequiredColumnIndex(headers, 'fileid'),
+    banco: getRequiredColumnIndex(headers, 'banco'),
+    importePagado: getRequiredColumnIndex(headers, 'importepagado'),
+    moneda: getRequiredColumnIndex(headers, 'moneda'),
+    // Optional headers - use indexOf (returns -1 if missing, which is safe)
     fileName: headers.indexOf('filename'),
-    banco: headers.indexOf('banco'),
-    importePagado: headers.indexOf('importepagado'),
-    moneda: headers.indexOf('moneda'),
     referencia: headers.indexOf('referencia'),
     cuitPagador: headers.indexOf('cuitpagador'),
     nombrePagador: headers.indexOf('nombrepagador'),
@@ -257,20 +326,22 @@ function parseRecibos(data: CellValue[][]): Array<Recibo & { row: number }> {
   const headers = data[0].map(h => String(h || '').toLowerCase());
   const recibos: Array<Recibo & { row: number }> = [];
 
+  // Required headers - throw if missing (critical for matching)
   const colIndex = {
-    fechaPago: headers.indexOf('fechapago'),
-    fileId: headers.indexOf('fileid'),
+    fechaPago: getRequiredColumnIndex(headers, 'fechapago'),
+    fileId: getRequiredColumnIndex(headers, 'fileid'),
+    nombreEmpleado: getRequiredColumnIndex(headers, 'nombreempleado'),
+    cuilEmpleado: getRequiredColumnIndex(headers, 'cuilempleado'),
+    totalNeto: getRequiredColumnIndex(headers, 'totalneto'),
+    // Optional headers - use indexOf (returns -1 if missing, which is safe)
     fileName: headers.indexOf('filename'),
     tipoRecibo: headers.indexOf('tiporecibo'),
-    nombreEmpleado: headers.indexOf('nombreempleado'),
-    cuilEmpleado: headers.indexOf('cuilempleado'),
     legajo: headers.indexOf('legajo'),
     tareaDesempenada: headers.indexOf('tareadesempenada'),
     cuitEmpleador: headers.indexOf('cuitempleador'),
     periodoAbonado: headers.indexOf('periodoabonado'),
     subtotalRemuneraciones: headers.indexOf('subtotalremuneraciones'),
     subtotalDescuentos: headers.indexOf('subtotaldescuentos'),
-    totalNeto: headers.indexOf('totalneto'),
     processedAt: headers.indexOf('processedat'),
     confidence: headers.indexOf('confidence'),
     needsReview: headers.indexOf('needsreview'),
@@ -313,9 +384,12 @@ function parseRetenciones(data: CellValue[][]): Array<Retencion & { row: number 
   const headers = data[0].map(h => String(h || '').toLowerCase());
   const retenciones: Array<Retencion & { row: number }> = [];
 
+  // Required headers - throw if missing (critical for matching)
   const colIndex = {
-    fechaEmision: headers.indexOf('fechaemision'),
-    fileId: headers.indexOf('fileid'),
+    fechaEmision: getRequiredColumnIndex(headers, 'fechaemision'),
+    fileId: getRequiredColumnIndex(headers, 'fileid'),
+    montoRetencion: getRequiredColumnIndex(headers, 'montoretencion'),
+    // Optional headers - use indexOf (returns -1 if missing, which is safe)
     fileName: headers.indexOf('filename'),
     nroCertificado: headers.indexOf('nrocertificado'),
     cuitAgenteRetencion: headers.indexOf('cuitagenteretencion'),
@@ -323,7 +397,6 @@ function parseRetenciones(data: CellValue[][]): Array<Retencion & { row: number 
     impuesto: headers.indexOf('impuesto'),
     regimen: headers.indexOf('regimen'),
     montoComprobante: headers.indexOf('montocomprobante'),
-    montoRetencion: headers.indexOf('montoretencion'),
     processedAt: headers.indexOf('processedat'),
     confidence: headers.indexOf('confidence'),
     needsReview: headers.indexOf('needsreview'),
@@ -716,11 +789,16 @@ async function matchBankMovimientos(
       }
 
       if (shouldUpdate) {
+        // Compute version from the row's current state for TOCTOU protection
+        // If row changes between now and write, update will be skipped
+        const expectedVersion = computeRowVersion(mov);
+
         updates.push({
           sheetName: mov.sheetName,
           rowNumber: mov.rowNumber,
           matchedFileId: matchResult.matchedFileId,
           detalle: matchResult.description,
+          expectedVersion,
         });
 
         if (mov.debito !== null && mov.debito > 0) {

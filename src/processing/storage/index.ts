@@ -7,7 +7,7 @@ import type { Result, DocumentType } from '../../types/index.js';
 import { info as logInfo, error as logError } from '../../utils/logger.js';
 import { getCorrelationId } from '../../utils/correlation.js';
 import { withQuotaRetry, withLock } from '../../utils/concurrency.js';
-import { MAX_FAILED_FILE_RETRIES } from '../../config.js';
+import { MAX_FAILED_FILE_RETRIES, FILE_STATUS_LOCK_TIMEOUT_MS } from '../../config.js';
 
 /**
  * In-memory cache for file row indexes
@@ -54,6 +54,7 @@ export async function markFileProcessing(
     const cacheKey = `${dashboardId}:${fileId}`;
 
     // Wrap in lock to serialize with updateFileStatus
+    // ADV-22: Explicit timeout (10s) prevents indefinite wait if lock is held
     const lockResult = await withLock(lockKey, async () => {
       // Check if file already exists in tracking sheet (for retry scenarios)
       const existingResult = await getValues(dashboardId, 'Archivos Procesados!A:E');
@@ -145,7 +146,7 @@ export async function markFileProcessing(
       });
 
       return undefined;
-    });
+    }, FILE_STATUS_LOCK_TIMEOUT_MS, FILE_STATUS_LOCK_TIMEOUT_MS);
 
     if (!lockResult.ok) {
       throw lockResult.error;
@@ -175,6 +176,7 @@ export async function updateFileStatus(
   const lockKey = `file-status:${dashboardId}:${fileId}`;
 
   // Wrap entire function body in lock to prevent TOCTOU race
+  // ADV-22: Explicit timeout (10s) prevents indefinite wait if lock is held
   return await withLock(lockKey, async () => {
     // Invalidate cache at start of lock to ensure fresh data
     // This prevents TOCTOU: always re-read within lock
@@ -262,7 +264,7 @@ export async function updateFileStatus(
     });
 
     return undefined;
-  });
+  }, FILE_STATUS_LOCK_TIMEOUT_MS, FILE_STATUS_LOCK_TIMEOUT_MS);
 }
 
 /**

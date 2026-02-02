@@ -105,4 +105,41 @@ describe('formatMonthFolder', () => {
     const validDate = new Date('2025-03-15');
     expect(formatMonthFolder(validDate)).toBe('03 - Marzo');
   });
+
+  // ADV-14: UTC consistency tests
+  describe('UTC consistency', () => {
+    it('handles UTC date at midnight correctly (edge case for timezone boundary)', () => {
+      // UTC midnight on Jan 1 - in Argentina (UTC-3) this would be Dec 31 at 21:00
+      // The function should use UTC month, not local month
+      const utcMidnight = new Date(Date.UTC(2025, 0, 1, 0, 0, 0));
+      expect(formatMonthFolder(utcMidnight)).toBe('01 - Enero');
+    });
+
+    it('handles date created from parseArgDate (UTC noon) correctly', () => {
+      // parseArgDate creates dates at UTC noon to avoid DST issues
+      // UTC noon on Jan 1 = Argentina 9:00 AM on Jan 1 (still Jan 1)
+      // But UTC midnight on Jan 1 = Argentina Dec 31 at 21:00
+      const utcNoon = new Date(Date.UTC(2025, 0, 1, 12, 0, 0));
+      expect(formatMonthFolder(utcNoon)).toBe('01 - Enero');
+    });
+
+    it('produces consistent results regardless of local timezone simulation', () => {
+      // Create a UTC date that represents Dec 31 23:00 UTC
+      // In UTC-3 (Argentina), this is Jan 1 02:00
+      // Using UTC methods should give December, not January
+      const utcLateDecember = new Date(Date.UTC(2025, 11, 31, 23, 0, 0));
+      expect(formatMonthFolder(utcLateDecember)).toBe('12 - Diciembre');
+    });
+
+    it('handles early January dates without shifting to December', () => {
+      // UTC January 1st at various times should all return January
+      const jan1Early = new Date(Date.UTC(2025, 0, 1, 3, 0, 0));
+      const jan1Mid = new Date(Date.UTC(2025, 0, 1, 12, 0, 0));
+      const jan1Late = new Date(Date.UTC(2025, 0, 1, 23, 59, 59));
+
+      expect(formatMonthFolder(jan1Early)).toBe('01 - Enero');
+      expect(formatMonthFolder(jan1Mid)).toBe('01 - Enero');
+      expect(formatMonthFolder(jan1Late)).toBe('01 - Enero');
+    });
+  });
 });

@@ -16,9 +16,22 @@ Execute the current pending work in PLANS.md following strict TDD workflow. Upda
 
 Look in PLANS.md for pending work in this priority order:
 
-1. **Latest "Fix Plan"** with no "Iteration" after it → Execute that fix plan
-2. **Original Plan** with no "Iteration 1" → Execute the original plan
-3. **Nothing pending** → Inform user "No pending work in PLANS.md"
+1. **Check latest Iteration block** for "Tasks Remaining" section:
+   - If found → Resume from first task in that list
+2. **Look for `## Fix Plan`** (h2 level) that has no iteration after it:
+   - Fix Plans are created by `plan-review-implementation` when bugs are found
+   - Execute fixes starting from Fix 1
+3. **Original Plan** with no "Iteration 1" → Execute the original plan starting from Task 1
+4. **Nothing pending** → Inform user "No pending work in PLANS.md"
+
+**Resuming from previous iteration:**
+When an iteration has "Tasks Remaining", start from the first remaining task. The previous iteration already documented completed tasks - do NOT re-execute them.
+
+**Fix Plan structure:**
+Fix Plans created by review have the same structure as tasks:
+- `### Fix 1: [Title]` with `**Linear Issue:** [ADVA-N](url)`
+- TDD steps (write test, implement fix)
+- Execute them like regular tasks, creating a new iteration when done
 
 ## Linear State Management
 
@@ -63,14 +76,16 @@ For each task in the plan:
    └─ Use mcp__linear__update_issue (skip if no issue link)
 ```
 
-### Task Completion Checklist
+### Pre-Stop Checklist
 
-After completing ALL tasks:
+Run this checklist when stopping (either context low OR all tasks done):
 
 1. **Run `bug-hunter` agent** - Review changes for bugs
-   - If bugs found → Fix immediately before proceeding
+   - If bugs found → Fix immediately before writing iteration block
 2. **Run `verifier` agent** - Verify all tests pass and zero warnings
-   - If failures or warnings → Fix immediately before proceeding
+   - If failures or warnings → Fix immediately before writing iteration block
+
+**IMPORTANT:** Always run this checklist before documenting the iteration, even if stopping mid-plan due to context limits.
 
 ## Handling Failures
 
@@ -85,7 +100,7 @@ After completing ALL tasks:
 
 ## Document Results
 
-After execution, append a new "Iteration N" section to PLANS.md:
+After completing tasks (either all tasks or stopping due to context), append a new "Iteration N" section to PLANS.md:
 
 ```markdown
 ---
@@ -94,27 +109,43 @@ After execution, append a new "Iteration N" section to PLANS.md:
 
 **Implemented:** YYYY-MM-DD
 
-### Completed
-- Task 1: [Brief description of what was done]
-- Task 2: [Brief description of what was done]
+### Tasks Completed This Iteration
+- Task 3: Fix CUIT DNI extraction - Removed leading zero stripping, updated tests
+- Task 4: Tighten ADVA_NAME_PATTERN - Changed regex to require VIDEOJUEGO
+
+### Tasks Remaining
+- Task 5: Add extraction failure flagging
+- Task 6: Validate header indices
+- ... (list remaining tasks)
 
 ### Files Modified
-- `path/to/file.ts` - Description of changes
+- `src/utils/validation.ts` - Removed leading zero removal in extractDniFromCuit
+- `src/gemini/parser.ts` - Updated ADVA_NAME_PATTERN regex
 
 ### Linear Updates
-- ADVA-123: Todo → In Progress → Review
-- ADVA-124: Todo → In Progress → Review
+- ADV-9: Todo → In Progress → Review
+- ADV-10: Todo → In Progress → Review
 
 ### Pre-commit Verification
 - bug-hunter: [Passed | Found N bugs, fixed before proceeding]
 - verifier: All N tests pass, zero warnings
+
+### Continuation Status
+[Context running low (~35% remaining). Run `/plan-implement` to continue with Task 5.]
+OR
+[All tasks completed. Ready for review.]
 ```
 
-**IMPORTANT:** Do NOT add "Review Findings" or "Notes" sections. Those are reserved for `plan-review-implementation`. The iteration section should end after "Pre-commit Verification".
+**IMPORTANT:**
+- Do NOT add "Review Findings" or "Notes" sections - reserved for `plan-review-implementation`
+- Always list BOTH completed AND remaining tasks so next iteration knows where to resume
+- The "Continuation Status" clearly indicates whether more work remains
 
-## Context Management & Continuation
+## Context Management & Task-by-Task Continuation
 
-After completing each iteration, estimate remaining context:
+**Evaluate context AFTER EACH TASK, not after the whole plan.**
+
+After completing each task's TDD cycle (steps 1-6), estimate remaining context:
 
 **Rough estimation heuristics:**
 - Each large file read (~500 lines): ~2-3% context
@@ -122,21 +153,21 @@ After completing each iteration, estimate remaining context:
 - Each verifier/bug-hunter invocation: ~2-4% context
 - Conversation messages accumulate over time
 
-**Decision logic:**
-- If estimated remaining context **> 60%** → Automatically continue to next pending work (Fix Plan or next iteration)
-- If estimated remaining context **≤ 60%** → Stop and inform user:
-  > "Iteration N complete. Context is running low (~X% estimated remaining). Run `/plan-implement` again to continue."
+**Decision logic after each task:**
+- If estimated remaining context **> 40%** → Continue to next task
+- If estimated remaining context **≤ 40%** → STOP and write iteration block
 
-**Why 60% threshold:** Leaves buffer for:
-- Potential bug fixes
-- verifier verification
-- User interactions
+**Why 40% threshold:** Leaves buffer for:
+- Running bug-hunter and verifier before stopping
+- Documenting the iteration
+- User interactions in next session
 - Unexpected issues
 
-**When to continue automatically:**
-1. Current iteration completed successfully
-2. There is more pending work in PLANS.md (another Fix Plan or the plan isn't fully implemented)
-3. Estimated remaining context > 60%
+**When reaching the threshold or completing all tasks:**
+1. Run `bug-hunter` agent on completed work
+2. Run `verifier` agent to confirm all tests pass
+3. Write the `## Iteration N` block documenting what was done
+4. If more tasks remain, inform user to run `/plan-implement` again
 
 ## Error Handling
 
@@ -158,16 +189,16 @@ After completing each iteration, estimate remaining context:
 2. **NEVER skip failing tests** - Fix them or ask for help
 3. **NEVER modify PLANS.md sections above current iteration** - Append only
 4. **NEVER proceed with warnings** - Fix all warnings first
-5. **NEVER ask "should I continue?"** - Execute the full plan
+5. **NEVER ask "should I continue?"** - Use context estimation to decide automatically
 
 ## Rules
 
-- **Execute ALL pending tasks** - Never leave work incomplete
-- **Continue automatically if context allows** - If > 60% context remains, proceed to next iteration
+- **Evaluate context after EACH task** - Stop when context ≤ 40%, don't wait until all tasks done
+- **Continue if context allows** - If > 40% context remains after a task, proceed to next task
 - **Follow TDD strictly** - Test before implementation, always
 - **Fix failures immediately** - Do not proceed with failing tests or warnings
 - **Never modify previous sections** - Only append new Iteration section
 - **Do not commit or create PR** - Unless explicitly requested
-- **Document everything** - Include all checklist results in iteration
+- **Document completed AND remaining tasks** - So next iteration knows where to resume
 - **Update Linear in real-time** - Move issues Todo→In Progress at task start, In Progress→Review at task end
 - If nothing to execute, inform the user and stop

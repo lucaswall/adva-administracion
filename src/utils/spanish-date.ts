@@ -23,7 +23,12 @@ export const SPANISH_MONTHS = [
 
 /**
  * Formats a date as a month folder name
- * @param date - Date to format
+ *
+ * Uses UTC methods for consistency with date.ts parsing functions.
+ * This ensures dates created with Date.UTC() (like those from parseArgDate)
+ * are interpreted correctly regardless of local timezone.
+ *
+ * @param date - Date to format (interpreted as UTC)
  * @returns Folder name in format "MM - MonthName" (e.g., "01 - Enero"), or undefined if date is invalid
  */
 export function formatMonthFolder(date: Date): string | undefined {
@@ -32,7 +37,7 @@ export function formatMonthFolder(date: Date): string | undefined {
     return undefined;
   }
 
-  const monthIndex = date.getMonth();
+  const monthIndex = date.getUTCMonth();
   const monthNumber = String(monthIndex + 1).padStart(2, '0');
   const monthName = SPANISH_MONTHS[monthIndex];
   return `${monthNumber} - ${monthName}`;

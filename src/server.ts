@@ -12,7 +12,14 @@ import { discoverFolderStructure, getCachedFolderStructure } from './services/fo
 import { initWatchManager, startWatching, shutdownWatchManager, updateLastScanTime } from './services/watch-manager.js';
 import { scanFolder } from './processing/scanner.js';
 import { updateStatusSheet } from './services/status-sheet.js';
-import { info, error as logError } from './utils/logger.js';
+import { info, warn, error as logError } from './utils/logger.js';
+import type { Result } from './types/index.js';
+
+/**
+ * Maximum time to wait for graceful shutdown before forcing exit
+ * ADV-7: Prevent infinite hanging during shutdown
+ */
+export const SHUTDOWN_TIMEOUT_MS = 30000;
 
 /**
  * Build and configure the Fastify server
@@ -125,14 +132,71 @@ async function initializeRealTimeMonitoring(): Promise<void> {
 }
 
 /**
- * Perform startup scan to process any pending documents
+ * Checks if an error is a critical scan error that should prevent server startup
+ * Critical errors indicate fundamental configuration or authentication issues
+ * that won't be resolved by retrying later.
+ *
+ * @param error - Error from scanFolder
+ * @returns true if the error is critical and should prevent startup
  */
-async function performStartupScan(): Promise<void> {
+export function isCriticalScanError(error: Error): boolean {
+  const message = error.message.toLowerCase();
+
+  // Authentication errors - credentials/permissions are wrong
+  const authPatterns = [
+    'authentication',
+    'unauthorized',
+    'forbidden',
+    'invalid credentials',
+    'access denied',
+    'insufficient',
+    '401',
+    '403',
+  ];
+
+  // Folder structure errors - fundamental configuration issues
+  // Note: patterns must be specific to avoid matching transient errors like "File temporarily not found"
+  const folderPatterns = [
+    'folder structure not initialized',
+    'entrada folder not found',
+    'root folder does not exist',
+    'control de ingresos not found',
+    'control de egresos not found',
+    'dashboard operativo not found',
+  ];
+
+  // Check for auth errors
+  for (const pattern of authPatterns) {
+    if (message.includes(pattern)) {
+      return true;
+    }
+  }
+
+  // Check for folder structure errors
+  for (const pattern of folderPatterns) {
+    if (message.includes(pattern)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+/**
+ * Perform startup scan to process any pending documents
+ * ADV-26: Returns Result to allow proper error handling by caller
+ *
+ * @returns Result indicating success or error
+ *   - On success: { ok: true, value: undefined }
+ *   - On critical error: { ok: false, error: Error } - should prevent startup
+ *   - On transient error: { ok: true, value: undefined } - logged but startup continues
+ */
+export async function performStartupScan(): Promise<Result<void, Error>> {
   const config = getConfig();
 
   // Skip scan in test mode
   if (config.nodeEnv === 'test') {
-    return;
+    return { ok: true, value: undefined };
   }
 
   info('Performing startup scan', { module: 'server', phase: 'startup-scan' });
@@ -154,13 +218,97 @@ async function performStartupScan(): Promise<void> {
     if (folderStructure?.dashboardOperativoId) {
       await updateStatusSheet(folderStructure.dashboardOperativoId);
     }
-  } else {
-    logError('Startup scan failed', {
+
+    return { ok: true, value: undefined };
+  }
+
+  // Scan failed - check if it's a critical error
+  if (isCriticalScanError(result.error)) {
+    logError('Startup scan failed with critical error', {
       module: 'server',
       phase: 'startup-scan',
-      error: result.error.message
+      error: result.error.message,
+      critical: true,
     });
+    return { ok: false, error: result.error };
   }
+
+  // Transient error - log warning but allow startup to continue
+  warn('Startup scan failed with transient error, server will continue', {
+    module: 'server',
+    phase: 'startup-scan',
+    error: result.error.message,
+    critical: false,
+  });
+
+  return { ok: true, value: undefined };
+}
+
+/**
+ * Creates a shutdown handler that properly awaits all cleanup operations
+ * ADV-7: Fix shutdown handlers not awaited - was causing unclean shutdown
+ *
+ * @param shutdownWatchManager - Function to shutdown watch manager
+ * @param serverClose - Function to close the server
+ * @param processExit - Function to exit the process (allows injection for testing)
+ * @param timeoutMs - Maximum time to wait for shutdown (defaults to SHUTDOWN_TIMEOUT_MS)
+ * @returns Async handler function that properly awaits cleanup
+ */
+export function createShutdownHandler(
+  shutdownWatchManager: () => Promise<void>,
+  serverClose: () => Promise<void>,
+  processExit: (code: number) => void,
+  timeoutMs: number = SHUTDOWN_TIMEOUT_MS
+): (signal: string) => Promise<void> {
+  return async (signal: string) => {
+    info('Received shutdown signal', {
+      module: 'server',
+      phase: 'shutdown',
+      signal
+    });
+
+    // Create timeout promise to prevent infinite hanging
+    const timeoutPromise = new Promise<'timeout'>((resolve) => {
+      setTimeout(() => resolve('timeout'), timeoutMs);
+    });
+
+    // Create shutdown promise that awaits all cleanup operations
+    const shutdownPromise = (async () => {
+      try {
+        // Stop watching before closing
+        await shutdownWatchManager();
+        info('Watch channels stopped', { module: 'server', phase: 'shutdown' });
+
+        await serverClose();
+        info('Server closed', { module: 'server', phase: 'shutdown' });
+
+        return 'success' as const;
+      } catch (err) {
+        logError('Shutdown error', {
+          module: 'server',
+          phase: 'shutdown',
+          error: err instanceof Error ? err.message : String(err)
+        });
+        return 'error' as const;
+      }
+    })();
+
+    // Race between shutdown and timeout
+    const result = await Promise.race([shutdownPromise, timeoutPromise]);
+
+    if (result === 'timeout') {
+      warn('Shutdown timed out, forcing exit', {
+        module: 'server',
+        phase: 'shutdown',
+        timeoutMs
+      });
+      processExit(1);
+    } else if (result === 'error') {
+      processExit(1);
+    } else {
+      processExit(0);
+    }
+  };
 }
 
 /**
@@ -205,27 +353,23 @@ async function start() {
     }
 
     // Perform startup scan
-    await performStartupScan();
+    // ADV-26: Check result and fail startup on critical errors
+    const scanResult = await performStartupScan();
+    if (!scanResult.ok) {
+      throw scanResult.error;
+    }
 
-    // Graceful shutdown handler
-    const shutdown = async (signal: string) => {
-      info('Received shutdown signal', {
-        module: 'server',
-        phase: 'shutdown',
-        signal
-      });
+    // Graceful shutdown handler - ADV-7: Properly await shutdown operations
+    const shutdown = createShutdownHandler(
+      shutdownWatchManager,
+      () => server.close(),
+      (code) => process.exit(code)
+    );
 
-      // Stop watching before closing
-      await shutdownWatchManager();
-      info('Watch channels stopped', { module: 'server', phase: 'shutdown' });
-
-      await server.close();
-      info('Server closed', { module: 'server', phase: 'shutdown' });
-      process.exit(0);
-    };
-
-    process.on('SIGTERM', () => shutdown('SIGTERM'));
-    process.on('SIGINT', () => shutdown('SIGINT'));
+    // Note: The handlers call async shutdown() which is now properly awaited internally
+    // The handler returns a promise, and process.exit() is called only after completion
+    process.on('SIGTERM', () => { shutdown('SIGTERM'); });
+    process.on('SIGINT', () => { shutdown('SIGINT'); });
 
   } catch (err) {
     logError('Failed to start server', {

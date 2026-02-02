@@ -993,6 +993,143 @@ describe('scanner', () => {
     });
   });
 
+  describe('Scan state machine race condition (ADV-15)', () => {
+    it('verifies atomic check-and-set: no yield between state check and state set', async () => {
+      // ADV-15: The concern was that between checking scanState !== 'idle' and setting
+      // scanState = 'pending', an await could yield to the event loop.
+      //
+      // In JavaScript, async functions execute synchronously until the first await.
+      // In scanFolder:
+      //   1. Line 386: if (scanState !== 'idle') - CHECK (sync)
+      //   2. Line 406: scanState = 'pending' - SET (sync)
+      //   3. Line 409: await withLock(...) - FIRST AWAIT
+      //
+      // Since there's no await between CHECK and SET, the state transition is atomic.
+      // This test verifies this by starting many concurrent scans and confirming
+      // exactly ONE proceeds past the state check.
+
+      const { withLock } = await import('../utils/concurrency.js');
+
+      // Track how many scans reached the withLock call (passed state check)
+      let lockAttempts = 0;
+
+      vi.mocked(withLock).mockImplementation(async (_lockId, fn) => {
+        lockAttempts++;
+        const result = await fn();
+        return { ok: true, value: result };
+      });
+
+      mockListFiles.mockResolvedValue({
+        ok: true,
+        value: [],
+      });
+
+      // Start 10 scans synchronously - all in the same event loop tick
+      const scans = [
+        scanFolder('entrada'),
+        scanFolder('entrada'),
+        scanFolder('entrada'),
+        scanFolder('entrada'),
+        scanFolder('entrada'),
+        scanFolder('entrada'),
+        scanFolder('entrada'),
+        scanFolder('entrada'),
+        scanFolder('entrada'),
+        scanFolder('entrada'),
+      ];
+
+      const results = await Promise.all(scans);
+
+      // Exactly ONE should have attempted to acquire the lock
+      // (all others should have been blocked by scanState check)
+      expect(lockAttempts).toBe(1);
+
+      // Verify exactly one succeeded and 9 were skipped
+      const succeeded = results.filter(r => r.ok && !r.value.skipped);
+      const skipped = results.filter(r => r.ok && r.value.skipped);
+      expect(succeeded.length).toBe(1);
+      expect(skipped.length).toBe(9);
+    });
+
+    it('state transitions are correct: idle -> pending -> running -> idle', async () => {
+      const { withLock } = await import('../utils/concurrency.js');
+
+      // Track state observations
+
+      // Mock withLock to observe state when lock is acquired
+      vi.mocked(withLock).mockImplementation(async (_lockId, fn) => {
+        // At this point, state should be 'pending' (set before withLock call)
+        // and will become 'running' inside the callback
+        const result = await fn();
+        return { ok: true, value: result };
+      });
+
+      mockListFiles.mockResolvedValue({
+        ok: true,
+        value: [],
+      });
+
+      // Run first scan
+      const result1 = await scanFolder('entrada');
+      expect(result1.ok).toBe(true);
+      if (result1.ok) {
+        expect(result1.value.skipped).toBeFalsy();
+      }
+
+      // After scan completes, state should be 'idle' again
+      // Verify by starting another scan - it should succeed, not skip
+      const result2 = await scanFolder('entrada');
+      expect(result2.ok).toBe(true);
+      if (result2.ok) {
+        expect(result2.value.skipped).toBeFalsy();
+      }
+    });
+
+    it('concurrent scan during running state returns scan_running reason', async () => {
+      const { withLock } = await import('../utils/concurrency.js');
+
+      let resolveBlocking: () => void;
+      const blockingPromise = new Promise<void>(resolve => {
+        resolveBlocking = resolve;
+      });
+
+      // Mock withLock to block inside the callback
+      vi.mocked(withLock).mockImplementation(async (_lockId, fn) => {
+        // fn() sets state to 'running' at line 413
+        const resultPromise = fn();
+        // Now state is 'running' - wait before completing
+        await blockingPromise;
+        const result = await resultPromise;
+        return { ok: true, value: result };
+      });
+
+      mockListFiles.mockResolvedValue({
+        ok: true,
+        value: [],
+      });
+
+      // Start first scan - it will block inside withLock
+      const scan1Promise = scanFolder('entrada');
+
+      // Give first scan time to enter running state
+      await new Promise(resolve => setImmediate(resolve));
+
+      // Start second scan while first is running
+      const result2 = await scanFolder('entrada');
+
+      // Second scan should be skipped with 'scan_running' or 'scan_pending'
+      expect(result2.ok).toBe(true);
+      if (result2.ok) {
+        expect(result2.value.skipped).toBe(true);
+        expect(['scan_pending', 'scan_running']).toContain(result2.value.reason);
+      }
+
+      // Unblock first scan
+      resolveBlocking!();
+      await scan1Promise;
+    });
+  });
+
   describe('Scan state management', () => {
     it('resets scanState to idle after successful scan', async () => {
       mockListFiles.mockResolvedValue({

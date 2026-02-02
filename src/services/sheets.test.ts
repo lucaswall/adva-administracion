@@ -1751,9 +1751,13 @@ describe('Google Sheets API wrapper - quota retry tests', () => {
     describe('getOrCreateMonthSheet - chronological ordering integration', () => {
       it('should create sheet and move to correct position', async () => {
         // Mock getSheetMetadata to return existing sheets
+        // With lock protection, getOrCreateMonthSheet now makes 3 calls:
+        // 1. First check (before lock)
+        // 2. Re-check after acquiring lock
+        // 3. Get updated metadata after creation for positioning
         mockSheetsApi.spreadsheets.get
           .mockResolvedValueOnce({
-            // First call to getSheetMetadata in getOrCreateMonthSheet
+            // First call: check if sheet exists (before lock)
             data: {
               sheets: [
                 { properties: { title: '2025-01', sheetId: 100, index: 0 } },
@@ -1762,7 +1766,16 @@ describe('Google Sheets API wrapper - quota retry tests', () => {
             },
           })
           .mockResolvedValueOnce({
-            // Second call after createSheet to get updated metadata with index
+            // Second call: re-check after acquiring lock
+            data: {
+              sheets: [
+                { properties: { title: '2025-01', sheetId: 100, index: 0 } },
+                { properties: { title: '2025-03', sheetId: 102, index: 1 } },
+              ],
+            },
+          })
+          .mockResolvedValueOnce({
+            // Third call: get updated metadata after creation for positioning
             data: {
               sheets: [
                 { properties: { title: '2025-01', sheetId: 100, index: 0 } },
@@ -1848,9 +1861,10 @@ describe('Google Sheets API wrapper - quota retry tests', () => {
 
       it('should delete Sheet1 when creating first month sheet', async () => {
         // Mock getSheetMetadata to return only Sheet1 (default sheet in new spreadsheets)
+        // With lock protection, getOrCreateMonthSheet now makes 3 calls
         mockSheetsApi.spreadsheets.get
           .mockResolvedValueOnce({
-            // First call to getSheetMetadata in getOrCreateMonthSheet
+            // First call: check if sheet exists (before lock)
             data: {
               sheets: [
                 { properties: { title: 'Sheet1', sheetId: 0, index: 0 } },
@@ -1858,7 +1872,15 @@ describe('Google Sheets API wrapper - quota retry tests', () => {
             },
           })
           .mockResolvedValueOnce({
-            // Second call after createSheet to get updated metadata with index
+            // Second call: re-check after acquiring lock
+            data: {
+              sheets: [
+                { properties: { title: 'Sheet1', sheetId: 0, index: 0 } },
+              ],
+            },
+          })
+          .mockResolvedValueOnce({
+            // Third call: get updated metadata after creation for positioning
             data: {
               sheets: [
                 { properties: { title: 'Sheet1', sheetId: 0, index: 0 } },
@@ -1912,9 +1934,10 @@ describe('Google Sheets API wrapper - quota retry tests', () => {
 
       it('should delete Sheet1 even if other month sheets exist', async () => {
         // Mock getSheetMetadata to return Sheet1 + existing month sheet
+        // With lock protection, getOrCreateMonthSheet now makes 3 calls
         mockSheetsApi.spreadsheets.get
           .mockResolvedValueOnce({
-            // First call to getSheetMetadata in getOrCreateMonthSheet
+            // First call: check if sheet exists (before lock)
             data: {
               sheets: [
                 { properties: { title: 'Sheet1', sheetId: 0, index: 0 } },
@@ -1923,7 +1946,16 @@ describe('Google Sheets API wrapper - quota retry tests', () => {
             },
           })
           .mockResolvedValueOnce({
-            // Second call after createSheet to get updated metadata with index
+            // Second call: re-check after acquiring lock
+            data: {
+              sheets: [
+                { properties: { title: 'Sheet1', sheetId: 0, index: 0 } },
+                { properties: { title: '2025-01', sheetId: 100, index: 1 } },
+              ],
+            },
+          })
+          .mockResolvedValueOnce({
+            // Third call: get updated metadata after creation for positioning
             data: {
               sheets: [
                 { properties: { title: 'Sheet1', sheetId: 0, index: 0 } },
@@ -1978,9 +2010,10 @@ describe('Google Sheets API wrapper - quota retry tests', () => {
 
       it('should not delete Sheet1 if non-month sheets exist', async () => {
         // Mock getSheetMetadata to return Sheet1 + non-month sheet (e.g., "Summary")
+        // With lock protection, getOrCreateMonthSheet now makes 3 calls
         mockSheetsApi.spreadsheets.get
           .mockResolvedValueOnce({
-            // First call to getSheetMetadata in getOrCreateMonthSheet
+            // First call: check if sheet exists (before lock)
             data: {
               sheets: [
                 { properties: { title: 'Sheet1', sheetId: 0, index: 0 } },
@@ -1989,7 +2022,16 @@ describe('Google Sheets API wrapper - quota retry tests', () => {
             },
           })
           .mockResolvedValueOnce({
-            // Second call after createSheet to get updated metadata with index
+            // Second call: re-check after acquiring lock
+            data: {
+              sheets: [
+                { properties: { title: 'Sheet1', sheetId: 0, index: 0 } },
+                { properties: { title: 'Summary', sheetId: 50, index: 1 } },
+              ],
+            },
+          })
+          .mockResolvedValueOnce({
+            // Third call: get updated metadata after creation for positioning
             data: {
               sheets: [
                 { properties: { title: 'Sheet1', sheetId: 0, index: 0 } },

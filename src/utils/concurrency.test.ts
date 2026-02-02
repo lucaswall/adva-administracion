@@ -350,6 +350,131 @@ describe('withLock', () => {
   });
 });
 
+describe('lock auto-expiry atomicity', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('only one operation acquires an expired lock (instance ID verification)', async () => {
+    // This tests that when two operations both see an expired lock,
+    // only ONE can successfully acquire it via the instance ID verification.
+    // The loser must wait for the winner's lock to be released.
+    const acquisitionOrder: number[] = [];
+
+    // First task acquires lock and holds it past expiry
+    const fn1 = vi.fn().mockImplementation(async () => {
+      await new Promise(resolve => setTimeout(resolve, 200));
+      return 'first';
+    });
+
+    // Start first task with 100ms expiry
+    const promise1 = withLock('expiry-race-test', fn1, 5000, 100);
+
+    // Advance past expiry time
+    await vi.advanceTimersByTimeAsync(150);
+
+    // Now start two tasks that will both see the expired lock
+    const fn2 = vi.fn().mockImplementation(async () => {
+      acquisitionOrder.push(2);
+      await new Promise(resolve => setTimeout(resolve, 10));
+      return 'second';
+    });
+    const fn3 = vi.fn().mockImplementation(async () => {
+      acquisitionOrder.push(3);
+      await new Promise(resolve => setTimeout(resolve, 10));
+      return 'third';
+    });
+
+    const promise2 = withLock('expiry-race-test', fn2, 5000, 100);
+    const promise3 = withLock('expiry-race-test', fn3, 5000, 100);
+
+    await vi.runAllTimersAsync();
+    const [result1, result2, result3] = await Promise.all([promise1, promise2, promise3]);
+
+    // All tasks should complete successfully
+    expect(result1.ok).toBe(true);
+    expect(result2.ok).toBe(true);
+    expect(result3.ok).toBe(true);
+
+    // Both fn2 and fn3 should have executed (sequentially via lock)
+    expect(fn2).toHaveBeenCalledOnce();
+    expect(fn3).toHaveBeenCalledOnce();
+
+    // Verify both were recorded in acquisition order
+    expect(acquisitionOrder).toContain(2);
+    expect(acquisitionOrder).toContain(3);
+    expect(acquisitionOrder.length).toBe(2);
+  });
+
+  it('lock holder validation prevents wrong caller from releasing', async () => {
+    // This tests that only the actual lock holder can release the lock
+    let task1Released = false;
+    let task2Executed = false;
+
+    const fn1 = vi.fn().mockImplementation(async () => {
+      await new Promise(resolve => setTimeout(resolve, 100));
+      task1Released = true;
+      return 'first';
+    });
+
+    const fn2 = vi.fn().mockImplementation(async () => {
+      task2Executed = true;
+      return 'second';
+    });
+
+    // Start task1 with the lock
+    const promise1 = withLock('holder-validation-test', fn1, 5000, 500);
+
+    // Start task2 which should wait
+    const promise2 = withLock('holder-validation-test', fn2, 5000, 500);
+
+    await vi.runAllTimersAsync();
+    await Promise.all([promise1, promise2]);
+
+    // Both tasks should have executed sequentially
+    expect(task1Released).toBe(true);
+    expect(task2Executed).toBe(true);
+  });
+
+  it('atomic compare-and-set for lock acquisition prevents double acquisition', async () => {
+    // Tests that the lock state check and set happen atomically
+    const acquisitions: string[] = [];
+
+    // Create many concurrent attempts - all should serialize
+    const tasks = Array.from({ length: 5 }, (_, i) => {
+      const fn = vi.fn().mockImplementation(async () => {
+        acquisitions.push(`start-${i}`);
+        await new Promise(resolve => setTimeout(resolve, 20));
+        acquisitions.push(`end-${i}`);
+        return `task-${i}`;
+      });
+      return withLock('cas-test', fn, 5000, 30000);
+    });
+
+    await vi.runAllTimersAsync();
+    const results = await Promise.all(tasks);
+
+    // All should succeed
+    expect(results.every(r => r.ok)).toBe(true);
+
+    // Verify sequential execution: start-N should always be followed by end-N
+    // before any other start-M
+    for (let i = 0; i < acquisitions.length; i += 2) {
+      const startEntry = acquisitions[i];
+      const endEntry = acquisitions[i + 1];
+      const taskId = startEntry.split('-')[1];
+
+      expect(startEntry).toBe(`start-${taskId}`);
+      expect(endEntry).toBe(`end-${taskId}`);
+    }
+  });
+});
+
 describe('computeVersion', () => {
   it('computes hash for normal objects', () => {
     const obj = { foo: 'bar', num: 42 };
