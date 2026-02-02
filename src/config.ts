@@ -146,11 +146,38 @@ export interface Config {
 }
 
 /**
+ * Validates a numeric environment variable
+ * @throws Error if value is NaN or outside bounds
+ */
+function validateNumericEnv(name: string, value: number, min?: number, max?: number): void {
+  if (Number.isNaN(value)) {
+    if (min !== undefined && max !== undefined) {
+      throw new Error(`${name} must be between ${min} and ${max}`);
+    } else if (min !== undefined) {
+      throw new Error(`${name} must be >= ${min}`);
+    } else {
+      throw new Error(`${name} must be a valid number`);
+    }
+  }
+  if (min !== undefined && value < min) {
+    if (max !== undefined) {
+      throw new Error(`${name} must be between ${min} and ${max}`);
+    } else {
+      throw new Error(`${name} must be >= ${min}`);
+    }
+  }
+  if (max !== undefined && value > max) {
+    throw new Error(`${name} must be between ${min} and ${max}`);
+  }
+}
+
+/**
  * Loads configuration from environment variables
- * Throws if required variables are missing
+ * Throws if required variables are missing or invalid
  */
 export function loadConfig(): Config {
   const port = parseInt(process.env.PORT || '3000', 10);
+  validateNumericEnv('PORT', port, 1, 65535);
   const nodeEnv = (process.env.NODE_ENV || 'development') as Config['nodeEnv'];
   const logLevel = (process.env.LOG_LEVEL || 'INFO') as LogLevel;
 
@@ -193,11 +220,15 @@ export function loadConfig(): Config {
 
   // Matching configuration
   const matchDaysBefore = parseInt(process.env.MATCH_DAYS_BEFORE || '10', 10);
+  validateNumericEnv('MATCH_DAYS_BEFORE', matchDaysBefore, 0);
   const matchDaysAfter = parseInt(process.env.MATCH_DAYS_AFTER || '60', 10);
+  validateNumericEnv('MATCH_DAYS_AFTER', matchDaysAfter, 0);
   const usdArsTolerancePercent = parseFloat(process.env.USD_ARS_TOLERANCE_PERCENT || '5');
+  validateNumericEnv('USD_ARS_TOLERANCE_PERCENT', usdArsTolerancePercent, 0);
 
   // Gemini API configuration
   const geminiRpmLimit = parseInt(process.env.GEMINI_RPM_LIMIT || '150', 10);
+  validateNumericEnv('GEMINI_RPM_LIMIT', geminiRpmLimit, 1);
 
   return {
     port,

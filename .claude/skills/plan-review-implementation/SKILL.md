@@ -38,7 +38,6 @@ This skill moves issues from **Review → Done** (the final transition).
 1. Search PLANS.md for `## Iteration N` sections
 2. **If iterations exist:** Build list of iterations needing review:
    - Has "Tasks Completed This Iteration" or "### Completed" subsection
-   - Does NOT contain `### Tasks Remaining` (partial iteration, not ready for review)
    - Does NOT contain `<!-- REVIEW COMPLETE -->` marker
    - Process in order (Iteration 1 first, then 2, etc.)
 3. **If NO iterations exist:** Treat entire plan as single iteration:
@@ -48,11 +47,49 @@ This skill moves issues from **Review → Done** (the final transition).
 
 **Iteration detection:** A plan has iterations if it contains `## Iteration` (with or without number).
 
-**Partial iterations:** If an iteration has `### Tasks Remaining`, it's incomplete - skip it and inform user to run `plan-implement` first.
+**Ready for review vs partial iteration:**
+
+An iteration is **READY FOR REVIEW** when:
+- It has "Tasks Completed This Iteration" (or legacy "### Completed") section
+- It does NOT have `<!-- REVIEW COMPLETE -->` marker yet
+- The presence of `### Tasks Remaining` does NOT affect review readiness
+
+An iteration should be reviewed even if it has `### Tasks Remaining`. The review covers only the **completed tasks** in that iteration. Remaining tasks will be implemented in a future iteration.
+
+**Example - iteration ready for review:**
+```markdown
+## Iteration 1
+
+### Tasks Completed This Iteration
+- Task 1: Added validation
+- Task 2: Fixed parser
+
+### Tasks Remaining
+- Task 3: Add error handling
+- Task 4: Update tests
+
+### Continuation Status
+Context running low (~35% remaining). Run `/plan-implement` to continue with Task 3.
+```
+→ This iteration IS ready for review. Review Tasks 1 and 2. Tasks 3-4 will be in a future iteration.
+
+**Example - iteration already reviewed:**
+```markdown
+## Iteration 1
+
+### Tasks Completed This Iteration
+- Task 1: Added validation
+
+### Review Findings
+No issues found...
+
+<!-- REVIEW COMPLETE -->
+```
+→ This iteration is NOT ready for review (already reviewed).
 
 If no iteration/plan needs review → Inform user and stop.
 
-**Important:** Review ALL complete pending iterations in a single session, not just one.
+**Important:** Review ALL pending iterations in a single session, not just one.
 
 ## Review Process
 

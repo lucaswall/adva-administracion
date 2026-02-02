@@ -116,7 +116,9 @@ export async function scanRoutes(server: FastifyInstance) {
     schema: {
       body: {
         type: 'object',
-        properties: {},
+        properties: {
+          documentType: { type: 'string', enum: ['factura', 'recibo', 'all'] },
+        },
         additionalProperties: false,
       },
     },
@@ -139,8 +141,27 @@ export async function scanRoutes(server: FastifyInstance) {
    * POST /api/autofill-bank - Auto-fill bank movement descriptions
    * Protected with authentication
    */
-  server.post<{ Body: AutofillRequest }>('/autofill-bank', { onRequest: authMiddleware }, async (request, reply): Promise<BankAutoFillResult | ErrorResponse> => {
+  server.post<{ Body: AutofillRequest }>('/autofill-bank', {
+    onRequest: authMiddleware,
+    schema: {
+      body: {
+        type: 'object',
+        properties: {
+          bankName: { type: 'string' },
+        },
+        additionalProperties: false,
+      },
+    },
+  }, async (request, reply): Promise<BankAutoFillResult | ErrorResponse> => {
     const { bankName } = request.body || {};
+    // Validate bankName is a string (for schema validation)
+    if (bankName !== undefined && typeof bankName !== 'string') {
+      reply.status(400);
+      return {
+        error: 'Invalid bankName',
+        details: 'bankName must be a string',
+      };
+    }
 
     // Validate bankName is non-empty
     if (bankName !== undefined && typeof bankName === 'string' && bankName.trim() === '') {
@@ -193,7 +214,18 @@ export async function scanRoutes(server: FastifyInstance) {
    * Query parameters:
    *   force=true - Re-match all rows, clearing existing matches
    */
-  server.post<{ Querystring: { force?: string } }>('/match-movimientos', { onRequest: authMiddleware }, async (request, reply): Promise<MatchAllResult | ErrorResponse> => {
+  server.post<{ Querystring: { force?: string } }>('/match-movimientos', {
+    onRequest: authMiddleware,
+    schema: {
+      querystring: {
+        type: 'object',
+        properties: {
+          force: { type: 'string', enum: ['true'] },
+        },
+        additionalProperties: false,
+      },
+    },
+  }, async (request, reply): Promise<MatchAllResult | ErrorResponse> => {
     const force = request.query.force === 'true';
 
     server.log.info({ force }, 'Starting match movimientos');

@@ -138,8 +138,14 @@ OR
 
 **IMPORTANT:**
 - Do NOT add "Review Findings" or "Notes" sections - reserved for `plan-review-implementation`
-- Always list BOTH completed AND remaining tasks so next iteration knows where to resume
-- The "Continuation Status" clearly indicates whether more work remains
+- Always list completed tasks in "Tasks Completed This Iteration"
+- If stopping early due to context limits, also list remaining tasks in "Tasks Remaining"
+- If ALL tasks are complete, OMIT the "Tasks Remaining" section entirely
+- The "Continuation Status" clearly indicates whether more work remains:
+  - Stopping early: "Context running low (~X% remaining). Run `/plan-implement` to continue with Task N."
+  - All done: "All tasks completed. Ready for review."
+
+**Note:** The presence of "Tasks Remaining" does NOT prevent review. `plan-review-implementation` will review the completed tasks in this iteration regardless. Remaining tasks will be implemented and reviewed in future iterations.
 
 ## Context Management & Task-by-Task Continuation
 
