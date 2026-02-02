@@ -8,7 +8,7 @@ import { randomUUID } from 'crypto';
 import { watchFolder, stopWatching as driveStopWatching } from './drive.js';
 import { scanFolder } from '../processing/scanner.js';
 import type { WatchChannel, WatchManagerStatus, Result } from '../types/index.js';
-import { debug, info, error as logError } from '../utils/logger.js';
+import { debug, info, warn, error as logError } from '../utils/logger.js';
 import { updateStatusSheet } from './status-sheet.js';
 import { getCachedFolderStructure } from './folder-structure.js';
 
@@ -34,6 +34,37 @@ const CHANNEL_EXPIRATION_MS = 3600000; // 1 hour
 const RENEWAL_THRESHOLD_MS = 600000; // Renew if expires within 10 minutes
 const MAX_NOTIFICATION_AGE_MS = 3600000; // Keep notifications for 1 hour
 const MAX_NOTIFICATIONS_PER_CHANNEL = 1000;
+const MAX_CONSECUTIVE_FAILURES = 3; // Stop triggering scans after this many consecutive failures (ADV-18)
+
+/**
+ * Consecutive scan failure counter (ADV-18)
+ * Prevents infinite retry loops on permanent failures
+ */
+let consecutiveFailures = 0;
+
+/**
+ * Check if an error is a permanent auth failure that shouldn't be retried
+ */
+function isAuthFailure(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  const message = error.message.toLowerCase();
+  return (
+    message.includes('invalid credentials') ||
+    message.includes('unauthorized') ||
+    message.includes('authentication failed') ||
+    message.includes('permission denied') ||
+    message.includes('access denied') ||
+    message.includes('token expired') ||
+    message.includes('invalid_grant')
+  );
+}
+
+/**
+ * Reset consecutive failure counter (exported for testing)
+ */
+export function resetConsecutiveFailures(): void {
+  consecutiveFailures = 0;
+}
 
 /**
  * Cleanup expired notifications from all channels
@@ -367,11 +398,17 @@ export function triggerScan(folderId?: string): void {
     folderId
   });
 
+  // Track whether this scan failed (for ADV-18 failure handling)
+  let scanFailed = false;
+  let wasAuthFailure = false;
+
   // Run scan directly (not in queue) to avoid deadlock
   // The scanFolder function will use the queue for individual file processing
   runningScan = scanFolder(folderId)
     .then(async result => {
       if (result.ok) {
+        // Reset failure counter on success (ADV-18)
+        consecutiveFailures = 0;
         lastScanTime = new Date();
         info('Scan complete', {
           module: 'watch-manager',
@@ -388,22 +425,56 @@ export function triggerScan(folderId?: string): void {
           await updateStatusSheet(folderStructure.dashboardOperativoId);
         }
       } else {
+        scanFailed = true;
+        consecutiveFailures++;
+        wasAuthFailure = isAuthFailure(result.error);
         logError('Scan failed', {
           module: 'watch-manager',
           phase: 'scan-complete',
-          error: result.error.message
+          error: result.error.message,
+          consecutiveFailures,
+          isAuthFailure: wasAuthFailure
         });
       }
     })
     .catch(err => {
+      scanFailed = true;
+      consecutiveFailures++;
+      wasAuthFailure = isAuthFailure(err);
       logError('Scan execution failed', {
         module: 'watch-manager',
         phase: 'scan-complete',
-        error: err instanceof Error ? err.message : String(err)
+        error: err instanceof Error ? err.message : String(err),
+        consecutiveFailures,
+        isAuthFailure: wasAuthFailure
       });
     })
     .finally(() => {
       runningScan = null;
+
+      // ADV-18: Don't trigger pending scans if we've hit the failure threshold
+      // or if we encountered an auth failure (permanent error)
+      if (wasAuthFailure) {
+        warn('Auth failure detected, clearing pending scans', {
+          module: 'watch-manager',
+          phase: 'scan-trigger',
+          pendingScans: pendingScanFolderIds.size
+        });
+        pendingScanFolderIds.clear();
+        return;
+      }
+
+      if (scanFailed && consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
+        warn('Max consecutive failures reached, pausing scan triggers', {
+          module: 'watch-manager',
+          phase: 'scan-trigger',
+          consecutiveFailures,
+          maxConsecutiveFailures: MAX_CONSECUTIVE_FAILURES,
+          pendingScans: pendingScanFolderIds.size
+        });
+        pendingScanFolderIds.clear();
+        return;
+      }
 
       // If pending scans were queued, trigger the next one
       // Only trigger one at a time - it will recursively process the rest
@@ -560,6 +631,7 @@ export async function shutdownWatchManager(): Promise<void> {
   lastScanTime = null;
   runningScan = null;
   pendingScanFolderIds.clear();
+  consecutiveFailures = 0;
 
   info('Watch manager shutdown complete', {
     module: 'watch-manager',

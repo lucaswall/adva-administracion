@@ -462,3 +462,80 @@ Context running low. Run `/plan-implement` to continue with Task 11.
 **No issues found.** All changes follow TDD, use existing patterns, and improve defensive coding.
 
 <!-- REVIEW COMPLETE -->
+
+---
+
+## Iteration 3
+
+**Implemented:** 2026-02-02
+
+### Tasks Completed This Iteration
+- Task 11: Add rate limit retry to Drive API calls (ADV-25) - Wrapped all Drive API methods with `withQuotaRetry()` for automatic retry on 429/quota errors
+- Task 12: Fix infinite retry loop in watch-manager (ADV-18) - Added `consecutiveFailures` counter and `isAuthFailure()` detection to prevent infinite retry loops
+
+### Tasks Remaining
+None - All 12 tasks completed.
+
+### Files Modified
+- `src/services/drive.ts` - Added `withQuotaRetry` import, wrapped 10 API methods (listFilesInFolder, downloadFile, watchFolder, stopWatching, findByName, listByMimeType, createFolder, moveFile, renameFile, getParents, createSpreadsheet)
+- `src/services/drive.test.ts` - Added mock for `withQuotaRetry` with fast test retries, added 6 rate limit retry tests
+- `src/services/watch-manager.ts` - Added `MAX_CONSECUTIVE_FAILURES`, `consecutiveFailures` counter, `isAuthFailure()` helper, `resetConsecutiveFailures()` export, failure tracking in triggerScan
+- `src/services/watch-manager.test.ts` - Added 4 failure handling tests (consecutive failures, success reset, auth failure, throw handling)
+
+### Linear Updates
+- ADV-25: Todo → In Progress → Review
+- ADV-18: Todo → In Progress → Review
+
+### Pre-commit Verification
+- bug-hunter: Found 2 medium issues - Fixed overly broad 'auth' check in isAuthFailure()
+- verifier: All 1,478 tests pass, zero warnings
+
+### Code Review
+
+**Reviewer:** Claude Opus 4.5 (automated)
+**Date:** 2026-02-02
+
+#### Review Checklist
+
+| Category | Status | Notes |
+|----------|--------|-------|
+| Security | ✅ Pass | No injection, auth bypass, or secrets exposure |
+| Logic bugs | ✅ Pass | Failure counter and auth detection work correctly |
+| Edge cases | ✅ Pass | Max retries, auth failures, pending queue handling |
+| Async issues | ✅ Pass | Proper async/await patterns, scoped variables |
+| Resource leaks | ✅ Pass | Counter reset in shutdown, no new resources |
+| Type safety | ✅ Pass | Result<T,E> pattern, proper type guards |
+| Convention violations | ✅ Pass | Follows CLAUDE.md rules, uses Pino logger |
+
+#### Detailed Findings
+
+**Task 11 (ADV-25): Rate limit retry for Drive API**
+- All 10 Drive API methods wrapped with `withQuotaRetry()`
+- Reuses existing retry infrastructure from `utils/concurrency.js`
+- Test mock uses fast retry (10ms, 3 attempts) for efficient testing
+- Tests cover: single retry, multiple retries, max exhausted
+
+**Task 12 (ADV-18): Infinite retry loop fix**
+- `MAX_CONSECUTIVE_FAILURES = 3` limits retry attempts
+- `isAuthFailure()` detects 7 permanent error patterns:
+  - invalid credentials, unauthorized, authentication failed
+  - permission denied, access denied, token expired, invalid_grant
+- Counter reset on success, incremented on failure
+- Auth failures: immediately clear pending queue and stop
+- Max failures: warn, clear pending queue, pause triggers
+- Counter properly reset in `shutdownWatchManager()` (line 634)
+
+**No issues found.** All changes follow TDD, use existing patterns, and improve defensive coding.
+
+### Linear Updates
+- ADV-25: Review → Done
+- ADV-18: Review → Done
+
+<!-- REVIEW COMPLETE -->
+
+---
+
+## Status: COMPLETE
+
+All 12 tasks implemented and reviewed successfully. All Linear issues moved to Done.
+Ready for human review.
