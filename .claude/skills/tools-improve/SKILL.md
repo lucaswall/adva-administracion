@@ -1,12 +1,27 @@
 ---
 name: tools-improve
-description: Create, adjust, improve, or optimize Claude Code subagents and skills. Use when user says "create agent", "new skill", "improve agent", "optimize skill", "add subagent", or wants to work on .claude/agents/ or .claude/skills/ files.
+description: "REQUIRED: Load this skill BEFORE creating, modifying, or reviewing any Claude Code skill or subagent. Contains critical best practices for .claude/skills/ and .claude/agents/ files. Use when: creating agents, creating skills, editing SKILL.md files, editing agent .md files, reviewing skill/agent code, or any work involving Claude Code extensibility."
+argument-hint: <skill or agent name>
 allowed-tools: Read, Write, Edit, Glob, Grep, Bash
 ---
 
 # Tools Improve - Agent & Skill Development Assistant
 
 You create and optimize Claude Code subagents and skills.
+
+## Workflow
+
+1. **Clarify requirements** - What does user want to create/modify?
+2. **Decide type** - Skill vs subagent (see Decision section below)
+3. **Create/edit file** - Use appropriate template
+4. **Update CLAUDE.md** - Add new skill/agent to the SKILLS or SUBAGENTS table
+5. **Verify** - Confirm description triggers correctly for auto-discovery
+
+## Reference Docs
+
+For detailed information beyond this file:
+- [skills-reference.md](skills-reference.md) - Invocation control matrix, context budget, hooks, nested discovery
+- [subagents-reference.md](subagents-reference.md) - Built-in agents, permission modes, hook events, resume
 
 ## Decision: Skill vs Subagent
 
@@ -32,9 +47,20 @@ Create `.claude/skills/<name>/SKILL.md`:
 ---
 name: my-skill
 description: What it does. Use when [triggers]. Helps with [use cases].
+disable-model-invocation: true  # Add for workflows with side effects
 ---
 
 Instructions Claude follows when skill is invoked.
+```
+
+**Supporting files** go in the skill directory:
+```
+my-skill/
+├── SKILL.md              # Main instructions (required)
+├── references/           # Detailed docs loaded when needed
+│   └── checklist.md
+└── scripts/              # Executable scripts
+    └── helper.sh
 ```
 
 ### Subagent Template
@@ -45,6 +71,7 @@ name: my-agent
 description: What it does. Use proactively when [triggers].
 tools: Read, Glob, Grep, Bash
 model: sonnet
+permissionMode: dontAsk  # Add for read-only agents (auto-deny writes)
 ---
 
 You are a specialist in [domain]. When invoked:
@@ -161,21 +188,52 @@ exit 0
 
 ## Best Practices
 
-**Descriptions are critical** - Claude uses them for auto-discovery. Include:
+### Descriptions Are Critical
+
+Claude uses descriptions for auto-discovery. Always include:
 - What it does
 - Trigger phrases ("Use when...", "Use proactively after...")
 - Specific contexts
 
-**Keep SKILL.md under 500 lines** - Use supporting files for details.
+### Skill Architecture
 
-**Limit tool access** - Grant only what's needed.
+**Keep SKILL.md under 500 lines** - Use supporting files in the skill's own directory for details.
 
-**Model selection:**
-- `haiku` - Fast, cheap (exploration, simple tasks)
-- `sonnet` - Balanced (code review, implementation)
-- `opus` - Complex reasoning, critical decisions
+**Skills are self-contained** - Each skill directory is independent. There is NO shared directory pattern across skills. Supporting files go in `<skill>/references/` or similar subdirectories within that skill.
 
-**Max 3-4 custom subagents** - Too many reduces productivity.
+**Reducing duplication across skills:**
+1. **Put in CLAUDE.md** - Content loaded into all contexts (best for project-wide conventions)
+2. **Background knowledge skill** - Use `user-invocable: false` for shared knowledge Claude auto-loads
+3. **Accept duplication** - Self-contained skills are more maintainable than fragile dependencies
+
+### Invocation Control
+
+| Scenario | Frontmatter |
+|----------|-------------|
+| Side effects (deploy, commit, modify files) | `disable-model-invocation: true` |
+| Background knowledge (not a command) | `user-invocable: false` |
+| Safe for Claude to auto-invoke | (default - no flags) |
+
+### Tool & Permission Restrictions
+
+**Limit tool access** - Grant only what's needed via `tools` or `allowed-tools`.
+
+**Permission modes for subagents:**
+- `default` - Standard prompts
+- `dontAsk` - Auto-deny prompts (use for read-only agents)
+- `acceptEdits` - Auto-accept file edits
+- `bypassPermissions` - Skip all checks (dangerous)
+
+### Model Selection
+
+Match model to task complexity:
+- `haiku` - Fast, cheap (exploration, simple validation, tests)
+- `sonnet` - Balanced (code review, git operations, implementation)
+- `opus` - Complex reasoning, bug detection, critical decisions
+
+### Subagent Limits
+
+**Max 3-4 custom subagents** - Too many reduces productivity and confuses delegation.
 
 ## File Locations
 
@@ -191,3 +249,5 @@ Priority: CLI flag > project > user > plugin
 For complete reference, see:
 - Skills: https://code.claude.com/docs/en/skills
 - Subagents: https://code.claude.com/docs/en/sub-agents
+
+**Local references:** See [skills-reference.md](skills-reference.md) and [subagents-reference.md](subagents-reference.md) for quick lookup tables.

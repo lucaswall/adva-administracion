@@ -72,6 +72,8 @@ Task: Add parseResumenBroker function
 - **Commit requested** → Use `commit-bot` agent (don't commit manually)
 - **PR requested** → Use `pr-creator` agent (handles branch, commit, push, and PR)
 
+**Skills/Agents modification rule:** ALWAYS load the `tools-improve` skill BEFORE creating, editing, or reviewing any `.claude/skills/` or `.claude/agents/` file. This skill contains critical best practices that must be followed.
+
 ## SKILLS
 
 Skills are specialized workflows in `.claude/skills/`. Descriptions drive automatic invocation - include action verbs and explicit triggers.
@@ -85,6 +87,7 @@ Skills are specialized workflows in `.claude/skills/`. Descriptions drive automa
 | `plan-implement` | Execute the pending plan in PLANS.md following TDD. Use after any plan-* skill creates a plan, or when user says "implement the plan". Updates Linear issues: Todo→In Progress→Review. |
 | `plan-review-implementation` | QA review of completed implementation. Use after plan-implement finishes to verify correctness. Moves issues Review→Done or creates new issues in Todo for bugs found. |
 | `code-audit` | Audit codebase for bugs, security issues, memory leaks, and violations. Use when user says "audit", "find bugs", "check security", or "review codebase". Creates Linear issues in Backlog. Analysis only. |
+| `tools-improve` | **REQUIRED before modifying skills/agents.** Contains best practices for `.claude/skills/` and `.claude/agents/`. ALWAYS load this skill FIRST when: creating, editing, or reviewing any SKILL.md or agent .md file. |
 
 **Skill workflow:** `investigate` (optional) → `code-audit` → `plan-todo` → `plan-implement` → `plan-review-implementation` (repeat until COMPLETE)
 

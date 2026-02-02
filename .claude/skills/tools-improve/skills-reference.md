@@ -18,6 +18,11 @@ my-skill/
 └── assets/            # Templates, icons (not loaded)
 ```
 
+**Skills are self-contained.** Each skill directory is independent. There is NO shared directory pattern across skills. If you need to reduce duplication:
+1. Put shared content in **CLAUDE.md** (loaded into all contexts)
+2. Create a **background knowledge skill** with `user-invocable: false`
+3. Accept duplication (self-contained skills are more maintainable)
+
 ## String Substitutions
 
 | Variable | Example | Result |
@@ -42,6 +47,8 @@ my-skill/
 - No conversation history
 - Good for research/exploration
 - Specify agent type with `agent:` field
+
+**Warning:** `context: fork` only makes sense for skills with **explicit task instructions**. If your skill contains guidelines like "use these API conventions" without a concrete task, the subagent receives guidelines but no actionable prompt and returns without meaningful output.
 
 ## Complete Examples
 

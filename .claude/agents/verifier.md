@@ -3,7 +3,7 @@ name: verifier
 description: Runs tests and build validation in sequence. Use proactively after writing tests or modifying code. Use when user says "run tests", "check tests", "verify build", "check warnings", or after any code changes. Returns combined test/build results.
 tools: Bash
 model: haiku
-permissionMode: default
+permissionMode: dontAsk
 ---
 
 Run tests and build, report combined results concisely.

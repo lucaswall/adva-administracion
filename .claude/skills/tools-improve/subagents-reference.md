@@ -9,15 +9,23 @@
 | **general-purpose** | Inherit | All | Complex multi-step tasks |
 | **Bash** | Inherit | Bash | Terminal commands in isolation |
 
+## Key Constraints
+
+**Max 3-4 custom subagents** - Too many reduces productivity and confuses delegation.
+
+**Subagents cannot spawn other subagents.** If your workflow requires nested delegation, use skills or chain subagents from the main conversation.
+
 ## Permission Modes
 
-| Mode | Behavior |
-|------|----------|
-| `default` | Standard prompts |
-| `acceptEdits` | Auto-accept Write/Edit |
-| `dontAsk` | Auto-deny prompts (allowed tools still work) |
-| `bypassPermissions` | Skip ALL checks (dangerous) |
-| `plan` | Read-only exploration |
+| Mode | Behavior | Use When |
+|------|----------|----------|
+| `default` | Standard prompts | General purpose |
+| `acceptEdits` | Auto-accept Write/Edit | Trusted code writers |
+| `dontAsk` | Auto-deny prompts (allowed tools still work) | **Read-only agents** |
+| `bypassPermissions` | Skip ALL checks (dangerous) | Rarely - high trust only |
+| `plan` | Read-only exploration | Planning/research |
+
+**Tip:** Use `dontAsk` for read-only agents (reviewers, explorers, auditors). It auto-denies write operations while allowing the tools in the `tools` list.
 
 ## Hook Events
 
@@ -68,6 +76,24 @@ Continue that code review and analyze authorization
 ```
 
 Transcripts: `~/.claude/projects/{project}/{sessionId}/subagents/agent-{agentId}.jsonl`
+
+## Preload Skills into Subagents
+
+The `skills` field **injects full skill content** into the subagent's context at startup (not just made available for invocation). Subagents don't inherit skills from the parent conversation.
+
+```yaml
+skills:
+  - api-conventions
+  - error-handling-patterns
+```
+
+This is the inverse of `context: fork` in a skill. With `skills` in a subagent, the subagent controls the system prompt and loads skill content. With `context: fork` in a skill, the skill content becomes the task for the agent.
+
+## Auto-Compaction
+
+Subagents auto-compact at ~95% capacity (same as main conversation).
+
+To trigger earlier: `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=50` (percentage)
 
 ## Complete Example
 
