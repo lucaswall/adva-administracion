@@ -1,203 +1,107 @@
 # Implementation Plan
 
 **Created:** 2026-02-02
-**Source:** Linear Backlog - All except ADV-42
-**Linear Issues:** [ADV-45](https://linear.app/adva-administracion/issue/ADV-45), [ADV-43](https://linear.app/adva-administracion/issue/ADV-43), [ADV-44](https://linear.app/adva-administracion/issue/ADV-44), [ADV-31](https://linear.app/adva-administracion/issue/ADV-31), [ADV-30](https://linear.app/adva-administracion/issue/ADV-30), [ADV-16](https://linear.app/adva-administracion/issue/ADV-16)
+**Source:** Linear Backlog issue ADV-42
+**Linear Issues:** [ADV-42](https://linear.app/adva-administracion/issue/ADV-42/move-reviewed-issues-to-merge-status)
 
 ## Context Gathered
 
+### Linear Integration Research
+
+**Merge status exists:** Confirmed via `list_issue_statuses` - status ID: `2832dda6-3442-47c8-aa36-76422fb08cd8`, type: `started`
+
+**Linear GitHub Integration - Magic Keywords:**
+Per [Linear's GitHub integration docs](https://linear.app/docs/github-integration), including magic keywords in PR descriptions automatically links issues and transitions them:
+- **Closing keywords:** `closes`, `fixes`, `resolves`, `completes` + issue ID (e.g., `Closes ADV-123`)
+- When PR is merged, Linear automatically moves the issue to Done
+- Multiple issues: `Closes ADV-123, ADV-124, ADV-125`
+
+**New State Flow:**
+```
+Backlog → Todo → In Progress → Review → Merge → Done
+                                          ↑        ↑
+                                    (review OK)  (PR merged)
+```
+
+### Files to Modify
+
+**Skills (state transitions):**
+- `.claude/skills/plan-review-implementation/SKILL.md` - Change Review→Done to Review→Merge
+- `.claude/skills/plan-todo/SKILL.md` - Update state flow documentation
+
+**Subagent (PR creation):**
+- `.claude/agents/pr-creator.md` - Add Linear magic keywords to PR body template
+
+**Project Documentation:**
+- `CLAUDE.md` - Update LINEAR INTEGRATION section with new state flow
+
 ### Codebase Analysis
 
-**Skill Files to Modify (ADV-43, ADV-44, ADV-45):**
-- `.claude/skills/plan-todo/SKILL.md` - Needs pre-flight git check + feature branch suggestion
-- `.claude/skills/plan-fix/SKILL.md` - Needs pre-flight git check + feature branch suggestion
-- `.claude/skills/plan-inline/SKILL.md` - Needs pre-flight git check + feature branch suggestion
-- `.claude/skills/plan-implement/SKILL.md` - Iteration/review flow fix (ADV-45)
-- `.claude/skills/plan-review-implementation/SKILL.md` - Review iteration detection fix (ADV-45)
+**plan-review-implementation changes needed:**
+- Line 3 description: Update "Review→Done" to "Review→Merge"
+- Line 8: Update description
+- Line 20: Update "Review → Done" to "Review → Merge"
+- Lines 23, 26, 178, 213, 228-229: Update all Done references to Merge
+- Line 261: Update final status message
+- Line 270: Update note about Done state
+- Line 310: Update rule about Review→Done
 
-**Source Files to Modify (ADV-31, ADV-30, ADV-16):**
-- `src/config.ts` - Numeric env var validation (lines 153, 195-197, 200)
-- `src/config.test.ts` - Tests for config validation
-- `src/routes/scan.ts` - Schema validation for endpoints (lines 114-122, 142, 196)
-- `src/routes/scan.test.ts` - Tests for route validation
-- `src/utils/rate-limiter.ts` - Memory cleanup improvements (if needed)
-- `src/utils/rate-limiter.test.ts` - Tests for cleanup edge cases
-
-**Existing Patterns:**
-- Skills use `disable-model-invocation: true` for side-effect operations
-- Skills have "Pre-flight Check" sections for PLANS.md validation
-- Fastify schema validation uses JSON Schema syntax
-- Config uses `parseInt()`/`parseFloat()` with fallback defaults
-- Rate limiter cleanup is already called via cron job every 10 minutes
-
-**Test Conventions:**
-- Vitest with describe/it/expect
-- Tests colocated with source as `*.test.ts`
-- Mock environment variables using `process.env` manipulation
-
-### Investigation Notes
-
-**ADV-16 (Rate limiter memory leak):**
-Upon investigation, `cleanupRateLimiter()` IS being called every 10 minutes via the `cleanupJob` cron in `watch-manager.ts`. The issue description says "cleanup never called" but this appears to be outdated. However, the issue may still be valid in edge cases:
-1. When watch-manager is not initialized (no webhook URL configured)
-2. Keys with empty arrays stay in Map even after `check()` clears their requests
-
-Will verify and add tests or close as already fixed.
-
-**ADV-45 (Plan review iteration confusion):**
-The issue is that `plan-review-implementation` may not correctly identify which iterations need review. Looking at the SKILL.md files:
-- `plan-implement` writes `### Tasks Remaining` when stopping mid-plan
-- `plan-review-implementation` checks for `<!-- REVIEW COMPLETE -->` marker
-- The confusion may be in the detection logic for "partial iteration"
+**pr-creator changes needed:**
+- Add "## Linear Issues" section to PR body template
+- Include `Closes ADV-XXX` pattern for each issue in the plan
+- Issues must be extracted from PLANS.md Linear Issues line
+- Format: `Closes ADV-123, ADV-124, ADV-125` (comma-separated)
 
 ---
 
 ## Original Plan
 
-### Task 1: Add git branch pre-flight check to plan-todo
-**Linear Issue:** [ADV-44](https://linear.app/adva-administracion/issue/ADV-44)
-
-Add a new "Git Pre-flight Check" section to plan-todo SKILL.md that runs before PLANS.md check:
-
-1. Read `.claude/skills/plan-todo/SKILL.md`
-2. Add "Git Pre-flight Check" section BEFORE "Pre-flight Check" with these rules:
-   - Check if on main/master branch: `git branch --show-current`
-   - Check if branch is up-to-date: `git status -uno` (no upstream changes)
-   - If not on main → STOP with warning: "Not on main branch. Please switch to main before planning."
-   - If main has unpushed commits → STOP with warning: "Main branch has uncommitted changes. Please commit or stash them first."
-3. Update workflow list to include the git check as step 0
-
-### Task 2: Add git branch pre-flight check to plan-fix
-**Linear Issue:** [ADV-44](https://linear.app/adva-administracion/issue/ADV-44)
-
-Add the same git pre-flight check to plan-fix SKILL.md:
-
-1. Read `.claude/skills/plan-fix/SKILL.md`
-2. Add "Git Pre-flight Check" section BEFORE "Pre-flight Check" with identical rules to Task 1
-3. Update workflow list to include the git check as step 0
-
-### Task 3: Add git branch pre-flight check to plan-inline
-**Linear Issue:** [ADV-44](https://linear.app/adva-administracion/issue/ADV-44)
-
-Add the same git pre-flight check to plan-inline SKILL.md:
-
-1. Read `.claude/skills/plan-inline/SKILL.md`
-2. Add "Git Pre-flight Check" section BEFORE "Pre-flight Check" with identical rules to Tasks 1-2
-3. Update workflow list to include the git check as step 0
-
-### Task 4: Add feature branch suggestion to plan-todo
-**Linear Issue:** [ADV-43](https://linear.app/adva-administracion/issue/ADV-43)
-
-Modify plan-todo termination section to suggest creating a feature branch:
-
-1. Read `.claude/skills/plan-todo/SKILL.md`
-2. Update the "Termination" section to add branch creation suggestion after the plan summary:
-   ```
-   ---
-
-   **Suggested next step:** Create a feature branch before implementing:
-   ```bash
-   git checkout -b feat/<plan-description>
-   ```
-   Then run `plan-implement` to execute this plan.
-   ```
-3. The branch name should be derived from the plan objective (e.g., `feat/fix-backlog-bugs`, `feat/add-validation`)
-
-### Task 5: Add feature branch suggestion to plan-fix
-**Linear Issue:** [ADV-43](https://linear.app/adva-administracion/issue/ADV-43)
-
-Add the same feature branch suggestion to plan-fix SKILL.md:
-
-1. Read `.claude/skills/plan-fix/SKILL.md`
-2. Update the "Termination" section with the same branch creation suggestion
-3. Branch prefix should be `fix/` for bug fixes (aligns with conventional commits)
-
-### Task 6: Add feature branch suggestion to plan-inline
-**Linear Issue:** [ADV-43](https://linear.app/adva-administracion/issue/ADV-43)
-
-Add the same feature branch suggestion to plan-inline SKILL.md:
-
-1. Read `.claude/skills/plan-inline/SKILL.md`
-2. Update the "Termination" section with the same branch creation suggestion
-3. Branch prefix should be inferred from task type (feat/, fix/, refactor/, etc.)
-
-### Task 7: Fix iteration completion detection in plan-review-implementation
-**Linear Issue:** [ADV-45](https://linear.app/adva-administracion/issue/ADV-45)
-
-Clarify the iteration detection logic in plan-review-implementation:
+### Task 1: Update plan-review-implementation to use Merge status
+**Linear Issue:** [ADV-42](https://linear.app/adva-administracion/issue/ADV-42/move-reviewed-issues-to-merge-status)
 
 1. Read `.claude/skills/plan-review-implementation/SKILL.md`
-2. Review and update "Identify What to Review" section:
-   - An iteration is COMPLETE and ready for review when it has:
-     - "Tasks Completed This Iteration" section
-     - NO `### Tasks Remaining` section (meaning all tasks done OR this is a partial stop)
-     - No `<!-- REVIEW COMPLETE -->` marker yet
-   - An iteration is PARTIAL (not ready for review) when:
-     - It has `### Tasks Remaining` with items still listed
-     - OR `### Continuation Status` says "Context running low" with pending tasks
-3. Clarify that when `### Tasks Remaining` exists, the iteration is NOT ready for review - user should run `plan-implement` first
-4. Add explicit examples of complete vs partial iteration detection
+2. Update all "Review → Done" transitions to "Review → Merge":
+   - Line 3: description
+   - Line 8: summary line
+   - Line 20: "This skill moves issues from **Review → Merge**"
+   - Line 23: update_issue example
+   - Line 26: issues found case
+   - Line 178: Linear Updates example
+   - Lines 213, 228-229, 261, 270, 310: various references
+3. Update the final status message (line 261) to reflect Merge state
+4. Update the completion note (line 270)
 
-### Task 8: Clarify iteration report format in plan-implement
-**Linear Issue:** [ADV-45](https://linear.app/adva-administracion/issue/ADV-45)
+### Task 2: Update pr-creator to include Linear magic keywords
+**Linear Issue:** [ADV-42](https://linear.app/adva-administracion/issue/ADV-42/move-reviewed-issues-to-merge-status)
 
-Ensure plan-implement iteration reports are unambiguous:
+1. Read `.claude/agents/pr-creator.md`
+2. Add new step to Phase 1 to extract Linear issue IDs:
+   - Read PLANS.md if exists
+   - Extract issue IDs from "Linear Issues:" line (pattern: ADV-XXX)
+   - Store for use in PR body
+3. Update PR Body Structure (lines 109-132):
+   - Add "## Linear Issues" section with `Closes ADV-XXX, ADV-YYY` format
+   - This triggers Linear's automation when PR is merged → issues move to Done
+4. Document the Linear integration in a new section explaining the magic keywords
 
-1. Read `.claude/skills/plan-implement/SKILL.md`
-2. Review the "Document Results" section
-3. Ensure iteration block format clearly indicates status:
-   - When ALL tasks complete: `### Continuation Status` says "All tasks completed. Ready for review."
-   - When stopping early: `### Continuation Status` says "Context running low (~X% remaining). Run `/plan-implement` to continue with Task N."
-4. The `### Tasks Remaining` section should ONLY appear when stopping early, not when complete
-5. Add note: "If no tasks remain, omit the `### Tasks Remaining` section entirely"
+### Task 3: Update plan-todo state flow documentation
+**Linear Issue:** [ADV-42](https://linear.app/adva-administracion/issue/ADV-42/move-reviewed-issues-to-merge-status)
 
-### Task 9: Add numeric bounds validation to loadConfig
-**Linear Issue:** [ADV-31](https://linear.app/adva-administracion/issue/ADV-31)
+1. Read `.claude/skills/plan-todo/SKILL.md`
+2. Update line 234 state flow to include Merge:
+   - From: `Backlog → Todo → In Progress → Review → Done`
+   - To: `Backlog → Todo → In Progress → Review → Merge → Done`
 
-1. Write test in `src/config.test.ts` for numeric validation:
-   - Test PORT validation: negative → throw, >65535 → throw, NaN → throw, valid → pass
-   - Test MATCH_DAYS_BEFORE/AFTER: negative → throw, NaN → throw, valid → pass
-   - Test GEMINI_RPM_LIMIT: negative → throw, zero → throw, NaN → throw, valid → pass
-   - Test USD_ARS_TOLERANCE_PERCENT: negative → throw, NaN → throw, valid → pass
-2. Run verifier with pattern `config` (expect fail)
-3. Implement validation in `src/config.ts` loadConfig():
-   - Add helper: `function validateNumericEnv(name: string, value: number, min?: number, max?: number): void`
-   - Validate PORT: 1-65535, throw if invalid
-   - Validate MATCH_DAYS_BEFORE/AFTER: ≥0, throw if negative or NaN
-   - Validate GEMINI_RPM_LIMIT: ≥1, throw if invalid
-   - Validate USD_ARS_TOLERANCE_PERCENT: ≥0, throw if negative or NaN
-4. Run verifier with pattern `config` (expect pass)
+### Task 4: Update CLAUDE.md Linear Integration section
+**Linear Issue:** [ADV-42](https://linear.app/adva-administracion/issue/ADV-42/move-reviewed-issues-to-merge-status)
 
-### Task 10: Add Fastify schema validation to scan routes
-**Linear Issue:** [ADV-30](https://linear.app/adva-administracion/issue/ADV-30)
-
-1. Write test in `src/routes/scan.test.ts` for schema validation:
-   - Test `/rematch` rejects invalid `documentType` values
-   - Test `/autofill-bank` rejects non-string `bankName`
-   - Test `/match-movimientos` validates `force` query parameter (must be "true" or omitted)
-2. Run verifier with pattern `scan` (expect fail)
-3. Fix in `src/routes/scan.ts`:
-   - Add schema to `/rematch`: `documentType: { type: 'string', enum: ['factura', 'recibo', 'all'] }`
-   - Add schema to `/autofill-bank`: `bankName: { type: 'string' }`
-   - Add querystring schema to `/match-movimientos`: `force: { type: 'string', enum: ['true'] }`
-4. Run verifier with pattern `scan` (expect pass)
-
-### Task 11: Verify and document rate limiter cleanup mechanism
-**Linear Issue:** [ADV-16](https://linear.app/adva-administracion/issue/ADV-16)
-
-Investigation revealed cleanup IS called via cron. Verify edge cases and add tests:
-
-1. Write test in `src/utils/rate-limiter.test.ts`:
-   - Test cleanup removes keys with all-expired entries
-   - Test cleanup is idempotent (calling twice doesn't break anything)
-   - Test cleanup preserves keys with active requests
-   - Test check() doesn't leave empty arrays in requestLog
-2. Run verifier with pattern `rate-limiter` (expect pass - likely already working)
-3. If any tests fail, fix the issue:
-   - Ensure `check()` removes empty arrays after filtering (line 68-69)
-   - Or update cleanup() to be called from check() when array becomes empty
-4. Add JSDoc comment documenting that cleanup is called via watch-manager cron job
-5. Run verifier with pattern `rate-limiter` (expect pass)
+1. Read `CLAUDE.md`
+2. Update "State Flow" diagram to include Merge state
+3. Add Merge to the states table with description
+4. Update "State Transition Triggers" table:
+   - Add `Review → Merge` triggered by plan-review-implementation
+   - Add `Merge → Done` triggered by PR merge (via Linear GitHub automation)
+5. Add note explaining the Linear GitHub integration magic keywords
 
 ## Post-Implementation Checklist
 
@@ -208,121 +112,27 @@ Investigation revealed cleanup IS called via cron. Verify edge cases and add tes
 
 ## Plan Summary
 
-**Objective:** Improve skill workflow robustness (git checks, branch suggestions, iteration detection) and add defensive validation to configuration and route schemas.
+**Objective:** Implement Merge status in skill workflow so issues move to Merge after review, then automatically to Done when PR is merged via Linear's GitHub integration.
 
-**Linear Issues:** ADV-45, ADV-43, ADV-44, ADV-31, ADV-30, ADV-16
+**Linear Issues:** ADV-42
 
 **Approach:**
-- Update plan-* skills with git pre-flight checks to ensure clean main branch before planning
-- Add feature branch suggestions to termination output for better git workflow
-- Clarify iteration detection logic to prevent review confusion
-- Add numeric bounds validation to config loading
-- Add Fastify JSON schema validation to scan routes
-- Verify and document rate limiter cleanup (already implemented via cron)
+- Add Merge as intermediate state between Review and Done
+- Update plan-review-implementation to move issues Review→Merge instead of Review→Done
+- Update pr-creator to include `Closes ADV-XXX` magic keywords in PR body
+- When PR merges, Linear's GitHub automation moves issues Merge→Done automatically
 
 **Scope:**
-- Tasks: 11
-- Files affected: 8 (5 skills, 2 source files + tests)
-- New tests: yes (config validation, route schema validation, rate limiter edge cases)
+- Tasks: 4
+- Files affected: 4 (2 skills, 1 subagent, 1 project doc)
+- New tests: no (documentation/skill changes only)
 
 **Key Decisions:**
-- Git pre-flight runs BEFORE PLANS.md check (can't plan if not on clean main)
-- Branch suggestion is advisory (user can skip and implement directly)
-- Iteration "ready for review" = has completed tasks AND no "Tasks Remaining" section
-- Config validation throws on invalid values (fail fast vs silent defaults)
-- Rate limiter cleanup already works via cron - just add edge case tests
+- Merge is type `started` (not `completed`) so Linear treats it as "in progress" until PR merges
+- PR body uses `Closes` keyword (not `Fixes`) as these are features/improvements, not bugs
+- Multiple issues in one PR are comma-separated: `Closes ADV-123, ADV-124`
+- pr-creator extracts issue IDs from PLANS.md automatically
 
 **Dependencies/Prerequisites:**
-- Tasks 1-3 (git pre-flight) are independent and can be done in parallel
-- Tasks 4-6 (branch suggestion) are independent and can be done in parallel
-- Tasks 7-8 (iteration fix) should be done together to ensure consistency
-- Tasks 9-11 (source code) follow TDD and are independent
-
----
-
-## Iteration 1
-
-**Implemented:** 2026-02-02
-
-### Tasks Completed This Iteration
-- Task 1: Add git branch pre-flight check to plan-todo - Added Git Pre-flight Check section and updated workflow
-- Task 2: Add git branch pre-flight check to plan-fix - Added Git Pre-flight Check section and Step 0 reference
-- Task 3: Add git branch pre-flight check to plan-inline - Added Git Pre-flight Check section and updated workflow
-- Task 4: Add feature branch suggestion to plan-todo - Added branch suggestion to termination output
-- Task 5: Add feature branch suggestion to plan-fix - Added branch suggestion with fix/ prefix
-- Task 6: Add feature branch suggestion to plan-inline - Added branch suggestion with type inference
-- Task 7: Fix iteration completion detection in plan-review-implementation - Clarified detection logic with examples
-- Task 8: Clarify iteration report format in plan-implement - Added notes about Tasks Remaining not blocking review
-- Task 9: Add numeric bounds validation to loadConfig - Added validateNumericEnv helper and validation for PORT, MATCH_DAYS_*, GEMINI_RPM_LIMIT, USD_ARS_TOLERANCE_PERCENT
-- Task 10: Add Fastify schema validation to scan routes - Added schemas for /rematch, /autofill-bank, /match-movimientos
-- Task 11: Verify and document rate limiter cleanup mechanism - Confirmed cleanup is called via cron, added JSDoc documentation
-
-### Files Modified
-- `.claude/skills/plan-todo/SKILL.md` - Added Git Pre-flight Check section, updated workflow, added branch suggestion
-- `.claude/skills/plan-fix/SKILL.md` - Added Git Pre-flight Check section, Step 0, added branch suggestion
-- `.claude/skills/plan-inline/SKILL.md` - Added Git Pre-flight Check section, updated workflow, added branch suggestion
-- `.claude/skills/plan-implement/SKILL.md` - Clarified iteration report format re: Tasks Remaining
-- `.claude/skills/plan-review-implementation/SKILL.md` - Clarified iteration detection logic with examples
-- `src/config.ts` - Added validateNumericEnv helper, validation for PORT, MATCH_DAYS_*, GEMINI_RPM_LIMIT, USD_ARS_TOLERANCE_PERCENT
-- `src/config.test.ts` - Added tests for numeric validation (PORT, MATCH_DAYS_*, GEMINI_RPM_LIMIT, USD_ARS_TOLERANCE_PERCENT)
-- `src/routes/scan.ts` - Added schemas for /rematch (documentType enum), /autofill-bank (bankName string), /match-movimientos (force querystring)
-- `src/routes/scan.test.ts` - Added tests for schema validation
-- `src/utils/rate-limiter.ts` - Added JSDoc documenting cleanup is called via watch-manager cron
-
-### Linear Updates
-- ADV-44: Todo → In Progress → Review (Tasks 1-3: git pre-flight checks)
-- ADV-43: Todo → In Progress → Review (Tasks 4-6: branch suggestions)
-- ADV-45: Todo → In Progress → Review (Tasks 7-8: iteration detection)
-- ADV-31: Todo → In Progress → Review (Task 9: config validation)
-- ADV-30: Todo → In Progress → Review (Task 10: route schema validation)
-- ADV-16: Todo → In Progress → Review (Task 11: rate limiter documentation)
-
-### Pre-commit Verification
-- bug-hunter: Found 2 MEDIUM issues (test naming, redundant check) and 1 LOW issue (edge case). All are acceptable as-is - the manual type check provides defense-in-depth, test correctly reflects actual behavior (Fastify coerces types), and the edge case for max-only validation doesn't occur in current code.
-- verifier: All 1,506 tests pass, zero warnings
-
-### Continuation Status
-All tasks completed. Ready for review.
-
-### Review Findings
-
-Files reviewed: 10
-Checks applied: Security, Logic, Async, Resources, Type Safety, Conventions
-
-**Skill Files (Tasks 1-8):**
-- `.claude/skills/plan-todo/SKILL.md` - Git Pre-flight Check added, branch suggestion added
-- `.claude/skills/plan-fix/SKILL.md` - Git Pre-flight Check added, branch suggestion with `fix/` prefix
-- `.claude/skills/plan-inline/SKILL.md` - Git Pre-flight Check added, branch suggestion with type inference
-- `.claude/skills/plan-implement/SKILL.md` - Clarified Tasks Remaining doesn't block review
-- `.claude/skills/plan-review-implementation/SKILL.md` - Iteration detection logic clarified
-
-**Source Files (Tasks 9-11):**
-- `src/config.ts` - `validateNumericEnv` helper with proper bounds checking
-- `src/config.test.ts` - Comprehensive tests for all numeric validations
-- `src/routes/scan.ts` - JSON schemas added with enums and additionalProperties:false
-- `src/routes/scan.test.ts` - Schema validation tests added
-- `src/utils/rate-limiter.ts` - JSDoc documenting cleanup via cron
-
-**Pre-commit issues (already reviewed and accepted):**
-- [MEDIUM] Test naming: "rejects non-string bankName via schema" passes due to type coercion + 404, not schema rejection - acceptable as test still validates behavior
-- [MEDIUM] Redundant type check for bankName at scan.ts:158 - acceptable as defense-in-depth
-- [LOW] Edge case for max-only validation - doesn't occur in current code
-
-No CRITICAL or HIGH issues found. All implementations are correct and follow project conventions.
-
-### Linear Updates
-- ADV-44: Review → Done (Tasks 1-3: git pre-flight checks)
-- ADV-43: Review → Done (Tasks 4-6: branch suggestions)
-- ADV-45: Review → Done (Tasks 7-8: iteration detection)
-- ADV-31: Review → Done (Task 9: config validation)
-- ADV-30: Review → Done (Task 10: route schema validation)
-- ADV-16: Review → Done (Task 11: rate limiter documentation)
-
-<!-- REVIEW COMPLETE -->
-
----
-
-## Status: COMPLETE
-
-All tasks implemented and reviewed successfully. All Linear issues moved to Done.
-Ready for human review.
+- Linear GitHub integration must be configured (assumed already set up)
+- Tasks can be done in any order, but Task 4 (CLAUDE.md) should be last to reflect final state
