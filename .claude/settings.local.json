@@ -59,7 +59,8 @@
       "mcp__linear__list_teams",
       "mcp__linear__list_issue_statuses",
       "mcp__linear__list_issue_labels",
-      "WebFetch(domain:docs.anthropic.com)"
+      "WebFetch(domain:docs.anthropic.com)",
+      "mcp__linear__search_documentation"
     ],
     "deny": [
       "Bash(rm -rf *)",

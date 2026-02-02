@@ -2,7 +2,7 @@
 name: plan-todo
 description: Convert Linear Backlog issues into TDD implementation plans. Use when user says "plan ADVA-123", "plan all bugs", "work on backlog", or wants to implement issues from Linear. Moves planned issues to Todo state. Explores codebase for patterns and discovers available MCPs from CLAUDE.md.
 argument-hint: [issue-selector] e.g., "ADVA-123", "all Bug issues", "the file naming issue"
-allowed-tools: Read, Edit, Write, Glob, Grep, Task, mcp__linear__list_issues, mcp__linear__get_issue, mcp__linear__update_issue, mcp__linear__list_issue_labels, mcp__linear__list_issue_statuses
+allowed-tools: Read, Edit, Write, Glob, Grep, Task, Bash, mcp__linear__list_issues, mcp__linear__get_issue, mcp__linear__update_issue, mcp__linear__list_issue_labels, mcp__linear__list_issue_statuses
 disable-model-invocation: true
 ---
 
@@ -298,9 +298,18 @@ When you finish writing PLANS.md (and moving issues to Todo), output the plan su
 Create a feature branch and commit the plan.
 ```
 
-**Then execute:**
+**Then execute git workflow:**
+
+1. Create a feature branch with proper naming:
+   - Use `feat/` prefix for new features
+   - Use `fix/` prefix for bug fixes
+   - Use `refactor/` prefix for refactoring
+   - Branch name should be kebab-case, derived from the plan objective
+   - Example: `feat/add-broker-statement-parsing`, `fix/cuit-validation-leading-zeros`
+
+2. Stage, commit, and push:
 ```bash
-git checkout -b feat/<plan-description> && git add PLANS.md && git commit -m "plan: <plan-description>"
+git checkout -b <type>/<plan-description> && git add PLANS.md && git commit -m "plan: <plan-description>" && git push -u origin <type>/<plan-description>
 ```
 
 Do not ask follow-up questions. Do not offer to implement. Output the summary and stop.

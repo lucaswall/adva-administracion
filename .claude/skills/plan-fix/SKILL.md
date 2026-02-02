@@ -2,7 +2,7 @@
 name: plan-fix
 description: Investigates bugs AND creates actionable TDD fix plans. Creates Linear issues in Todo state. Use when you know you want to fix something - user reports extraction errors, deployment failures, wrong data, missing matches, or prompt issues. Can be chained from investigate skill. Discovers MCPs from CLAUDE.md for debugging (logs, files, prompts).
 argument-hint: <bug description>
-allowed-tools: Read, Edit, Write, Glob, Grep, Task, mcp__linear__list_issues, mcp__linear__get_issue, mcp__linear__create_issue, mcp__linear__update_issue, mcp__linear__list_issue_labels, mcp__linear__list_issue_statuses
+allowed-tools: Read, Edit, Write, Glob, Grep, Task, Bash, mcp__linear__list_issues, mcp__linear__get_issue, mcp__linear__create_issue, mcp__linear__update_issue, mcp__linear__list_issue_labels, mcp__linear__list_issue_statuses
 disable-model-invocation: true
 ---
 
@@ -283,9 +283,16 @@ When you finish writing PLANS.md (and creating Linear issues), output the plan s
 Create a feature branch and commit the plan.
 ```
 
-**Then execute:**
+**Then execute git workflow:**
+
+1. Create a fix branch with proper naming:
+   - Always use `fix/` prefix for bug fixes
+   - Branch name should be kebab-case, derived from the bug description
+   - Example: `fix/sql-injection-query-builder`, `fix/race-condition-cache`
+
+2. Stage, commit, and push:
 ```bash
-git checkout -b fix/<bug-description> && git add PLANS.md && git commit -m "plan: <bug-description>"
+git checkout -b fix/<bug-description> && git add PLANS.md && git commit -m "plan: <bug-description>" && git push -u origin fix/<bug-description>
 ```
 
 Do not ask follow-up questions. Do not offer to implement. Output the summary and stop.

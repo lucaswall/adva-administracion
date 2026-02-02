@@ -2,7 +2,7 @@
 name: plan-inline
 description: Create TDD implementation plans from direct feature requests. Use when user provides a task description like "add X feature", "create Y function", or "implement Z". Creates Linear issues in Todo state. Faster than plan-todo for ad-hoc requests that don't need backlog tracking.
 argument-hint: <task description>
-allowed-tools: Read, Edit, Write, Glob, Grep, Task, mcp__linear__list_issues, mcp__linear__get_issue, mcp__linear__create_issue, mcp__linear__update_issue, mcp__linear__list_issue_labels, mcp__linear__list_issue_statuses
+allowed-tools: Read, Edit, Write, Glob, Grep, Task, Bash, mcp__linear__list_issues, mcp__linear__get_issue, mcp__linear__create_issue, mcp__linear__update_issue, mcp__linear__list_issue_labels, mcp__linear__list_issue_statuses
 disable-model-invocation: true
 ---
 
@@ -316,9 +316,18 @@ When you finish writing PLANS.md (and creating Linear issues), output the plan s
 Create a feature branch and commit the plan.
 ```
 
-**Then execute** (where `<type>` is `feat/`, `fix/`, `refactor/`, etc.):
+**Then execute git workflow:**
+
+1. Create a feature branch with proper naming:
+   - Use `feat/` prefix for new features
+   - Use `fix/` prefix for bug fixes
+   - Use `refactor/` prefix for refactoring
+   - Branch name should be kebab-case, derived from the plan objective
+   - Example: `feat/validate-cuit-modulo11`, `refactor/extract-common-parser-utils`
+
+2. Stage, commit, and push:
 ```bash
-git checkout -b <type>/<task-description> && git add PLANS.md && git commit -m "plan: <task-description>"
+git checkout -b <type>/<task-description> && git add PLANS.md && git commit -m "plan: <task-description>" && git push -u origin <type>/<task-description>
 ```
 
 Do not ask follow-up questions. Do not offer to implement. Output the summary and stop.
