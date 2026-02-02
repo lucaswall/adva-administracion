@@ -43,3 +43,6 @@ service-account.json
 apps-script/.clasp.json
 apps-script/dist/
 apps-script/src/config.ts
+
+# Claude Code local settings (personal overrides)
+.claude/settings.local.json
