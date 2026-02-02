@@ -280,11 +280,12 @@ When you finish writing PLANS.md (and creating Linear issues), output the plan s
 
 ---
 
-**Suggested next step:** Create a feature branch before implementing:
-```bash
-git checkout -b fix/<bug-description>
+Create a feature branch and commit the plan.
 ```
-Then run `/plan-implement` to execute this plan.
+
+**Then execute:**
+```bash
+git checkout -b fix/<bug-description> && git add PLANS.md && git commit -m "plan: <bug-description>"
 ```
 
 Do not ask follow-up questions. Do not offer to implement. Output the summary and stop.

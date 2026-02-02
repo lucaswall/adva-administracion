@@ -313,13 +313,12 @@ When you finish writing PLANS.md (and creating Linear issues), output the plan s
 
 ---
 
-**Suggested next step:** Create a feature branch before implementing:
-```bash
-git checkout -b <type>/<task-description>
+Create a feature branch and commit the plan.
 ```
-Where `<type>` is `feat/`, `fix/`, `refactor/`, etc. based on the task type.
 
-Then run `/plan-implement` to execute this plan.
+**Then execute** (where `<type>` is `feat/`, `fix/`, `refactor/`, etc.):
+```bash
+git checkout -b <type>/<task-description> && git add PLANS.md && git commit -m "plan: <task-description>"
 ```
 
 Do not ask follow-up questions. Do not offer to implement. Output the summary and stop.

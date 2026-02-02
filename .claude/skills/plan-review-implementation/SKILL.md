@@ -69,7 +69,7 @@ An iteration should be reviewed even if it has `### Tasks Remaining`. The review
 - Task 4: Update tests
 
 ### Continuation Status
-Context running low (~35% remaining). Run `/plan-implement` to continue with Task 3.
+Context running low (~35% remaining). More tasks remain.
 ```
 → This iteration IS ready for review. Review Tasks 1 and 2. Tasks 3-4 will be in a future iteration.
 
@@ -248,10 +248,10 @@ This ensures work is preserved even if the session ends.
 
 When all pending iterations have been reviewed:
 
-- **If any iteration has a Fix Plan** → Do NOT mark complete. Fix plans must be implemented first.
-  > "Review complete. Found issues requiring fixes. Run `/plan-implement` to execute the Fix Plan, then `/plan-review-implementation` again."
+- **If Fix Plan exists OR tasks remain unfinished** → Do NOT mark complete. More implementation needed.
+  > "Review complete. Run `/plan-implement` to continue implementation."
 
-- **If all iterations passed with no issues** → Append final status and suggest PR:
+- **If all tasks complete and no issues** → Append final status and create PR:
 
 ```markdown
 ---
@@ -262,10 +262,10 @@ All tasks implemented and reviewed successfully. All Linear issues moved to Done
 Ready for human review.
 ```
 
-**Then suggest to the user:**
-> "Plan complete! Would you like me to create a PR for these changes?"
+**Then tell the user:**
+> "Plan complete! Create a PR for these changes."
 
-This prompts the user to invoke the `pr-creator` agent if they want to submit the work.
+This triggers the `pr-creator` subagent to handle branch creation, commit, push, and PR.
 
 **Note:** When marking COMPLETE, all issues from the plan should be in Done state.
 

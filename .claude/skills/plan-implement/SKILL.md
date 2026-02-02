@@ -131,9 +131,9 @@ After completing tasks (either all tasks or stopping due to context), append a n
 - verifier: All N tests pass, zero warnings
 
 ### Continuation Status
-[Context running low (~35% remaining). Run `/plan-implement` to continue with Task 5.]
+[Context running low (~35% remaining). More tasks remain.]
 OR
-[All tasks completed. Ready for review.]
+[All tasks completed.]
 ```
 
 **IMPORTANT:**
@@ -142,8 +142,8 @@ OR
 - If stopping early due to context limits, also list remaining tasks in "Tasks Remaining"
 - If ALL tasks are complete, OMIT the "Tasks Remaining" section entirely
 - The "Continuation Status" clearly indicates whether more work remains:
-  - Stopping early: "Context running low (~X% remaining). Run `/plan-implement` to continue with Task N."
-  - All done: "All tasks completed. Ready for review."
+  - Stopping early: "Context running low (~X% remaining). More tasks remain."
+  - All done: "All tasks completed."
 
 **Note:** The presence of "Tasks Remaining" does NOT prevent review. `plan-review-implementation` will review the completed tasks in this iteration regardless. Remaining tasks will be implemented and reviewed in future iterations.
 
@@ -173,7 +173,7 @@ After completing each task's TDD cycle (steps 1-6), estimate remaining context:
 1. Run `bug-hunter` agent on completed work
 2. Run `verifier` agent to confirm all tests pass
 3. Write the `## Iteration N` block documenting what was done
-4. If more tasks remain, inform user to run `/plan-implement` again
+4. **Always end with:** "Run `/plan-review-implementation` to review completed work."
 
 ## Error Handling
 

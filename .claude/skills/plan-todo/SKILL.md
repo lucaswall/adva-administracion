@@ -295,11 +295,12 @@ When you finish writing PLANS.md (and moving issues to Todo), output the plan su
 
 ---
 
-**Suggested next step:** Create a feature branch before implementing:
-```bash
-git checkout -b feat/<plan-description>
+Create a feature branch and commit the plan.
 ```
-Then run `/plan-implement` to execute this plan.
+
+**Then execute:**
+```bash
+git checkout -b feat/<plan-description> && git add PLANS.md && git commit -m "plan: <plan-description>"
 ```
 
 Do not ask follow-up questions. Do not offer to implement. Output the summary and stop.
