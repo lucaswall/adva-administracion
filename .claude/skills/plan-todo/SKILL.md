@@ -8,6 +8,22 @@ disable-model-invocation: true
 
 Convert Linear Backlog issues into a structured TDD implementation plan in PLANS.md.
 
+## Git Pre-flight Check
+
+**Before doing anything else**, verify git state:
+
+1. Check current branch: `git branch --show-current`
+2. If NOT on `main` or `master`:
+   - **STOP** with message: "Not on main branch. Please switch to main before planning: `git checkout main`"
+3. Check for uncommitted changes: `git status --porcelain`
+4. If there are uncommitted changes:
+   - **STOP** with message: "Main branch has uncommitted changes. Please commit or stash them first."
+5. Check if branch is up-to-date with remote: `git fetch origin && git status -uno`
+6. If behind remote:
+   - **STOP** with message: "Main branch is behind remote. Please pull latest: `git pull origin main`"
+
+Only proceed to PLANS.md check if git state is clean.
+
 ## Purpose
 
 - Convert backlog issues from Linear into actionable TDD implementation plans
@@ -57,6 +73,7 @@ Default: plan the **first issue** in Linear Backlog. Override with $ARGUMENTS:
 
 ## Workflow
 
+0. **Git pre-flight check** - Ensure on clean main branch (see Git Pre-flight Check section)
 1. **Read PLANS.md** - Pre-flight check
 2. **Query Linear Backlog** - Use `mcp__linear__list_issues` with `team=ADVA Administracion, state=Backlog` to identify issues to plan
 3. **Read CLAUDE.md** - Understand TDD workflow, agents, project rules, available MCPs
@@ -278,7 +295,11 @@ When you finish writing PLANS.md (and moving issues to Todo), output the plan su
 
 ---
 
-Next step: Run `plan-implement` to execute this plan.
+**Suggested next step:** Create a feature branch before implementing:
+```bash
+git checkout -b feat/<plan-description>
+```
+Then run `/plan-implement` to execute this plan.
 ```
 
 Do not ask follow-up questions. Do not offer to implement. Output the summary and stop.

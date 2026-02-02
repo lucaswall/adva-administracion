@@ -8,6 +8,22 @@ disable-model-invocation: true
 
 Create a TDD implementation plan directly from inline instructions in $ARGUMENTS. Creates Linear issues in Todo state.
 
+## Git Pre-flight Check
+
+**Before doing anything else**, verify git state:
+
+1. Check current branch: `git branch --show-current`
+2. If NOT on `main` or `master`:
+   - **STOP** with message: "Not on main branch. Please switch to main before planning: `git checkout main`"
+3. Check for uncommitted changes: `git status --porcelain`
+4. If there are uncommitted changes:
+   - **STOP** with message: "Main branch has uncommitted changes. Please commit or stash them first."
+5. Check if branch is up-to-date with remote: `git fetch origin && git status -uno`
+6. If behind remote:
+   - **STOP** with message: "Main branch is behind remote. Please pull latest: `git pull origin main`"
+
+Only proceed to PLANS.md check if git state is clean.
+
 ## Purpose
 
 - Convert inline task descriptions into actionable TDD implementation plans
@@ -71,6 +87,7 @@ Example arguments:
 
 ## Workflow
 
+0. **Git pre-flight check** - Ensure on clean main branch (see Git Pre-flight Check section)
 1. **Read PLANS.md** - Pre-flight check
 2. **Read CLAUDE.md** - Understand TDD workflow, agents, project rules, available MCPs
 3. **Parse $ARGUMENTS** - Understand what needs to be implemented
@@ -296,7 +313,13 @@ When you finish writing PLANS.md (and creating Linear issues), output the plan s
 
 ---
 
-Next step: Run `plan-implement` to execute this plan.
+**Suggested next step:** Create a feature branch before implementing:
+```bash
+git checkout -b <type>/<task-description>
+```
+Where `<type>` is `feat/`, `fix/`, `refactor/`, etc. based on the task type.
+
+Then run `/plan-implement` to execute this plan.
 ```
 
 Do not ask follow-up questions. Do not offer to implement. Output the summary and stop.

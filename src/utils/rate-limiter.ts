@@ -35,6 +35,11 @@ export interface RateLimitResult {
 /**
  * Creates a rate limiter with sliding window algorithm
  *
+ * Memory management: The `check()` method cleans up expired timestamps per-key
+ * on each call. To remove abandoned keys (keys that haven't been checked recently),
+ * call `cleanup()` periodically. In production, cleanup is called every 10 minutes
+ * via the watch-manager cron job (`cleanupExpiredNotifications` in watch-manager.ts).
+ *
  * @param windowMs - Time window in milliseconds
  * @param maxRequests - Maximum number of requests allowed in the window
  * @returns Rate limiter instance

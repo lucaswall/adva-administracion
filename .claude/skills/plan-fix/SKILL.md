@@ -8,6 +8,22 @@ disable-model-invocation: true
 
 Investigate bugs and create TDD fix plans in PLANS.md. Creates Linear issues in Todo state.
 
+## Git Pre-flight Check
+
+**Before doing anything else**, verify git state:
+
+1. Check current branch: `git branch --show-current`
+2. If NOT on `main` or `master`:
+   - **STOP** with message: "Not on main branch. Please switch to main before planning: `git checkout main`"
+3. Check for uncommitted changes: `git status --porcelain`
+4. If there are uncommitted changes:
+   - **STOP** with message: "Main branch has uncommitted changes. Please commit or stash them first."
+5. Check if branch is up-to-date with remote: `git fetch origin && git status -uno`
+6. If behind remote:
+   - **STOP** with message: "Main branch is behind remote. Please pull latest: `git pull origin main`"
+
+Only proceed to PLANS.md check if git state is clean.
+
 ## Purpose
 
 - Investigate bugs found after processing files (extraction errors, wrong data, missing matches)
@@ -55,6 +71,10 @@ $ARGUMENTS should contain the bug description with context:
    - Business rules and validation
 
 ## Investigation Workflow
+
+### Step 0: Git Pre-flight Check
+
+Run the Git Pre-flight Check (see section above) before proceeding. Only continue if git state is clean.
 
 ### Step 1: Classify the Bug Type
 
@@ -260,7 +280,11 @@ When you finish writing PLANS.md (and creating Linear issues), output the plan s
 
 ---
 
-Next step: Run `plan-implement` to execute this plan.
+**Suggested next step:** Create a feature branch before implementing:
+```bash
+git checkout -b fix/<bug-description>
+```
+Then run `/plan-implement` to execute this plan.
 ```
 
 Do not ask follow-up questions. Do not offer to implement. Output the summary and stop.

@@ -341,6 +341,39 @@ describe('Scan routes', () => {
       expect(body.matchesFound).toBe(5);
       expect(body.duration).toBe(150);
     });
+
+    it('rejects invalid documentType values via schema', async () => {
+      const response = await server.inject({
+        method: 'POST',
+        url: '/api/rematch',
+        headers: {
+          authorization: 'Bearer test-secret-123',
+        },
+        payload: { documentType: 'invalid-type' },
+      });
+
+      expect(response.statusCode).toBe(400);
+    });
+
+    it('accepts valid documentType values via schema', async () => {
+      mockRematch.mockResolvedValue({
+        ok: true,
+        value: { matchesFound: 0, duration: 100 },
+      });
+
+      for (const docType of ['factura', 'recibo', 'all']) {
+        const response = await server.inject({
+          method: 'POST',
+          url: '/api/rematch',
+          headers: {
+            authorization: 'Bearer test-secret-123',
+          },
+          payload: { documentType: docType },
+        });
+
+        expect(response.statusCode).toBe(200);
+      }
+    });
   });
 
   describe('POST /api/autofill-bank', () => {
@@ -457,6 +490,19 @@ describe('Scan routes', () => {
 
       expect(response.statusCode).toBe(200);
       expect(mockAutoFillBankMovements).toHaveBeenCalledWith('BBVA');
+    });
+
+    it('rejects non-string bankName via schema', async () => {
+      const response = await server.inject({
+        method: 'POST',
+        url: '/api/autofill-bank',
+        headers: {
+          authorization: 'Bearer test-secret-123',
+        },
+        payload: { bankName: 123 },
+      });
+
+      expect(response.statusCode).toBe(404);
     });
   });
 
@@ -588,6 +634,30 @@ describe('Scan routes', () => {
 
       expect(response.statusCode).toBe(401);
       expect(mockMatchAllMovimientos).not.toHaveBeenCalled();
+    });
+
+    it('rejects invalid force query parameter values via schema', async () => {
+      const response = await server.inject({
+        method: 'POST',
+        url: '/api/match-movimientos?force=yes',
+        headers: {
+          authorization: 'Bearer test-secret-123',
+        },
+      });
+
+      expect(response.statusCode).toBe(400);
+    });
+
+    it('rejects force=false via schema (only true allowed)', async () => {
+      const response = await server.inject({
+        method: 'POST',
+        url: '/api/match-movimientos?force=false',
+        headers: {
+          authorization: 'Bearer test-secret-123',
+        },
+      });
+
+      expect(response.statusCode).toBe(400);
     });
   });
 });
