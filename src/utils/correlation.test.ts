@@ -214,4 +214,73 @@ describe('Correlation Context', () => {
       expect(logData!).not.toHaveProperty('fileName');
     });
   });
+
+  describe('updateCorrelationContext - immutability', () => {
+    it('should not mutate previously captured context reference', () => {
+      let capturedBefore: ReturnType<typeof getCorrelationContext>;
+      let capturedAfter: ReturnType<typeof getCorrelationContext>;
+
+      withCorrelation(() => {
+        // Capture reference before update
+        capturedBefore = getCorrelationContext();
+        const originalFileId = capturedBefore?.fileId;
+
+        // Update context
+        updateCorrelationContext({ fileId: 'new-file-id' });
+
+        // Capture reference after update
+        capturedAfter = getCorrelationContext();
+
+        // Original captured reference should NOT have been mutated
+        expect(capturedBefore?.fileId).toBe(originalFileId);
+        // New reference should have updated value
+        expect(capturedAfter?.fileId).toBe('new-file-id');
+      });
+    });
+
+    it('should preserve updates when multiple sequential updates occur', async () => {
+      await withCorrelationAsync(async () => {
+        updateCorrelationContext({ fileId: 'file-1' });
+        await new Promise(resolve => setTimeout(resolve, 1));
+
+        updateCorrelationContext({ fileName: 'name-1.pdf' });
+        await new Promise(resolve => setTimeout(resolve, 1));
+
+        const context = getCorrelationContext();
+        // Both updates should be preserved
+        expect(context?.fileId).toBe('file-1');
+        expect(context?.fileName).toBe('name-1.pdf');
+      });
+    });
+
+    it('should isolate updates between concurrent async contexts', async () => {
+      const results: Array<{ ctxId: string; fileId?: string; fileName?: string }> = [];
+
+      await Promise.all([
+        withCorrelationAsync(async () => {
+          updateCorrelationContext({ fileId: 'file-ctx1' });
+          await new Promise(resolve => setTimeout(resolve, 10));
+          updateCorrelationContext({ fileName: 'name-ctx1.pdf' });
+          const ctx = getCorrelationContext();
+          results.push({ ctxId: '1', fileId: ctx?.fileId, fileName: ctx?.fileName });
+        }, { correlationId: 'ctx-1' }),
+        withCorrelationAsync(async () => {
+          updateCorrelationContext({ fileId: 'file-ctx2' });
+          await new Promise(resolve => setTimeout(resolve, 5));
+          updateCorrelationContext({ fileName: 'name-ctx2.pdf' });
+          const ctx = getCorrelationContext();
+          results.push({ ctxId: '2', fileId: ctx?.fileId, fileName: ctx?.fileName });
+        }, { correlationId: 'ctx-2' }),
+      ]);
+
+      // Each context should have its own isolated updates
+      const ctx1Result = results.find(r => r.ctxId === '1');
+      const ctx2Result = results.find(r => r.ctxId === '2');
+
+      expect(ctx1Result?.fileId).toBe('file-ctx1');
+      expect(ctx1Result?.fileName).toBe('name-ctx1.pdf');
+      expect(ctx2Result?.fileId).toBe('file-ctx2');
+      expect(ctx2Result?.fileName).toBe('name-ctx2.pdf');
+    });
+  });
 });

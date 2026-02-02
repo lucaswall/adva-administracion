@@ -5,7 +5,9 @@
 
 /**
  * Validates that a string is a valid ISO date in YYYY-MM-DD format
- * with a reasonable year (current year - 10 to current year + 1)
+ * with a reasonable year (current year - 16 to current year + 1)
+ *
+ * Extended to 16 years to support historical Argentine invoices.
  *
  * @param dateStr - String to validate
  * @returns true if valid ISO date, false otherwise
@@ -22,9 +24,10 @@ export function isValidISODate(dateStr: string): boolean {
   const month = parseInt(monthStr, 10);
   const day = parseInt(dayStr, 10);
 
-  // Validate year is in reasonable range (current year - 10 to current year + 1)
+  // Validate year is in reasonable range (current year - 16 to current year + 1)
+  // Extended to 16 years back to support historical Argentine invoices (ADV-29)
   const currentYear = new Date().getFullYear();
-  if (year < currentYear - 10 || year > currentYear + 1) return false;
+  if (year < currentYear - 16 || year > currentYear + 1) return false;
 
   // Validate month (1-12)
   if (month < 1 || month > 12) return false;

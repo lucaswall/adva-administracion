@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { autoFillBankMovements } from './autofill.js';
+import { autoFillBankMovements, parseMovementRow } from './autofill.js';
 import type { FolderStructure } from '../types/index.js';
 
 // Mock dependencies
@@ -130,5 +130,67 @@ describe('autofillBankMovements error context (bug #19)', () => {
       expect(result.value.failedBanks).toEqual([]);
       expect(result.value.errors).toBe(0);
     }
+  });
+});
+
+describe('parseMovementRow - array bounds checking', () => {
+  it('returns null for row with less than 9 elements', () => {
+    // Row with only 6 elements (missing credito, debito, detalle)
+    const shortRow = ['2024-01-15', '2024-01-15', 'TRANSFERENCIA', 'TRF', 'CENTRAL', 'ADMIN'];
+    const result = parseMovementRow(shortRow, 1);
+    expect(result).toBeNull();
+  });
+
+  it('returns null for empty row', () => {
+    const emptyRow: string[] = [];
+    const result = parseMovementRow(emptyRow, 1);
+    expect(result).toBeNull();
+  });
+
+  it('returns valid BankMovement for row with exactly 9 elements', () => {
+    const validRow = [
+      '2024-01-15',    // fecha
+      '2024-01-15',    // fechaValor
+      'TRANSFERENCIA', // concepto
+      'TRF',           // codigo
+      'CENTRAL',       // oficina
+      'ADMIN',         // areaAdva
+      50000,           // credito
+      null,            // debito
+      'Pago cliente',  // detalle
+    ];
+    const result = parseMovementRow(validRow, 5);
+
+    expect(result).not.toBeNull();
+    expect(result?.row).toBe(5);
+    expect(result?.fecha).toBe('2024-01-15');
+    expect(result?.concepto).toBe('TRANSFERENCIA');
+    expect(result?.credito).toBe(50000);
+    expect(result?.debito).toBeNull();
+    expect(result?.detalle).toBe('Pago cliente');
+  });
+
+  it('returns valid BankMovement for row with more than 9 elements', () => {
+    // Extra columns should be ignored
+    const longRow = [
+      '2024-01-15', '2024-01-15', 'TRANSFERENCIA', 'TRF', 'CENTRAL', 'ADMIN',
+      50000, null, 'Detalle', 'extra1', 'extra2',
+    ];
+    const result = parseMovementRow(longRow, 1);
+
+    expect(result).not.toBeNull();
+    expect(result?.detalle).toBe('Detalle');
+  });
+
+  it('returns null for row missing required fecha (index 0)', () => {
+    const noFecha = [null, '2024-01-15', 'TRANSFERENCIA', 'TRF', 'CENTRAL', 'ADMIN', 50000, null, ''];
+    const result = parseMovementRow(noFecha, 1);
+    expect(result).toBeNull();
+  });
+
+  it('returns null for row missing required concepto (index 2)', () => {
+    const noConcepto = ['2024-01-15', '2024-01-15', null, 'TRF', 'CENTRAL', 'ADMIN', 50000, null, ''];
+    const result = parseMovementRow(noConcepto, 1);
+    expect(result).toBeNull();
   });
 });

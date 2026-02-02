@@ -7,6 +7,7 @@ import { google, drive_v3 } from 'googleapis';
 import { getGoogleAuthAsync, getDefaultScopes } from './google-auth.js';
 import type { FileInfo, Result } from '../types/index.js';
 import { debug, warn, error as logError } from '../utils/logger.js';
+import { withQuotaRetry } from '../utils/concurrency.js';
 
 /**
  * Drive service instance
@@ -64,15 +65,21 @@ export async function listFilesInFolder(
     let pageToken: string | undefined;
 
     do {
-      const response = await drive.files.list({
-        q: `'${folderId}' in parents and trashed = false`,
-        fields: 'nextPageToken, files(id, name, mimeType, modifiedTime)',
-        pageSize: 100,
-        pageToken,
-        supportsAllDrives: true,
-        includeItemsFromAllDrives: true,
-      });
+      const listResult = await withQuotaRetry(async () =>
+        drive.files.list({
+          q: `'${folderId}' in parents and trashed = false`,
+          fields: 'nextPageToken, files(id, name, mimeType, modifiedTime)',
+          pageSize: 100,
+          pageToken,
+          supportsAllDrives: true,
+          includeItemsFromAllDrives: true,
+        })
+      );
 
+      if (!listResult.ok) {
+        return listResult;
+      }
+      const response = listResult.value;
       const items = response.data.files || [];
       debug('Query folder results', {
         module: 'drive',
@@ -143,18 +150,24 @@ export async function downloadFile(fileId: string): Promise<Result<Buffer, Error
   try {
     const drive = await getDriveService();
 
-    const response = await drive.files.get(
-      {
-        fileId,
-        alt: 'media',
-        supportsAllDrives: true,
-      },
-      {
-        responseType: 'arraybuffer',
-      }
+    const getResult = await withQuotaRetry(async () =>
+      drive.files.get(
+        {
+          fileId,
+          alt: 'media',
+          supportsAllDrives: true,
+        },
+        {
+          responseType: 'arraybuffer',
+        }
+      )
     );
 
-    const buffer = Buffer.from(response.data as ArrayBuffer);
+    if (!getResult.ok) {
+      return getResult;
+    }
+
+    const buffer = Buffer.from(getResult.value.data as ArrayBuffer);
     return { ok: true, value: buffer };
   } catch (error) {
     return {
@@ -217,22 +230,28 @@ export async function watchFolder(
 
     const expiration = Date.now() + expirationMs;
 
-    const response = await drive.files.watch({
-      fileId: folderId,
-      supportsAllDrives: true,
-      requestBody: {
-        id: channelId,
-        type: 'web_hook',
-        address: webhookUrl,
-        expiration: String(expiration),
-      },
-    });
+    const watchResult = await withQuotaRetry(async () =>
+      drive.files.watch({
+        fileId: folderId,
+        supportsAllDrives: true,
+        requestBody: {
+          id: channelId,
+          type: 'web_hook',
+          address: webhookUrl,
+          expiration: String(expiration),
+        },
+      })
+    );
+
+    if (!watchResult.ok) {
+      return watchResult;
+    }
 
     return {
       ok: true,
       value: {
-        resourceId: response.data.resourceId || '',
-        expiration: response.data.expiration || String(expiration),
+        resourceId: watchResult.value.data.resourceId || '',
+        expiration: watchResult.value.data.expiration || String(expiration),
       },
     };
   } catch (error) {
@@ -256,12 +275,18 @@ export async function stopWatching(
   try {
     const drive = await getDriveService();
 
-    await drive.channels.stop({
-      requestBody: {
-        id: channelId,
-        resourceId,
-      },
-    });
+    const stopResult = await withQuotaRetry(async () =>
+      drive.channels.stop({
+        requestBody: {
+          id: channelId,
+          resourceId,
+        },
+      })
+    );
+
+    if (!stopResult.ok) {
+      return stopResult;
+    }
 
     return { ok: true, value: undefined };
   } catch (error) {
@@ -319,15 +344,21 @@ export async function findByName(
     });
 
     // First, check for ALL matches to detect duplicates
-    const checkResponse = await drive.files.list({
-      q: query,
-      fields: 'files(id, name, mimeType)',
-      pageSize: 10, // Check for up to 10 duplicates
-      supportsAllDrives: true,
-      includeItemsFromAllDrives: true,
-    });
+    const listResult = await withQuotaRetry(async () =>
+      drive.files.list({
+        q: query,
+        fields: 'files(id, name, mimeType)',
+        pageSize: 10, // Check for up to 10 duplicates
+        supportsAllDrives: true,
+        includeItemsFromAllDrives: true,
+      })
+    );
 
-    const files = checkResponse.data.files || [];
+    if (!listResult.ok) {
+      return listResult;
+    }
+
+    const files = listResult.value.data.files || [];
     debug('Find by name results', {
       module: 'drive',
       phase: 'find-by-name',
@@ -412,16 +443,22 @@ export async function listByMimeType(
     let pageToken: string | undefined;
 
     do {
-      const response = await drive.files.list({
-        q: `'${folderId}' in parents and mimeType = '${mimeType}' and trashed = false`,
-        fields: 'nextPageToken, files(id, name, mimeType)',
-        pageSize: 100,
-        pageToken,
-        supportsAllDrives: true,
-        includeItemsFromAllDrives: true,
-      });
+      const listResult = await withQuotaRetry(async () =>
+        drive.files.list({
+          q: `'${folderId}' in parents and mimeType = '${mimeType}' and trashed = false`,
+          fields: 'nextPageToken, files(id, name, mimeType)',
+          pageSize: 100,
+          pageToken,
+          supportsAllDrives: true,
+          includeItemsFromAllDrives: true,
+        })
+      );
 
-      const items = response.data.files || [];
+      if (!listResult.ok) {
+        return listResult;
+      }
+
+      const items = listResult.value.data.files || [];
 
       for (const item of items) {
         if (item.id && item.name && item.mimeType) {
@@ -433,7 +470,7 @@ export async function listByMimeType(
         }
       }
 
-      pageToken = response.data.nextPageToken || undefined;
+      pageToken = listResult.value.data.nextPageToken || undefined;
     } while (pageToken);
 
     return { ok: true, value: files };
@@ -466,17 +503,23 @@ export async function createFolder(
       parentId
     });
 
-    const response = await drive.files.create({
-      requestBody: {
-        name,
-        mimeType: 'application/vnd.google-apps.folder',
-        parents: [parentId],
-      },
-      fields: 'id, name, mimeType',
-      supportsAllDrives: true,
-    });
+    const createResult = await withQuotaRetry(async () =>
+      drive.files.create({
+        requestBody: {
+          name,
+          mimeType: 'application/vnd.google-apps.folder',
+          parents: [parentId],
+        },
+        fields: 'id, name, mimeType',
+        supportsAllDrives: true,
+      })
+    );
 
-    const file = response.data;
+    if (!createResult.ok) {
+      return createResult;
+    }
+
+    const file = createResult.value.data;
     if (!file.id) {
       logError('Failed to create folder: no ID returned', {
         module: 'drive',
@@ -534,13 +577,19 @@ export async function moveFile(
   try {
     const drive = await getDriveService();
 
-    await drive.files.update({
-      fileId,
-      addParents: toFolderId,
-      removeParents: fromFolderId,
-      fields: 'id, parents',
-      supportsAllDrives: true,
-    });
+    const updateResult = await withQuotaRetry(async () =>
+      drive.files.update({
+        fileId,
+        addParents: toFolderId,
+        removeParents: fromFolderId,
+        fields: 'id, parents',
+        supportsAllDrives: true,
+      })
+    );
+
+    if (!updateResult.ok) {
+      return updateResult;
+    }
 
     return { ok: true, value: undefined };
   } catch (error) {
@@ -565,12 +614,18 @@ export async function renameFile(
   try {
     const drive = await getDriveService();
 
-    await drive.files.update({
-      fileId,
-      requestBody: { name: newName },
-      fields: 'id, name',
-      supportsAllDrives: true,
-    });
+    const updateResult = await withQuotaRetry(async () =>
+      drive.files.update({
+        fileId,
+        requestBody: { name: newName },
+        fields: 'id, name',
+        supportsAllDrives: true,
+      })
+    );
+
+    if (!updateResult.ok) {
+      return updateResult;
+    }
 
     return { ok: true, value: undefined };
   } catch (error) {
@@ -591,13 +646,19 @@ export async function getParents(fileId: string): Promise<Result<string[], Error
   try {
     const drive = await getDriveService();
 
-    const response = await drive.files.get({
-      fileId,
-      fields: 'parents',
-      supportsAllDrives: true,
-    });
+    const getResult = await withQuotaRetry(async () =>
+      drive.files.get({
+        fileId,
+        fields: 'parents',
+        supportsAllDrives: true,
+      })
+    );
 
-    return { ok: true, value: response.data.parents || [] };
+    if (!getResult.ok) {
+      return getResult;
+    }
+
+    return { ok: true, value: getResult.value.data.parents || [] };
   } catch (error) {
     return {
       ok: false,
@@ -620,17 +681,23 @@ export async function createSpreadsheet(
   try {
     const drive = await getDriveService();
 
-    const response = await drive.files.create({
-      requestBody: {
-        name,
-        mimeType: 'application/vnd.google-apps.spreadsheet',
-        parents: [parentId],
-      },
-      fields: 'id, name, mimeType',
-      supportsAllDrives: true,
-    });
+    const createResult = await withQuotaRetry(async () =>
+      drive.files.create({
+        requestBody: {
+          name,
+          mimeType: 'application/vnd.google-apps.spreadsheet',
+          parents: [parentId],
+        },
+        fields: 'id, name, mimeType',
+        supportsAllDrives: true,
+      })
+    );
 
-    const file = response.data;
+    if (!createResult.ok) {
+      return createResult;
+    }
+
+    const file = createResult.value.data;
     if (!file.id) {
       return {
         ok: false,

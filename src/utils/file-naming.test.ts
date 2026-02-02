@@ -223,6 +223,12 @@ describe('generateReciboFileName', () => {
     expect(result).toBe('2024-12 - Recibo de Sueldo - Juan Perez.pdf');
   });
 
+  it('handles malformed short date with safe fallback', () => {
+    const recibo: Recibo = { ...baseRecibo, fechaPago: '2024' };
+    const result = generateReciboFileName(recibo);
+    expect(result).toBe('unknown - Recibo de Sueldo - Juan Perez.pdf');
+  });
+
   it('generates liquidacion final', () => {
     const recibo: Recibo = { ...baseRecibo, tipoRecibo: 'liquidacion_final' };
     const result = generateReciboFileName(recibo);
@@ -281,6 +287,12 @@ describe('generateResumenFileName', () => {
     const result = generateResumenFileName(resumen);
     expect(result).toBe('2024-01 - Resumen - BBVA - 1234 5678 90 ARS.pdf');
   });
+
+  it('handles malformed short fechaHasta with safe fallback', () => {
+    const resumen: ResumenBancario = { ...baseResumen, fechaHasta: '' };
+    const result = generateResumenFileName(resumen);
+    expect(result).toBe('unknown - Resumen - BBVA - 1234567890 ARS.pdf');
+  });
 });
 
 describe('generateResumenTarjetaFileName', () => {
@@ -327,6 +339,12 @@ describe('generateResumenTarjetaFileName', () => {
       expect(result).not.toContain('USD');
     }
   });
+
+  it('handles malformed short fechaHasta with safe fallback', () => {
+    const tarjeta: ResumenTarjeta = { ...baseTarjeta, fechaHasta: 'abc' };
+    const result = generateResumenTarjetaFileName(tarjeta);
+    expect(result).toBe('unknown - Resumen - BBVA - Visa 4563.pdf');
+  });
 });
 
 describe('generateResumenBrokerFileName', () => {
@@ -354,5 +372,11 @@ describe('generateResumenBrokerFileName', () => {
     const broker: ResumenBroker = { ...baseBroker, broker: 'IOL Invertir/Online S.A.' };
     const result = generateResumenBrokerFileName(broker);
     expect(result).toBe('2024-01 - Resumen Broker - IOL Invertir-Online S.A. - 123456.pdf');
+  });
+
+  it('handles malformed short fechaHasta with safe fallback', () => {
+    const broker: ResumenBroker = { ...baseBroker, fechaHasta: '20' };
+    const result = generateResumenBrokerFileName(broker);
+    expect(result).toBe('unknown - Resumen Broker - BALANZ CAPITAL VALORES SAU - 123456.pdf');
   });
 });

@@ -69,6 +69,12 @@ describe('parseNumber', () => {
       expect(parseNumber('-1,234.56')).toBe(-1234.56);
       expect(parseNumber('(1,234.56)')).toBe(-1234.56);
     });
+
+    it('parses accounting notation with currency symbol inside parentheses', () => {
+      expect(parseNumber('($1,234.56)')).toBe(-1234.56);
+      expect(parseNumber('($100.00)')).toBe(-100);
+      expect(parseNumber('(-$1,234.56)')).toBe(-1234.56);
+    });
   });
 
   describe('Plain format', () => {

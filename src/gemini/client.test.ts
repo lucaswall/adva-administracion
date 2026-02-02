@@ -1171,6 +1171,98 @@ describe('GeminiClient', () => {
     });
   });
 
+  describe('rate limit queue robustness', () => {
+    const mockBuffer = Buffer.from('test');
+    const mockMimeType = 'application/pdf';
+    const mockPrompt = 'Extract';
+
+    it('queue continues processing after one request fails', async () => {
+      vi.useFakeTimers();
+
+      const mockResponse = {
+        candidates: [{
+          content: {
+            parts: [{ text: 'Success' }]
+          }
+        }]
+      };
+
+      let callCount = 0;
+      global.fetch = vi.fn().mockImplementation(async () => {
+        callCount++;
+        if (callCount === 2) {
+          // Second request fails
+          throw new Error('Network failure');
+        }
+        return {
+          ok: true,
+          status: 200,
+          text: async () => JSON.stringify(mockResponse)
+        };
+      });
+
+      const limitedClient = new GeminiClient(mockApiKey, 10);
+
+      // Launch 4 concurrent requests
+      const promises = [
+        limitedClient.analyzeDocument(mockBuffer, mockMimeType, mockPrompt, 1),
+        limitedClient.analyzeDocument(mockBuffer, mockMimeType, mockPrompt, 1),
+        limitedClient.analyzeDocument(mockBuffer, mockMimeType, mockPrompt, 1),
+        limitedClient.analyzeDocument(mockBuffer, mockMimeType, mockPrompt, 1),
+      ];
+
+      await vi.runAllTimersAsync();
+
+      const results = await Promise.all(promises);
+
+      // Request 2 should fail, others should succeed
+      expect(results[0].ok).toBe(true);
+      expect(results[1].ok).toBe(false);
+      expect(results[2].ok).toBe(true);
+      expect(results[3].ok).toBe(true);
+
+      // All 4 requests should have been attempted
+      expect(callCount).toBe(4);
+
+      vi.useRealTimers();
+    });
+
+    it('rapid sequential requests are all processed without deadlock', async () => {
+      vi.useFakeTimers();
+
+      const mockResponse = {
+        candidates: [{
+          content: {
+            parts: [{ text: 'Success' }]
+          }
+        }]
+      };
+
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify(mockResponse)
+      });
+
+      const limitedClient = new GeminiClient(mockApiKey, 100);
+
+      // Launch many rapid requests
+      const promises = Array.from({ length: 20 }, () =>
+        limitedClient.analyzeDocument(mockBuffer, mockMimeType, mockPrompt, 1)
+      );
+
+      await vi.runAllTimersAsync();
+
+      const results = await Promise.all(promises);
+
+      // All should succeed
+      expect(results.every(r => r.ok)).toBe(true);
+      expect(global.fetch).toHaveBeenCalledTimes(20);
+
+      vi.useRealTimers();
+    });
+  });
+
   describe('HTTP response size limit', () => {
     const mockBuffer = Buffer.from('test-pdf-content');
     const mockMimeType = 'application/pdf';

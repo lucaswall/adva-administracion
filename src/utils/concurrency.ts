@@ -3,6 +3,7 @@
  * Implements optimistic locking using version checks
  */
 
+import { createHash } from 'crypto';
 import type { Result } from '../types/index.js';
 import { warn, debug } from './logger.js';
 import { getCorrelationId } from './correlation.js';
@@ -363,7 +364,8 @@ export class VersionConflictError extends Error {
 }
 
 /**
- * Computes a simple hash for a value (for version comparison)
+ * Computes a hash for a value (for version comparison)
+ * Uses MD5 for better collision resistance than DJB2 (ADV-33)
  * Handles BigInt, Symbols, and circular references safely
  */
 export function computeVersion(value: unknown): string {
@@ -389,13 +391,8 @@ export function computeVersion(value: unknown): string {
     }
   }
 
-  let hash = 0;
-  for (let i = 0; i < str.length; i++) {
-    const char = str.charCodeAt(i);
-    hash = ((hash << 5) - hash) + char;
-    hash = hash & hash; // Convert to 32bit integer
-  }
-  return hash.toString(16);
+  // Use MD5 for better collision resistance (returns 16-char hex)
+  return createHash('md5').update(str).digest('hex').slice(0, 16);
 }
 
 /**

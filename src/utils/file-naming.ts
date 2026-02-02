@@ -5,6 +5,41 @@
 import type { Factura, Pago, Recibo, ResumenBancario, ResumenTarjeta, ResumenBroker, Retencion } from '../types/index.js';
 
 /**
+ * Extracts YYYY-MM periodo from a date string with validation
+ *
+ * @param dateStr - Date string expected to be in YYYY-MM-DD format
+ * @returns YYYY-MM if valid, 'unknown' if malformed or too short
+ */
+function extractPeriodo(dateStr: string): string {
+  // Must be at least 7 chars (YYYY-MM) and match YYYY-MM pattern at start
+  if (!dateStr || dateStr.length < 7) {
+    return 'unknown';
+  }
+
+  // Validate YYYY-MM format at the beginning
+  const periodoMatch = dateStr.match(/^(\d{4})-(\d{2})/);
+  if (!periodoMatch) {
+    return 'unknown';
+  }
+
+  const [, yearStr, monthStr] = periodoMatch;
+  const year = parseInt(yearStr, 10);
+  const month = parseInt(monthStr, 10);
+
+  // Validate year is reasonable (1900-2100)
+  if (year < 1900 || year > 2100) {
+    return 'unknown';
+  }
+
+  // Validate month (1-12)
+  if (month < 1 || month > 12) {
+    return 'unknown';
+  }
+
+  return dateStr.substring(0, 7);
+}
+
+/**
  * Map of accented characters to their ASCII equivalents
  */
 const ACCENT_MAP: Record<string, string> = {
@@ -161,8 +196,8 @@ export function generatePagoFileName(
  * @returns Standardized file name
  */
 export function generateReciboFileName(recibo: Recibo): string {
-  // Extract YYYY-MM from fechaPago
-  const yearMonth = recibo.fechaPago.substring(0, 7); // YYYY-MM-DD -> YYYY-MM
+  // Extract YYYY-MM from fechaPago with validation
+  const yearMonth = extractPeriodo(recibo.fechaPago);
 
   // Type label
   const typeLabel = recibo.tipoRecibo === 'liquidacion_final'
@@ -186,8 +221,8 @@ export function generateReciboFileName(recibo: Recibo): string {
  * @returns Standardized file name
  */
 export function generateResumenFileName(resumen: ResumenBancario): string {
-  // Extract YYYY-MM from fechaHasta (periodo format)
-  const periodo = resumen.fechaHasta.substring(0, 7); // YYYY-MM-DD -> YYYY-MM
+  // Extract YYYY-MM from fechaHasta with validation
+  const periodo = extractPeriodo(resumen.fechaHasta);
 
   // Bank name (sanitized)
   const bankName = sanitizeFileName(resumen.banco);
@@ -208,8 +243,8 @@ export function generateResumenFileName(resumen: ResumenBancario): string {
  * @returns Standardized file name
  */
 export function generateResumenTarjetaFileName(resumen: ResumenTarjeta): string {
-  // Extract YYYY-MM from fechaHasta (periodo format)
-  const periodo = resumen.fechaHasta.substring(0, 7); // YYYY-MM-DD -> YYYY-MM
+  // Extract YYYY-MM from fechaHasta with validation
+  const periodo = extractPeriodo(resumen.fechaHasta);
 
   // Bank name (sanitized)
   const bankName = sanitizeFileName(resumen.banco);
@@ -230,8 +265,8 @@ export function generateResumenTarjetaFileName(resumen: ResumenTarjeta): string 
  * @returns Standardized file name
  */
 export function generateResumenBrokerFileName(resumen: ResumenBroker): string {
-  // Extract YYYY-MM from fechaHasta (periodo format)
-  const periodo = resumen.fechaHasta.substring(0, 7); // YYYY-MM-DD -> YYYY-MM
+  // Extract YYYY-MM from fechaHasta with validation
+  const periodo = extractPeriodo(resumen.fechaHasta);
 
   // Broker name (sanitized)
   const brokerName = sanitizeFileName(resumen.broker);

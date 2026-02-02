@@ -27,6 +27,30 @@ vi.mock('./google-auth.js', () => ({
   getDefaultScopes: vi.fn(() => []),
 }));
 
+// Mock concurrency with fast retries for testing (ADV-25)
+vi.mock('../utils/concurrency.js', async () => {
+  const actual = await vi.importActual<typeof import('../utils/concurrency.js')>('../utils/concurrency.js');
+  return {
+    ...actual,
+    withQuotaRetry: vi.fn(async <T>(fn: () => Promise<T>) => {
+      // Fast retry with max 3 attempts, 10ms delay for tests
+      let lastError: Error | null = null;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          const result = await fn();
+          return { ok: true, value: result };
+        } catch (error) {
+          lastError = error instanceof Error ? error : new Error(String(error));
+          if (attempt < 2) {
+            await new Promise(resolve => setTimeout(resolve, 10));
+          }
+        }
+      }
+      return { ok: false, error: lastError || new Error('Unknown error') };
+    }),
+  };
+});
+
 import {
   findByName,
   listByMimeType,
@@ -365,6 +389,107 @@ describe('Drive folder operations', () => {
       if (!result.ok) {
         expect(result.error.message).toBe('Get failed');
       }
+    });
+  });
+
+  describe('rate limit retry (ADV-25)', () => {
+    it('retries on 429 response in listFilesInFolder', async () => {
+      // Dynamically import to get the quota retry version
+      const { listFilesInFolder: listFilesInFolderWithRetry } = await import('./drive.js');
+
+      // First call fails with 429, second succeeds
+      mockDriveFiles.list
+        .mockRejectedValueOnce(new Error('Rate limit exceeded (429)'))
+        .mockResolvedValueOnce({
+          data: {
+            files: [{ id: 'file1', name: 'test.pdf', mimeType: 'application/pdf', modifiedTime: '2024-01-15T00:00:00Z' }],
+          },
+        });
+
+      const result = await listFilesInFolderWithRetry('folderId');
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value).toHaveLength(1);
+        expect(result.value[0].name).toBe('test.pdf');
+      }
+      expect(mockDriveFiles.list).toHaveBeenCalledTimes(2);
+    });
+
+    it('retries on rate limit error in moveFile', async () => {
+      // First call fails with rate limit, second succeeds
+      mockDriveFiles.update
+        .mockRejectedValueOnce(new Error('Too many requests'))
+        .mockResolvedValueOnce({
+          data: { id: 'fileId' },
+        });
+
+      const result = await moveFile('fileId', 'fromFolderId', 'toFolderId');
+
+      expect(result.ok).toBe(true);
+      expect(mockDriveFiles.update).toHaveBeenCalledTimes(2);
+    });
+
+    it('retries on 429 in findByName and eventually succeeds', async () => {
+      mockDriveFiles.list
+        .mockRejectedValueOnce(new Error('429 Too Many Requests'))
+        .mockRejectedValueOnce(new Error('Rate limit exceeded'))
+        .mockResolvedValueOnce({
+          data: {
+            files: [{ id: 'file123', name: 'test.pdf', mimeType: 'application/pdf' }],
+          },
+        });
+
+      const result = await findByName('parentId', 'test.pdf');
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value?.id).toBe('file123');
+      }
+      expect(mockDriveFiles.list).toHaveBeenCalledTimes(3);
+    });
+
+    it('returns error after max retries exhausted', async () => {
+      // All calls fail with rate limit
+      mockDriveFiles.list.mockRejectedValue(new Error('Rate limit exceeded (429)'));
+
+      const result = await findByName('parentId', 'test.pdf');
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.error.message).toContain('Rate limit');
+      }
+      // Should have been called multiple times before giving up
+      expect(mockDriveFiles.list.mock.calls.length).toBeGreaterThanOrEqual(2);
+    });
+
+    it('retries on quota exceeded in renameFile', async () => {
+      mockDriveFiles.update
+        .mockRejectedValueOnce(new Error('Quota exceeded'))
+        .mockResolvedValueOnce({
+          data: { id: 'fileId', name: 'new-name.pdf' },
+        });
+
+      const result = await renameFile('fileId', 'new-name.pdf');
+
+      expect(result.ok).toBe(true);
+      expect(mockDriveFiles.update).toHaveBeenCalledTimes(2);
+    });
+
+    it('retries on rate limit in getParents', async () => {
+      mockDriveFiles.get
+        .mockRejectedValueOnce(new Error('429'))
+        .mockResolvedValueOnce({
+          data: { parents: ['parent1'] },
+        });
+
+      const result = await getParents('fileId');
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value).toEqual(['parent1']);
+      }
+      expect(mockDriveFiles.get).toHaveBeenCalledTimes(2);
     });
   });
 

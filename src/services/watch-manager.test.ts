@@ -8,6 +8,7 @@ import {
   getChannelCount,
   triggerScan,
   checkAndMarkNotification,
+  resetConsecutiveFailures,
 } from './watch-manager.js';
 import * as cron from 'node-cron';
 
@@ -399,6 +400,131 @@ describe('watch-manager', () => {
       expect(maxConcurrency).toBe(1);
       // All 5 folders should have been scanned
       expect(mockScanFolder).toHaveBeenCalledTimes(5);
+    });
+  });
+
+describe('triggerScan - failure handling (ADV-18)', () => {
+    beforeEach(() => {
+      // Reset the consecutive failure counter before each test
+      resetConsecutiveFailures();
+    });
+
+    it('should stop triggering scans after consecutive failures', async () => {
+      const { scanFolder } = await import('../processing/scanner.js');
+      const mockScanFolder = vi.mocked(scanFolder);
+
+      // All scans fail
+      mockScanFolder.mockResolvedValue({
+        ok: false,
+        error: new Error('Simulated scan failure')
+      });
+
+      // Trigger multiple scans - queue more than MAX_CONSECUTIVE_FAILURES (3)
+      triggerScan('folder1');
+      await new Promise(resolve => setTimeout(resolve, 10));
+
+      // Queue additional scans - these should be limited by failure threshold
+      triggerScan('folder2');
+      triggerScan('folder3');
+      triggerScan('folder4');
+      triggerScan('folder5');
+
+      // Wait for all processing to complete
+      await new Promise(resolve => setTimeout(resolve, 500));
+
+      // After MAX_CONSECUTIVE_FAILURES (3), should stop processing pending scans
+      // Should see exactly 3 calls (folder1, folder2, folder3), then stops
+      expect(mockScanFolder).toHaveBeenCalledTimes(3);
+    });
+
+    it('should reset failure counter on successful scan', async () => {
+      const { scanFolder } = await import('../processing/scanner.js');
+      const mockScanFolder = vi.mocked(scanFolder);
+
+      const scanPromises: Array<{ resolve: (value: any) => void }> = [];
+
+      mockScanFolder.mockImplementation(() => {
+        return new Promise((resolve) => {
+          scanPromises.push({ resolve });
+        });
+      });
+
+      // First scan
+      triggerScan('folder1');
+      await new Promise(resolve => setTimeout(resolve, 10));
+
+      // Queue more scans
+      triggerScan('folder2');
+
+      // First scan succeeds - counter should reset
+      scanPromises[0].resolve({
+        ok: true,
+        value: { filesProcessed: 1, errors: 0, facturasAdded: 0, pagosAdded: 0, recibosAdded: 0, matchesFound: 0, duration: 0 }
+      });
+      await new Promise(resolve => setTimeout(resolve, 100));
+
+      // Second scan should proceed (counter was reset)
+      expect(mockScanFolder).toHaveBeenCalledTimes(2);
+
+      // Second scan succeeds
+      scanPromises[1].resolve({
+        ok: true,
+        value: { filesProcessed: 1, errors: 0, facturasAdded: 0, pagosAdded: 0, recibosAdded: 0, matchesFound: 0, duration: 0 }
+      });
+      await new Promise(resolve => setTimeout(resolve, 100));
+    });
+
+    it('should stop immediately on auth failure without retries', async () => {
+      const { scanFolder } = await import('../processing/scanner.js');
+      const mockScanFolder = vi.mocked(scanFolder);
+
+      // Use a controlled promise to simulate slow auth failure
+      const scanPromises: Array<{ reject: (err: Error) => void }> = [];
+
+      mockScanFolder.mockImplementation(() => {
+        return new Promise((_, reject) => {
+          scanPromises.push({ reject: (err: Error) => reject(err) });
+        });
+      });
+
+      // Trigger first scan
+      triggerScan('folder1');
+      await new Promise(resolve => setTimeout(resolve, 10));
+
+      // Queue additional scans while first is running
+      triggerScan('folder2');
+      triggerScan('folder3');
+
+      // Now trigger auth failure for first scan
+      scanPromises[0].reject(new Error('Invalid Credentials'));
+
+      // Wait for processing
+      await new Promise(resolve => setTimeout(resolve, 200));
+
+      // Should NOT trigger any pending scans after auth failure - only 1 call
+      expect(mockScanFolder).toHaveBeenCalledTimes(1);
+    });
+
+    it('should not trigger pending scan when scan execution throws (after max failures)', async () => {
+      const { scanFolder } = await import('../processing/scanner.js');
+      const mockScanFolder = vi.mocked(scanFolder);
+
+      // Throw error instead of returning Result
+      mockScanFolder.mockRejectedValue(new Error('Unexpected crash'));
+
+      // Trigger multiple scans to hit MAX_CONSECUTIVE_FAILURES
+      triggerScan('folder1');
+      await new Promise(resolve => setTimeout(resolve, 10));
+
+      // Queue more scans than MAX_CONSECUTIVE_FAILURES
+      triggerScan('folder2');
+      triggerScan('folder3');
+      triggerScan('folder4');
+
+      await new Promise(resolve => setTimeout(resolve, 500));
+
+      // Should only run 3 scans (MAX_CONSECUTIVE_FAILURES) then stop
+      expect(mockScanFolder).toHaveBeenCalledTimes(3);
     });
   });
 

@@ -19,11 +19,16 @@ import { parseNumber } from '../utils/numbers.js';
 import { getConfig } from '../config.js';
 import { warn } from '../utils/logger.js';
 
+/** Minimum number of columns required for a valid movement row */
+const MIN_MOVEMENT_COLUMNS = 9;
+
 /**
  * Parses a row from the bank movements sheet into a BankMovement object
  */
-function parseMovementRow(row: CellValue[], rowNumber: number): BankMovement | null {
+export function parseMovementRow(row: CellValue[], rowNumber: number): BankMovement | null {
   // Columns: Fecha, FechaValor, Concepto, Codigo, Oficina, AreaADVA, Credito, Debito, Detalle
+  // Ensure row has enough elements before accessing indices
+  if (row.length < MIN_MOVEMENT_COLUMNS) return null;
   if (!row[0] || !row[2]) return null; // Need at least date and concepto
 
   return {

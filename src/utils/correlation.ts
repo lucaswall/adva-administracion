@@ -93,13 +93,23 @@ export async function withCorrelationAsync<T>(
  * Updates the current correlation context with additional data
  * Useful for adding fileId/fileName after the context is created
  *
+ * This function creates a new context object with the updates applied,
+ * preserving immutability. The new context replaces the current one
+ * using enterWith() to maintain the same async context scope.
+ *
  * @param updates - Partial context updates
  */
 export function updateCorrelationContext(updates: Partial<Omit<CorrelationContext, 'correlationId' | 'startTime'>>): void {
   const store = correlationStorage.getStore();
   if (store) {
-    if (updates.fileId !== undefined) store.fileId = updates.fileId;
-    if (updates.fileName !== undefined) store.fileName = updates.fileName;
+    // Create a new immutable context object with updates applied
+    const newContext: CorrelationContext = {
+      ...store,
+      fileId: updates.fileId !== undefined ? updates.fileId : store.fileId,
+      fileName: updates.fileName !== undefined ? updates.fileName : store.fileName,
+    };
+    // Replace the current context with the new one
+    correlationStorage.enterWith(newContext);
   }
 }
 
