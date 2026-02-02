@@ -467,3 +467,58 @@ Context running low (~35% remaining). Run `/plan-implement` to continue with Tas
 **Task 8 (ADV-20):** Race condition fixed with double-checked locking. Fast path for existing sheets, lock acquired for creation, re-check after lock before creating.
 
 **Linear:** ADV-14, ADV-17, ADV-20 → Done
+
+---
+
+## Iteration 3
+
+**Implemented:** 2026-02-01
+
+### Tasks Completed This Iteration
+- Task 9: Add TOCTOU protection in match-movimientos replacement (ADV-19) - Added `computeRowVersion()` function and `expectedVersion` field to `DetalleUpdate` interface for optimistic concurrency control
+- Task 10: Fix lock auto-expiry race condition (ADV-8) - Rewrote lock acquisition to use atomic compare-and-swap pattern with `lockInstanceId` verification
+
+### Tasks Remaining
+- Task 11: Fix scanner state machine race condition (ADV-15)
+- Task 12: Add lock timeout to markFileProcessing (ADV-22)
+- Task 13: Fix startup scan silent failure (ADV-26)
+- Task 14: Fix shutdown handlers not awaited (ADV-7)
+- Task 15: Fix data loss in pagos-pendientes after sheet clear (ADV-13)
+- Task 16: Fix timing leak in auth middleware (ADV-6)
+
+### Files Modified
+- `src/bank/match-movimientos.ts` - Added `computeRowVersion()` function, updated `DetalleUpdate` usage to include `expectedVersion`
+- `src/bank/match-movimientos.test.ts` - Added tests for `computeRowVersion`, TOCTOU protection with `expectedVersion`
+- `src/services/movimientos-detalle.ts` - Added `computeVersionFromRow()` function, updated `updateDetalle()` to verify versions before writing
+- `src/utils/concurrency.ts` - Rewrote `LockManager.acquire()` to use atomic compare-and-swap pattern, removed separate release-then-acquire flow
+- `src/utils/concurrency.test.ts` - Added lock auto-expiry atomicity tests, updated test expectations for instance ID verification
+
+### Linear Updates
+- ADV-19: Todo → In Progress → Review
+- ADV-8: Todo → In Progress → Review
+
+### Pre-commit Verification
+- bug-hunter: Found 1 high, 2 medium, 1 low issues - Analysis shows high issue is false positive (version computation is consistent), medium issues are expected limitations (optimistic concurrency, test coverage)
+- verifier: All 1406 tests pass, zero warnings
+
+### Continuation Status
+Context running low (~35% remaining). Run `/plan-implement` to continue with Task 11.
+
+### Review
+<!-- REVIEW COMPLETE -->
+**Reviewed:** 2026-02-01
+**Result:** ✅ PASS - All 2 tasks implemented correctly
+
+**Task 9 (ADV-19):** TOCTOU protection implemented with optimistic locking.
+- `computeRowVersion()` in match-movimientos.ts computes MD5 hash of row data (fecha, origenConcepto, debito, credito, matchedFileId, detalle)
+- `computeVersionFromRow()` in movimientos-detalle.ts uses identical algorithm for verification
+- `updateDetalle()` verifies version before writing, skips on mismatch with warning log
+- Tests cover consistency, different versions for different data, null handling
+
+**Task 10 (ADV-8):** Lock auto-expiry race condition fixed with atomic CAS pattern.
+- `LockManager.acquire()` rewritten with `lockInstanceId` for compare-and-swap
+- Synchronous atomic block: read state → check can acquire → set new state → verify won race
+- Expired lock handling notifies old waiters before acquisition
+- Tests verify only one operation acquires expired lock, sequential execution maintained
+
+**Linear:** ADV-19, ADV-8 → Done

@@ -3,6 +3,7 @@
  * Matches bank movements against Control de Ingresos/Egresos
  */
 
+import { createHash } from 'crypto';
 import type {
   Result,
   Factura,
@@ -45,6 +46,50 @@ export function getRequiredColumnIndex(headers: string[], headerName: string): n
     );
   }
   return index;
+}
+
+/**
+ * Row data used for computing version hash
+ * Used for TOCTOU protection - only includes mutable fields that matter for matching
+ */
+interface VersionableRow {
+  /** Transaction date */
+  fecha: string;
+  /** Origin/concept description */
+  origenConcepto: string;
+  /** Debit amount */
+  debito: number | null;
+  /** Credit amount */
+  credito: number | null;
+  /** Google Drive fileId of matched document */
+  matchedFileId: string;
+  /** Human-readable match description */
+  detalle: string;
+}
+
+/**
+ * Computes a version hash for a movimiento row.
+ * Used for TOCTOU protection - if the version changes between read and write,
+ * the update should be skipped to avoid overwriting concurrent modifications.
+ *
+ * The version is based on fields that could change during concurrent updates:
+ * - matchedFileId and detalle (the fields we're updating)
+ * - fecha, origenConcepto, debito, credito (immutable but included for row identity)
+ *
+ * @param row - Row data to compute version for
+ * @returns Hex string hash of the row data
+ */
+export function computeRowVersion(row: VersionableRow): string {
+  const data = [
+    row.fecha,
+    row.origenConcepto,
+    row.debito?.toString() ?? '',
+    row.credito?.toString() ?? '',
+    row.matchedFileId,
+    row.detalle,
+  ].join('|');
+
+  return createHash('md5').update(data).digest('hex').slice(0, 16);
 }
 
 /**
@@ -744,11 +789,16 @@ async function matchBankMovimientos(
       }
 
       if (shouldUpdate) {
+        // Compute version from the row's current state for TOCTOU protection
+        // If row changes between now and write, update will be skipped
+        const expectedVersion = computeRowVersion(mov);
+
         updates.push({
           sheetName: mov.sheetName,
           rowNumber: mov.rowNumber,
           matchedFileId: matchResult.matchedFileId,
           detalle: matchResult.description,
+          expectedVersion,
         });
 
         if (mov.debito !== null && mov.debito > 0) {

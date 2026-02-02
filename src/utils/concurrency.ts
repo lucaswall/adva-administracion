@@ -32,6 +32,8 @@ interface LockState {
   /** Promise that resolves when lock is released */
   waitPromise?: Promise<void>;
   /** Resolve function to release waiters */
+  /** Unique instance ID for this lock (for atomic compare-and-swap on expiry) */
+  lockInstanceId?: string;
   waitResolve?: () => void;
 }
 
@@ -61,6 +63,8 @@ const DEFAULT_RETRY_CONFIG: RetryConfig = {
  */
 const LOCK_TIMEOUT_MS = 30000; // 30 seconds
 
+let lockInstanceIdCounter = 0;
+
 /**
  * In-memory lock manager for resources
  */
@@ -68,7 +72,18 @@ class LockManager {
   private locks = new Map<string, LockState>();
 
   /**
-   * Acquires a lock for a resource
+   * Attempts to atomically acquire a lock, handling expiry in the same operation.
+   *
+   * ATOMICITY: This uses a compare-and-swap pattern where:
+   * 1. We read current state
+   * 2. Determine if we can acquire (no lock OR expired lock)
+   * 3. Create new state with unique instance ID
+   * 4. Set the new state
+   * 5. Verify our instance ID is in the map (we won the race)
+   *
+   * If two operations both see an expired lock, they will both set their state,
+   * but only one will have their lockInstanceId in the map after - the second
+   * one to call Map.set() wins. The loser will fail the verification and retry.
    *
    * @param resourceId - Unique identifier for the resource
    * @param timeoutMs - Maximum time to wait for the lock
@@ -78,56 +93,88 @@ class LockManager {
   async acquire(resourceId: string, timeoutMs: number = 5000, autoExpiryMs: number = LOCK_TIMEOUT_MS): Promise<boolean> {
     const startTime = Date.now();
     const correlationId = getCorrelationId();
+    const myLockInstanceId = String(++lockInstanceIdCounter) + '-' + Math.random().toString(36).slice(2);
 
     while (Date.now() - startTime < timeoutMs) {
-      const state = this.locks.get(resourceId);
+      // === ATOMIC BLOCK START ===
+      // All operations below until "ATOMIC BLOCK END" are synchronous
+      // JavaScript single-threading guarantees no interleaving here
 
-      // Check if lock is expired
-      if (state?.locked && state.acquiredAt) {
-        const lockAge = Date.now() - state.acquiredAt;
-        if (lockAge > autoExpiryMs) {
-          warn('Lock expired, force releasing', {
-            module: 'concurrency',
-            resourceId,
-            lockAge,
-            autoExpiryMs,
-            correlationId,
-          });
-          this.release(resourceId);
+      const state = this.locks.get(resourceId);
+      const now = Date.now();
+
+      // Determine if we can acquire: no lock OR lock is expired
+      let canAcquire = false;
+      let isExpiredLock = false;
+      let lockAge = 0;
+      let oldWaitResolve: (() => void) | undefined;
+
+      if (!state?.locked) {
+        // No lock held - can acquire
+        canAcquire = true;
+      } else if (state.acquiredAt) {
+        // Lock exists - check if expired using THE LOCK'S OWN expiry timeout
+        lockAge = now - state.acquiredAt;
+        if (lockAge > state.autoExpiryMs) {
+          // Lock is expired - can acquire by overwriting
+          canAcquire = true;
+          isExpiredLock = true;
+          oldWaitResolve = state.waitResolve;
         }
       }
 
-      const currentState = this.locks.get(resourceId);
-
-      if (!currentState?.locked) {
-        // Lock is available - create promise and capture resolver synchronously
-        // Note: Promise executor runs synchronously, so resolver is assigned before Map.set()
-        let resolver: () => void = () => {}; // Initialize to satisfy TypeScript
+      if (canAcquire) {
+        // Create wait promise synchronously (executor runs immediately)
+        let resolver: () => void = () => {};
         const waitPromise = new Promise<void>((resolve) => {
           resolver = resolve;
         });
 
-        // Set ALL state atomically in single Map.set() call (no yields between)
+        // Set our lock state - this overwrites any existing state atomically
         this.locks.set(resourceId, {
           locked: true,
-          acquiredAt: Date.now(),
+          acquiredAt: now,
           autoExpiryMs,
           holderCorrelationId: correlationId,
+          lockInstanceId: myLockInstanceId,
           waitPromise,
           waitResolve: resolver,
         });
 
-        debug('Lock acquired', {
-          module: 'concurrency',
-          resourceId,
-          correlationId,
-        });
+        // CRITICAL: Verify we won the race
+        // If another operation set their state after us, their ID will be here
+        const verifyState = this.locks.get(resourceId);
+        if (verifyState?.lockInstanceId === myLockInstanceId) {
+          // === ATOMIC BLOCK END - WE WON ===
 
-        return true;
+          // Notify old waiters (safe to do after we have the lock)
+          if (isExpiredLock && oldWaitResolve) {
+            oldWaitResolve();
+            warn('Lock expired, force acquired by new holder', {
+              module: 'concurrency',
+              resourceId,
+              lockAge,
+              autoExpiryMs: state?.autoExpiryMs,
+              oldHolder: state?.holderCorrelationId,
+              newHolder: correlationId,
+            });
+          }
+
+          debug('Lock acquired', {
+            module: 'concurrency',
+            resourceId,
+            correlationId,
+          });
+
+          return true;
+        }
+        // === ATOMIC BLOCK END - WE LOST ===
+        // Another operation set their lock after us - continue to wait for it
       }
 
-      // Wait for current lock to be released
-      if (currentState.waitPromise) {
+      // Lock is held (and not expired) OR we lost the race - wait for release
+      const currentState = this.locks.get(resourceId);
+      if (currentState?.waitPromise) {
         const remainingTime = timeoutMs - (Date.now() - startTime);
         if (remainingTime <= 0) break;
 

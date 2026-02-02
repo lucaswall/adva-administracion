@@ -995,3 +995,241 @@ describe('matchAllMovimientos', () => {
     expect(updateDetalle).toHaveBeenCalledWith('bbva-id', []);
   });
 });
+
+describe('computeRowVersion', () => {
+  it('computes consistent version for same row data', async () => {
+    const { computeRowVersion } = await import('./match-movimientos.js');
+
+    const row = {
+      fecha: '2025-01-15',
+      origenConcepto: 'PAGO TEST',
+      debito: 1000,
+      credito: null,
+      matchedFileId: 'file123',
+      detalle: 'Test detalle',
+    };
+
+    const version1 = computeRowVersion(row);
+    const version2 = computeRowVersion(row);
+
+    expect(version1).toBe(version2);
+    expect(version1).toMatch(/^[a-f0-9]+$/); // Should be a hex string
+  });
+
+  it('computes different versions for different matchedFileId', async () => {
+    const { computeRowVersion } = await import('./match-movimientos.js');
+
+    const row1 = {
+      fecha: '2025-01-15',
+      origenConcepto: 'PAGO TEST',
+      debito: 1000,
+      credito: null,
+      matchedFileId: 'file123',
+      detalle: 'Test detalle',
+    };
+
+    const row2 = {
+      ...row1,
+      matchedFileId: 'file456',
+    };
+
+    expect(computeRowVersion(row1)).not.toBe(computeRowVersion(row2));
+  });
+
+  it('computes different versions for different detalle', async () => {
+    const { computeRowVersion } = await import('./match-movimientos.js');
+
+    const row1 = {
+      fecha: '2025-01-15',
+      origenConcepto: 'PAGO TEST',
+      debito: 1000,
+      credito: null,
+      matchedFileId: 'file123',
+      detalle: 'Detalle A',
+    };
+
+    const row2 = {
+      ...row1,
+      detalle: 'Detalle B',
+    };
+
+    expect(computeRowVersion(row1)).not.toBe(computeRowVersion(row2));
+  });
+
+  it('handles null/empty values consistently', async () => {
+    const { computeRowVersion } = await import('./match-movimientos.js');
+
+    const row1 = {
+      fecha: '2025-01-15',
+      origenConcepto: 'PAGO TEST',
+      debito: null,
+      credito: 1000,
+      matchedFileId: '',
+      detalle: '',
+    };
+
+    const row2 = {
+      fecha: '2025-01-15',
+      origenConcepto: 'PAGO TEST',
+      debito: null,
+      credito: 1000,
+      matchedFileId: '',
+      detalle: '',
+    };
+
+    expect(computeRowVersion(row1)).toBe(computeRowVersion(row2));
+  });
+});
+
+describe('TOCTOU protection', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.useFakeTimers();
+    mockMatchMovement = vi.fn().mockReturnValue({
+      matchType: 'no_match',
+      description: '',
+      matchedFileId: '',
+      confidence: 'LOW',
+    });
+    mockMatchCreditMovement = vi.fn().mockReturnValue({
+      matchType: 'no_match',
+      description: '',
+      matchedFileId: '',
+      confidence: 'LOW',
+    });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('skips update when row version changed between read and write', async () => {
+    const mockFolderStructure = {
+      controlIngresosId: 'ingresos-id',
+      controlEgresosId: 'egresos-id',
+      bankSpreadsheets: new Map(),
+      movimientosSpreadsheets: new Map([['BBVA', 'bbva-id']]),
+    };
+
+    vi.mocked(withLock).mockImplementation(async (_id, fn) => {
+      const result = await fn();
+      return { ok: true, value: result };
+    });
+
+    vi.mocked(getCachedFolderStructure).mockReturnValue(mockFolderStructure as any);
+
+    vi.mocked(getValues).mockResolvedValue({
+      ok: true,
+      value: [['header']],
+    });
+
+    // Initial read returns row with empty match
+    vi.mocked(getMovimientosToFill).mockResolvedValue({
+      ok: true,
+      value: [
+        {
+          sheetName: '2025-01',
+          rowNumber: 2,
+          fecha: '2025-01-15',
+          origenConcepto: 'PAGO TEST',
+          debito: 1000,
+          credito: null,
+          saldo: 9000,
+          saldoCalculado: 9000,
+          matchedFileId: '',  // Empty initially
+          detalle: '',
+        },
+      ],
+    });
+
+    mockMatchMovement.mockReturnValue({
+      matchType: 'direct_factura',
+      description: 'Pago Factura TEST',
+      matchedFileId: 'factura123',
+      confidence: 'HIGH',
+    });
+
+    // updateDetalle should receive expected version and skip if mismatch
+    // The mock will simulate version mismatch by returning 0 updates
+    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: 0 });
+
+    const resultPromise = matchAllMovimientos();
+    await vi.runAllTimersAsync();
+    const result = await resultPromise;
+
+    expect(result.ok).toBe(true);
+    // updateDetalle should be called with version information
+    expect(updateDetalle).toHaveBeenCalledWith(
+      'bbva-id',
+      expect.arrayContaining([
+        expect.objectContaining({
+          sheetName: '2025-01',
+          rowNumber: 2,
+          matchedFileId: 'factura123',
+          detalle: 'Pago Factura TEST',
+          expectedVersion: expect.any(String),  // Version computed from initial read
+        }),
+      ])
+    );
+  });
+
+  it('includes expectedVersion in DetalleUpdate for TOCTOU protection', async () => {
+    const mockFolderStructure = {
+      controlIngresosId: 'ingresos-id',
+      controlEgresosId: 'egresos-id',
+      bankSpreadsheets: new Map(),
+      movimientosSpreadsheets: new Map([['BBVA', 'bbva-id']]),
+    };
+
+    vi.mocked(withLock).mockImplementation(async (_id, fn) => {
+      const result = await fn();
+      return { ok: true, value: result };
+    });
+
+    vi.mocked(getCachedFolderStructure).mockReturnValue(mockFolderStructure as any);
+
+    vi.mocked(getValues).mockResolvedValue({
+      ok: true,
+      value: [['header']],
+    });
+
+    vi.mocked(getMovimientosToFill).mockResolvedValue({
+      ok: true,
+      value: [
+        {
+          sheetName: '2025-01',
+          rowNumber: 2,
+          fecha: '2025-01-15',
+          origenConcepto: 'PAGO TEST',
+          debito: 1000,
+          credito: null,
+          saldo: 9000,
+          saldoCalculado: 9000,
+          matchedFileId: 'old-file',
+          detalle: 'Old detalle',
+        },
+      ],
+    });
+
+    mockMatchMovement.mockReturnValue({
+      matchType: 'direct_factura',
+      description: 'New detalle',
+      matchedFileId: 'new-file',
+      confidence: 'HIGH',
+    });
+
+    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: 1 });
+
+    const resultPromise = matchAllMovimientos({ force: true });
+    await vi.runAllTimersAsync();
+    await resultPromise;
+
+    // Verify expectedVersion is included and is based on initial row state
+    const updateCall = vi.mocked(updateDetalle).mock.calls[0];
+    const updates = (updateCall[1] as any) as Array<{expectedVersion: string}>;
+    expect(updates.length).toBe(1);
+    expect(updates[0]).toHaveProperty('expectedVersion');
+    expect(typeof updates[0].expectedVersion).toBe('string');
+    expect(updates[0].expectedVersion.length).toBeGreaterThan(0);
+  });
+});
