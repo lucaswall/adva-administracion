@@ -280,6 +280,45 @@ describe('readMovimientosForPeriod', () => {
     }
   });
 
+  it('should normalize serial number dates via normalizeSpreadsheetDate', async () => {
+    vi.mocked(getValues).mockResolvedValue({
+      ok: true,
+      value: [
+        ['fecha', 'origenConcepto', 'debito', 'credito', 'saldo', 'saldoCalculado', 'matchedFileId', 'detalle'],
+        [45993, 'TRANSFERENCIA TEST SA', 1000, null, 9000, 9000, '', ''],
+        [45671, 'DEPOSITO', null, 5000, 14000, 14000, 'file123', 'Cobro'],
+      ],
+    });
+
+    const result = await readMovimientosForPeriod('spreadsheet-id', '2025-12');
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value).toHaveLength(2);
+      // Serial number 45993 should be converted to '2025-12-02'
+      expect(result.value[0].fecha).toBe('2025-12-02');
+      // Serial number 45671 should be converted to '2025-01-14'
+      expect(result.value[1].fecha).toBe('2025-01-14');
+    }
+  });
+
+  it('should pass through string dates unchanged', async () => {
+    vi.mocked(getValues).mockResolvedValue({
+      ok: true,
+      value: [
+        ['fecha', 'origenConcepto', 'debito', 'credito', 'saldo', 'saldoCalculado', 'matchedFileId', 'detalle'],
+        ['2025-01-15', 'TRANSFERENCIA', 1000, null, 9000, 9000, '', ''],
+      ],
+    });
+
+    const result = await readMovimientosForPeriod('spreadsheet-id', '2025-01');
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value[0].fecha).toBe('2025-01-15');
+    }
+  });
+
   it('should use correct range format with quoted sheet name', async () => {
     vi.mocked(getValues).mockResolvedValue({
       ok: true,

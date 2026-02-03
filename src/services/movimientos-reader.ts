@@ -7,6 +7,7 @@ import type { Result, MovimientoRow } from '../types/index.js';
 import { PARALLEL_SHEET_READ_CHUNK_SIZE } from '../config.js';
 import { getSheetMetadata, getValues, type CellValue } from './sheets.js';
 import { parseNumber } from '../utils/numbers.js';
+import { normalizeSpreadsheetDate } from '../utils/date.js';
 import { warn, debug } from '../utils/logger.js';
 
 /**
@@ -51,7 +52,7 @@ function parseMovimientoRow(
   return {
     sheetName,
     rowNumber,
-    fecha: String(row[0] || ''),
+    fecha: normalizeSpreadsheetDate(row[0]),
     origenConcepto,
     debito: parseNumber(row[2]),
     credito: parseNumber(row[3]),

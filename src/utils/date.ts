@@ -175,7 +175,7 @@ export function toDateString(value: unknown): string {
  * @returns ISO date string (YYYY-MM-DD)
  *
  * @example
- * serialToDateString(45993) // Returns '2025-12-23'
+ * serialToDateString(45993) // Returns '2025-12-02'
  */
 export function serialToDateString(serial: number): string {
   const epoch = new Date(Date.UTC(1899, 11, 30));

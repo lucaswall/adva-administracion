@@ -3,12 +3,14 @@
  * Handles batch updates of matchedFileId and detalle columns
  */
 
+import { createHash } from 'crypto';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { updateDetalle, type DetalleUpdate } from './movimientos-detalle.js';
 
 // Mock dependencies
 vi.mock('./sheets.js', () => ({
   batchUpdate: vi.fn(),
+  getValues: vi.fn(),
 }));
 
 vi.mock('../utils/logger.js', () => ({
@@ -18,7 +20,7 @@ vi.mock('../utils/logger.js', () => ({
   error: vi.fn(),
 }));
 
-import { batchUpdate } from './sheets.js';
+import { batchUpdate, getValues } from './sheets.js';
 
 describe('updateDetalle', () => {
   beforeEach(() => {
@@ -290,5 +292,90 @@ describe('updateDetalle', () => {
         values: [['file789', 'Normal Sheet']],
       },
     ]);
+  });
+
+  it('should correctly compute version hash with serial number dates in TOCTOU check', async () => {
+    // computeVersionFromRow must normalize serial number dates so that the
+    // version hash matches what computeRowVersion produces from the parsed
+    // MovimientoRow (which gets fecha as a normalized date string).
+    //
+    // Row data: [45993, 'TRANSFERENCIA', 1000, null, null, null, '', '']
+    // Serial 45993 => '2025-12-02'
+    // Expected hash input: '2025-12-02|TRANSFERENCIA|1000|||'
+    const expectedHashInput = '2025-12-02|TRANSFERENCIA|1000|||';
+    const expectedVersion = createHash('md5').update(expectedHashInput).digest('hex').slice(0, 16);
+
+    // Mock getValues to return a row with a serial number date
+    vi.mocked(getValues).mockResolvedValue({
+      ok: true,
+      value: [
+        ['fecha', 'origenConcepto', 'debito', 'credito', 'saldo', 'saldoCalculado', 'matchedFileId', 'detalle'],
+        [45993, 'TRANSFERENCIA', 1000, null, null, null, '', ''],
+      ],
+    });
+    vi.mocked(batchUpdate).mockResolvedValue({ ok: true, value: 1 });
+
+    const updates: DetalleUpdate[] = [
+      {
+        sheetName: '2025-12',
+        rowNumber: 2,
+        matchedFileId: 'file-new',
+        detalle: 'New match',
+        expectedVersion,
+      },
+    ];
+
+    const result = await updateDetalle('spreadsheet-id', updates);
+
+    // If computeVersionFromRow normalizes the serial number correctly,
+    // the version check passes and batchUpdate is called
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value).toBe(1);
+    }
+    expect(batchUpdate).toHaveBeenCalled();
+  });
+
+  it('should reject version mismatch when serial number is not normalized', async () => {
+    // If someone computes a version using the raw serial string "45993"
+    // instead of the normalized date, it should NOT match
+    const wrongHashInput = '45993|TRANSFERENCIA|1000|||';
+    const wrongVersion = createHash('md5').update(wrongHashInput).digest('hex').slice(0, 16);
+
+    // The correct hash from normalized date
+    const correctHashInput = '2025-12-02|TRANSFERENCIA|1000|||';
+    const correctVersion = createHash('md5').update(correctHashInput).digest('hex').slice(0, 16);
+
+    // Ensure the two versions are actually different
+    expect(wrongVersion).not.toBe(correctVersion);
+
+    vi.mocked(getValues).mockResolvedValue({
+      ok: true,
+      value: [
+        ['fecha', 'origenConcepto', 'debito', 'credito', 'saldo', 'saldoCalculado', 'matchedFileId', 'detalle'],
+        [45993, 'TRANSFERENCIA', 1000, null, null, null, '', ''],
+      ],
+    });
+    vi.mocked(batchUpdate).mockResolvedValue({ ok: true, value: 1 });
+
+    const updates: DetalleUpdate[] = [
+      {
+        sheetName: '2025-12',
+        rowNumber: 2,
+        matchedFileId: 'file-new',
+        detalle: 'New match',
+        expectedVersion: wrongVersion,
+      },
+    ];
+
+    const result = await updateDetalle('spreadsheet-id', updates);
+
+    // Version mismatch → update skipped, but still "ok" (just 0 rows updated)
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value).toBe(0);
+    }
+    // batchUpdate should NOT be called since all updates were skipped
+    expect(batchUpdate).not.toHaveBeenCalled();
   });
 });

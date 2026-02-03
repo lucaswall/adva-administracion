@@ -277,4 +277,29 @@ describe('matchNCsWithFacturas', () => {
       expect(result.value).toBe(1);
     }
   });
+
+  it('normalizes serial number dates in fechaEmision when matching', async () => {
+    // Serial 45658 => 2025-01-01, Serial 45672 => 2025-01-15
+    const mockRows = [
+      ['fechaEmision', 'fileId', 'fileName', 'tipo', 'nro', 'cuit', 'razon', 'neto', 'iva', 'total', 'moneda', 'concepto', 'processed', 'conf', 'review', 'matchedPago', 'matchConf', 'cuitMatch', 'pagada'],
+      // Regular factura with serial number date
+      [45658, 'file-1', 'factura.pdf', 'A', '0002-00003160', '20123456786', 'TEST SA', '1000', '210', '1210', 'ARS', 'Servicios', '2025-01-01', '0.95', 'NO', '', '', '', ''],
+      // NC with serial number date
+      [45672, 'file-2', 'nc.pdf', 'NC', '0002-00000001', '20123456786', 'TEST SA', '1000', '210', '1210', 'ARS', 'Nota de credito s/ Factura N° 2-3160', '2025-01-15', '0.95', 'NO', '', '', '', ''],
+    ];
+
+    vi.mocked(getValues).mockResolvedValue({ ok: true, value: mockRows });
+    vi.mocked(setValues).mockResolvedValue({ ok: true, value: 1 });
+
+    const result = await matchNCsWithFacturas('test-spreadsheet-id');
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      // Should match even with serial number dates
+      expect(result.value).toBe(1);
+    }
+
+    // Both factura and NC should be marked as paid
+    expect(setValues).toHaveBeenCalledTimes(2);
+  });
 });

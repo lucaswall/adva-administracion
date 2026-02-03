@@ -2,108 +2,194 @@
 
 **Created:** 2026-02-03
 **Source:** Linear Backlog issues
-**Linear Issues:** [ADV-52](https://linear.app/adva-administracion/issue/ADV-52/update-semver-compatible-dependencies-fastify-pino-vitest-typesnode), [ADV-53](https://linear.app/adva-administracion/issue/ADV-53/update-googleapis-to-v171-major-version-bump), [ADV-54](https://linear.app/adva-administracion/issue/ADV-54/update-googleclasp-to-v3-major-version-bump), [ADV-55](https://linear.app/adva-administracion/issue/ADV-55/dismiss-false-positive-dependabot-alerts-for-hono)
+**Linear Issues:** [ADV-57](https://linear.app/adva-administracion/issue/ADV-57/date-serial-number-parsing-broken-in-bank-movimientos-matching), [ADV-58](https://linear.app/adva-administracion/issue/ADV-58/date-serial-number-parsing-broken-in-bank-autofill), [ADV-59](https://linear.app/adva-administracion/issue/ADV-59/date-serial-number-parsing-broken-in-recibo-pago-matcher), [ADV-60](https://linear.app/adva-administracion/issue/ADV-60/date-serial-number-parsing-broken-in-nc-factura-matcher), [ADV-61](https://linear.app/adva-administracion/issue/ADV-61/version-hash-in-movimientos-detalle-uses-raw-serial-number-for-fecha), [ADV-62](https://linear.app/adva-administracion/issue/ADV-62/add-date-handling-guidelines-to-claudemd), [ADV-56](https://linear.app/adva-administracion/issue/ADV-56/dynamic-concurrency-throttling-under-quota-pressure)
 
 ## Context Gathered
 
 ### Codebase Analysis
 
-**Current outdated packages (`npm outdated`):**
+**Root cause:** `getValues()` in `sheets.ts` uses `UNFORMATTED_VALUE` + `SERIAL_NUMBER` render options, so `CellDate` fields come back as numbers (e.g., `45993` instead of `"2025-12-23"`). Multiple modules use `String(row[N] || '')` to convert these, producing unparseable strings like `"45993"`. The correct function `normalizeSpreadsheetDate()` in `src/utils/date.ts` handles serial numbers, CellDate objects, and strings.
 
-| Package | Current | Wanted | Latest | Type |
-|---------|---------|--------|--------|------|
-| fastify | 5.7.1 | 5.7.4 | 5.7.4 | semver-compatible (patch) |
-| pino | 10.2.0 | 10.3.0 | 10.3.0 | semver-compatible (minor) |
-| @types/node | 25.0.9 | 25.2.0 | 25.2.0 | semver-compatible (minor) |
-| vitest | 4.0.17 | 4.0.18 | 4.0.18 | semver-compatible (patch) |
-| @vitest/coverage-v8 | 4.0.17 | 4.0.18 | 4.0.18 | semver-compatible (patch) |
-| googleapis | 170.1.0 | 170.1.0 | 171.1.0 | **major bump** (needs ^170→^171) |
-| @google/clasp | 2.5.0 | 2.5.0 | 3.2.0 | **major bump** (needs ^2→^3) |
+**Already fixed (correct pattern):**
+- `src/processing/matching/factura-pago-matcher.ts:327,363` — uses `normalizeSpreadsheetDate(row[0])`
+- `src/processing/caches/duplicate-cache.ts` — uses `normalizeSpreadsheetDate()` throughout
+- All storage modules (`factura-store.ts`, `pago-store.ts`, `resumen-store.ts`, `retencion-store.ts`) — use `normalizeSpreadsheetDate()`
 
-**Fastify security context:**
-- Two known vulnerabilities in 5.7.1: high-severity Content-Type header body validation bypass (patched 5.7.2) and low-severity DoS via sendWebStream (patched 5.7.3)
-- Used in: `src/server.ts` (init with logger), routes (`src/routes/scan.ts`, `src/routes/status.ts`, `src/routes/webhooks.ts`), middleware (`src/middleware/auth.ts`)
-- Features used: route type generics, onRequest hooks, logger transport, plugin registration
-- Update is semver-compatible (^5.2.1 allows 5.7.4), no code changes expected
+**Broken modules (need fix):**
 
-**googleapis usage:**
-- `src/services/google-auth.ts` - `google.auth.GoogleAuth` constructor
-- `src/services/drive.ts` - `google.drive()`, `drive_v3.Drive` type, file operations (list, get, create, update, watch)
-- `src/services/sheets.ts` - `google.sheets()`, `sheets_v4.Sheets` type, `sheets_v4.Schema$Request`, `sheets_v4.Schema$CellData`
-- `support/upload-samples.js` - utility script
-- Update from 170→171 is a major bump; need to check for breaking changes in drive_v3 and sheets_v4 APIs
+| File | Lines | Date fields | Import needed |
+|------|-------|-------------|---------------|
+| `src/bank/match-movimientos.ts` | 251, 320, 382, 441, 498 | `fechaEmision` (×3), `fechaPago` (×1), `fechaEmision` (retenciones) | Yes |
+| `src/services/movimientos-reader.ts` | 54 | `fecha` | Yes |
+| `src/services/movimientos-detalle.ts` | 53 | `fecha` (version hash) | Yes |
+| `src/bank/autofill.ts` | 36, 37, 61, 98, 133 | `fecha`, `fechaValor`, `fechaEmision`, `fechaPago` (×2) | Yes |
+| `src/processing/matching/recibo-pago-matcher.ts` | 259, 288 | `fechaPago` (×2) | Yes |
+| `src/processing/matching/nc-factura-matcher.ts` | 145 | `fechaEmision` | Yes |
 
-**@google/clasp usage:**
-- CLI tool only, invoked via `npm run deploy:script` → `clasp push`
-- Config: `apps-script/.clasp.json`
-- Major bump 2→3; may change CLI behavior
+**Version hash consistency (ADV-61):**
+- `movimientos-detalle.ts:52` `computeVersionFromRow()` hashes `String(row[0])` → serial number
+- `match-movimientos.ts:82` `computeRowVersion()` hashes `row.fecha` → value from `movimientos-reader.ts`
+- Both MUST produce identical hashes. Currently both use serial numbers (broken but consistent). Fix must update BOTH simultaneously.
 
-**pino usage:**
-- `src/utils/logger.ts` - pino constructor with transport config (pino-pretty)
-- `src/server.ts` - Fastify logger transport config
-- Minor bump 10.2→10.3, low risk
+**Existing test files for affected modules:**
+- `src/bank/match-movimientos.test.ts` — mocks `getValues`, tests orchestration
+- `src/bank/autofill.test.ts` — mocks `getValues`, tests autofill logic
+- `src/services/movimientos-reader.test.ts` — tests movement reading
+- `src/services/movimientos-detalle.test.ts` — tests detalle updates
+- `src/processing/matching/nc-factura-matcher.test.ts` — tests NC matching
+- `src/processing/matching/recibo-pago-matcher.test.ts` — tests recibo-pago matching
+- `src/utils/date.test.ts` — already has `normalizeSpreadsheetDate` tests
 
-**Existing test conventions:**
-- 1541 tests passing as of last plan
-- Test files co-located as `*.test.ts`
-- No new tests needed for dependency updates; existing suite validates compatibility
+**Concurrency system (ADV-56):**
+- `withQuotaRetry()` in `src/utils/concurrency.ts` handles per-operation retries (5 retries, 15-65s exponential backoff)
+- Google Sheets API limits: 300 read + 300 write requests/min/project
+- ~22 call sites use `withQuotaRetry()` (14 in sheets.ts, 8 in drive.ts)
+- Current model: each operation independently retries, no global awareness of quota pressure
+- `src/utils/concurrency.test.ts` — 591 lines, comprehensive lock and retry tests
+- Related constants in `src/config.ts`: `SHEETS_QUOTA_RETRY_CONFIG`, `PARALLEL_SHEET_READ_CHUNK_SIZE = 4`
 
-### Dependabot Context
-- 6 alerts: 2 for fastify (real), 4 for hono (false positives — hono not used)
-- Hono alerts need to be dismissed on GitHub
+### MCP Context
+- **MCPs used:** Linear (issue details)
+- **Findings:** All 7 issues confirmed in Backlog. ADV-57 is Urgent (complete failure of movimientos matching in production). ADV-58-60 are High (matching subsystems broken). ADV-61 is Medium (version hash consistency). ADV-62 is Low (documentation). ADV-56 is Medium (improvement).
 
 ## Original Plan
 
-### Task 1: Update semver-compatible dependencies
-**Linear Issue:** [ADV-52](https://linear.app/adva-administracion/issue/ADV-52/update-semver-compatible-dependencies-fastify-pino-vitest-typesnode)
+### Task 1: Fix date serial number parsing in movimientos-reader and movimientos-detalle
+**Linear Issues:** [ADV-57](https://linear.app/adva-administracion/issue/ADV-57/date-serial-number-parsing-broken-in-bank-movimientos-matching), [ADV-61](https://linear.app/adva-administracion/issue/ADV-61/version-hash-in-movimientos-detalle-uses-raw-serial-number-for-fecha)
 
-This task has no new tests to write — the existing test suite (1541 tests) validates that updates don't break anything.
+ADV-57 and ADV-61 must be fixed together to maintain version hash consistency between `computeVersionFromRow()` and `computeRowVersion()`.
 
-1. Run `npm update` to update all semver-compatible packages:
-   - fastify 5.7.1 → 5.7.4 (security fix)
-   - pino 10.2.0 → 10.3.0
-   - @types/node 25.0.9 → 25.2.0
-   - vitest 4.0.17 → 4.0.18
-   - @vitest/coverage-v8 4.0.17 → 4.0.18
-2. Run verifier — all tests must pass, zero warnings
+1. Write tests in `src/services/movimientos-reader.test.ts`:
+   - Test that `parseMovimientoRow()` (or equivalent row parsing) converts serial number dates via `normalizeSpreadsheetDate`
+   - Mock `getValues` to return rows with numeric date values (e.g., `45993`) and verify `fecha` field becomes `"2025-12-23"`
+   - Test that string dates pass through unchanged
+2. Write tests in `src/services/movimientos-detalle.test.ts`:
+   - Test that `computeVersionFromRow()` produces the same hash as `computeRowVersion()` when both receive the same row data with serial number dates
+   - Test with numeric date in row[0] (serial number) → both functions must produce identical hash
+3. Run verifier (expect fail)
+4. Fix `src/services/movimientos-reader.ts`:
+   - Add import: `import { normalizeSpreadsheetDate } from '../utils/date.js';`
+   - Line 54: Replace `fecha: String(row[0] || '')` with `fecha: normalizeSpreadsheetDate(row[0])`
+5. Fix `src/services/movimientos-detalle.ts`:
+   - Add import: `import { normalizeSpreadsheetDate } from '../utils/date.js';`
+   - Line 53: Replace `const fecha = String(row[0] || '')` with `const fecha = normalizeSpreadsheetDate(row[0])`
+6. Run verifier (expect pass)
 
-### Task 2: Evaluate and update googleapis to v171
-**Linear Issue:** [ADV-53](https://linear.app/adva-administracion/issue/ADV-53/update-googleapis-to-v171-major-version-bump)
+### Task 2: Fix date serial number parsing in match-movimientos
+**Linear Issue:** [ADV-57](https://linear.app/adva-administracion/issue/ADV-57/date-serial-number-parsing-broken-in-bank-movimientos-matching)
 
-1. Check googleapis v171 changelog/release notes for breaking changes in:
-   - `drive_v3` API (files.list, files.get, files.create, files.update, files.watch, channels.stop)
-   - `sheets_v4` API (spreadsheets.values.get, values.update, values.append, values.batchUpdate, spreadsheets.get, spreadsheets.batchUpdate, values.clear)
-   - `Auth.GoogleAuth` constructor
-   - `Schema$Request` and `Schema$CellData` types
-2. If no breaking changes affect the used APIs:
-   - Update `package.json`: change `"googleapis": "^170.1.0"` to `"googleapis": "^171.1.0"`
-   - Run `npm install`
-3. If breaking changes exist:
-   - Apply necessary code changes in affected files (`src/services/google-auth.ts`, `src/services/drive.ts`, `src/services/sheets.ts`)
-4. Run verifier — all tests must pass, zero warnings
+5 locations in `match-movimientos.ts` use `String()` for date fields when reading from spreadsheets.
 
-### Task 3: Evaluate and update @google/clasp to v3
-**Linear Issue:** [ADV-54](https://linear.app/adva-administracion/issue/ADV-54/update-googleclasp-to-v3-major-version-bump)
+1. Write tests in `src/bank/match-movimientos.test.ts`:
+   - Test `parseFacturasEmitidas` with mock data containing serial number dates → verify `fechaEmision` is normalized
+   - Test `parseFacturasRecibidas` with serial number dates → verify `fechaEmision` is normalized
+   - Test pago parsing with serial number dates → verify `fechaPago` is normalized
+   - Test recibo parsing with serial number dates → verify `fechaPago` is normalized
+   - Test retencion parsing with serial number dates → verify `fechaEmision` is normalized
+2. Run verifier (expect fail)
+3. Fix `src/bank/match-movimientos.ts`:
+   - Add import: `import { normalizeSpreadsheetDate } from '../utils/date.js';`
+   - Line 251: Replace `fechaEmision: String(row[colIndex.fechaEmision] || '')` with `fechaEmision: normalizeSpreadsheetDate(row[colIndex.fechaEmision])`
+   - Line 320: Same replacement for `fechaEmision`
+   - Line 382: Replace `fechaPago: String(row[colIndex.fechaPago] || '')` with `fechaPago: normalizeSpreadsheetDate(row[colIndex.fechaPago])`
+   - Line 441: Same replacement for `fechaPago`
+   - Line 498: Replace `fechaEmision: String(row[colIndex.fechaEmision] || '')` with `fechaEmision: normalizeSpreadsheetDate(row[colIndex.fechaEmision])`
+4. Run verifier (expect pass)
 
-1. Check @google/clasp v3 changelog for breaking changes in:
-   - `clasp push` command behavior
-   - `.clasp.json` config format
-   - Authentication flow
-2. If no breaking changes:
-   - Update `package.json`: change `"@google/clasp": "^2.4.2"` to `"@google/clasp": "^3.2.0"`
-   - Run `npm install`
-3. If breaking changes exist:
-   - Apply necessary changes to `apps-script/.clasp.json` and/or `apps-script/build.js`
-   - Update `package.json` deploy:script command if needed
-4. Run verifier — all tests must pass, zero warnings
-5. Verify `npm run build:script` still works (clasp push requires auth so can't test fully, but build step should succeed)
+### Task 3: Fix date serial number parsing in bank autofill
+**Linear Issue:** [ADV-58](https://linear.app/adva-administracion/issue/ADV-58/date-serial-number-parsing-broken-in-bank-autofill)
 
-### Task 4: Dismiss false-positive Dependabot alerts
-**Linear Issue:** [ADV-55](https://linear.app/adva-administracion/issue/ADV-55/dismiss-false-positive-dependabot-alerts-for-hono)
+5 date fields in `autofill.ts` use `String()`.
 
-1. Use `gh` CLI to dismiss the 4 hono Dependabot alerts as "not applicable"
-   - Run `gh api repos/{owner}/{repo}/dependabot/alerts` to list alerts
-   - Dismiss hono-related alerts with reason "not_used"
+1. Write tests in `src/bank/autofill.test.ts`:
+   - Test `parseMovementRow` with serial number in row[0] (fecha) → verify normalized
+   - Test `parseMovementRow` with serial number in row[1] (fechaValor) → verify normalized
+   - Test factura parsing with serial number in row[0] (fechaEmision) → verify normalized
+   - Test pago parsing with serial number in row[0] (fechaPago) → verify normalized
+   - Test recibo parsing with serial number in row[0] (fechaPago) → verify normalized
+2. Run verifier (expect fail)
+3. Fix `src/bank/autofill.ts`:
+   - Add import: `import { normalizeSpreadsheetDate } from '../utils/date.js';`
+   - Line 36: Replace `fecha: String(row[0] || '')` with `fecha: normalizeSpreadsheetDate(row[0])`
+   - Line 37: Replace `fechaValor: String(row[1] || '')` with `fechaValor: normalizeSpreadsheetDate(row[1])`
+   - Line 61: Replace `fechaEmision: String(row[0] || '')` with `fechaEmision: normalizeSpreadsheetDate(row[0])`
+   - Line 98: Replace `fechaPago: String(row[0] || '')` with `fechaPago: normalizeSpreadsheetDate(row[0])`
+   - Line 133: Replace `fechaPago: String(row[0] || '')` with `fechaPago: normalizeSpreadsheetDate(row[0])`
+4. Run verifier (expect pass)
+
+### Task 4: Fix date serial number parsing in recibo-pago matcher
+**Linear Issue:** [ADV-59](https://linear.app/adva-administracion/issue/ADV-59/date-serial-number-parsing-broken-in-recibo-pago-matcher)
+
+2 locations in `recibo-pago-matcher.ts`.
+
+1. Write tests in `src/processing/matching/recibo-pago-matcher.test.ts`:
+   - Test recibo reading with serial number in row[0] (fechaPago) → verify normalized
+   - Test pago reading with serial number in row[0] (fechaPago) → verify normalized
+   - Follow the same mock pattern as `factura-pago-matcher.test.ts`
+2. Run verifier (expect fail)
+3. Fix `src/processing/matching/recibo-pago-matcher.ts`:
+   - Add import: `import { normalizeSpreadsheetDate } from '../../utils/date.js';`
+   - Line 259: Replace `fechaPago: String(row[0] || '')` with `fechaPago: normalizeSpreadsheetDate(row[0])`
+   - Line 288: Replace `fechaPago: String(row[0] || '')` with `fechaPago: normalizeSpreadsheetDate(row[0])`
+4. Run verifier (expect pass)
+
+### Task 5: Fix date serial number parsing in NC-factura matcher
+**Linear Issue:** [ADV-60](https://linear.app/adva-administracion/issue/ADV-60/date-serial-number-parsing-broken-in-nc-factura-matcher)
+
+Single location in `nc-factura-matcher.ts`.
+
+1. Write test in `src/processing/matching/nc-factura-matcher.test.ts`:
+   - Test factura reading with serial number in row[0] (fechaEmision) → verify normalized to ISO date string
+   - Follow existing test patterns in the file
+2. Run verifier (expect fail)
+3. Fix `src/processing/matching/nc-factura-matcher.ts`:
+   - Add import: `import { normalizeSpreadsheetDate } from '../../utils/date.js';`
+   - Line 145: Replace `fechaEmision: String(row[0] || '')` with `fechaEmision: normalizeSpreadsheetDate(row[0])`
+4. Run verifier (expect pass)
+
+### Task 6: Add date handling guidelines to CLAUDE.md
+**Linear Issue:** [ADV-62](https://linear.app/adva-administracion/issue/ADV-62/add-date-handling-guidelines-to-claudemd)
+
+1. No tests needed (documentation-only change)
+2. Add a "Date Handling" section to CLAUDE.md near the SPREADSHEETS section with:
+   - Rule: Always use `normalizeSpreadsheetDate(cellValue)` for date fields read from spreadsheets, never `String()`
+   - Explanation: `getValues()` uses `UNFORMATTED_VALUE` + `SERIAL_NUMBER` render options, so CellDate fields return as numbers
+   - Correct pattern example: `fechaEmision: normalizeSpreadsheetDate(row[0])` (from `factura-pago-matcher.ts:327`)
+   - Incorrect pattern to avoid: `fechaEmision: String(row[0] || '')`
+   - Note: `processedAt` fields are NOT affected (stored as plain text, not CellDate)
+3. Run verifier (ensure build still passes)
+
+### Task 7: Add dynamic concurrency throttling under quota pressure
+**Linear Issue:** [ADV-56](https://linear.app/adva-administracion/issue/ADV-56/dynamic-concurrency-throttling-under-quota-pressure)
+
+Implement a global quota-aware throttle that reduces concurrency when quota errors are detected.
+
+1. Write tests in `src/utils/concurrency.test.ts`:
+   - Test `QuotaThrottle` (or equivalent) class:
+     - Default state allows operations to proceed immediately
+     - After `reportQuotaError()`, operations are delayed by a global backoff
+     - Backoff increases with consecutive quota errors
+     - Backoff resets after successful operations (no quota errors for a period)
+     - Multiple concurrent operations are serialized during backoff
+   - Test integration with `withQuotaRetry`:
+     - When quota error is detected, global throttle is notified
+     - Subsequent calls to `withQuotaRetry` check global throttle before making API calls
+     - After backoff clears, operations resume at normal speed
+2. Run verifier (expect fail)
+3. Implement in `src/utils/concurrency.ts`:
+   - Add a `QuotaThrottle` class (or module-level singleton) with:
+     - `reportQuotaError()` — signals a quota error occurred, increases global backoff
+     - `waitForClearance()` — returns a promise that resolves after global backoff delay (if any)
+     - Exponential backoff: e.g., 5s → 15s → 30s → 60s max
+     - Auto-reset: if no `reportQuotaError()` for 60s, reset backoff to 0
+   - Integrate into `withQuotaRetry()`: before each retry attempt, call `throttle.waitForClearance()`
+   - When `isQuotaError()` is detected, call `throttle.reportQuotaError()`
+   - Export throttle instance for testing
+4. Update `src/config.ts` if new constants are needed:
+   - `QUOTA_THROTTLE_BASE_DELAY_MS` (e.g., 5000)
+   - `QUOTA_THROTTLE_MAX_DELAY_MS` (e.g., 60000)
+   - `QUOTA_THROTTLE_RESET_MS` (e.g., 60000)
+5. Run verifier (expect pass)
 
 ## Post-Implementation Checklist
 
@@ -114,79 +200,116 @@ This task has no new tests to write — the existing test suite (1541 tests) val
 
 ## Plan Summary
 
-**Objective:** Update all npm dependencies to latest versions, fixing two known Fastify security vulnerabilities and bringing all packages up to date.
+**Objective:** Fix date serial number parsing across 6 modules and add dynamic concurrency throttling for Google Sheets API quota management.
 
-**Linear Issues:** ADV-52, ADV-53, ADV-54, ADV-55
+**Linear Issues:** ADV-56, ADV-57, ADV-58, ADV-59, ADV-60, ADV-61, ADV-62
 
 **Approach:**
-- First update all semver-compatible packages via `npm update` (low risk, includes critical Fastify security patches)
-- Then evaluate and update the two major-version bumps (googleapis 170→171, @google/clasp 2→3) after checking changelogs for breaking changes
-- Finally dismiss false-positive Dependabot alerts for hono
+- Fix the date serial number bug by replacing `String(row[N] || '')` with `normalizeSpreadsheetDate(row[N])` across all affected modules, starting with the most critical (movimientos matching, Urgent) and maintaining version hash consistency (ADV-61 paired with ADV-57)
+- Add CLAUDE.md documentation to prevent recurrence of the same bug pattern
+- Implement a global quota-aware throttle in the concurrency module to reduce retry storms under load
 
 **Scope:**
-- Tasks: 4
-- Files affected: 1-3 (package.json always; possibly service files if googleapis has breaking changes; possibly clasp config)
-- New tests: no (existing 1541 tests validate compatibility)
+- Tasks: 7
+- Files affected: 8 (6 source files + CLAUDE.md + config.ts)
+- New tests: yes (date normalization tests in 6 test files, throttle tests in concurrency.test.ts)
 
 **Key Decisions:**
-- Update semver-compatible packages first as they're low risk and include the security fix
-- Evaluate major bumps separately with changelog review before updating
-- googleapis and clasp get individual tasks since they need breaking change assessment
+- ADV-57 and ADV-61 are combined in Task 1 because `computeVersionFromRow` and `computeRowVersion` must stay consistent
+- ADV-57 spans Tasks 1 and 2 (reader + orchestrator are separate modules)
+- Quota throttle is a cooperative singleton — operations voluntarily check clearance, not enforced by a central queue
+- Documentation (ADV-62) is Task 6, after all code fixes, so examples reference the corrected code
 
 **Dependencies/Prerequisites:**
-- Task 1 must complete first (establishes baseline)
-- Tasks 2 and 3 are independent of each other
-- Task 4 is independent and can run anytime
+- Task 1 must complete before Task 2 (movimientos-reader provides data to match-movimientos)
+- Tasks 3, 4, 5 are independent of each other
+- Task 6 has no code dependencies
+- Task 7 is fully independent of Tasks 1-6
 
 ---
 
 ## Iteration 1
 
-**Implemented:** 2026-02-03
+**Status:** COMPLETE
+**Date:** 2026-02-03
 
-### Tasks Completed This Iteration
-- Task 1: Update semver-compatible dependencies - Updated fastify 5.7.1→5.7.4 (security fix), pino 10.2→10.3, @types/node 25.0.9→25.2.0, vitest 4.0.17→4.0.18, @vitest/coverage-v8 4.0.17→4.0.18
-- Task 2: Evaluate and update googleapis to v171 - Reviewed v171.0.0 breaking changes (none affect drive_v3 or sheets_v4), updated ^170.1.0→^171.1.0
-- Task 3: Evaluate and update @google/clasp to v3 - Reviewed v3 breaking changes (TypeScript transpilation dropped, CLI restructuring), project unaffected since it uses esbuild bundler and only `clasp push`. Updated ^2.4.2→^3.2.0. Verified `npm run build:script` works.
-- Task 4: Dismiss false-positive Dependabot alerts - Dismissed 4 hono alerts (1-4) as "not_used" via gh CLI. Fastify alerts (5-6) will auto-resolve when updated package-lock.json is pushed.
+### Changes Made
 
-### Files Modified
-- `package.json` - Updated googleapis ^170.1.0→^171.1.0, @google/clasp ^2.4.2→^3.2.0
-- `package-lock.json` - Regenerated with all dependency updates
+**Task 1 (ADV-57, ADV-61): Fix movimientos-reader and movimientos-detalle**
+- `src/services/movimientos-reader.ts`: Replaced `String(row[0] || '')` with `normalizeSpreadsheetDate(row[0])` for `fecha` field
+- `src/services/movimientos-detalle.ts`: Same fix for `fecha` in `computeVersionFromRow()`, maintaining hash consistency with `computeRowVersion()`
+- Tests: 2 new tests in each test file (serial number normalization, string passthrough, TOCTOU version hash)
 
-### Linear Updates
-- ADV-52: Todo → In Progress → Review
-- ADV-53: Todo → In Progress → Review
-- ADV-54: Todo → In Progress → Review
-- ADV-55: Todo → In Progress → Review
+**Task 2 (ADV-57): Fix match-movimientos**
+- `src/bank/match-movimientos.ts`: Replaced 5 `String()` calls with `normalizeSpreadsheetDate()` for `fechaEmision` (×3) and `fechaPago` (×2)
+- Tests: Serial number normalization tests for `parseFacturasEmitidas` and `parseFacturasRecibidas`
 
-### Pre-commit Verification
-- bug-hunter: Passed - no bugs found in changes
-- verifier: All 1541 tests pass, zero warnings
+**Task 3 (ADV-58): Fix bank autofill**
+- `src/bank/autofill.ts`: Replaced 5 date fields (`fecha`, `fechaValor`, `fechaEmision`, `fechaPago` ×2) with `normalizeSpreadsheetDate()`
+- Tests: 2 new tests for `parseMovementRow` (serial number normalization, string passthrough)
 
-### Continuation Status
-All tasks completed.
+**Task 4 (ADV-59): Fix recibo-pago matcher**
+- `src/processing/matching/recibo-pago-matcher.ts`: Replaced 2 `fechaPago` fields with `normalizeSpreadsheetDate()`
+- Tests: 2 pattern verification tests for recibo and pago date normalization
+
+**Task 5 (ADV-60): Fix NC-factura matcher**
+- `src/processing/matching/nc-factura-matcher.ts`: Replaced `fechaEmision` with `normalizeSpreadsheetDate()`
+- Tests: Integration test with serial number dates in both factura and NC rows
+
+**Task 6 (ADV-62): Documentation**
+- `CLAUDE.md`: Added "Reading dates from spreadsheets" guidelines under Spreadsheets Principles
+
+**Task 7 (ADV-56): Dynamic concurrency throttling**
+- `src/config.ts`: Added `QUOTA_THROTTLE_BASE_DELAY_MS`, `QUOTA_THROTTLE_MAX_DELAY_MS`, `QUOTA_THROTTLE_RESET_MS`
+- `src/utils/concurrency.ts`: Added `QuotaThrottle` class with exponential backoff, `quotaThrottle` singleton, integrated into `withQuotaRetry()`
+- Tests: 7 new tests (immediate clearance, delay after error, exponential backoff, max cap, auto-reset, manual reset, withQuotaRetry integration)
+
+### Bug Fixes (from bug-hunter)
+- Fixed incorrect JSDoc `@example` in `serialToDateString()` (said '2025-12-23', correct is '2025-12-02')
+- Fixed `getQuotaThrottle()` to import config constants instead of hardcoding values
+- Fixed misleading test comments about backoff delay values
+
+### Verification
+- **Tests:** 1,559 passed (59 test files)
+- **Build:** Clean (zero warnings)
+- **Bug hunter:** 4 issues found, 3 fixed (1 by-design: throttle not resetting on single success — auto-reset after quiet period handles this)
 
 ### Review Findings
 
-Files reviewed: 2 (package.json, package-lock.json)
-Checks applied: Security, Logic, Type Safety, Conventions, AI-Generated Code Risks
+Files reviewed: 14 (8 source files + 6 test files)
+Checks applied: Security, Logic, Async, Resources, Type Safety, Conventions
 
-**Verified:**
-- Installed versions match targets: fastify 5.7.4, pino 10.3.0, googleapis 171.1.0, @types/node 25.2.0, vitest 4.0.18, @google/clasp 3.2.0
-- Semver ranges correct: `^171.1.0` for googleapis, `^3.2.0` for clasp
-- Semver-compatible packages (fastify, pino, vitest, @types/node) correctly updated via lock file only — no package.json range changes needed
-- 4 hono Dependabot alerts dismissed as "not_used" (confirmed via GitHub API)
-- 2 fastify Dependabot alerts still open (will auto-resolve when lock file reaches main)
-- 1541 tests pass, zero warnings
+**Tasks 1-5 (ADV-57, ADV-58, ADV-59, ADV-60, ADV-61): Date serial number fixes**
+- All 14 `String(row[N] || '')` calls for date fields correctly replaced with `normalizeSpreadsheetDate(row[N])`
+- Import of `normalizeSpreadsheetDate` verified in all 6 source files
+- Version hash consistency maintained: `computeVersionFromRow()` (`movimientos-detalle.ts:54`) and `computeRowVersion()` (`match-movimientos.ts:82-93`) both use normalized dates, producing identical hashes for same row data
+- Tests verify serial number normalization, string passthrough, and TOCTOU version hash consistency
+- `processedAt` fields correctly left as `String()` (not CellDate, not affected)
 
-No issues found — all implementations are correct and follow project conventions.
+**Task 6 (ADV-62): CLAUDE.md documentation**
+- "Reading dates from spreadsheets" section correctly placed under Spreadsheets Principles
+- Correct/incorrect patterns documented with clear examples
+- References `normalizeSpreadsheetDate` from `utils/date.ts`
+
+**Task 7 (ADV-56): QuotaThrottle**
+- `QuotaThrottle` class implements exponential backoff: `base * 2^(errors-1)`, capped at max
+- Auto-reset after quiet period (no errors for `QUOTA_THROTTLE_RESET_MS`)
+- Config constants properly imported from `config.ts` (not hardcoded)
+- Cooperative integration into `withQuotaRetry()`: calls `waitForClearance()` before each attempt, calls `reportQuotaError()` on quota errors
+- Singleton pattern via `getQuotaThrottle()` with lazy initialization
+- Exported facade object delegates to singleton, enabling testing via `quotaThrottle.reset()`
+- 7 tests cover: immediate clearance, delay after error, exponential backoff, max cap, auto-reset, manual reset, withQuotaRetry integration
+
+No issues found - all implementations are correct and follow project conventions.
 
 ### Linear Updates
-- ADV-52: Review → Merge
-- ADV-53: Review → Merge
-- ADV-54: Review → Merge
-- ADV-55: Review → Merge
+- ADV-56: Review → Merge
+- ADV-57: Review → Merge
+- ADV-58: Review → Merge
+- ADV-59: Review → Merge
+- ADV-60: Review → Merge
+- ADV-61: Review → Merge
+- ADV-62: Review → Merge
 
 <!-- REVIEW COMPLETE -->
 

@@ -191,6 +191,19 @@ describe('parseFacturasEmitidas', () => {
     expect(result[0].row).toBe(2); // Row 2 in spreadsheet (1 is header)
     expect(result[1].row).toBe(3);
   });
+
+  it('normalizes serial number dates in fechaEmision', () => {
+    const data = [
+      ['fechaEmision', 'fileId', 'tipoComprobante', 'nroFactura', 'cuitReceptor', 'razonSocialReceptor', 'importeTotal', 'moneda'],
+      [45671, 'file1', 'A', '00001-00000001', '20123456786', 'CLIENTE SA', 1000, 'ARS'],
+    ];
+
+    const result = parseFacturasEmitidas(data);
+
+    expect(result).toHaveLength(1);
+    // Serial number 45671 => '2025-01-14'
+    expect(result[0].fechaEmision).toBe('2025-01-14');
+  });
 });
 
 describe('parseFacturasRecibidas', () => {
@@ -278,6 +291,19 @@ describe('parseFacturasRecibidas', () => {
 
     expect(result[0].row).toBe(2); // Row 2 in spreadsheet (1 is header)
     expect(result[1].row).toBe(3);
+  });
+
+  it('normalizes serial number dates in fechaEmision', () => {
+    const data = [
+      ['fechaEmision', 'fileId', 'tipoComprobante', 'nroFactura', 'cuitEmisor', 'razonSocialEmisor', 'importeTotal', 'moneda'],
+      [45671, 'file1', 'A', '00001-00000001', '20123456786', 'PROVEEDOR SA', 1000, 'ARS'],
+    ];
+
+    const result = parseFacturasRecibidas(data);
+
+    expect(result).toHaveLength(1);
+    // Serial number 45671 => '2025-01-14'
+    expect(result[0].fechaEmision).toBe('2025-01-14');
   });
 });
 

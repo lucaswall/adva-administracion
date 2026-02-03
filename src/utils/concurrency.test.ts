@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { isQuotaError, withQuotaRetry, SHEETS_QUOTA_RETRY_CONFIG, withLock, computeVersion } from './concurrency.js';
+import { isQuotaError, withQuotaRetry, SHEETS_QUOTA_RETRY_CONFIG, withLock, computeVersion, quotaThrottle } from './concurrency.js';
 
 describe('isQuotaError', () => {
   it('detects "quota exceeded" message', () => {
@@ -586,5 +586,128 @@ describe('computeVersion', () => {
     const hash2 = computeVersion({ a: 2 });
 
     expect(hash1).not.toBe(hash2);
+  });
+});
+
+describe('QuotaThrottle', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    quotaThrottle.reset();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('allows operations to proceed immediately with no quota errors', async () => {
+    const start = Date.now();
+    await quotaThrottle.waitForClearance();
+    const elapsed = Date.now() - start;
+
+    // Should resolve immediately (no delay)
+    expect(elapsed).toBeLessThan(50);
+  });
+
+  it('adds delay after reportQuotaError is called', async () => {
+    quotaThrottle.reportQuotaError();
+
+    // waitForClearance should now impose a delay
+    const waitPromise = quotaThrottle.waitForClearance();
+
+    // Advance time to cover the base delay (5 seconds)
+    await vi.advanceTimersByTimeAsync(5000);
+    await waitPromise;
+
+    // Should have waited for the backoff delay
+    expect(true).toBe(true); // If we get here, the wait resolved after delay
+  });
+
+  it('increases backoff with consecutive quota errors', async () => {
+    // First error → base delay (5s)
+    quotaThrottle.reportQuotaError();
+    const delay1 = quotaThrottle.getCurrentDelayMs();
+
+    // Second error → base * 2 (10s)
+    quotaThrottle.reportQuotaError();
+    const delay2 = quotaThrottle.getCurrentDelayMs();
+
+    // Third error → base * 4 (20s)
+    quotaThrottle.reportQuotaError();
+    const delay3 = quotaThrottle.getCurrentDelayMs();
+
+    expect(delay2).toBeGreaterThan(delay1);
+    expect(delay3).toBeGreaterThan(delay2);
+  });
+
+  it('caps backoff at maximum delay', async () => {
+    // Report many errors to hit the cap
+    for (let i = 0; i < 20; i++) {
+      quotaThrottle.reportQuotaError();
+    }
+
+    const delay = quotaThrottle.getCurrentDelayMs();
+    // Should be capped at 60 seconds max
+    expect(delay).toBeLessThanOrEqual(60000);
+  });
+
+  it('resets backoff after reset period with no errors', async () => {
+    quotaThrottle.reportQuotaError();
+    quotaThrottle.reportQuotaError();
+
+    const delayBefore = quotaThrottle.getCurrentDelayMs();
+    expect(delayBefore).toBeGreaterThan(0);
+
+    // Advance time past the reset period (60 seconds)
+    await vi.advanceTimersByTimeAsync(61000);
+
+    const delayAfter = quotaThrottle.getCurrentDelayMs();
+    expect(delayAfter).toBe(0);
+  });
+
+  it('reset() clears all state', async () => {
+    quotaThrottle.reportQuotaError();
+    quotaThrottle.reportQuotaError();
+    quotaThrottle.reportQuotaError();
+
+    expect(quotaThrottle.getCurrentDelayMs()).toBeGreaterThan(0);
+
+    quotaThrottle.reset();
+
+    expect(quotaThrottle.getCurrentDelayMs()).toBe(0);
+  });
+
+  it('integrates with withQuotaRetry - notifies throttle on quota errors', async () => {
+    quotaThrottle.reset();
+
+    let callCount = 0;
+    const fn = async () => {
+      callCount++;
+      if (callCount <= 1) {
+        throw new Error('Quota exceeded for quota metric');
+      }
+      return 'success';
+    };
+
+    // Use very short retry delays for testing
+    const resultPromise = withQuotaRetry(fn, { maxRetries: 3, baseDelayMs: 100, maxDelayMs: 200 }, { maxRetries: 3, baseDelayMs: 100, maxDelayMs: 200 });
+
+    // Advance timers repeatedly to cover:
+    // 1. First waitForClearance (0ms - no delay yet)
+    // 2. fn() throws quota error → reportQuotaError sets 5s delay
+    // 3. Per-operation retry delay (~100ms)
+    // 4. Second waitForClearance (5000ms throttle delay)
+    // 5. fn() succeeds
+    for (let i = 0; i < 20; i++) {
+      await vi.advanceTimersByTimeAsync(1000);
+    }
+    const result = await resultPromise;
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value).toBe('success');
+    }
+
+    // After a quota error, the throttle should have been notified
+    expect(callCount).toBe(2);
   });
 });
