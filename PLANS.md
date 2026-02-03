@@ -2,7 +2,7 @@
 
 **Created:** 2026-02-03
 **Source:** Linear Backlog issues
-**Linear Issues:** [ADV-52](https://linear.app/adva-administracion/issue/ADV-52/update-all-dependencies-to-latest-versions)
+**Linear Issues:** [ADV-52](https://linear.app/adva-administracion/issue/ADV-52/update-semver-compatible-dependencies-fastify-pino-vitest-typesnode), [ADV-53](https://linear.app/adva-administracion/issue/ADV-53/update-googleapis-to-v171-major-version-bump), [ADV-54](https://linear.app/adva-administracion/issue/ADV-54/update-googleclasp-to-v3-major-version-bump), [ADV-55](https://linear.app/adva-administracion/issue/ADV-55/dismiss-false-positive-dependabot-alerts-for-hono)
 
 ## Context Gathered
 
@@ -55,7 +55,7 @@
 ## Original Plan
 
 ### Task 1: Update semver-compatible dependencies
-**Linear Issue:** [ADV-52](https://linear.app/adva-administracion/issue/ADV-52/update-all-dependencies-to-latest-versions)
+**Linear Issue:** [ADV-52](https://linear.app/adva-administracion/issue/ADV-52/update-semver-compatible-dependencies-fastify-pino-vitest-typesnode)
 
 This task has no new tests to write — the existing test suite (1541 tests) validates that updates don't break anything.
 
@@ -68,7 +68,7 @@ This task has no new tests to write — the existing test suite (1541 tests) val
 2. Run verifier — all tests must pass, zero warnings
 
 ### Task 2: Evaluate and update googleapis to v171
-**Linear Issue:** [ADV-52](https://linear.app/adva-administracion/issue/ADV-52/update-all-dependencies-to-latest-versions)
+**Linear Issue:** [ADV-53](https://linear.app/adva-administracion/issue/ADV-53/update-googleapis-to-v171-major-version-bump)
 
 1. Check googleapis v171 changelog/release notes for breaking changes in:
    - `drive_v3` API (files.list, files.get, files.create, files.update, files.watch, channels.stop)
@@ -83,7 +83,7 @@ This task has no new tests to write — the existing test suite (1541 tests) val
 4. Run verifier — all tests must pass, zero warnings
 
 ### Task 3: Evaluate and update @google/clasp to v3
-**Linear Issue:** [ADV-52](https://linear.app/adva-administracion/issue/ADV-52/update-all-dependencies-to-latest-versions)
+**Linear Issue:** [ADV-54](https://linear.app/adva-administracion/issue/ADV-54/update-googleclasp-to-v3-major-version-bump)
 
 1. Check @google/clasp v3 changelog for breaking changes in:
    - `clasp push` command behavior
@@ -99,7 +99,7 @@ This task has no new tests to write — the existing test suite (1541 tests) val
 5. Verify `npm run build:script` still works (clasp push requires auth so can't test fully, but build step should succeed)
 
 ### Task 4: Dismiss false-positive Dependabot alerts
-**Linear Issue:** [ADV-52](https://linear.app/adva-administracion/issue/ADV-52/update-all-dependencies-to-latest-versions)
+**Linear Issue:** [ADV-55](https://linear.app/adva-administracion/issue/ADV-55/dismiss-false-positive-dependabot-alerts-for-hono)
 
 1. Use `gh` CLI to dismiss the 4 hono Dependabot alerts as "not applicable"
    - Run `gh api repos/{owner}/{repo}/dependabot/alerts` to list alerts
@@ -116,7 +116,7 @@ This task has no new tests to write — the existing test suite (1541 tests) val
 
 **Objective:** Update all npm dependencies to latest versions, fixing two known Fastify security vulnerabilities and bringing all packages up to date.
 
-**Linear Issues:** ADV-52
+**Linear Issues:** ADV-52, ADV-53, ADV-54, ADV-55
 
 **Approach:**
 - First update all semver-compatible packages via `npm update` (low risk, includes critical Fastify security patches)
