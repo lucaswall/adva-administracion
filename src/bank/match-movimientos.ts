@@ -209,15 +209,83 @@ function movimientoRowToBankMovement(mov: MovimientoRow): BankMovement {
 }
 
 /**
- * Parses Facturas from spreadsheet data using header-based lookup
+ * Parses Facturas Emitidas from spreadsheet data using header-based lookup.
+ * ADVA is the emisor, so counterparty info is cuitReceptor/razonSocialReceptor.
  */
-function parseFacturas(data: CellValue[][]): Array<Factura & { row: number }> {
+export function parseFacturasEmitidas(data: CellValue[][]): Array<Factura & { row: number }> {
   if (data.length < 2) return [];
 
   const headers = data[0].map(h => String(h || '').toLowerCase());
   const facturas: Array<Factura & { row: number }> = [];
 
   // Required headers - throw if missing (critical for matching)
+  // For Facturas Emitidas, the counterparty is the receptor
+  const colIndex = {
+    fechaEmision: getRequiredColumnIndex(headers, 'fechaemision'),
+    fileId: getRequiredColumnIndex(headers, 'fileid'),
+    tipoComprobante: getRequiredColumnIndex(headers, 'tipocomprobante'),
+    nroFactura: getRequiredColumnIndex(headers, 'nrofactura'),
+    cuitReceptor: getRequiredColumnIndex(headers, 'cuitreceptor'),
+    razonSocialReceptor: getRequiredColumnIndex(headers, 'razonsocialreceptor'),
+    importeTotal: getRequiredColumnIndex(headers, 'importetotal'),
+    moneda: getRequiredColumnIndex(headers, 'moneda'),
+    // Optional headers - use indexOf (returns -1 if missing, which is safe)
+    fileName: headers.indexOf('filename'),
+    importeNeto: headers.indexOf('importeneto'),
+    importeIva: headers.indexOf('importeiva'),
+    concepto: headers.indexOf('concepto'),
+    processedAt: headers.indexOf('processedat'),
+    confidence: headers.indexOf('confidence'),
+    needsReview: headers.indexOf('needsreview'),
+    matchedPagoFileId: headers.indexOf('matchedpagofileid'),
+    matchConfidence: headers.indexOf('matchconfidence'),
+    hasCuitMatch: headers.indexOf('hascuitmatch'),
+  };
+
+  for (let i = 1; i < data.length; i++) {
+    const row = data[i];
+    if (!row || !row[colIndex.fileId]) continue;
+
+    facturas.push({
+      row: i + 1,
+      fechaEmision: String(row[colIndex.fechaEmision] || ''),
+      fileId: String(row[colIndex.fileId] || ''),
+      fileName: String(row[colIndex.fileName] || ''),
+      tipoComprobante: String(row[colIndex.tipoComprobante] || 'A') as any,
+      nroFactura: String(row[colIndex.nroFactura] || ''),
+      // ADVA is emisor, so emisor fields are implicit (not stored)
+      cuitEmisor: '',
+      razonSocialEmisor: '',
+      cuitReceptor: String(row[colIndex.cuitReceptor] || ''),
+      razonSocialReceptor: String(row[colIndex.razonSocialReceptor] || ''),
+      importeNeto: parseNumber(row[colIndex.importeNeto]) || 0,
+      importeIva: parseNumber(row[colIndex.importeIva]) || 0,
+      importeTotal: parseNumber(row[colIndex.importeTotal]) || 0,
+      moneda: (String(row[colIndex.moneda] || 'ARS') as 'ARS' | 'USD'),
+      concepto: String(row[colIndex.concepto] || ''),
+      processedAt: String(row[colIndex.processedAt] || ''),
+      confidence: parseNumber(row[colIndex.confidence]) || 0,
+      needsReview: row[colIndex.needsReview] === 'YES',
+      matchedPagoFileId: row[colIndex.matchedPagoFileId] ? String(row[colIndex.matchedPagoFileId]) : undefined,
+      matchConfidence: row[colIndex.matchConfidence] ? (String(row[colIndex.matchConfidence]) as MatchConfidence) : undefined,
+    });
+  }
+
+  return facturas;
+}
+
+/**
+ * Parses Facturas Recibidas from spreadsheet data using header-based lookup.
+ * ADVA is the receptor, so counterparty info is cuitEmisor/razonSocialEmisor.
+ */
+export function parseFacturasRecibidas(data: CellValue[][]): Array<Factura & { row: number }> {
+  if (data.length < 2) return [];
+
+  const headers = data[0].map(h => String(h || '').toLowerCase());
+  const facturas: Array<Factura & { row: number }> = [];
+
+  // Required headers - throw if missing (critical for matching)
+  // For Facturas Recibidas, the counterparty is the emisor
   const colIndex = {
     fechaEmision: getRequiredColumnIndex(headers, 'fechaemision'),
     fileId: getRequiredColumnIndex(headers, 'fileid'),
@@ -239,6 +307,8 @@ function parseFacturas(data: CellValue[][]): Array<Factura & { row: number }> {
     needsReview: headers.indexOf('needsreview'),
     matchedPagoFileId: headers.indexOf('matchedpagofileid'),
     matchConfidence: headers.indexOf('matchconfidence'),
+    hasCuitMatch: headers.indexOf('hascuitmatch'),
+    pagada: headers.indexOf('pagada'),
   };
 
   for (let i = 1; i < data.length; i++) {
@@ -465,7 +535,7 @@ async function loadControlIngresos(spreadsheetId: string): Promise<Result<Ingres
     return {
       ok: true,
       value: {
-        facturasEmitidas: parseFacturas(facturasResult.value),
+        facturasEmitidas: parseFacturasEmitidas(facturasResult.value),
         pagosRecibidos: parsePagos(pagosResult.value),
         retenciones: parseRetenciones(retencionesResult.value),
       },
@@ -496,7 +566,7 @@ async function loadControlEgresos(spreadsheetId: string): Promise<Result<Egresos
     return {
       ok: true,
       value: {
-        facturasRecibidas: parseFacturas(facturasResult.value),
+        facturasRecibidas: parseFacturasRecibidas(facturasResult.value),
         pagosEnviados: parsePagos(pagosResult.value),
         recibos: parseRecibos(recibosResult.value),
       },

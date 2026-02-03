@@ -8,6 +8,8 @@ import {
   matchAllMovimientos,
   isBetterMatch,
   getRequiredColumnIndex,
+  parseFacturasEmitidas,
+  parseFacturasRecibidas,
   type MatchQuality,
 } from './match-movimientos.js';
 
@@ -100,6 +102,182 @@ describe('getRequiredColumnIndex', () => {
       expect((e as Error).message).toContain('fechaemision');
       expect((e as Error).message).toContain('fileid');
     }
+  });
+});
+
+describe('parseFacturasEmitidas', () => {
+  it('requires cuitReceptor and razonSocialReceptor headers', () => {
+    const data = [
+      ['fechaEmision', 'fileId', 'fileName', 'tipoComprobante', 'nroFactura', 'cuitReceptor', 'razonSocialReceptor', 'importeNeto', 'importeIva', 'importeTotal', 'moneda', 'concepto', 'processedAt', 'confidence', 'needsReview', 'matchedPagoFileId', 'matchConfidence', 'hasCuitMatch'],
+      ['2025-01-15', 'file1', 'test.pdf', 'A', '00001-00000001', '20123456786', 'CLIENTE SA', '', '', '1000', 'ARS', '', '2025-01-15T10:00:00Z', '0.95', 'NO', '', '', ''],
+    ];
+
+    const result = parseFacturasEmitidas(data);
+
+    expect(result).toHaveLength(1);
+    expect(result[0].cuitReceptor).toBe('20123456786');
+    expect(result[0].razonSocialReceptor).toBe('CLIENTE SA');
+  });
+
+  it('throws error when cuitReceptor header is missing', () => {
+    const data = [
+      ['fechaEmision', 'fileId', 'tipoComprobante', 'nroFactura', 'razonSocialReceptor', 'importeTotal', 'moneda'],
+      ['2025-01-15', 'file1', 'A', '00001-00000001', 'CLIENTE SA', '1000', 'ARS'],
+    ];
+
+    expect(() => parseFacturasEmitidas(data)).toThrow(/Required header 'cuitreceptor' not found/);
+  });
+
+  it('throws error when razonSocialReceptor header is missing', () => {
+    const data = [
+      ['fechaEmision', 'fileId', 'tipoComprobante', 'nroFactura', 'cuitReceptor', 'importeTotal', 'moneda'],
+      ['2025-01-15', 'file1', 'A', '00001-00000001', '20123456786', '1000', 'ARS'],
+    ];
+
+    expect(() => parseFacturasEmitidas(data)).toThrow(/Required header 'razonsocialreceptor' not found/);
+  });
+
+  it('handles optional headers gracefully when missing', () => {
+    // Minimal required headers only
+    const data = [
+      ['fechaEmision', 'fileId', 'tipoComprobante', 'nroFactura', 'cuitReceptor', 'razonSocialReceptor', 'importeTotal', 'moneda'],
+      ['2025-01-15', 'file1', 'A', '00001-00000001', '20123456786', 'CLIENTE SA', '1000', 'ARS'],
+    ];
+
+    const result = parseFacturasEmitidas(data);
+
+    expect(result).toHaveLength(1);
+    expect(result[0].importeNeto).toBe(0); // Default for missing optional
+    expect(result[0].importeIva).toBe(0);
+    expect(result[0].matchedPagoFileId).toBeUndefined();
+  });
+
+  it('returns empty array for data with only headers', () => {
+    const data = [
+      ['fechaEmision', 'fileId', 'tipoComprobante', 'nroFactura', 'cuitReceptor', 'razonSocialReceptor', 'importeTotal', 'moneda'],
+    ];
+
+    expect(parseFacturasEmitidas(data)).toEqual([]);
+  });
+
+  it('returns empty array for empty data', () => {
+    expect(parseFacturasEmitidas([])).toEqual([]);
+  });
+
+  it('skips rows without fileId', () => {
+    const data = [
+      ['fechaEmision', 'fileId', 'tipoComprobante', 'nroFactura', 'cuitReceptor', 'razonSocialReceptor', 'importeTotal', 'moneda'],
+      ['2025-01-15', 'file1', 'A', '00001-00000001', '20123456786', 'CLIENTE SA', '1000', 'ARS'],
+      ['2025-01-16', '', 'A', '00001-00000002', '27234567891', 'OTRO CLIENTE', '2000', 'ARS'],
+      ['2025-01-17', 'file3', 'B', '00001-00000003', '20111111119', 'TERCER CLIENTE', '3000', 'ARS'],
+    ];
+
+    const result = parseFacturasEmitidas(data);
+
+    expect(result).toHaveLength(2);
+    expect(result[0].fileId).toBe('file1');
+    expect(result[1].fileId).toBe('file3');
+  });
+
+  it('includes row number (1-indexed, accounting for header)', () => {
+    const data = [
+      ['fechaEmision', 'fileId', 'tipoComprobante', 'nroFactura', 'cuitReceptor', 'razonSocialReceptor', 'importeTotal', 'moneda'],
+      ['2025-01-15', 'file1', 'A', '00001-00000001', '20123456786', 'CLIENTE SA', '1000', 'ARS'],
+      ['2025-01-16', 'file2', 'B', '00001-00000002', '27234567891', 'OTRO CLIENTE', '2000', 'ARS'],
+    ];
+
+    const result = parseFacturasEmitidas(data);
+
+    expect(result[0].row).toBe(2); // Row 2 in spreadsheet (1 is header)
+    expect(result[1].row).toBe(3);
+  });
+});
+
+describe('parseFacturasRecibidas', () => {
+  it('requires cuitEmisor and razonSocialEmisor headers', () => {
+    const data = [
+      ['fechaEmision', 'fileId', 'fileName', 'tipoComprobante', 'nroFactura', 'cuitEmisor', 'razonSocialEmisor', 'cuitReceptor', 'razonSocialReceptor', 'importeNeto', 'importeIva', 'importeTotal', 'moneda', 'concepto', 'processedAt', 'confidence', 'needsReview', 'matchedPagoFileId', 'matchConfidence'],
+      ['2025-01-15', 'file1', 'test.pdf', 'A', '00001-00000001', '20123456786', 'PROVEEDOR SA', '30709076783', 'ADVA', '', '', '1000', 'ARS', '', '2025-01-15T10:00:00Z', '0.95', 'NO', '', ''],
+    ];
+
+    const result = parseFacturasRecibidas(data);
+
+    expect(result).toHaveLength(1);
+    expect(result[0].cuitEmisor).toBe('20123456786');
+    expect(result[0].razonSocialEmisor).toBe('PROVEEDOR SA');
+  });
+
+  it('throws error when cuitEmisor header is missing', () => {
+    const data = [
+      ['fechaEmision', 'fileId', 'tipoComprobante', 'nroFactura', 'razonSocialEmisor', 'importeTotal', 'moneda'],
+      ['2025-01-15', 'file1', 'A', '00001-00000001', 'PROVEEDOR SA', '1000', 'ARS'],
+    ];
+
+    expect(() => parseFacturasRecibidas(data)).toThrow(/Required header 'cuitemisor' not found/);
+  });
+
+  it('throws error when razonSocialEmisor header is missing', () => {
+    const data = [
+      ['fechaEmision', 'fileId', 'tipoComprobante', 'nroFactura', 'cuitEmisor', 'importeTotal', 'moneda'],
+      ['2025-01-15', 'file1', 'A', '00001-00000001', '20123456786', '1000', 'ARS'],
+    ];
+
+    expect(() => parseFacturasRecibidas(data)).toThrow(/Required header 'razonsocialemisor' not found/);
+  });
+
+  it('handles optional headers gracefully when missing', () => {
+    // Minimal required headers only
+    const data = [
+      ['fechaEmision', 'fileId', 'tipoComprobante', 'nroFactura', 'cuitEmisor', 'razonSocialEmisor', 'importeTotal', 'moneda'],
+      ['2025-01-15', 'file1', 'A', '00001-00000001', '20123456786', 'PROVEEDOR SA', '1000', 'ARS'],
+    ];
+
+    const result = parseFacturasRecibidas(data);
+
+    expect(result).toHaveLength(1);
+    expect(result[0].cuitReceptor).toBe(''); // Missing optional
+    expect(result[0].razonSocialReceptor).toBe('');
+    expect(result[0].importeNeto).toBe(0);
+  });
+
+  it('returns empty array for data with only headers', () => {
+    const data = [
+      ['fechaEmision', 'fileId', 'tipoComprobante', 'nroFactura', 'cuitEmisor', 'razonSocialEmisor', 'importeTotal', 'moneda'],
+    ];
+
+    expect(parseFacturasRecibidas(data)).toEqual([]);
+  });
+
+  it('returns empty array for empty data', () => {
+    expect(parseFacturasRecibidas([])).toEqual([]);
+  });
+
+  it('skips rows without fileId', () => {
+    const data = [
+      ['fechaEmision', 'fileId', 'tipoComprobante', 'nroFactura', 'cuitEmisor', 'razonSocialEmisor', 'importeTotal', 'moneda'],
+      ['2025-01-15', 'file1', 'A', '00001-00000001', '20123456786', 'PROVEEDOR SA', '1000', 'ARS'],
+      ['2025-01-16', '', 'A', '00001-00000002', '27234567891', 'OTRO PROVEEDOR', '2000', 'ARS'],
+      ['2025-01-17', 'file3', 'B', '00001-00000003', '20111111119', 'TERCER PROVEEDOR', '3000', 'ARS'],
+    ];
+
+    const result = parseFacturasRecibidas(data);
+
+    expect(result).toHaveLength(2);
+    expect(result[0].fileId).toBe('file1');
+    expect(result[1].fileId).toBe('file3');
+  });
+
+  it('includes row number (1-indexed, accounting for header)', () => {
+    const data = [
+      ['fechaEmision', 'fileId', 'tipoComprobante', 'nroFactura', 'cuitEmisor', 'razonSocialEmisor', 'importeTotal', 'moneda'],
+      ['2025-01-15', 'file1', 'A', '00001-00000001', '20123456786', 'PROVEEDOR SA', '1000', 'ARS'],
+      ['2025-01-16', 'file2', 'B', '00001-00000002', '27234567891', 'OTRO PROVEEDOR', '2000', 'ARS'],
+    ];
+
+    const result = parseFacturasRecibidas(data);
+
+    expect(result[0].row).toBe(2); // Row 2 in spreadsheet (1 is header)
+    expect(result[1].row).toBe(3);
   });
 });
 

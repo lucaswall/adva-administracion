@@ -1107,6 +1107,68 @@ describe('Parser - CUIT Assignment for Consumidor Final', () => {
       expect(result.documentType).toBe('factura_emitida');
       expect(result.cuitReceptor).toBe('12345678'); // DNI should be assigned
     });
+
+    // CUIT-based fallback tests (ADV-47)
+    it('uses CUIT fallback when ADVA CUIT is first in array and name matching fails', () => {
+      // ADVA CUIT appears first (issuer position) but names don't match pattern
+      const issuerName = 'UNKNOWN COMPANY NAME'; // Doesn't match ADVA pattern
+      const clientName = 'PROVEEDOR SA';
+      const allCuits = ['30709076783', '20123456786']; // ADVA first = issuer
+
+      const result = assignCuitsAndClassify(issuerName, clientName, allCuits);
+
+      expect(result.documentType).toBe('factura_emitida');
+      expect(result.cuitEmisor).toBe('30709076783');
+      expect(result.cuitReceptor).toBe('20123456786');
+    });
+
+    it('uses CUIT fallback when ADVA CUIT is second in array and name matching fails', () => {
+      // ADVA CUIT appears second (client position) but names don't match pattern
+      const issuerName = 'PROVEEDOR SA';
+      const clientName = 'UNKNOWN COMPANY NAME'; // Doesn't match ADVA pattern
+      const allCuits = ['20123456786', '30709076783']; // ADVA second = client
+
+      const result = assignCuitsAndClassify(issuerName, clientName, allCuits);
+
+      expect(result.documentType).toBe('factura_recibida');
+      expect(result.cuitEmisor).toBe('20123456786');
+      expect(result.cuitReceptor).toBe('30709076783');
+    });
+
+    it('prefers name matching over CUIT fallback when name matches', () => {
+      // Name clearly matches ADVA - don't fall back to CUIT position
+      const issuerName = 'ASOCIACION CIVIL DE DESARROLLADORES DE VIDEOJUEGOS ARGENTINOS';
+      const clientName = 'PROVEEDOR SA';
+      // CUIT order is opposite to name order - but name should take precedence
+      const allCuits = ['20123456786', '30709076783']; // ADVA second, but name says issuer
+
+      const result = assignCuitsAndClassify(issuerName, clientName, allCuits);
+
+      expect(result.documentType).toBe('factura_emitida'); // Name-based, not CUIT-based
+      expect(result.cuitEmisor).toBe('30709076783');
+    });
+
+    it('throws when ADVA CUIT not found and name matching also fails', () => {
+      const issuerName = 'EMPRESA RANDOM SA';
+      const clientName = 'OTRA EMPRESA SA';
+      const allCuits = ['20123456786', '27234567891']; // No ADVA CUIT
+
+      expect(() => assignCuitsAndClassify(issuerName, clientName, allCuits))
+        .toThrow(/ADVA not found/);
+    });
+
+    it('handles CUIT fallback with mismatched names but valid ADVA CUIT', () => {
+      // Real-world case: OCR/extraction issue corrupts name but CUIT is correct
+      const issuerName = 'A.C.D.V.A.'; // Weird OCR corruption
+      const clientName = 'BBHO PRODUCCIONES SA';
+      const allCuits = ['30709076783', '20123456786']; // ADVA first = issuer
+
+      const result = assignCuitsAndClassify(issuerName, clientName, allCuits);
+
+      // Should work via CUIT fallback since name doesn't match
+      expect(result.documentType).toBe('factura_emitida');
+      expect(result.cuitEmisor).toBe('30709076783');
+    });
   });
 
   describe('parseFacturaResponse - Consumidor Final validation', () => {
@@ -1464,6 +1526,27 @@ describe('isAdvaName', () => {
 
   it('accepts case insensitive match', () => {
     expect(isAdvaName('Asociacion Civil de Desarrolladores de Videojuegos Argentinos')).toBe(true);
+  });
+
+  // Abbreviated forms with periods (ADV-46)
+  it('accepts "AS.C.DE DES.DE VIDEOJUEGOS ARG" (periods in abbreviations)', () => {
+    expect(isAdvaName('AS.C.DE DES.DE VIDEOJUEGOS ARG')).toBe(true);
+  });
+
+  it('accepts "A.C. DES. DE VIDEOJUEGOS" (abbreviated with periods)', () => {
+    expect(isAdvaName('A.C. DES. DE VIDEOJUEGOS')).toBe(true);
+  });
+
+  it('accepts "ASOC. CIVIL DESARROLL. VIDEOJUEGOS" (partial abbreviations)', () => {
+    expect(isAdvaName('ASOC. CIVIL DESARROLL. VIDEOJUEGOS')).toBe(true);
+  });
+
+  it('accepts "AS DE DES DE VIDEOJUEGO" (extreme abbreviation without periods)', () => {
+    expect(isAdvaName('AS DE DES DE VIDEOJUEGO')).toBe(true);
+  });
+
+  it('accepts "A.DE DES.VIDEOJUEGOS ARG" (mixed abbreviation)', () => {
+    expect(isAdvaName('A.DE DES.VIDEOJUEGOS ARG')).toBe(true);
   });
 
   // Invalid names - should return false (these were matching incorrectly before)

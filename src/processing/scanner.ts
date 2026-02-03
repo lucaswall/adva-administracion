@@ -234,6 +234,18 @@ async function processFileWithRetry(
       fileName: fileInfo.name,
       correlationId,
     });
+
+    // ADV-50: Update status to 'failed' before moving to Sin Procesar
+    const statusResult = await updateFileStatus(dashboardOperativoId, fileInfo.id, 'failed', 'Unrecognized document type');
+    if (!statusResult.ok) {
+      logError('Failed to update file status', {
+        module: 'scanner',
+        fileId: fileInfo.id,
+        error: statusResult.error.message,
+        correlationId,
+      });
+    }
+
     const sortResult = await sortToSinProcesar(fileInfo.id, fileInfo.name);
     if (!sortResult.success) {
       logError('Failed to move file to Sin Procesar', {
@@ -265,6 +277,18 @@ async function processFileWithRetry(
       fileName: fileInfo.name,
       correlationId,
     });
+
+    // ADV-50: Update status to 'failed' before moving to Sin Procesar
+    const statusResult = await updateFileStatus(dashboardOperativoId, fileInfo.id, 'failed', 'No valid date for folder routing');
+    if (!statusResult.ok) {
+      logError('Failed to update file status', {
+        module: 'scanner',
+        fileId: fileInfo.id,
+        error: statusResult.error.message,
+        correlationId,
+      });
+    }
+
     const sortResult = await sortToSinProcesar(fileInfo.id, fileInfo.name);
     if (!sortResult.success) {
       logError('Failed to move file to Sin Procesar', {
@@ -810,6 +834,18 @@ async function storeAndSortDocument(
     if (storeResult.ok) {
       if (storeResult.value.stored) {
         result.facturasAdded++;
+
+        // ADV-51: Update status to 'success' BEFORE sorting to prevent race condition
+        const statusResult = await updateFileStatus(dashboardOperativoId, fileInfo.id, 'success');
+        if (!statusResult.ok) {
+          logError('Failed to update file status', {
+            module: 'scanner',
+            fileId: fileInfo.id,
+            error: statusResult.error.message,
+            correlationId,
+          });
+        }
+
         info('Factura emitida stored, moving to Ingresos folder', {
           module: 'scanner',
           phase: 'storage',
@@ -818,7 +854,7 @@ async function storeAndSortDocument(
         });
         const sortResult = await sortAndRenameDocument(doc, 'ingresos', 'factura_emitida');
         if (!sortResult.success) {
-          logError('Failed to move factura to Ingresos', {
+          logError('Failed to move factura to Ingresos (data stored, file in original location)', {
             module: 'scanner',
             phase: 'storage',
             fileName: fileInfo.name,
@@ -826,16 +862,6 @@ async function storeAndSortDocument(
             correlationId,
           });
           result.errors++;
-          // Mark as failed in tracking sheet
-          const statusResult = await updateFileStatus(dashboardOperativoId, fileInfo.id, 'failed', sortResult.error);
-          if (!statusResult.ok) {
-            logError('Failed to update file status', {
-              module: 'scanner',
-              fileId: fileInfo.id,
-              error: statusResult.error.message,
-              correlationId,
-            });
-          }
         } else {
           info(`Moved to ${sortResult.targetPath}`, {
             module: 'scanner',
@@ -843,16 +869,6 @@ async function storeAndSortDocument(
             fileName: fileInfo.name,
             correlationId,
           });
-          // Mark as success in tracking sheet
-          const statusResult = await updateFileStatus(dashboardOperativoId, fileInfo.id, 'success');
-          if (!statusResult.ok) {
-            logError('Failed to update file status', {
-              module: 'scanner',
-              fileId: fileInfo.id,
-              error: statusResult.error.message,
-              correlationId,
-            });
-          }
         }
       } else {
         // Duplicate detected - move to Duplicado folder
@@ -938,6 +954,19 @@ async function storeAndSortDocument(
     if (storeResult.ok) {
       if (storeResult.value.stored) {
         result.facturasAdded++;
+
+        // ADV-51: Update status to 'success' BEFORE sorting to prevent race condition
+        // If server restarts after storage but before status update, file would be stuck in 'processing'
+        const statusResult = await updateFileStatus(dashboardOperativoId, fileInfo.id, 'success');
+        if (!statusResult.ok) {
+          logError('Failed to update file status', {
+            module: 'scanner',
+            fileId: fileInfo.id,
+            error: statusResult.error.message,
+            correlationId,
+          });
+        }
+
         info('Factura recibida stored, moving to Egresos folder', {
           module: 'scanner',
           phase: 'storage',
@@ -946,7 +975,8 @@ async function storeAndSortDocument(
         });
         const sortResult = await sortAndRenameDocument(doc, 'egresos', 'factura_recibida');
         if (!sortResult.success) {
-          logError('Failed to move factura to Egresos', {
+          // Log error but don't change status - data is stored successfully
+          logError('Failed to move factura to Egresos (data stored, file in original location)', {
             module: 'scanner',
             phase: 'storage',
             fileName: fileInfo.name,
@@ -954,16 +984,6 @@ async function storeAndSortDocument(
             correlationId,
           });
           result.errors++;
-          // Mark as failed in tracking sheet
-          const statusResult = await updateFileStatus(dashboardOperativoId, fileInfo.id, 'failed', sortResult.error);
-          if (!statusResult.ok) {
-            logError('Failed to update file status', {
-              module: 'scanner',
-              fileId: fileInfo.id,
-              error: statusResult.error.message,
-              correlationId,
-            });
-          }
         } else {
           info(`Moved to ${sortResult.targetPath}`, {
             module: 'scanner',
@@ -971,16 +991,6 @@ async function storeAndSortDocument(
             fileName: fileInfo.name,
             correlationId,
           });
-          // Mark as success in tracking sheet
-          const statusResult = await updateFileStatus(dashboardOperativoId, fileInfo.id, 'success');
-          if (!statusResult.ok) {
-            logError('Failed to update file status', {
-              module: 'scanner',
-              fileId: fileInfo.id,
-              error: statusResult.error.message,
-              correlationId,
-            });
-          }
         }
       } else {
         // Duplicate detected - move to Duplicado folder
@@ -1066,6 +1076,18 @@ async function storeAndSortDocument(
     if (storeResult.ok) {
       if (storeResult.value.stored) {
         result.pagosAdded++;
+
+        // ADV-51: Update status to 'success' BEFORE sorting to prevent race condition
+        const statusResult = await updateFileStatus(dashboardOperativoId, fileInfo.id, 'success');
+        if (!statusResult.ok) {
+          logError('Failed to update file status', {
+            module: 'scanner',
+            fileId: fileInfo.id,
+            error: statusResult.error.message,
+            correlationId,
+          });
+        }
+
         info('Pago recibido stored, moving to Ingresos folder', {
           module: 'scanner',
           phase: 'storage',
@@ -1074,7 +1096,7 @@ async function storeAndSortDocument(
         });
         const sortResult = await sortAndRenameDocument(doc, 'ingresos', 'pago_recibido');
         if (!sortResult.success) {
-          logError('Failed to move pago to Ingresos', {
+          logError('Failed to move pago to Ingresos (data stored, file in original location)', {
             module: 'scanner',
             phase: 'storage',
             fileName: fileInfo.name,
@@ -1082,15 +1104,6 @@ async function storeAndSortDocument(
             correlationId,
           });
           result.errors++;
-          const statusResult = await updateFileStatus(dashboardOperativoId, fileInfo.id, 'failed', sortResult.error);
-          if (!statusResult.ok) {
-            logError('Failed to update file status', {
-              module: 'scanner',
-              fileId: fileInfo.id,
-              error: statusResult.error.message,
-              correlationId,
-            });
-          }
         } else {
           info(`Moved to ${sortResult.targetPath}`, {
             module: 'scanner',
@@ -1098,15 +1111,6 @@ async function storeAndSortDocument(
             fileName: fileInfo.name,
             correlationId,
           });
-          const statusResult = await updateFileStatus(dashboardOperativoId, fileInfo.id, 'success');
-          if (!statusResult.ok) {
-            logError('Failed to update file status', {
-              module: 'scanner',
-              fileId: fileInfo.id,
-              error: statusResult.error.message,
-              correlationId,
-            });
-          }
         }
       } else {
         // Duplicate detected - move to Duplicado folder
@@ -1189,6 +1193,18 @@ async function storeAndSortDocument(
     if (storeResult.ok) {
       if (storeResult.value.stored) {
         result.pagosAdded++;
+
+        // ADV-51: Update status to 'success' BEFORE sorting to prevent race condition
+        const statusResult = await updateFileStatus(dashboardOperativoId, fileInfo.id, 'success');
+        if (!statusResult.ok) {
+          logError('Failed to update file status', {
+            module: 'scanner',
+            fileId: fileInfo.id,
+            error: statusResult.error.message,
+            correlationId,
+          });
+        }
+
         info('Pago enviado stored, moving to Egresos folder', {
           module: 'scanner',
           phase: 'storage',
@@ -1197,7 +1213,7 @@ async function storeAndSortDocument(
         });
         const sortResult = await sortAndRenameDocument(doc, 'egresos', 'pago_enviado');
         if (!sortResult.success) {
-          logError('Failed to move pago to Egresos', {
+          logError('Failed to move pago to Egresos (data stored, file in original location)', {
             module: 'scanner',
             phase: 'storage',
             fileName: fileInfo.name,
@@ -1205,15 +1221,6 @@ async function storeAndSortDocument(
             correlationId,
           });
           result.errors++;
-          const statusResult = await updateFileStatus(dashboardOperativoId, fileInfo.id, 'failed', sortResult.error);
-          if (!statusResult.ok) {
-            logError('Failed to update file status', {
-              module: 'scanner',
-              fileId: fileInfo.id,
-              error: statusResult.error.message,
-              correlationId,
-            });
-          }
         } else {
           info(`Moved to ${sortResult.targetPath}`, {
             module: 'scanner',
@@ -1221,15 +1228,6 @@ async function storeAndSortDocument(
             fileName: fileInfo.name,
             correlationId,
           });
-          const statusResult = await updateFileStatus(dashboardOperativoId, fileInfo.id, 'success');
-          if (!statusResult.ok) {
-            logError('Failed to update file status', {
-              module: 'scanner',
-              fileId: fileInfo.id,
-              error: statusResult.error.message,
-              correlationId,
-            });
-          }
         }
       } else {
         // Duplicate detected - move to Duplicado folder
@@ -1312,6 +1310,18 @@ async function storeAndSortDocument(
     if (storeResult.ok) {
       if (storeResult.value.stored) {
         result.recibosAdded++;
+
+        // ADV-51: Update status to 'success' BEFORE sorting to prevent race condition
+        const statusResult = await updateFileStatus(dashboardOperativoId, fileInfo.id, 'success');
+        if (!statusResult.ok) {
+          logError('Failed to update file status', {
+            module: 'scanner',
+            fileId: fileInfo.id,
+            error: statusResult.error.message,
+            correlationId,
+          });
+        }
+
         info('Recibo stored, moving to Egresos folder', {
           module: 'scanner',
           phase: 'storage',
@@ -1320,7 +1330,7 @@ async function storeAndSortDocument(
         });
         const sortResult = await sortAndRenameDocument(doc, 'egresos', 'recibo');
         if (!sortResult.success) {
-          logError('Failed to move recibo to Egresos', {
+          logError('Failed to move recibo to Egresos (data stored, file in original location)', {
             module: 'scanner',
             phase: 'storage',
             fileName: fileInfo.name,
@@ -1328,15 +1338,6 @@ async function storeAndSortDocument(
             correlationId,
           });
           result.errors++;
-          const statusResult = await updateFileStatus(dashboardOperativoId, fileInfo.id, 'failed', sortResult.error);
-          if (!statusResult.ok) {
-            logError('Failed to update file status', {
-              module: 'scanner',
-              fileId: fileInfo.id,
-              error: statusResult.error.message,
-              correlationId,
-            });
-          }
         } else {
           info(`Moved to ${sortResult.targetPath}`, {
             module: 'scanner',
@@ -1344,15 +1345,6 @@ async function storeAndSortDocument(
             fileName: fileInfo.name,
             correlationId,
           });
-          const statusResult = await updateFileStatus(dashboardOperativoId, fileInfo.id, 'success');
-          if (!statusResult.ok) {
-            logError('Failed to update file status', {
-              module: 'scanner',
-              fileId: fileInfo.id,
-              error: statusResult.error.message,
-              correlationId,
-            });
-          }
         }
       } else {
         // Duplicate detected - move to Duplicado folder
@@ -1542,10 +1534,21 @@ async function storeAndSortDocument(
               }
             }
 
+            // ADV-51: Update status to 'success' BEFORE sorting to prevent race condition
+            const statusResult = await updateFileStatus(dashboardOperativoId, fileInfo.id, 'success');
+            if (!statusResult.ok) {
+              logError('Failed to update file status', {
+                module: 'scanner',
+                fileId: fileInfo.id,
+                error: statusResult.error.message,
+                correlationId,
+              });
+            }
+
             // Not a duplicate - move to bank account folder
             const sortResult = await sortAndRenameDocument(doc, 'bancos', 'resumen_bancario');
             if (!sortResult.success) {
-              logError('Failed to move resumen', {
+              logError('Failed to move resumen (data stored, file in original location)', {
                 module: 'scanner',
                 phase: 'storage',
                 fileName: fileInfo.name,
@@ -1553,15 +1556,6 @@ async function storeAndSortDocument(
                 correlationId,
               });
               result.errors++;
-              const statusResult = await updateFileStatus(dashboardOperativoId, fileInfo.id, 'failed', sortResult.error);
-              if (!statusResult.ok) {
-                logError('Failed to update file status', {
-                  module: 'scanner',
-                  fileId: fileInfo.id,
-                  error: statusResult.error.message,
-                  correlationId,
-                });
-              }
             } else {
               info(`Stored and moved to ${sortResult.targetPath}`, {
                 module: 'scanner',
@@ -1569,15 +1563,6 @@ async function storeAndSortDocument(
                 fileName: fileInfo.name,
                 correlationId,
               });
-              const statusResult = await updateFileStatus(dashboardOperativoId, fileInfo.id, 'success');
-              if (!statusResult.ok) {
-                logError('Failed to update file status', {
-                  module: 'scanner',
-                  fileId: fileInfo.id,
-                  error: statusResult.error.message,
-                  correlationId,
-                });
-              }
             }
           } else {
             // Duplicate - move to Duplicado folder
@@ -1769,24 +1754,26 @@ async function storeAndSortDocument(
               }
             }
 
+            // ADV-51: Update status to 'success' BEFORE sorting to prevent race condition
+            const statusResult = await updateFileStatus(dashboardOperativoId, fileInfo.id, 'success');
+            if (!statusResult.ok) {
+              logError('Failed to update file status', {
+                module: 'scanner',
+                fileId: fileInfo.id,
+                error: statusResult.error.message,
+                correlationId,
+              });
+            }
+
             const sortResult = await sortAndRenameDocument(doc, 'bancos', 'resumen_tarjeta');
             if (!sortResult.success) {
-              logError('Failed to move resumen tarjeta', {
+              logError('Failed to move resumen tarjeta (data stored, file in original location)', {
                 module: 'scanner',
                 phase: 'storage',
                 fileName: fileInfo.name,
                 error: sortResult.error,
                 correlationId,
               });
-              const statusResult = await updateFileStatus(dashboardOperativoId, fileInfo.id, 'failed', sortResult.error);
-              if (!statusResult.ok) {
-                logError('Failed to update file status', {
-                  module: 'scanner',
-                  fileId: fileInfo.id,
-                  error: statusResult.error.message,
-                  correlationId,
-                });
-              }
               result.errors++;
             } else {
               info(`Stored and moved to ${sortResult.targetPath}`, {
@@ -1795,15 +1782,6 @@ async function storeAndSortDocument(
                 fileName: fileInfo.name,
                 correlationId,
               });
-              const statusResult = await updateFileStatus(dashboardOperativoId, fileInfo.id, 'success');
-              if (!statusResult.ok) {
-                logError('Failed to update file status', {
-                  module: 'scanner',
-                  fileId: fileInfo.id,
-                  error: statusResult.error.message,
-                  correlationId,
-                });
-              }
             }
           } else {
             info('Duplicate resumen tarjeta detected, moving to Duplicado folder', {
@@ -1985,24 +1963,26 @@ async function storeAndSortDocument(
               }
             }
 
+            // ADV-51: Update status to 'success' BEFORE sorting to prevent race condition
+            const statusResult = await updateFileStatus(dashboardOperativoId, fileInfo.id, 'success');
+            if (!statusResult.ok) {
+              logError('Failed to update file status', {
+                module: 'scanner',
+                fileId: fileInfo.id,
+                error: statusResult.error.message,
+                correlationId,
+              });
+            }
+
             const sortResult = await sortAndRenameDocument(doc, 'bancos', 'resumen_broker');
             if (!sortResult.success) {
-              logError('Failed to move resumen broker', {
+              logError('Failed to move resumen broker (data stored, file in original location)', {
                 module: 'scanner',
                 phase: 'storage',
                 fileName: fileInfo.name,
                 error: sortResult.error,
                 correlationId,
               });
-              const statusResult = await updateFileStatus(dashboardOperativoId, fileInfo.id, 'failed', sortResult.error);
-              if (!statusResult.ok) {
-                logError('Failed to update file status', {
-                  module: 'scanner',
-                  fileId: fileInfo.id,
-                  error: statusResult.error.message,
-                  correlationId,
-                });
-              }
               result.errors++;
             } else {
               info(`Stored and moved to ${sortResult.targetPath}`, {
@@ -2011,15 +1991,6 @@ async function storeAndSortDocument(
                 fileName: fileInfo.name,
                 correlationId,
               });
-              const statusResult = await updateFileStatus(dashboardOperativoId, fileInfo.id, 'success');
-              if (!statusResult.ok) {
-                logError('Failed to update file status', {
-                  module: 'scanner',
-                  fileId: fileInfo.id,
-                  error: statusResult.error.message,
-                  correlationId,
-                });
-              }
             }
           } else {
             info('Duplicate resumen broker detected, moving to Duplicado folder', {
@@ -2096,6 +2067,17 @@ async function storeAndSortDocument(
     const storeResult = await storeRetencion(doc as Retencion, controlIngresosId, context);
     if (storeResult.ok) {
       if (storeResult.value.stored) {
+        // ADV-51: Update status to 'success' BEFORE sorting to prevent race condition
+        const statusResult = await updateFileStatus(dashboardOperativoId, fileInfo.id, 'success');
+        if (!statusResult.ok) {
+          logError('Failed to update file status', {
+            module: 'scanner',
+            fileId: fileInfo.id,
+            error: statusResult.error.message,
+            correlationId,
+          });
+        }
+
         info('Retencion stored, moving to Ingresos folder', {
           module: 'scanner',
           phase: 'storage',
@@ -2104,7 +2086,7 @@ async function storeAndSortDocument(
         });
         const sortResult = await sortAndRenameDocument(doc, 'ingresos', 'certificado_retencion');
         if (!sortResult.success) {
-          logError('Failed to move retencion to Ingresos', {
+          logError('Failed to move retencion to Ingresos (data stored, file in original location)', {
             module: 'scanner',
             phase: 'storage',
             fileName: fileInfo.name,
@@ -2112,15 +2094,6 @@ async function storeAndSortDocument(
             correlationId,
           });
           result.errors++;
-          const statusResult = await updateFileStatus(dashboardOperativoId, fileInfo.id, 'failed', sortResult.error);
-          if (!statusResult.ok) {
-            logError('Failed to update file status', {
-              module: 'scanner',
-              fileId: fileInfo.id,
-              error: statusResult.error.message,
-              correlationId,
-            });
-          }
         } else {
           info(`Moved to ${sortResult.targetPath}`, {
             module: 'scanner',
@@ -2128,15 +2101,6 @@ async function storeAndSortDocument(
             fileName: fileInfo.name,
             correlationId,
           });
-          const statusResult = await updateFileStatus(dashboardOperativoId, fileInfo.id, 'success');
-          if (!statusResult.ok) {
-            logError('Failed to update file status', {
-              module: 'scanner',
-              fileId: fileInfo.id,
-              error: statusResult.error.message,
-              correlationId,
-            });
-          }
         }
       } else {
         // Duplicate detected - move to Duplicado folder

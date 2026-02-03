@@ -1,107 +1,183 @@
 # Implementation Plan
 
 **Created:** 2026-02-02
-**Source:** Linear Backlog issue ADV-42
-**Linear Issues:** [ADV-42](https://linear.app/adva-administracion/issue/ADV-42/move-reviewed-issues-to-merge-status)
+**Source:** Linear Backlog issues (all 6)
+**Linear Issues:** [ADV-49](https://linear.app/adva-administracion/issue/ADV-49/parsefacturas-fails-for-facturas-emitidas-due-to-wrong-required), [ADV-46](https://linear.app/adva-administracion/issue/ADV-46/adva-name-pattern-fails-for-abbreviated-company-names), [ADV-47](https://linear.app/adva-administracion/issue/ADV-47/add-cuit-based-fallback-for-adva-role-detection), [ADV-48](https://linear.app/adva-administracion/issue/ADV-48/gemini-extracts-truncated-names-incorrectly-from-insurance-documents), [ADV-50](https://linear.app/adva-administracion/issue/ADV-50/missing-status-update-for-unrecognized-documents-leaves-files-stuck-in), [ADV-51](https://linear.app/adva-administracion/issue/ADV-51/server-restart-race-condition-leaves-successfully-processed-files)
 
 ## Context Gathered
 
-### Linear Integration Research
-
-**Merge status exists:** Confirmed via `list_issue_statuses` - status ID: `2832dda6-3442-47c8-aa36-76422fb08cd8`, type: `started`
-
-**Linear GitHub Integration - Magic Keywords:**
-Per [Linear's GitHub integration docs](https://linear.app/docs/github-integration), including magic keywords in PR descriptions automatically links issues and transitions them:
-- **Closing keywords:** `closes`, `fixes`, `resolves`, `completes` + issue ID (e.g., `Closes ADV-123`)
-- When PR is merged, Linear automatically moves the issue to Done
-- Multiple issues: `Closes ADV-123, ADV-124, ADV-125`
-
-**New State Flow:**
-```
-Backlog → Todo → In Progress → Review → Merge → Done
-                                          ↑        ↑
-                                    (review OK)  (PR merged)
-```
-
-### Files to Modify
-
-**Skills (state transitions):**
-- `.claude/skills/plan-review-implementation/SKILL.md` - Change Review→Done to Review→Merge
-- `.claude/skills/plan-todo/SKILL.md` - Update state flow documentation
-
-**Subagent (PR creation):**
-- `.claude/agents/pr-creator.md` - Add Linear magic keywords to PR body template
-
-**Project Documentation:**
-- `CLAUDE.md` - Update LINEAR INTEGRATION section with new state flow
-
 ### Codebase Analysis
 
-**plan-review-implementation changes needed:**
-- Line 3 description: Update "Review→Done" to "Review→Merge"
-- Line 8: Update description
-- Line 20: Update "Review → Done" to "Review → Merge"
-- Lines 23, 26, 178, 213, 228-229: Update all Done references to Merge
-- Line 261: Update final status message
-- Line 270: Update note about Done state
-- Line 310: Update rule about Review→Done
+**ADV-49 (parseFacturas fails for Facturas Emitidas):**
+- File: `src/bank/match-movimientos.ts:214-273`
+- `parseFacturas()` requires `cuitEmisor` and `razonSocialEmisor` (lines 226-227)
+- `Facturas Emitidas` only has `cuitReceptor` and `razonSocialReceptor` (ADVA is emisor)
+- Called at line 468 for `Facturas Emitidas` and line 499 for `Facturas Recibidas`
+- Need to split into two functions with different header requirements
+- Test file: `src/bank/match-movimientos.test.ts`
 
-**pr-creator changes needed:**
-- Add "## Linear Issues" section to PR body template
-- Include `Closes ADV-XXX` pattern for each issue in the plan
-- Issues must be extracted from PLANS.md Linear Issues line
-- Format: `Closes ADV-123, ADV-124, ADV-125` (comma-separated)
+**ADV-46 (ADVA name pattern fails for abbreviated names):**
+- File: `src/gemini/parser.ts:33`
+- Pattern: `/ADVA|(?=.*VIDEOJUEGO)(?=.*ASOC)(?=.*DESARROLL)/i`
+- Problem: Periods in abbreviations like "AS.C.DE" break keyword matching
+- Need to expand pattern to handle `AS\.?C\.?` and `DES\.?` variations
+- Test file: `src/gemini/parser.test.ts` (has `isAdvaName` tests)
+
+**ADV-47 (Add CUIT-based fallback for ADVA role detection):**
+- File: `src/gemini/parser.ts:84-134`
+- Function: `assignCuitsAndClassify()` throws when ADVA not found in names
+- ADVA_CUIT (30709076783) is available in `allCuits` array
+- Need fallback: if ADVA_CUIT present but name matching fails, use CUIT position
+- Test file: `src/gemini/parser.test.ts` (has `assignCuitsAndClassify` tests)
+
+**ADV-48 (Gemini extracts truncated names incorrectly):**
+- File: `src/gemini/prompts.ts` - FACTURA_PROMPT
+- Gemini concatenates adjacent address text with truncated company names
+- Need to add explicit instruction to stop at truncation points
+- Test with Gemini MCP before implementation
+- Test file: `src/gemini/prompts.test.ts`
+
+**ADV-50 (Missing status update for unrecognized documents):**
+- File: `src/processing/scanner.ts:229-287`
+- Two code paths move files to Sin Procesar without calling `updateFileStatus()`
+- Lines 229-255: Unrecognized document handling
+- Lines 260-287: No valid date handling
+- Need to add `updateFileStatus(dashboardId, fileId, 'failed', ...)` calls
+- Test file: `src/processing/scanner.test.ts`
+
+**ADV-51 (Server restart race condition):**
+- File: `src/processing/scanner.ts`
+- Processing flow: markFileProcessing → extraction → storage → sortAndRenameDocument → updateFileStatus
+- If restart occurs after sort but before updateFileStatus, file stuck in 'processing'
+- Solution: Move updateFileStatus('success') BEFORE sortAndRenameDocument
+- Status reflects data storage success, not file location
+- Test file: `src/processing/scanner.test.ts`
+
+### Test Conventions
+- Vitest with `describe`, `it`, `expect`
+- Mock dependencies with `vi.mock()`
+- Co-located test files as `*.test.ts`
+- Follow Result<T,E> pattern assertions
+
+### Priority Order
+1. **ADV-49** (Urgent) - Complete failure of movimientos matching
+2. **ADV-46** (High) - Invoices rejected due to abbreviation mismatch
+3. **ADV-47** (High) - 17 valid invoices failed due to name matching
+4. **ADV-50** (High) - Files stuck in 'processing' status
+5. **ADV-51** (High) - Race condition on server restart
+6. **ADV-48** (Medium) - Gemini extraction issue with truncated names
 
 ---
 
 ## Original Plan
 
-### Task 1: Update plan-review-implementation to use Merge status
-**Linear Issue:** [ADV-42](https://linear.app/adva-administracion/issue/ADV-42/move-reviewed-issues-to-merge-status)
+### Task 1: Fix parseFacturas() for Facturas Emitidas
+**Linear Issue:** [ADV-49](https://linear.app/adva-administracion/issue/ADV-49/parsefacturas-fails-for-facturas-emitidas-due-to-wrong-required)
 
-1. Read `.claude/skills/plan-review-implementation/SKILL.md`
-2. Update all "Review → Done" transitions to "Review → Merge":
-   - Line 3: description
-   - Line 8: summary line
-   - Line 20: "This skill moves issues from **Review → Merge**"
-   - Line 23: update_issue example
-   - Line 26: issues found case
-   - Line 178: Linear Updates example
-   - Lines 213, 228-229, 261, 270, 310: various references
-3. Update the final status message (line 261) to reflect Merge state
-4. Update the completion note (line 270)
+1. Write tests in `src/bank/match-movimientos.test.ts`:
+   - Test `parseFacturasEmitidas()` requires `cuitReceptor`, `razonSocialReceptor`
+   - Test `parseFacturasRecibidas()` requires `cuitEmisor`, `razonSocialEmisor`
+   - Test both functions handle missing optional headers gracefully
+   - Test error message when required header is missing
+2. Run verifier (expect fail)
+3. Implement in `src/bank/match-movimientos.ts`:
+   - Split `parseFacturas()` into `parseFacturasEmitidas()` and `parseFacturasRecibidas()`
+   - `parseFacturasEmitidas`: require `cuitReceptor`, `razonSocialReceptor` (lines 226-227)
+   - `parseFacturasRecibidas`: require `cuitEmisor`, `razonSocialEmisor`
+   - Update `loadControlIngresos()` (line 468) to use `parseFacturasEmitidas`
+   - Update `loadControlEgresos()` (line 499) to use `parseFacturasRecibidas`
+4. Run verifier (expect pass)
 
-### Task 2: Update pr-creator to include Linear magic keywords
-**Linear Issue:** [ADV-42](https://linear.app/adva-administracion/issue/ADV-42/move-reviewed-issues-to-merge-status)
+### Task 2: Expand ADVA_NAME_PATTERN for abbreviated company names
+**Linear Issue:** [ADV-46](https://linear.app/adva-administracion/issue/ADV-46/adva-name-pattern-fails-for-abbreviated-company-names)
 
-1. Read `.claude/agents/pr-creator.md`
-2. Add new step to Phase 1 to extract Linear issue IDs:
-   - Read PLANS.md if exists
-   - Extract issue IDs from "Linear Issues:" line (pattern: ADV-XXX)
-   - Store for use in PR body
-3. Update PR Body Structure (lines 109-132):
-   - Add "## Linear Issues" section with `Closes ADV-XXX, ADV-YYY` format
-   - This triggers Linear's automation when PR is merged → issues move to Done
-4. Document the Linear integration in a new section explaining the magic keywords
+1. Write tests in `src/gemini/parser.test.ts`:
+   - Test `isAdvaName("AS.C.DE DES.DE VIDEOJUEGOS ARG")` returns true
+   - Test `isAdvaName("A.C. DES. DE VIDEOJUEGOS")` returns true
+   - Test `isAdvaName("ASOC. CIVIL DESARROLL. VIDEOJUEGOS")` returns true
+   - Test standard names still work: "ASOCIACION CIVIL DE DESARROLLADORES DE VIDEOJUEGOS"
+   - Test false positive protection: "ASOCIACION DE DESARROLLADORES DE SOFTWARE" returns false
+2. Run verifier (expect fail)
+3. Implement in `src/gemini/parser.ts`:
+   - Update `ADVA_NAME_PATTERN` (line 33) to handle abbreviations:
+     - `AS\.?O?C?\.?` for ASOC variations
+     - `DES\.?A?R?R?O?L?L?\.?` for DESARROLL variations
+   - Keep VIDEOJUEGO requirement to prevent false positives
+4. Run verifier (expect pass)
 
-### Task 3: Update plan-todo state flow documentation
-**Linear Issue:** [ADV-42](https://linear.app/adva-administracion/issue/ADV-42/move-reviewed-issues-to-merge-status)
+### Task 3: Add CUIT-based fallback for ADVA role detection
+**Linear Issue:** [ADV-47](https://linear.app/adva-administracion/issue/ADV-47/add-cuit-based-fallback-for-adva-role-detection)
 
-1. Read `.claude/skills/plan-todo/SKILL.md`
-2. Update line 234 state flow to include Merge:
-   - From: `Backlog → Todo → In Progress → Review → Done`
-   - To: `Backlog → Todo → In Progress → Review → Merge → Done`
+1. Write tests in `src/gemini/parser.test.ts`:
+   - Test `assignCuitsAndClassify()` with ADVA CUIT as first in array → factura_emitida
+   - Test `assignCuitsAndClassify()` with ADVA CUIT as second in array → factura_recibida
+   - Test fallback only triggers when name matching fails
+   - Test fallback with mismatched names but valid ADVA CUIT
+   - Test still throws when ADVA CUIT not found and name matching fails
+2. Run verifier (expect fail)
+3. Implement in `src/gemini/parser.ts`:
+   - In `assignCuitsAndClassify()` (lines 84-134), before throwing error:
+   - Check if ADVA_CUIT is in `allCuits` array
+   - If ADVA_CUIT is first CUIT → ADVA is issuer → factura_emitida
+   - If ADVA_CUIT is second CUIT → ADVA is client → factura_recibida
+   - Log warning when using CUIT fallback
+4. Run verifier (expect pass)
 
-### Task 4: Update CLAUDE.md Linear Integration section
-**Linear Issue:** [ADV-42](https://linear.app/adva-administracion/issue/ADV-42/move-reviewed-issues-to-merge-status)
+### Task 4: Add missing status update for unrecognized documents
+**Linear Issue:** [ADV-50](https://linear.app/adva-administracion/issue/ADV-50/missing-status-update-for-unrecognized-documents-leaves-files-stuck-in)
 
-1. Read `CLAUDE.md`
-2. Update "State Flow" diagram to include Merge state
-3. Add Merge to the states table with description
-4. Update "State Transition Triggers" table:
-   - Add `Review → Merge` triggered by plan-review-implementation
-   - Add `Merge → Done` triggered by PR merge (via Linear GitHub automation)
-5. Add note explaining the Linear GitHub integration magic keywords
+1. Write tests in `src/processing/scanner.test.ts`:
+   - Test unrecognized document updates status to 'failed' with reason
+   - Test document without valid date updates status to 'failed' with reason
+   - Mock `updateFileStatus` and verify it's called with correct parameters
+   - Test file still moves to Sin Procesar after status update
+2. Run verifier (expect fail)
+3. Implement in `src/processing/scanner.ts`:
+   - Lines 229-255 (unrecognized handler): Add before return:
+     ```typescript
+     await updateFileStatus(dashboardOperativoId, fileInfo.id, 'failed', 'Unrecognized document type');
+     ```
+   - Lines 260-287 (no valid date handler): Add before return:
+     ```typescript
+     await updateFileStatus(dashboardOperativoId, fileInfo.id, 'failed', 'No valid date for folder routing');
+     ```
+4. Run verifier (expect pass)
+
+### Task 5: Fix server restart race condition
+**Linear Issue:** [ADV-51](https://linear.app/adva-administracion/issue/ADV-51/server-restart-race-condition-leaves-successfully-processed-files)
+
+1. Write tests in `src/processing/scanner.test.ts`:
+   - Test `updateFileStatus('success')` is called BEFORE `sortAndRenameDocument`
+   - Test file status is 'success' even if sort fails (data is stored)
+   - Test order of operations: store → updateFileStatus → sort
+   - Mock both functions and verify call order
+2. Run verifier (expect fail)
+3. Implement in `src/processing/scanner.ts`:
+   - In `storeAndSortDocument()` function, for each document type handler:
+   - Move `updateFileStatus(dashboardOperativoId, fileInfo.id, 'success')` call
+   - From: after `sortAndRenameDocument()` success
+   - To: immediately after successful storage (before `sortAndRenameDocument()`)
+   - If sort fails, status is still 'success' (data was stored correctly)
+   - If sort fails, log error but don't change status to 'failed'
+4. Run verifier (expect pass)
+
+### Task 6: Improve Gemini prompt for truncated name handling
+**Linear Issue:** [ADV-48](https://linear.app/adva-administracion/issue/ADV-48/gemini-extracts-truncated-names-incorrectly-from-insurance-documents)
+
+1. Test current prompt behavior with Gemini MCP:
+   - Use `gemini_analyze_pdf` to test with insurance document
+   - Verify current extraction concatenates address text
+2. Write tests in `src/gemini/prompts.test.ts`:
+   - Test FACTURA_PROMPT contains truncation instruction
+   - Test instruction mentions not concatenating address text
+3. Run verifier (expect fail)
+4. Implement in `src/gemini/prompts.ts`:
+   - Update FACTURA_PROMPT to add instruction:
+     - "CRITICAL: Company names may be truncated due to space constraints."
+     - "Do NOT concatenate adjacent text (like addresses) with company names."
+     - "If a name appears truncated, extract only the visible name portion."
+     - "Example: If you see 'ASOCIACION CIVIL DE DESARROLLADORES DE' followed by 'TUCUMAN N° 1505', the name is 'ASOCIACION CIVIL DE DESARROLLADORES DE', not including the address."
+5. Run verifier (expect pass)
 
 ## Post-Implementation Checklist
 
@@ -110,82 +186,31 @@ Backlog → Todo → In Progress → Review → Merge → Done
 
 ---
 
-## Iteration 1
-
-**Implemented:** 2026-02-02
-
-### Tasks Completed This Iteration
-- Task 1: Update plan-review-implementation to use Merge status - Changed all "Review → Done" to "Review → Merge" throughout the skill
-- Task 2: Update pr-creator to include Linear magic keywords - Added step to extract issue IDs from PLANS.md, added "Linear Issues" section with `Closes ADV-XXX` format
-- Task 3: Update plan-todo state flow documentation - Added Merge to state flow comment
-- Task 4: Update CLAUDE.md Linear Integration section - Added Merge state to diagram, table, and transitions; added Linear GitHub Integration section
-
-### Files Modified
-- `.claude/skills/plan-review-implementation/SKILL.md` - Updated all Done references to Merge
-- `.claude/agents/pr-creator.md` - Added Linear issue extraction and magic keywords in PR body
-- `.claude/skills/plan-todo/SKILL.md` - Updated state flow to include Merge
-- `CLAUDE.md` - Updated LINEAR INTEGRATION section with Merge state and GitHub automation docs
-
-### Linear Updates
-- ADV-42: Todo → In Progress → Review
-
-### Pre-commit Verification
-- bug-hunter: Passed - no bugs found
-- verifier: All 1506 tests pass, zero warnings
-
-### Continuation Status
-All tasks completed.
-
-### Review Findings
-
-Files reviewed: 4
-Checks applied: Security, Logic, Async, Resources, Type Safety, Conventions
-
-No issues found - all implementations are correct and follow project conventions.
-
-**Files reviewed:**
-- `.claude/skills/plan-review-implementation/SKILL.md` - All "Review → Done" correctly changed to "Review → Merge"
-- `.claude/agents/pr-creator.md` - Added Linear issue extraction and magic keywords in PR body
-- `.claude/skills/plan-todo/SKILL.md` - State flow correctly updated to include Merge
-- `CLAUDE.md` - Linear Integration section updated with Merge state and GitHub automation docs
-
-### Linear Updates
-- ADV-42: Review → Merge
-
-<!-- REVIEW COMPLETE -->
-
----
-
 ## Plan Summary
 
-**Objective:** Implement Merge status in skill workflow so issues move to Merge after review, then automatically to Done when PR is merged via Linear's GitHub integration.
+**Objective:** Fix 6 critical bugs affecting document processing: parseFacturas header mismatch, ADVA name pattern abbreviations, CUIT fallback for role detection, missing status updates, server restart race condition, and Gemini truncated name extraction.
 
-**Linear Issues:** ADV-42
+**Linear Issues:** ADV-49, ADV-46, ADV-47, ADV-48, ADV-50, ADV-51
 
 **Approach:**
-- Add Merge as intermediate state between Review and Done
-- Update plan-review-implementation to move issues Review→Merge instead of Review→Done
-- Update pr-creator to include `Closes ADV-XXX` magic keywords in PR body
-- When PR merges, Linear's GitHub automation moves issues Merge→Done automatically
+- Fix ADV-49 first (Urgent) as it causes complete failure of movimientos matching
+- Address ADV-46 and ADV-47 together as they both affect invoice parsing in parser.ts
+- Fix ADV-50 and ADV-51 together as they both affect scanner.ts status tracking
+- Address ADV-48 last as it requires prompt engineering iteration
 
 **Scope:**
-- Tasks: 4
-- Files affected: 4 (2 skills, 1 subagent, 1 project doc)
-- New tests: no (documentation/skill changes only)
+- Tasks: 6
+- Files affected: 4 (src/bank/match-movimientos.ts, src/gemini/parser.ts, src/processing/scanner.ts, src/gemini/prompts.ts)
+- New tests: yes (test-first TDD for each task)
 
 **Key Decisions:**
-- Merge is type `started` (not `completed`) so Linear treats it as "in progress" until PR merges
-- PR body uses `Closes` keyword (not `Fixes`) as these are features/improvements, not bugs
-- Multiple issues in one PR are comma-separated: `Closes ADV-123, ADV-124`
-- pr-creator extracts issue IDs from PLANS.md automatically
+- Split parseFacturas into two functions rather than adding conditional logic
+- Expand ADVA_NAME_PATTERN regex to handle abbreviations while keeping VIDEOJUEGO requirement
+- CUIT fallback uses array position (first = issuer, second = client) to determine role
+- Status update moved BEFORE sort to prevent race condition - status reflects data storage, not file location
+- Files moved to Sin Procesar still get 'failed' status (not 'success')
 
 **Dependencies/Prerequisites:**
-- Linear GitHub integration must be configured (assumed already set up)
-- Tasks can be done in any order, but Task 4 (CLAUDE.md) should be last to reflect final state
-
----
-
-## Status: COMPLETE
-
-All tasks implemented and reviewed successfully. ADV-42 moved to Merge.
-Ready for PR creation.
+- Tasks can be implemented in order shown (priority-based)
+- ADV-46 and ADV-47 share the same file, coordinate changes
+- ADV-50 and ADV-51 share the same file, coordinate changes
