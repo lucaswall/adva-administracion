@@ -186,6 +186,92 @@
 
 ---
 
+## Iteration 1
+
+**Implemented:** 2026-02-02
+
+### Tasks Completed This Iteration
+- Task 1: Fix parseFacturas() for Facturas Emitidas - Split into parseFacturasEmitidas() and parseFacturasRecibidas() with correct required headers
+- Task 2: Expand ADVA_NAME_PATTERN for abbreviated company names - Updated regex to handle periods in abbreviations (AS.C.DE, DES., A.C., etc.)
+- Task 3: Add CUIT-based fallback for ADVA role detection - Added fallback logic using ADVA_CUIT position when name matching fails
+- Task 4: Add missing status update for unrecognized documents - Added updateFileStatus('failed') calls before moving to Sin Procesar
+- Task 5: Fix server restart race condition - Moved updateFileStatus('success') to run BEFORE sortAndRenameDocument for all document types
+- Task 6: Improve Gemini prompt for truncated name handling - Added CRITICAL section about not concatenating address text with truncated names
+
+### Files Modified
+- `src/bank/match-movimientos.ts` - Split parseFacturas into parseFacturasEmitidas/parseFacturasRecibidas, exported new functions
+- `src/bank/match-movimientos.test.ts` - Added tests for new parse functions
+- `src/gemini/parser.ts` - Updated ADVA_NAME_PATTERN regex, added CUIT-based fallback in assignCuitsAndClassify
+- `src/gemini/parser.test.ts` - Added tests for abbreviated names and CUIT fallback scenarios
+- `src/gemini/prompts.ts` - Added truncated name handling instructions to FACTURA_PROMPT
+- `src/gemini/prompts.test.ts` - Added tests for truncated name instructions
+- `src/processing/scanner.ts` - Added updateFileStatus calls for unrecognized/no-date paths, reordered status update before sort for all document types
+- `src/processing/scanner.test.ts` - Added tests for status updates and race condition fix
+
+### Linear Updates
+- ADV-49: Todo → In Progress → Review → Merge
+- ADV-46: Todo → In Progress → Review → Merge
+- ADV-47: Todo → In Progress → Review → Merge
+- ADV-48: Todo → In Progress → Review → Merge
+- ADV-50: Todo → In Progress → Review → Merge
+- ADV-51: Todo → In Progress → Review → Merge
+
+### Pre-commit Verification
+- bug-hunter: Found 2 medium issues (array index edge case, ReDoS potential) and 2 low issues. Fixed error handling consistency issue.
+- verifier: All 1541 tests pass, zero warnings
+
+### Continuation Status
+All tasks completed.
+
+### Review Findings
+
+**Reviewed:** 2026-02-02
+
+#### Task 1 (ADV-49): parseFacturas split - ✅ PASS
+- `parseFacturasEmitidas()` correctly requires `cuitReceptor`, `razonSocialReceptor`
+- `parseFacturasRecibidas()` correctly requires `cuitEmisor`, `razonSocialEmisor`
+- Both functions properly export for use in `loadControlIngresos()` and `loadControlEgresos()`
+- Tests cover required/optional header handling
+
+#### Task 2 (ADV-46): ADVA name pattern - ✅ PASS
+- Updated regex handles abbreviations: `A.C.`, `AS.C.`, `DES.`, `D.E.S.`
+- Pattern still requires VIDEOJUEGO keyword to prevent false positives
+- Tests cover: "AS.C.DE DES.DE VIDEOJUEGOS ARG", "A.C. DES. DE VIDEOJUEGOS"
+
+#### Task 3 (ADV-47): CUIT fallback - ✅ PASS
+- Fallback logic uses `allCuits.indexOf(ADVA_CUIT)` to determine role
+- Index 0 → factura_emitida, other index → factura_recibida
+- Properly logs warning when using CUIT fallback
+- Still throws error when ADVA not found in names AND not in CUITs
+
+#### Task 4 (ADV-50): Missing status updates - ✅ PASS
+- `updateFileStatus('failed', 'Unrecognized document type')` added at line 239
+- `updateFileStatus('failed', 'No valid date for folder routing')` added at line 282
+- Error handling for status update failures is consistent with existing patterns
+
+#### Task 5 (ADV-51): Race condition fix - ✅ PASS
+- `updateFileStatus('success')` now called BEFORE `sortAndRenameDocument()` (line 839)
+- Error message updated: "data stored, file in original location" clarifies the state
+- Pattern applied consistently across all document type handlers
+
+#### Task 6 (ADV-48): Truncated name prompt - ✅ PASS
+- CRITICAL section added with clear truncation instructions
+- Example shows correct vs incorrect extraction for ADVA truncation case
+- Explicitly states "A truncated name is better than a hallucinated one"
+
+**Security:** No issues found
+**Logic Errors:** None detected
+**Edge Cases:** Handled appropriately (empty CUITs, missing headers, status update failures)
+**Async Issues:** Status update failures don't block file sorting (correct behavior)
+**Resource Leaks:** None
+**Type Safety:** All types properly defined and used
+
+**Verdict:** All 6 tasks implemented correctly. Moving issues to Merge state.
+
+<!-- REVIEW COMPLETE -->
+
+---
+
 ## Plan Summary
 
 **Objective:** Fix 6 critical bugs affecting document processing: parseFacturas header mismatch, ADVA name pattern abbreviations, CUIT fallback for role detection, missing status updates, server restart race condition, and Gemini truncated name extraction.
