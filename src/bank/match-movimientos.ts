@@ -6,12 +6,11 @@
 import { createHash } from 'crypto';
 import type {
   Result,
+  BankMatchTier,
   Factura,
   Pago,
   Recibo,
   Retencion,
-  MovimientoRow,
-  BankMovement,
   MatchConfidence,
 } from '../types/index.js';
 import { PROCESSING_LOCK_ID, PROCESSING_LOCK_TIMEOUT_MS, ADVA_CUITS } from '../config.js';
@@ -149,64 +148,28 @@ interface EgresosData {
 }
 
 /**
- * Numeric value for confidence levels (higher is better)
- */
-const CONFIDENCE_RANK: Record<'HIGH' | 'MEDIUM' | 'LOW', number> = {
-  HIGH: 3,
-  MEDIUM: 2,
-  LOW: 1,
-};
-
-/**
- * Returns true if candidate match is strictly better than existing match
- * Used for replacement logic
+ * Returns true if candidate match is strictly better than existing match.
+ * Uses tier-based comparison: lower tier wins, then closer date, then exact amount.
  */
 export function isBetterMatch(
   existing: MatchQuality,
   candidate: MatchQuality
 ): boolean {
-  // 1. Compare confidence levels first (ADV-34: prevents LOW replacing HIGH)
-  const existingConfRank = CONFIDENCE_RANK[existing.confidence];
-  const candidateConfRank = CONFIDENCE_RANK[candidate.confidence];
-  if (candidateConfRank > existingConfRank) return true;
-  if (candidateConfRank < existingConfRank) return false;
+  // 1. Lower tier always wins
+  if (candidate.tier < existing.tier) return true;
+  if (candidate.tier > existing.tier) return false;
 
-  // 2. CUIT match beats no CUIT match (when confidence is equal)
-  if (candidate.hasCuitMatch && !existing.hasCuitMatch) return true;
-  if (!candidate.hasCuitMatch && existing.hasCuitMatch) return false;
-
-  // 3. Closer date wins (when CUIT match is equal)
+  // 2. Closer date wins (same tier)
   if (candidate.dateDistance < existing.dateDistance) return true;
   if (candidate.dateDistance > existing.dateDistance) return false;
 
-  // 4. Exact amount beats tolerance match
+  // 3. Exact amount beats tolerance match (same tier and date)
   if (candidate.isExactAmount && !existing.isExactAmount) return true;
-  if (!candidate.isExactAmount && existing.isExactAmount) return false;
-
-  // 5. Has linked pago beats no linked pago
-  if (candidate.hasLinkedPago && !existing.hasLinkedPago) return true;
 
   // Equal quality - keep existing (no churn)
   return false;
 }
 
-/**
- * Converts MovimientoRow to BankMovement for matcher compatibility
- */
-function movimientoRowToBankMovement(mov: MovimientoRow): BankMovement {
-  return {
-    row: mov.rowNumber,
-    fecha: mov.fecha,
-    fechaValor: mov.fecha,
-    concepto: mov.concepto,
-    codigo: '',
-    oficina: '',
-    areaAdva: '',
-    credito: mov.credito,
-    debito: mov.debito,
-    detalle: mov.detalle,
-  };
-}
 
 /**
  * Parses Facturas Emitidas from spreadsheet data using header-based lookup.
@@ -580,11 +543,11 @@ async function loadControlEgresos(spreadsheetId: string): Promise<Result<Egresos
 }
 
 /**
- * Builds MatchQuality from a document (Factura, Pago, or Recibo) and movement
+ * Builds MatchQuality from a document and movement context.
+ * Computes tier based on document type, CUIT match, and linked pago status.
  */
 function buildMatchQuality(
   fileId: string,
-  confidence: 'HIGH' | 'MEDIUM' | 'LOW',
   fechaDocumento: string,
   fechaMovimiento: string,
   cuitDocumento: string,
@@ -601,16 +564,24 @@ function buildMatchQuality(
     ? Math.abs(Math.floor((docDate.getTime() - movDate.getTime()) / (1000 * 60 * 60 * 24)))
     : Infinity;
 
-  // Check for CUIT match in concepto
-  const hasCuitMatch = conceptoMovimiento.includes(cuitDocumento);
+  // Compute tier from context
+  const hasCuitMatch = cuitDocumento ? conceptoMovimiento.includes(cuitDocumento) : false;
+  let tier: BankMatchTier;
+  if (hasLinkedPago && hasCuitMatch) {
+    tier = 1; // Pago with linked factura + CUIT
+  } else if (hasLinkedPago) {
+    tier = 1; // Pago with linked factura
+  } else if (hasCuitMatch) {
+    tier = 2; // CUIT match
+  } else {
+    tier = 5; // Amount + date only (can't determine keyword/referencia from existing data)
+  }
 
   return {
     fileId,
-    confidence,
-    hasCuitMatch,
+    tier,
     dateDistance,
     isExactAmount,
-    hasLinkedPago,
   };
 }
 
@@ -688,8 +659,6 @@ function buildMatchQualityFromFileId(
   let fechaDocumento: string;
   let cuitDocumento: string;
   let hasLinkedPago = false;
-  // Use document's matchConfidence if available, default to HIGH for existing matches
-  const confidence: 'HIGH' | 'MEDIUM' | 'LOW' = document.matchConfidence || 'HIGH';
 
   if (type === 'factura_emitida' || type === 'factura_recibida') {
     fechaDocumento = document.fechaEmision;
@@ -711,7 +680,6 @@ function buildMatchQualityFromFileId(
   // Set to true for both existing and candidate to ensure fair comparison on other dimensions
   return buildMatchQuality(
     fileId,
-    confidence,
     fechaDocumento,
     fechaMovimiento,
     cuitDocumento,
@@ -765,23 +733,19 @@ async function matchBankMovimientos(
 
   // Process each movimiento
   for (const mov of movimientos) {
-    const bankMovement = movimientoRowToBankMovement(mov);
     let matchResult;
 
     // Route to appropriate matcher based on debit/credit
     if (mov.debito !== null && mov.debito > 0) {
-      // Debit movement - use existing matchMovement
-      // Signature: matchMovement(movement, facturas, recibos, pagos)
       matchResult = matcher.matchMovement(
-        bankMovement,
+        mov,
         egresosData.facturasRecibidas,
         egresosData.recibos,
         egresosData.pagosEnviados
       );
     } else if (mov.credito !== null && mov.credito > 0) {
-      // Credit movement - use new matchCreditMovement
       matchResult = matcher.matchCreditMovement(
-        bankMovement,
+        mov,
         ingresosData.facturasEmitidas,
         ingresosData.pagosRecibidos,
         ingresosData.retenciones
@@ -865,7 +829,6 @@ async function matchBankMovimientos(
               // This ensures the comparison focuses on confidence, CUIT match, and date proximity
               const candidateQuality = buildMatchQuality(
                 matchResult.matchedFileId!,
-                matchResult.confidence,  // Use confidence from matcher result (ADV-34)
                 fechaDocumento,
                 mov.fecha,
                 cuitDocumento,

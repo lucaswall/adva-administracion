@@ -308,213 +308,103 @@ describe('parseFacturasRecibidas', () => {
 });
 
 describe('isBetterMatch', () => {
-  // ADV-34: Confidence level should be compared FIRST, before CUIT match
-  it('should prefer HIGH confidence over MEDIUM with same metrics', () => {
+  it('lower tier always wins (Tier 1 beats Tier 3 even with worse date)', () => {
     const existing: MatchQuality = {
       fileId: 'file1',
-      confidence: 'MEDIUM',
-      hasCuitMatch: true,
-      dateDistance: 1,
+      tier: 3,
+      dateDistance: 0,
       isExactAmount: true,
-      hasLinkedPago: true,
     };
     const candidate: MatchQuality = {
       fileId: 'file2',
-      confidence: 'HIGH',
-      hasCuitMatch: true,
-      dateDistance: 1,
-      isExactAmount: true,
-      hasLinkedPago: true,
-    };
-
-    expect(isBetterMatch(existing, candidate)).toBe(true);
-  });
-
-  it('should prefer MEDIUM confidence over LOW with same metrics', () => {
-    const existing: MatchQuality = {
-      fileId: 'file1',
-      confidence: 'LOW',
-      hasCuitMatch: true,
-      dateDistance: 1,
-      isExactAmount: true,
-      hasLinkedPago: false,
-    };
-    const candidate: MatchQuality = {
-      fileId: 'file2',
-      confidence: 'MEDIUM',
-      hasCuitMatch: true,
-      dateDistance: 1,
-      isExactAmount: true,
-      hasLinkedPago: false,
-    };
-
-    expect(isBetterMatch(existing, candidate)).toBe(true);
-  });
-
-  it('should compare confidence before date distance', () => {
-    const existing: MatchQuality = {
-      fileId: 'file1',
-      confidence: 'LOW',
-      hasCuitMatch: true,
-      dateDistance: 0,  // Same day
-      isExactAmount: true,
-      hasLinkedPago: true,
-    };
-    const candidate: MatchQuality = {
-      fileId: 'file2',
-      confidence: 'HIGH',
-      hasCuitMatch: true,
-      dateDistance: 30,  // 30 days away
+      tier: 1,
+      dateDistance: 15,
       isExactAmount: false,
-      hasLinkedPago: false,
-    };
-
-    // HIGH confidence should beat LOW even with worse date distance
-    expect(isBetterMatch(existing, candidate)).toBe(true);
-  });
-
-  it('should prefer CUIT match over no CUIT match', () => {
-    const existing: MatchQuality = {
-      fileId: 'file1',
-      confidence: 'HIGH',
-      hasCuitMatch: false,
-      dateDistance: 1,
-      isExactAmount: true,
-      hasLinkedPago: true,
-    };
-    const candidate: MatchQuality = {
-      fileId: 'file2',
-      confidence: 'HIGH',
-      hasCuitMatch: true,
-      dateDistance: 10,
-      isExactAmount: false,
-      hasLinkedPago: false,
     };
 
     expect(isBetterMatch(existing, candidate)).toBe(true);
   });
 
-  it('should prefer existing when it has CUIT match and candidate does not', () => {
+  it('higher tier never wins over lower tier', () => {
     const existing: MatchQuality = {
       fileId: 'file1',
-      confidence: 'HIGH',
-      hasCuitMatch: true,
-      dateDistance: 10,
+      tier: 2,
+      dateDistance: 30,
       isExactAmount: false,
-      hasLinkedPago: false,
     };
     const candidate: MatchQuality = {
       fileId: 'file2',
-      confidence: 'HIGH',
-      hasCuitMatch: false,
-      dateDistance: 1,
+      tier: 5,
+      dateDistance: 0,
       isExactAmount: true,
-      hasLinkedPago: true,
     };
 
     expect(isBetterMatch(existing, candidate)).toBe(false);
   });
 
-  it('should prefer closer date when confidence and CUIT match are equal', () => {
+  it('same tier, closer date wins', () => {
     const existing: MatchQuality = {
       fileId: 'file1',
-      confidence: 'HIGH',
-      hasCuitMatch: true,
+      tier: 2,
       dateDistance: 15,
       isExactAmount: true,
-      hasLinkedPago: false,
     };
     const candidate: MatchQuality = {
       fileId: 'file2',
-      confidence: 'HIGH',
-      hasCuitMatch: true,
+      tier: 2,
       dateDistance: 2,
       isExactAmount: true,
-      hasLinkedPago: false,
     };
 
     expect(isBetterMatch(existing, candidate)).toBe(true);
   });
 
-  it('should prefer existing when closer date', () => {
+  it('same tier, existing has closer date — keep existing', () => {
     const existing: MatchQuality = {
       fileId: 'file1',
-      confidence: 'HIGH',
-      hasCuitMatch: true,
+      tier: 2,
       dateDistance: 2,
       isExactAmount: false,
-      hasLinkedPago: false,
     };
     const candidate: MatchQuality = {
       fileId: 'file2',
-      confidence: 'HIGH',
-      hasCuitMatch: true,
+      tier: 2,
       dateDistance: 15,
       isExactAmount: true,
-      hasLinkedPago: true,
     };
 
     expect(isBetterMatch(existing, candidate)).toBe(false);
   });
 
-  it('should prefer exact amount when confidence, CUIT and date are equal', () => {
+  it('same tier and date, exact amount beats tolerance', () => {
     const existing: MatchQuality = {
       fileId: 'file1',
-      confidence: 'HIGH',
-      hasCuitMatch: true,
+      tier: 4,
       dateDistance: 5,
       isExactAmount: false,
-      hasLinkedPago: true,
     };
     const candidate: MatchQuality = {
       fileId: 'file2',
-      confidence: 'HIGH',
-      hasCuitMatch: true,
+      tier: 4,
       dateDistance: 5,
       isExactAmount: true,
-      hasLinkedPago: false,
     };
 
     expect(isBetterMatch(existing, candidate)).toBe(true);
   });
 
-  it('should prefer linked pago when all else is equal', () => {
+  it('equal quality — keep existing (no churn)', () => {
     const existing: MatchQuality = {
       fileId: 'file1',
-      confidence: 'HIGH',
-      hasCuitMatch: true,
+      tier: 2,
       dateDistance: 5,
       isExactAmount: true,
-      hasLinkedPago: false,
     };
     const candidate: MatchQuality = {
       fileId: 'file2',
-      confidence: 'HIGH',
-      hasCuitMatch: true,
+      tier: 2,
       dateDistance: 5,
       isExactAmount: true,
-      hasLinkedPago: true,
-    };
-
-    expect(isBetterMatch(existing, candidate)).toBe(true);
-  });
-
-  it('should keep existing when quality is exactly equal (no churn)', () => {
-    const existing: MatchQuality = {
-      fileId: 'file1',
-      confidence: 'HIGH',
-      hasCuitMatch: true,
-      dateDistance: 5,
-      isExactAmount: true,
-      hasLinkedPago: true,
-    };
-    const candidate: MatchQuality = {
-      fileId: 'file2',
-      confidence: 'HIGH',
-      hasCuitMatch: true,
-      dateDistance: 5,
-      isExactAmount: true,
-      hasLinkedPago: true,
     };
 
     expect(isBetterMatch(existing, candidate)).toBe(false);

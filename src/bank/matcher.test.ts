@@ -3,9 +3,22 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { BankMovementMatcher, calculateKeywordMatchScore, stripBankOriginPrefix, isBankFee, isCreditCardPayment, extractKeywordTokens } from './matcher.js';
-import type { BankMovement, Factura, Pago, Retencion } from '../types/index.js';
+import { BankMovementMatcher, calculateKeywordMatchScore, stripBankOriginPrefix, isBankFee, isCreditCardPayment, extractKeywordTokens, extractReferencia } from './matcher.js';
+import type { MovimientoRow, Factura, Pago, Retencion } from '../types/index.js';
 import { setExchangeRateCache, type ExchangeRate } from '../utils/exchange-rate.js';
+
+/** Helper to build MovimientoRow from minimal params */
+function makeMovimiento(overrides: Partial<MovimientoRow> & Pick<MovimientoRow, 'fecha' | 'concepto' | 'debito' | 'credito'>): MovimientoRow {
+  return {
+    rowNumber: 1,
+    sheetName: '2024-01',
+    saldo: null,
+    saldoCalculado: null,
+    matchedFileId: '',
+    detalle: '',
+    ...overrides,
+  };
+}
 
 // Mock logger
 vi.mock('../utils/logger.js', () => ({
@@ -55,18 +68,7 @@ describe('BankMovementMatcher - Cross-Currency Confidence', () => {
         row: 2
       };
 
-      const movement: BankMovement = {
-        row: 1,
-        fecha: '2024-01-15',
-        fechaValor: '2024-01-15',
-        concepto: 'PAGO FACTURA TEST SA 20-12345678-6',
-        codigo: '001',
-        oficina: '001',
-        areaAdva: 'General',
-        debito: 85000, // Payment in ARS
-        credito: null,
-        detalle: ''
-      };
+      const movement = makeMovimiento({ fecha: '2024-01-15', concepto: 'PAGO FACTURA TEST SA 20-12345678-6', debito: 85000, credito: null });
 
       const result = matcher.matchMovement(movement, [usdFactura], [], []);
 
@@ -97,18 +99,7 @@ describe('BankMovementMatcher - Cross-Currency Confidence', () => {
         row: 2
       };
 
-      const movement: BankMovement = {
-        row: 1,
-        fecha: '2024-01-15',
-        fechaValor: '2024-01-15',
-        concepto: 'DEBITO AUTOMATICO TEST SA', // Keyword match, no CUIT
-        codigo: '001',
-        oficina: '001',
-        areaAdva: 'General',
-        debito: 85000,
-        credito: null,
-        detalle: ''
-      };
+      const movement = makeMovimiento({ fecha: '2024-01-15', concepto: 'DEBITO AUTOMATICO TEST SA', debito: 85000, credito: null });
 
       const result = matcher.matchMovement(movement, [usdFactura], [], []);
 
@@ -139,18 +130,7 @@ describe('BankMovementMatcher - Cross-Currency Confidence', () => {
         row: 2
       };
 
-      const movement: BankMovement = {
-        row: 1,
-        fecha: '2024-01-15',
-        fechaValor: '2024-01-15',
-        concepto: 'PAGO FACTURA TEST SA 20-12345678-6',
-        codigo: '001',
-        oficina: '001',
-        areaAdva: 'General',
-        debito: 100000,
-        credito: null,
-        detalle: ''
-      };
+      const movement = makeMovimiento({ fecha: '2024-01-15', concepto: 'PAGO FACTURA TEST SA 20-12345678-6', debito: 100000, credito: null });
 
       const result = matcher.matchMovement(movement, [arsFactura], [], []);
 
@@ -228,18 +208,7 @@ describe('BankMovementMatcher - Credit Movement Matching', () => {
         row: 2
       };
 
-      const movement: BankMovement = {
-        row: 1,
-        fecha: '2024-01-15',
-        fechaValor: '2024-01-15',
-        concepto: 'TRANSFERENCIA DESDE TEST SA 20-12345678-6',
-        codigo: '',
-        oficina: '',
-        areaAdva: '',
-        debito: null,
-        credito: 100000,
-        detalle: ''
-      };
+      const movement = makeMovimiento({ fecha: '2024-01-15', concepto: 'TRANSFERENCIA DESDE TEST SA 20-12345678-6', debito: null, credito: 100000 });
 
       const result = matcher.matchCreditMovement(movement, [facturaEmitida], [pagoRecibido], []);
 
@@ -270,18 +239,7 @@ describe('BankMovementMatcher - Credit Movement Matching', () => {
         row: 2
       };
 
-      const movement: BankMovement = {
-        row: 1,
-        fecha: '2024-01-15',
-        fechaValor: '2024-01-15',
-        concepto: 'TRANSFERENCIA DESDE TEST SA 20-12345678-6',
-        codigo: '',
-        oficina: '',
-        areaAdva: '',
-        debito: null,
-        credito: 100000,
-        detalle: ''
-      };
+      const movement = makeMovimiento({ fecha: '2024-01-15', concepto: 'TRANSFERENCIA DESDE TEST SA 20-12345678-6', debito: null, credito: 100000 });
 
       const result = matcher.matchCreditMovement(movement, [facturaEmitida], [], []);
 
@@ -330,18 +288,7 @@ describe('BankMovementMatcher - Credit Movement Matching', () => {
         row: 2
       };
 
-      const movement: BankMovement = {
-        row: 1,
-        fecha: '2024-01-15',
-        fechaValor: '2024-01-15',
-        concepto: 'TRANSFERENCIA DESDE TEST SA',
-        codigo: '',
-        oficina: '',
-        areaAdva: '',
-        debito: null,
-        credito: 95000, // 100000 - 5000
-        detalle: ''
-      };
+      const movement = makeMovimiento({ fecha: '2024-01-15', concepto: 'TRANSFERENCIA DESDE TEST SA', debito: null, credito: 95000 });
 
       const result = matcher.matchCreditMovement(movement, [facturaEmitida], [], [retencion]);
 
@@ -409,18 +356,7 @@ describe('BankMovementMatcher - Credit Movement Matching', () => {
         row: 2
       };
 
-      const movement: BankMovement = {
-        row: 1,
-        fecha: '2024-01-15',
-        fechaValor: '2024-01-15',
-        concepto: 'TRANSFERENCIA DESDE TEST SA',
-        codigo: '',
-        oficina: '',
-        areaAdva: '',
-        debito: null,
-        credito: 90000, // 100000 - 7000 - 3000
-        detalle: ''
-      };
+      const movement = makeMovimiento({ fecha: '2024-01-15', concepto: 'TRANSFERENCIA DESDE TEST SA', debito: null, credito: 90000 });
 
       const result = matcher.matchCreditMovement(
         movement,
@@ -474,18 +410,7 @@ describe('BankMovementMatcher - Credit Movement Matching', () => {
         row: 2
       };
 
-      const movement: BankMovement = {
-        row: 1,
-        fecha: '2024-01-15',
-        fechaValor: '2024-01-15',
-        concepto: 'TRANSFERENCIA DESDE TEST SA',
-        codigo: '',
-        oficina: '',
-        areaAdva: '',
-        debito: null,
-        credito: 79000, // 85000 - 6000 (should NOT match without retencion: 7.1% diff)
-        detalle: ''
-      };
+      const movement = makeMovimiento({ fecha: '2024-01-15', concepto: 'TRANSFERENCIA DESDE TEST SA', debito: null, credito: 79000 });
 
       const result = matcher.matchCreditMovement(movement, [facturaEmitida], [], [retencion]);
 
@@ -535,18 +460,7 @@ describe('BankMovementMatcher - Credit Movement Matching', () => {
         row: 2
       };
 
-      const movement: BankMovement = {
-        row: 1,
-        fecha: '2024-01-15',
-        fechaValor: '2024-01-15',
-        concepto: 'TRANSFERENCIA DESDE TEST SA',
-        codigo: '',
-        oficina: '',
-        areaAdva: '',
-        debito: null,
-        credito: 95000, // 100000 - 5000
-        detalle: ''
-      };
+      const movement = makeMovimiento({ fecha: '2024-01-15', concepto: 'TRANSFERENCIA DESDE TEST SA', debito: null, credito: 95000 });
 
       const result = matcher.matchCreditMovement(movement, [facturaEmitida], [], [retencion]);
 
@@ -612,18 +526,7 @@ describe('BankMovementMatcher - Credit Movement Matching', () => {
         row: 2
       };
 
-      const movement: BankMovement = {
-        row: 1,
-        fecha: '2024-01-15', // Within factura date range (-5/+30 days)
-        fechaValor: '2024-01-15',
-        concepto: 'TRANSFERENCIA DESDE TEST SA',
-        codigo: '',
-        oficina: '',
-        areaAdva: '',
-        debito: null,
-        credito: 95000, // 100000 - 5000 (only valid retencion counted)
-        detalle: ''
-      };
+      const movement = makeMovimiento({ fecha: '2024-01-15', concepto: 'TRANSFERENCIA DESDE TEST SA', debito: null, credito: 95000 });
 
       const result = matcher.matchCreditMovement(
         movement,
@@ -655,18 +558,7 @@ describe('BankMovementMatcher - Credit Movement Matching', () => {
         row: 2
       };
 
-      const movement: BankMovement = {
-        row: 1,
-        fecha: '2024-01-15',
-        fechaValor: '2024-01-15',
-        concepto: 'TRANSFERENCIA DESDE TEST SA',
-        codigo: '',
-        oficina: '',
-        areaAdva: '',
-        debito: null,
-        credito: 100000,
-        detalle: ''
-      };
+      const movement = makeMovimiento({ fecha: '2024-01-15', concepto: 'TRANSFERENCIA DESDE TEST SA', debito: null, credito: 100000 });
 
       const result = matcher.matchCreditMovement(movement, [], [pagoRecibido], []);
 
@@ -677,18 +569,7 @@ describe('BankMovementMatcher - Credit Movement Matching', () => {
     });
 
     it('returns bank_fee match for credit movement with bank fee concepto', () => {
-      const movement: BankMovement = {
-        row: 1,
-        fecha: '2024-01-15',
-        fechaValor: '2024-01-15',
-        concepto: 'COMISION MAN CUENTA',
-        codigo: '',
-        oficina: '',
-        areaAdva: '',
-        debito: null,
-        credito: 500,
-        detalle: ''
-      };
+      const movement = makeMovimiento({ fecha: '2024-01-15', concepto: 'COMISION MAN CUENTA', debito: null, credito: 500 });
 
       const result = matcher.matchCreditMovement(movement, [], [], []);
 
@@ -699,18 +580,7 @@ describe('BankMovementMatcher - Credit Movement Matching', () => {
     });
 
     it('returns credit_card_payment match for credit movement with credit card payment concepto', () => {
-      const movement: BankMovement = {
-        row: 1,
-        fecha: '2024-01-15',
-        fechaValor: '2024-01-15',
-        concepto: 'PAGO TARJETA 4563',
-        codigo: '',
-        oficina: '',
-        areaAdva: '',
-        debito: null,
-        credito: 15000,
-        detalle: ''
-      };
+      const movement = makeMovimiento({ fecha: '2024-01-15', concepto: 'PAGO TARJETA 4563', debito: null, credito: 15000 });
 
       const result = matcher.matchCreditMovement(movement, [], [], []);
 
@@ -722,18 +592,7 @@ describe('BankMovementMatcher - Credit Movement Matching', () => {
 
     it('returns bank_fee for credit movement even with zero credit amount', () => {
       // Bank fee check should run BEFORE amount validation
-      const movement: BankMovement = {
-        row: 1,
-        fecha: '2024-01-15',
-        fechaValor: '2024-01-15',
-        concepto: 'IMPUESTO LEY 25413',
-        codigo: '',
-        oficina: '',
-        areaAdva: '',
-        debito: null,
-        credito: 0,
-        detalle: ''
-      };
+      const movement = makeMovimiento({ fecha: '2024-01-15', concepto: 'IMPUESTO LEY 25413', debito: null, credito: 0 });
 
       const result = matcher.matchCreditMovement(movement, [], [], []);
 
@@ -763,18 +622,7 @@ describe('BankMovementMatcher - Credit Movement Matching', () => {
         row: 2
       };
 
-      const movement: BankMovement = {
-        row: 1,
-        fecha: '2024-01-15',
-        fechaValor: '2024-01-15',
-        concepto: 'TRANSFERENCIA DESDE TEST SA 20-12345678-6',
-        codigo: '',
-        oficina: '',
-        areaAdva: '',
-        debito: null,
-        credito: 100000,
-        detalle: ''
-      };
+      const movement = makeMovimiento({ fecha: '2024-01-15', concepto: 'TRANSFERENCIA DESDE TEST SA 20-12345678-6', debito: null, credito: 100000 });
 
       const result = matcher.matchCreditMovement(movement, [facturaEmitida], [], []);
 
@@ -784,18 +632,7 @@ describe('BankMovementMatcher - Credit Movement Matching', () => {
     });
 
     it('returns no match for credit movement with no matches', () => {
-      const movement: BankMovement = {
-        row: 1,
-        fecha: '2024-01-15',
-        fechaValor: '2024-01-15',
-        concepto: 'DEPOSITO DESCONOCIDO',
-        codigo: '',
-        oficina: '',
-        areaAdva: '',
-        debito: null,
-        credito: 50000,
-        detalle: ''
-      };
+      const movement = makeMovimiento({ fecha: '2024-01-15', concepto: 'DEPOSITO DESCONOCIDO', debito: null, credito: 50000 });
 
       const result = matcher.matchCreditMovement(movement, [], [], []);
 
@@ -825,145 +662,12 @@ describe('BankMovementMatcher - Credit Movement Matching', () => {
         row: 2
       };
 
-      const movement: BankMovement = {
-        row: 1,
-        fecha: '2024-01-15',
-        fechaValor: '2024-01-15',
-        concepto: 'TRANSFERENCIA 20-12345678-6',
-        codigo: '',
-        oficina: '',
-        areaAdva: '',
-        debito: null,
-        credito: 100000,
-        detalle: ''
-      };
+      const movement = makeMovimiento({ fecha: '2024-01-15', concepto: 'TRANSFERENCIA 20-12345678-6', debito: null, credito: 100000 });
 
       const result = matcher.matchCreditMovement(movement, [facturaEmitida], [], []);
 
       expect(result.matchType).toBe('direct_factura');
       expect(result.confidence).toBe('HIGH');
-    });
-  });
-
-  describe('compareMatches', () => {
-    it('prefers CUIT match over no CUIT match', () => {
-      const withoutCuit = {
-        fileId: 'doc1',
-        confidence: 'HIGH' as const,
-        hasCuitMatch: false,
-        dateDistance: 2,
-        isExactAmount: true,
-        hasLinkedPago: false
-      };
-
-      const withCuit = {
-        fileId: 'doc2',
-        confidence: 'HIGH' as const,
-        hasCuitMatch: true,
-        dateDistance: 10,
-        isExactAmount: false,
-        hasLinkedPago: false
-      };
-
-      const result = matcher.compareMatches(withoutCuit, withCuit);
-
-      expect(result).toBe('candidate'); // withCuit wins
-    });
-
-    it('prefers closer date when CUIT match is equal', () => {
-      const further = {
-        fileId: 'doc1',
-        confidence: 'HIGH' as const,
-        hasCuitMatch: true,
-        dateDistance: 10,
-        isExactAmount: true,
-        hasLinkedPago: false
-      };
-
-      const closer = {
-        fileId: 'doc2',
-        confidence: 'HIGH' as const,
-        hasCuitMatch: true,
-        dateDistance: 2,
-        isExactAmount: true,
-        hasLinkedPago: false
-      };
-
-      const result = matcher.compareMatches(further, closer);
-
-      expect(result).toBe('candidate'); // closer wins
-    });
-
-    it('prefers exact amount over tolerance match', () => {
-      const withTolerance = {
-        fileId: 'doc1',
-        confidence: 'HIGH' as const,
-        hasCuitMatch: true,
-        dateDistance: 2,
-        isExactAmount: false,
-        hasLinkedPago: false
-      };
-
-      const exact = {
-        fileId: 'doc2',
-        confidence: 'HIGH' as const,
-        hasCuitMatch: true,
-        dateDistance: 2,
-        isExactAmount: true,
-        hasLinkedPago: false
-      };
-
-      const result = matcher.compareMatches(withTolerance, exact);
-
-      expect(result).toBe('candidate'); // exact wins
-    });
-
-    it('prefers Factura with linked Pago over Factura alone', () => {
-      const withoutPago = {
-        fileId: 'doc1',
-        confidence: 'HIGH' as const,
-        hasCuitMatch: true,
-        dateDistance: 2,
-        isExactAmount: true,
-        hasLinkedPago: false
-      };
-
-      const withPago = {
-        fileId: 'doc2',
-        confidence: 'HIGH' as const,
-        hasCuitMatch: true,
-        dateDistance: 2,
-        isExactAmount: true,
-        hasLinkedPago: true
-      };
-
-      const result = matcher.compareMatches(withoutPago, withPago);
-
-      expect(result).toBe('candidate'); // withPago wins
-    });
-
-    it('keeps existing when quality is equal', () => {
-      const existing = {
-        fileId: 'doc1',
-        confidence: 'HIGH' as const,
-        hasCuitMatch: true,
-        dateDistance: 2,
-        isExactAmount: true,
-        hasLinkedPago: false
-      };
-
-      const candidate = {
-        fileId: 'doc2',
-        confidence: 'HIGH' as const,
-        hasCuitMatch: true,
-        dateDistance: 2,
-        isExactAmount: true,
-        hasLinkedPago: false
-      };
-
-      const result = matcher.compareMatches(existing, candidate);
-
-      expect(result).toBe('existing'); // No churn
     });
   });
 
@@ -1009,6 +713,7 @@ describe('BankMovementMatcher - Credit Movement Matching', () => {
           fechaPago: '2024-01-15',
           importePagado: 1210,
           moneda: 'ARS',
+          cuitBeneficiario: '20123456786',
           matchedFacturaFileId: 'factura-missing', // Links to factura not in array
           processedAt: '2024-01-15T10:00:00Z',
           needsReview: false,
@@ -1017,18 +722,7 @@ describe('BankMovementMatcher - Credit Movement Matching', () => {
         }
       ];
 
-      const movement: BankMovement = {
-        row: 1,
-        fecha: '2024-01-15',
-        fechaValor: '2024-01-15',
-        concepto: 'PAGO 20123456786',
-        codigo: '',
-        oficina: '',
-        areaAdva: '',
-        debito: 1210,
-        credito: null,
-        detalle: ''
-      };
+      const movement = makeMovimiento({ fecha: '2024-01-15', concepto: 'PAGO 20123456786', debito: 1210, credito: null });
 
       // Should not crash, should log warning and continue
       const result = matcher.matchMovement(movement, facturas, [], pagos);
@@ -1147,6 +841,399 @@ describe('isCreditCardPayment with origin prefix', () => {
 
   it('should still match credit card payment without prefix', () => {
     expect(isCreditCardPayment('PAGO TARJETA 1234')).toBe(true);
+  });
+
+  it('should match PAGO TARJETA VISA EMPRESA', () => {
+    expect(isCreditCardPayment('PAGO TARJETA VISA EMPRESA')).toBe(true);
+  });
+
+  it('should match PAGO TARJETA MASTERCARD', () => {
+    expect(isCreditCardPayment('PAGO TARJETA MASTERCARD')).toBe(true);
+  });
+
+  it('should match PAGO TARJETA AMEX', () => {
+    expect(isCreditCardPayment('PAGO TARJETA AMEX')).toBe(true);
+  });
+
+  it('should match PAGO TARJETA NARANJA', () => {
+    expect(isCreditCardPayment('PAGO TARJETA NARANJA')).toBe(true);
+  });
+
+  it('should match PAGO TARJETA CABAL', () => {
+    expect(isCreditCardPayment('PAGO TARJETA CABAL')).toBe(true);
+  });
+
+  it('should not match bare PAGO TARJETA without identifier', () => {
+    expect(isCreditCardPayment('PAGO TARJETA')).toBe(false);
+  });
+
+  it('should not match PAGO RECIBIDO', () => {
+    expect(isCreditCardPayment('PAGO RECIBIDO')).toBe(false);
+  });
+});
+
+describe('Tier-based matching algorithm', () => {
+  let matcher: BankMovementMatcher;
+
+  beforeEach(() => {
+    matcher = new BankMovementMatcher(5);
+  });
+
+  describe('Hard identity filters', () => {
+    it('CUIT in concepto → only matching CUIT documents, no fallthrough', () => {
+      // Concepto has CUIT 20123456786, but only a factura with DIFFERENT CUIT exists
+      const factura: Factura & { row: number } = {
+        fileId: 'f1',
+        fileName: 'f1.pdf',
+        tipoComprobante: 'A',
+        nroFactura: '00001-00000001',
+        fechaEmision: '2024-01-15',
+        cuitEmisor: '27234567891', // Different CUIT
+        razonSocialEmisor: 'OTRO SA',
+        cuitReceptor: '30709076783',
+        razonSocialReceptor: 'ADVA',
+        importeNeto: 41322.31,
+        importeIva: 8677.69,
+        importeTotal: 50000,
+        moneda: 'ARS',
+        processedAt: '2024-01-15T10:00:00Z',
+        needsReview: false,
+        confidence: 0.95,
+        row: 2
+      };
+
+      const movement = makeMovimiento({ fecha: '2024-01-15', concepto: 'PAGO FACTURA 20-12345678-6', debito: 50000, credito: null });
+
+      const result = matcher.matchMovement(movement, [factura], [], []);
+      expect(result.matchType).toBe('no_match');
+    });
+
+    it('no CUIT in concepto → all documents in pool considered', () => {
+      const factura: Factura & { row: number } = {
+        fileId: 'f1',
+        fileName: 'f1.pdf',
+        tipoComprobante: 'A',
+        nroFactura: '00001-00000001',
+        fechaEmision: '2024-01-15',
+        cuitEmisor: '20123456786',
+        razonSocialEmisor: 'TEST SA',
+        cuitReceptor: '30709076783',
+        razonSocialReceptor: 'ADVA',
+        importeNeto: 41322.31,
+        importeIva: 8677.69,
+        importeTotal: 50000,
+        moneda: 'ARS',
+        processedAt: '2024-01-15T10:00:00Z',
+        needsReview: false,
+        confidence: 0.95,
+        row: 2
+      };
+
+      const movement = makeMovimiento({ fecha: '2024-01-15', concepto: 'TRANSFERENCIA GENÉRICA', debito: 50000, credito: null });
+
+      const result = matcher.matchMovement(movement, [factura], [], []);
+      // Should match at Tier 5 (amount+date only)
+      expect(result.matchType).toBe('direct_factura');
+      expect(result.tier).toBe(5);
+    });
+  });
+
+  describe('Tier ranking', () => {
+    it('Tier 1 (Pago+Factura) beats Tier 2 (CUIT match)', () => {
+      // Pago with linked factura (Tier 1)
+      const factura: Factura & { row: number } = {
+        fileId: 'f1',
+        fileName: 'f1.pdf',
+        tipoComprobante: 'A',
+        nroFactura: '00001-00000001',
+        fechaEmision: '2024-01-10',
+        cuitEmisor: '20123456786',
+        razonSocialEmisor: 'TEST SA',
+        cuitReceptor: '30709076783',
+        razonSocialReceptor: 'ADVA',
+        importeNeto: 41322.31,
+        importeIva: 8677.69,
+        importeTotal: 50000,
+        moneda: 'ARS',
+        processedAt: '2024-01-10T10:00:00Z',
+        needsReview: false,
+        confidence: 0.95,
+        row: 2
+      };
+
+      const pago: Pago & { row: number } = {
+        fileId: 'p1',
+        fileName: 'p1.pdf',
+        banco: 'BBVA',
+        fechaPago: '2024-01-15',
+        importePagado: 50000,
+        moneda: 'ARS',
+        cuitBeneficiario: '20123456786',
+        nombreBeneficiario: 'TEST SA',
+        matchedFacturaFileId: 'f1',
+        processedAt: '2024-01-15T10:00:00Z',
+        needsReview: false,
+        confidence: 0.95,
+        row: 3
+      };
+
+      const movement = makeMovimiento({ fecha: '2024-01-15', concepto: 'PAGO 20-12345678-6', debito: 50000, credito: null });
+
+      const result = matcher.matchMovement(movement, [factura], [], [pago]);
+      expect(result.matchType).toBe('pago_factura');
+      expect(result.tier).toBe(1);
+    });
+
+    it('Tier 2 (CUIT match) beats Tier 4 (name match)', () => {
+      // Factura with matching CUIT (Tier 2) - further date
+      const facturaWithCuit: Factura & { row: number } = {
+        fileId: 'f1',
+        fileName: 'f1.pdf',
+        tipoComprobante: 'A',
+        nroFactura: '00001-00000001',
+        fechaEmision: '2024-01-10',
+        cuitEmisor: '20123456786',
+        razonSocialEmisor: 'TEST SA',
+        cuitReceptor: '30709076783',
+        razonSocialReceptor: 'ADVA',
+        importeNeto: 41322.31,
+        importeIva: 8677.69,
+        importeTotal: 50000,
+        moneda: 'ARS',
+        processedAt: '2024-01-10T10:00:00Z',
+        needsReview: false,
+        confidence: 0.95,
+        row: 2
+      };
+
+      // Another factura without matching CUIT but has name match (Tier 4) - closer date
+      const facturaWithName: Factura & { row: number } = {
+        fileId: 'f2',
+        fileName: 'f2.pdf',
+        tipoComprobante: 'A',
+        nroFactura: '00001-00000002',
+        fechaEmision: '2024-01-14', // Closer date
+        cuitEmisor: '27234567891', // Different CUIT
+        razonSocialEmisor: 'TELECOM ARGENTINA',
+        cuitReceptor: '30709076783',
+        razonSocialReceptor: 'ADVA',
+        importeNeto: 41322.31,
+        importeIva: 8677.69,
+        importeTotal: 50000,
+        moneda: 'ARS',
+        processedAt: '2024-01-14T10:00:00Z',
+        needsReview: false,
+        confidence: 0.95,
+        row: 3
+      };
+
+      const movement = makeMovimiento({ fecha: '2024-01-15', concepto: 'DEBITO TELECOM 20-12345678-6', debito: 50000, credito: null });
+
+      const result = matcher.matchMovement(movement, [facturaWithCuit, facturaWithName], [], []);
+      expect(result.matchedFileId).toBe('f1'); // CUIT match wins (Tier 2)
+      expect(result.tier).toBe(2);
+    });
+
+    it('Within same tier, closer date wins', () => {
+      const facturaFar: Factura & { row: number } = {
+        fileId: 'f1',
+        fileName: 'f1.pdf',
+        tipoComprobante: 'A',
+        nroFactura: '00001-00000001',
+        fechaEmision: '2024-01-01', // 14 days away
+        cuitEmisor: '20123456786',
+        razonSocialEmisor: 'TEST SA',
+        cuitReceptor: '30709076783',
+        razonSocialReceptor: 'ADVA',
+        importeNeto: 41322.31,
+        importeIva: 8677.69,
+        importeTotal: 50000,
+        moneda: 'ARS',
+        processedAt: '2024-01-01T10:00:00Z',
+        needsReview: false,
+        confidence: 0.95,
+        row: 2
+      };
+
+      const facturaClose: Factura & { row: number } = {
+        fileId: 'f2',
+        fileName: 'f2.pdf',
+        tipoComprobante: 'A',
+        nroFactura: '00001-00000002',
+        fechaEmision: '2024-01-14', // 1 day away
+        cuitEmisor: '20123456786',
+        razonSocialEmisor: 'TEST SA',
+        cuitReceptor: '30709076783',
+        razonSocialReceptor: 'ADVA',
+        importeNeto: 41322.31,
+        importeIva: 8677.69,
+        importeTotal: 50000,
+        moneda: 'ARS',
+        processedAt: '2024-01-14T10:00:00Z',
+        needsReview: false,
+        confidence: 0.95,
+        row: 3
+      };
+
+      const movement = makeMovimiento({ fecha: '2024-01-15', concepto: 'PAGO 20-12345678-6', debito: 50000, credito: null });
+
+      const result = matcher.matchMovement(movement, [facturaFar, facturaClose], [], []);
+      expect(result.matchedFileId).toBe('f2'); // Closer date wins
+    });
+
+    it('Tier 5 — factura matched by amount+date only (no CUIT/keyword)', () => {
+      const factura: Factura & { row: number } = {
+        fileId: 'f1',
+        fileName: 'f1.pdf',
+        tipoComprobante: 'A',
+        nroFactura: '00001-00000001',
+        fechaEmision: '2024-01-14',
+        cuitEmisor: '20123456786',
+        razonSocialEmisor: 'TEST SA',
+        cuitReceptor: '30709076783',
+        razonSocialReceptor: 'ADVA',
+        importeNeto: 41322.31,
+        importeIva: 8677.69,
+        importeTotal: 50000,
+        moneda: 'ARS',
+        processedAt: '2024-01-14T10:00:00Z',
+        needsReview: false,
+        confidence: 0.95,
+        row: 2
+      };
+
+      const movement = makeMovimiento({ fecha: '2024-01-15', concepto: 'OPERACION 12345', debito: 50000, credito: null });
+
+      const result = matcher.matchMovement(movement, [factura], [], []);
+      expect(result.matchType).toBe('direct_factura');
+      expect(result.tier).toBe(5);
+    });
+  });
+
+  describe('Keyword matching scope', () => {
+    it('name token matching applies to ALL movements (not just direct debits)', () => {
+      const factura: Factura & { row: number } = {
+        fileId: 'f1',
+        fileName: 'f1.pdf',
+        tipoComprobante: 'A',
+        nroFactura: '00001-00000001',
+        fechaEmision: '2024-01-14',
+        cuitEmisor: '20123456786',
+        razonSocialEmisor: 'TELECOM ARGENTINA',
+        cuitReceptor: '30709076783',
+        razonSocialReceptor: 'ADVA',
+        importeNeto: 41322.31,
+        importeIva: 8677.69,
+        importeTotal: 50000,
+        moneda: 'ARS',
+        processedAt: '2024-01-14T10:00:00Z',
+        needsReview: false,
+        confidence: 0.95,
+        row: 2
+      };
+
+      const movement = makeMovimiento({ fecha: '2024-01-15', concepto: 'PAGO TELECOM ARGENTINA', debito: 50000, credito: null });
+
+      const result = matcher.matchMovement(movement, [factura], [], []);
+      expect(result.matchType).toBe('direct_factura');
+      expect(result.tier).toBe(4); // Name match → Tier 4
+    });
+  });
+});
+
+describe('Pago date window ±15 days', () => {
+  let matcher: BankMovementMatcher;
+
+  beforeEach(() => {
+    matcher = new BankMovementMatcher(5);
+  });
+
+  it('matches a pago 10 days before bank date', () => {
+    const pago: Pago & { row: number } = {
+      fileId: 'pago1',
+      fileName: 'pago.pdf',
+      banco: 'BBVA',
+      fechaPago: '2024-01-05', // 10 days before bank date
+      importePagado: 50000,
+      moneda: 'ARS',
+      cuitBeneficiario: '20123456786',
+      nombreBeneficiario: 'TEST SA',
+      processedAt: '2024-01-05T10:00:00Z',
+      needsReview: false,
+      confidence: 0.95,
+      row: 2
+    };
+
+    const movement = makeMovimiento({ fecha: '2024-01-15', concepto: 'PAGO A PROVEEDOR 20-12345678-6', debito: 50000, credito: null });
+
+    const result = matcher.matchMovement(movement, [], [], [pago]);
+    expect(result.matchType).not.toBe('no_match');
+  });
+
+  it('matches a pago 15 days after bank date', () => {
+    const pago: Pago & { row: number } = {
+      fileId: 'pago1',
+      fileName: 'pago.pdf',
+      banco: 'BBVA',
+      fechaPago: '2024-01-30', // 15 days after bank date
+      importePagado: 50000,
+      moneda: 'ARS',
+      cuitBeneficiario: '20123456786',
+      nombreBeneficiario: 'TEST SA',
+      processedAt: '2024-01-30T10:00:00Z',
+      needsReview: false,
+      confidence: 0.95,
+      row: 2
+    };
+
+    const movement = makeMovimiento({ fecha: '2024-01-15', concepto: 'PAGO A PROVEEDOR 20-12345678-6', debito: 50000, credito: null });
+
+    const result = matcher.matchMovement(movement, [], [], [pago]);
+    expect(result.matchType).not.toBe('no_match');
+  });
+
+  it('does NOT match a pago 16 days after bank date', () => {
+    const pago: Pago & { row: number } = {
+      fileId: 'pago1',
+      fileName: 'pago.pdf',
+      banco: 'BBVA',
+      fechaPago: '2024-01-31', // 16 days after bank date
+      importePagado: 50000,
+      moneda: 'ARS',
+      cuitBeneficiario: '20123456786',
+      nombreBeneficiario: 'TEST SA',
+      processedAt: '2024-01-31T10:00:00Z',
+      needsReview: false,
+      confidence: 0.95,
+      row: 2
+    };
+
+    const movement = makeMovimiento({ fecha: '2024-01-15', concepto: 'PAGO A PROVEEDOR 20-12345678-6', debito: 50000, credito: null });
+
+    const result = matcher.matchMovement(movement, [], [], [pago]);
+    expect(result.matchType).toBe('no_match');
+  });
+});
+
+describe('extractReferencia', () => {
+  it('extracts 7-digit referencia from ORDEN DE PAGO DEL EXTERIOR format', () => {
+    expect(extractReferencia('ORDEN DE PAGO DEL EXTERIOR 4083953.01.8584')).toBe('4083953');
+  });
+
+  it('extracts 7-digit referencia from ORDEN DE PAGO format', () => {
+    expect(extractReferencia('ORDEN DE PAGO 1234567.02.1234')).toBe('1234567');
+  });
+
+  it('returns undefined for concepto without ORDEN DE PAGO pattern', () => {
+    expect(extractReferencia('TRANSFERENCIA RECIBIDA')).toBeUndefined();
+  });
+
+  it('returns undefined for 6-digit number (too short)', () => {
+    expect(extractReferencia('PAGO 123456')).toBeUndefined();
+  });
+
+  it('returns undefined for empty string', () => {
+    expect(extractReferencia('')).toBeUndefined();
   });
 });
 

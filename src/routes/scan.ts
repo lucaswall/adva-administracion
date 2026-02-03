@@ -3,9 +3,8 @@
  */
 
 import type { FastifyInstance } from 'fastify';
-import type { ScanResult, BankAutoFillResult } from '../types/index.js';
+import type { ScanResult } from '../types/index.js';
 import { scanFolder, rematch, RematchResult } from '../processing/scanner.js';
-import { autoFillBankMovements } from '../bank/autofill.js';
 import { matchAllMovimientos, type MatchAllResult } from '../bank/match-movimientos.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { extractDriveFolderId, isValidDriveId } from '../utils/drive-parser.js';
@@ -26,13 +25,6 @@ interface ScanRequest {
  */
 interface RematchRequest {
   documentType?: 'factura' | 'recibo' | 'all';
-}
-
-/**
- * Autofill request body
- */
-interface AutofillRequest {
-  bankName?: string;
 }
 
 /**
@@ -126,75 +118,6 @@ export async function scanRoutes(server: FastifyInstance) {
     server.log.info({}, 'Starting rematch');
 
     const result = await rematch();
-
-    if (!result.ok) {
-      reply.status(500);
-      return {
-        error: result.error.message,
-      };
-    }
-
-    return result.value;
-  });
-
-  /**
-   * POST /api/autofill-bank - Auto-fill bank movement descriptions
-   * Protected with authentication
-   */
-  server.post<{ Body: AutofillRequest }>('/autofill-bank', {
-    onRequest: authMiddleware,
-    schema: {
-      body: {
-        type: 'object',
-        properties: {
-          bankName: { type: 'string' },
-        },
-        additionalProperties: false,
-      },
-    },
-  }, async (request, reply): Promise<BankAutoFillResult | ErrorResponse> => {
-    const { bankName } = request.body || {};
-    // Validate bankName is a string (for schema validation)
-    if (bankName !== undefined && typeof bankName !== 'string') {
-      reply.status(400);
-      return {
-        error: 'Invalid bankName',
-        details: 'bankName must be a string',
-      };
-    }
-
-    // Validate bankName is non-empty
-    if (bankName !== undefined && typeof bankName === 'string' && bankName.trim() === '') {
-      reply.status(400);
-      return {
-        error: 'Invalid bankName',
-        details: 'bankName must be a non-empty string',
-      };
-    }
-
-    // Check if bankName exists in folder structure
-    if (bankName) {
-      const folderStructure = getCachedFolderStructure();
-      if (!folderStructure) {
-        reply.status(500);
-        return {
-          error: 'Folder structure not cached',
-          details: 'Run /api/scan first to initialize folder structure',
-        };
-      }
-
-      if (!folderStructure.bankSpreadsheets.has(bankName)) {
-        reply.status(404);
-        return {
-          error: 'Bank not found',
-          details: `Bank "${bankName}" does not exist in folder structure`,
-        };
-      }
-    }
-
-    server.log.info({ bankName }, 'Starting bank autofill');
-
-    const result = await autoFillBankMovements(bankName);
 
     if (!result.ok) {
       reply.status(500);

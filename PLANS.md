@@ -296,3 +296,70 @@ Clean up any dead code, update documentation.
 - Hard CUIT filter is a behavior change — movements that previously matched a wrong CUIT document will now show no match. This is intentional per MATCHING.md.
 - Removing `/api/autofill-bank` is a breaking API change — verify no external clients depend on it.
 - Existing spreadsheet data with matches won't be affected (match-movimientos only updates when `isBetterMatch` or force mode).
+
+## Implementation Complete
+
+**Status:** ALL 9 TASKS COMPLETE
+**Date:** 2026-02-03
+
+### Tasks Completed
+1. **ADV-66** — Added BankMatchTier type and extractReferencia function
+2. **ADV-67** — Updated credit card payment pattern to match card type names
+3. **ADV-68** — Updated pago date window from ±1 to ±15 days
+4. **ADV-69** — Rewrote BankMovementMatcher with tier-based algorithm
+5. **ADV-70** — Updated MatchQuality and isBetterMatch for tier-based comparison
+6. **ADV-71** — Simplified BankMovement → uses MovimientoRow directly
+7. **ADV-72** — Deleted autofill.ts and removed /api/autofill-bank route
+8. **ADV-73** — Verified description formats match MATCHING.md Phase 6
+9. **ADV-74** — Final cleanup and documentation
+
+### Bug Fixes from Post-Implementation Review
+- Added Tier 3 referencia matching to debit side (was extracted but not used)
+- Added keyword matching (Tier 4) to credit side for Facturas Emitidas
+- Fixed stale JSDoc comments (PAGO_DATE_RANGE, tierToConfidence)
+
+### Known Limitations
+- `buildMatchQuality()` in match-movimientos.ts cannot reconstruct Tier 3/4 — existing matches are approximated as Tier 2 or 5 for replacement comparison
+- Recibos use Tier 5 + HIGH confidence (intentional: salary payments are reliable matches even without CUIT)
+
+### Review Findings
+
+Files reviewed: 7 source files + 3 test files
+Checks applied: Security, Logic, Async, Resources, Type Safety, Error Handling, Edge Cases, Conventions
+
+Summary: 1 issue found
+- MEDIUM: 1
+
+**Documented (no fix required for merge):**
+- [MEDIUM] DEAD CODE: `triggerAutofillBank()` in `apps-script/src/main.ts:70-73` still calls deleted `/api/autofill-bank` endpoint. `README.md` and `DEVELOPMENT.md` also reference it. Users clicking the Dashboard menu item will get a 404 error.
+
+**No CRITICAL or HIGH issues found.** The core implementation (matcher, orchestration, types, routes, tests) is correct and follows all project conventions.
+
+### Linear Updates
+- ADV-66: Review → Merge
+- ADV-67: Review → Merge
+- ADV-68: Review → Merge
+- ADV-69: Review → Merge
+- ADV-70: Review → Merge
+- ADV-71: Review → Merge
+- ADV-72: Review → Merge
+- ADV-73: Review → Merge
+- ADV-74: Review → Merge
+- ADV-75: Created in Todo (Fix: dead triggerAutofillBank + docs cleanup)
+
+<!-- REVIEW COMPLETE -->
+
+---
+
+## Fix Plan
+
+**Source:** Review findings from Implementation
+**Linear Issues:** [ADV-75](https://linear.app/adva-administracion/issue/ADV-75/remove-dead-triggerautofillbank-from-apps-script-and-update-docs)
+
+### Fix 1: Remove dead triggerAutofillBank() and update docs
+**Linear Issue:** [ADV-75](https://linear.app/adva-administracion/issue/ADV-75/remove-dead-triggerautofillbank-from-apps-script-and-update-docs)
+
+1. Delete `triggerAutofillBank()` function from `apps-script/src/main.ts`
+2. Remove `/api/autofill-bank` references from `README.md`
+3. Remove autofill reference from `DEVELOPMENT.md:126`
+4. Run verifier (expect pass)
