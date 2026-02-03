@@ -160,6 +160,22 @@ DOCUMENT STRUCTURE:
    - LOCATION: In the CLIENT/BUYER section below the header, typically mid-page
    - Extract the NAME of this company/person
 
+CRITICAL - TRUNCATED NAMES:
+Company names may be truncated due to space constraints in the document field.
+Do NOT concatenate adjacent text (like addresses) with truncated company names.
+Stop extracting the name at the end of the company name field boundary.
+
+Example of INCORRECT extraction:
+- Document shows: "ASOCIACION CIVIL DE DESARROLLADORES DE" (name field, truncated)
+- Next line shows: "TUCUMAN N° 1505 P 3" (address field)
+- WRONG: "ASOCIACION CIVIL DE DESARROLLADORES DE TUCUMAN" (concatenated address)
+- CORRECT: "ASOCIACION CIVIL DE DESARROLLADORES DE" (just the name, even if truncated)
+
+If a company name appears to end abruptly (mid-word or before "DE"):
+- Extract ONLY what is in the name field
+- Do NOT append text from address, city, or other adjacent fields
+- A truncated name is better than a hallucinated one
+
 3. ALL CUITs: Find ALL identification numbers anywhere in the document
    - CRITICAL: In Argentina, identification numbers may have different labels:
      * "CUIT:" (11 digits) - Tax ID for companies/individuals

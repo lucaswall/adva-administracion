@@ -5,11 +5,34 @@
 
 import { describe, it, expect } from 'vitest';
 import {
+  FACTURA_PROMPT,
   getResumenBancarioPrompt,
   getResumenTarjetaPrompt,
   getResumenBrokerPrompt,
   formatCurrentDateForPrompt,
 } from './prompts.js';
+
+// ADV-48: Tests for truncated name handling in FACTURA_PROMPT
+describe('FACTURA_PROMPT truncated name handling', () => {
+  it('should contain instruction about truncated company names', () => {
+    expect(FACTURA_PROMPT).toContain('truncat');
+  });
+
+  it('should instruct not to concatenate address text with company names', () => {
+    expect(FACTURA_PROMPT).toContain('address');
+    expect(FACTURA_PROMPT.toLowerCase()).toContain('do not');
+  });
+
+  it('should provide example of truncated name vs address', () => {
+    // Should mention the ADVA truncation case with address following
+    expect(FACTURA_PROMPT).toContain('ASOCIACION');
+    expect(FACTURA_PROMPT).toContain('TUCUMAN');
+  });
+
+  it('should prioritize stopping at field boundaries', () => {
+    expect(FACTURA_PROMPT).toContain('field');
+  });
+});
 
 describe('formatCurrentDateForPrompt', () => {
   it('should format January 2025 correctly', () => {

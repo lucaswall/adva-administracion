@@ -22,15 +22,20 @@ const MAX_JSON_SIZE = 1_000_000;
  * - "ADVA" (the acronym)
  * - "ASOCIACION CIVIL DE DESARROLLADORES DE VIDEOJUEGOS ARGENTINOS" (full name)
  * - "ASOC CIVIL DESARROLLADORES VIDEOJUEGOS" (abbreviated)
+ * - "AS.C.DE DES.DE VIDEOJUEGOS ARG" (heavily abbreviated with periods)
+ * - "A.C. DES. DE VIDEOJUEGOS" (very abbreviated)
  * - Requires VIDEOJUEGO to be present when matching ASOC/DESARROLL patterns
  *   to avoid false positives like "ASOCIACION DE DESARROLLADORES DE SOFTWARE"
  *
  * Pattern breakdown:
  * - `ADVA` - Matches the acronym directly
- * - `(?=.*VIDEOJUEGO)(?=.*ASOC)(?=.*DESARROLL)` - Lookaheads require all three
- *   keywords to be present (in any order) for association name matches
+ * - `(?=.*VIDEOJUEGO)` - Lookahead requires VIDEOJUEGO keyword
+ * - `(?=.*(?:A\.?[SC]\.?|A\.?DE))` - Lookahead for association abbreviation
+ *   Matches: AS, A.S., A.C., AC, ASOC, A.DE, etc.
+ * - `(?=.*D\.?E\.?S\.?)` - Lookahead for desarrolladores abbreviation
+ *   Matches: DES, D.E.S., DESARROLL, DES., etc.
  */
-const ADVA_NAME_PATTERN = /ADVA|(?=.*VIDEOJUEGO)(?=.*ASOC)(?=.*DESARROLL)/i;
+const ADVA_NAME_PATTERN = /ADVA|(?=.*VIDEOJUEGO)(?=.*(?:A\.?[SC]\.?|A\.?DE))(?=.*D\.?E\.?S\.?)/i;
 
 /**
  * Normalizes a CUIT by removing dashes, spaces, and slashes.
@@ -129,7 +134,40 @@ export function assignCuitsAndClassify(
     };
   }
 
-  // ADVA not found in either name - this is an error
+  // ADVA not found in either name - try CUIT-based fallback
+  // If ADVA's CUIT is present, use its position to determine role
+  const advaCuitIndex = allCuits.indexOf(ADVA_CUIT);
+  if (advaCuitIndex !== -1) {
+    warn('Name matching failed, using CUIT fallback for ADVA role detection', {
+      module: 'gemini-parser',
+      phase: 'cuit-assignment',
+      issuerName,
+      clientName,
+      advaCuitIndex,
+    });
+
+    if (advaCuitIndex === 0) {
+      // ADVA CUIT is first - ADVA is the issuer (factura_emitida)
+      return {
+        documentType: 'factura_emitida',
+        cuitEmisor: ADVA_CUIT,
+        razonSocialEmisor: issuerName,
+        cuitReceptor: otherCuit,
+        razonSocialReceptor: clientName,
+      };
+    } else {
+      // ADVA CUIT is not first - ADVA is the client (factura_recibida)
+      return {
+        documentType: 'factura_recibida',
+        cuitEmisor: otherCuit,
+        razonSocialEmisor: issuerName,
+        cuitReceptor: ADVA_CUIT,
+        razonSocialReceptor: clientName,
+      };
+    }
+  }
+
+  // ADVA not found in names or CUITs - this is an error
   throw new Error(`ADVA not found in either issuer name "${issuerName}" or client name "${clientName}"`);
 }
 

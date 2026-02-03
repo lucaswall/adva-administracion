@@ -161,6 +161,7 @@ describe('scanner', () => {
   let mockSortToSinProcesar: any;
   let mockSortAndRename: any;
   let mockMarkFileProcessing: any;
+  let mockHasValidDate: any;
   let pendingTasks: Set<Promise<void>>;
 
   beforeEach(async () => {
@@ -169,13 +170,14 @@ describe('scanner', () => {
     // Set up fresh mocks
     const { listFilesInFolder } = await import('../services/drive.js');
     const { getProcessingQueue } = await import('./queue.js');
-    const { processFile } = await import('./extractor.js');
+    const { processFile, hasValidDate } = await import('./extractor.js');
     const { sortToSinProcesar, sortAndRenameDocument } = await import('../services/document-sorter.js');
     const { markFileProcessing } = await import('./storage/index.js');
     const { withLock } = await import('../utils/concurrency.js');
 
     mockListFiles = vi.mocked(listFilesInFolder);
     mockProcessFile = vi.mocked(processFile);
+    mockHasValidDate = vi.mocked(hasValidDate);
     mockSortToSinProcesar = vi.mocked(sortToSinProcesar);
     mockSortAndRename = vi.mocked(sortAndRenameDocument);
     mockMarkFileProcessing = vi.mocked(markFileProcessing);
@@ -990,6 +992,265 @@ describe('scanner', () => {
         'failed',
         expect.any(String)
       );
+    });
+
+    // ADV-50: Missing status update for unrecognized documents
+    it('should update status to failed when document is unrecognized', async () => {
+      const { updateFileStatus } = await import('./storage/index.js');
+
+      const mockFile = {
+        id: 'unrecognized-file',
+        name: 'presupuesto.pdf',
+        mimeType: 'application/pdf',
+        parents: ['entrada'],
+      };
+
+      mockListFiles.mockResolvedValue({
+        ok: true,
+        value: [mockFile],
+      });
+
+      // Mock extraction returning unrecognized document type
+      mockProcessFile.mockResolvedValue({
+        ok: true,
+        value: {
+          documentType: 'unrecognized',
+          document: null,
+          confidence: 0,
+        },
+      });
+
+      mockSortToSinProcesar.mockResolvedValue({
+        success: true,
+        targetPath: 'Sin Procesar/presupuesto.pdf',
+      });
+
+      await scanFolder('entrada');
+
+      // Should call updateFileStatus with 'failed' status for unrecognized document
+      expect(updateFileStatus).toHaveBeenCalledWith(
+        'dashboard',
+        'unrecognized-file',
+        'failed',
+        expect.stringContaining('Unrecognized')
+      );
+    });
+
+    it('should update status to failed when document has no valid date', async () => {
+      const { updateFileStatus } = await import('./storage/index.js');
+
+      const mockFile = {
+        id: 'no-date-file',
+        name: 'factura-no-date.pdf',
+        mimeType: 'application/pdf',
+        parents: ['entrada'],
+      };
+
+      mockListFiles.mockResolvedValue({
+        ok: true,
+        value: [mockFile],
+      });
+
+      // Mock extraction returning factura with no date
+      mockProcessFile.mockResolvedValue({
+        ok: true,
+        value: {
+          documentType: 'factura_recibida',
+          document: {
+            // Factura with empty fechaEmision - no valid date
+            fechaEmision: '',
+            tipoComprobante: 'A',
+            nroFactura: '00001-00000001',
+            cuitEmisor: '20123456786',
+            razonSocialEmisor: 'PROVEEDOR SA',
+            importeTotal: 1000,
+            moneda: 'ARS',
+          },
+          confidence: 0.8,
+        },
+      });
+
+      mockSortToSinProcesar.mockResolvedValue({
+        success: true,
+        targetPath: 'Sin Procesar/factura-no-date.pdf',
+      });
+
+      mockHasValidDate.mockReturnValue(false);
+
+      await scanFolder('entrada');
+
+      // Should call updateFileStatus with 'failed' status for document without valid date
+      expect(updateFileStatus).toHaveBeenCalledWith(
+        'dashboard',
+        'no-date-file',
+        'failed',
+        expect.stringContaining('date')
+      );
+    });
+
+    it('should still move file to Sin Procesar after updating status', async () => {
+      const mockFile = {
+        id: 'unrecognized-file-2',
+        name: 'unknown.pdf',
+        mimeType: 'application/pdf',
+        parents: ['entrada'],
+      };
+
+      mockListFiles.mockResolvedValue({
+        ok: true,
+        value: [mockFile],
+      });
+
+      mockProcessFile.mockResolvedValue({
+        ok: true,
+        value: {
+          documentType: 'unknown',
+          document: null,
+          confidence: 0,
+        },
+      });
+
+      mockSortToSinProcesar.mockResolvedValue({
+        success: true,
+        targetPath: 'Sin Procesar/unknown.pdf',
+      });
+
+      await scanFolder('entrada');
+
+      // Should still move file to Sin Procesar after status update
+      expect(mockSortToSinProcesar).toHaveBeenCalledWith(
+        'unrecognized-file-2',
+        'unknown.pdf'
+      );
+    });
+
+    // ADV-51: Server restart race condition - status update must happen before sort
+    it('should update status to success BEFORE sorting document (race condition fix)', async () => {
+      const { updateFileStatus } = await import('./storage/index.js');
+      const { sortAndRenameDocument } = await import('../services/document-sorter.js');
+
+      const mockFile = {
+        id: 'race-condition-file',
+        name: 'factura.pdf',
+        mimeType: 'application/pdf',
+        parents: ['entrada'],
+      };
+
+      mockListFiles.mockResolvedValue({
+        ok: true,
+        value: [mockFile],
+      });
+
+      // Mock successful extraction of a factura
+      mockProcessFile.mockResolvedValue({
+        ok: true,
+        value: {
+          documentType: 'factura_recibida',
+          document: {
+            fechaEmision: '2025-01-15',
+            tipoComprobante: 'A',
+            nroFactura: '00001-00000001',
+            cuitEmisor: '20123456786',
+            razonSocialEmisor: 'PROVEEDOR SA',
+            cuitReceptor: '30709076783',
+            razonSocialReceptor: 'ADVA',
+            importeTotal: 1000,
+            moneda: 'ARS',
+          },
+          confidence: 0.95,
+        },
+      });
+
+      mockHasValidDate.mockReturnValue(true);
+
+      mockSortAndRename.mockResolvedValue({
+        success: true,
+        targetPath: 'Egresos/01 - Enero/factura.pdf',
+      });
+
+      // Track call order
+      const callOrder: string[] = [];
+
+      vi.mocked(updateFileStatus).mockImplementation(async (...args) => {
+        if (args[2] === 'success') {
+          callOrder.push('updateFileStatus-success');
+        }
+        return { ok: true, value: undefined };
+      });
+
+      vi.mocked(sortAndRenameDocument).mockImplementation(async () => {
+        callOrder.push('sortAndRename');
+        return { success: true, targetPath: 'Egresos/01 - Enero/factura.pdf' };
+      });
+
+      await scanFolder('entrada');
+
+      // Verify updateFileStatus('success') was called BEFORE sortAndRename
+      const statusIndex = callOrder.indexOf('updateFileStatus-success');
+      const sortIndex = callOrder.indexOf('sortAndRename');
+
+      expect(statusIndex).toBeGreaterThanOrEqual(0);
+      expect(sortIndex).toBeGreaterThanOrEqual(0);
+      expect(statusIndex).toBeLessThan(sortIndex);
+    });
+
+    it('should keep status as success even if sort fails (data was stored)', async () => {
+      const { updateFileStatus } = await import('./storage/index.js');
+
+      const mockFile = {
+        id: 'sort-fail-file',
+        name: 'factura-sort-fail.pdf',
+        mimeType: 'application/pdf',
+        parents: ['entrada'],
+      };
+
+      mockListFiles.mockResolvedValue({
+        ok: true,
+        value: [mockFile],
+      });
+
+      mockProcessFile.mockResolvedValue({
+        ok: true,
+        value: {
+          documentType: 'factura_recibida',
+          document: {
+            fechaEmision: '2025-01-15',
+            tipoComprobante: 'A',
+            nroFactura: '00001-00000001',
+            cuitEmisor: '20123456786',
+            razonSocialEmisor: 'PROVEEDOR SA',
+            cuitReceptor: '30709076783',
+            razonSocialReceptor: 'ADVA',
+            importeTotal: 1000,
+            moneda: 'ARS',
+          },
+          confidence: 0.95,
+        },
+      });
+
+      mockHasValidDate.mockReturnValue(true);
+
+      // Sort fails
+      mockSortAndRename.mockResolvedValue({
+        success: false,
+        error: 'Failed to move file',
+      });
+
+      await scanFolder('entrada');
+
+      // Status should be 'success' because data was stored, not 'failed' because sort failed
+      // The key insight: status reflects data storage success, not file location
+      expect(updateFileStatus).toHaveBeenCalledWith(
+        'dashboard',
+        'sort-fail-file',
+        'success'
+      );
+
+      // Should NOT have been called with 'failed' for this file
+      const failedCalls = vi.mocked(updateFileStatus).mock.calls.filter(
+        call => call[1] === 'sort-fail-file' && call[2] === 'failed'
+      );
+      expect(failedCalls).toHaveLength(0);
     });
   });
 
