@@ -549,6 +549,12 @@ See `SPREADSHEET_FORMAT.md` for complete schema.
   - **Parsed timestamps** (e.g., `fechaEmision`, `fechaPago` from documents) should NOT use spreadsheet timezone
     - These are already in correct timezone from source document
     - Pass them as-is using `CellDate` type
+- **Reading dates from spreadsheets:**
+  - `getValues()` uses `UNFORMATTED_VALUE` + `SERIAL_NUMBER` render options, so `CellDate` fields return as numbers (e.g., `45993` instead of `"2025-12-02"`)
+  - **Always** use `normalizeSpreadsheetDate(cellValue)` from `utils/date.ts` for date fields, **never** `String()`
+  - Correct: `fechaEmision: normalizeSpreadsheetDate(row[colIndex.fechaEmision])`
+  - Wrong: `fechaEmision: String(row[colIndex.fechaEmision] || '')`
+  - `processedAt` fields are NOT affected (stored as plain text, not `CellDate`)
 
 ## MATCHING
 

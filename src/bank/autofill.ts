@@ -16,6 +16,7 @@ import { getValues, batchUpdate, type CellValue } from '../services/sheets.js';
 import { getCachedFolderStructure } from '../services/folder-structure.js';
 import { BankMovementMatcher } from './matcher.js';
 import { parseNumber } from '../utils/numbers.js';
+import { normalizeSpreadsheetDate } from '../utils/date.js';
 import { getConfig } from '../config.js';
 import { warn } from '../utils/logger.js';
 
@@ -33,8 +34,8 @@ export function parseMovementRow(row: CellValue[], rowNumber: number): BankMovem
 
   return {
     row: rowNumber,
-    fecha: String(row[0] || ''),
-    fechaValor: String(row[1] || ''),
+    fecha: normalizeSpreadsheetDate(row[0]),
+    fechaValor: normalizeSpreadsheetDate(row[1]),
     concepto: String(row[2] || ''),
     codigo: String(row[3] || ''),
     oficina: String(row[4] || ''),
@@ -58,7 +59,7 @@ function parseFacturas(data: CellValue[][]): Array<Factura & { row: number }> {
 
     facturas.push({
       row: i + 1,
-      fechaEmision: String(row[0] || ''),
+      fechaEmision: normalizeSpreadsheetDate(row[0]),
       fileId: String(row[1] || ''),
       fileName: String(row[2] || ''),
       tipoComprobante: (row[3] || 'A') as Factura['tipoComprobante'],
@@ -95,7 +96,7 @@ function parsePagos(data: CellValue[][]): Array<Pago & { row: number }> {
 
     pagos.push({
       row: i + 1,
-      fechaPago: String(row[0] || ''),
+      fechaPago: normalizeSpreadsheetDate(row[0]),
       fileId: String(row[1] || ''),
       fileName: String(row[2] || ''),
       banco: String(row[3] || ''),
@@ -130,7 +131,7 @@ function parseRecibos(data: CellValue[][]): Array<Recibo & { row: number }> {
 
     recibos.push({
       row: i + 1,
-      fechaPago: String(row[0] || ''),
+      fechaPago: normalizeSpreadsheetDate(row[0]),
       fileId: String(row[1] || ''),
       fileName: String(row[2] || ''),
       tipoRecibo: (row[3] || 'sueldo') as Recibo['tipoRecibo'],

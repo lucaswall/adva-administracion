@@ -225,3 +225,97 @@ Implement a global quota-aware throttle that reduces concurrency when quota erro
 - Tasks 3, 4, 5 are independent of each other
 - Task 6 has no code dependencies
 - Task 7 is fully independent of Tasks 1-6
+
+---
+
+## Iteration 1
+
+**Status:** COMPLETE
+**Date:** 2026-02-03
+
+### Changes Made
+
+**Task 1 (ADV-57, ADV-61): Fix movimientos-reader and movimientos-detalle**
+- `src/services/movimientos-reader.ts`: Replaced `String(row[0] || '')` with `normalizeSpreadsheetDate(row[0])` for `fecha` field
+- `src/services/movimientos-detalle.ts`: Same fix for `fecha` in `computeVersionFromRow()`, maintaining hash consistency with `computeRowVersion()`
+- Tests: 2 new tests in each test file (serial number normalization, string passthrough, TOCTOU version hash)
+
+**Task 2 (ADV-57): Fix match-movimientos**
+- `src/bank/match-movimientos.ts`: Replaced 5 `String()` calls with `normalizeSpreadsheetDate()` for `fechaEmision` (×3) and `fechaPago` (×2)
+- Tests: Serial number normalization tests for `parseFacturasEmitidas` and `parseFacturasRecibidas`
+
+**Task 3 (ADV-58): Fix bank autofill**
+- `src/bank/autofill.ts`: Replaced 5 date fields (`fecha`, `fechaValor`, `fechaEmision`, `fechaPago` ×2) with `normalizeSpreadsheetDate()`
+- Tests: 2 new tests for `parseMovementRow` (serial number normalization, string passthrough)
+
+**Task 4 (ADV-59): Fix recibo-pago matcher**
+- `src/processing/matching/recibo-pago-matcher.ts`: Replaced 2 `fechaPago` fields with `normalizeSpreadsheetDate()`
+- Tests: 2 pattern verification tests for recibo and pago date normalization
+
+**Task 5 (ADV-60): Fix NC-factura matcher**
+- `src/processing/matching/nc-factura-matcher.ts`: Replaced `fechaEmision` with `normalizeSpreadsheetDate()`
+- Tests: Integration test with serial number dates in both factura and NC rows
+
+**Task 6 (ADV-62): Documentation**
+- `CLAUDE.md`: Added "Reading dates from spreadsheets" guidelines under Spreadsheets Principles
+
+**Task 7 (ADV-56): Dynamic concurrency throttling**
+- `src/config.ts`: Added `QUOTA_THROTTLE_BASE_DELAY_MS`, `QUOTA_THROTTLE_MAX_DELAY_MS`, `QUOTA_THROTTLE_RESET_MS`
+- `src/utils/concurrency.ts`: Added `QuotaThrottle` class with exponential backoff, `quotaThrottle` singleton, integrated into `withQuotaRetry()`
+- Tests: 7 new tests (immediate clearance, delay after error, exponential backoff, max cap, auto-reset, manual reset, withQuotaRetry integration)
+
+### Bug Fixes (from bug-hunter)
+- Fixed incorrect JSDoc `@example` in `serialToDateString()` (said '2025-12-23', correct is '2025-12-02')
+- Fixed `getQuotaThrottle()` to import config constants instead of hardcoding values
+- Fixed misleading test comments about backoff delay values
+
+### Verification
+- **Tests:** 1,559 passed (59 test files)
+- **Build:** Clean (zero warnings)
+- **Bug hunter:** 4 issues found, 3 fixed (1 by-design: throttle not resetting on single success — auto-reset after quiet period handles this)
+
+### Review Findings
+
+Files reviewed: 14 (8 source files + 6 test files)
+Checks applied: Security, Logic, Async, Resources, Type Safety, Conventions
+
+**Tasks 1-5 (ADV-57, ADV-58, ADV-59, ADV-60, ADV-61): Date serial number fixes**
+- All 14 `String(row[N] || '')` calls for date fields correctly replaced with `normalizeSpreadsheetDate(row[N])`
+- Import of `normalizeSpreadsheetDate` verified in all 6 source files
+- Version hash consistency maintained: `computeVersionFromRow()` (`movimientos-detalle.ts:54`) and `computeRowVersion()` (`match-movimientos.ts:82-93`) both use normalized dates, producing identical hashes for same row data
+- Tests verify serial number normalization, string passthrough, and TOCTOU version hash consistency
+- `processedAt` fields correctly left as `String()` (not CellDate, not affected)
+
+**Task 6 (ADV-62): CLAUDE.md documentation**
+- "Reading dates from spreadsheets" section correctly placed under Spreadsheets Principles
+- Correct/incorrect patterns documented with clear examples
+- References `normalizeSpreadsheetDate` from `utils/date.ts`
+
+**Task 7 (ADV-56): QuotaThrottle**
+- `QuotaThrottle` class implements exponential backoff: `base * 2^(errors-1)`, capped at max
+- Auto-reset after quiet period (no errors for `QUOTA_THROTTLE_RESET_MS`)
+- Config constants properly imported from `config.ts` (not hardcoded)
+- Cooperative integration into `withQuotaRetry()`: calls `waitForClearance()` before each attempt, calls `reportQuotaError()` on quota errors
+- Singleton pattern via `getQuotaThrottle()` with lazy initialization
+- Exported facade object delegates to singleton, enabling testing via `quotaThrottle.reset()`
+- 7 tests cover: immediate clearance, delay after error, exponential backoff, max cap, auto-reset, manual reset, withQuotaRetry integration
+
+No issues found - all implementations are correct and follow project conventions.
+
+### Linear Updates
+- ADV-56: Review → Merge
+- ADV-57: Review → Merge
+- ADV-58: Review → Merge
+- ADV-59: Review → Merge
+- ADV-60: Review → Merge
+- ADV-61: Review → Merge
+- ADV-62: Review → Merge
+
+<!-- REVIEW COMPLETE -->
+
+---
+
+## Status: COMPLETE
+
+All tasks implemented and reviewed successfully. All Linear issues moved to Merge.
+Ready for PR creation.

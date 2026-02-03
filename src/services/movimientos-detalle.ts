@@ -9,6 +9,7 @@ import { SHEETS_BATCH_UPDATE_LIMIT } from '../config.js';
 import { batchUpdate, getValues, type CellValue } from './sheets.js';
 import { debug, warn } from '../utils/logger.js';
 import { parseNumber } from '../utils/numbers.js';
+import { normalizeSpreadsheetDate } from '../utils/date.js';
 
 /**
  * Represents an update to the matchedFileId and detalle columns
@@ -50,7 +51,7 @@ function escapeSheetName(sheetName: string): string {
  * @returns Hex string hash (16 chars)
  */
 function computeVersionFromRow(row: CellValue[]): string {
-  const fecha = String(row[0] || '');
+  const fecha = normalizeSpreadsheetDate(row[0]);
   const origenConcepto = String(row[1] || '');
   const debito = parseNumber(row[2]);
   const credito = parseNumber(row[3]);

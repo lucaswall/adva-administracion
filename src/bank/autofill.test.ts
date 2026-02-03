@@ -193,4 +193,42 @@ describe('parseMovementRow - array bounds checking', () => {
     const result = parseMovementRow(noConcepto, 1);
     expect(result).toBeNull();
   });
+
+  it('normalizes serial number dates in fecha and fechaValor', () => {
+    const row = [
+      45671,           // fecha (serial number => '2025-01-14')
+      45672,           // fechaValor (serial number => '2025-01-15')
+      'TRANSFERENCIA', // concepto
+      'TRF',           // codigo
+      'CENTRAL',       // oficina
+      'ADMIN',         // areaAdva
+      50000,           // credito
+      null,            // debito
+      '',              // detalle
+    ];
+    const result = parseMovementRow(row, 2);
+
+    expect(result).not.toBeNull();
+    expect(result?.fecha).toBe('2025-01-14');
+    expect(result?.fechaValor).toBe('2025-01-15');
+  });
+
+  it('passes through string dates unchanged', () => {
+    const row = [
+      '2025-01-14',    // fecha (already string)
+      '2025-01-15',    // fechaValor (already string)
+      'TRANSFERENCIA', // concepto
+      'TRF',           // codigo
+      'CENTRAL',       // oficina
+      'ADMIN',         // areaAdva
+      50000,           // credito
+      null,            // debito
+      '',              // detalle
+    ];
+    const result = parseMovementRow(row, 2);
+
+    expect(result).not.toBeNull();
+    expect(result?.fecha).toBe('2025-01-14');
+    expect(result?.fechaValor).toBe('2025-01-15');
+  });
 });

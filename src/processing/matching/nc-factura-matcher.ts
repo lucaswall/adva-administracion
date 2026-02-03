@@ -6,6 +6,7 @@
 import type { Result } from '../../types/index.js';
 import { getValues, setValues } from '../../services/sheets.js';
 import { parseNumber } from '../../utils/numbers.js';
+import { normalizeSpreadsheetDate } from '../../utils/date.js';
 import { debug, info, warn } from '../../utils/logger.js';
 import { getCorrelationId } from '../../utils/correlation.js';
 
@@ -142,7 +143,7 @@ export async function matchNCsWithFacturas(
 
     const factura: FacturaRow = {
       rowNumber: i + 1, // 1-indexed, accounting for header
-      fechaEmision: String(row[0] || ''),
+      fechaEmision: normalizeSpreadsheetDate(row[0]),
       fileId: String(row[1] || ''),
       tipoComprobante: String(row[3] || '').toUpperCase(),
       nroFactura: String(row[4] || ''),

@@ -76,6 +76,24 @@ export const SHEETS_BATCH_UPDATE_LIMIT = 500;
 export const PARALLEL_SHEET_READ_CHUNK_SIZE = 4;
 
 /**
+ * Base delay for global quota throttle in milliseconds
+ * First backoff step after a quota error is detected
+ */
+export const QUOTA_THROTTLE_BASE_DELAY_MS = 5000;
+
+/**
+ * Maximum delay for global quota throttle in milliseconds
+ * Backoff will not exceed this value
+ */
+export const QUOTA_THROTTLE_MAX_DELAY_MS = 60000;
+
+/**
+ * Reset period for global quota throttle in milliseconds
+ * If no quota errors occur for this duration, backoff resets to zero
+ */
+export const QUOTA_THROTTLE_RESET_MS = 60000;
+
+/**
  * Maximum number of retry attempts for transient errors (JSON parse errors)
  * These errors are often caused by temporary Gemini API instability
  */

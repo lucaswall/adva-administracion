@@ -7,6 +7,11 @@ import { createHash } from 'crypto';
 import type { Result } from '../types/index.js';
 import { warn, debug } from './logger.js';
 import { getCorrelationId } from './correlation.js';
+import {
+  QUOTA_THROTTLE_BASE_DELAY_MS,
+  QUOTA_THROTTLE_MAX_DELAY_MS,
+  QUOTA_THROTTLE_RESET_MS,
+} from '../config.js';
 
 /**
  * Represents a versioned value for optimistic locking
@@ -414,6 +419,114 @@ export function checkVersion(
 }
 
 /**
+ * Global quota throttle that reduces throughput when quota errors are detected.
+ *
+ * When any operation reports a quota error, the throttle imposes a global delay
+ * on all subsequent operations. The delay increases with consecutive errors
+ * (exponential backoff) and resets after a quiet period with no errors.
+ *
+ * This is cooperative — operations voluntarily call waitForClearance() before
+ * making API calls. It is NOT an enforced central queue.
+ */
+class QuotaThrottle {
+  private consecutiveErrors = 0;
+  private lastErrorTime = 0;
+  private baseDelayMs: number;
+  private maxDelayMs: number;
+  private resetMs: number;
+
+  constructor(baseDelayMs: number, maxDelayMs: number, resetMs: number) {
+    this.baseDelayMs = baseDelayMs;
+    this.maxDelayMs = maxDelayMs;
+    this.resetMs = resetMs;
+  }
+
+  /**
+   * Signals that a quota error occurred, increasing global backoff
+   */
+  reportQuotaError(): void {
+    this.consecutiveErrors++;
+    this.lastErrorTime = Date.now();
+    debug('Quota error reported to global throttle', {
+      module: 'concurrency',
+      consecutiveErrors: this.consecutiveErrors,
+      delayMs: this.getCurrentDelayMs(),
+    });
+  }
+
+  /**
+   * Returns the current delay in milliseconds (0 if no throttling active)
+   */
+  getCurrentDelayMs(): number {
+    if (this.consecutiveErrors === 0) return 0;
+
+    // Auto-reset if enough time has passed since last error
+    const timeSinceLastError = Date.now() - this.lastErrorTime;
+    if (timeSinceLastError > this.resetMs) {
+      this.consecutiveErrors = 0;
+      return 0;
+    }
+
+    // Exponential backoff: base * 2^(errors-1), capped at max
+    const delay = Math.min(
+      this.baseDelayMs * Math.pow(2, this.consecutiveErrors - 1),
+      this.maxDelayMs,
+    );
+    return delay;
+  }
+
+  /**
+   * Returns a promise that resolves after the current global backoff delay.
+   * If no throttling is active, resolves immediately.
+   */
+  async waitForClearance(): Promise<void> {
+    const delay = this.getCurrentDelayMs();
+    if (delay > 0) {
+      debug('Waiting for quota clearance', {
+        module: 'concurrency',
+        delayMs: delay,
+        consecutiveErrors: this.consecutiveErrors,
+      });
+      await new Promise<void>(resolve => setTimeout(resolve, delay));
+    }
+  }
+
+  /**
+   * Resets throttle state (for testing)
+   */
+  reset(): void {
+    this.consecutiveErrors = 0;
+    this.lastErrorTime = 0;
+  }
+}
+
+let _quotaThrottle: QuotaThrottle | null = null;
+
+/**
+ * Gets the global QuotaThrottle singleton.
+ */
+function getQuotaThrottle(): QuotaThrottle {
+  if (!_quotaThrottle) {
+    _quotaThrottle = new QuotaThrottle(
+      QUOTA_THROTTLE_BASE_DELAY_MS,
+      QUOTA_THROTTLE_MAX_DELAY_MS,
+      QUOTA_THROTTLE_RESET_MS,
+    );
+  }
+  return _quotaThrottle;
+}
+
+/**
+ * Global quota throttle singleton, exported for direct use and testing
+ */
+export const quotaThrottle = {
+  reportQuotaError: () => getQuotaThrottle().reportQuotaError(),
+  waitForClearance: () => getQuotaThrottle().waitForClearance(),
+  getCurrentDelayMs: () => getQuotaThrottle().getCurrentDelayMs(),
+  reset: () => getQuotaThrottle().reset(),
+};
+
+/**
  * Configuration for quota-aware retries (Google Sheets API)
  * Quota resets every 60 seconds
  */
@@ -462,13 +575,21 @@ export async function withQuotaRetry<T>(
   let lastError: Error | null = null;
   let attempt = 0;
   const maxAttempts = Math.max(standard.maxRetries, quota.maxRetries);
+  const throttle = getQuotaThrottle();
 
   while (attempt <= maxAttempts) {
     try {
+      // Wait for global quota clearance before each attempt
+      await throttle.waitForClearance();
       const result = await fn();
       return { ok: true, value: result };
     } catch (error) {
       lastError = error instanceof Error ? error : new Error(String(error));
+
+      // Notify global throttle on quota errors
+      if (isQuotaError(lastError)) {
+        throttle.reportQuotaError();
+      }
 
       if (attempt < maxAttempts) {
         const config = isQuotaError(lastError) ? quota : standard;

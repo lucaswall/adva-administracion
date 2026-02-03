@@ -20,7 +20,7 @@ import { info, warn, debug } from '../utils/logger.js';
 import { getCachedFolderStructure } from '../services/folder-structure.js';
 import { getValues, type CellValue } from '../services/sheets.js';
 import { parseNumber } from '../utils/numbers.js';
-import { parseArgDate } from '../utils/date.js';
+import { parseArgDate, normalizeSpreadsheetDate } from '../utils/date.js';
 import { BankMovementMatcher, type MatchQuality } from './matcher.js';
 import { getMovimientosToFill } from '../services/movimientos-reader.js';
 import { updateDetalle, type DetalleUpdate } from '../services/movimientos-detalle.js';
@@ -248,7 +248,7 @@ export function parseFacturasEmitidas(data: CellValue[][]): Array<Factura & { ro
 
     facturas.push({
       row: i + 1,
-      fechaEmision: String(row[colIndex.fechaEmision] || ''),
+      fechaEmision: normalizeSpreadsheetDate(row[colIndex.fechaEmision]),
       fileId: String(row[colIndex.fileId] || ''),
       fileName: String(row[colIndex.fileName] || ''),
       tipoComprobante: String(row[colIndex.tipoComprobante] || 'A') as any,
@@ -317,7 +317,7 @@ export function parseFacturasRecibidas(data: CellValue[][]): Array<Factura & { r
 
     facturas.push({
       row: i + 1,
-      fechaEmision: String(row[colIndex.fechaEmision] || ''),
+      fechaEmision: normalizeSpreadsheetDate(row[colIndex.fechaEmision]),
       fileId: String(row[colIndex.fileId] || ''),
       fileName: String(row[colIndex.fileName] || ''),
       tipoComprobante: String(row[colIndex.tipoComprobante] || 'A') as any,
@@ -379,7 +379,7 @@ function parsePagos(data: CellValue[][]): Array<Pago & { row: number }> {
 
     pagos.push({
       row: i + 1,
-      fechaPago: String(row[colIndex.fechaPago] || ''),
+      fechaPago: normalizeSpreadsheetDate(row[colIndex.fechaPago]),
       fileId: String(row[colIndex.fileId] || ''),
       fileName: String(row[colIndex.fileName] || ''),
       banco: String(row[colIndex.banco] || ''),
@@ -438,7 +438,7 @@ function parseRecibos(data: CellValue[][]): Array<Recibo & { row: number }> {
 
     recibos.push({
       row: i + 1,
-      fechaPago: String(row[colIndex.fechaPago] || ''),
+      fechaPago: normalizeSpreadsheetDate(row[colIndex.fechaPago]),
       fileId: String(row[colIndex.fileId] || ''),
       fileName: String(row[colIndex.fileName] || ''),
       tipoRecibo: (String(row[colIndex.tipoRecibo] || 'sueldo') as 'sueldo' | 'liquidacion_final'),
@@ -495,7 +495,7 @@ function parseRetenciones(data: CellValue[][]): Array<Retencion & { row: number 
 
     retenciones.push({
       row: i + 1,
-      fechaEmision: String(row[colIndex.fechaEmision] || ''),
+      fechaEmision: normalizeSpreadsheetDate(row[colIndex.fechaEmision]),
       fileId: String(row[colIndex.fileId] || ''),
       fileName: String(row[colIndex.fileName] || ''),
       nroCertificado: String(row[colIndex.nroCertificado] || ''),

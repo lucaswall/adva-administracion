@@ -16,6 +16,7 @@ import {
   buildReciboMatchUpdate,
 } from '../../matching/cascade-matcher.js';
 import { parseNumber } from '../../utils/numbers.js';
+import { normalizeSpreadsheetDate } from '../../utils/date.js';
 import { debug, info, warn } from '../../utils/logger.js';
 import { getCorrelationId } from '../../utils/correlation.js';
 import { withLock, withRetry } from '../../utils/concurrency.js';
@@ -256,7 +257,7 @@ async function doMatchRecibosWithPagos(
 
       recibos.push({
         row: i + 1,
-        fechaPago: String(row[0] || ''),
+        fechaPago: normalizeSpreadsheetDate(row[0]),
         fileId: String(row[1] || ''),
         fileName: String(row[2] || ''),
         tipoRecibo: (row[3] || 'sueldo') as Recibo['tipoRecibo'],
@@ -285,7 +286,7 @@ async function doMatchRecibosWithPagos(
 
       pagos.push({
         row: i + 1,
-        fechaPago: String(row[0] || ''),
+        fechaPago: normalizeSpreadsheetDate(row[0]),
         fileId: String(row[1] || ''),
         fileName: String(row[2] || ''),
         banco: String(row[3] || ''),
