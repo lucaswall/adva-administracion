@@ -223,7 +223,7 @@ export const MOVIMIENTOS_BANCARIO_SHEET: SheetConfig = {
   title: 'Movimientos',
   headers: [
     'fecha',
-    'origenConcepto',
+    'concepto',
     'debito',
     'credito',
     'saldo',           // Parsed from PDF (for comparison)

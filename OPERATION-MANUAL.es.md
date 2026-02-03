@@ -296,7 +296,7 @@ Cuando se procesa un resumen bancario:
 | Columna | Descripción |
 |---------|-------------|
 | **fecha** | Fecha del movimiento |
-| **origenConcepto** | Descripción del banco |
+| **concepto** | Descripción del movimiento |
 | **debito** | Monto si es salida de dinero |
 | **credito** | Monto si es entrada de dinero |
 | **saldo** | Saldo según el extracto PDF |

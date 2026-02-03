@@ -323,14 +323,14 @@ describe('Parser - Movimiento Validation', () => {
         movimientos: [
           {
             fecha: '2024-01-02',
-            origenConcepto: 'D 500 TRANSFERENCIA',
+            concepto: 'D 500 TRANSFERENCIA',
             debito: null,
             credito: 50000.00,
             saldo: 150000.00
           },
           {
             fecha: '2024-01-05',
-            origenConcepto: 'D 003 PAGO TARJETA',
+            concepto: 'D 003 PAGO TARJETA',
             debito: 25000.00,
             credito: null,
             saldo: 125000.00
@@ -344,7 +344,7 @@ describe('Parser - Movimiento Validation', () => {
       if (result.ok) {
         expect(result.value.data.movimientos).toHaveLength(2);
         expect(result.value.data.movimientos![0].fecha).toBe('2024-01-02');
-        expect(result.value.data.movimientos![0].origenConcepto).toBe('D 500 TRANSFERENCIA');
+        expect(result.value.data.movimientos![0].concepto).toBe('D 500 TRANSFERENCIA');
         expect(result.value.data.movimientos![0].debito).toBeNull();
         expect(result.value.data.movimientos![0].credito).toBe(50000.00);
       }
@@ -384,7 +384,7 @@ describe('Parser - Movimiento Validation', () => {
         movimientos: [
           {
             fecha: 'invalid-date',
-            origenConcepto: 'D 500 TRANSFERENCIA',
+            concepto: 'D 500 TRANSFERENCIA',
             debito: null,
             credito: 50000.00,
             saldo: 150000.00
@@ -414,7 +414,7 @@ describe('Parser - Movimiento Validation', () => {
         movimientos: [
           {
             fecha: '2024-01-02',
-            origenConcepto: 'D 500 TRANSFERENCIA',
+            concepto: 'D 500 TRANSFERENCIA',
             debito: null,
             credito: null,
             saldo: 150000.00
@@ -444,7 +444,7 @@ describe('Parser - Movimiento Validation', () => {
         movimientos: [
           {
             fecha: '2024-01-02',
-            origenConcepto: 'D 500 TRANSFERENCIA',
+            concepto: 'D 500 TRANSFERENCIA',
             debito: null,
             credito: 50000.00,
             saldo: 150000.00
@@ -832,7 +832,7 @@ describe('Parser - Movimiento Validation', () => {
         movimientos: [
           {
             fecha: '2024-01-02',
-            origenConcepto: 'TRANSFERENCIA',
+            concepto: 'TRANSFERENCIA',
             debito: null,
             credito: 50000,
             saldo: -5000, // Negative saldo is invalid
@@ -861,7 +861,7 @@ describe('Parser - Movimiento Validation', () => {
         movimientos: [
           {
             fecha: '2024-01-02',
-            origenConcepto: 'TRANSFERENCIA',
+            concepto: 'TRANSFERENCIA',
             debito: NaN, // NaN is invalid
             credito: null,
             saldo: 90000,
@@ -890,7 +890,7 @@ describe('Parser - Movimiento Validation', () => {
         movimientos: [
           {
             fecha: '2024-01-02',
-            origenConcepto: 'TRANSFERENCIA',
+            concepto: 'TRANSFERENCIA',
             debito: null,
             credito: 1e16, // Extremely large value, likely hallucination
             saldo: 1e16,
@@ -919,7 +919,7 @@ describe('Parser - Movimiento Validation', () => {
         movimientos: [
           {
             fecha: '2024-01-02',
-            origenConcepto: 'TRANSFERENCIA',
+            concepto: 'TRANSFERENCIA',
             debito: null,
             credito: 50000,
             saldo: 150000,

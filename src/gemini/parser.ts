@@ -879,7 +879,7 @@ function isInvalidNumericValue(value: number | null, fieldName: string, context:
 
 function validateMovimientosBancario(movimientos: Array<{
   fecha: string;
-  origenConcepto: string;
+  concepto: string;
   debito: number | null;
   credito: number | null;
   saldo: number;
@@ -902,13 +902,13 @@ function validateMovimientosBancario(movimientos: Array<{
       warn('Movimiento bancario has neither debito nor credito', {
         module: 'gemini-parser',
         phase: 'movimiento-validation',
-        origenConcepto: mov.origenConcepto,
+        concepto: mov.concepto,
       });
       hasIssues = true;
     }
 
     // Validate numeric ranges
-    const context = { origenConcepto: mov.origenConcepto };
+    const context = { concepto: mov.concepto };
     if (isInvalidNumericValue(mov.debito, 'debito', context)) hasIssues = true;
     if (isInvalidNumericValue(mov.credito, 'credito', context)) hasIssues = true;
     if (isInvalidNumericValue(mov.saldo, 'saldo', context)) hasIssues = true;

@@ -433,15 +433,15 @@ Extract ALL individual transactions from the movements table.
 
 For each transaction:
 - fecha: Transaction date (YYYY-MM-DD)
-- origenConcepto: Full description combining origin and concept (e.g., "D 500 TRANSFERENCIA RECIBIDA")
+- concepto: Transaction description/concept text only, excluding bank channel codes (e.g., "D", "D 500"). Extract only the meaningful description.
 - debito: Debit amount or null (if this is a credit transaction)
 - credito: Credit amount or null (if this is a debit transaction)
 - saldo: Running balance after this transaction
 
 Include in response:
 "movimientos": [
-  {"fecha": "2024-01-02", "origenConcepto": "D 500 TRANSFERENCIA RECIBIDA", "debito": null, "credito": 50000.00, "saldo": 200000.00},
-  {"fecha": "2024-01-05", "origenConcepto": "D 003 PAGO TARJETA VISA", "debito": 15000.00, "credito": null, "saldo": 185000.00}
+  {"fecha": "2024-01-02", "concepto": "TRANSFERENCIA RECIBIDA", "debito": null, "credito": 50000.00, "saldo": 200000.00},
+  {"fecha": "2024-01-05", "concepto": "PAGO TARJETA VISA", "debito": 15000.00, "credito": null, "saldo": 185000.00}
 ]
 
 If statement shows "SIN MOVIMIENTOS" or no transactions: return "movimientos": []
@@ -457,7 +457,7 @@ Return ONLY valid JSON:
   "moneda": "ARS",
   "cantidadMovimientos": 47,
   "movimientos": [
-    {"fecha": "2024-01-02", "origenConcepto": "D 500 TRANSFERENCIA", "debito": null, "credito": 50000.00, "saldo": 200000.00}
+    {"fecha": "2024-01-02", "concepto": "TRANSFERENCIA", "debito": null, "credito": 50000.00, "saldo": 200000.00}
   ]
 }`;
 }

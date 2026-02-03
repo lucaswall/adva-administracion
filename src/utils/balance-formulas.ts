@@ -20,7 +20,7 @@ export function generateInitialBalanceRow(
 ): [null, string, null, null, null, number] {
   return [
     null,              // fecha (empty for initial balance)
-    'SALDO INICIAL',   // origenConcepto
+    'SALDO INICIAL',   // concepto
     null,              // debito (empty)
     null,              // credito (empty)
     null,              // saldo (empty)
@@ -61,7 +61,7 @@ export function generateMovimientoRowWithFormula(
 
   return [
     mov.fecha,         // fecha (string in YYYY-MM-DD format)
-    mov.origenConcepto,
+    mov.concepto,
     mov.debito,
     mov.credito,
     mov.saldo,         // Parsed from PDF (for comparison)
@@ -89,7 +89,7 @@ export function generateFinalBalanceRow(
 
   return [
     null,                    // fecha (empty)
-    'SALDO FINAL',           // origenConcepto
+    'SALDO FINAL',           // concepto
     null,                    // debito (empty)
     null,                    // credito (empty)
     null,                    // saldo (empty)

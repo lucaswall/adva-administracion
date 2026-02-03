@@ -22,7 +22,7 @@ vi.mock('../../utils/logger.js', () => ({
 
 vi.mock('../../constants/spreadsheet-headers.js', () => ({
   MOVIMIENTOS_BANCARIO_SHEET: {
-    headers: ['fecha', 'origenConcepto', 'debito', 'credito', 'saldo', 'saldoCalculado', 'matchedFileId', 'detalle'],
+    headers: ['fecha', 'concepto', 'debito', 'credito', 'saldo', 'saldoCalculado', 'matchedFileId', 'detalle'],
   },
   MOVIMIENTOS_TARJETA_SHEET: {
     headers: ['fecha', 'descripcion', 'nroCupon', 'pesos', 'dolares'],
@@ -36,7 +36,7 @@ import { getOrCreateMonthSheet, formatEmptyMonthSheet, appendRowsWithLinks } fro
 
 const createTestMovimientoBancario = (overrides: Partial<MovimientoBancario> = {}): MovimientoBancario => ({
   fecha: '2025-01-15',
-  origenConcepto: 'Test transaction',
+  concepto: 'Test transaction',
   debito: 1000,
   credito: null,
   saldo: 5000,
@@ -73,9 +73,9 @@ describe('storeMovimientosBancario', () => {
 
   it('should store all movimientos in the resumen month (from fechaHasta), not by individual fecha', async () => {
     const movimientos: MovimientoBancario[] = [
-      createTestMovimientoBancario({ fecha: '2024-12-30', origenConcepto: 'Dec transaction', saldo: 1000 }),
-      createTestMovimientoBancario({ fecha: '2025-01-05', origenConcepto: 'Early Jan transaction', saldo: 2000 }),
-      createTestMovimientoBancario({ fecha: '2025-01-15', origenConcepto: 'Mid-Jan transaction', saldo: 3000 }),
+      createTestMovimientoBancario({ fecha: '2024-12-30', concepto: 'Dec transaction', saldo: 1000 }),
+      createTestMovimientoBancario({ fecha: '2025-01-05', concepto: 'Early Jan transaction', saldo: 2000 }),
+      createTestMovimientoBancario({ fecha: '2025-01-15', concepto: 'Mid-Jan transaction', saldo: 3000 }),
     ];
 
     vi.mocked(getOrCreateMonthSheet).mockResolvedValue({ ok: true, value: 123 });
@@ -122,9 +122,9 @@ describe('storeMovimientosBancario', () => {
 
   it('should sort movimientos by date within each month', async () => {
     const movimientos: MovimientoBancario[] = [
-      createTestMovimientoBancario({ fecha: '2025-01-20', origenConcepto: 'Second' }),
-      createTestMovimientoBancario({ fecha: '2025-01-10', origenConcepto: 'First' }),
-      createTestMovimientoBancario({ fecha: '2025-01-15', origenConcepto: 'Middle' }),
+      createTestMovimientoBancario({ fecha: '2025-01-20', concepto: 'Second' }),
+      createTestMovimientoBancario({ fecha: '2025-01-10', concepto: 'First' }),
+      createTestMovimientoBancario({ fecha: '2025-01-15', concepto: 'Middle' }),
     ];
 
     vi.mocked(getOrCreateMonthSheet).mockResolvedValue({ ok: true, value: 123 });
@@ -372,7 +372,7 @@ describe('storeMovimientosBancario', () => {
 
   it('should store rows with 8 columns (includes empty matchedFileId and detalle)', async () => {
     const movimientos: MovimientoBancario[] = [
-      createTestMovimientoBancario({ fecha: '2025-01-15', origenConcepto: 'Test', saldo: 9000 }),
+      createTestMovimientoBancario({ fecha: '2025-01-15', concepto: 'Test', saldo: 9000 }),
     ];
 
     vi.mocked(getOrCreateMonthSheet).mockResolvedValue({ ok: true, value: 123 });

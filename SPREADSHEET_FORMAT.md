@@ -251,7 +251,7 @@ Each bank/card/broker spreadsheet has per-month sheets named `YYYY-MM` containin
 | Column | Field | Type | Description |
 |--------|-------|------|-------------|
 | A | fecha | date | Transaction date (serial format) |
-| B | origenConcepto | string | Transaction description/concept |
+| B | concepto | string | Transaction description/concept |
 | C | debito | currency | Debit amount (money OUT) |
 | D | credito | currency | Credit amount (money IN) |
 | E | saldo | currency | Balance from PDF (parsed) |

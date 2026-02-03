@@ -309,7 +309,7 @@ describe('updateDetalle', () => {
     vi.mocked(getValues).mockResolvedValue({
       ok: true,
       value: [
-        ['fecha', 'origenConcepto', 'debito', 'credito', 'saldo', 'saldoCalculado', 'matchedFileId', 'detalle'],
+        ['fecha', 'concepto', 'debito', 'credito', 'saldo', 'saldoCalculado', 'matchedFileId', 'detalle'],
         [45993, 'TRANSFERENCIA', 1000, null, null, null, '', ''],
       ],
     });
@@ -352,7 +352,7 @@ describe('updateDetalle', () => {
     vi.mocked(getValues).mockResolvedValue({
       ok: true,
       value: [
-        ['fecha', 'origenConcepto', 'debito', 'credito', 'saldo', 'saldoCalculado', 'matchedFileId', 'detalle'],
+        ['fecha', 'concepto', 'debito', 'credito', 'saldo', 'saldoCalculado', 'matchedFileId', 'detalle'],
         [45993, 'TRANSFERENCIA', 1000, null, null, null, '', ''],
       ],
     });

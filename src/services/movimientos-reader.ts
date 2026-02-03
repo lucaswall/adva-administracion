@@ -24,12 +24,12 @@ const YYYY_MM_PATTERN = /^\d{4}-\d{2}$/;
  * Checks if a row is a special row (SALDO INICIAL, SALDO FINAL, etc.)
  * These rows should be skipped when processing transactions
  *
- * @param origenConcepto - The origenConcepto field value
+ * @param concepto - The concepto field value
  * @returns True if the row is a special row that should be skipped
  */
-export function isSpecialRow(origenConcepto: string): boolean {
-  if (!origenConcepto) return false;
-  const normalized = origenConcepto.trim().toUpperCase();
+export function isSpecialRow(concepto: string): boolean {
+  if (!concepto) return false;
+  const normalized = concepto.trim().toUpperCase();
   return SKIP_LABELS.some(label => normalized.startsWith(label));
 }
 
@@ -46,14 +46,14 @@ function parseMovimientoRow(
   sheetName: string,
   rowNumber: number
 ): MovimientoRow | null {
-  const origenConcepto = String(row[1] || '');
-  if (isSpecialRow(origenConcepto)) return null;
+  const concepto = String(row[1] || '');
+  if (isSpecialRow(concepto)) return null;
 
   return {
     sheetName,
     rowNumber,
     fecha: normalizeSpreadsheetDate(row[0]),
-    origenConcepto,
+    concepto,
     debito: parseNumber(row[2]),
     credito: parseNumber(row[3]),
     saldo: parseNumber(row[4]),

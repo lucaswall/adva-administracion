@@ -78,7 +78,7 @@ export async function storeMovimientosBancario(
     const initialRow = generateInitialBalanceRow(saldoInicial, targetMonth);
     rows.push([
       initialRow[0],  // null (fecha)
-      initialRow[1],  // 'SALDO INICIAL' (origenConcepto)
+      initialRow[1],  // 'SALDO INICIAL' (concepto)
       initialRow[2],  // null (debito)
       initialRow[3],  // null (credito)
       initialRow[4],  // null (saldo)
@@ -97,7 +97,7 @@ export async function storeMovimientosBancario(
       // Wrap in CellDate/CellNumber/CellFormula types for spreadsheet formatting
       rows.push([
         { type: 'date', value: txRow[0] } as CellDate,
-        txRow[1],  // origenConcepto (string)
+        txRow[1],  // concepto (string)
         txRow[2] !== null ? { type: 'number', value: txRow[2] } as CellNumber : null,  // debito
         txRow[3] !== null ? { type: 'number', value: txRow[3] } as CellNumber : null,  // credito
         txRow[4] !== null ? { type: 'number', value: txRow[4] } as CellNumber : null,  // saldo
@@ -113,7 +113,7 @@ export async function storeMovimientosBancario(
     const finalRow = generateFinalBalanceRow(lastTransactionRowIndex);
     rows.push([
       finalRow[0],  // null (fecha)
-      finalRow[1],  // 'SALDO FINAL' (origenConcepto)
+      finalRow[1],  // 'SALDO FINAL' (concepto)
       finalRow[2],  // null (debito)
       finalRow[3],  // null (credito)
       finalRow[4],  // null (saldo)

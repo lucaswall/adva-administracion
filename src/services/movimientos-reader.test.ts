@@ -159,7 +159,7 @@ describe('readMovimientosForPeriod', () => {
     vi.mocked(getValues).mockResolvedValue({
       ok: true,
       value: [
-        ['fecha', 'origenConcepto', 'debito', 'credito', 'saldo', 'saldoCalculado', 'matchedFileId', 'detalle'],
+        ['fecha', 'concepto', 'debito', 'credito', 'saldo', 'saldoCalculado', 'matchedFileId', 'detalle'],
         ['2025-01-15', 'TRANSFERENCIA TEST SA', 1000, null, 9000, 9000, '', ''],
         ['2025-01-16', 'DEPOSITO', null, 5000, 14000, 14000, 'file123', 'Cobro Factura'],
       ],
@@ -175,7 +175,7 @@ describe('readMovimientosForPeriod', () => {
       expect(mov1.sheetName).toBe('2025-01');
       expect(mov1.rowNumber).toBe(2);  // Row 2 (1-indexed, after header)
       expect(mov1.fecha).toBe('2025-01-15');
-      expect(mov1.origenConcepto).toBe('TRANSFERENCIA TEST SA');
+      expect(mov1.concepto).toBe('TRANSFERENCIA TEST SA');
       expect(mov1.debito).toBe(1000);
       expect(mov1.credito).toBeNull();
       expect(mov1.saldo).toBe(9000);
@@ -194,7 +194,7 @@ describe('readMovimientosForPeriod', () => {
     vi.mocked(getValues).mockResolvedValue({
       ok: true,
       value: [
-        ['fecha', 'origenConcepto', 'debito', 'credito', 'saldo', 'saldoCalculado', 'matchedFileId', 'detalle'],
+        ['fecha', 'concepto', 'debito', 'credito', 'saldo', 'saldoCalculado', 'matchedFileId', 'detalle'],
         [null, 'SALDO INICIAL', null, null, null, 10000, '', ''],
         ['2025-01-15', 'TRANSFERENCIA', 1000, null, 9000, 9000, '', ''],
         [null, 'SALDO FINAL', null, null, null, 9000, '', ''],
@@ -206,7 +206,7 @@ describe('readMovimientosForPeriod', () => {
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.value).toHaveLength(1);
-      expect(result.value[0].origenConcepto).toBe('TRANSFERENCIA');
+      expect(result.value[0].concepto).toBe('TRANSFERENCIA');
     }
   });
 
@@ -214,7 +214,7 @@ describe('readMovimientosForPeriod', () => {
     vi.mocked(getValues).mockResolvedValue({
       ok: true,
       value: [
-        ['fecha', 'origenConcepto', 'debito', 'credito', 'saldo', 'saldoCalculado', 'matchedFileId', 'detalle'],
+        ['fecha', 'concepto', 'debito', 'credito', 'saldo', 'saldoCalculado', 'matchedFileId', 'detalle'],
         [null, 'SALDO INICIAL AJUSTADO', null, null, null, 10000, '', ''],
         ['2025-01-15', 'PAGO', 500, null, 9500, 9500, '', ''],
       ],
@@ -225,7 +225,7 @@ describe('readMovimientosForPeriod', () => {
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.value).toHaveLength(1);
-      expect(result.value[0].origenConcepto).toBe('PAGO');
+      expect(result.value[0].concepto).toBe('PAGO');
     }
   });
 
@@ -233,7 +233,7 @@ describe('readMovimientosForPeriod', () => {
     vi.mocked(getValues).mockResolvedValue({
       ok: true,
       value: [
-        ['fecha', 'origenConcepto', 'debito', 'credito', 'saldo', 'saldoCalculado', 'matchedFileId', 'detalle'],
+        ['fecha', 'concepto', 'debito', 'credito', 'saldo', 'saldoCalculado', 'matchedFileId', 'detalle'],
       ],
     });
 
@@ -249,7 +249,7 @@ describe('readMovimientosForPeriod', () => {
     vi.mocked(getValues).mockResolvedValue({
       ok: true,
       value: [
-        ['fecha', 'origenConcepto', 'debito', 'credito', 'saldo', 'saldoCalculado', 'matchedFileId', 'detalle'],
+        ['fecha', 'concepto', 'debito', 'credito', 'saldo', 'saldoCalculado', 'matchedFileId', 'detalle'],
         ['2025-01-15', 'PAGO'],  // Missing columns
       ],
     });
@@ -284,7 +284,7 @@ describe('readMovimientosForPeriod', () => {
     vi.mocked(getValues).mockResolvedValue({
       ok: true,
       value: [
-        ['fecha', 'origenConcepto', 'debito', 'credito', 'saldo', 'saldoCalculado', 'matchedFileId', 'detalle'],
+        ['fecha', 'concepto', 'debito', 'credito', 'saldo', 'saldoCalculado', 'matchedFileId', 'detalle'],
         [45993, 'TRANSFERENCIA TEST SA', 1000, null, 9000, 9000, '', ''],
         [45671, 'DEPOSITO', null, 5000, 14000, 14000, 'file123', 'Cobro'],
       ],
@@ -306,7 +306,7 @@ describe('readMovimientosForPeriod', () => {
     vi.mocked(getValues).mockResolvedValue({
       ok: true,
       value: [
-        ['fecha', 'origenConcepto', 'debito', 'credito', 'saldo', 'saldoCalculado', 'matchedFileId', 'detalle'],
+        ['fecha', 'concepto', 'debito', 'credito', 'saldo', 'saldoCalculado', 'matchedFileId', 'detalle'],
         ['2025-01-15', 'TRANSFERENCIA', 1000, null, 9000, 9000, '', ''],
       ],
     });
@@ -349,14 +349,14 @@ describe('getMovimientosToFill', () => {
       .mockResolvedValueOnce({
         ok: true,
         value: [
-          ['fecha', 'origenConcepto', 'debito', 'credito', 'saldo', 'saldoCalculado', 'matchedFileId', 'detalle'],
+          ['fecha', 'concepto', 'debito', 'credito', 'saldo', 'saldoCalculado', 'matchedFileId', 'detalle'],
           ['2025-01-15', 'TX1', 1000, null, 9000, 9000, '', ''],
         ],
       })
       .mockResolvedValueOnce({
         ok: true,
         value: [
-          ['fecha', 'origenConcepto', 'debito', 'credito', 'saldo', 'saldoCalculado', 'matchedFileId', 'detalle'],
+          ['fecha', 'concepto', 'debito', 'credito', 'saldo', 'saldoCalculado', 'matchedFileId', 'detalle'],
           ['2025-02-10', 'TX2', null, 2000, 11000, 11000, '', ''],
         ],
       });
@@ -366,8 +366,8 @@ describe('getMovimientosToFill', () => {
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.value).toHaveLength(2);
-      expect(result.value[0].origenConcepto).toBe('TX1');
-      expect(result.value[1].origenConcepto).toBe('TX2');
+      expect(result.value[0].concepto).toBe('TX1');
+      expect(result.value[1].concepto).toBe('TX2');
     }
   });
 
@@ -382,7 +382,7 @@ describe('getMovimientosToFill', () => {
     vi.mocked(getValues).mockResolvedValue({
       ok: true,
       value: [
-        ['fecha', 'origenConcepto', 'debito', 'credito', 'saldo', 'saldoCalculado', 'matchedFileId', 'detalle'],
+        ['fecha', 'concepto', 'debito', 'credito', 'saldo', 'saldoCalculado', 'matchedFileId', 'detalle'],
         ['2025-01-15', 'TX1', 1000, null, 9000, 9000, '', ''],  // No match
         ['2025-01-16', 'TX2', null, 2000, 11000, 11000, 'file123', 'Existing match'],  // Has match
       ],
@@ -426,7 +426,7 @@ describe('getMovimientosToFill', () => {
       .mockResolvedValueOnce({
         ok: true,
         value: [
-          ['fecha', 'origenConcepto', 'debito', 'credito', 'saldo', 'saldoCalculado', 'matchedFileId', 'detalle'],
+          ['fecha', 'concepto', 'debito', 'credito', 'saldo', 'saldoCalculado', 'matchedFileId', 'detalle'],
           ['2025-01-15', 'TX1', 1000, null, 9000, 9000, '', ''],
         ],
       })
@@ -441,7 +441,7 @@ describe('getMovimientosToFill', () => {
     if (result.ok) {
       // Should have movimientos from first sheet
       expect(result.value).toHaveLength(1);
-      expect(result.value[0].origenConcepto).toBe('TX1');
+      expect(result.value[0].concepto).toBe('TX1');
     }
   });
 

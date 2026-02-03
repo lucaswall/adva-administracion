@@ -135,7 +135,7 @@ describe('getResumenBancarioPrompt', () => {
     });
 
     it('should specify all required movimiento fields', () => {
-      expect(prompt).toContain('origenConcepto');
+      expect(prompt).toContain('concepto');
       expect(prompt).toContain('debito');
       expect(prompt).toContain('credito');
     });
