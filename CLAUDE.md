@@ -80,6 +80,7 @@ Skills are specialized workflows in `.claude/skills/`. Descriptions drive automa
 
 | Skill | When to Invoke |
 |-------|----------------|
+| `add-to-backlog` | Add issues to Linear Backlog from free-form input. Use when user says "add to backlog", "create backlog issues", "track this", or describes tasks/improvements/bugs to add. Interprets ideas, investigation findings, or conversation context into structured issues. |
 | `investigate` | Read-only investigation that reports findings without creating plans. Use when user says "investigate", "check why", "look into", "diagnose", or wants to understand a problem before deciding action. Accesses Railway logs, Drive files, Gemini prompts. Offers to chain to plan-fix if issues are found. |
 | `plan-todo` | Convert Linear Backlog issues into TDD implementation plans. Use when user says "plan ADVA-123", "plan all bugs", or wants to work on backlog items. Moves planned issues to Todo state. |
 | `plan-inline` | Create TDD plans from direct feature requests. Use when user provides a task description directly like "add X feature" or "create Y function". Creates Linear issues in Todo state. |
@@ -89,7 +90,7 @@ Skills are specialized workflows in `.claude/skills/`. Descriptions drive automa
 | `code-audit` | Audit codebase for bugs, security issues, memory leaks, and violations. Use when user says "audit", "find bugs", "check security", or "review codebase". Creates Linear issues in Backlog. Analysis only. |
 | `tools-improve` | **REQUIRED before modifying skills/agents.** Contains best practices for `.claude/skills/` and `.claude/agents/`. ALWAYS load this skill FIRST when: creating, editing, or reviewing any SKILL.md or agent .md file. |
 
-**Skill workflow:** `investigate` (optional) → `code-audit` → `plan-todo` → `plan-implement` → `plan-review-implementation` (repeat until COMPLETE)
+**Skill workflow:** `add-to-backlog` or `code-audit` → `plan-todo` → `plan-implement` → `plan-review-implementation` (repeat until COMPLETE)
 
 ## MCP SERVERS
 
