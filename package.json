@@ -29,13 +29,13 @@
   "license": "MIT",
   "dependencies": {
     "fastify": "^5.2.1",
-    "googleapis": "^170.1.0",
+    "googleapis": "^171.1.0",
     "node-cron": "^4.2.1",
     "p-queue": "^9.1.0",
     "pino": "^10.2.0"
   },
   "devDependencies": {
-    "@google/clasp": "^2.4.2",
+    "@google/clasp": "^3.2.0",
     "@types/google-apps-script": "^2.0.8",
     "@types/node": "^25.0.9",
     "@types/node-cron": "^3.0.11",
