@@ -56,7 +56,7 @@ interface VersionableRow {
   /** Transaction date */
   fecha: string;
   /** Origin/concept description */
-  origenConcepto: string;
+  concepto: string;
   /** Debit amount */
   debito: number | null;
   /** Credit amount */
@@ -74,7 +74,7 @@ interface VersionableRow {
  *
  * The version is based on fields that could change during concurrent updates:
  * - matchedFileId and detalle (the fields we're updating)
- * - fecha, origenConcepto, debito, credito (immutable but included for row identity)
+ * - fecha, concepto, debito, credito (immutable but included for row identity)
  *
  * @param row - Row data to compute version for
  * @returns Hex string hash of the row data
@@ -82,7 +82,7 @@ interface VersionableRow {
 export function computeRowVersion(row: VersionableRow): string {
   const data = [
     row.fecha,
-    row.origenConcepto,
+    row.concepto,
     row.debito?.toString() ?? '',
     row.credito?.toString() ?? '',
     row.matchedFileId,
@@ -198,7 +198,7 @@ function movimientoRowToBankMovement(mov: MovimientoRow): BankMovement {
     row: mov.rowNumber,
     fecha: mov.fecha,
     fechaValor: mov.fecha,
-    concepto: mov.origenConcepto,
+    concepto: mov.concepto,
     codigo: '',
     oficina: '',
     areaAdva: '',
@@ -792,11 +792,17 @@ async function matchBankMovimientos(
     }
 
     // Handle match result with replacement logic
-    if (matchResult.matchType !== 'no_match' && matchResult.matchedFileId) {
+    const isFileIdMatch = matchResult.matchType !== 'no_match' && matchResult.matchedFileId;
+    const isAutoLabelMatch = matchResult.matchType === 'bank_fee' || matchResult.matchType === 'credit_card_payment';
+    if (isFileIdMatch || isAutoLabelMatch) {
       // Found a new candidate match
       let shouldUpdate = false;
 
-      if (options.force || !mov.matchedFileId) {
+      if (isAutoLabelMatch) {
+        // Auto-label matches (bank fees, credit card payments) have no fileId to compare
+        // Update if: force mode, no existing detalle, or no existing matchedFileId
+        shouldUpdate = options.force || !mov.detalle;
+      } else if (options.force || !mov.matchedFileId) {
         // Force mode OR no existing match - always update
         shouldUpdate = true;
       } else {
@@ -804,7 +810,7 @@ async function matchBankMovimientos(
         const existingQuality = buildMatchQualityFromFileId(
           mov.matchedFileId,
           mov.fecha,
-          mov.origenConcepto,
+          mov.concepto,
           ingresosData,
           egresosData
         );
@@ -820,7 +826,7 @@ async function matchBankMovimientos(
           // Build candidate quality
           // Note: matchResult doesn't provide all fields we need, so we need to look up the document
           const candidateDoc = findDocumentByFileId(
-            matchResult.matchedFileId,
+            matchResult.matchedFileId!,
             ingresosData.facturasEmitidas,
             ingresosData.pagosRecibidos,
             egresosData.facturasRecibidas,
@@ -858,12 +864,12 @@ async function matchBankMovimientos(
               // Use the same value for both (true) so they compare equally on this dimension
               // This ensures the comparison focuses on confidence, CUIT match, and date proximity
               const candidateQuality = buildMatchQuality(
-                matchResult.matchedFileId,
+                matchResult.matchedFileId!,
                 matchResult.confidence,  // Use confidence from matcher result (ADV-34)
                 fechaDocumento,
                 mov.fecha,
                 cuitDocumento,
-                mov.origenConcepto,
+                mov.concepto,
                 hasLinkedPago,
                 true  // Consistent with existing for fair comparison
               );
@@ -887,7 +893,7 @@ async function matchBankMovimientos(
         updates.push({
           sheetName: mov.sheetName,
           rowNumber: mov.rowNumber,
-          matchedFileId: matchResult.matchedFileId,
+          matchedFileId: matchResult.matchedFileId ?? '',
           detalle: matchResult.description,
           expectedVersion,
         });

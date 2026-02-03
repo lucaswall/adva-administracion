@@ -21,7 +21,7 @@ describe('Balance Formula Utilities', () => {
 
       expect(result).toEqual([
         null,              // fecha (empty for initial balance)
-        'SALDO INICIAL',   // origenConcepto
+        'SALDO INICIAL',   // concepto
         null,              // debito (empty)
         null,              // credito (empty)
         null,              // saldo (empty)
@@ -45,7 +45,7 @@ describe('Balance Formula Utilities', () => {
   describe('generateMovimientoRowWithFormula', () => {
     const mockMovimiento: MovimientoBancario = {
       fecha: '2025-01-15',
-      origenConcepto: 'Transferencia recibida',
+      concepto: 'Transferencia recibida',
       debito: null,
       credito: 5000,
       saldo: 15000,
@@ -81,7 +81,7 @@ describe('Balance Formula Utilities', () => {
     it('should handle debit transaction', () => {
       const debitMovimiento: MovimientoBancario = {
         fecha: '2025-01-16',
-        origenConcepto: 'Pago de servicio',
+        concepto: 'Pago de servicio',
         debito: 1000,
         credito: null,
         saldo: 14000,
@@ -98,7 +98,7 @@ describe('Balance Formula Utilities', () => {
     it('should handle transaction with both debit and credit', () => {
       const bothMovimiento: MovimientoBancario = {
         fecha: '2025-01-17',
-        origenConcepto: 'Ajuste bancario',
+        concepto: 'Ajuste bancario',
         debito: 100,
         credito: 50,
         saldo: 13950,
@@ -124,7 +124,7 @@ describe('Balance Formula Utilities', () => {
 
       expect(result).toEqual([
         null,            // fecha (empty)
-        'SALDO FINAL',   // origenConcepto
+        'SALDO FINAL',   // concepto
         null,            // debito (empty)
         null,            // credito (empty)
         null,            // saldo (empty)
@@ -190,8 +190,8 @@ describe('Balance Formula Utilities', () => {
   describe('calculateBalanceDiff', () => {
     it('should return 0 when computed balance matches saldoFinal exactly', () => {
       const movimientos: MovimientoBancario[] = [
-        { fecha: '2025-01-15', origenConcepto: 'Credit', debito: null, credito: 5000, saldo: 15000 },
-        { fecha: '2025-01-20', origenConcepto: 'Debit', debito: 2000, credito: null, saldo: 13000 },
+        { fecha: '2025-01-15', concepto: 'Credit', debito: null, credito: 5000, saldo: 15000 },
+        { fecha: '2025-01-20', concepto: 'Debit', debito: 2000, credito: null, saldo: 13000 },
       ];
 
       // saldoInicial: 10000 + 5000 - 2000 = 13000
@@ -202,7 +202,7 @@ describe('Balance Formula Utilities', () => {
 
     it('should return positive diff when computed balance is higher than saldoFinal', () => {
       const movimientos: MovimientoBancario[] = [
-        { fecha: '2025-01-15', origenConcepto: 'Credit', debito: null, credito: 5000, saldo: 15000 },
+        { fecha: '2025-01-15', concepto: 'Credit', debito: null, credito: 5000, saldo: 15000 },
       ];
 
       // saldoInicial: 10000 + 5000 = 15000, but saldoFinal reported as 14000
@@ -213,7 +213,7 @@ describe('Balance Formula Utilities', () => {
 
     it('should return negative diff when computed balance is lower than saldoFinal', () => {
       const movimientos: MovimientoBancario[] = [
-        { fecha: '2025-01-15', origenConcepto: 'Debit', debito: 3000, credito: null, saldo: 7000 },
+        { fecha: '2025-01-15', concepto: 'Debit', debito: 3000, credito: null, saldo: 7000 },
       ];
 
       // saldoInicial: 10000 - 3000 = 7000, but saldoFinal reported as 8000
@@ -224,9 +224,9 @@ describe('Balance Formula Utilities', () => {
 
     it('should handle small rounding differences', () => {
       const movimientos: MovimientoBancario[] = [
-        { fecha: '2025-01-15', origenConcepto: 'Credit', debito: null, credito: 100.33, saldo: 10100.33 },
-        { fecha: '2025-01-16', origenConcepto: 'Credit', debito: null, credito: 100.33, saldo: 10200.66 },
-        { fecha: '2025-01-17', origenConcepto: 'Credit', debito: null, credito: 100.34, saldo: 10301 },
+        { fecha: '2025-01-15', concepto: 'Credit', debito: null, credito: 100.33, saldo: 10100.33 },
+        { fecha: '2025-01-16', concepto: 'Credit', debito: null, credito: 100.33, saldo: 10200.66 },
+        { fecha: '2025-01-17', concepto: 'Credit', debito: null, credito: 100.34, saldo: 10301 },
       ];
 
       // 10000 + 100.33 + 100.33 + 100.34 = 10301.00
@@ -249,7 +249,7 @@ describe('Balance Formula Utilities', () => {
 
     it('should handle transactions with both debit and credit', () => {
       const movimientos: MovimientoBancario[] = [
-        { fecha: '2025-01-15', origenConcepto: 'Adjustment', debito: 100, credito: 200, saldo: 10100 },
+        { fecha: '2025-01-15', concepto: 'Adjustment', debito: 100, credito: 200, saldo: 10100 },
       ];
 
       // saldoInicial: 10000 + 200 - 100 = 10100
@@ -260,8 +260,8 @@ describe('Balance Formula Utilities', () => {
 
     it('should handle null debito/credito values', () => {
       const movimientos: MovimientoBancario[] = [
-        { fecha: '2025-01-15', origenConcepto: 'Only credit', debito: null, credito: 500, saldo: 10500 },
-        { fecha: '2025-01-16', origenConcepto: 'Only debit', debito: 200, credito: null, saldo: 10300 },
+        { fecha: '2025-01-15', concepto: 'Only credit', debito: null, credito: 500, saldo: 10500 },
+        { fecha: '2025-01-16', concepto: 'Only debit', debito: 200, credito: null, saldo: 10300 },
       ];
 
       // saldoInicial: 10000 + 500 - 200 = 10300

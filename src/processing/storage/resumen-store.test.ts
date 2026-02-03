@@ -53,7 +53,7 @@ const createTestResumen = (overrides: Partial<ResumenBancario> = {}): ResumenBan
   confidence: 0.95,
   needsReview: false,
   movimientos: [
-    { fecha: '2024-01-15', origenConcepto: 'Credit', debito: null, credito: 5000, saldo: 15000 },
+    { fecha: '2024-01-15', concepto: 'Credit', debito: null, credito: 5000, saldo: 15000 },
   ],
   ...overrides,
 });
@@ -327,7 +327,7 @@ describe('storeResumenBancario (bank accounts)', () => {
         saldoInicial: 10000,
         saldoFinal: 15000,
         movimientos: [
-          { fecha: '2024-01-15', origenConcepto: 'Credit', debito: null, credito: 5000, saldo: 15000 },
+          { fecha: '2024-01-15', concepto: 'Credit', debito: null, credito: 5000, saldo: 15000 },
         ],
       });
 
@@ -393,7 +393,7 @@ describe('storeResumenBancario (bank accounts)', () => {
         saldoInicial: 10000,
         saldoFinal: 15000,
         movimientos: [
-          { fecha: '2024-01-15', origenConcepto: 'Credit', debito: null, credito: 5000, saldo: 15000 },
+          { fecha: '2024-01-15', concepto: 'Credit', debito: null, credito: 5000, saldo: 15000 },
         ],
       });
 
@@ -416,8 +416,8 @@ describe('storeResumenBancario (bank accounts)', () => {
         saldoInicial: 10000,
         saldoFinal: 10500,
         movimientos: [
-          { fecha: '2024-01-15', origenConcepto: 'Credit', debito: null, credito: 3000, saldo: 13000 },
-          { fecha: '2024-01-20', origenConcepto: 'Debit', debito: 2000, credito: null, saldo: 11000 },
+          { fecha: '2024-01-15', concepto: 'Credit', debito: null, credito: 3000, saldo: 13000 },
+          { fecha: '2024-01-20', concepto: 'Debit', debito: 2000, credito: null, saldo: 11000 },
         ],
       });
 

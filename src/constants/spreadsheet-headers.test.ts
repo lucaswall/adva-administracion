@@ -232,7 +232,7 @@ describe('Movimientos Bancario Sheet', () => {
     it('should have correct header order', () => {
       expect(MOVIMIENTOS_BANCARIO_SHEET.headers).toEqual([
         'fecha',
-        'origenConcepto',
+        'concepto',
         'debito',
         'credito',
         'saldo',

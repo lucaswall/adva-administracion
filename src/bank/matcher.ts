@@ -58,6 +58,26 @@ const BANK_JARGON = new Set([
 ]);
 
 /**
+ * Strips bank origin prefix from concepto text.
+ * Some bank statements prepend "D NNN" (where NNN is a channel code) to the description.
+ * This function removes that prefix for consistent pattern matching.
+ *
+ * Examples:
+ * - "D 500 TRANSFERENCIA RECIBIDA" → "TRANSFERENCIA RECIBIDA"
+ * - "D COMISION MANTENIMIENTO" → "COMISION MANTENIMIENTO"
+ * - "TRANSFERENCIA RECIBIDA" → "TRANSFERENCIA RECIBIDA" (no change)
+ *
+ * @param concepto - Bank transaction concept text, possibly with origin prefix
+ * @returns Concept text with origin prefix removed
+ */
+export function stripBankOriginPrefix(concepto: string): string {
+  if (!concepto) {
+    return '';
+  }
+  return concepto.replace(/^D\s+\d{2,3}\s+/, '').trim();
+}
+
+/**
  * Checks if a bank concept represents a direct debit transaction
  *
  * @param concepto - Bank transaction concept text
@@ -83,8 +103,14 @@ export function extractKeywordTokens(concepto: string): string[] {
     return [];
   }
 
+  // Strip bank origin prefix before extracting tokens
+  const cleaned = stripBankOriginPrefix(concepto);
+  if (!cleaned) {
+    return [];
+  }
+
   // First split on whitespace/punctuation
-  const parts = concepto
+  const parts = cleaned
     .toUpperCase()
     .split(/[\s\-\.]+/);
 
@@ -188,7 +214,8 @@ export function isCreditCardPayment(concepto: string): boolean {
   if (!concepto) {
     return false;
   }
-  return CREDIT_CARD_PAYMENT_PATTERNS.some(pattern => pattern.test(concepto));
+  const cleaned = stripBankOriginPrefix(concepto);
+  return CREDIT_CARD_PAYMENT_PATTERNS.some(pattern => pattern.test(cleaned));
 }
 
 /**
@@ -224,7 +251,8 @@ export function isBankFee(concepto: string): boolean {
   if (!concepto) {
     return false;
   }
-  return BANK_FEE_PATTERNS.some(pattern => pattern.test(concepto));
+  const cleaned = stripBankOriginPrefix(concepto);
+  return BANK_FEE_PATTERNS.some(pattern => pattern.test(cleaned));
 }
 
 /** Re-export for convenience */
@@ -772,6 +800,16 @@ export class BankMovementMatcher {
     pagosRecibidos: Array<Pago & { row: number }>,
     retenciones: Array<Retencion & { row: number }>
   ): BankMovementMatchResult {
+    // Priority 0: Check for bank fees FIRST (can be debito or credito)
+    if (isBankFee(movement.concepto)) {
+      return this.createBankFeeMatch(movement);
+    }
+
+    // Priority 0.5: Check for credit card payments
+    if (isCreditCardPayment(movement.concepto)) {
+      return this.createCreditCardPaymentMatch(movement);
+    }
+
     const amount = movement.credito;
     if (amount === null || amount === 0) {
       return this.noMatchCredit(movement, ['No credit amount']);

@@ -47,12 +47,12 @@ function escapeSheetName(sheetName: string): string {
  * Computes version hash from raw row data (columns A-H)
  * Must match the algorithm in match-movimientos.ts computeRowVersion
  *
- * @param row - Raw cell values from spreadsheet [fecha, origenConcepto, debito, credito, saldo, saldoCalculado, matchedFileId, detalle]
+ * @param row - Raw cell values from spreadsheet [fecha, concepto, debito, credito, saldo, saldoCalculado, matchedFileId, detalle]
  * @returns Hex string hash (16 chars)
  */
 function computeVersionFromRow(row: CellValue[]): string {
   const fecha = normalizeSpreadsheetDate(row[0]);
-  const origenConcepto = String(row[1] || '');
+  const concepto = String(row[1] || '');
   const debito = parseNumber(row[2]);
   const credito = parseNumber(row[3]);
   const matchedFileId = String(row[6] || '');
@@ -60,7 +60,7 @@ function computeVersionFromRow(row: CellValue[]): string {
 
   const data = [
     fecha,
-    origenConcepto,
+    concepto,
     debito?.toString() ?? '',
     credito?.toString() ?? '',
     matchedFileId,

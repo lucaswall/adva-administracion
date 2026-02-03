@@ -680,7 +680,7 @@ describe('matchAllMovimientos', () => {
           sheetName: '2025-01',
           rowNumber: 2,
           fecha: '2025-01-15',
-          origenConcepto: 'PAGO TEST',
+          concepto: 'PAGO TEST',
           debito: 1000,
           credito: null,
           saldo: 9000,
@@ -736,7 +736,7 @@ describe('matchAllMovimientos', () => {
           sheetName: '2025-01',
           rowNumber: 2,
           fecha: '2025-01-15',
-          origenConcepto: 'TRANSFERENCIA RECIBIDA',
+          concepto: 'TRANSFERENCIA RECIBIDA',
           debito: null,
           credito: 5000,
           saldo: 15000,
@@ -792,7 +792,7 @@ describe('matchAllMovimientos', () => {
           sheetName: '2025-01',
           rowNumber: 2,
           fecha: '2025-01-15',
-          origenConcepto: 'UNKNOWN TX',
+          concepto: 'UNKNOWN TX',
           debito: 1000,
           credito: null,
           saldo: 9000,
@@ -848,7 +848,7 @@ describe('matchAllMovimientos', () => {
           sheetName: '2025-01',
           rowNumber: 2,
           fecha: '2025-01-15',
-          origenConcepto: 'PAGO TEST',
+          concepto: 'PAGO TEST',
           debito: 1000,
           credito: null,
           saldo: 9000,
@@ -948,9 +948,9 @@ describe('matchAllMovimientos', () => {
     vi.mocked(getMovimientosToFill).mockResolvedValue({
       ok: true,
       value: [
-        { sheetName: '2025-01', rowNumber: 2, fecha: '2025-01-15', origenConcepto: 'TX1', debito: 1000, credito: null, saldo: 9000, saldoCalculado: 9000, matchedFileId: '', detalle: '' },
-        { sheetName: '2025-01', rowNumber: 3, fecha: '2025-01-16', origenConcepto: 'TX2', debito: null, credito: 2000, saldo: 11000, saldoCalculado: 11000, matchedFileId: '', detalle: '' },
-        { sheetName: '2025-01', rowNumber: 4, fecha: '2025-01-17', origenConcepto: 'TX3', debito: 500, credito: null, saldo: 10500, saldoCalculado: 10500, matchedFileId: '', detalle: '' },
+        { sheetName: '2025-01', rowNumber: 2, fecha: '2025-01-15', concepto: 'TX1', debito: 1000, credito: null, saldo: 9000, saldoCalculado: 9000, matchedFileId: '', detalle: '' },
+        { sheetName: '2025-01', rowNumber: 3, fecha: '2025-01-16', concepto: 'TX2', debito: null, credito: 2000, saldo: 11000, saldoCalculado: 11000, matchedFileId: '', detalle: '' },
+        { sheetName: '2025-01', rowNumber: 4, fecha: '2025-01-17', concepto: 'TX3', debito: 500, credito: null, saldo: 10500, saldoCalculado: 10500, matchedFileId: '', detalle: '' },
       ],
     });
 
@@ -1025,7 +1025,7 @@ describe('matchAllMovimientos', () => {
           sheetName: '2025-01',
           rowNumber: 2,
           fecha: '2025-01-15',
-          origenConcepto: 'PAGO A PROVEEDOR SA',
+          concepto: 'PAGO A PROVEEDOR SA',
           debito: 1000,
           credito: null,
           saldo: 9000,
@@ -1098,7 +1098,7 @@ describe('matchAllMovimientos', () => {
           sheetName: '2025-01',
           rowNumber: 2,
           fecha: '2025-01-15',
-          origenConcepto: 'PAGO 20123456786',  // CUIT match
+          concepto: 'PAGO 20123456786',  // CUIT match
           debito: 1000,
           credito: null,
           saldo: 9000,
@@ -1166,7 +1166,7 @@ describe('matchAllMovimientos', () => {
           sheetName: '2025-01',
           rowNumber: 2,
           fecha: '2025-01-15',
-          origenConcepto: 'PAGO 20123456786',
+          concepto: 'PAGO 20123456786',
           debito: 1000,
           credito: null,
           saldo: 9000,
@@ -1237,7 +1237,7 @@ describe('matchAllMovimientos', () => {
           sheetName: '2025-01',
           rowNumber: 2,
           fecha: '2025-01-15',
-          origenConcepto: 'PAGO 20123456786',
+          concepto: 'PAGO 20123456786',
           debito: 1000,
           credito: null,
           saldo: 9000,
@@ -1279,13 +1279,379 @@ describe('matchAllMovimientos', () => {
   });
 });
 
+describe('bank fee and credit card payment detalle writing', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.useFakeTimers();
+    mockMatchMovement = vi.fn().mockReturnValue({
+      matchType: 'no_match',
+      description: '',
+      matchedFileId: '',
+      confidence: 'LOW',
+    });
+    mockMatchCreditMovement = vi.fn().mockReturnValue({
+      matchType: 'no_match',
+      description: '',
+      matchedFileId: '',
+      confidence: 'LOW',
+    });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('should write detalle for bank_fee match with empty matchedFileId', async () => {
+    const mockFolderStructure = {
+      controlIngresosId: 'ingresos-id',
+      controlEgresosId: 'egresos-id',
+      bankSpreadsheets: new Map(),
+      movimientosSpreadsheets: new Map([['BBVA', 'bbva-id']]),
+    };
+
+    vi.mocked(withLock).mockImplementation(async (_id, fn) => {
+      const result = await fn();
+      return { ok: true, value: result };
+    });
+
+    vi.mocked(getCachedFolderStructure).mockReturnValue(mockFolderStructure as any);
+
+    vi.mocked(getValues).mockResolvedValue({
+      ok: true,
+      value: [['header']],
+    });
+
+    vi.mocked(getMovimientosToFill).mockResolvedValue({
+      ok: true,
+      value: [
+        {
+          sheetName: '2025-01',
+          rowNumber: 2,
+          fecha: '2025-01-15',
+          concepto: 'COMISION MAN CUENTA',
+          debito: 500,
+          credito: null,
+          saldo: 9500,
+          saldoCalculado: 9500,
+          matchedFileId: '',
+          detalle: '',
+        },
+      ],
+    });
+
+    mockMatchMovement.mockReturnValue({
+      matchType: 'bank_fee',
+      description: 'Gastos bancarios',
+      matchedFileId: '',
+      confidence: 'HIGH',
+    });
+
+    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: 1 });
+
+    const resultPromise = matchAllMovimientos();
+    await vi.runAllTimersAsync();
+    const result = await resultPromise;
+
+    expect(result.ok).toBe(true);
+    expect(updateDetalle).toHaveBeenCalledWith('bbva-id', expect.arrayContaining([
+      expect.objectContaining({
+        detalle: 'Gastos bancarios',
+        matchedFileId: '',
+      }),
+    ]));
+  });
+
+  it('should write detalle for credit_card_payment match with empty matchedFileId', async () => {
+    const mockFolderStructure = {
+      controlIngresosId: 'ingresos-id',
+      controlEgresosId: 'egresos-id',
+      bankSpreadsheets: new Map(),
+      movimientosSpreadsheets: new Map([['BBVA', 'bbva-id']]),
+    };
+
+    vi.mocked(withLock).mockImplementation(async (_id, fn) => {
+      const result = await fn();
+      return { ok: true, value: result };
+    });
+
+    vi.mocked(getCachedFolderStructure).mockReturnValue(mockFolderStructure as any);
+
+    vi.mocked(getValues).mockResolvedValue({
+      ok: true,
+      value: [['header']],
+    });
+
+    vi.mocked(getMovimientosToFill).mockResolvedValue({
+      ok: true,
+      value: [
+        {
+          sheetName: '2025-01',
+          rowNumber: 3,
+          fecha: '2025-01-20',
+          concepto: 'PAGO TARJETA 4563',
+          debito: 15000,
+          credito: null,
+          saldo: 5000,
+          saldoCalculado: 5000,
+          matchedFileId: '',
+          detalle: '',
+        },
+      ],
+    });
+
+    mockMatchMovement.mockReturnValue({
+      matchType: 'credit_card_payment',
+      description: 'Pago de tarjeta de credito',
+      matchedFileId: '',
+      confidence: 'HIGH',
+    });
+
+    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: 1 });
+
+    const resultPromise = matchAllMovimientos();
+    await vi.runAllTimersAsync();
+    const result = await resultPromise;
+
+    expect(result.ok).toBe(true);
+    expect(updateDetalle).toHaveBeenCalledWith('bbva-id', expect.arrayContaining([
+      expect.objectContaining({
+        detalle: 'Pago de tarjeta de credito',
+        matchedFileId: '',
+      }),
+    ]));
+  });
+
+  it('should still produce no update for no_match results', async () => {
+    const mockFolderStructure = {
+      controlIngresosId: 'ingresos-id',
+      controlEgresosId: 'egresos-id',
+      bankSpreadsheets: new Map(),
+      movimientosSpreadsheets: new Map([['BBVA', 'bbva-id']]),
+    };
+
+    vi.mocked(withLock).mockImplementation(async (_id, fn) => {
+      const result = await fn();
+      return { ok: true, value: result };
+    });
+
+    vi.mocked(getCachedFolderStructure).mockReturnValue(mockFolderStructure as any);
+
+    vi.mocked(getValues).mockResolvedValue({
+      ok: true,
+      value: [['header']],
+    });
+
+    vi.mocked(getMovimientosToFill).mockResolvedValue({
+      ok: true,
+      value: [
+        {
+          sheetName: '2025-01',
+          rowNumber: 2,
+          fecha: '2025-01-15',
+          concepto: 'UNKNOWN TX',
+          debito: 1000,
+          credito: null,
+          saldo: 9000,
+          saldoCalculado: 9000,
+          matchedFileId: '',
+          detalle: '',
+        },
+      ],
+    });
+
+    // mockMatchMovement defaults to no_match
+
+    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: 0 });
+
+    const resultPromise = matchAllMovimientos();
+    await vi.runAllTimersAsync();
+    const result = await resultPromise;
+
+    expect(result.ok).toBe(true);
+    expect(updateDetalle).toHaveBeenCalledWith('bbva-id', []);
+  });
+
+  it('should update bank_fee match in force mode', async () => {
+    const mockFolderStructure = {
+      controlIngresosId: 'ingresos-id',
+      controlEgresosId: 'egresos-id',
+      bankSpreadsheets: new Map(),
+      movimientosSpreadsheets: new Map([['BBVA', 'bbva-id']]),
+    };
+
+    vi.mocked(withLock).mockImplementation(async (_id, fn) => {
+      const result = await fn();
+      return { ok: true, value: result };
+    });
+
+    vi.mocked(getCachedFolderStructure).mockReturnValue(mockFolderStructure as any);
+
+    vi.mocked(getValues).mockResolvedValue({
+      ok: true,
+      value: [['header']],
+    });
+
+    vi.mocked(getMovimientosToFill).mockResolvedValue({
+      ok: true,
+      value: [
+        {
+          sheetName: '2025-01',
+          rowNumber: 2,
+          fecha: '2025-01-15',
+          concepto: 'COMISION MAN CUENTA',
+          debito: 500,
+          credito: null,
+          saldo: 9500,
+          saldoCalculado: 9500,
+          matchedFileId: '',
+          detalle: 'Gastos bancarios',
+        },
+      ],
+    });
+
+    mockMatchMovement.mockReturnValue({
+      matchType: 'bank_fee',
+      description: 'Gastos bancarios',
+      matchedFileId: '',
+      confidence: 'HIGH',
+    });
+
+    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: 1 });
+
+    const resultPromise = matchAllMovimientos({ force: true });
+    await vi.runAllTimersAsync();
+    const result = await resultPromise;
+
+    expect(result.ok).toBe(true);
+    expect(updateDetalle).toHaveBeenCalledWith('bbva-id', expect.arrayContaining([
+      expect.objectContaining({
+        detalle: 'Gastos bancarios',
+      }),
+    ]));
+  });
+
+  it('should not overwrite existing bank_fee detalle when not in force mode', async () => {
+    const mockFolderStructure = {
+      controlIngresosId: 'ingresos-id',
+      controlEgresosId: 'egresos-id',
+      bankSpreadsheets: new Map(),
+      movimientosSpreadsheets: new Map([['BBVA', 'bbva-id']]),
+    };
+
+    vi.mocked(withLock).mockImplementation(async (_id, fn) => {
+      const result = await fn();
+      return { ok: true, value: result };
+    });
+
+    vi.mocked(getCachedFolderStructure).mockReturnValue(mockFolderStructure as any);
+
+    vi.mocked(getValues).mockResolvedValue({
+      ok: true,
+      value: [['header']],
+    });
+
+    vi.mocked(getMovimientosToFill).mockResolvedValue({
+      ok: true,
+      value: [
+        {
+          sheetName: '2025-01',
+          rowNumber: 2,
+          fecha: '2025-01-15',
+          concepto: 'COMISION MAN CUENTA',
+          debito: 500,
+          credito: null,
+          saldo: 9500,
+          saldoCalculado: 9500,
+          matchedFileId: '',
+          detalle: 'Gastos bancarios',  // Already has detalle
+        },
+      ],
+    });
+
+    mockMatchMovement.mockReturnValue({
+      matchType: 'bank_fee',
+      description: 'Gastos bancarios',
+      matchedFileId: '',
+      confidence: 'HIGH',
+    });
+
+    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: 0 });
+
+    const resultPromise = matchAllMovimientos();
+    await vi.runAllTimersAsync();
+    const result = await resultPromise;
+
+    expect(result.ok).toBe(true);
+    // Should NOT update - existing bank_fee detalle, no quality improvement possible
+    expect(updateDetalle).toHaveBeenCalledWith('bbva-id', []);
+  });
+
+  it('should increment debitsFilled counter for bank_fee debit matches', async () => {
+    const mockFolderStructure = {
+      controlIngresosId: 'ingresos-id',
+      controlEgresosId: 'egresos-id',
+      bankSpreadsheets: new Map(),
+      movimientosSpreadsheets: new Map([['BBVA', 'bbva-id']]),
+    };
+
+    vi.mocked(withLock).mockImplementation(async (_id, fn) => {
+      const result = await fn();
+      return { ok: true, value: result };
+    });
+
+    vi.mocked(getCachedFolderStructure).mockReturnValue(mockFolderStructure as any);
+
+    vi.mocked(getValues).mockResolvedValue({
+      ok: true,
+      value: [['header']],
+    });
+
+    vi.mocked(getMovimientosToFill).mockResolvedValue({
+      ok: true,
+      value: [
+        {
+          sheetName: '2025-01',
+          rowNumber: 2,
+          fecha: '2025-01-15',
+          concepto: 'COMISION MAN CUENTA',
+          debito: 500,
+          credito: null,
+          saldo: 9500,
+          saldoCalculado: 9500,
+          matchedFileId: '',
+          detalle: '',
+        },
+      ],
+    });
+
+    mockMatchMovement.mockReturnValue({
+      matchType: 'bank_fee',
+      description: 'Gastos bancarios',
+      matchedFileId: '',
+      confidence: 'HIGH',
+    });
+
+    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: 1 });
+
+    const resultPromise = matchAllMovimientos();
+    await vi.runAllTimersAsync();
+    const result = await resultPromise;
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.totalDebitsFilled).toBe(1);
+      expect(result.value.totalCreditsFilled).toBe(0);
+    }
+  });
+});
+
 describe('computeRowVersion', () => {
   it('computes consistent version for same row data', async () => {
     const { computeRowVersion } = await import('./match-movimientos.js');
 
     const row = {
       fecha: '2025-01-15',
-      origenConcepto: 'PAGO TEST',
+      concepto: 'PAGO TEST',
       debito: 1000,
       credito: null,
       matchedFileId: 'file123',
@@ -1304,7 +1670,7 @@ describe('computeRowVersion', () => {
 
     const row1 = {
       fecha: '2025-01-15',
-      origenConcepto: 'PAGO TEST',
+      concepto: 'PAGO TEST',
       debito: 1000,
       credito: null,
       matchedFileId: 'file123',
@@ -1324,7 +1690,7 @@ describe('computeRowVersion', () => {
 
     const row1 = {
       fecha: '2025-01-15',
-      origenConcepto: 'PAGO TEST',
+      concepto: 'PAGO TEST',
       debito: 1000,
       credito: null,
       matchedFileId: 'file123',
@@ -1344,7 +1710,7 @@ describe('computeRowVersion', () => {
 
     const row1 = {
       fecha: '2025-01-15',
-      origenConcepto: 'PAGO TEST',
+      concepto: 'PAGO TEST',
       debito: null,
       credito: 1000,
       matchedFileId: '',
@@ -1353,7 +1719,7 @@ describe('computeRowVersion', () => {
 
     const row2 = {
       fecha: '2025-01-15',
-      origenConcepto: 'PAGO TEST',
+      concepto: 'PAGO TEST',
       debito: null,
       credito: 1000,
       matchedFileId: '',
@@ -1414,7 +1780,7 @@ describe('TOCTOU protection', () => {
           sheetName: '2025-01',
           rowNumber: 2,
           fecha: '2025-01-15',
-          origenConcepto: 'PAGO TEST',
+          concepto: 'PAGO TEST',
           debito: 1000,
           credito: null,
           saldo: 9000,
@@ -1483,7 +1849,7 @@ describe('TOCTOU protection', () => {
           sheetName: '2025-01',
           rowNumber: 2,
           fecha: '2025-01-15',
-          origenConcepto: 'PAGO TEST',
+          concepto: 'PAGO TEST',
           debito: 1000,
           credito: null,
           saldo: 9000,

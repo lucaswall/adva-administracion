@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { BankMovementMatcher, calculateKeywordMatchScore } from './matcher.js';
+import { BankMovementMatcher, calculateKeywordMatchScore, stripBankOriginPrefix, isBankFee, isCreditCardPayment, extractKeywordTokens } from './matcher.js';
 import type { BankMovement, Factura, Pago, Retencion } from '../types/index.js';
 import { setExchangeRateCache, type ExchangeRate } from '../utils/exchange-rate.js';
 
@@ -676,6 +676,113 @@ describe('BankMovementMatcher - Credit Movement Matching', () => {
       expect(result.matchedFileId).toBe('pago1');
     });
 
+    it('returns bank_fee match for credit movement with bank fee concepto', () => {
+      const movement: BankMovement = {
+        row: 1,
+        fecha: '2024-01-15',
+        fechaValor: '2024-01-15',
+        concepto: 'COMISION MAN CUENTA',
+        codigo: '',
+        oficina: '',
+        areaAdva: '',
+        debito: null,
+        credito: 500,
+        detalle: ''
+      };
+
+      const result = matcher.matchCreditMovement(movement, [], [], []);
+
+      expect(result.matchType).toBe('bank_fee');
+      expect(result.confidence).toBe('HIGH');
+      expect(result.matchedFileId).toBe('');
+      expect(result.description).toBe('Gastos bancarios');
+    });
+
+    it('returns credit_card_payment match for credit movement with credit card payment concepto', () => {
+      const movement: BankMovement = {
+        row: 1,
+        fecha: '2024-01-15',
+        fechaValor: '2024-01-15',
+        concepto: 'PAGO TARJETA 4563',
+        codigo: '',
+        oficina: '',
+        areaAdva: '',
+        debito: null,
+        credito: 15000,
+        detalle: ''
+      };
+
+      const result = matcher.matchCreditMovement(movement, [], [], []);
+
+      expect(result.matchType).toBe('credit_card_payment');
+      expect(result.confidence).toBe('HIGH');
+      expect(result.matchedFileId).toBe('');
+      expect(result.description).toBe('Pago de tarjeta de credito');
+    });
+
+    it('returns bank_fee for credit movement even with zero credit amount', () => {
+      // Bank fee check should run BEFORE amount validation
+      const movement: BankMovement = {
+        row: 1,
+        fecha: '2024-01-15',
+        fechaValor: '2024-01-15',
+        concepto: 'IMPUESTO LEY 25413',
+        codigo: '',
+        oficina: '',
+        areaAdva: '',
+        debito: null,
+        credito: 0,
+        detalle: ''
+      };
+
+      const result = matcher.matchCreditMovement(movement, [], [], []);
+
+      expect(result.matchType).toBe('bank_fee');
+      expect(result.confidence).toBe('HIGH');
+    });
+
+    it('non-fee credit movements still go through normal matching', () => {
+      // Normal credit movement that is NOT a bank fee should proceed to normal matching
+      const facturaEmitida: Factura & { row: number } = {
+        fileId: 'factura1',
+        fileName: 'factura-001.pdf',
+        tipoComprobante: 'A',
+        nroFactura: '00001-00000123',
+        fechaEmision: '2024-01-10',
+        cuitEmisor: '30709076783',
+        razonSocialEmisor: 'ADVA',
+        cuitReceptor: '20123456786',
+        razonSocialReceptor: 'TEST SA',
+        importeNeto: 90000,
+        importeIva: 10000,
+        importeTotal: 100000,
+        moneda: 'ARS',
+        processedAt: '2024-01-10T10:00:00Z',
+        needsReview: false,
+        confidence: 0.95,
+        row: 2
+      };
+
+      const movement: BankMovement = {
+        row: 1,
+        fecha: '2024-01-15',
+        fechaValor: '2024-01-15',
+        concepto: 'TRANSFERENCIA DESDE TEST SA 20-12345678-6',
+        codigo: '',
+        oficina: '',
+        areaAdva: '',
+        debito: null,
+        credito: 100000,
+        detalle: ''
+      };
+
+      const result = matcher.matchCreditMovement(movement, [facturaEmitida], [], []);
+
+      // Should match the factura, not be treated as a bank fee
+      expect(result.matchType).toBe('direct_factura');
+      expect(result.matchedFileId).toBe('factura1');
+    });
+
     it('returns no match for credit movement with no matches', () => {
       const movement: BankMovement = {
         row: 1,
@@ -982,5 +1089,79 @@ describe('BankMovementMatcher - Credit Movement Matching', () => {
 
       expect(score).toBeGreaterThan(0);
     });
+  });
+});
+
+describe('stripBankOriginPrefix', () => {
+  it('should strip "D NNN " prefix (origin code with 3-digit channel)', () => {
+    expect(stripBankOriginPrefix('D 500 TRANSFERENCIA RECIBIDA')).toBe('TRANSFERENCIA RECIBIDA');
+  });
+
+  it('should not strip "D " prefix without channel number (avoids false positives)', () => {
+    expect(stripBankOriginPrefix('D COMISION MANTENIMIENTO')).toBe('D COMISION MANTENIMIENTO');
+  });
+
+  it('should strip prefix with varying whitespace', () => {
+    expect(stripBankOriginPrefix('D  500  IMPUESTO LEY')).toBe('IMPUESTO LEY');
+  });
+
+  it('should not strip if no D prefix', () => {
+    expect(stripBankOriginPrefix('TRANSFERENCIA RECIBIDA')).toBe('TRANSFERENCIA RECIBIDA');
+  });
+
+  it('should not strip if D is part of a word', () => {
+    expect(stripBankOriginPrefix('DEBITO DIRECTO')).toBe('DEBITO DIRECTO');
+  });
+
+  it('should handle empty string', () => {
+    expect(stripBankOriginPrefix('')).toBe('');
+  });
+
+  it('should not strip single-digit channel code (too short)', () => {
+    expect(stripBankOriginPrefix('D 5 TRANSFERENCIA')).toBe('D 5 TRANSFERENCIA');
+  });
+
+  it('should strip prefix with 2-digit channel number', () => {
+    expect(stripBankOriginPrefix('D 50 PAGO TARJETA 1234')).toBe('PAGO TARJETA 1234');
+  });
+});
+
+describe('isBankFee with origin prefix', () => {
+  it('should match bank fee with D prefix', () => {
+    expect(isBankFee('D 500 IMPUESTO LEY 25413')).toBe(true);
+  });
+
+  it('should match bank fee with D NNN prefix', () => {
+    expect(isBankFee('D 500 COMISION MANTENIMIENTO')).toBe(true);
+  });
+
+  it('should still match bank fee without prefix', () => {
+    expect(isBankFee('IMPUESTO LEY 25413')).toBe(true);
+  });
+});
+
+describe('isCreditCardPayment with origin prefix', () => {
+  it('should match credit card payment with D prefix', () => {
+    expect(isCreditCardPayment('D 500 PAGO TARJETA 1234')).toBe(true);
+  });
+
+  it('should still match credit card payment without prefix', () => {
+    expect(isCreditCardPayment('PAGO TARJETA 1234')).toBe(true);
+  });
+});
+
+describe('extractKeywordTokens with origin prefix', () => {
+  it('should not include origin prefix tokens (D, channel number)', () => {
+    const tokens = extractKeywordTokens('D 500 TRANSFERENCIA RECIBIDA');
+    expect(tokens).not.toContain('D');
+    expect(tokens).not.toContain('500');
+    // Should still have meaningful tokens
+    expect(tokens.length).toBeGreaterThan(0);
+  });
+
+  it('should extract same tokens with and without prefix', () => {
+    const withPrefix = extractKeywordTokens('D 500 ACME CORPORATION');
+    const withoutPrefix = extractKeywordTokens('ACME CORPORATION');
+    expect(withPrefix).toEqual(withoutPrefix);
   });
 });

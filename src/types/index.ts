@@ -262,8 +262,8 @@ export type TipoTarjeta = 'Visa' | 'Mastercard' | 'Amex' | 'Naranja' | 'Cabal';
 export interface MovimientoBancario {
   /** Transaction date (ISO format: YYYY-MM-DD) */
   fecha: string;
-  /** Combined ORIGEN + CONCEPTO (e.g., "D 500 TRANSFERENCIA 20291679375") */
-  origenConcepto: string;
+  /** Transaction description/concept */
+  concepto: string;
   /** Debit amount (null if credit transaction) */
   debito: number | null;
   /** Credit amount (null if debit transaction) */
@@ -864,8 +864,8 @@ export interface MovimientoRow {
   rowNumber: number;
   /** Transaction date */
   fecha: string;
-  /** Origin/concept description */
-  origenConcepto: string;
+  /** Transaction description/concept */
+  concepto: string;
   /** Debit amount - null if credit */
   debito: number | null;
   /** Credit amount - null if debit */
