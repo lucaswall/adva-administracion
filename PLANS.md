@@ -1,83 +1,71 @@
 # Bug Fix Plan
 
 **Created:** 2026-02-04
-**Bug Report:** Cross-currency bank matching completely broken (exchange rate cache never populated) + credit movements missing referencia extraction for Tier 3
+**Bug Report:** FacturaPagoMatcher CUIT/name matching broken for Ingresos — all Pagos Recibidos fail to match Facturas Emitidas, causing REVISAR in bank movimientos
 **Category:** Matching
-**Linear Issues:** [ADV-77](https://linear.app/adva-administracion/issue/ADV-77/fix-add-exchange-rate-prefetch-to-matchallmovimientos-for-cross), [ADV-78](https://linear.app/adva-administracion/issue/ADV-78/fix-add-referencia-extraction-and-tier-3-matching-to-credit-movements)
+**Linear Issues:** [ADV-79](https://linear.app/lw-claude/issue/ADV-79/fix-facturapagomatcher-cuitname-matching-broken-for-ingresos-facturas)
 
 ## Investigation
 
 ### Context Gathered
-- **MCPs used:** Google Drive (gsheets_read for BBVA ARS Movimientos, Control de Ingresos, Control de Egresos), WebFetch (ArgentinaDatos API rate verification)
+- **MCPs used:** Google Sheets (gsheets_read for Control de Ingresos Pagos Recibidos and Facturas Emitidas), Google Drive (gdrive_search)
 - **Files examined:**
-  - `src/bank/matcher.ts` — `matchMovement()` has `extractReferencia()` (line 373), `matchCreditMovement()` does not
-  - `src/bank/match-movimientos.ts` — `matchAllMovimientos()` creates `new BankMovementMatcher()` (line 938) without prefetching exchange rates
-  - `src/utils/exchange-rate.ts` — `prefetchExchangeRates()` defined (line 237) but never imported from production code
-  - Spreadsheet BBVA ARS 2025-10, 2025-11, 2025-12 — 53 unmatched movements analyzed
+  - `src/matching/matcher.ts` — `findMatches()` lines 202-230: CUIT and name matching only checks `cuitEmisor` / `razonSocialEmisor`
+  - `src/processing/matching/factura-pago-matcher.ts` — lines 333-336: For Ingresos, `cuitEmisor` is set to `''`, `cuitReceptor` is populated
+  - `src/processing/matching/index.ts` — lines 84-91: Ingresos call passes `'cuitReceptor'` and `'cuitPagador'` but matcher ignores these
+  - `src/bank/matcher.ts` — lines 436, 654-656: REVISAR logic when `matchedFacturaFileId` is empty
+  - Control de Ingresos spreadsheet: All 13 Pagos Recibidos have empty `matchedFacturaFileId` (column N)
+  - Facturas Emitidas spreadsheet: Column F is `cuitReceptor`, Column G is `razonSocialReceptor`
 
 ### Evidence
 
-**Bug 1: Cross-currency matching silently fails (CRITICAL)**
+**All Pagos Recibidos have empty `matchedFacturaFileId`** — zero Ingresos matches exist. This includes:
+- Domestic pagos with CUITs (e.g., Nitro Digital Business `30713518006`) that should match Facturas Emitidas by CUIT
+- Foreign pagos (FRITO PLAY LLC, MICROSOFT, XSOLLA USA INC, etc.) that should match by name
+- Pagos with referencia fields that could identify invoices
 
-`prefetchExchangeRates()` is only imported in `src/utils/exchange-rate.test.ts`. No production code calls it. When `amountsMatchCrossCurrency()` encounters USD documents, it calls `getExchangeRateSync()` → cache miss → returns `{ matches: false, cacheMiss: true }`.
+**The matcher code** in `src/matching/matcher.ts` lines 202-209:
+```typescript
+// Line 203: checks pago.cuitBeneficiario vs factura.cuitEmisor ← ALWAYS EMPTY for Ingresos
+// Line 206: checks pago.cuitPagador vs factura.cuitEmisor ← ALWAYS EMPTY for Ingresos
+```
 
-Verified with real data: 7 ORDEN DE PAGO DEL EXTERIOR entries have matching USD Pagos Recibidos. All are within 5% tolerance of the official venta rate (~1430-1460 ARS/USD in Oct-Dec 2025):
-- FRITO PLAY (ref 4084946): Bank ARS 9,294,750 ↔ Pago USD 6,750 = -3.71% from expected → **would match**
-- TINY BYTES (ref 4086424): Bank ARS 2,103,135 ↔ Pago USD 1,500 = -1.95% → **would match**
-- ODACLICK (ref 4088338): Bank ARS 3,578,516 ↔ Pago USD 2,480 = +0.55% → **would match**
-- FRITO PLAY (ref 4087712): Bank ARS 621,058 ↔ Pago USD 430 = +0.65% → **would match**
-- DEVOLVER DIGITAL (ref 4091656): Bank ARS 2,563,271 ↔ Pago USD 1,780 = +0.00% → **would match**
-- XSOLLA USA (ref 4617760): Bank ARS 6,307,200 ↔ Pago USD 4,500 = -3.34% → **would match**
-- MICROSOFT (ref 4620508): Bank ARS 7,756,980 ↔ Pago USD 5,500 = -3.40% → **would match**
+For **Ingresos**, `factura-pago-matcher.ts` line 333 sets `cuitEmisor: ''` because `facturaCuitField === 'cuitReceptor'`. It populates `cuitReceptor` (line 335) instead, but the matcher never reads it.
 
-Zero cross-currency matches exist in any movimientos sheet, confirming the bug is systemic.
+**Name matching has the same bug** — lines 214-230 only check `factura.razonSocialEmisor` (empty for Ingresos), never `factura.razonSocialReceptor`.
 
-**Bug 2: Credit movements lack referencia extraction (MEDIUM)**
-
-`matchMovement()` (debit, line 373) calls `extractReferencia()` and uses it for Tier 3.
-`matchCreditMovement()` (credit, line 590-591) only extracts CUIT, NOT referencia.
-
-ORDEN DE PAGO DEL EXTERIOR entries are **credit** movements (incoming wire transfers). Their concepto contains the referencia pattern `NNNNNNN.NN.NNNN` which corresponds to the `referencia` field in Pagos Recibidos. Without referencia extraction on the credit side, these can only match at Tier 5 (amount+date) instead of Tier 3 (referencia), resulting in lower confidence.
+**Bank movimientos impact:** 20 REVISAR entries across BBVA ARS 2025-10/11/12 because pagos recibidos have no linked facturas:
+- 11 "REVISAR! Cobro de..." (credits: foreign payment orders)
+- 9 "REVISAR! Pago a..." (debits: domestic payments with unmatched pagos)
 
 ### Root Cause
 
-**Bug 1:** `prefetchExchangeRates()` was implemented but never wired into the matching orchestration flow. The matching code uses `getExchangeRateSync()` which is cache-only by design (for synchronous matching), but the async prefetch step that should populate the cache before matching was never added to `matchAllMovimientos()`.
+The `FacturaPagoMatcher.findMatches()` hardcodes CUIT matching against `factura.cuitEmisor` and name matching against `factura.razonSocialEmisor`. These fields are only populated for **Egresos** (Facturas Recibidas). For **Ingresos** (Facturas Emitidas), the counterparty info is in `factura.cuitReceptor` and `factura.razonSocialReceptor`, but the matcher never checks these fields.
 
-**Bug 2:** When the tier-based matching was implemented (ADV-69), referencia extraction was added to `matchMovement()` (debits) but omitted from `matchCreditMovement()` (credits). ORDEN DE PAGO entries are credits, so this gap directly impacts them.
+The `facturaCuitField` and `pagoCuitField` parameters are passed through `matchFacturasWithPagos()` and used to parse the spreadsheet columns correctly, but the core `FacturaPagoMatcher` class is unaware of which scenario (Ingresos/Egresos) it's operating in and only checks emisor fields.
 
 ## Fix Plan
 
-### Fix 1: Add exchange rate prefetch to matchAllMovimientos
-**Linear Issue:** [ADV-77](https://linear.app/adva-administracion/issue/ADV-77/fix-add-exchange-rate-prefetch-to-matchallmovimientos-for-cross)
+### Fix 1: Make FacturaPagoMatcher CUIT/name matching work for both Ingresos and Egresos
+**Linear Issue:** [ADV-79](https://linear.app/lw-claude/issue/ADV-79/fix-facturapagomatcher-cuitname-matching-broken-for-ingresos-facturas)
 
-1. Write test in `src/bank/match-movimientos.test.ts`:
-   - Test that `prefetchExchangeRates` is called with dates from USD Pagos Recibidos and USD Facturas Emitidas before matching starts
-   - Test that USD Pagos Recibidos can be matched to ARS credit movements when exchange rates are prefetched
-   - Test that USD Facturas Emitidas can be matched to ARS credit movements when exchange rates are prefetched
+1. Write tests in `src/matching/matcher.test.ts`:
+   - Test: Ingresos scenario — Pago Recibido with `cuitPagador` matches Factura Emitida with `cuitReceptor` (CUIT boost)
+   - Test: Ingresos scenario — Pago Recibido with `nombrePagador` matches Factura Emitida with `razonSocialReceptor` (name boost)
+   - Test: Ingresos scenario — no match when `cuitPagador` doesn't match `cuitReceptor` (no false positives)
+   - Test: Egresos scenario still works — Pago Enviado with `cuitBeneficiario` matches Factura Recibida with `cuitEmisor` (regression)
+   - Test: Egresos scenario — name matching with `razonSocialEmisor` still works (regression)
 2. Run verifier (expect fail)
-3. Implement in `src/bank/match-movimientos.ts`:
-   - Import `prefetchExchangeRates` from `../utils/exchange-rate.js`
-   - After loading `ingresosResult` and `egresosResult` (after line 935), add a helper function `collectUsdDates(ingresosData, egresosData)` that:
-     - Collects `fechaPago` from Pagos Recibidos where `moneda === 'USD'`
-     - Collects `fechaEmision` from Facturas Emitidas where `moneda === 'USD'`
-     - Collects `fechaEmision` from Facturas Recibidas where `moneda === 'USD'`
-     - Returns unique date array
-   - Call `await prefetchExchangeRates(collectUsdDates(...))` before `new BankMovementMatcher()` (line 938)
-4. Run verifier (expect pass)
-
-### Fix 2: Add referencia extraction and Tier 3 to credit matching
-**Linear Issue:** [ADV-78](https://linear.app/adva-administracion/issue/ADV-78/fix-add-referencia-extraction-and-tier-3-matching-to-credit-movements)
-
-1. Write test in `src/bank/matcher.test.ts`:
-   - Test: Credit movement with ORDEN DE PAGO pattern matches Pago Recibido with same referencia at Tier 3
-   - Test: Credit movement with ORDEN DE PAGO pattern but no matching Pago referencia falls through to Tier 5
-   - Test: Credit movement without referencia pattern does not produce Tier 3 candidates
-2. Run verifier (expect fail)
-3. Implement in `src/bank/matcher.ts` `matchCreditMovement()`:
-   - Add `const extractedRef = extractReferencia(movement.concepto);` after line 591 (alongside extractedCuit)
-   - In the Pagos Recibidos loop (line 601-668), when determining tier for pagos without linked facturas (line 653-667):
-     - Add tier 3 case: `if (extractedRef && pago.referencia === extractedRef)` → tier = 3, add 'Referencia match' reason
-     - Keep existing: CUIT match → tier 2, no identity → tier 5
+3. Implement fix in `src/matching/matcher.ts` `findMatches()`:
+   - **CUIT matching (lines 202-209):** Add checks for receptor fields. The logic should be:
+     - Check `pago.cuitBeneficiario` vs `factura.cuitEmisor` (Egresos: pago beneficiary = factura emisor)
+     - Check `pago.cuitPagador` vs `factura.cuitEmisor` (Egresos fallback)
+     - Check `pago.cuitPagador` vs `factura.cuitReceptor` (Ingresos: pago payer = factura receptor/client)
+     - Check `pago.cuitBeneficiario` vs `factura.cuitReceptor` (Ingresos fallback)
+   - **Name matching (lines 211-230):** Add checks for receptor name. The logic should be:
+     - Existing: check `nombreBeneficiario` vs `razonSocialEmisor`, then `nombrePagador` vs `razonSocialEmisor`
+     - Add: check `nombrePagador` vs `razonSocialReceptor`, then `nombreBeneficiario` vs `razonSocialReceptor`
+   - Both CUIT and name matching should short-circuit on first match found (existing `if/else if` pattern)
 4. Run verifier (expect pass)
 
 ## Post-Implementation Checklist
@@ -89,71 +77,19 @@ ORDEN DE PAGO DEL EXTERIOR entries are **credit** movements (incoming wire trans
 
 ## Plan Summary
 
-**Problem:** Cross-currency bank matching is completely broken — all USD document matching silently fails because exchange rate cache is never populated. Additionally, credit movements (like ORDEN DE PAGO DEL EXTERIOR) lack referencia extraction, preventing Tier 3 matching.
+**Problem:** FacturaPagoMatcher only matches CUIT and name against `factura.cuitEmisor` / `razonSocialEmisor`, which are empty for Facturas Emitidas. This means zero Ingresos matches work, causing all Pagos Recibidos to lack linked facturas and showing "REVISAR!" in bank movimientos.
 
-**Root Cause:** `prefetchExchangeRates()` was implemented but never called from `matchAllMovimientos()`. `extractReferencia()` was added to debit matching but omitted from credit matching.
+**Root Cause:** The matcher was written assuming all facturas have `cuitEmisor` populated, but Facturas Emitidas store counterparty info in `cuitReceptor` / `razonSocialReceptor` instead.
 
-**Linear Issues:** ADV-77 (Urgent), ADV-78 (Medium)
+**Linear Issues:** ADV-79 (Urgent)
 
-**Solution Approach:** Add `prefetchExchangeRates()` call in `matchAllMovimientos()` after loading Control data and before creating the matcher, collecting all unique dates from USD documents. Add `extractReferencia()` call and Tier 3 logic to `matchCreditMovement()`, mirroring the debit side pattern.
+**Solution Approach:** Extend the CUIT and name matching logic in `FacturaPagoMatcher.findMatches()` to also check `factura.cuitReceptor` and `factura.razonSocialReceptor`. The matcher will try both emisor and receptor fields, matching whichever is populated. This requires no schema changes — the fields already exist on the `Factura` interface and are correctly parsed by `factura-pago-matcher.ts`.
 
 **Scope:**
-- Files affected: 2 (`src/bank/match-movimientos.ts`, `src/bank/matcher.ts`)
-- New tests: yes (cross-currency integration tests, credit referencia Tier 3 tests)
+- Files affected: 1 (`src/matching/matcher.ts`)
+- New tests: yes (5 tests: 3 Ingresos scenarios + 2 Egresos regressions)
 - Breaking changes: no
 
 **Risks/Considerations:**
-- Prefetching exchange rates adds API calls on startup. ArgentinaDatos API may rate-limit if many unique dates. Use `Promise.allSettled` (already in `prefetchExchangeRates`) to handle individual failures gracefully.
-- After fix, re-running `/api/match-movimientos?force=true` will fill previously unmatched cross-currency movements.
-
----
-
-## Iteration 1
-
-**Implemented:** 2026-02-04
-
-### Tasks Completed This Iteration
-- Fix 1: Add exchange rate prefetch to matchAllMovimientos - Added `extractUsdDocumentDates()` helper and `prefetchExchangeRates()` call before matcher creation
-- Fix 2: Add referencia extraction and Tier 3 to credit matching - Added `extractReferencia()` call and Tier 3 logic in `matchCreditMovement()`
-
-### Files Modified
-- `src/bank/match-movimientos.ts` - Added `extractUsdDocumentDates()` function, imported `prefetchExchangeRates`, added prefetch call in `matchAllMovimientos()` after loading Control data
-- `src/bank/matcher.ts` - Added `extractReferencia()` call in `matchCreditMovement()` Phase 1, added Tier 3 case for referencia match in pago_only candidates
-- `src/bank/match-movimientos.test.ts` - Added 2 tests for exchange rate prefetch (USD dates collected, skipped when no USD)
-- `src/bank/matcher.test.ts` - Added 3 tests for credit referencia Tier 3 (referencia match, fallthrough to Tier 5, no referencia pattern)
-
-### Linear Updates
-- ADV-77: Todo → In Progress → Review
-- ADV-78: Todo → In Progress → Review
-
-### Pre-commit Verification
-- bug-hunter: Passed, no bugs found
-- verifier: All 1585 tests pass, zero warnings
-
-### Continuation Status
-All tasks completed.
-
-### Review Findings
-
-Files reviewed: 4
-- `src/bank/match-movimientos.ts` — `extractUsdDocumentDates()` helper, `prefetchExchangeRates` import and call
-- `src/bank/matcher.ts` — `extractReferencia()` call and Tier 3 logic in `matchCreditMovement()`
-- `src/bank/match-movimientos.test.ts` — 2 new exchange rate prefetch tests
-- `src/bank/matcher.test.ts` — 3 new credit referencia Tier 3 tests
-
-Checks applied: Security, Logic, Async, Resources, Type Safety, Edge Cases, Conventions
-
-No issues found - all implementations are correct and follow project conventions.
-
-### Linear Updates
-- ADV-77: Review → Merge
-- ADV-78: Review → Merge
-
-<!-- REVIEW COMPLETE -->
-
----
-
-## Status: COMPLETE
-
-All tasks implemented and reviewed successfully. All Linear issues moved to Merge.
-Ready for PR creation.
+- The fix must not create false positive matches by accidentally matching emisor CUIT with receptor CUIT in the wrong direction. Each check compares the correct pago field with the correct factura field based on the flow direction.
+- After deploying, run `/api/rematch` to re-match existing Ingresos documents, then `/api/match-movimientos?force=true` to update bank movimientos.
