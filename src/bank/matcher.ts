@@ -4,8 +4,9 @@
  */
 
 import type {
-  BankMovement,
+  BankMatchTier,
   BankMovementMatchResult,
+  MovimientoRow,
   Factura,
   Pago,
   Recibo,
@@ -23,9 +24,9 @@ import { warn } from '../utils/logger.js';
 const DEFAULT_CROSS_CURRENCY_TOLERANCE = 5;
 
 /**
- * Date range for Pago matching (tight: ±1 day)
+ * Date range for Pago matching (±15 days)
  */
-const PAGO_DATE_RANGE = 1;
+const PAGO_DATE_RANGE = 15;
 
 /**
  * Date range for Factura/Recibo matching (looser)
@@ -202,6 +203,7 @@ const MIN_KEYWORD_MATCH_SCORE = 2;
  */
 const CREDIT_CARD_PAYMENT_PATTERNS = [
   /^PAGO TARJETA\s+\d+/i,
+  /^PAGO TARJETA\s+(?:VISA|MASTERCARD|AMEX|NARANJA|CABAL)\b/i,
 ];
 
 /**
@@ -255,11 +257,69 @@ export function isBankFee(concepto: string): boolean {
   return BANK_FEE_PATTERNS.some(pattern => pattern.test(cleaned));
 }
 
+/**
+ * Extracts a 7-digit referencia from ORDEN DE PAGO patterns in bank concepto
+ * Pattern: 7 digits followed by .NN.NNNN (e.g., "4083953.01.8584")
+ *
+ * @param concepto - Bank transaction concept text
+ * @returns The 7-digit referencia string, or undefined if not found
+ */
+export function extractReferencia(concepto: string): string | undefined {
+  if (!concepto) {
+    return undefined;
+  }
+  const match = concepto.match(/(\d{7})\.\d{2}\.\d{4}/);
+  return match ? match[1] : undefined;
+}
+
 /** Re-export for convenience */
 export const extractCuitFromConcepto = extractCuitFromText;
 
 /**
+ * Internal candidate type for tier-based ranking
+ */
+interface TieredCandidate {
+  tier: BankMatchTier;
+  matchType: 'pago_factura' | 'direct_factura' | 'recibo' | 'pago_only';
+  fileId: string;
+  description: string;
+  confidence: 'HIGH' | 'MEDIUM' | 'LOW';
+  reasons: string[];
+  dateDiff: number;
+  isExactAmount: boolean;
+}
+
+/**
+ * Calculates date distance in days between two dates
+ */
+function dateDiffDays(a: Date, b: Date): number {
+  return Math.abs(Math.floor((a.getTime() - b.getTime()) / (1000 * 60 * 60 * 24)));
+}
+
+/**
+ * Determines confidence based on tier and cross-currency status
+ * Tier 1-3: HIGH (MEDIUM if cross-currency)
+ * Tier 4: MEDIUM (LOW if cross-currency)
+ * Tier 5: LOW
+ */
+function tierToConfidence(tier: BankMatchTier, isCrossCurrency: boolean): 'HIGH' | 'MEDIUM' | 'LOW' {
+  if (tier <= 3) {
+    return isCrossCurrency ? 'MEDIUM' : 'HIGH';
+  }
+  if (tier === 4) {
+    return isCrossCurrency ? 'LOW' : 'MEDIUM';
+  }
+  return 'LOW';
+}
+
+/**
  * Matches bank movements against Facturas, Recibos, and Pagos
+ * Uses a tier-based ranking algorithm:
+ * Tier 1: Pago with linked Factura
+ * Tier 2: CUIT match from concepto
+ * Tier 3: Referencia match
+ * Tier 4: Name token score >= 2
+ * Tier 5: Amount + date only
  */
 export class BankMovementMatcher {
   private readonly crossCurrencyTolerancePercent: number;
@@ -274,29 +334,27 @@ export class BankMovementMatcher {
   }
 
   /**
-   * Matches a bank movement against all available documents
+   * Matches a debit bank movement against Egresos documents (Facturas Recibidas, Recibos, Pagos Enviados)
    *
-   * Priority:
-   * 0. Bank fees (gastos bancarios) - FIRST
-   * 1. Pago with linked Factura (BEST)
-   * 2. Direct Factura match
-   * 3. Recibo match
-   * 4. Pago without linked Factura (REVISAR)
-   * 5. No match
+   * Algorithm:
+   * Phase 0: Auto-detect bank fees and credit card payments
+   * Phase 1: Extract identity (CUIT, referencia, name tokens) from concepto
+   * Phase 3: Gather candidates with hard identity filters
+   * Phase 4: Score each candidate with tier, sort, return best
    *
    * @param movement - Bank movement to match
    * @param facturas - All facturas from sheet
    * @param recibos - All recibos from sheet
    * @param pagos - All pagos from sheet
-   * @returns Match result with generated description
+   * @returns Match result with generated description and tier
    */
   matchMovement(
-    movement: BankMovement,
+    movement: MovimientoRow,
     facturas: Array<Factura & { row: number }>,
     recibos: Array<Recibo & { row: number }>,
     pagos: Array<Pago & { row: number }>
   ): BankMovementMatchResult {
-    // Priority 0: Check for bank fees FIRST (can be debito or credito)
+    // Phase 0: Auto-detect
     if (isBankFee(movement.concepto)) {
       return this.createBankFeeMatch(movement);
     }
@@ -306,190 +364,106 @@ export class BankMovementMatcher {
       return this.noMatch(movement, ['No debit amount']);
     }
 
-    // Priority 0.5: Check for credit card payments
     if (isCreditCardPayment(movement.concepto)) {
       return this.createCreditCardPaymentMatch(movement);
     }
 
-    // Extract CUIT from concepto for matching
+    // Phase 1: Extract identity
     const extractedCuit = extractCuitFromConcepto(movement.concepto);
+    const extractedRef = extractReferencia(movement.concepto);
 
-    // Parse bank dates
     const bankFecha = parseArgDate(movement.fecha);
-    const bankFechaValor = parseArgDate(movement.fechaValor);
-
-    if (!bankFecha && !bankFechaValor) {
+    if (!bankFecha) {
       return this.noMatch(movement, ['No valid date in movement']);
     }
 
-    // Step 1: Try to find matching Pagos (tight date range: ±1 day)
-    const matchingPagos = this.findMatchingPagos(amount, bankFecha, bankFechaValor, extractedCuit, pagos);
+    // Phase 3 & 4: Gather and score candidates
+    const candidates: TieredCandidate[] = [];
 
-    // Step 2: Check if any Pago has a linked Factura (BEST MATCH)
-    for (const pagoMatch of matchingPagos) {
-      if (pagoMatch.pago.matchedFacturaFileId) {
-        // Find the linked Factura
-        const linkedFactura = facturas.find(f => f.fileId === pagoMatch.pago.matchedFacturaFileId);
+    // If CUIT extracted, apply hard filter — only consider documents with matching CUIT
+    const hasCuitFilter = !!extractedCuit;
+
+    // --- Pagos ---
+    for (const pago of pagos) {
+      if (!amountsMatch(pago.importePagado, amount)) continue;
+      const pagoDate = parseArgDate(pago.fechaPago);
+      if (!pagoDate) continue;
+      if (!isWithinDays(bankFecha, pagoDate, PAGO_DATE_RANGE, PAGO_DATE_RANGE)) continue;
+
+      // Hard CUIT filter
+      if (hasCuitFilter && pago.cuitBeneficiario !== extractedCuit) continue;
+
+      const dateDiff = dateDiffDays(bankFecha, pagoDate);
+      const reasons = [`Amount match: ${amount}`, `Date match: Pago ${pago.fechaPago}`];
+
+      // Check for linked factura (Tier 1)
+      if (pago.matchedFacturaFileId) {
+        const linkedFactura = facturas.find(f => f.fileId === pago.matchedFacturaFileId);
         if (linkedFactura) {
-          return this.createPagoFacturaMatch(movement, pagoMatch.pago, linkedFactura, extractedCuit, pagoMatch.reasons);
+          const description = this.formatDebitFacturaDescription(linkedFactura);
+          candidates.push({
+            tier: 1,
+            matchType: 'pago_factura',
+            fileId: pago.fileId,
+            description,
+            confidence: 'HIGH',
+            reasons: [...reasons, 'Pago linked to Factura'],
+            dateDiff,
+            isExactAmount: true,
+          });
+          continue;
         } else {
-          // Linked factura not found in the array - log warning and continue
-          warn(
-            'Linked factura not found in facturas array',
-            {
-              pagoFileId: pagoMatch.pago.fileId,
-              matchedFacturaFileId: pagoMatch.pago.matchedFacturaFileId
-            }
-          );
+          warn('Linked factura not found in facturas array', {
+            pagoFileId: pago.fileId,
+            matchedFacturaFileId: pago.matchedFacturaFileId
+          });
         }
       }
-    }
 
-    // Step 3: Try direct Factura match (amount + date + CUIT or keyword for direct debits)
-    const matchingFacturas = this.findMatchingFacturas(amount, bankFecha, bankFechaValor, extractedCuit, movement.concepto, facturas);
-    if (matchingFacturas.length > 0) {
-      const bestFactura = matchingFacturas[0];
-      return this.createDirectFacturaMatch(movement, bestFactura.factura, extractedCuit, bestFactura.reasons, bestFactura.matchType);
-    }
-
-    // Step 4: Try Recibo match
-    const matchingRecibos = this.findMatchingRecibos(amount, bankFecha, bankFechaValor, recibos);
-    if (matchingRecibos.length > 0) {
-      const bestRecibo = matchingRecibos[0];
-      return this.createReciboMatch(movement, bestRecibo.recibo, extractedCuit, bestRecibo.reasons);
-    }
-
-    // Step 5: Pago without linked Factura (REVISAR)
-    if (matchingPagos.length > 0) {
-      const bestPago = matchingPagos[0];
-      return this.createPagoOnlyMatch(movement, bestPago.pago, extractedCuit, bestPago.reasons);
-    }
-
-    // Step 6: No match
-    return this.noMatch(movement, ['No matching documents found']);
-  }
-
-  /**
-   * Finds pagos matching amount and date criteria (tight: ±1 day)
-   */
-  private findMatchingPagos(
-    amount: number,
-    bankFecha: Date | null,
-    bankFechaValor: Date | null,
-    extractedCuit: string | undefined,
-    pagos: Array<Pago & { row: number }>
-  ): Array<{ pago: Pago & { row: number }; reasons: string[] }> {
-    const matches: Array<{ pago: Pago & { row: number }; reasons: string[]; hasCuit: boolean; dateDiff: number }> = [];
-
-    for (const pago of pagos) {
-      // Check amount match
-      if (!amountsMatch(pago.importePagado, amount)) {
-        continue;
-      }
-
-      // Parse pago date
-      const pagoDate = parseArgDate(pago.fechaPago);
-      if (!pagoDate) {
-        continue;
-      }
-
-      // Check date match (±1 day from either bank date)
-      let dateMatches = false;
-      let dateDiff = 999;
-
-      if (bankFecha && isWithinDays(bankFecha, pagoDate, PAGO_DATE_RANGE, PAGO_DATE_RANGE)) {
-        dateMatches = true;
-        dateDiff = Math.min(dateDiff, Math.abs(Math.floor((pagoDate.getTime() - bankFecha.getTime()) / (1000 * 60 * 60 * 24))));
-      }
-      if (bankFechaValor && isWithinDays(bankFechaValor, pagoDate, PAGO_DATE_RANGE, PAGO_DATE_RANGE)) {
-        dateMatches = true;
-        dateDiff = Math.min(dateDiff, Math.abs(Math.floor((pagoDate.getTime() - bankFechaValor.getTime()) / (1000 * 60 * 60 * 24))));
-      }
-
-      if (!dateMatches) {
-        continue;
-      }
-
-      const reasons: string[] = [];
-      reasons.push(`Amount match: ${amount}`);
-      reasons.push(`Date match: Pago ${pago.fechaPago}`);
-
-      // Check CUIT match
-      let hasCuit = false;
+      // Pago without linked factura — determine tier
+      let tier: BankMatchTier;
       if (extractedCuit && pago.cuitBeneficiario === extractedCuit) {
-        hasCuit = true;
-        reasons.push('CUIT match with beneficiary');
+        tier = 2;
+      } else if (extractedRef && pago.referencia === extractedRef) {
+        tier = 3;
+        reasons.push('Referencia match');
+      } else {
+        tier = 5;
       }
+      const name = pago.nombreBeneficiario || 'Desconocido';
+      const cuit = pago.cuitBeneficiario ? ` ${pago.cuitBeneficiario}` : '';
+      const concepto = pago.concepto ? ` (${pago.concepto})` : '';
+      const description = `REVISAR! Pago a ${name}${cuit}${concepto}`.trim();
 
-      matches.push({ pago, reasons, hasCuit, dateDiff });
+      candidates.push({
+        tier,
+        matchType: 'pago_only',
+        fileId: pago.fileId,
+        description,
+        confidence: tier <= 3 ? 'HIGH' : 'LOW',
+        reasons: [...reasons, 'Pago without linked Factura'],
+        dateDiff,
+        isExactAmount: true,
+      });
     }
 
-    // Sort by CUIT match first, then by date proximity
-    matches.sort((a, b) => {
-      if (a.hasCuit !== b.hasCuit) {
-        return a.hasCuit ? -1 : 1;
-      }
-      return a.dateDiff - b.dateDiff;
-    });
-
-    return matches.map(m => ({ pago: m.pago, reasons: m.reasons }));
-  }
-
-  /**
-   * Finds facturas matching amount, date, and CUIT/keyword criteria
-   * Supports cross-currency matching for USD facturas
-   * For direct debits without CUIT, falls back to keyword matching
-   */
-  private findMatchingFacturas(
-    amount: number,
-    bankFecha: Date | null,
-    bankFechaValor: Date | null,
-    extractedCuit: string | undefined,
-    bankConcepto: string,
-    facturas: Array<Factura & { row: number }>
-  ): Array<{ factura: Factura & { row: number }; reasons: string[]; matchType: 'cuit' | 'keyword' }> {
-    const matches: Array<{ factura: Factura & { row: number }; reasons: string[]; hasCuit: boolean; hasKeyword: boolean; keywordScore: number; dateDiff: number }> = [];
-
-    // Check if this is a direct debit (for keyword matching fallback)
-    const isDirectDebitMovement = isDirectDebit(bankConcepto);
-
+    // --- Facturas ---
     for (const factura of facturas) {
-      // Check amount match (supports cross-currency for USD facturas)
       const crossCurrencyResult = amountsMatchCrossCurrency(
-        factura.importeTotal,
-        factura.moneda,
-        factura.fechaEmision,
-        amount,
-        this.crossCurrencyTolerancePercent
+        factura.importeTotal, factura.moneda, factura.fechaEmision,
+        amount, this.crossCurrencyTolerancePercent
       );
+      if (!crossCurrencyResult.matches) continue;
 
-      if (!crossCurrencyResult.matches) {
-        continue;
-      }
-
-      // Parse factura date
       const facturaDate = parseArgDate(factura.fechaEmision);
-      if (!facturaDate) {
-        continue;
-      }
+      if (!facturaDate) continue;
+      if (!isWithinDays(facturaDate, bankFecha, FACTURA_DATE_RANGE_BEFORE, FACTURA_DATE_RANGE_AFTER)) continue;
 
-      // Check date match (bank date should be after or near factura date)
-      let dateMatches = false;
-      let dateDiff = 999;
+      // Hard CUIT filter
+      if (hasCuitFilter && factura.cuitEmisor !== extractedCuit) continue;
 
-      if (bankFecha && isWithinDays(facturaDate, bankFecha, FACTURA_DATE_RANGE_BEFORE, FACTURA_DATE_RANGE_AFTER)) {
-        dateMatches = true;
-        dateDiff = Math.min(dateDiff, Math.abs(Math.floor((bankFecha.getTime() - facturaDate.getTime()) / (1000 * 60 * 60 * 24))));
-      }
-      if (bankFechaValor && isWithinDays(facturaDate, bankFechaValor, FACTURA_DATE_RANGE_BEFORE, FACTURA_DATE_RANGE_AFTER)) {
-        dateMatches = true;
-        dateDiff = Math.min(dateDiff, Math.abs(Math.floor((bankFechaValor.getTime() - facturaDate.getTime()) / (1000 * 60 * 60 * 24))));
-      }
-
-      if (!dateMatches) {
-        continue;
-      }
-
+      const dateDiff = dateDiffDays(bankFecha, facturaDate);
+      const isCrossCurrency = factura.moneda === 'USD';
       const reasons: string[] = [];
       if (crossCurrencyResult.isCrossCurrency) {
         reasons.push('Cross-currency match (USD→ARS)');
@@ -499,294 +473,93 @@ export class BankMovementMatcher {
       }
       reasons.push(`Date match: Factura ${factura.fechaEmision}`);
 
-      // Check CUIT match (preferred for direct factura match)
-      let hasCuit = false;
+      // Determine tier
+      let tier: BankMatchTier;
       if (extractedCuit && factura.cuitEmisor === extractedCuit) {
-        hasCuit = true;
+        tier = 2;
         reasons.push('CUIT match with emisor');
-      }
-
-      // For direct debits without CUIT, try keyword matching
-      let hasKeyword = false;
-      let keywordScore = 0;
-      if (!hasCuit && isDirectDebitMovement) {
-        keywordScore = calculateKeywordMatchScore(
-          bankConcepto,
-          factura.razonSocialEmisor,
-          factura.concepto
+      } else {
+        // Try keyword matching (applies to ALL movements, not just direct debits)
+        const keywordScore = calculateKeywordMatchScore(
+          movement.concepto, factura.razonSocialEmisor, factura.concepto
         );
         if (keywordScore >= MIN_KEYWORD_MATCH_SCORE) {
-          hasKeyword = true;
+          tier = 4;
           reasons.push(`Keyword match (score: ${keywordScore})`);
-          reasons.push('Direct debit without CUIT');
+        } else {
+          tier = 5;
         }
       }
 
-      // Only include if CUIT matches OR keyword matches (for direct debits)
-      if (!hasCuit && !hasKeyword) {
-        continue;
-      }
+      const description = this.formatDebitFacturaDescription(factura);
+      const confidence = tierToConfidence(tier, isCrossCurrency);
 
-      matches.push({ factura, reasons, hasCuit, hasKeyword, keywordScore, dateDiff });
+      candidates.push({
+        tier,
+        matchType: 'direct_factura',
+        fileId: factura.fileId,
+        description,
+        confidence,
+        reasons: [...reasons, 'Direct Factura match'],
+        dateDiff,
+        isExactAmount: !crossCurrencyResult.isCrossCurrency,
+      });
     }
 
-    // Sort by: CUIT match first, then keyword score, then date proximity
-    matches.sort((a, b) => {
-      // CUIT matches always come first
-      if (a.hasCuit !== b.hasCuit) {
-        return a.hasCuit ? -1 : 1;
-      }
-      // For keyword matches, higher score is better
-      if (a.hasKeyword && b.hasKeyword && a.keywordScore !== b.keywordScore) {
-        return b.keywordScore - a.keywordScore;
-      }
-      // Finally, sort by date proximity
-      return a.dateDiff - b.dateDiff;
+    // --- Recibos ---
+    for (const recibo of recibos) {
+      if (!amountsMatch(recibo.totalNeto, amount)) continue;
+      const reciboDate = parseArgDate(recibo.fechaPago);
+      if (!reciboDate) continue;
+      if (!isWithinDays(reciboDate, bankFecha, FACTURA_DATE_RANGE_BEFORE, FACTURA_DATE_RANGE_AFTER)) continue;
+
+      // Hard CUIT filter — recibos don't have a counterparty CUIT to match
+      if (hasCuitFilter) continue;
+
+      const dateDiff = dateDiffDays(bankFecha, reciboDate);
+      const description = `Sueldo ${recibo.periodoAbonado} - ${recibo.nombreEmpleado}`;
+
+      candidates.push({
+        tier: 5,
+        matchType: 'recibo',
+        fileId: recibo.fileId,
+        description,
+        confidence: 'HIGH',
+        reasons: [`Amount match: ${amount}`, `Date match: Recibo ${recibo.fechaPago}`, `Employee: ${recibo.nombreEmpleado}`],
+        dateDiff,
+        isExactAmount: true,
+      });
+    }
+
+    // Phase 4: Sort candidates by tier (lower wins), then date distance, then exact amount
+    candidates.sort((a, b) => {
+      if (a.tier !== b.tier) return a.tier - b.tier;
+      if (a.dateDiff !== b.dateDiff) return a.dateDiff - b.dateDiff;
+      if (a.isExactAmount !== b.isExactAmount) return a.isExactAmount ? -1 : 1;
+      return 0;
     });
 
-    return matches.map(m => ({
-      factura: m.factura,
-      reasons: m.reasons,
-      matchType: m.hasCuit ? 'cuit' as const : 'keyword' as const
-    }));
-  }
-
-  /**
-   * Finds recibos matching amount and date criteria
-   */
-  private findMatchingRecibos(
-    amount: number,
-    bankFecha: Date | null,
-    bankFechaValor: Date | null,
-    recibos: Array<Recibo & { row: number }>
-  ): Array<{ recibo: Recibo & { row: number }; reasons: string[] }> {
-    const matches: Array<{ recibo: Recibo & { row: number }; reasons: string[]; dateDiff: number }> = [];
-
-    for (const recibo of recibos) {
-      // Check amount match (use totalNeto for salary)
-      if (!amountsMatch(recibo.totalNeto, amount)) {
-        continue;
-      }
-
-      // Parse recibo date
-      const reciboDate = parseArgDate(recibo.fechaPago);
-      if (!reciboDate) {
-        continue;
-      }
-
-      // Check date match
-      let dateMatches = false;
-      let dateDiff = 999;
-
-      if (bankFecha && isWithinDays(reciboDate, bankFecha, FACTURA_DATE_RANGE_BEFORE, FACTURA_DATE_RANGE_AFTER)) {
-        dateMatches = true;
-        dateDiff = Math.min(dateDiff, Math.abs(Math.floor((bankFecha.getTime() - reciboDate.getTime()) / (1000 * 60 * 60 * 24))));
-      }
-      if (bankFechaValor && isWithinDays(reciboDate, bankFechaValor, FACTURA_DATE_RANGE_BEFORE, FACTURA_DATE_RANGE_AFTER)) {
-        dateMatches = true;
-        dateDiff = Math.min(dateDiff, Math.abs(Math.floor((bankFechaValor.getTime() - reciboDate.getTime()) / (1000 * 60 * 60 * 24))));
-      }
-
-      if (!dateMatches) {
-        continue;
-      }
-
-      const reasons: string[] = [];
-      reasons.push(`Amount match: ${amount}`);
-      reasons.push(`Date match: Recibo ${recibo.fechaPago}`);
-      reasons.push(`Employee: ${recibo.nombreEmpleado}`);
-
-      matches.push({ recibo, reasons, dateDiff });
+    if (candidates.length === 0) {
+      return this.noMatch(movement, ['No matching documents found']);
     }
 
-    // Sort by date proximity
-    matches.sort((a, b) => a.dateDiff - b.dateDiff);
-
-    return matches.map(m => ({ recibo: m.recibo, reasons: m.reasons }));
-  }
-
-  /**
-   * Creates a Pago → Factura match result (BEST)
-   */
-  private createPagoFacturaMatch(
-    movement: BankMovement,
-    pago: Pago,
-    factura: Factura,
-    extractedCuit: string | undefined,
-    reasons: string[]
-  ): BankMovementMatchResult {
-    const description = this.formatFacturaDescription(factura);
-
+    const best = candidates[0];
     return {
       movement,
-      matchType: 'pago_factura',
-      description,
-      matchedFileId: pago.fileId,
+      matchType: best.matchType,
+      description: best.description,
+      matchedFileId: best.fileId,
       extractedCuit,
-      confidence: 'HIGH',
-      reasons: [...reasons, 'Pago linked to Factura']
+      confidence: best.confidence,
+      tier: best.tier,
+      reasons: best.reasons,
     };
-  }
-
-  /**
-   * Creates a direct Factura match result
-   *
-   * @param movement - Bank movement
-   * @param factura - Matched factura
-   * @param extractedCuit - CUIT extracted from bank concepto (if any)
-   * @param reasons - Match reasons
-   * @param facturaMatchType - How the factura was matched ('cuit' or 'keyword')
-   */
-  private createDirectFacturaMatch(
-    movement: BankMovement,
-    factura: Factura,
-    extractedCuit: string | undefined,
-    reasons: string[],
-    facturaMatchType: 'cuit' | 'keyword' = 'cuit'
-  ): BankMovementMatchResult {
-    const description = this.formatFacturaDescription(factura);
-
-    // Determine base confidence
-    // Keyword matches have MEDIUM confidence (needs review)
-    // CUIT matches have HIGH confidence
-    let confidence: 'HIGH' | 'MEDIUM' | 'LOW' = facturaMatchType === 'keyword' ? 'MEDIUM' : 'HIGH';
-
-    // Cap confidence for cross-currency matches per CLAUDE.md:
-    // "With CUIT → MEDIUM max; without → LOW"
-    const isCrossCurrency = factura.moneda === 'USD';
-    if (isCrossCurrency) {
-      if (facturaMatchType === 'cuit') {
-        confidence = 'MEDIUM'; // Cap HIGH to MEDIUM for cross-currency with CUIT
-      } else {
-        confidence = 'LOW'; // Cap MEDIUM to LOW for cross-currency without CUIT (keyword match)
-      }
-    }
-
-    const matchTypeLabel = facturaMatchType === 'keyword'
-      ? 'Direct Factura match (keyword)'
-      : 'Direct Factura match';
-
-    return {
-      movement,
-      matchType: 'direct_factura',
-      description,
-      matchedFileId: factura.fileId,
-      extractedCuit,
-      confidence,
-      reasons: [...reasons, matchTypeLabel]
-    };
-  }
-
-  /**
-   * Creates a Recibo match result
-   */
-  private createReciboMatch(
-    movement: BankMovement,
-    recibo: Recibo,
-    extractedCuit: string | undefined,
-    reasons: string[]
-  ): BankMovementMatchResult {
-    const description = `Sueldo ${recibo.periodoAbonado} - ${recibo.nombreEmpleado}`;
-
-    return {
-      movement,
-      matchType: 'recibo',
-      description,
-      matchedFileId: recibo.fileId,
-      extractedCuit,
-      confidence: 'HIGH',
-      reasons
-    };
-  }
-
-  /**
-   * Creates a Pago-only match result (REVISAR)
-   */
-  private createPagoOnlyMatch(
-    movement: BankMovement,
-    pago: Pago,
-    extractedCuit: string | undefined,
-    reasons: string[]
-  ): BankMovementMatchResult {
-    const name = pago.nombreBeneficiario || 'Desconocido';
-    const cuit = pago.cuitBeneficiario ? ` ${pago.cuitBeneficiario}` : '';
-    const concepto = pago.concepto ? ` (${pago.concepto})` : '';
-    const description = `REVISAR! Pago a ${name}${cuit}${concepto}`.trim();
-
-    return {
-      movement,
-      matchType: 'pago_only',
-      description,
-      matchedFileId: pago.fileId,
-      extractedCuit,
-      confidence: 'LOW',
-      reasons: [...reasons, 'Pago without linked Factura']
-    };
-  }
-
-  /**
-   * Creates a no-match result
-   */
-  private noMatch(movement: BankMovement, reasons: string[]): BankMovementMatchResult {
-    return {
-      movement,
-      matchType: 'no_match',
-      description: '',
-      matchedFileId: '',
-      confidence: 'LOW',
-      reasons
-    };
-  }
-
-  /**
-   * Creates a bank fee match result
-   */
-  private createBankFeeMatch(movement: BankMovement): BankMovementMatchResult {
-    return {
-      movement,
-      matchType: 'bank_fee',
-      description: 'Gastos bancarios',
-      matchedFileId: '',
-      confidence: 'HIGH',
-      reasons: ['Bank fee pattern detected']
-    };
-  }
-
-  /**
-   * Creates a credit card payment match result
-   */
-  private createCreditCardPaymentMatch(movement: BankMovement): BankMovementMatchResult {
-    return {
-      movement,
-      matchType: 'credit_card_payment',
-      description: 'Pago de tarjeta de credito',
-      matchedFileId: '',
-      confidence: 'HIGH',
-      reasons: ['Credit card payment pattern detected']
-    };
-  }
-
-  /**
-   * Formats a Factura description
-   */
-  private formatFacturaDescription(factura: Factura): string {
-    const razonSocial = factura.razonSocialEmisor || 'Proveedor';
-    const concepto = factura.concepto || '';
-
-    if (concepto) {
-      return `Pago Factura a ${razonSocial} - ${concepto}`;
-    }
-    return `Pago Factura a ${razonSocial}`;
   }
 
   /**
    * Matches a credit movement (money coming IN to ADVA) against Facturas Emitidas and Pagos Recibidos
    *
-   * Priority:
-   * 1. Pago Recibido with linked Factura Emitida (BEST)
-   * 2. Direct Factura Emitida match (with retencion tolerance)
-   * 3. Pago Recibido without linked Factura (REVISAR)
-   * 4. No match
+   * Uses the same tier-based algorithm as matchMovement but for the Ingresos pool.
    *
    * @param movement - Bank movement with credito amount
    * @param facturasEmitidas - All Facturas Emitidas from Control de Ingresos
@@ -795,17 +568,16 @@ export class BankMovementMatcher {
    * @returns Match result with generated description and matchedFileId
    */
   matchCreditMovement(
-    movement: BankMovement,
+    movement: MovimientoRow,
     facturasEmitidas: Array<Factura & { row: number }>,
     pagosRecibidos: Array<Pago & { row: number }>,
     retenciones: Array<Retencion & { row: number }>
   ): BankMovementMatchResult {
-    // Priority 0: Check for bank fees FIRST (can be debito or credito)
+    // Phase 0: Auto-detect
     if (isBankFee(movement.concepto)) {
       return this.createBankFeeMatch(movement);
     }
 
-    // Priority 0.5: Check for credit card payments
     if (isCreditCardPayment(movement.concepto)) {
       return this.createCreditCardPaymentMatch(movement);
     }
@@ -815,248 +587,128 @@ export class BankMovementMatcher {
       return this.noMatchCredit(movement, ['No credit amount']);
     }
 
-    // Extract CUIT from concepto
+    // Phase 1: Extract identity
     const extractedCuit = extractCuitFromConcepto(movement.concepto);
 
-    // Parse bank dates
     const bankFecha = parseArgDate(movement.fecha);
     if (!bankFecha) {
       return this.noMatchCredit(movement, ['No valid date in movement']);
     }
 
-    // Step 1: Try to find matching Pagos Recibidos (tight date range: ±1 day)
-    const matchingPagos = this.findMatchingPagosRecibidos(
-      amount,
-      bankFecha,
-      extractedCuit,
-      pagosRecibidos
-    );
+    const hasCuitFilter = !!extractedCuit;
+    const candidates: TieredCandidate[] = [];
 
-    // Step 2: Check if any Pago has a linked Factura Emitida (BEST MATCH)
-    for (const pagoMatch of matchingPagos) {
-      if (pagoMatch.pago.matchedFacturaFileId) {
-        const linkedFactura = facturasEmitidas.find(
-          f => f.fileId === pagoMatch.pago.matchedFacturaFileId
-        );
-        if (linkedFactura) {
-          return this.createPagoFacturaMatchCredit(
-            movement,
-            pagoMatch.pago,
-            linkedFactura,
-            extractedCuit,
-            pagoMatch.reasons
-          );
-        }
-      }
-    }
-
-    // Step 3: Try direct Factura Emitida match (with retencion tolerance)
-    const matchingFacturas = this.findMatchingFacturasEmitidas(
-      amount,
-      bankFecha,
-      extractedCuit,
-      facturasEmitidas,
-      retenciones
-    );
-
-    if (matchingFacturas.length > 0) {
-      const bestFactura = matchingFacturas[0];
-      return this.createDirectFacturaMatchCredit(
-        movement,
-        bestFactura.factura,
-        extractedCuit,
-        bestFactura.reasons,
-        bestFactura.usedRetenciones
-      );
-    }
-
-    // Step 4: Pago Recibido without linked Factura (REVISAR)
-    if (matchingPagos.length > 0) {
-      const bestPago = matchingPagos[0];
-      return this.createPagoOnlyMatchCredit(
-        movement,
-        bestPago.pago,
-        extractedCuit,
-        bestPago.reasons
-      );
-    }
-
-    // No match
-    return this.noMatchCredit(movement, ['No matching factura or pago found']);
-  }
-
-  /**
-   * Compares two matches to determine which is better
-   * Used for replacement logic when a movimiento already has a match
-   *
-   * @param existing - Quality metrics of existing match
-   * @param candidate - Quality metrics of candidate match
-   * @returns 'existing' if existing is better or equal, 'candidate' if candidate is better
-   */
-  compareMatches(
-    existing: MatchQuality,
-    candidate: MatchQuality
-  ): 'existing' | 'candidate' {
-    // 1. CUIT match beats no CUIT match
-    if (candidate.hasCuitMatch && !existing.hasCuitMatch) return 'candidate';
-    if (!candidate.hasCuitMatch && existing.hasCuitMatch) return 'existing';
-
-    // 2. Closer date wins (when CUIT match is equal)
-    if (candidate.dateDistance < existing.dateDistance) return 'candidate';
-    if (candidate.dateDistance > existing.dateDistance) return 'existing';
-
-    // 3. Exact amount beats tolerance match
-    if (candidate.isExactAmount && !existing.isExactAmount) return 'candidate';
-    if (!candidate.isExactAmount && existing.isExactAmount) return 'existing';
-
-    // 4. Has linked pago beats no linked pago
-    if (candidate.hasLinkedPago && !existing.hasLinkedPago) return 'candidate';
-    if (!candidate.hasLinkedPago && existing.hasLinkedPago) return 'existing';
-
-    // Equal quality - keep existing (no churn)
-    return 'existing';
-  }
-
-  /**
-   * Finds matching Pagos Recibidos for a credit movement
-   */
-  private findMatchingPagosRecibidos(
-    amount: number,
-    bankFecha: Date,
-    extractedCuit: string | undefined,
-    pagos: Array<Pago & { row: number }>
-  ): Array<{ pago: Pago & { row: number }; reasons: string[] }> {
-    const matches: Array<{
-      pago: Pago & { row: number };
-      reasons: string[];
-      hasCuit: boolean;
-      dateDiff: number;
-    }> = [];
-
-    for (const pago of pagos) {
+    // --- Pagos Recibidos ---
+    for (const pago of pagosRecibidos) {
       const pagoFecha = parseArgDate(pago.fechaPago);
       if (!pagoFecha) continue;
+      if (!isWithinDays(bankFecha, pagoFecha, PAGO_DATE_RANGE, PAGO_DATE_RANGE)) continue;
 
-      // Check date range (tight: ±1 day)
-      if (!isWithinDays(bankFecha, pagoFecha, PAGO_DATE_RANGE, PAGO_DATE_RANGE)) {
-        continue;
-      }
+      // Use cross-currency matching for pagos recibidos
+      const amountOk = amountsMatchCrossCurrency(
+        pago.importePagado, pago.moneda || 'ARS', pago.fechaPago,
+        amount, this.crossCurrencyTolerancePercent
+      );
+      if (!amountOk.matches) continue;
 
-      // Check amount
-      const amountMatches = amountsMatch(amount, pago.importePagado, this.crossCurrencyTolerancePercent);
-      if (!amountMatches) continue;
+      // Hard CUIT filter
+      if (hasCuitFilter && pago.cuitPagador !== extractedCuit) continue;
 
-      const dateDiff = Math.abs(bankFecha.getTime() - pagoFecha.getTime()) / (1000 * 60 * 60 * 24);
-      const reasons: string[] = [];
-      reasons.push('Amount match');
-      reasons.push(`Date within ±${PAGO_DATE_RANGE} days`);
-
-      // Check CUIT match
-      let hasCuit = false;
+      const dateDiff = dateDiffDays(bankFecha, pagoFecha);
+      const reasons = ['Amount match', `Date within ±${PAGO_DATE_RANGE} days`];
       if (extractedCuit && pago.cuitPagador === extractedCuit) {
-        hasCuit = true;
         reasons.push('CUIT match');
       }
 
-      matches.push({ pago, reasons, hasCuit, dateDiff });
+      // Check for linked factura (Tier 1)
+      if (pago.matchedFacturaFileId) {
+        const linkedFactura = facturasEmitidas.find(f => f.fileId === pago.matchedFacturaFileId);
+        if (linkedFactura) {
+          const isCrossCurrency = linkedFactura.moneda === 'USD';
+          const cliente = linkedFactura.razonSocialReceptor || 'Cliente';
+          const concepto = linkedFactura.concepto || '';
+          const description = concepto
+            ? `Cobro Factura de ${cliente} - ${concepto}`
+            : `Cobro Factura de ${cliente}`;
+          const confidence = isCrossCurrency ? 'MEDIUM' : 'HIGH';
+
+          if (isCrossCurrency) {
+            reasons.push('Cross-currency match (USD→ARS)');
+          }
+
+          candidates.push({
+            tier: 1,
+            matchType: 'pago_factura',
+            fileId: pago.fileId,
+            description,
+            confidence,
+            reasons: [...reasons, 'Pago with linked Factura'],
+            dateDiff,
+            isExactAmount: !amountOk.isCrossCurrency,
+          });
+          continue;
+        }
+      }
+
+      // Pago without linked factura (REVISAR)
+      const pagador = pago.nombrePagador || 'Desconocido';
+      const description = `REVISAR! Cobro de ${pagador}`;
+      const tier: BankMatchTier = extractedCuit && pago.cuitPagador === extractedCuit ? 2 : 5;
+
+      candidates.push({
+        tier,
+        matchType: 'pago_only',
+        fileId: pago.fileId,
+        description,
+        confidence: 'MEDIUM',
+        reasons: [...reasons, 'Pago without linked Factura'],
+        dateDiff,
+        isExactAmount: !amountOk.isCrossCurrency,
+      });
     }
 
-    // Sort by CUIT match first, then by date proximity
-    matches.sort((a, b) => {
-      if (a.hasCuit !== b.hasCuit) {
-        return a.hasCuit ? -1 : 1;
-      }
-      return a.dateDiff - b.dateDiff;
-    });
-
-    return matches.map(m => ({ pago: m.pago, reasons: m.reasons }));
-  }
-
-  /**
-   * Finds matching Facturas Emitidas for a credit movement (with retencion tolerance)
-   */
-  private findMatchingFacturasEmitidas(
-    amount: number,
-    bankFecha: Date,
-    extractedCuit: string | undefined,
-    facturas: Array<Factura & { row: number }>,
-    retenciones: Array<Retencion & { row: number }>
-  ): Array<{
-    factura: Factura & { row: number };
-    reasons: string[];
-    usedRetenciones: Array<Retencion & { row: number }>;
-  }> {
-    const matches: Array<{
-      factura: Factura & { row: number };
-      reasons: string[];
-      usedRetenciones: Array<Retencion & { row: number }>;
-      hasCuit: boolean;
-      dateDiff: number;
-      isExactAmount: boolean;
-    }> = [];
-
-    for (const factura of facturas) {
+    // --- Facturas Emitidas (with retencion tolerance) ---
+    for (const factura of facturasEmitidas) {
       const facturaFecha = parseArgDate(factura.fechaEmision);
       if (!facturaFecha) continue;
+      if (!isWithinDays(facturaFecha, bankFecha, FACTURA_DATE_RANGE_BEFORE, FACTURA_DATE_RANGE_AFTER)) continue;
 
-      // Check date range for credits: factura before movement (customer pays after invoice)
-      // Allow factura up to 30 days before movement, or up to 5 days after (for date recording issues)
-      if (!isWithinDays(facturaFecha, bankFecha, FACTURA_DATE_RANGE_BEFORE, FACTURA_DATE_RANGE_AFTER)) {
-        continue;
-      }
+      // Hard CUIT filter
+      if (hasCuitFilter && factura.cuitReceptor !== extractedCuit) continue;
 
-      // Find related retenciones (same CUIT, within 90 days after factura)
-      const relatedRetenciones = this.findRelatedRetenciones(
-        factura,
-        facturaFecha,
-        retenciones
-      );
-
+      // Find related retenciones
+      const relatedRetenciones = this.findRelatedRetenciones(factura, facturaFecha, retenciones);
       const retencionSum = this.sumRetenciones(relatedRetenciones);
 
-      // Check if amount + retenciones ≈ factura total
-      const amountWithRetenciones = amount + retencionSum;
-
-      // Try direct amount match first (no retenciones needed)
+      // Try direct amount match
       let amountMatches = false;
       const isCrossCurrency = factura.moneda === 'USD';
 
       if (factura.moneda === 'ARS') {
         amountMatches = amountsMatch(amount, factura.importeTotal, this.crossCurrencyTolerancePercent);
       } else if (factura.moneda === 'USD') {
-        // Cross-currency matching (USD factura, ARS payment)
         const matchResult = amountsMatchCrossCurrency(
-          factura.importeTotal,
-          factura.moneda,
-          factura.fechaEmision,
-          amount,
-          this.crossCurrencyTolerancePercent
+          factura.importeTotal, factura.moneda, factura.fechaEmision,
+          amount, this.crossCurrencyTolerancePercent
         );
         amountMatches = matchResult.matches;
       }
 
-      // If direct match fails, try with retencion tolerance
+      // Try with retencion tolerance
       let usedRetenciones: Array<Retencion & { row: number }> = [];
       let matchType: 'exact' | 'with_retenciones' = 'exact';
 
       if (!amountMatches && retencionSum > 0) {
+        const amountWithRetenciones = amount + retencionSum;
         if (factura.moneda === 'ARS') {
-          amountMatches = amountsMatch(
-            amountWithRetenciones,
-            factura.importeTotal,
-            this.crossCurrencyTolerancePercent
-          );
+          amountMatches = amountsMatch(amountWithRetenciones, factura.importeTotal, this.crossCurrencyTolerancePercent);
         } else if (factura.moneda === 'USD') {
           const matchResult = amountsMatchCrossCurrency(
-            factura.importeTotal,
-            factura.moneda,
-            factura.fechaEmision,
-            amountWithRetenciones,
-            this.crossCurrencyTolerancePercent
+            factura.importeTotal, factura.moneda, factura.fechaEmision,
+            amountWithRetenciones, this.crossCurrencyTolerancePercent
           );
           amountMatches = matchResult.matches;
         }
-
         if (amountMatches) {
           usedRetenciones = relatedRetenciones;
           matchType = 'with_retenciones';
@@ -1065,52 +717,89 @@ export class BankMovementMatcher {
 
       if (!amountMatches) continue;
 
-      const dateDiff = Math.abs(bankFecha.getTime() - facturaFecha.getTime()) / (1000 * 60 * 60 * 24);
+      const dateDiff = dateDiffDays(bankFecha, facturaFecha);
       const reasons: string[] = [];
       reasons.push(matchType === 'exact' ? 'Exact amount match' : 'Amount + retenciones match');
       reasons.push('Date within range');
-
       if (isCrossCurrency) {
         reasons.push('Cross-currency match (USD→ARS)');
       }
 
-      // Check CUIT match
-      let hasCuit = false;
-      if (extractedCuit && factura.cuitReceptor === extractedCuit) {
-        hasCuit = true;
-        reasons.push('CUIT match');
+      // CUIT match check
+      const hasCuit = !!(extractedCuit && factura.cuitReceptor === extractedCuit);
+      if (hasCuit) reasons.push('CUIT match');
+      const hasImplicitCuitMatch = usedRetenciones.length > 0;
+
+      // Determine tier
+      let tier: BankMatchTier;
+      if (hasCuit || hasImplicitCuitMatch) {
+        tier = 2;
+      } else {
+        // Try keyword matching (applies to ALL movements)
+        const keywordScore = calculateKeywordMatchScore(
+          movement.concepto, factura.razonSocialReceptor ?? '', factura.concepto
+        );
+        if (keywordScore >= MIN_KEYWORD_MATCH_SCORE) {
+          tier = 4;
+          reasons.push(`Keyword match (score: ${keywordScore})`);
+        } else {
+          tier = 5;
+        }
       }
 
-      matches.push({
-        factura,
+      // Build description
+      const cliente = factura.razonSocialReceptor || 'Cliente';
+      const concepto = factura.concepto || '';
+      let description = concepto
+        ? `Cobro Factura de ${cliente} - ${concepto}`
+        : `Cobro Factura de ${cliente}`;
+      if (usedRetenciones.length > 0) {
+        description += ` (con retencion)`;
+      }
+
+      // Confidence
+      let confidence: 'HIGH' | 'MEDIUM' | 'LOW';
+      if (isCrossCurrency) {
+        confidence = (hasCuit || hasImplicitCuitMatch) ? 'MEDIUM' : 'LOW';
+      } else {
+        confidence = (hasCuit || hasImplicitCuitMatch) ? 'HIGH' : 'MEDIUM';
+      }
+
+      candidates.push({
+        tier,
+        matchType: 'direct_factura',
+        fileId: factura.fileId,
+        description,
+        confidence,
         reasons,
-        usedRetenciones,
-        hasCuit,
         dateDiff,
         isExactAmount: matchType === 'exact',
       });
     }
 
-    // Sort by CUIT match first, then date proximity, then exact amount
-    matches.sort((a, b) => {
-      if (a.hasCuit !== b.hasCuit) {
-        return a.hasCuit ? -1 : 1;
-      }
-      if (a.dateDiff !== b.dateDiff) {
-        return a.dateDiff - b.dateDiff;
-      }
-      // Prefer exact amount match over retencion-adjusted match
-      if (a.isExactAmount !== b.isExactAmount) {
-        return a.isExactAmount ? -1 : 1;
-      }
+    // Sort by tier, then date, then exact amount
+    candidates.sort((a, b) => {
+      if (a.tier !== b.tier) return a.tier - b.tier;
+      if (a.dateDiff !== b.dateDiff) return a.dateDiff - b.dateDiff;
+      if (a.isExactAmount !== b.isExactAmount) return a.isExactAmount ? -1 : 1;
       return 0;
     });
 
-    return matches.map(m => ({
-      factura: m.factura,
-      reasons: m.reasons,
-      usedRetenciones: m.usedRetenciones,
-    }));
+    if (candidates.length === 0) {
+      return this.noMatchCredit(movement, ['No matching factura or pago found']);
+    }
+
+    const best = candidates[0];
+    return {
+      movement,
+      matchType: best.matchType,
+      description: best.description,
+      matchedFileId: best.fileId,
+      extractedCuit,
+      confidence: best.confidence,
+      tier: best.tier,
+      reasons: best.reasons,
+    };
   }
 
   /**
@@ -1124,12 +813,10 @@ export class BankMovementMatcher {
     const related: Array<Retencion & { row: number }> = [];
 
     for (const retencion of retenciones) {
-      // Check CUIT match
       if (retencion.cuitAgenteRetencion !== factura.cuitReceptor) {
         continue;
       }
 
-      // Check date range (up to 90 days AFTER factura)
       const retencionFecha = parseArgDate(retencion.fechaEmision);
       if (!retencionFecha) continue;
 
@@ -1137,7 +824,6 @@ export class BankMovementMatcher {
         (retencionFecha.getTime() - facturaFecha.getTime()) / (1000 * 60 * 60 * 24)
       );
 
-      // Retencion must be on or after factura date, but not more than 90 days after
       if (daysDiff < 0 || daysDiff > RETENCION_DATE_RANGE_DAYS) {
         continue;
       }
@@ -1156,116 +842,63 @@ export class BankMovementMatcher {
   }
 
   /**
-   * Creates a Pago + Factura match result for credit movements
+   * Formats a debit Factura description (Pago Factura a ...)
    */
-  private createPagoFacturaMatchCredit(
-    movement: BankMovement,
-    pago: Pago & { row: number },
-    factura: Factura,
-    extractedCuit: string | undefined,
-    reasons: string[]
-  ): BankMovementMatchResult {
-    const cliente = factura.razonSocialReceptor || 'Cliente';
+  private formatDebitFacturaDescription(factura: Factura): string {
+    const razonSocial = factura.razonSocialEmisor || 'Proveedor';
     const concepto = factura.concepto || '';
-    const description = concepto
-      ? `Cobro Factura de ${cliente} - ${concepto}`
-      : `Cobro Factura de ${cliente}`;
-
-    // Check for cross-currency
-    const isCrossCurrency = factura.moneda === 'USD';
-    const confidence = isCrossCurrency ? 'MEDIUM' : 'HIGH';
-
-    if (isCrossCurrency) {
-      reasons.push('Cross-currency match (USD→ARS)');
+    if (concepto) {
+      return `Pago Factura a ${razonSocial} - ${concepto}`;
     }
-
-    return {
-      movement,
-      matchType: 'pago_factura',
-      description,
-      matchedFileId: pago.fileId,
-      extractedCuit,
-      confidence,
-      reasons: [...reasons, 'Pago with linked Factura']
-    };
+    return `Pago Factura a ${razonSocial}`;
   }
 
   /**
-   * Creates a direct Factura match result for credit movements
+   * Creates a no-match result
    */
-  private createDirectFacturaMatchCredit(
-    movement: BankMovement,
-    factura: Factura & { row: number },
-    extractedCuit: string | undefined,
-    reasons: string[],
-    usedRetenciones: Array<Retencion & { row: number }>
-  ): BankMovementMatchResult {
-    const cliente = factura.razonSocialReceptor || 'Cliente';
-    const concepto = factura.concepto || '';
-
-    let description = concepto
-      ? `Cobro Factura de ${cliente} - ${concepto}`
-      : `Cobro Factura de ${cliente}`;
-
-    if (usedRetenciones.length > 0) {
-      description += ` (con retencion)`;
-    }
-
-    // Check for cross-currency and CUIT match
-    const isCrossCurrency = factura.moneda === 'USD';
-    const hasCuitMatch = reasons.includes('CUIT match');
-
-    // If we matched retenciones, that implies CUIT match (retenciones are matched by CUIT)
-    const hasImplicitCuitMatch = usedRetenciones.length > 0;
-
-    let confidence: 'HIGH' | 'MEDIUM' | 'LOW' = 'MEDIUM';
-
-    if (isCrossCurrency) {
-      // Cross-currency: MEDIUM max with CUIT (explicit or implicit), LOW without
-      confidence = (hasCuitMatch || hasImplicitCuitMatch) ? 'MEDIUM' : 'LOW';
-    } else {
-      // Same currency: HIGH with CUIT (explicit or implicit), MEDIUM without
-      confidence = (hasCuitMatch || hasImplicitCuitMatch) ? 'HIGH' : 'MEDIUM';
-    }
-
+  private noMatch(movement: MovimientoRow, reasons: string[]): BankMovementMatchResult {
     return {
       movement,
-      matchType: 'direct_factura',
-      description,
-      matchedFileId: factura.fileId,
-      extractedCuit,
-      confidence,
+      matchType: 'no_match',
+      description: '',
+      matchedFileId: '',
+      confidence: 'LOW',
       reasons
     };
   }
 
   /**
-   * Creates a Pago-only match result for credit movements (REVISAR)
+   * Creates a bank fee match result
    */
-  private createPagoOnlyMatchCredit(
-    movement: BankMovement,
-    pago: Pago & { row: number },
-    extractedCuit: string | undefined,
-    reasons: string[]
-  ): BankMovementMatchResult {
-    const pagador = pago.nombrePagador || 'Desconocido';
-    const description = `REVISAR! Cobro de ${pagador}`;
-
+  private createBankFeeMatch(movement: MovimientoRow): BankMovementMatchResult {
     return {
       movement,
-      matchType: 'pago_only',
-      description,
-      matchedFileId: pago.fileId,
-      extractedCuit,
-      confidence: 'MEDIUM',
-      reasons: [...reasons, 'Pago without linked Factura']
+      matchType: 'bank_fee',
+      description: 'Gastos bancarios',
+      matchedFileId: '',
+      confidence: 'HIGH',
+      reasons: ['Bank fee pattern detected']
+    };
+  }
+
+  /**
+   * Creates a credit card payment match result
+   */
+  private createCreditCardPaymentMatch(movement: MovimientoRow): BankMovementMatchResult {
+    return {
+      movement,
+      matchType: 'credit_card_payment',
+      description: 'Pago de tarjeta de credito',
+      matchedFileId: '',
+      confidence: 'HIGH',
+      reasons: ['Credit card payment pattern detected']
     };
   }
 
   /**
    * Creates a no-match result for credit movements
    */
-  private noMatchCredit(movement: BankMovement, reasons: string[]): BankMovementMatchResult {
+  private noMatchCredit(movement: MovimientoRow, reasons: string[]): BankMovementMatchResult {
     return {
       movement,
       matchType: 'no_match',
@@ -1279,13 +912,14 @@ export class BankMovementMatcher {
 
 /**
  * Match quality metrics for comparison
+ * Uses tier-based ranking: lower tier = better match
  */
 export interface MatchQuality {
   fileId: string;
-  /** Confidence level: HIGH > MEDIUM > LOW (ADV-34) */
-  confidence: 'HIGH' | 'MEDIUM' | 'LOW';
-  hasCuitMatch: boolean;
+  /** Match tier (1-5, lower is better) */
+  tier: BankMatchTier;
+  /** Date distance in days between movement and document */
   dateDistance: number;
+  /** Whether the amount matched exactly (vs tolerance) */
   isExactAmount: boolean;
-  hasLinkedPago: boolean;
 }

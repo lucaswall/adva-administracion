@@ -41,7 +41,6 @@ export function createMenu(): void {
   ui.createMenu('ADVA')
     .addItem('🔄 Trigger Scan', 'triggerScan')
     .addItem('🔗 Trigger Re-match', 'triggerRematch')
-    .addItem('🏦 Auto-fill Bank Data', 'triggerAutofillBank')
     .addItem('📝 Completar Detalles Movimientos', 'triggerMatchMovimientos')
     .addSeparator()
     .addItem('ℹ️ About', 'showAbout')
@@ -62,14 +61,6 @@ export function triggerScan(): void {
 export function triggerRematch(): void {
   const url = getApiUrl('/api/rematch');
   makeApiCall(url, 'post', null, 'Re-match triggered successfully!');
-}
-
-/**
- * Triggers automatic bank data filling
- */
-export function triggerAutofillBank(): void {
-  const url = getApiUrl('/api/autofill-bank');
-  makeApiCall(url, 'post', null, 'Bank auto-fill triggered successfully!');
 }
 
 /**

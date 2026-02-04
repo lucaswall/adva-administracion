@@ -317,7 +317,6 @@ src/
 │   └── correlation.ts
 └── bank/
     ├── matcher.ts
-    ├── autofill.ts
     └── match-movimientos.ts
 
 apps-script/              # Dashboard ADVA menu (bound script)
@@ -436,7 +435,6 @@ npm run deploy:script # Build + deploy to Dashboard
 | GET | /api/status | Yes | Status + queue info |
 | POST | /api/scan | Yes | Manual scan |
 | POST | /api/rematch | Yes | Rematch unmatched |
-| POST | /api/autofill-bank | Yes | Auto-fill bank |
 | POST | /api/match-movimientos | Yes | Match movimientos detalles (supports `?force=true` to re-match all rows) |
 | POST | /webhooks/drive | No | Drive notifications |
 
@@ -558,17 +556,25 @@ See `SPREADSHEET_FORMAT.md` for complete schema.
 
 ## MATCHING
 
-### Confidence Levels
-- **HIGH**: amount + date in range + CUIT/name match
-- **MEDIUM**: amount + date in range, no CUIT
-- **LOW**: amount + date in extended range only
+### Tier-Based Ranking
+Bank movements are matched against documents using a tier-based algorithm (lower tier = better match):
 
-### Cascading Displacement
-Better matches replace existing ones. Quality comparison: confidence → CUIT match → date proximity.
+| Tier | Criteria | Confidence |
+|------|----------|------------|
+| 1 | Pago with linked Factura | HIGH |
+| 2 | CUIT match from concepto | HIGH |
+| 3 | Referencia match | HIGH |
+| 4 | Name token score ≥ 2 | MEDIUM |
+| 5 | Amount + date only | LOW |
 
-**Termination:** max depth (10), cycle detection, timeout (30s), no better candidates.
+**Hard identity filter:** If CUIT is found in concepto, only documents with matching CUIT are considered — no fallthrough to lower tiers.
 
-Config: `MAX_CASCADE_DEPTH = 10`, `CASCADE_TIMEOUT_MS = 30000` in `src/config.ts`
+### Match Replacement
+Better matches replace existing ones. Quality comparison: tier → date proximity → exact amount.
+
+### Date Windows
+- Pago: ±15 days from bank date
+- Factura: -5/+30 days from bank date
 
 ### Cross-Currency (USD→ARS)
-Exchange rates from ArgentinaDatos API, ±5% tolerance. With CUIT → MEDIUM max; without → LOW.
+Exchange rates from ArgentinaDatos API, ±5% tolerance. Cross-currency caps: Tier 1-3 → MEDIUM, Tier 4 → LOW, Tier 5 → LOW.

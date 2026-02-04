@@ -828,32 +828,6 @@ export class ParseError extends Error {
 
 
 /**
- * Bank movement from external spreadsheet
- */
-export interface BankMovement {
-  /** Row number in external sheet (1-indexed) */
-  row: number;
-  /** Transaction date (Fecha column) */
-  fecha: string;
-  /** Value date (Fecha Valor column) */
-  fechaValor: string;
-  /** Transaction concept/description (Concepto column) */
-  concepto: string;
-  /** Bank code (Codigo column) */
-  codigo: string;
-  /** Branch (Oficina column) */
-  oficina: string;
-  /** ADVA area (Area ADVA column) */
-  areaAdva: string;
-  /** Credit amount - null if debit */
-  credito: number | null;
-  /** Debit amount - null if credit */
-  debito: number | null;
-  /** Existing detail (Detalle column) */
-  detalle: string;
-}
-
-/**
  * Row from Movimientos Bancario per-month sheets
  * Used for matching against Control de Ingresos/Egresos
  */
@@ -881,6 +855,17 @@ export interface MovimientoRow {
 }
 
 /**
+ * Bank match tier for tier-based ranking algorithm
+ * Lower tier = better match
+ * Tier 1: Pago with linked Factura
+ * Tier 2: CUIT match from concepto
+ * Tier 3: Referencia match
+ * Tier 4: Name token score >= 2
+ * Tier 5: Amount + date only
+ */
+export type BankMatchTier = 1 | 2 | 3 | 4 | 5;
+
+/**
  * Match type for bank movement matching
  */
 export type BankMatchType = 'bank_fee' | 'credit_card_payment' | 'pago_factura' | 'direct_factura' | 'recibo' | 'pago_only' | 'no_match';
@@ -890,7 +875,7 @@ export type BankMatchType = 'bank_fee' | 'credit_card_payment' | 'pago_factura' 
  */
 export interface BankMovementMatchResult {
   /** The movement that was matched */
-  movement: BankMovement;
+  movement: MovimientoRow;
   /** Type of match found */
   matchType: BankMatchType;
   /** Generated description in Spanish (empty if no match) */
@@ -901,38 +886,10 @@ export interface BankMovementMatchResult {
   extractedCuit?: string;
   /** Match confidence */
   confidence: MatchConfidence;
+  /** Match tier (1-5, lower is better) */
+  tier?: BankMatchTier;
   /** Match reasons for debugging */
   reasons: string[];
-}
-
-/**
- * Auto-fill operation result
- */
-export interface BankAutoFillResult {
-  /** Total rows processed */
-  rowsProcessed: number;
-  /** Rows filled with descriptions */
-  rowsFilled: number;
-  /** Matches for bank fees (gastos bancarios) */
-  bankFeeMatches: number;
-  /** Matches for credit card payments */
-  creditCardPaymentMatches: number;
-  /** Matches via Pago→Factura link */
-  pagoFacturaMatches: number;
-  /** Direct Factura matches */
-  directFacturaMatches: number;
-  /** Recibo matches */
-  reciboMatches: number;
-  /** Pago-only matches (REVISAR) */
-  pagoOnlyMatches: number;
-  /** Rows with no match */
-  noMatches: number;
-  /** Errors encountered */
-  errors: number;
-  /** Banks that failed to load */
-  failedBanks: string[];
-  /** Execution duration in milliseconds */
-  duration: number;
 }
 
 /**

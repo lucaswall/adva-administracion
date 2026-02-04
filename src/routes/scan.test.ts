@@ -1,6 +1,6 @@
 /**
  * Unit tests for scan routes
- * Tests POST /api/scan, /api/rematch, and /api/autofill-bank endpoints
+ * Tests POST /api/scan, /api/rematch, and /api/match-movimientos endpoints
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -24,13 +24,6 @@ vi.mock('../services/folder-structure.js', () => ({
   getCachedFolderStructure: () => mockGetCachedFolderStructure(),
   discoverFolderStructure: () => mockDiscoverFolderStructure(),
   clearFolderStructureCache: vi.fn(),
-}));
-
-// Mock bank autofill
-const mockAutoFillBankMovements = vi.fn();
-
-vi.mock('../bank/autofill.js', () => ({
-  autoFillBankMovements: (...args: unknown[]) => mockAutoFillBankMovements(...args),
 }));
 
 // Mock match-movimientos
@@ -373,136 +366,6 @@ describe('Scan routes', () => {
 
         expect(response.statusCode).toBe(200);
       }
-    });
-  });
-
-  describe('POST /api/autofill-bank', () => {
-    it('triggers a successful autofill', async () => {
-      mockAutoFillBankMovements.mockResolvedValue({
-        ok: true,
-        value: {
-          rowsProcessed: 50,
-          rowsFilled: 35,
-          bankFeeMatches: 5,
-          creditCardPaymentMatches: 2,
-          pagoFacturaMatches: 15,
-          directFacturaMatches: 3,
-          reciboMatches: 0,
-          pagoOnlyMatches: 0,
-          noMatches: 15,
-          errors: 0,
-          duration: 2000,
-        },
-      });
-
-      const response = await server.inject({
-        method: 'POST',
-        url: '/api/autofill-bank',
-        headers: {
-          authorization: 'Bearer test-secret-123',
-        },
-        payload: {},
-      });
-
-      expect(response.statusCode).toBe(200);
-      const body = JSON.parse(response.payload);
-      expect(body.rowsProcessed).toBe(50);
-      expect(body.rowsFilled).toBe(35);
-    });
-
-    it('returns 500 on autofill failure', async () => {
-      mockAutoFillBankMovements.mockResolvedValue({
-        ok: false,
-        error: new Error('Bank sheet not found'),
-      });
-
-      const response = await server.inject({
-        method: 'POST',
-        url: '/api/autofill-bank',
-        headers: {
-          authorization: 'Bearer test-secret-123',
-        },
-        payload: {},
-      });
-
-      expect(response.statusCode).toBe(500);
-      const body = JSON.parse(response.payload);
-      expect(body.error).toBe('Bank sheet not found');
-    });
-
-    it('returns 400 for empty bankName (bug #50)', async () => {
-      const response = await server.inject({
-        method: 'POST',
-        url: '/api/autofill-bank',
-        headers: {
-          authorization: 'Bearer test-secret-123',
-        },
-        payload: { bankName: '' },
-      });
-
-      expect(response.statusCode).toBe(400);
-      const body = JSON.parse(response.payload);
-      expect(body.error).toContain('bankName');
-    });
-
-    it('returns 404 for non-existent bankName (bug #50)', async () => {
-      const response = await server.inject({
-        method: 'POST',
-        url: '/api/autofill-bank',
-        headers: {
-          authorization: 'Bearer test-secret-123',
-        },
-        payload: { bankName: 'NonExistentBank' },
-      });
-
-      expect(response.statusCode).toBe(404);
-      const body = JSON.parse(response.payload);
-      expect(body.error.toLowerCase()).toContain('bank');
-    });
-
-    it('accepts valid bankName (bug #50)', async () => {
-      mockAutoFillBankMovements.mockResolvedValue({
-        ok: true,
-        value: {
-          rowsProcessed: 10,
-          rowsFilled: 5,
-          bankFeeMatches: 0,
-          creditCardPaymentMatches: 0,
-          pagoFacturaMatches: 3,
-          directFacturaMatches: 1,
-          reciboMatches: 0,
-          pagoOnlyMatches: 0,
-          noMatches: 5,
-          failedBanks: [],
-          errors: 0,
-          duration: 500,
-        },
-      });
-
-      const response = await server.inject({
-        method: 'POST',
-        url: '/api/autofill-bank',
-        headers: {
-          authorization: 'Bearer test-secret-123',
-        },
-        payload: { bankName: 'BBVA' },
-      });
-
-      expect(response.statusCode).toBe(200);
-      expect(mockAutoFillBankMovements).toHaveBeenCalledWith('BBVA');
-    });
-
-    it('rejects non-string bankName via schema', async () => {
-      const response = await server.inject({
-        method: 'POST',
-        url: '/api/autofill-bank',
-        headers: {
-          authorization: 'Bearer test-secret-123',
-        },
-        payload: { bankName: 123 },
-      });
-
-      expect(response.statusCode).toBe(404);
     });
   });
 
