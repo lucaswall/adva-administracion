@@ -1252,3 +1252,113 @@ describe('extractKeywordTokens with origin prefix', () => {
     expect(withPrefix).toEqual(withoutPrefix);
   });
 });
+
+describe('Credit movement referencia extraction (Tier 3)', () => {
+  let matcher: BankMovementMatcher;
+
+  beforeEach(() => {
+    matcher = new BankMovementMatcher(5);
+  });
+
+  it('matches credit movement with ORDEN DE PAGO referencia to Pago Recibido at Tier 3', () => {
+    const pagoRecibido: Pago & { row: number } = {
+      fileId: 'pago1',
+      fileName: 'pago-001.pdf',
+      banco: 'BBVA',
+      fechaPago: '2024-01-15',
+      importePagado: 9294750,
+      moneda: 'ARS',
+      referencia: '4084946',
+      cuitPagador: '20123456786',
+      nombrePagador: 'FRITO PLAY',
+      cuitBeneficiario: '30709076783',
+      nombreBeneficiario: 'ADVA',
+      processedAt: '2024-01-15T10:00:00Z',
+      needsReview: false,
+      confidence: 0.95,
+      row: 2
+    };
+
+    const movement = makeMovimiento({
+      fecha: '2024-01-15',
+      concepto: 'ORDEN DE PAGO DEL EXTERIOR 4084946.01.8584',
+      debito: null,
+      credito: 9294750,
+    });
+
+    const result = matcher.matchCreditMovement(movement, [], [pagoRecibido], []);
+
+    expect(result.matchType).toBe('pago_only');
+    expect(result.matchedFileId).toBe('pago1');
+    expect(result.tier).toBe(3);
+    expect(result.reasons).toContain('Referencia match');
+  });
+
+  it('falls through to Tier 5 when referencia does not match any Pago', () => {
+    const pagoRecibido: Pago & { row: number } = {
+      fileId: 'pago1',
+      fileName: 'pago-001.pdf',
+      banco: 'BBVA',
+      fechaPago: '2024-01-15',
+      importePagado: 9294750,
+      moneda: 'ARS',
+      referencia: '9999999', // Different referencia
+      cuitPagador: '20123456786',
+      nombrePagador: 'FRITO PLAY',
+      cuitBeneficiario: '30709076783',
+      nombreBeneficiario: 'ADVA',
+      processedAt: '2024-01-15T10:00:00Z',
+      needsReview: false,
+      confidence: 0.95,
+      row: 2
+    };
+
+    const movement = makeMovimiento({
+      fecha: '2024-01-15',
+      concepto: 'ORDEN DE PAGO DEL EXTERIOR 4084946.01.8584',
+      debito: null,
+      credito: 9294750,
+    });
+
+    const result = matcher.matchCreditMovement(movement, [], [pagoRecibido], []);
+
+    expect(result.matchType).toBe('pago_only');
+    expect(result.matchedFileId).toBe('pago1');
+    expect(result.tier).toBe(5); // Falls through to amount+date
+  });
+
+  it('does not produce Tier 3 for credit movements without referencia pattern', () => {
+    const pagoRecibido: Pago & { row: number } = {
+      fileId: 'pago1',
+      fileName: 'pago-001.pdf',
+      banco: 'BBVA',
+      fechaPago: '2024-01-15',
+      importePagado: 100000,
+      moneda: 'ARS',
+      referencia: '4084946',
+      cuitPagador: '20123456786',
+      nombrePagador: 'TEST SA',
+      cuitBeneficiario: '30709076783',
+      nombreBeneficiario: 'ADVA',
+      processedAt: '2024-01-15T10:00:00Z',
+      needsReview: false,
+      confidence: 0.95,
+      row: 2
+    };
+
+    const movement = makeMovimiento({
+      fecha: '2024-01-15',
+      concepto: 'TRANSFERENCIA DESDE TEST SA',
+      debito: null,
+      credito: 100000,
+    });
+
+    const result = matcher.matchCreditMovement(movement, [], [pagoRecibido], []);
+
+    expect(result.matchType).toBe('pago_only');
+    expect(result.matchedFileId).toBe('pago1');
+    // No referencia in concepto → cannot be Tier 3
+    expect(result.tier).not.toBe(3);
+    expect(result.tier).toBe(5);
+  });
+});

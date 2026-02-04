@@ -589,6 +589,7 @@ export class BankMovementMatcher {
 
     // Phase 1: Extract identity
     const extractedCuit = extractCuitFromConcepto(movement.concepto);
+    const extractedRef = extractReferencia(movement.concepto);
 
     const bankFecha = parseArgDate(movement.fecha);
     if (!bankFecha) {
@@ -653,7 +654,15 @@ export class BankMovementMatcher {
       // Pago without linked factura (REVISAR)
       const pagador = pago.nombrePagador || 'Desconocido';
       const description = `REVISAR! Cobro de ${pagador}`;
-      const tier: BankMatchTier = extractedCuit && pago.cuitPagador === extractedCuit ? 2 : 5;
+      let tier: BankMatchTier;
+      if (extractedCuit && pago.cuitPagador === extractedCuit) {
+        tier = 2;
+      } else if (extractedRef && pago.referencia === extractedRef) {
+        tier = 3;
+        reasons.push('Referencia match');
+      } else {
+        tier = 5;
+      }
 
       candidates.push({
         tier,
