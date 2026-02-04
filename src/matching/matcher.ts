@@ -42,6 +42,7 @@ const DEFAULT_DATE_RANGES: DateRangeConfig = {
  */
 function normalizeString(str: string): string {
   return str
+    .trim()
     .toLowerCase()
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '');
@@ -190,15 +191,10 @@ export class FacturaPagoMatcher {
       }
 
       // Check for CUIT match (optional boost)
-      // Priority: beneficiary CUIT > payer CUIT
-      // Beneficiary is the one receiving money, which should match the invoice emisor
+      // Egresos: beneficiary CUIT matches factura emisor (supplier sent invoice)
+      // Ingresos: payer CUIT matches factura receptor (client received invoice)
       // Uses cuitOrDniMatch to handle cases where payment shows DNI (7-8 digits)
       // instead of full CUIT (11 digits)
-      //
-      // Note: Fallback to cuitPagador === cuitEmisor handles edge cases where:
-      // - Payment document lists ADVA as pagador and counterparty details are in payer fields
-      // - Some payment systems use payer field for counterparty when direction is ambiguous
-      // This is kept for backward compatibility with existing matches.
       let cuitMatch = false;
       if (pago.cuitBeneficiario && factura.cuitEmisor && cuitOrDniMatch(pago.cuitBeneficiario, factura.cuitEmisor)) {
         cuitMatch = true;
@@ -206,15 +202,21 @@ export class FacturaPagoMatcher {
       } else if (pago.cuitPagador && factura.cuitEmisor && cuitOrDniMatch(pago.cuitPagador, factura.cuitEmisor)) {
         cuitMatch = true;
         reasons.push('Payer CUIT/DNI match');
+      } else if (pago.cuitPagador && factura.cuitReceptor && cuitOrDniMatch(pago.cuitPagador, factura.cuitReceptor)) {
+        cuitMatch = true;
+        reasons.push('Payer CUIT/DNI match');
+      } else if (pago.cuitBeneficiario && factura.cuitReceptor && cuitOrDniMatch(pago.cuitBeneficiario, factura.cuitReceptor)) {
+        cuitMatch = true;
+        reasons.push('Beneficiary CUIT/DNI match');
       }
 
       // Check for name match (optional boost)
-      // Priority: beneficiary name > payer name
+      // Egresos: beneficiary/payer name matches factura emisor name
+      // Ingresos: payer/beneficiary name matches factura receptor name
       let nameMatch = false;
       if (pago.nombreBeneficiario && factura.razonSocialEmisor) {
         const beneficiarioName = normalizeString(pago.nombreBeneficiario);
         const facturaName = normalizeString(factura.razonSocialEmisor);
-        // Check if one name contains significant part of the other
         nameMatch = beneficiarioName.includes(facturaName) || facturaName.includes(beneficiarioName);
         if (nameMatch) {
           reasons.push('Beneficiary name match');
@@ -222,10 +224,25 @@ export class FacturaPagoMatcher {
       } else if (pago.nombrePagador && factura.razonSocialEmisor) {
         const pagoName = normalizeString(pago.nombrePagador);
         const facturaName = normalizeString(factura.razonSocialEmisor);
-        // Check if one name contains significant part of the other
         nameMatch = pagoName.includes(facturaName) || facturaName.includes(pagoName);
         if (nameMatch) {
           reasons.push('Payer name match');
+        }
+      }
+      if (!nameMatch && pago.nombrePagador && factura.razonSocialReceptor) {
+        const pagoName = normalizeString(pago.nombrePagador);
+        const facturaName = normalizeString(factura.razonSocialReceptor);
+        nameMatch = pagoName.includes(facturaName) || facturaName.includes(pagoName);
+        if (nameMatch) {
+          reasons.push('Payer name match');
+        }
+      }
+      if (!nameMatch && pago.nombreBeneficiario && factura.razonSocialReceptor) {
+        const beneficiarioName = normalizeString(pago.nombreBeneficiario);
+        const facturaName = normalizeString(factura.razonSocialReceptor);
+        nameMatch = beneficiarioName.includes(facturaName) || facturaName.includes(beneficiarioName);
+        if (nameMatch) {
+          reasons.push('Beneficiary name match');
         }
       }
 
