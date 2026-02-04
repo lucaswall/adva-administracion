@@ -105,3 +105,55 @@ ORDEN DE PAGO DEL EXTERIOR entries are **credit** movements (incoming wire trans
 **Risks/Considerations:**
 - Prefetching exchange rates adds API calls on startup. ArgentinaDatos API may rate-limit if many unique dates. Use `Promise.allSettled` (already in `prefetchExchangeRates`) to handle individual failures gracefully.
 - After fix, re-running `/api/match-movimientos?force=true` will fill previously unmatched cross-currency movements.
+
+---
+
+## Iteration 1
+
+**Implemented:** 2026-02-04
+
+### Tasks Completed This Iteration
+- Fix 1: Add exchange rate prefetch to matchAllMovimientos - Added `extractUsdDocumentDates()` helper and `prefetchExchangeRates()` call before matcher creation
+- Fix 2: Add referencia extraction and Tier 3 to credit matching - Added `extractReferencia()` call and Tier 3 logic in `matchCreditMovement()`
+
+### Files Modified
+- `src/bank/match-movimientos.ts` - Added `extractUsdDocumentDates()` function, imported `prefetchExchangeRates`, added prefetch call in `matchAllMovimientos()` after loading Control data
+- `src/bank/matcher.ts` - Added `extractReferencia()` call in `matchCreditMovement()` Phase 1, added Tier 3 case for referencia match in pago_only candidates
+- `src/bank/match-movimientos.test.ts` - Added 2 tests for exchange rate prefetch (USD dates collected, skipped when no USD)
+- `src/bank/matcher.test.ts` - Added 3 tests for credit referencia Tier 3 (referencia match, fallthrough to Tier 5, no referencia pattern)
+
+### Linear Updates
+- ADV-77: Todo → In Progress → Review
+- ADV-78: Todo → In Progress → Review
+
+### Pre-commit Verification
+- bug-hunter: Passed, no bugs found
+- verifier: All 1585 tests pass, zero warnings
+
+### Continuation Status
+All tasks completed.
+
+### Review Findings
+
+Files reviewed: 4
+- `src/bank/match-movimientos.ts` — `extractUsdDocumentDates()` helper, `prefetchExchangeRates` import and call
+- `src/bank/matcher.ts` — `extractReferencia()` call and Tier 3 logic in `matchCreditMovement()`
+- `src/bank/match-movimientos.test.ts` — 2 new exchange rate prefetch tests
+- `src/bank/matcher.test.ts` — 3 new credit referencia Tier 3 tests
+
+Checks applied: Security, Logic, Async, Resources, Type Safety, Edge Cases, Conventions
+
+No issues found - all implementations are correct and follow project conventions.
+
+### Linear Updates
+- ADV-77: Review → Merge
+- ADV-78: Review → Merge
+
+<!-- REVIEW COMPLETE -->
+
+---
+
+## Status: COMPLETE
+
+All tasks implemented and reviewed successfully. All Linear issues moved to Merge.
+Ready for PR creation.

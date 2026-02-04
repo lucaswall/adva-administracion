@@ -42,6 +42,10 @@ vi.mock('../utils/logger.js', () => ({
   error: vi.fn(),
 }));
 
+vi.mock('../utils/exchange-rate.js', () => ({
+  prefetchExchangeRates: vi.fn().mockResolvedValue(undefined),
+}));
+
 // Create mockable matcher methods
 let mockMatchMovement = vi.fn();
 let mockMatchCreditMovement = vi.fn();
@@ -61,6 +65,7 @@ import { getValues } from '../services/sheets.js';
 import { getMovimientosToFill } from '../services/movimientos-reader.js';
 import { updateDetalle } from '../services/movimientos-detalle.js';
 import { warn } from '../utils/logger.js';
+import { prefetchExchangeRates } from '../utils/exchange-rate.js';
 
 describe('getRequiredColumnIndex', () => {
   it('returns correct index when header exists', () => {
@@ -1770,5 +1775,132 @@ describe('TOCTOU protection', () => {
     expect(updates[0]).toHaveProperty('expectedVersion');
     expect(typeof updates[0].expectedVersion).toBe('string');
     expect(updates[0].expectedVersion.length).toBeGreaterThan(0);
+  });
+});
+
+describe('exchange rate prefetch', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.useFakeTimers();
+    mockMatchMovement = vi.fn().mockReturnValue({
+      matchType: 'no_match',
+      description: '',
+      matchedFileId: '',
+      confidence: 'LOW',
+    });
+    mockMatchCreditMovement = vi.fn().mockReturnValue({
+      matchType: 'no_match',
+      description: '',
+      matchedFileId: '',
+      confidence: 'LOW',
+    });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('should call prefetchExchangeRates with dates from USD documents before matching', async () => {
+    const mockFolderStructure = {
+      controlIngresosId: 'ingresos-id',
+      controlEgresosId: 'egresos-id',
+      bankSpreadsheets: new Map(),
+      movimientosSpreadsheets: new Map([['BBVA', 'bbva-id']]),
+    };
+
+    vi.mocked(withLock).mockImplementation(async (_id, fn) => {
+      const result = await fn();
+      return { ok: true, value: result };
+    });
+
+    vi.mocked(getCachedFolderStructure).mockReturnValue(mockFolderStructure as any);
+
+    // Mock Control data with USD documents
+    vi.mocked(getValues).mockImplementation(async (_spreadsheetId, range) => {
+      if (range === 'Pagos Recibidos!A:O') {
+        return {
+          ok: true,
+          value: [
+            ['fechaPago', 'fileId', 'fileName', 'banco', 'importePagado', 'moneda', 'referencia', 'cuitPagador', 'nombrePagador', 'cuitBeneficiario', 'nombreBeneficiario', 'concepto', 'processedAt', 'confidence', 'needsReview'],
+            ['2025-10-15', 'pago1', 'pago1.pdf', 'BBVA', '6750', 'USD', '4084946', '20123456786', 'FRITO PLAY', '30709076783', 'ADVA', '', '2025-10-15T10:00:00Z', '0.95', 'NO'],
+            ['2025-11-20', 'pago2', 'pago2.pdf', 'BBVA', '1500', 'USD', '4086424', '27234567891', 'TINY BYTES', '30709076783', 'ADVA', '', '2025-11-20T10:00:00Z', '0.95', 'NO'],
+            ['2025-12-05', 'pago3', 'pago3.pdf', 'BBVA', '50000', 'ARS', '', '20111111119', 'LOCAL SA', '30709076783', 'ADVA', '', '2025-12-05T10:00:00Z', '0.95', 'NO'],
+          ],
+        };
+      }
+      if (range === 'Facturas Emitidas!A:R') {
+        return {
+          ok: true,
+          value: [
+            ['fechaEmision', 'fileId', 'fileName', 'tipoComprobante', 'nroFactura', 'cuitReceptor', 'razonSocialReceptor', 'importeNeto', 'importeIva', 'importeTotal', 'moneda', 'concepto', 'processedAt', 'confidence', 'needsReview', 'matchedPagoFileId', 'matchConfidence', 'hasCuitMatch'],
+            ['2025-10-10', 'fact1', 'fact1.pdf', 'E', '00001-00000001', '20123456786', 'FRITO PLAY', '', '', '6750', 'USD', '', '2025-10-10T10:00:00Z', '0.95', 'NO', '', '', ''],
+          ],
+        };
+      }
+      if (range === 'Facturas Recibidas!A:S') {
+        return {
+          ok: true,
+          value: [
+            ['fechaEmision', 'fileId', 'fileName', 'tipoComprobante', 'nroFactura', 'cuitEmisor', 'razonSocialEmisor', 'importeNeto', 'importeIva', 'importeTotal', 'moneda', 'concepto', 'processedAt', 'confidence', 'needsReview', 'matchedPagoFileId', 'matchConfidence', 'hascuitmatch', 'pagada'],
+            ['2025-11-01', 'fact2', 'fact2.pdf', 'E', '00002-00000001', '20111111119', 'FOREIGN INC', '', '', '500', 'USD', '', '2025-11-01T10:00:00Z', '0.95', 'NO', '', '', '', ''],
+          ],
+        };
+      }
+      return { ok: true, value: [['header']] };
+    });
+
+    vi.mocked(getMovimientosToFill).mockResolvedValue({ ok: true, value: [] });
+    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: 0 });
+
+    const resultPromise = matchAllMovimientos();
+    await vi.runAllTimersAsync();
+    const result = await resultPromise;
+
+    expect(result.ok).toBe(true);
+
+    // prefetchExchangeRates should be called with dates from USD Pagos Recibidos,
+    // USD Facturas Emitidas, and USD Facturas Recibidas
+    expect(prefetchExchangeRates).toHaveBeenCalledTimes(1);
+    const calledDates = vi.mocked(prefetchExchangeRates).mock.calls[0][0];
+    // Should include dates from USD pagos and USD facturas
+    expect(calledDates).toContain('2025-10-15'); // USD pago 1
+    expect(calledDates).toContain('2025-11-20'); // USD pago 2
+    expect(calledDates).toContain('2025-10-10'); // USD factura emitida
+    expect(calledDates).toContain('2025-11-01'); // USD factura recibida
+    // Should NOT include ARS pago date
+    expect(calledDates).not.toContain('2025-12-05');
+  });
+
+  it('should not call prefetchExchangeRates when no USD documents exist', async () => {
+    const mockFolderStructure = {
+      controlIngresosId: 'ingresos-id',
+      controlEgresosId: 'egresos-id',
+      bankSpreadsheets: new Map(),
+      movimientosSpreadsheets: new Map([['BBVA', 'bbva-id']]),
+    };
+
+    vi.mocked(withLock).mockImplementation(async (_id, fn) => {
+      const result = await fn();
+      return { ok: true, value: result };
+    });
+
+    vi.mocked(getCachedFolderStructure).mockReturnValue(mockFolderStructure as any);
+
+    // All ARS documents, no USD
+    vi.mocked(getValues).mockResolvedValue({
+      ok: true,
+      value: [['header']],
+    });
+
+    vi.mocked(getMovimientosToFill).mockResolvedValue({ ok: true, value: [] });
+    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: 0 });
+
+    const resultPromise = matchAllMovimientos();
+    await vi.runAllTimersAsync();
+    const result = await resultPromise;
+
+    expect(result.ok).toBe(true);
+    // Should not call prefetchExchangeRates when there are no USD documents
+    expect(prefetchExchangeRates).not.toHaveBeenCalled();
   });
 });

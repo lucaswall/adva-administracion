@@ -24,8 +24,44 @@ import { BankMovementMatcher, type MatchQuality } from './matcher.js';
 import { getMovimientosToFill } from '../services/movimientos-reader.js';
 import { updateDetalle, type DetalleUpdate } from '../services/movimientos-detalle.js';
 
+import { prefetchExchangeRates } from '../utils/exchange-rate.js';
+
 // Re-export MatchQuality for test compatibility
 export type { MatchQuality };
+
+/**
+ * Extracts USD document dates for exchange rate prefetching.
+ * Collects dates from Pagos Recibidos, Facturas Emitidas, and Facturas Recibidas.
+ *
+ * @returns Array of unique date strings from USD documents
+ */
+function extractUsdDocumentDates(
+  pagosRecibidos: Array<Pago & { row: number }>,
+  facturasEmitidas: Array<Factura & { row: number }>,
+  facturasRecibidas: Array<Factura & { row: number }>
+): string[] {
+  const dates = new Set<string>();
+
+  for (const pago of pagosRecibidos) {
+    if (pago.moneda === 'USD' && pago.fechaPago) {
+      dates.add(pago.fechaPago);
+    }
+  }
+
+  for (const factura of facturasEmitidas) {
+    if (factura.moneda === 'USD' && factura.fechaEmision) {
+      dates.add(factura.fechaEmision);
+    }
+  }
+
+  for (const factura of facturasRecibidas) {
+    if (factura.moneda === 'USD' && factura.fechaEmision) {
+      dates.add(factura.fechaEmision);
+    }
+  }
+
+  return Array.from(dates);
+}
 
 /**
  * Gets the column index for a required header, throwing if not found.
@@ -932,6 +968,16 @@ export async function matchAllMovimientos(
       const egresosResult = await loadControlEgresos(controlEgresosId);
       if (!egresosResult.ok) {
         return egresosResult;
+      }
+
+      // Prefetch exchange rates for USD documents before matching
+      const usdDates = extractUsdDocumentDates(
+        ingresosResult.value.pagosRecibidos,
+        ingresosResult.value.facturasEmitidas,
+        egresosResult.value.facturasRecibidas
+      );
+      if (usdDates.length > 0) {
+        await prefetchExchangeRates(usdDates);
       }
 
       // Create matcher instance
