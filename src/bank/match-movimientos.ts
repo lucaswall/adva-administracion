@@ -823,7 +823,7 @@ async function matchBankMovimientos(
               cuitDocumento = '';
             }
 
-            if (fechaDocumento && cuitDocumento) {
+            if (fechaDocumento) {
               // For isExactAmount, we can't reliably determine this without re-running complex matching
               // Use the same value for both (true) so they compare equally on this dimension
               // This ensures the comparison focuses on confidence, CUIT match, and date proximity

@@ -15,7 +15,7 @@ This server processes Argentine invoices and payment documents using AI, automat
 - Extracts structured data using Gemini AI with **direction-aware classification**
 - Writes data to Google Sheets (Control de Ingresos, Control de Egresos)
 - Matches payments to invoices automatically
-- Auto-fills bank movement descriptions
+- Matches bank movements to processed documents
 - Sorts processed documents into month folders (Ingresos/, Egresos/, Bancos/)
 - Provides REST API for manual triggers and monitoring
 
@@ -444,7 +444,7 @@ When you open the Dashboard Operativo Contable spreadsheet, the **ADVA** menu ap
 |-----------|--------------|-------------|
 | 🔄 Trigger Scan | POST /api/scan | Manually trigger document scan |
 | 🔗 Trigger Re-match | POST /api/rematch | Re-run matching on unmatched docs |
-| 🏦 Auto-fill Bank Data | POST /api/autofill-bank | Auto-fill bank movement descriptions |
+| 📝 Completar Detalles Movimientos | POST /api/match-movimientos | Match bank movements to documents |
 | ℹ️ About | GET /api/status | Show server info, test connectivity, display uptime and queue status |
 
 **Note:** API URL and secret are configured at build time via environment variables. No per-spreadsheet configuration needed.
@@ -489,7 +489,7 @@ All endpoints except `/health` and `/webhooks/drive` require Bearer token authen
 | GET | `/api/status` | Yes | Detailed status + queue info |
 | POST | `/api/scan` | Yes | Trigger manual document scan |
 | POST | `/api/rematch` | Yes | Re-run matching on unmatched docs |
-| POST | `/api/autofill-bank` | Yes | Auto-fill bank descriptions |
+| POST | `/api/match-movimientos` | Yes | Match bank movements to documents |
 | POST | `/webhooks/drive` | No | Drive push notifications (validated via channel ID) |
 
 ### Example API Calls
@@ -512,9 +512,9 @@ curl -X POST -H "Authorization: Bearer YOUR_API_SECRET" \
 curl -X POST -H "Authorization: Bearer YOUR_API_SECRET" \
   https://your-app.up.railway.app/api/rematch
 
-# Auto-fill bank movements (requires auth)
+# Match bank movements to documents (requires auth)
 curl -X POST -H "Authorization: Bearer YOUR_API_SECRET" \
-  https://your-app.up.railway.app/api/autofill-bank
+  https://your-app.up.railway.app/api/match-movimientos
 ```
 
 ---
@@ -610,10 +610,6 @@ Or in Railway dashboard: Deployments → [Select deployment] → Logs
    - Check `Sin Procesar/` folder in Drive
    - Manually match or correct data
    - Run rematch: `curl -X POST .../api/rematch`
-
-2. **Auto-fill bank movements**
-   - Run: `curl -X POST .../api/autofill-bank`
-   - Fills descriptions for matched movements
 
 ### Quarterly Tasks
 

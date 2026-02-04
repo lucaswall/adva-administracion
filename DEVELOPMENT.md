@@ -123,7 +123,7 @@ src/
 │   └── spreadsheet-headers.ts # Spreadsheet header definitions
 ├── routes/
 │   ├── status.ts          # GET /health, /api/status
-│   ├── scan.ts            # POST /api/scan, /rematch, /autofill-bank
+│   ├── scan.ts            # POST /api/scan, /rematch, /match-movimientos
 │   └── webhooks.ts        # POST /webhooks/drive
 ├── middleware/
 │   └── auth.ts            # Bearer token authentication
@@ -156,8 +156,7 @@ src/
 │   └── logger.ts          # Pino structured logging
 └── bank/
     ├── matcher.ts         # Bank movement matching
-    ├── autofill.ts        # Bank auto-fill functionality
-    └── subdiario-matcher.ts # Subdiario matching
+    └── match-movimientos.ts # Bank movements orchestration
 
 tests/unit/                # Unit tests mirroring src/ structure
 ```
@@ -169,7 +168,7 @@ tests/unit/                # Unit tests mirroring src/ structure
 - **gemini/**: PDF to structured data extraction (direction-aware classification)
 - **services/**: Google APIs integration (dual spreadsheet support)
 - **matching/**: Invoice-payment matching and scoring
-- **bank/**: Bank movements and auto-fill
+- **bank/**: Bank movement matching
 - **utils/**: Date, CUIT, currency, file-naming utilities
 - **routes/**: HTTP endpoint handlers
 - **processing/**: Queue management and document scanning

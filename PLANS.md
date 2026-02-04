@@ -363,3 +363,58 @@ Summary: 1 issue found
 2. Remove `/api/autofill-bank` references from `README.md`
 3. Remove autofill reference from `DEVELOPMENT.md:126`
 4. Run verifier (expect pass)
+
+---
+
+## Iteration 1 (Fix Plan)
+
+**Implemented:** 2026-02-03
+
+### Tasks Completed This Iteration
+- Fix 1: Remove dead triggerAutofillBank() and update docs — Deleted function and menu item from apps-script/src/main.ts, removed all /api/autofill-bank references from README.md and DEVELOPMENT.md, updated docs to reference /api/match-movimientos instead
+
+### Bug Fix (Pre-existing)
+- Fixed HIGH bug in match-movimientos.ts: quality comparison guard `if (fechaDocumento && cuitDocumento)` silently dropped better matches when document had no CUIT (empty string is falsy). Changed to `if (fechaDocumento)` since buildMatchQuality already handles empty cuitDocumento correctly.
+
+### Files Modified
+- `apps-script/src/main.ts` — Removed triggerAutofillBank() function and menu item
+- `README.md` — Replaced autofill-bank references with match-movimientos, removed maintenance task
+- `DEVELOPMENT.md` — Updated project structure (removed autofill.ts, added match-movimientos.ts), updated route comment and module description
+- `src/bank/match-movimientos.ts` — Fixed guard condition on line 826
+
+### Linear Updates
+- ADV-75: Todo → In Progress → Review
+- ADV-76: Created in Review (pre-existing bug fix)
+
+### Pre-commit Verification
+- bug-hunter: Found 1 HIGH bug (pre-existing), fixed before proceeding
+- verifier: All 1580 tests pass, zero warnings
+
+### Review Findings
+
+Files reviewed: 4 (apps-script/src/main.ts, README.md, DEVELOPMENT.md, src/bank/match-movimientos.ts)
+Checks applied: Security, Logic, Async, Resources, Type Safety, Error Handling, Edge Cases, Conventions
+
+No issues found — all implementations are correct and follow project conventions.
+
+Verification:
+- `triggerAutofillBank()` fully removed from Apps Script, replaced with `triggerMatchMovimientos()`
+- All `/api/autofill-bank` references removed from README.md and DEVELOPMENT.md
+- No remaining autofill references in `src/`, `apps-script/`, or documentation files
+- Bug fix in `match-movimientos.ts:826` is correct: `buildMatchQuality` handles empty `cuitDocumento` by setting `hasCuitMatch = false`, so the guard only needs `fechaDocumento`
+
+### Linear Updates
+- ADV-75: Review → Merge
+- ADV-76: Review → Merge
+
+<!-- REVIEW COMPLETE -->
+
+### Continuation Status
+All tasks completed.
+
+---
+
+## Status: COMPLETE
+
+All tasks implemented and reviewed successfully. All Linear issues moved to Merge.
+Ready for PR creation.
