@@ -1284,6 +1284,205 @@ describe('ReciboPagoMatcher.findMatches', () => {
   });
 });
 
+describe('FacturaPagoMatcher Ingresos scenario (receptor fields)', () => {
+  const matcher = new FacturaPagoMatcher(10, 60);
+
+  // Ingresos facturas: cuitEmisor is ADVA (or empty), counterparty info in receptor fields
+  const ingresosFacturas: Array<Factura & { row: number }> = [
+    {
+      row: 2,
+      fileId: 'fe1',
+      fileName: 'factura-emitida1.pdf',
+      tipoComprobante: 'A',
+      nroFactura: '00001-00000010',
+      fechaEmision: '2024-01-05',
+      cuitEmisor: '', // Empty for Ingresos (ADVA is emisor, stored elsewhere)
+      razonSocialEmisor: '', // Empty for Ingresos
+      cuitReceptor: '20123456786', // Client CUIT (fictional)
+      razonSocialReceptor: 'NITRO DIGITAL BUSINESS SRL',
+      importeNeto: 5000,
+      importeIva: 1050,
+      importeTotal: 6050,
+      moneda: 'ARS',
+      processedAt: '2024-01-05T10:00:00Z',
+      confidence: 1.0,
+      needsReview: false
+    },
+    {
+      row: 3,
+      fileId: 'fe2',
+      fileName: 'factura-emitida2.pdf',
+      tipoComprobante: 'E',
+      nroFactura: '00001-00000011',
+      fechaEmision: '2024-01-10',
+      cuitEmisor: '', // Empty for Ingresos
+      razonSocialEmisor: '', // Empty for Ingresos
+      razonSocialReceptor: 'FRITO PLAY LLC', // Foreign client (name only, no CUIT)
+      importeNeto: 1000,
+      importeIva: 0,
+      importeTotal: 1000,
+      moneda: 'USD',
+      processedAt: '2024-01-10T10:00:00Z',
+      confidence: 1.0,
+      needsReview: false
+    }
+  ];
+
+  it('matches Ingresos by CUIT: pago cuitPagador vs factura cuitReceptor', () => {
+    const pago: Pago = {
+      fileId: 'pr1',
+      fileName: 'pago-recibido1.pdf',
+      banco: 'BBVA',
+      fechaPago: '2024-01-07',
+      importePagado: 6050,
+      moneda: 'ARS',
+      cuitPagador: '20123456786', // matches factura cuitReceptor
+      nombrePagador: 'NITRO DIGITAL BUSINESS SRL',
+      processedAt: '2024-01-07T10:00:00Z',
+      confidence: 1.0,
+      needsReview: false
+    };
+
+    const matches = matcher.findMatches(pago, ingresosFacturas);
+    expect(matches.length).toBe(1);
+    expect(matches[0].facturaFileId).toBe('fe1');
+    expect(matches[0].confidence).toBe('HIGH');
+    expect(matches[0].hasCuitMatch).toBe(true);
+  });
+
+  it('matches Ingresos by name: pago nombrePagador vs factura razonSocialReceptor', () => {
+    setExchangeRateCache('2024-01-10', {
+      fecha: '2024-01-10',
+      compra: 815.50,
+      venta: 855.50,
+    });
+
+    const pago: Pago = {
+      fileId: 'pr2',
+      fileName: 'pago-recibido2.pdf',
+      banco: 'BBVA',
+      fechaPago: '2024-01-12',
+      importePagado: 855.50 * 1000, // cross-currency, but name match still works
+      moneda: 'ARS',
+      nombrePagador: 'FRITO PLAY', // partial name match with 'FRITO PLAY LLC'
+      processedAt: '2024-01-12T10:00:00Z',
+      confidence: 1.0,
+      needsReview: false
+    };
+
+    const matches = matcher.findMatches(pago, ingresosFacturas);
+    expect(matches.length).toBe(1);
+    expect(matches[0].facturaFileId).toBe('fe2');
+    // Cross-currency caps at LOW without CUIT, but name match is still tracked
+    expect(matches[0].reasons.some(r => r.includes('name match'))).toBe(true);
+
+    clearExchangeRateCache();
+  });
+
+  it('does not false-positive when cuitPagador differs from cuitReceptor', () => {
+    const pago: Pago = {
+      fileId: 'pr3',
+      fileName: 'pago-recibido3.pdf',
+      banco: 'BBVA',
+      fechaPago: '2024-01-07',
+      importePagado: 6050,
+      moneda: 'ARS',
+      cuitPagador: '20999999999', // different CUIT, should NOT match
+      processedAt: '2024-01-07T10:00:00Z',
+      confidence: 1.0,
+      needsReview: false
+    };
+
+    const matches = matcher.findMatches(pago, ingresosFacturas);
+    expect(matches.length).toBe(1);
+    // Should match on amount/date but NOT have CUIT match
+    expect(matches[0].hasCuitMatch).toBe(false);
+    expect(matches[0].confidence).toBe('MEDIUM'); // no CUIT/name boost
+  });
+
+  it('Egresos still works: pago cuitBeneficiario vs factura cuitEmisor (regression)', () => {
+    // Standard Egresos facturas with cuitEmisor populated
+    const egresosFacturas: Array<Factura & { row: number }> = [
+      {
+        row: 2,
+        fileId: 'fr1',
+        fileName: 'factura-recibida1.pdf',
+        tipoComprobante: 'A',
+        nroFactura: '00002-00000001',
+        fechaEmision: '2024-01-05',
+        cuitEmisor: '20111111119',
+        razonSocialEmisor: 'EMPRESA UNO SA',
+        importeNeto: 1000,
+        importeIva: 210,
+        importeTotal: 1210,
+        moneda: 'ARS',
+        processedAt: '2024-01-05T10:00:00Z',
+        confidence: 1.0,
+        needsReview: false
+      }
+    ];
+
+    const pago: Pago = {
+      fileId: 'pe1',
+      fileName: 'pago-enviado1.pdf',
+      banco: 'BBVA',
+      fechaPago: '2024-01-07',
+      importePagado: 1210,
+      moneda: 'ARS',
+      cuitBeneficiario: '20111111119', // matches factura cuitEmisor
+      processedAt: '2024-01-07T10:00:00Z',
+      confidence: 1.0,
+      needsReview: false
+    };
+
+    const matches = matcher.findMatches(pago, egresosFacturas);
+    expect(matches.length).toBe(1);
+    expect(matches[0].confidence).toBe('HIGH');
+    expect(matches[0].hasCuitMatch).toBe(true);
+    expect(matches[0].reasons).toContain('Beneficiary CUIT/DNI match');
+  });
+
+  it('Egresos name matching still works with razonSocialEmisor (regression)', () => {
+    const egresosFacturas: Array<Factura & { row: number }> = [
+      {
+        row: 2,
+        fileId: 'fr2',
+        fileName: 'factura-recibida2.pdf',
+        tipoComprobante: 'A',
+        nroFactura: '00002-00000002',
+        fechaEmision: '2024-01-05',
+        cuitEmisor: '20222222228',
+        razonSocialEmisor: 'EMPRESA DOS SRL',
+        importeNeto: 2000,
+        importeIva: 420,
+        importeTotal: 2420,
+        moneda: 'ARS',
+        processedAt: '2024-01-05T10:00:00Z',
+        confidence: 1.0,
+        needsReview: false
+      }
+    ];
+
+    const pago: Pago = {
+      fileId: 'pe2',
+      fileName: 'pago-enviado2.pdf',
+      banco: 'BBVA',
+      fechaPago: '2024-01-07',
+      importePagado: 2420,
+      moneda: 'ARS',
+      nombreBeneficiario: 'EMPRESA DOS', // partial name match
+      processedAt: '2024-01-07T10:00:00Z',
+      confidence: 1.0,
+      needsReview: false
+    };
+
+    const matches = matcher.findMatches(pago, egresosFacturas);
+    expect(matches.length).toBe(1);
+    expect(matches[0].confidence).toBe('HIGH');
+    expect(matches[0].reasons).toContain('Beneficiary name match');
+  });
+});
+
 describe('MatchQuality.compare - dateProximityDays=0 handling (bug #16)', () => {
   it('treats dateProximityDays=0 as perfect match, not as undefined', () => {
     // Bug: dateProximityDays || 999 treats 0 as falsy and replaces with 999
