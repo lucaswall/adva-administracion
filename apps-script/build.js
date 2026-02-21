@@ -71,6 +71,17 @@ function readEnvFile(envPath) {
 }
 
 /**
+ * Escapes a string value for safe injection into single-quoted TypeScript template
+ * Prevents syntax injection from values containing single quotes or backslashes
+ *
+ * @param {string} value - Raw value to escape
+ * @returns {string} Escaped value safe for single-quoted string injection
+ */
+export function escapeTemplateValue(value) {
+  return value.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+}
+
+/**
  * Main build function
  */
 async function build() {
@@ -138,9 +149,9 @@ async function build() {
   }
 
   const templateContent = fs.readFileSync(templatePath, 'utf-8');
-  // Inject full URL with protocol for Apps Script
-  let configContent = templateContent.replace('{{API_BASE_URL}}', fullUrl);
-  configContent = configContent.replace('{{API_SECRET}}', apiSecret);
+  // Inject full URL with protocol for Apps Script (escape for single-quoted strings)
+  let configContent = templateContent.replace('{{API_BASE_URL}}', escapeTemplateValue(fullUrl));
+  configContent = configContent.replace('{{API_SECRET}}', escapeTemplateValue(apiSecret));
   fs.writeFileSync(configPath, configContent, 'utf-8');
 
   log.success('config.ts generated');
@@ -175,10 +186,6 @@ function triggerScan() {
 
 function triggerRematch() {
   return ADVA.triggerRematch();
-}
-
-function triggerAutofillBank() {
-  return ADVA.triggerAutofillBank();
 }
 
 function showAbout() {
@@ -222,10 +229,15 @@ function showAbout() {
   log.info('  3. Deploy once after Dashboard is created');
 }
 
-// Run build
-try {
-  await build();
-} catch (error) {
-  log.error(`Build failed: ${error.message}`);
-  process.exit(1);
+// Run build only when executed directly (not imported by tests)
+const isDirectExecution = process.argv[1] &&
+  fileURLToPath(import.meta.url) === process.argv[1];
+
+if (isDirectExecution) {
+  try {
+    await build();
+  } catch (error) {
+    log.error(`Build failed: ${error.message}`);
+    process.exit(1);
+  }
 }

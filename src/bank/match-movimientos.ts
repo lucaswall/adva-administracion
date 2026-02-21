@@ -11,7 +11,6 @@ import type {
   Pago,
   Recibo,
   Retencion,
-  MatchConfidence,
 } from '../types/index.js';
 import { PROCESSING_LOCK_ID, PROCESSING_LOCK_TIMEOUT_MS, ADVA_CUITS } from '../config.js';
 import { withLock } from '../utils/concurrency.js';
@@ -20,6 +19,7 @@ import { getCachedFolderStructure } from '../services/folder-structure.js';
 import { getValues, type CellValue } from '../services/sheets.js';
 import { parseNumber } from '../utils/numbers.js';
 import { parseArgDate, normalizeSpreadsheetDate } from '../utils/date.js';
+import { validateMoneda, validateMatchConfidence, validateTipoComprobante } from '../utils/validation.js';
 import { BankMovementMatcher, type MatchQuality } from './matcher.js';
 import { getMovimientosToFill } from '../services/movimientos-reader.js';
 import { updateDetalle, type DetalleUpdate } from '../services/movimientos-detalle.js';
@@ -250,7 +250,7 @@ export function parseFacturasEmitidas(data: CellValue[][]): Array<Factura & { ro
       fechaEmision: normalizeSpreadsheetDate(row[colIndex.fechaEmision]),
       fileId: String(row[colIndex.fileId] || ''),
       fileName: String(row[colIndex.fileName] || ''),
-      tipoComprobante: String(row[colIndex.tipoComprobante] || 'A') as any,
+      tipoComprobante: validateTipoComprobante(row[colIndex.tipoComprobante]),
       nroFactura: String(row[colIndex.nroFactura] || ''),
       // ADVA is emisor, so emisor fields are implicit (not stored)
       cuitEmisor: '',
@@ -260,13 +260,13 @@ export function parseFacturasEmitidas(data: CellValue[][]): Array<Factura & { ro
       importeNeto: parseNumber(row[colIndex.importeNeto]) || 0,
       importeIva: parseNumber(row[colIndex.importeIva]) || 0,
       importeTotal: parseNumber(row[colIndex.importeTotal]) || 0,
-      moneda: (String(row[colIndex.moneda] || 'ARS') as 'ARS' | 'USD'),
+      moneda: validateMoneda(row[colIndex.moneda]),
       concepto: String(row[colIndex.concepto] || ''),
       processedAt: String(row[colIndex.processedAt] || ''),
       confidence: parseNumber(row[colIndex.confidence]) || 0,
       needsReview: row[colIndex.needsReview] === 'YES',
       matchedPagoFileId: row[colIndex.matchedPagoFileId] ? String(row[colIndex.matchedPagoFileId]) : undefined,
-      matchConfidence: row[colIndex.matchConfidence] ? (String(row[colIndex.matchConfidence]) as MatchConfidence) : undefined,
+      matchConfidence: validateMatchConfidence(row[colIndex.matchConfidence]),
     });
   }
 
@@ -319,7 +319,7 @@ export function parseFacturasRecibidas(data: CellValue[][]): Array<Factura & { r
       fechaEmision: normalizeSpreadsheetDate(row[colIndex.fechaEmision]),
       fileId: String(row[colIndex.fileId] || ''),
       fileName: String(row[colIndex.fileName] || ''),
-      tipoComprobante: String(row[colIndex.tipoComprobante] || 'A') as any,
+      tipoComprobante: validateTipoComprobante(row[colIndex.tipoComprobante]),
       nroFactura: String(row[colIndex.nroFactura] || ''),
       cuitEmisor: String(row[colIndex.cuitEmisor] || ''),
       razonSocialEmisor: String(row[colIndex.razonSocialEmisor] || ''),
@@ -328,13 +328,13 @@ export function parseFacturasRecibidas(data: CellValue[][]): Array<Factura & { r
       importeNeto: parseNumber(row[colIndex.importeNeto]) || 0,
       importeIva: parseNumber(row[colIndex.importeIva]) || 0,
       importeTotal: parseNumber(row[colIndex.importeTotal]) || 0,
-      moneda: (String(row[colIndex.moneda] || 'ARS') as 'ARS' | 'USD'),
+      moneda: validateMoneda(row[colIndex.moneda]),
       concepto: String(row[colIndex.concepto] || ''),
       processedAt: String(row[colIndex.processedAt] || ''),
       confidence: parseNumber(row[colIndex.confidence]) || 0,
       needsReview: row[colIndex.needsReview] === 'YES',
       matchedPagoFileId: row[colIndex.matchedPagoFileId] ? String(row[colIndex.matchedPagoFileId]) : undefined,
-      matchConfidence: row[colIndex.matchConfidence] ? (String(row[colIndex.matchConfidence]) as MatchConfidence) : undefined,
+      matchConfidence: validateMatchConfidence(row[colIndex.matchConfidence]),
     });
   }
 
@@ -383,7 +383,7 @@ function parsePagos(data: CellValue[][]): Array<Pago & { row: number }> {
       fileName: String(row[colIndex.fileName] || ''),
       banco: String(row[colIndex.banco] || ''),
       importePagado: parseNumber(row[colIndex.importePagado]) || 0,
-      moneda: (String(row[colIndex.moneda] || 'ARS') as 'ARS' | 'USD'),
+      moneda: validateMoneda(row[colIndex.moneda]),
       referencia: String(row[colIndex.referencia] || ''),
       cuitPagador: String(row[colIndex.cuitPagador] || ''),
       nombrePagador: String(row[colIndex.nombrePagador] || ''),
@@ -394,7 +394,7 @@ function parsePagos(data: CellValue[][]): Array<Pago & { row: number }> {
       confidence: parseNumber(row[colIndex.confidence]) || 0,
       needsReview: row[colIndex.needsReview] === 'YES',
       matchedFacturaFileId: row[colIndex.matchedFacturaFileId] ? String(row[colIndex.matchedFacturaFileId]) : undefined,
-      matchConfidence: row[colIndex.matchConfidence] ? (String(row[colIndex.matchConfidence]) as MatchConfidence) : undefined,
+      matchConfidence: validateMatchConfidence(row[colIndex.matchConfidence]),
     });
   }
 
@@ -440,7 +440,7 @@ function parseRecibos(data: CellValue[][]): Array<Recibo & { row: number }> {
       fechaPago: normalizeSpreadsheetDate(row[colIndex.fechaPago]),
       fileId: String(row[colIndex.fileId] || ''),
       fileName: String(row[colIndex.fileName] || ''),
-      tipoRecibo: (String(row[colIndex.tipoRecibo] || 'sueldo') as 'sueldo' | 'liquidacion_final'),
+      tipoRecibo: (row[colIndex.tipoRecibo] === 'liquidacion_final' ? 'liquidacion_final' : 'sueldo'),
       nombreEmpleado: String(row[colIndex.nombreEmpleado] || ''),
       cuilEmpleado: String(row[colIndex.cuilEmpleado] || ''),
       legajo: String(row[colIndex.legajo] || ''),
@@ -509,7 +509,7 @@ function parseRetenciones(data: CellValue[][]): Array<Retencion & { row: number 
       confidence: parseNumber(row[colIndex.confidence]) || 0,
       needsReview: row[colIndex.needsReview] === 'YES',
       matchedFacturaFileId: row[colIndex.matchedFacturaFileId] ? String(row[colIndex.matchedFacturaFileId]) : undefined,
-      matchConfidence: row[colIndex.matchConfidence] ? (String(row[colIndex.matchConfidence]) as MatchConfidence) : undefined,
+      matchConfidence: validateMatchConfidence(row[colIndex.matchConfidence]),
     });
   }
 

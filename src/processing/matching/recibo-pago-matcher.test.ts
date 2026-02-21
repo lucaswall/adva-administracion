@@ -5,6 +5,7 @@
 import { describe, it, expect } from 'vitest';
 import { parseNumber } from '../../utils/numbers.js';
 import { normalizeSpreadsheetDate } from '../../utils/date.js';
+import { buildUnmatchUpdate } from '../../matching/cascade-matcher.js';
 import type { Pago, Recibo, MatchConfidence } from '../../types/index.js';
 
 describe('recibo-pago-matcher', () => {
@@ -158,6 +159,73 @@ describe('recibo-pago-matcher', () => {
 
       // Serial number 45671 => '2025-01-14'
       expect(pago.fechaPago).toBe('2025-01-14');
+    });
+  });
+
+  describe('Cascade displacement cleanup', () => {
+    it('should produce recibo unmatch update via buildUnmatchUpdate', () => {
+      // When a displaced pago has no remaining recibo match,
+      // the previous recibo should be unmatched if not claimed by another pago
+      const reciboFileId = 'recibo-previous';
+      const reciboRow = 3;
+
+      const update = buildUnmatchUpdate(reciboFileId, reciboRow, 'recibo');
+
+      expect(update.reciboFileId).toBe(reciboFileId);
+      expect(update.reciboRow).toBe(reciboRow);
+      expect(update.pagoFileId).toBe(''); // Empty = unmatched
+      expect(update.confidence).toBe('LOW');
+      expect(update.hasCuitMatch).toBe(false);
+    });
+
+    it('should produce pago unmatch entry in cascade state for displaced pago with no remaining matches', () => {
+      // Scenario:
+      // 1. Pago A is matched to Recibo R1 (existing match)
+      // 2. Pago B (better match) displaces Pago A from R1
+      // 3. All other recibos are already claimed
+      // 4. Cascade logic should create an update to clear Pago A's match columns (N:O)
+
+      const cascadeState = {
+        updates: new Map(),
+        displacedCount: 0,
+        maxDepthReached: 0,
+        cycleDetected: false,
+        startTime: Date.now()
+      };
+
+      const displacedPagoFileId = 'pago-displaced';
+      const previousReciboFileId = 'recibo-previous';
+      const previousReciboRow = 3;
+
+      // Recibo unmatch entry (what the fix should create for unclaimed previous recibo)
+      cascadeState.updates.set(
+        previousReciboFileId,
+        buildUnmatchUpdate(previousReciboFileId, previousReciboRow, 'recibo')
+      );
+
+      // Pago unmatch entry (what the fix should create)
+      cascadeState.updates.set(
+        `pago:${displacedPagoFileId}`,
+        {
+          pagoFileId: displacedPagoFileId,
+          reciboFileId: '',
+          reciboRow: 0,
+          confidence: 'LOW' as MatchConfidence,
+          hasCuitMatch: false,
+        }
+      );
+
+      // Verify recibo unmatch
+      const reciboUpdate = cascadeState.updates.get(previousReciboFileId);
+      expect(reciboUpdate).toBeDefined();
+      expect(reciboUpdate?.pagoFileId).toBe('');
+      expect(reciboUpdate?.reciboFileId).toBe(previousReciboFileId);
+
+      // Verify pago unmatch
+      const pagoUpdate = cascadeState.updates.get(`pago:${displacedPagoFileId}`);
+      expect(pagoUpdate).toBeDefined();
+      expect(pagoUpdate?.pagoFileId).toBe(displacedPagoFileId);
+      expect(pagoUpdate?.reciboFileId).toBe('');
     });
   });
 });

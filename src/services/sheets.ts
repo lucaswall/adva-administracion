@@ -1236,14 +1236,14 @@ export async function moveSheetToFirst(
  *
  * @param spreadsheetId - Spreadsheet ID
  * @param range - A1 notation for target sheet (e.g., 'Sheet1!A:Z')
- * @param values - 2D array of rows to append. Date objects are supported.
+ * @param values - 2D array of rows to append. Date objects and CellFormula objects are supported.
  * @param timeZone - Optional IANA timezone string. When provided, Date objects are converted to this timezone.
  * @returns Number of updated cells
  */
 export async function appendRowsWithFormatting(
   spreadsheetId: string,
   range: string,
-  values: CellValue[][],
+  values: (CellValue | CellFormula)[][],
   timeZone?: string,
   metadataCache?: import('../processing/caches/index.js').MetadataCache
 ): Promise<Result<number, Error>> {
@@ -1290,13 +1290,12 @@ export async function appendRowsWithFormatting(
             type: 'DATE_TIME',
             pattern: 'yyyy-mm-dd hh:mm:ss',
           };
+        } else if (isCellFormula(value)) {
+          // Explicit formula - bypasses sanitization for trusted internal formulas
+          cellData.userEnteredValue = { formulaValue: value.value };
         } else if (typeof value === 'string') {
-          // If string starts with =, it's a formula - use formulaValue instead of stringValue
-          if (value.startsWith('=')) {
-            cellData.userEnteredValue = { formulaValue: value };
-          } else {
-            cellData.userEnteredValue = { stringValue: value };
-          }
+          // Always insert as plain string - prevents formula injection
+          cellData.userEnteredValue = { stringValue: value };
         } else if (typeof value === 'number') {
           cellData.userEnteredValue = { numberValue: value };
         } else if (typeof value === 'boolean') {

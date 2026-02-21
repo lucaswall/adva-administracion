@@ -4,7 +4,7 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'node',
-    include: ['src/**/*.test.ts'],
+    include: ['src/**/*.test.ts', 'apps-script/**/*.test.js'],
     env: {
       API_SECRET: 'test-secret-token',
       GOOGLE_SERVICE_ACCOUNT_KEY: 'test-service-account-key',

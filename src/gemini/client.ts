@@ -44,7 +44,7 @@ export interface UsageCallbackData {
 /**
  * Optional callback for tracking token usage
  */
-export type UsageCallback = (data: UsageCallbackData) => void;
+export type UsageCallback = (data: UsageCallbackData) => void | Promise<void>;
 
 /**
  * Sleeps for a specified number of milliseconds
@@ -255,8 +255,8 @@ export class GeminiClient {
 
         const parseResult = this.parseApiResponse(responseText, response.status);
 
-        // Extract usage metadata from parse result
-        if (parseResult.ok && 'usageMetadata' in parseResult) {
+        // Extract usage metadata from parse result (both success and error responses)
+        if ('usageMetadata' in parseResult) {
           usageMetadata = parseResult.usageMetadata;
         }
 
@@ -345,7 +345,7 @@ export class GeminiClient {
   }
 
   /**
-   * Calls the usage callback if provided
+   * Calls the usage callback if provided, safely handling async rejections
    */
   private callUsageCallback(
     success: boolean,
@@ -357,7 +357,7 @@ export class GeminiClient {
   ): void {
     if (!this.usageCallback) return;
 
-    this.usageCallback({
+    const result = this.usageCallback({
       success,
       model: this.MODEL,
       promptTokens: usageMetadata?.promptTokenCount || 0,
@@ -369,6 +369,16 @@ export class GeminiClient {
       fileName,
       errorMessage,
     });
+
+    if (result !== null && result !== undefined && typeof (result as Promise<void>).then === 'function') {
+      (result as Promise<void>).catch((err: unknown) => {
+        warn('Usage callback rejected', {
+          module: 'gemini-client',
+          phase: 'usage-callback',
+          error: err instanceof Error ? err.message : String(err),
+        });
+      });
+    }
   }
 
   /**

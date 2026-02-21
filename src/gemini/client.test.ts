@@ -5,6 +5,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { GeminiClient } from './client.js';
 import { GeminiError } from '../types/index.js';
+import * as loggerModule from '../utils/logger.js';
 
 describe('GeminiClient', () => {
   let client: GeminiClient;
@@ -1023,6 +1024,51 @@ describe('GeminiClient', () => {
       );
     });
 
+    it('extracts usageMetadata from error responses (e.g. SAFETY block)', async () => {
+      const callback = vi.fn();
+      const clientWithCallback = new GeminiClient(mockApiKey, 60, callback);
+
+      // SAFETY block response includes usageMetadata
+      const mockResponse = {
+        candidates: [{
+          finishReason: 'SAFETY',
+          content: {
+            parts: [{ text: '' }]
+          }
+        }],
+        usageMetadata: {
+          promptTokenCount: 300,
+          candidatesTokenCount: 0,
+          totalTokenCount: 300,
+          cachedContentTokenCount: 50
+        }
+      };
+
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify(mockResponse)
+      });
+
+      const result = await clientWithCallback.analyzeDocument(
+        mockBuffer,
+        mockMimeType,
+        mockPrompt,
+        1
+      );
+
+      expect(result.ok).toBe(false);
+      // Even on error, usageMetadata should be extracted and passed to callback
+      expect(callback).toHaveBeenCalledWith(
+        expect.objectContaining({
+          promptTokens: 300,
+          cachedTokens: 50,
+          outputTokens: 0,
+          totalTokens: 300
+        })
+      );
+    });
+
     it('does not call callback if not provided', async () => {
       const mockResponse = {
         candidates: [{
@@ -1337,6 +1383,57 @@ describe('GeminiClient', () => {
 
       expect(result.ok).toBe(true);
       // Normal responses should work without truncation
+    });
+  });
+
+  describe('callUsageCallback async rejection handling', () => {
+    const mockBuffer = Buffer.from('test-pdf-content');
+    const mockMimeType = 'application/pdf';
+    const mockPrompt = 'Extract data';
+
+    it('should catch and log warning when async callback returns rejected Promise', async () => {
+      const warnSpy = vi.spyOn(loggerModule, 'warn').mockImplementation(() => {});
+
+      const asyncErrorCallback = vi.fn().mockReturnValue(
+        Promise.reject(new Error('async callback error'))
+      );
+
+      const clientWithCallback = new GeminiClient(mockApiKey, 60, asyncErrorCallback);
+
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify({
+          candidates: [{ content: { parts: [{ text: 'Extracted data' }] } }],
+        }),
+      });
+
+      // Should not throw even though the callback returns a rejected Promise
+      const result = await clientWithCallback.analyzeDocument(
+        mockBuffer,
+        mockMimeType,
+        mockPrompt,
+        1,
+        'file-id',
+        'test.pdf'
+      );
+
+      // analyzeDocument still succeeds
+      expect(result.ok).toBe(true);
+
+      // The callback was called
+      expect(asyncErrorCallback).toHaveBeenCalledOnce();
+
+      // Allow microtasks to settle so .catch() handler runs
+      await Promise.resolve();
+
+      // Warning was logged about the callback failure
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('callback'),
+        expect.any(Object)
+      );
+
+      warnSpy.mockRestore();
     });
   });
 });

@@ -5,7 +5,8 @@
 
 import { randomUUID } from 'crypto';
 import { GEMINI_PRICING } from '../config.js';
-import { appendRowsWithFormatting, getValues, getSpreadsheetTimezone } from './sheets.js';
+import { appendRowsWithFormatting, getSpreadsheetTimezone } from './sheets.js';
+import type { CellFormula } from './sheets.js';
 import type { Result } from '../types/index.js';
 import { debug, error as logError } from '../utils/logger.js';
 
@@ -98,19 +99,17 @@ export async function logTokenUsage(
   }
   const timeZone = timezoneResult.ok ? timezoneResult.value : undefined;
 
-  // Get current row count to determine next row number for formula
-  const valuesResult = await getValues(spreadsheetId, 'Uso de API!A:A');
-  if (!valuesResult.ok) {
-    return { ok: false, error: valuesResult.error };
-  }
-
-  // Next row will be current row count + 1 (accounting for header row)
-  const nextRow = valuesResult.value.length + 1;
-
   // Convert timestamp to Date object if it's a string
   const timestamp = typeof data.timestamp === 'string'
     ? new Date(data.timestamp)
     : data.timestamp;
+
+  // estimatedCostUSD formula: promptTokens*promptCost + cachedTokens*cachedCost + outputTokens*outputCost
+  // Uses ROW()-based self-referencing to avoid TOCTOU race condition with row count reads
+  const costFormula: CellFormula = {
+    type: 'formula',
+    value: '=INDIRECT("F"&ROW())*INDIRECT("I"&ROW())+INDIRECT("G"&ROW())*INDIRECT("J"&ROW())+INDIRECT("H"&ROW())*INDIRECT("K"&ROW())',
+  };
 
   // Format data as spreadsheet row with Date object for proper datetime formatting
   const row = [
@@ -125,8 +124,7 @@ export async function logTokenUsage(
     data.promptCostPerToken,
     data.cachedCostPerToken,
     data.outputCostPerToken,
-    // estimatedCostUSD formula: =F*I + G*J + H*K (promptTokens*promptCost + cachedTokens*cachedCost + outputTokens*outputCost)
-    `=F${nextRow}*I${nextRow}+G${nextRow}*J${nextRow}+H${nextRow}*K${nextRow}`,
+    costFormula,
     data.durationMs,
     data.success ? 'YES' : 'NO',
     data.errorMessage,
