@@ -119,6 +119,13 @@ export const RETRY_DELAYS_MS = [10000, 30000, 60000] as const;
 export const FETCH_TIMEOUT_MS = 300000;
 
 /**
+ * Exchange rate API fetch timeout in milliseconds
+ * Maximum time allowed for a single fetch request to ArgentinaDatos API
+ * Set to 30 seconds - reasonable for a simple REST API
+ */
+export const EXCHANGE_RATE_TIMEOUT_MS = 30000;
+
+/**
  * Gemini API pricing per token (Standard tier)
  * Source: https://ai.google.dev/gemini-api/docs/pricing
  * Last updated: 2026-01-23
