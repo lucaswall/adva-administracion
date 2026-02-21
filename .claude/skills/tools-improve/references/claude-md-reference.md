@@ -33,6 +33,18 @@ CLAUDE.md is loaded into **every session**. It consumes context that Claude need
 | Long explanations or tutorials | Bloats context | Move to skills or reference files |
 | Self-evident practices | "Write clean code" adds nothing | Delete |
 
+## `@import` Syntax
+
+Reference external files from CLAUDE.md to keep it concise:
+```markdown
+See @README.md for project overview and @package.json for available npm commands.
+@docs/git-instructions.md
+@~/.claude/my-project-instructions.md
+```
+- Files are loaded inline when Claude reads CLAUDE.md
+- Up to 5 levels of nesting
+- Works with relative paths, absolute paths, and `~` home directory
+
 ## Modular Organization
 
 For larger projects, use `.claude/rules/*.md` for topic-specific instructions:
@@ -40,8 +52,6 @@ For larger projects, use `.claude/rules/*.md` for topic-specific instructions:
 - Supports path-scoping via YAML `paths` frontmatter
 - All loaded automatically as project memory
 - Subdirectories supported (discovered recursively)
-
-Use `@path/to/file` imports in CLAUDE.md to reference external files (up to 5 levels deep).
 
 ## When Reviewing CLAUDE.md
 
@@ -56,6 +66,7 @@ Apply this checklist:
 7. **Stale content?** → Cross-check tables/lists against actual files (agents, DB tables, components)
 8. **Emphasis on critical rules?** → Use "IMPORTANT" or "YOU MUST" for rules that must not be ignored
 9. **Checked into git?** → CLAUDE.md should be in version control for team sharing
+10. **Test by subtraction** → For each line, remove it and ask: "Would Claude make mistakes without this?" If not, cut it. Instruction-following quality degrades as instruction count increases.
 
 ## When Adding to CLAUDE.md
 
