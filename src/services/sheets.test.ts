@@ -2278,6 +2278,84 @@ describe('Google Sheets API wrapper - quota retry tests', () => {
         );
       });
     });
+
+    describe('appendRowsWithFormatting', () => {
+      beforeEach(() => {
+        mockSheetsApi.spreadsheets.get.mockResolvedValue({
+          data: {
+            sheets: [
+              { properties: { sheetId: 456, title: 'TestSheet' } },
+            ],
+          },
+        });
+        mockSheetsApi.spreadsheets.batchUpdate.mockResolvedValue({ data: {} });
+      });
+
+      it('should insert CellFormula values as formulaValue (not sanitized)', async () => {
+        const resultPromise = appendRowsWithFormatting('spreadsheet123', 'TestSheet!A:C', [
+          [
+            'Normal text',
+            { type: 'formula', value: '=A1+B1' } as any,
+            'Safe',
+          ],
+        ]);
+        await vi.runAllTimersAsync();
+        const result = await resultPromise;
+
+        expect(result.ok).toBe(true);
+        expect(mockSheetsApi.spreadsheets.batchUpdate).toHaveBeenCalledWith(
+          expect.objectContaining({
+            requestBody: expect.objectContaining({
+              requests: expect.arrayContaining([
+                expect.objectContaining({
+                  appendCells: expect.objectContaining({
+                    rows: [
+                      {
+                        values: [
+                          expect.objectContaining({ userEnteredValue: { stringValue: 'Normal text' } }),
+                          expect.objectContaining({ userEnteredValue: { formulaValue: '=A1+B1' } }),
+                          expect.objectContaining({ userEnteredValue: { stringValue: 'Safe' } }),
+                        ],
+                      },
+                    ],
+                  }),
+                }),
+              ]),
+            }),
+          })
+        );
+      });
+
+      it('should treat raw strings starting with = as stringValue (not formula)', async () => {
+        const resultPromise = appendRowsWithFormatting('spreadsheet123', 'TestSheet!A:B', [
+          ['=IMPORTRANGE("abc", "Sheet1!A:B")', 'normal'],
+        ]);
+        await vi.runAllTimersAsync();
+        const result = await resultPromise;
+
+        expect(result.ok).toBe(true);
+        expect(mockSheetsApi.spreadsheets.batchUpdate).toHaveBeenCalledWith(
+          expect.objectContaining({
+            requestBody: expect.objectContaining({
+              requests: expect.arrayContaining([
+                expect.objectContaining({
+                  appendCells: expect.objectContaining({
+                    rows: [
+                      {
+                        values: [
+                          expect.objectContaining({ userEnteredValue: { stringValue: '=IMPORTRANGE("abc", "Sheet1!A:B")' } }),
+                          expect.objectContaining({ userEnteredValue: { stringValue: 'normal' } }),
+                        ],
+                      },
+                    ],
+                  }),
+                }),
+              ]),
+            }),
+          })
+        );
+      });
+    });
   });
 
   describe('columnIndexToLetter', () => {
