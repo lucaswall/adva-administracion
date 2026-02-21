@@ -75,5 +75,8 @@
       "mcp__Railway__link-service",
       "mcp__Railway__generate-domain"
     ]
+  },
+  "env": {
+    "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1"
   }
 }
