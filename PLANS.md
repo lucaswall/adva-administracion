@@ -449,3 +449,36 @@ Fix Plan pending — 3 bugs found during review.
 
 1. Run `bug-hunter` agent — Review fix changes for new bugs
 2. Run `verifier` agent — Verify all tests pass and zero warnings
+
+---
+
+## Iteration 2
+
+**Implemented:** 2026-02-21
+**Method:** Single-agent (3 fixes, effort score 4 — worker overhead exceeds implementation time)
+
+### Tasks Completed This Iteration
+- Fix 1: Missing unmatch cleanup in recibo-pago cascade displacement (ADV-97) — Added `buildUnmatchUpdate` for unclaimed recibos, added `pago:` unmatch entries, updated update loop to handle `pago:` keys and recibo unmatch entries
+- Fix 2: usageMetadata discarded on Gemini error responses (ADV-98) — Changed condition from `parseResult.ok && 'usageMetadata' in parseResult` to `'usageMetadata' in parseResult`
+- Fix 3: API_SECRET single quote injection in Apps Script build (ADV-99) — Added `escapeTemplateValue` function, applied to both `API_BASE_URL` and `API_SECRET` substitutions, guarded top-level build execution for testability
+
+### Files Modified
+- `src/processing/matching/recibo-pago-matcher.ts` — Added unmatch cleanup in cascade displacement, `pago:` key handling in update loop, used `update.reciboFileId` instead of `key`
+- `src/processing/matching/recibo-pago-matcher.test.ts` — Added cascade displacement cleanup tests
+- `src/gemini/client.ts` — Fixed usageMetadata extraction from error responses
+- `src/gemini/client.test.ts` — Added test for SAFETY block usageMetadata extraction
+- `apps-script/build.js` — Added `escapeTemplateValue` function, applied escaping, guarded top-level execution
+- `apps-script/build.test.js` — New test file for build helpers
+- `vitest.config.ts` — Added `apps-script/**/*.test.js` to include pattern
+
+### Linear Updates
+- ADV-97: Todo → In Progress → Review
+- ADV-98: Todo → In Progress → Review
+- ADV-99: Todo → In Progress → Review
+
+### Pre-commit Verification
+- bug-hunter: Found 2 bugs (fragile key usage in update loop, unreliable isDirectExecution check), fixed before commit
+- verifier: All 1612 tests pass, zero warnings
+
+### Continuation Status
+All tasks completed.

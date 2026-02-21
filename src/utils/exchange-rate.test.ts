@@ -2,7 +2,7 @@
  * Unit tests for exchange rate utilities
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   getExchangeRateSync,
   clearExchangeRateCache,

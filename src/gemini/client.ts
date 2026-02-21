@@ -255,8 +255,8 @@ export class GeminiClient {
 
         const parseResult = this.parseApiResponse(responseText, response.status);
 
-        // Extract usage metadata from parse result
-        if (parseResult.ok && 'usageMetadata' in parseResult) {
+        // Extract usage metadata from parse result (both success and error responses)
+        if ('usageMetadata' in parseResult) {
           usageMetadata = parseResult.usageMetadata;
         }
 

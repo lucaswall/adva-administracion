@@ -15,6 +15,7 @@ import {
   isBetterMatch,
   detectCycle,
   buildReciboMatchUpdate,
+  buildUnmatchUpdate,
 } from '../../matching/cascade-matcher.js';
 import { parseNumber } from '../../utils/numbers.js';
 import { normalizeSpreadsheetDate } from '../../utils/date.js';
@@ -174,6 +175,41 @@ async function processCascadingReciboDisplacements(
       }
     } else {
       // No match found - pago becomes unmatched
+      // If this pago was previously matched to a recibo that wasn't claimed, unmatch it
+      if (displaced.previousMatchFileId && !claims.claimedRecibos.has(displaced.previousMatchFileId)) {
+        const previousRecibo = recibos.find(r => r.fileId === displaced.previousMatchFileId);
+        if (previousRecibo) {
+          cascadeState.updates.set(
+            displaced.previousMatchFileId,
+            buildUnmatchUpdate(
+              displaced.previousMatchFileId,
+              previousRecibo.row,
+              'recibo'
+            )
+          );
+
+          debug('Unmatched recibo due to displaced pago with no new match', {
+            module: 'matching',
+            phase: 'cascade-recibo',
+            pagoId: displacedPago.fileId,
+            reciboId: displaced.previousMatchFileId,
+            correlationId,
+          });
+        }
+      }
+
+      // Store unmatch update for pago (clear matchedReciboFileId)
+      cascadeState.updates.set(
+        `pago:${displacedPago.fileId}`,
+        {
+          pagoFileId: displacedPago.fileId,
+          reciboFileId: '',
+          reciboRow: 0,
+          confidence: 'LOW',
+          hasCuitMatch: false,
+        }
+      );
+
       debug('Displaced pago has no remaining recibo matches', {
         module: 'matching',
         phase: 'cascade-recibo',
@@ -470,8 +506,18 @@ async function doMatchRecibosWithPagos(
   const updates: Array<{ range: string; values: (string | number)[][] }> = [];
   let matchesFound = 0;
 
-  for (const [reciboFileId, update] of cascadeState.updates) {
-    if (update.reciboFileId && update.reciboRow) {
+  for (const [key, update] of cascadeState.updates) {
+    // Check if this is a pago unmatch update (key starts with "pago:")
+    if (key.startsWith('pago:')) {
+      const pago = pagosMap.get(update.pagoFileId);
+      if (pago) {
+        // Clear pago match (columns N:O)
+        updates.push({
+          range: `'Pagos Enviados'!N${pago.row}:O${pago.row}`,
+          values: [['', '']],
+        });
+      }
+    } else if (update.reciboFileId && update.reciboRow && update.pagoFileId) {
       matchesFound++;
 
       // Update recibo with match info (columns Q:R)
@@ -489,11 +535,17 @@ async function doMatchRecibosWithPagos(
         updates.push({
           range: `'Pagos Enviados'!N${pago.row}:O${pago.row}`,
           values: [[
-            reciboFileId,
+            update.reciboFileId,
             update.confidence,
           ]],
         });
       }
+    } else if (update.reciboFileId && update.reciboRow) {
+      // Recibo unmatch - clear recibo match columns (columns Q:R)
+      updates.push({
+        range: `'Recibos'!Q${update.reciboRow}:R${update.reciboRow}`,
+        values: [['', '']],
+      });
     }
   }
 
