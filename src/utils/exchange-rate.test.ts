@@ -513,6 +513,10 @@ describe('exchange-rate', () => {
       vi.clearAllMocks();
     });
 
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
     it('aborts fetch after timeout period', async () => {
       vi.useFakeTimers();
 
@@ -538,8 +542,6 @@ describe('exchange-rate', () => {
 
       expect(result.ok).toBe(false);
       expect(abortCalled).toBe(true);
-
-      vi.useRealTimers();
     });
 
     it('clears timeout on successful response', async () => {
@@ -557,7 +559,6 @@ describe('exchange-rate', () => {
       expect(clearTimeoutSpy).toHaveBeenCalled();
 
       clearTimeoutSpy.mockRestore();
-      vi.useRealTimers();
     });
   });
 

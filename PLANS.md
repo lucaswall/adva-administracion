@@ -1,6 +1,6 @@
 # Implementation Plan
 
-**Status:** IN_PROGRESS
+**Status:** IMPLEMENTED
 **Branch:** feat/ADV-80-backlog-batch
 **Issues:** ADV-80, ADV-81, ADV-83, ADV-88, ADV-89, ADV-90, ADV-94, ADV-95
 **Created:** 2026-02-21
@@ -311,3 +311,71 @@ Fix 8 backlog issues from code audit: add timeout to exchange-rate fetch (ADV-80
 - Adding durationMs to Google Drive/Sheets API calls (ADV-90 scoped to ArgentinaDatos only — googleapis calls are managed by the client library)
 - Changing `appendRowsWithLinks` (already uses `CellFormula` correctly)
 - Changing token-usage-batch.ts (already calculates cost directly without formulas)
+
+---
+
+## Iteration 1
+
+**Implemented:** 2026-02-21
+**Method:** Agent team (3 workers, worktree-isolated)
+
+### Tasks Completed This Iteration
+- Task 1: Add timeout to exchange-rate API fetch (ADV-80) — Added AbortController with 30s timeout to `getExchangeRate()`, added `EXCHANGE_RATE_TIMEOUT_MS` config constant (worker-1)
+- Task 2: Fix formula injection in appendRowsWithFormatting (ADV-83) — Changed signature to accept `CellFormula`, removed `startsWith('=')` check, raw strings always `stringValue` (worker-2)
+- Task 3: Fix token usage logger race condition and async callback (ADV-81) — Replaced absolute row formula with ROW()-based self-referencing, removed `getValues` call (TOCTOU fix), fixed `UsageCallback` type to handle async, added `.catch()` for async rejections (worker-2)
+- Task 4: Add runtime validation for enum casts from spreadsheet cells (ADV-88) — Updated `validateMoneda`/`validateTipoComprobante` to return defaults with warnings, fixed `String(undefined)` bug, replaced all unchecked casts in matching modules (worker-3)
+- Task 5: Add durationMs to exchange-rate API call logs (ADV-90) — Added `Date.now()` timing and debug-level `durationMs` logging on success and error paths (worker-1)
+- Task 6: Replace placeholder tests (ADV-89) — Replaced `expect(true).toBe(true)` in concurrency.test.ts with meaningful assertion, removed untestable placeholders in scanner.test.ts and folder-structure.test.ts (worker-3)
+- Task 7: Remove dead triggerAutofillBank from Apps Script build (ADV-94) — Removed from build footer in apps-script/build.js (worker-3)
+- Task 8: Fix npm audit vulnerabilities and update dependencies (ADV-95) — Reduced from 8 to 4 vulnerabilities; remaining 4 are in googleapis transitive chain via @google/clasp (latest version, unfixable) (lead)
+
+### Files Modified
+- `src/config.ts` — Added EXCHANGE_RATE_TIMEOUT_MS constant
+- `src/utils/exchange-rate.ts` — AbortController timeout + durationMs logging
+- `src/utils/exchange-rate.test.ts` — Timeout and durationMs tests, afterEach fix
+- `src/services/sheets.ts` — appendRowsWithFormatting CellFormula support, removed startsWith('=') check
+- `src/services/sheets.test.ts` — Formula injection tests
+- `src/services/token-usage-logger.ts` — ROW()-based formula, CellFormula wrapper, removed getValues
+- `src/services/token-usage-logger.test.ts` — New test file for token usage logger
+- `src/gemini/client.ts` — UsageCallback async type, callUsageCallback .catch()
+- `src/gemini/client.test.ts` — Async callback rejection test
+- `src/utils/validation.ts` — Updated enum validators with defaults and warnings
+- `src/utils/validation.test.ts` — Updated validation tests
+- `src/bank/match-movimientos.ts` — Replaced unchecked casts with validation functions
+- `src/processing/matching/factura-pago-matcher.ts` — Replaced unchecked casts
+- `src/processing/matching/recibo-pago-matcher.ts` — Replaced unchecked casts
+- `src/services/folder-structure.test.ts` — Removed placeholder test
+- `src/processing/scanner.test.ts` — Removed placeholder test
+- `src/utils/concurrency.test.ts` — Replaced placeholder with meaningful assertion
+- `apps-script/build.js` — Removed dead triggerAutofillBank
+- `package.json` — Updated dependencies
+- `package-lock.json` — Updated lock file
+- `.gitignore` — Added bare `node_modules` entry for worktree symlinks
+
+### Linear Updates
+- ADV-80: Todo → In Progress → Review
+- ADV-81: Todo → In Progress → Review
+- ADV-83: Todo → In Progress → Review
+- ADV-88: Todo → In Progress → Review
+- ADV-89: Todo → Review
+- ADV-90: Todo → In Progress → Review
+- ADV-94: Todo → Review
+- ADV-95: Todo → Review
+
+### Pre-commit Verification
+- bug-hunter: Found 1 medium bug (vi.useRealTimers not in afterEach), fixed before commit
+- verifier: All 1605 tests pass, zero warnings
+
+### Work Partition
+- Worker 1: Tasks 1, 5 (exchange-rate domain — timeout, durationMs logging)
+- Worker 2: Tasks 2, 3 (sheets/logger/client domain — formula injection, TOCTOU race, async callback)
+- Worker 3: Tasks 4, 6, 7 (validation/matching + test cleanup + dead code removal)
+- Lead: Task 8 (npm audit fix — CLI commands)
+
+### Merge Summary
+- Worker 2: fast-forward (no conflicts)
+- Worker 1: merged, no conflicts
+- Worker 3: merged, no conflicts
+
+### Continuation Status
+All tasks completed.
