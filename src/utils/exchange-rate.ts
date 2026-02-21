@@ -6,8 +6,9 @@
 import type { Result, Moneda } from '../types/index.js';
 import { parseArgDate, formatISODate } from './date.js';
 import { amountsMatch } from './numbers.js';
-import { warn } from './logger.js';
+import { debug, warn } from './logger.js';
 import { getCorrelationId } from './correlation.js';
+import { EXCHANGE_RATE_TIMEOUT_MS } from '../config.js';
 
 /**
  * Exchange rate data from ArgentinaDatos API
@@ -145,10 +146,20 @@ export async function getExchangeRate(date: string): Promise<Result<ExchangeRate
   const [year, month, day] = dateParts;
   const url = `https://api.argentinadatos.com/v1/cotizaciones/dolares/oficial/${year}/${month}/${day}`;
 
+  const startTime = Date.now();
+
+  // Create AbortController for timeout
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), EXCHANGE_RATE_TIMEOUT_MS);
+
   try {
-    const response = await fetch(url);
+    const response = await fetch(url, { signal: controller.signal });
+    clearTimeout(timeoutId);
+
+    const durationMs = Date.now() - startTime;
 
     if (!response.ok) {
+      debug('Exchange rate API call completed', { module: 'exchange-rate', durationMs, url });
       return {
         ok: false,
         error: new Error(`Failed to fetch exchange rate: HTTP ${response.status}`),
@@ -191,8 +202,12 @@ export async function getExchangeRate(date: string): Promise<Result<ExchangeRate
     // Cache the result
     setCachedValue(cacheKey, exchangeRate);
 
+    debug('Exchange rate API call completed', { module: 'exchange-rate', durationMs, url });
     return { ok: true, value: exchangeRate };
   } catch (e) {
+    clearTimeout(timeoutId);
+    const durationMs = Date.now() - startTime;
+    debug('Exchange rate API call completed', { module: 'exchange-rate', durationMs, url });
     return {
       ok: false,
       error: e instanceof Error ? e : new Error(String(e)),

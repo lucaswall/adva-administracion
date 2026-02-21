@@ -500,7 +500,118 @@ describe('exchange-rate', () => {
       const result = await getExchangeRate('2025-01-20');
 
       expect(result.ok).toBe(true);
-      expect(global.fetch).toHaveBeenCalledWith(expect.stringContaining('/2025/01/20'));
+      expect(global.fetch).toHaveBeenCalledWith(
+        expect.stringContaining('/2025/01/20'),
+        expect.objectContaining({ signal: expect.any(AbortSignal) })
+      );
+    });
+  });
+
+  describe('getExchangeRate timeout', () => {
+    beforeEach(() => {
+      clearExchangeRateCache();
+      vi.clearAllMocks();
+    });
+
+    it('aborts fetch after timeout period', async () => {
+      vi.useFakeTimers();
+
+      let abortCalled = false;
+      global.fetch = vi.fn().mockImplementation((_url: string, options?: RequestInit) => {
+        return new Promise((_resolve, reject) => {
+          if (options?.signal) {
+            options.signal.addEventListener('abort', () => {
+              abortCalled = true;
+              reject(new DOMException('The operation was aborted.', 'AbortError'));
+            });
+          }
+        });
+      });
+
+      const { getExchangeRate } = await import('./exchange-rate.js');
+      const promise = getExchangeRate('2025-01-20');
+
+      // Advance time past the timeout (EXCHANGE_RATE_TIMEOUT_MS = 30000ms)
+      await vi.advanceTimersByTimeAsync(30001);
+
+      const result = await promise;
+
+      expect(result.ok).toBe(false);
+      expect(abortCalled).toBe(true);
+
+      vi.useRealTimers();
+    });
+
+    it('clears timeout on successful response', async () => {
+      vi.useFakeTimers();
+      const clearTimeoutSpy = vi.spyOn(global, 'clearTimeout');
+
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({ compra: 1250, venta: 1260, fecha: '2025-01-20' })
+      });
+
+      const { getExchangeRate } = await import('./exchange-rate.js');
+      await getExchangeRate('2025-01-20');
+
+      expect(clearTimeoutSpy).toHaveBeenCalled();
+
+      clearTimeoutSpy.mockRestore();
+      vi.useRealTimers();
+    });
+  });
+
+  describe('getExchangeRate logging', () => {
+    beforeEach(() => {
+      clearExchangeRateCache();
+      vi.clearAllMocks();
+    });
+
+    it('logs durationMs on successful fetch', async () => {
+      const loggerModule = await import('../utils/logger.js');
+      const debugSpy = vi.spyOn(loggerModule, 'debug');
+
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({ compra: 1250, venta: 1260, fecha: '2025-01-20' })
+      });
+
+      const { getExchangeRate } = await import('./exchange-rate.js');
+      await getExchangeRate('2025-01-20');
+
+      expect(debugSpy).toHaveBeenCalledWith(
+        expect.stringContaining('Exchange rate API call'),
+        expect.objectContaining({
+          module: 'exchange-rate',
+          durationMs: expect.any(Number)
+        })
+      );
+
+      debugSpy.mockRestore();
+    });
+
+    it('logs durationMs on HTTP error response', async () => {
+      const loggerModule = await import('../utils/logger.js');
+      const debugSpy = vi.spyOn(loggerModule, 'debug');
+
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 500
+      });
+
+      const { getExchangeRate } = await import('./exchange-rate.js');
+      const result = await getExchangeRate('2025-01-20');
+
+      expect(result.ok).toBe(false);
+      expect(debugSpy).toHaveBeenCalledWith(
+        expect.stringContaining('Exchange rate API call'),
+        expect.objectContaining({
+          module: 'exchange-rate',
+          durationMs: expect.any(Number)
+        })
+      );
+
+      debugSpy.mockRestore();
     });
   });
 });
