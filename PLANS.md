@@ -377,5 +377,75 @@ Fix 8 backlog issues from code audit: add timeout to exchange-rate fetch (ADV-80
 - Worker 1: merged, no conflicts
 - Worker 3: merged, no conflicts
 
+### Review Findings
+
+Summary: 5 findings evaluated (Team: security, reliability, quality reviewers)
+- FIX: 3 issue(s) — Linear issues created in Todo
+- DISCARDED: 2 finding(s) — not applicable
+
+**Issues requiring fix:**
+- [HIGH] BUG: Missing unmatch cleanup in recibo-pago cascade displacement (`src/processing/matching/recibo-pago-matcher.ts:175-183`) — displaced pago with no new match leaves orphaned match references in spreadsheet
+- [MEDIUM] BUG: usageMetadata discarded on Gemini error responses (`src/gemini/client.ts:258-261`) — `parseResult.ok &&` condition prevents extracting token counts from error responses, undercounting costs
+- [MEDIUM] SECURITY: API_SECRET single quote injection in Apps Script build (`apps-script/build.js:142-144`) — raw string substitution without escaping single quotes
+
+**Discarded findings (not bugs):**
+- [DISCARDED] SECURITY: `setValues()`/`appendRows()`/`batchUpdate()` use `USER_ENTERED` without formula sanitization (`src/services/sheets.ts:232,266,295`) — current callers pass only hardcoded headers; safe alternatives (`appendRowsWithFormatting`, `appendRowsWithLinks`) are used for document data
+- [DISCARDED] BUG: `movimientosFilled` reported even when `updateDetalle` fails (`src/bank/match-movimientos.ts:929`) — `errors` field correctly reports the write failure; `movimientosFilled` semantically means "matches found" not "writes completed"
+
+### Linear Updates
+- ADV-80: Review → Merge
+- ADV-81: Review → Merge
+- ADV-83: Review → Merge
+- ADV-88: Review → Merge
+- ADV-89: Review → Merge
+- ADV-90: Review → Merge
+- ADV-94: Review → Merge
+- ADV-95: Review → Merge
+- ADV-97: Created in Todo (Fix: Missing unmatch cleanup in recibo-pago cascade)
+- ADV-98: Created in Todo (Fix: usageMetadata discarded on error responses)
+- ADV-99: Created in Todo (Fix: API_SECRET single quote injection)
+
+<!-- REVIEW COMPLETE -->
+
 ### Continuation Status
-All tasks completed.
+Fix Plan pending — 3 bugs found during review.
+
+---
+
+## Fix Plan
+
+**Source:** Review findings from Iteration 1
+**Linear Issues:** [ADV-97](https://linear.app/lw-claude/issue/ADV-97/missing-unmatch-cleanup-in-recibo-pago-cascade-displacement), [ADV-98](https://linear.app/lw-claude/issue/ADV-98/usagemetadata-discarded-on-gemini-error-responses), [ADV-99](https://linear.app/lw-claude/issue/ADV-99/api-secret-single-quote-injection-in-apps-script-build)
+
+### Fix 1: Missing unmatch cleanup in recibo-pago cascade displacement (ADV-97)
+**Linear Issue:** [ADV-97](https://linear.app/lw-claude/issue/ADV-97/missing-unmatch-cleanup-in-recibo-pago-cascade-displacement)
+
+1. Write test in `src/processing/matching/recibo-pago-matcher.test.ts` verifying that when a displaced pago has no remaining recibo match, unmatch updates are produced for both the recibo and the pago
+2. Run verifier (expect fail)
+3. In `src/processing/matching/recibo-pago-matcher.ts:175-183`, add unmatch cleanup logic matching the pattern from `factura-pago-matcher.ts:176-213`:
+   - If displaced pago had a `previousMatchFileId` and that recibo isn't claimed, add `buildUnmatchUpdate` for the recibo
+   - Add `cascadeState.updates.set('pago:${id}', ...)` entry to clear the pago's match reference
+   - Import `buildUnmatchUpdate` from `cascade-matcher.js` if not already imported
+4. Run verifier (expect pass)
+
+### Fix 2: usageMetadata discarded on Gemini error responses (ADV-98)
+**Linear Issue:** [ADV-98](https://linear.app/lw-claude/issue/ADV-98/usagemetadata-discarded-on-gemini-error-responses)
+
+1. Write test in `src/gemini/client.test.ts` verifying that when Gemini returns an error response with usageMetadata (e.g., SAFETY block), the usage callback receives the actual token counts (not zeros)
+2. Run verifier (expect fail)
+3. In `src/gemini/client.ts:258-261`, change the condition from `if (parseResult.ok && 'usageMetadata' in parseResult)` to `if ('usageMetadata' in parseResult)`
+4. Run verifier (expect pass)
+
+### Fix 3: API_SECRET single quote injection in Apps Script build (ADV-99)
+**Linear Issue:** [ADV-99](https://linear.app/lw-claude/issue/ADV-99/api-secret-single-quote-injection-in-apps-script-build)
+
+1. Write test in `apps-script/build.test.js` (or inline assertion) verifying that a secret containing single quotes is properly escaped in the generated output
+2. Run verifier (expect fail)
+3. In `apps-script/build.js:142-144`, escape the substituted values before injection: `secret.replace(/\\/g, '\\\\').replace(/'/g, "\\'")`
+4. Apply same escaping to `API_BASE_URL` if it uses the same pattern
+5. Run verifier (expect pass)
+
+### Post-Fix Checklist
+
+1. Run `bug-hunter` agent — Review fix changes for new bugs
+2. Run `verifier` agent — Verify all tests pass and zero warnings
