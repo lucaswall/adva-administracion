@@ -3,7 +3,8 @@
  * Handles matching between facturas and pagos with upgrade detection
  */
 
-import type { Result, Factura, Pago, MatchConfidence } from '../../types/index.js';
+import type { Result, Factura, Pago } from '../../types/index.js';
+import { validateMoneda, validateMatchConfidence, validateTipoComprobante } from '../../utils/validation.js';
 import { getConfig, MAX_CASCADE_DEPTH, CASCADE_TIMEOUT_MS } from '../../config.js';
 import { getValues, batchUpdate } from '../../services/sheets.js';
 import { FacturaPagoMatcher, type MatchQuality } from '../../matching/matcher.js';
@@ -327,7 +328,7 @@ async function doMatchFacturasWithPagos(
         fechaEmision: normalizeSpreadsheetDate(row[0]),
         fileId: String(row[1] || ''),
         fileName: String(row[2] || ''),
-        tipoComprobante: (row[3] || 'A') as Factura['tipoComprobante'],
+        tipoComprobante: validateTipoComprobante(row[3]),
         nroFactura: String(row[4] || ''),
         // Column 5 (F) and 6 (G) contain either emisor or receptor info depending on sheet
         cuitEmisor: facturaCuitField === 'cuitEmisor' ? String(row[5] || '') : '',
@@ -337,13 +338,13 @@ async function doMatchFacturasWithPagos(
         importeNeto: parseNumber(row[7]) || 0,
         importeIva: parseNumber(row[8]) || 0,
         importeTotal: parseNumber(row[9]) || 0,
-        moneda: (row[10] || 'ARS') as Factura['moneda'],
+        moneda: validateMoneda(row[10]),
         concepto: row[11] ? String(row[11]) : undefined,
         processedAt: String(row[12] || ''),
         confidence: Number(row[13]) || 0,
         needsReview: row[14] === 'YES',
         matchedPagoFileId: row[15] ? String(row[15]) : undefined,
-        matchConfidence: row[16] ? (String(row[16]) as MatchConfidence) : undefined,
+        matchConfidence: validateMatchConfidence(row[16]),
         hasCuitMatch: row[17] === 'YES',
       };
 
@@ -365,7 +366,7 @@ async function doMatchFacturasWithPagos(
         fileName: String(row[2] || ''),
         banco: String(row[3] || ''),
         importePagado: parseNumber(row[4]) || 0,
-        moneda: (String(row[5]) as 'ARS' | 'USD') || 'ARS',
+        moneda: validateMoneda(row[5]),
         referencia: row[6] ? String(row[6]) : undefined,
         cuitPagador: pagoCuitField === 'cuitPagador' ? String(row[7] || '') : undefined,
         nombrePagador: pagoCuitField === 'cuitPagador' ? String(row[8] || '') : undefined,
@@ -376,7 +377,7 @@ async function doMatchFacturasWithPagos(
         confidence: Number(row[11]) || 0,
         needsReview: row[12] === 'YES',
         matchedFacturaFileId: row[13] ? String(row[13]) : undefined,
-        matchConfidence: row[14] ? (String(row[14]) as MatchConfidence) : undefined,
+        matchConfidence: validateMatchConfidence(row[14]),
       };
 
       pagos.push(pago);

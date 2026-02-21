@@ -3,7 +3,8 @@
  * Handles matching between recibos and pagos with upgrade detection
  */
 
-import type { Result, Pago, Recibo, MatchConfidence } from '../../types/index.js';
+import type { Result, Pago, Recibo } from '../../types/index.js';
+import { validateMoneda, validateMatchConfidence } from '../../utils/validation.js';
 import { getConfig, MAX_CASCADE_DEPTH, CASCADE_TIMEOUT_MS } from '../../config.js';
 import { getValues, batchUpdate } from '../../services/sheets.js';
 import { ReciboPagoMatcher, type MatchQuality } from '../../matching/matcher.js';
@@ -260,7 +261,7 @@ async function doMatchRecibosWithPagos(
         fechaPago: normalizeSpreadsheetDate(row[0]),
         fileId: String(row[1] || ''),
         fileName: String(row[2] || ''),
-        tipoRecibo: (row[3] || 'sueldo') as Recibo['tipoRecibo'],
+        tipoRecibo: (row[3] === 'liquidacion_final' ? 'liquidacion_final' : 'sueldo'),
         nombreEmpleado: String(row[4] || ''),
         cuilEmpleado: String(row[5] || ''),
         legajo: String(row[6] || ''),
@@ -274,7 +275,7 @@ async function doMatchRecibosWithPagos(
         confidence: Number(row[14]) || 0,
         needsReview: row[15] === 'YES',
         matchedPagoFileId: row[16] ? String(row[16]) : undefined,
-        matchConfidence: row[17] ? (String(row[17]) as MatchConfidence) : undefined,
+        matchConfidence: validateMatchConfidence(row[17]),
       });
     }
   }
@@ -291,7 +292,7 @@ async function doMatchRecibosWithPagos(
         fileName: String(row[2] || ''),
         banco: String(row[3] || ''),
         importePagado: parseNumber(row[4]) || 0,
-        moneda: (String(row[5]) as 'ARS' | 'USD') || 'ARS',
+        moneda: validateMoneda(row[5]),
         referencia: row[6] ? String(row[6]) : undefined,
         cuitPagador: row[7] ? String(row[7]) : undefined,
         nombrePagador: row[8] ? String(row[8]) : undefined,
@@ -300,7 +301,7 @@ async function doMatchRecibosWithPagos(
         confidence: Number(row[11]) || 0,
         needsReview: row[12] === 'YES',
         matchedFacturaFileId: row[13] ? String(row[13]) : undefined,
-        matchConfidence: row[14] ? (String(row[14]) as MatchConfidence) : undefined,
+        matchConfidence: validateMatchConfidence(row[14]),
       });
     }
   }

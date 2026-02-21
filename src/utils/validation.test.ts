@@ -3,7 +3,7 @@
  * Migrated to Vitest from custom framework
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   isValidCuit,
   formatCuit,
@@ -23,6 +23,7 @@ import {
   validateTipoTarjeta,
   validateConfidence
 } from './validation.js';
+import * as logger from '../utils/logger.js';
 import type { Factura, Pago, Recibo } from '../types/index.js';
 
 describe('isValidCuit', () => {
@@ -570,6 +571,16 @@ describe('validatePago', () => {
 });
 
 describe('validateTipoComprobante', () => {
+  let warnSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    warnSpy.mockRestore();
+  });
+
   it('returns valid tipo for A', () => {
     expect(validateTipoComprobante('A')).toBe('A');
   });
@@ -598,32 +609,46 @@ describe('validateTipoComprobante', () => {
     expect(validateTipoComprobante('LP')).toBe('LP');
   });
 
-  it('returns undefined for invalid string', () => {
-    expect(validateTipoComprobante('X')).toBeUndefined();
+  it('returns default A for invalid string', () => {
+    expect(validateTipoComprobante('X')).toBe('A');
   });
 
-  it('returns undefined for lowercase', () => {
-    expect(validateTipoComprobante('a')).toBeUndefined();
+  it('returns default A for lowercase', () => {
+    expect(validateTipoComprobante('a')).toBe('A');
   });
 
-  it('returns undefined for number', () => {
-    expect(validateTipoComprobante(123)).toBeUndefined();
+  it('returns default A for number', () => {
+    expect(validateTipoComprobante(123)).toBe('A');
   });
 
-  it('returns undefined for null', () => {
-    expect(validateTipoComprobante(null)).toBeUndefined();
+  it('returns default A for null', () => {
+    expect(validateTipoComprobante(null)).toBe('A');
   });
 
-  it('returns undefined for undefined', () => {
-    expect(validateTipoComprobante(undefined)).toBeUndefined();
+  it('returns default A for undefined', () => {
+    expect(validateTipoComprobante(undefined)).toBe('A');
   });
 
-  it('returns undefined for object', () => {
-    expect(validateTipoComprobante({ tipo: 'A' })).toBeUndefined();
+  it('returns default A for object', () => {
+    expect(validateTipoComprobante({ tipo: 'A' })).toBe('A');
   });
 
-  it('returns undefined for empty string', () => {
-    expect(validateTipoComprobante('')).toBeUndefined();
+  it('returns default A for empty string', () => {
+    expect(validateTipoComprobante('')).toBe('A');
+  });
+
+  it('returns default A for string "undefined"', () => {
+    expect(validateTipoComprobante('undefined')).toBe('A');
+  });
+
+  it('logs warning when falling back to default', () => {
+    validateTipoComprobante('X');
+    expect(warnSpy).toHaveBeenCalled();
+  });
+
+  it('does not log warning for valid values', () => {
+    validateTipoComprobante('A');
+    expect(warnSpy).not.toHaveBeenCalled();
   });
 });
 
@@ -670,6 +695,16 @@ describe('validateMatchConfidence', () => {
 });
 
 describe('validateMoneda', () => {
+  let warnSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    warnSpy.mockRestore();
+  });
+
   it('returns ARS for ARS', () => {
     expect(validateMoneda('ARS')).toBe('ARS');
   });
@@ -678,32 +713,46 @@ describe('validateMoneda', () => {
     expect(validateMoneda('USD')).toBe('USD');
   });
 
-  it('returns undefined for invalid string', () => {
-    expect(validateMoneda('EUR')).toBeUndefined();
+  it('returns default ARS for invalid string', () => {
+    expect(validateMoneda('EUR')).toBe('ARS');
   });
 
-  it('returns undefined for lowercase', () => {
-    expect(validateMoneda('ars')).toBeUndefined();
+  it('returns default ARS for lowercase', () => {
+    expect(validateMoneda('ars')).toBe('ARS');
   });
 
-  it('returns undefined for number', () => {
-    expect(validateMoneda(100)).toBeUndefined();
+  it('returns default ARS for number', () => {
+    expect(validateMoneda(100)).toBe('ARS');
   });
 
-  it('returns undefined for null', () => {
-    expect(validateMoneda(null)).toBeUndefined();
+  it('returns default ARS for null', () => {
+    expect(validateMoneda(null)).toBe('ARS');
   });
 
-  it('returns undefined for undefined', () => {
-    expect(validateMoneda(undefined)).toBeUndefined();
+  it('returns default ARS for undefined', () => {
+    expect(validateMoneda(undefined)).toBe('ARS');
   });
 
-  it('returns undefined for object', () => {
-    expect(validateMoneda({ currency: 'ARS' })).toBeUndefined();
+  it('returns default ARS for object', () => {
+    expect(validateMoneda({ currency: 'ARS' })).toBe('ARS');
   });
 
-  it('returns undefined for empty string', () => {
-    expect(validateMoneda('')).toBeUndefined();
+  it('returns default ARS for empty string', () => {
+    expect(validateMoneda('')).toBe('ARS');
+  });
+
+  it('returns default ARS for string "undefined" (String(undefined) bug)', () => {
+    expect(validateMoneda('undefined')).toBe('ARS');
+  });
+
+  it('logs warning when falling back to default', () => {
+    validateMoneda('EUR');
+    expect(warnSpy).toHaveBeenCalled();
+  });
+
+  it('does not log warning for valid values', () => {
+    validateMoneda('ARS');
+    expect(warnSpy).not.toHaveBeenCalled();
   });
 });
 

@@ -3,6 +3,7 @@
  */
 
 import type { Factura, Pago, Recibo, ValidationResult, TipoComprobante, TipoRecibo, MatchConfidence, Moneda, TipoTarjeta } from '../types/index.js';
+import { warn } from './logger.js';
 
 /**
  * Valid CUIT/CUIL prefix types
@@ -343,16 +344,34 @@ export function validateRecibo(data: Partial<Recibo>): ValidationResult {
 }
 
 /**
- * Validates and returns a TipoComprobante enum value
+ * Validates and returns a TipoComprobante enum value.
+ * Returns 'A' as default when the value is missing, invalid, or the literal string "undefined".
  *
- * @param value - String value to validate
- * @returns Valid TipoComprobante or undefined
+ * @param value - Value to validate (handles null/undefined/non-string safely)
+ * @returns Valid TipoComprobante, defaults to 'A'
  */
-export function validateTipoComprobante(value: unknown): TipoComprobante | undefined {
-  if (typeof value !== 'string') return undefined;
+export function validateTipoComprobante(value: unknown): TipoComprobante {
+  const DEFAULT: TipoComprobante = 'A';
+
+  // Guard: null/undefined/non-string before calling String()
+  if (value === null || value === undefined || typeof value !== 'string') {
+    warn('Invalid tipoComprobante value, using default', { value, default: DEFAULT, module: 'validation' });
+    return DEFAULT;
+  }
+
+  // Guard: empty string or the literal "undefined"/"null" produced by String(undefined/null)
+  if (value === '' || value === 'undefined' || value === 'null') {
+    warn('Invalid tipoComprobante value, using default', { value, default: DEFAULT, module: 'validation' });
+    return DEFAULT;
+  }
 
   const validTypes: TipoComprobante[] = ['A', 'B', 'C', 'E', 'NC', 'ND', 'LP'];
-  return validTypes.includes(value as TipoComprobante) ? (value as TipoComprobante) : undefined;
+  if (validTypes.includes(value as TipoComprobante)) {
+    return value as TipoComprobante;
+  }
+
+  warn('Unknown tipoComprobante value, using default', { value, default: DEFAULT, module: 'validation' });
+  return DEFAULT;
 }
 
 /**
@@ -369,16 +388,35 @@ export function validateMatchConfidence(value: unknown): MatchConfidence | undef
 }
 
 /**
- * Validates and returns a Moneda enum value
+ * Validates and returns a Moneda enum value.
+ * Returns 'ARS' as default when the value is missing, invalid, or the literal string "undefined".
+ * Fixes the String(undefined) → "undefined" bug by checking for null/undefined before String().
  *
- * @param value - String value to validate
- * @returns Valid Moneda or undefined
+ * @param value - Value to validate (handles null/undefined/non-string safely)
+ * @returns Valid Moneda, defaults to 'ARS'
  */
-export function validateMoneda(value: unknown): Moneda | undefined {
-  if (typeof value !== 'string') return undefined;
+export function validateMoneda(value: unknown): Moneda {
+  const DEFAULT: Moneda = 'ARS';
+
+  // Guard: null/undefined/non-string before calling String()
+  if (value === null || value === undefined || typeof value !== 'string') {
+    warn('Invalid moneda value, using default', { value, default: DEFAULT, module: 'validation' });
+    return DEFAULT;
+  }
+
+  // Guard: empty string or the literal "undefined"/"null" produced by String(undefined/null)
+  if (value === '' || value === 'undefined' || value === 'null') {
+    warn('Invalid moneda value, using default', { value, default: DEFAULT, module: 'validation' });
+    return DEFAULT;
+  }
 
   const validCurrencies: Moneda[] = ['ARS', 'USD'];
-  return validCurrencies.includes(value as Moneda) ? (value as Moneda) : undefined;
+  if (validCurrencies.includes(value as Moneda)) {
+    return value as Moneda;
+  }
+
+  warn('Unknown moneda value, using default', { value, default: DEFAULT, module: 'validation' });
+  return DEFAULT;
 }
 
 /**
