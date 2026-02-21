@@ -668,4 +668,4 @@ If `TeamCreate` fails or worktree setup fails, implement the plan sequentially a
 - **Always clean up worktrees** — Remove worktrees, prune metadata, delete worker branches after merge
 - **No co-author attribution** — Commit messages must NOT include `Co-Authored-By` tags
 - **Never stage sensitive files** — Skip `.env*`, `*.key`, `*.pem`, `credentials*`, `secrets*`
-- **Log migrations in MIGRATIONS.md** — Workers report migration-relevant changes to lead; lead appends to MIGRATIONS.md
+- **Log migrations in MIGRATIONS.md** — Workers report migration-relevant changes to lead; lead appends to MIGRATIONS.md. All schema/folder/API changes MUST include migration logic (startup detection + automatic migration) — never ship a breaking change without a migration path.

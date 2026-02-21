@@ -144,7 +144,7 @@ For each candidate issue, read the referenced code and ask:
 
 1. **Does the problem actually exist?** Read the file/line cited in the issue. Is the code actually there? Does it behave as the issue claims?
 2. **Is it relevant to the project context?** Consider:
-   - Project status (DEVELOPMENT = no legacy data, no backward compatibility)
+   - Project status (PRODUCTION = has live data, backward compatibility or migration required)
    - Single-user vs multi-user implications
    - Client-side vs server-side distinctions
    - Whether the "fix" is already the correct behavior
@@ -171,7 +171,7 @@ mcp__linear__create_comment(issueId: "ADVA-xxx", body: "Canceled during triage: 
 ```
 
 The reason should be specific, e.g.:
-- "Project is in DEVELOPMENT status with no legacy data — migration path is dead code."
+- "This issue is not applicable to the current project context — [specific reason]."
 - "Single-user app behind auth — this attack vector is not a real risk."
 - "The extraction already handles this edge case correctly — see src/gemini/parser.ts:L42."
 
@@ -453,7 +453,7 @@ When planning, consider how MCPs will be used during implementation:
 11. **Keep scope tight.** Only plan what the issues ask for. Do not add nice-to-haves.
 12. **Plans describe WHAT and WHY, not HOW at the code level.** Include: file paths, function names, behavioral specs, test assertions, patterns to follow (reference existing files by path), state transitions. Do NOT include: implementation code blocks, ready-to-paste TypeScript/TSX, full function bodies. The implementer (plan-implement workers) writes all code — your job is architecture and specification. Exception: short one-liners for surgical changes (e.g., "add `if (!session.x)` check after the existing `!session.y` check") are fine.
 13. **Move valid issues to Todo.** After writing the plan, update the valid Linear issues to the "Todo" state.
-14. **Flag migration-relevant tasks.** If a task changes DB schema, renames columns, changes identity models, renames env vars, or changes session/token formats, add a note in the task: "**Migration note:** [what production data is affected]". The implementer will log this in `MIGRATIONS.md`.
+14. **Flag migration-relevant tasks.** If a task changes spreadsheet schema, renames columns, changes folder structure, renames env vars, or changes API response shapes, add a note in the task: "**Migration note:** [what production data is affected and how to migrate]". The plan MUST include a migration strategy (e.g., startup detection of old format + automatic migration). The implementer will log this in `MIGRATIONS.md`.
 
 ---
 

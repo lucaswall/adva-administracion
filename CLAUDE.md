@@ -1,7 +1,7 @@
 # ADVA Administración Server
 
-## STATUS: DEVELOPMENT
-Breaking changes OK. Delete unused code immediately. Update refs when changing APIs/configs.
+## STATUS: PRODUCTION
+Two environments: **production** and **staging**. Changes must be backwards-compatible or include a migration path. Spreadsheet schema changes require startup migration logic. Folder structure changes require graceful handling of old and new formats. Delete unused code only when safe (no production data depends on it).
 
 ## DOCUMENTATION
 
