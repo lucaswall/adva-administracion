@@ -1,8 +1,8 @@
 ---
 name: plan-inline
-description: Create TDD implementation plans from direct feature requests. Use when user provides a task description like "add X feature", "create Y function", or "implement Z". Creates Linear issues in Todo state. Faster than plan-todo for ad-hoc requests that don't need backlog tracking.
+description: Create TDD implementation plans from direct feature requests. Use when user provides a task description like "add X feature", "create Y function", or "implement Z". Creates Linear issues in Todo state. Faster than plan-backlog for ad-hoc requests that don't need backlog tracking.
 argument-hint: <task description>
-allowed-tools: Read, Edit, Write, Glob, Grep, Task, Bash, mcp__linear__list_issues, mcp__linear__get_issue, mcp__linear__create_issue, mcp__linear__update_issue, mcp__linear__list_issue_labels, mcp__linear__list_issue_statuses
+allowed-tools: Read, Edit, Write, Glob, Grep, Task, Bash, mcp__linear__list_teams, mcp__linear__list_issues, mcp__linear__get_issue, mcp__linear__create_issue, mcp__linear__update_issue, mcp__linear__list_issue_labels, mcp__linear__list_issue_statuses
 disable-model-invocation: true
 ---
 
@@ -34,12 +34,12 @@ Only proceed to PLANS.md check if git state is clean.
 
 ## When to Use
 
-Use `plan-inline` instead of `plan-todo` when:
+Use `plan-inline` instead of `plan-backlog` when:
 - The user provides a clear feature request or task description directly
 - The task doesn't need to go through Linear Backlog first
 - Quick planning without backlog management overhead
 
-Use `plan-todo` instead when:
+Use `plan-backlog` instead when:
 - Working from existing backlog items
 - Managing multiple items that should be tracked
 
@@ -51,6 +51,8 @@ Use `plan-todo` instead when:
 - Do not proceed.
 
 If PLANS.md is empty or has "Status: COMPLETE" → proceed with planning.
+
+**Verify Linear MCP:** Call `mcp__linear__list_teams`. If unavailable, **STOP** and tell the user: "Linear MCP is not connected. Run `/mcp` to reconnect, then re-run this skill."
 
 ## Arguments
 
@@ -73,15 +75,16 @@ Example arguments:
    - Google Drive MCP for file access (`gdrive_search`, `gdrive_read_file`, `gsheets_read`, etc.)
    - Railway MCP for deployment context (`get-logs`, `list-deployments`, `list-services`, `list-variables`)
    - Gemini MCP for prompt testing (`gemini_analyze_pdf`)
+   - Linear MCP for issue tracking (`list_issues`, `get_issue`, `create_issue`, etc.)
 
-2. **Folder structure** - Look for "FOLDER STRUCTURE" section to understand:
-   - Where documents are stored
-   - Naming conventions for folders
-
-3. **Project structure** - Look for "STRUCTURE" section to understand:
+2. **Project structure** - Look for "STRUCTURE" section to understand:
    - Source code organization
    - Test file locations
    - Where to add new files
+
+3. **Folder structure** - Look for "FOLDER STRUCTURE" section to understand:
+   - Where documents are stored
+   - Naming conventions for folders
 
 4. **Spreadsheet schemas** - Look for "SPREADSHEETS" section or read SPREADSHEET_FORMAT.md
 
@@ -96,6 +99,7 @@ Example arguments:
    - Document processing → Check Drive files, spreadsheet schemas
    - Deployment → Check service status, recent logs
    - Extraction issues → Check current prompts, test with Gemini MCP
+   - Existing issues → Check Linear for related issues or context
 6. **Generate plan** - Create TDD tasks with test-first approach
 7. **Write PLANS.md** - Overwrite with new plan
 8. **Create Linear issues** - Create issues in Todo state for each task
@@ -238,15 +242,20 @@ Discover available MCPs from CLAUDE.md's "MCP SERVERS" section. Common patterns:
 - Spreadsheet or database changes
 - File organization or storage
 
-**Deployment MCPs** - Use when task involves:
+**Deployment MCPs (Railway)** - Use when task involves:
 - Deployment configuration
 - Environment variables
 - Service logs for debugging context
 
-**AI/LLM MCPs** - Use when task involves:
+**AI/LLM MCPs (Gemini)** - Use when task involves:
 - Prompt improvements
 - Extraction accuracy
 - Testing variations before implementation
+
+**Issue Tracking MCPs (Linear)** - Use when task involves:
+- Checking existing issues for context
+- Understanding related work
+- Finding duplicate or related feature requests
 
 If CLAUDE.md doesn't list MCPs, skip MCP context gathering.
 
@@ -272,6 +281,8 @@ If CLAUDE.md doesn't list MCPs, skip MCP context gathering.
 - Always include post-implementation checklist
 - Create Linear issues in Todo state (bypasses Backlog)
 - Include Linear issue links in PLANS.md tasks
+- **Flag migration-relevant tasks** — If a task changes DB schema, renames columns, changes identity models, renames env vars, or changes session/token formats, add a note in the task: "**Migration note:** [what production data is affected]". The implementer will log this in `MIGRATIONS.md`.
+- **Plans describe WHAT and WHY, not HOW at the code level.** Include: file paths, function names, behavioral specs, test assertions, patterns to follow (reference existing files by path), state transitions. Do NOT include: implementation code blocks, ready-to-paste TypeScript/TSX, full function bodies. The implementer (plan-implement workers) writes all code — your job is architecture and specification. Exception: short one-liners for surgical changes (e.g., "add `if (!session.x)` check after the existing `!session.y` check") are fine.
 
 ## CRITICAL: Scope Boundaries
 
@@ -325,7 +336,7 @@ Create a feature branch and commit the plan.
    - Branch name should be kebab-case, derived from the plan objective
    - Example: `feat/validate-cuit-modulo11`, `refactor/extract-common-parser-utils`
 
-2. Stage, commit, and push:
+2. Stage, commit (no `Co-Authored-By` tags), and push:
 ```bash
 git checkout -b <type>/<task-description> && git add PLANS.md && git commit -m "plan: <task-description>" && git push -u origin <type>/<task-description>
 ```

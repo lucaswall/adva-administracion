@@ -2,7 +2,7 @@
 name: add-to-backlog
 description: Add issues to Linear Backlog from free-form input. Use when user says "add to backlog", "create backlog issues", "track this", or describes tasks/improvements/bugs to add. Interprets user's ideas, investigation findings, or conversation context into well-structured Backlog issues. Can process multiple items at once.
 argument-hint: [description of what to add, or "from conversation", or "from investigation"]
-allowed-tools: Read, Glob, Grep, Task, mcp__linear__list_issues, mcp__linear__get_issue, mcp__linear__create_issue, mcp__linear__list_issue_labels, mcp__linear__list_issue_statuses
+allowed-tools: Read, Glob, Grep, Task, mcp__linear__list_teams, mcp__linear__list_issues, mcp__linear__get_issue, mcp__linear__create_issue, mcp__linear__list_issue_labels, mcp__linear__list_issue_statuses
 disable-model-invocation: true
 ---
 
@@ -14,7 +14,7 @@ Add issues to Linear Backlog from user input. Interprets free-form descriptions 
 - Parse multiple items from a single input
 - Reference conversation context or investigation findings
 - Write problem-focused descriptions (what, not how)
-- Include implementation hints for `plan-todo` to use later
+- Include implementation hints for `plan-backlog` to use later
 
 ## Input Modes
 
@@ -41,14 +41,17 @@ User references findings from `investigate` skill:
 /add-to-backlog add the issues found by investigate
 ```
 
+## Pre-flight
+
+**Verify Linear MCP:** Call `mcp__linear__list_teams`. If unavailable, **STOP** and tell the user: "Linear MCP is not connected. Run `/mcp` to reconnect, then re-run this skill."
+
 ## Workflow
 
 1. **Parse input** - Understand what to add based on $ARGUMENTS
 2. **Identify items** - Separate multiple items from the input
 3. **Check existing Backlog** - Avoid duplicates
 4. **Draft issues** - Write problem-focused descriptions
-5. **Confirm with user** - Show proposed issues before creating
-6. **Create in Linear** - Add to Backlog state
+5. **Create in Linear** - Add to Backlog state
 
 ## Issue Structure
 
@@ -72,7 +75,7 @@ Structure:
 [Why this matters - user impact, data quality, errors]
 
 **Implementation Hints:** (optional)
-[Suggestions for plan-todo, patterns to follow, related code]
+[Suggestions for plan-backlog, patterns to follow, related code]
 ```
 
 ### Labels
@@ -112,7 +115,7 @@ Example:
 ```
 "Add CUIT validation, also handle Naranja cards, and fix the 2020 date bug"
 ```
-→ Three issues:
+--> Three issues:
 1. CUIT validation missing
 2. Naranja card type not supported in resumen_tarjeta
 3. Date parsing fails for 2020 documents
@@ -132,42 +135,14 @@ When user mentions investigation findings:
 ## Duplicate Detection
 
 Before creating, check existing Backlog:
-1. Query `mcp__linear__list_issues` with `team=ADVA Administracion, state=Backlog`
+1. Query `mcp__linear__list_issues` with `team=ADVA Administracion, state=Backlog, includeArchived=false`
 2. Compare proposed issues against existing titles/descriptions
 3. If similar issue exists:
-   - Note as "Similar to ADVA-XXX"
-   - Ask user if they want to create anyway or skip
-
-## User Confirmation
-
-Before creating issues, show the user what will be created:
-
-```
-I'll create the following Backlog issues:
-
-1. **CUIT validation missing** (Feature, Medium)
-   Missing validation for CUIT numbers using modulo 11 algorithm.
-   Hint: See existing validation patterns in src/utils/validation.ts
-
-2. **Naranja card type not supported** (Feature, Medium)
-   resumen_tarjeta extraction doesn't handle Naranja card format.
-   Hint: Add to TipoTarjeta enum and update parser.
-
-3. **Date parsing fails for 2020 documents** (Bug, High)
-   Documents with dates from 2020 fail to parse correctly.
-   Hint: Check date format assumptions in src/utils/date.ts
-
-Similar existing issues found:
-- ADVA-45: "CUIT format validation" - might overlap with #1
-
-Create these issues? (I'll skip duplicates unless you confirm)
-```
-
-Wait for user confirmation before proceeding.
+   - Skip the duplicate automatically
 
 ## Creating Issues
 
-Use `mcp__linear__create_issue` for each confirmed issue:
+Use `mcp__linear__create_issue` for each issue (skip duplicates automatically):
 
 ```
 team: "ADVA Administracion"
@@ -184,7 +159,7 @@ labels: [Mapped label]
 - Focus on the problem, not the solution
 - Include context about where/when the issue occurs
 - Explain impact to help prioritization
-- Add implementation hints for plan-todo
+- Add implementation hints for plan-backlog
 - Reference related files or code if known
 
 ### DON'T:
@@ -222,14 +197,13 @@ Add CUIT validation. Create a function that takes a CUIT string and validates it
 | $ARGUMENTS empty | Ask user what to add |
 | Can't parse items | Show interpretation, ask for clarification |
 | Linear unavailable | Stop, tell user to check Linear auth |
-| All items are duplicates | Report existing issues, ask if user wants to create anyway |
+| All items are duplicates | Report existing issues, skip creation |
 | Conversation reference unclear | List recent topics, ask which to add |
 
 ## Rules
 
-- **Always confirm before creating** - Show proposed issues first
 - **Problem-focused** - Describe what's wrong, not how to fix
-- **Include hints** - Help plan-todo with implementation suggestions
+- **Include hints** - Help plan-backlog with implementation suggestions
 - **Check duplicates** - Avoid cluttering backlog
 - **One problem per issue** - Split combined issues
 
@@ -249,8 +223,8 @@ Skipped:
 
 Next steps:
 - Review issues in Linear Backlog
-- Use `plan-todo` to create implementation plans
-- Use `plan-todo ADVA-123` to plan a specific issue
+- Use `plan-backlog` to create implementation plans
+- Use `plan-backlog ADVA-123` to plan a specific issue
 ```
 
 Do not ask follow-up questions. Do not offer to plan or implement.

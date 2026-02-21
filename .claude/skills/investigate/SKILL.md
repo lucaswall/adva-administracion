@@ -23,6 +23,7 @@ $ARGUMENTS should describe what to investigate:
 - What happened vs what was expected
 - File IDs or names if relevant
 - Error messages or unexpected values
+- Which environment (if applicable) — if not specified, ask
 - Deployment ID if it's a deployment issue
 - Any context that helps narrow the scope
 
@@ -31,9 +32,9 @@ $ARGUMENTS should describe what to investigate:
 **IMPORTANT: Do NOT hardcode MCP names or folder paths.** Always read CLAUDE.md to discover:
 
 1. **Available MCP servers** - Look for "MCP SERVERS" section to find:
-   - File/storage MCPs for accessing documents and data
-   - Deployment MCPs for logs and service status
-   - AI/LLM MCPs for prompt testing
+   - File/storage MCPs for accessing documents and data (Google Drive)
+   - Deployment MCPs for logs and service status (Railway)
+   - AI/LLM MCPs for prompt testing (Gemini)
 
 2. **Project structure** - Look for "STRUCTURE" or "FOLDER STRUCTURE" sections to understand:
    - Where source code and documents are stored
@@ -43,6 +44,11 @@ $ARGUMENTS should describe what to investigate:
    - Document types and their processing
    - Data schemas and formats
    - Business rules and validation
+
+4. **Environments** - Look for "ENVIRONMENTS" section to discover:
+   - Environment names (production, staging, etc.)
+   - Associated branches and URLs
+   - Deployment service configurations
 
 ## Investigation Workflow
 
@@ -68,11 +74,12 @@ Based on $ARGUMENTS, determine what you're investigating:
 - Read relevant source files, configs, and tests
 
 **For Deployment Issues (if deployment MCPs available):**
-1. Check MCP/CLI status
-2. List services to find affected service
-3. List recent deployments with statuses
-4. Get deployment and build logs
-5. Search logs for errors using filters (e.g., `@level:error`)
+1. **Determine target environment** from $ARGUMENTS (consult CLAUDE.md's ENVIRONMENTS section). If unclear, ask user.
+2. Check deployment MCP status
+3. List services to find affected service
+4. List recent deployments with statuses — pass `environment: "<target>"` explicitly if the MCP supports it
+5. Get deployment and build logs — pass `environment: "<target>"` explicitly if the MCP supports it
+6. Search logs for errors using filters (e.g., `@level:error`) if the MCP supports it
 
 **For Document/File Issues (if file MCPs available):**
 - Search for the problematic file
@@ -105,10 +112,12 @@ Write findings to the conversation (NOT to a file):
 ## Investigation Report
 
 **Subject:** [What was investigated]
+**Environment:** [production | staging | codebase-only]
 **Conclusion:** [Root Cause Identified | Suspected | Multiple Possibilities | Nothing Wrong | Cannot Determine]
 
 ### Context
 - **MCPs used:** [list MCPs accessed]
+- **Environment queried:** [production | staging | N/A]
 - **Files examined:** [list key files checked]
 - **Logs reviewed:** [deployment IDs, time ranges if applicable]
 
@@ -150,11 +159,12 @@ Example workflow:
 
 When investigating deployment issues (if deployment MCPs available):
 
-1. **Check status first** - Verify MCP/CLI access
-2. **List recent deployments** - Get deployment IDs and statuses
-3. **Get targeted logs** - Search for errors using filters
-4. **Look for patterns** - Repeated errors, timing correlations
-5. **Check configuration** - Environment variables, settings
+1. **Identify target environment** - Determine environment name from CLAUDE.md's ENVIRONMENTS section
+2. **Check status first** - Verify MCP/CLI access
+3. **List recent deployments** - Get deployment IDs and statuses (pass `environment` param if supported)
+4. **Get targeted logs** - Search for errors using filters (pass `environment` param if supported)
+5. **Look for patterns** - Repeated errors, timing correlations
+6. **Check configuration** - Environment variables, settings (pass `environment` param if supported)
 
 ## File Tracing Guidelines
 
@@ -182,6 +192,7 @@ When investigating file sorting or processing:
 - **Report only** - Do NOT modify source code or files
 - **No plans** - Do NOT write PLANS.md or fix plans
 - **Discover MCPs** - Read CLAUDE.md to find available tools
+- **Explicit environment** - ALWAYS pass the `environment` parameter to deployment MCP tools when supported; never rely on CLI defaults
 - **Be thorough** - Check multiple sources before concluding
 - **Be specific** - Include exact values, line numbers, timestamps
 - **Be honest** - If uncertain, say so; if nothing wrong, say so

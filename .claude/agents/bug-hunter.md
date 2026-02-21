@@ -2,7 +2,7 @@
 name: bug-hunter
 description: Expert code reviewer that finds bugs in git changes. Use proactively after implementing code changes, before committing. Checks for logic errors, CLAUDE.md violations, security issues (OWASP-based), type safety, resource leaks, async issues, and edge cases.
 tools: Bash, Read, Glob, Grep
-model: opus
+model: sonnet
 permissionMode: dontAsk
 ---
 

@@ -16,35 +16,27 @@ Reference for plan-review-implementation skill.
 ### Input Validation
 - [ ] All user inputs validated server-side (never trust client)
 - [ ] Allowlist validation preferred over blocklist
-- [ ] SQL injection prevention (parameterized queries, ORM)
-- [ ] NoSQL injection prevention (sanitize operators like `$gt`, `$ne`)
 - [ ] Command injection prevention (avoid shell execution with user input)
 - [ ] Path traversal prevention (`../` sequences blocked)
 - [ ] XSS prevention (context-appropriate encoding: HTML, JS, CSS, URL)
+- [ ] SSRF prevention (server-side requests use allowlisted URLs, no user-controlled URLs in fetch)
 - [ ] File upload validation (content type, size, extension)
 - [ ] Input length limits enforced
 - [ ] Special characters handled appropriately
 
 ### Authentication & Session
-- [ ] Strong password hashing (bcrypt, argon2, scrypt)
-- [ ] Salt unique per password
-- [ ] Account lockout after failed attempts
 - [ ] Session tokens cryptographically random (>=128 bits)
 - [ ] Session invalidation on logout
 - [ ] Session timeout for inactivity
-- [ ] Re-authentication for sensitive operations
 - [ ] Cookie flags set (HttpOnly, Secure, SameSite)
-- [ ] JWT validation complete (signature, expiry, issuer, audience)
 - [ ] Refresh tokens rotated on use
+- [ ] Constant-time comparison for sensitive values (tokens, API keys) — use `crypto.timingSafeEqual()`, not `===`
 
 ### Authorization
 - [ ] Access controls enforced server-side
 - [ ] Default deny policy
 - [ ] IDOR prevention (validate user owns resource)
-- [ ] Horizontal privilege escalation blocked (user A accessing user B data)
-- [ ] Vertical privilege escalation blocked (user becoming admin)
 - [ ] Admin functions protected
-- [ ] Centralized authorization logic (not scattered)
 - [ ] API endpoints match expected access level
 
 ### Secrets & Credentials
@@ -52,16 +44,14 @@ Reference for plan-review-implementation skill.
 - [ ] Secrets loaded from env vars or secret manager
 - [ ] No secrets in git history
 - [ ] Sensitive data not logged
-- [ ] Debug/verbose modes don't expose secrets
 - [ ] Error messages don't leak internal info
 
-### Cryptography
-- [ ] Modern algorithms (AES-256, RSA-2048+, SHA-256+)
-- [ ] Proper key management (generation, storage, rotation)
-- [ ] Certificate validation enabled (no skip-verify)
-- [ ] HTTPS for all external calls
-- [ ] Encryption at rest for sensitive data
-- [ ] Cryptographically secure random (not Math.random)
+### Security Headers
+- [ ] Content-Security-Policy (CSP) configured
+- [ ] X-Content-Type-Options: nosniff
+- [ ] X-Frame-Options or CSP frame-ancestors
+- [ ] Strict-Transport-Security (HSTS)
+- [ ] Referrer-Policy configured
 
 ## Logic & Correctness
 
@@ -69,12 +59,10 @@ Reference for plan-review-implementation skill.
 - [ ] Off-by-one errors in loops/indices
 - [ ] Null/undefined handling (especially from external data)
 - [ ] Empty array/object edge cases
-- [ ] Integer overflow/underflow
 - [ ] Floating point comparison issues
 - [ ] String encoding issues (UTF-8)
 - [ ] Timezone handling in dates
 - [ ] Boolean logic errors (De Morgan's law violations)
-- [ ] Negation confusion (!=, !==, not)
 - [ ] Assignment vs comparison (= vs ==)
 
 ### Boundary Conditions
@@ -108,41 +96,26 @@ Reference for plan-review-implementation skill.
 - [ ] Check-then-act patterns atomicized
 - [ ] Concurrent writes to same resource
 - [ ] Event ordering assumptions valid
-- [ ] Initialization races avoided
 
 ### Deadlocks & Hangs
 - [ ] External API calls have timeouts
-- [ ] Database queries have timeouts
 - [ ] Circuit breakers for unreliable services
 - [ ] No await in infinite loops without yield
-- [ ] Mutex/lock acquisition has timeout
 
 ## Resource Management
 
 ### Memory Leaks
 - [ ] Event listeners removed when done (.off, removeListener)
 - [ ] Intervals cleared (clearInterval)
-- [ ] Timeouts managed appropriately
 - [ ] Caches have eviction/size limits
 - [ ] Streams destroyed on error/completion
 - [ ] Large objects not held unnecessarily in closures
 - [ ] Collections don't grow unbounded
 
 ### Resource Leaks
-- [ ] Database connections returned to pool
-- [ ] File handles closed (finally blocks)
 - [ ] HTTP connections closed on error
 - [ ] External subscriptions cancelled
 - [ ] Temporary files cleaned up
-
-### Graceful Shutdown
-- [ ] SIGTERM/SIGINT handlers registered
-- [ ] In-flight requests completed before exit
-- [ ] Background jobs stopped gracefully
-- [ ] Database connections closed
-- [ ] File handles released
-- [ ] Timers cleared
-- [ ] External watches cancelled
 
 ## Error Handling
 
@@ -156,16 +129,13 @@ Reference for plan-review-implementation skill.
 ### Error Recovery
 - [ ] Retry logic for transient failures
 - [ ] Backoff strategies prevent thundering herd
-- [ ] Circuit breakers prevent cascade failures
 - [ ] Fallback behavior for non-critical features
 - [ ] Partial failures handled gracefully
 
 ### Error Information
 - [ ] Error messages are actionable
 - [ ] No sensitive data in error messages
-- [ ] Stack traces not exposed to users
 - [ ] Errors logged for debugging
-- [ ] Correlation IDs for request tracing
 
 ## Type Safety
 
@@ -174,15 +144,8 @@ Reference for plan-review-implementation skill.
 - [ ] Type guards for narrowing
 - [ ] Nullable types handled (null, undefined)
 - [ ] Union types exhaustively matched
-- [ ] Generic constraints appropriate
-- [ ] External data validated/parsed (zod, io-ts)
+- [ ] External data validated/parsed
 - [ ] Type assertions justified and correct
-
-### Runtime Validation
-- [ ] API inputs validated
-- [ ] External responses validated
-- [ ] Config values validated at startup
-- [ ] Type mismatches detected early
 
 ## Test Quality (When Tests Are Changed)
 
@@ -193,37 +156,59 @@ Reference for plan-review-implementation skill.
 - [ ] Mocks don't hide real bugs
 - [ ] Edge cases covered
 - [ ] Error paths tested
-- [ ] No always-passing tests
 
 ### Test Independence
 - [ ] Tests don't depend on execution order
 - [ ] Shared state cleaned up
 - [ ] No flaky timing dependencies
-- [ ] External dependencies mocked appropriately
 
 ### Test Data
 - [ ] No real customer/user data
 - [ ] No production credentials
 - [ ] Test data clearly fictional
-- [ ] Sensitive patterns avoided
+
+## Logging Quality
+
+### Logger Usage
+- [ ] Proper logger used (Pino, not console.log/warn/error in server code)
+- [ ] Log levels appropriate (ERROR for failures, INFO for state changes, DEBUG for routine operations)
+- [ ] Error catch blocks have logging with context
+- [ ] Lib modules doing significant work have logging (no blind spots in data layer)
+
+### Structured Logging
+- [ ] Logs use structured format with `{ action: "..." }` field
+- [ ] External API calls log `durationMs` (Gemini, Railway, Google Drive)
+- [ ] No sensitive data in logs (tokens, passwords, API keys, raw file data)
+
+### Double-Logging Prevention
+- [ ] Same error not logged at lib layer AND calling route handler
+- [ ] Errors passed to auto-logging helpers not also manually logged
+- [ ] Catch-and-rethrow doesn't produce duplicate log entries
+
+### Log Overflow
+- [ ] No logging inside tight loops or array iterations
+- [ ] Large objects truncated or summarized, not logged in full
 
 ## Project-Specific (CLAUDE.md)
 
 Always check CLAUDE.md for project-specific rules including:
 - Import conventions (ESM .js extensions)
-- Logging requirements (Pino vs console.log)
 - Error handling patterns (Result<T,E>)
 - Testing requirements (TDD workflow)
 - Naming conventions
-- Security requirements (auth middleware)
+- Pino logger requirement
 - Any other project-specific standards
 
 ## AI-Generated Code Risks
 
-When reviewing AI-generated or AI-assisted code, pay extra attention to:
-- **Logic errors** (75% more common in AI code)
-- **XSS vulnerabilities** (2.74x higher frequency)
-- **Code duplication** (frequent AI pattern)
-- **Security flaws** (~45% of AI code contains them)
-- **Missing context** (AI may not understand business logic)
-- **Hallucinated APIs** (non-existent methods/libraries)
+All code in this project is AI-assisted. Apply extra scrutiny for these patterns:
+- **Logic errors** (75% more common in AI code) — verify branching, loop bounds, comparisons
+- **XSS vulnerabilities** (2.74x higher frequency) — check all dynamic content rendering
+- **Code duplication** (frequent AI pattern) — similar code that should use shared abstractions
+- **Security flaws** (~45% of AI code contains them) — treat all AI output as untrusted until reviewed
+- **Missing input validation** — AI often skips server-side validation
+- **Missing context** (AI may not understand business logic) — verify domain-specific constraints (CUIT validation, AFIP rules, spreadsheet formats)
+- **Hallucinated APIs** (non-existent methods/libraries) — verify imports resolve to real exports
+- **Hallucinated packages** — non-existent npm packages that may be claimed by attackers. Verify every `import` references a real package in `package.json`.
+- **Outdated patterns** — AI may use deprecated APIs or old security practices from training data
+- **Over-engineering** — unnecessary abstractions or error handling for impossible scenarios

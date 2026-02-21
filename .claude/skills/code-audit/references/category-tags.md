@@ -16,6 +16,7 @@
 | `[type]` | Unsafe casts, missing guards, unvalidated external data | - |
 | `[dependency]` | Vulnerable or outdated packages | A06 |
 | `[rate-limit]` | API quota exhaustion risks | - |
+| `[logging]` | Missing logs, wrong levels, log overflow, insufficient debug coverage | - |
 | `[dead-code]` | Unused functions, unreachable code | - |
 | `[duplicate]` | Repeated logic | - |
 | `[test]` | Useless/duplicate tests, no assertions | - |
@@ -48,7 +49,7 @@ When creating Linear issues, map category tags to Linear labels:
 | Category Tags | Linear Label |
 |---------------|--------------|
 | `[security]`, `[dependency]` | Security |
-| `[bug]`, `[async]`, `[shutdown]`, `[edge-case]`, `[type]` | Bug |
+| `[bug]`, `[async]`, `[shutdown]`, `[edge-case]`, `[type]`, `[logging]` | Bug |
 | `[memory-leak]`, `[resource-leak]`, `[timeout]`, `[rate-limit]` | Performance |
 | `[convention]` | Convention |
 | `[dead-code]`, `[duplicate]`, `[test]`, `[practice]`, `[docs]`, `[chore]` | Technical Debt |

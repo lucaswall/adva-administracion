@@ -63,14 +63,11 @@ Task: Add parseResumenBroker function
 
 | Agent | Purpose | When to Use |
 |-------|---------|-------------|
-| `bug-hunter` (opus) | Find bugs in git changes | After implementation, before commit |
-| `verifier` (haiku) | Run tests and build | TDD mode: `verifier "pattern"` (filtered tests, no build). Full mode: `verifier` (all tests + build). Use TDD mode during development, Full mode for final verification. |
-| `commit-bot` (sonnet) | Commit to current branch | Only when user requests commit |
+| `bug-hunter` (sonnet) | Find bugs in git changes | After implementation, before commit |
+| `verifier` (haiku) | Run tests and build | TDD mode: `verifier "pattern"` (filtered tests, no build). Full mode: `verifier` (all tests + build). E2E mode: `verifier "e2e"` (E2E tests only). Use TDD mode during development, Full mode for final verification. |
 | `pr-creator` (sonnet) | Branch + commit + push + PR | Only when user requests PR |
 
-**Git agents rule:** Never commit or create PRs unless the user explicitly requests it. When requested:
-- **Commit requested** → Use `commit-bot` agent (don't commit manually)
-- **PR requested** → Use `pr-creator` agent (handles branch, commit, push, and PR)
+**Git agents rule:** Never commit or create PRs unless the user explicitly requests it. When requested, use `pr-creator` agent (handles branch, commit, push, and PR).
 
 **Skills/Agents modification rule:** ALWAYS load the `tools-improve` skill BEFORE creating, editing, or reviewing any `.claude/skills/` or `.claude/agents/` file. This skill contains critical best practices that must be followed.
 
@@ -80,17 +77,21 @@ Skills are specialized workflows in `.claude/skills/`. Descriptions drive automa
 
 | Skill | When to Invoke |
 |-------|----------------|
-| `add-to-backlog` | Add issues to Linear Backlog from free-form input. Use when user says "add to backlog", "create backlog issues", "track this", or describes tasks/improvements/bugs to add. Interprets ideas, investigation findings, or conversation context into structured issues. |
-| `investigate` | Read-only investigation that reports findings without creating plans. Use when user says "investigate", "check why", "look into", "diagnose", or wants to understand a problem before deciding action. Accesses Railway logs, Drive files, Gemini prompts. Offers to chain to plan-fix if issues are found. |
-| `plan-todo` | Convert Linear Backlog issues into TDD implementation plans. Use when user says "plan ADVA-123", "plan all bugs", or wants to work on backlog items. Moves planned issues to Todo state. |
-| `plan-inline` | Create TDD plans from direct feature requests. Use when user provides a task description directly like "add X feature" or "create Y function". Creates Linear issues in Todo state. |
+| `add-to-backlog` | Add issues to Linear Backlog from free-form input. Use when user says "add to backlog", "create backlog issues", "track this", or describes tasks/improvements/bugs to add. |
+| `backlog-refine` | Refine vague Backlog issues into well-specified, actionable items. Use when user says "refine backlog", "refine ADVA-123", "improve backlog items". |
+| `investigate` | Read-only investigation that reports findings without creating plans. Use when user says "investigate", "check why", "look into", "diagnose". Accesses Railway logs, Drive files, Gemini prompts. |
+| `plan-backlog` | Convert Linear Backlog issues into TDD implementation plans. Use when user says "plan ADVA-123", "plan all bugs", or wants to work on backlog items. Moves planned issues to Todo state. |
+| `plan-inline` | Create TDD plans from direct feature requests. Use when user provides a task description like "add X feature" or "create Y function". Creates Linear issues in Todo state. |
 | `plan-fix` | Investigate bugs and create fix plans. Use when user reports extraction errors, deployment failures, wrong data, or prompt issues. Creates Linear issues in Todo state. |
-| `plan-implement` | Execute the pending plan in PLANS.md following TDD. Use after any plan-* skill creates a plan, or when user says "implement the plan". Updates Linear issues: Todo→In Progress→Review. |
-| `plan-review-implementation` | QA review of completed implementation. Use after plan-implement finishes to verify correctness. Moves issues Review→Done or creates new issues in Todo for bugs found. |
-| `code-audit` | Audit codebase for bugs, security issues, memory leaks, and violations. Use when user says "audit", "find bugs", "check security", or "review codebase". Creates Linear issues in Backlog. Analysis only. |
+| `plan-implement` | Execute the pending plan in PLANS.md using an agent team for parallel implementation. Spawns workers in isolated git worktrees. Updates Linear issues: Todo→In Progress→Review. Falls back to single-agent mode if teams unavailable. |
+| `plan-review-implementation` | QA review using an agent team with 3 domain-specialized reviewers (security, reliability, quality). Moves issues Review→Merge. Creates new issues in Todo for bugs found. Falls back to single-agent mode if teams unavailable. |
+| `code-audit` | Audit codebase using an agent team with 3 domain-specialized reviewers. Creates Linear issues in Backlog. Falls back to single-agent mode if teams unavailable. |
+| `deep-review` | Deep, focused analysis of a single feature or service area. Combines code correctness, security, data integrity, and performance in one unified Opus pass. Use when user says "deep review X". |
+| `pull-from-roadmap` | Deep research and discussion of a roadmap feature or new idea. Gathers context from codebase, web, APIs, MCPs, then presents analysis for discussion. |
+| `push-to-production` | Release to production: version bump, changelog, push to main, verify Railway auto-deploy, GitHub Release, Linear state transitions. Use when user says "push to production", "release", or "ship it". |
 | `tools-improve` | **REQUIRED before modifying skills/agents.** Contains best practices for `.claude/skills/` and `.claude/agents/`. ALWAYS load this skill FIRST when: creating, editing, or reviewing any SKILL.md or agent .md file. |
 
-**Skill workflow:** `add-to-backlog` or `code-audit` → `plan-todo` → `plan-implement` → `plan-review-implementation` (repeat until COMPLETE)
+**Skill workflow:** `add-to-backlog` or `code-audit` → `plan-backlog` → `plan-implement` → `plan-review-implementation` (repeat until COMPLETE) → `push-to-production`
 
 ## MCP SERVERS
 
@@ -132,7 +133,7 @@ Allowed: `list_issues`, `get_issue`, `create_issue`, `update_issue`, `list_issue
 
 **Use cases:**
 - `code-audit` creates issues in Backlog
-- `plan-todo` reads Backlog, moves to Todo
+- `plan-backlog` reads Backlog, moves to Todo
 - `plan-inline`/`plan-fix` creates issues in Todo
 - `plan-implement` moves Todo→In Progress→Review
 - `plan-review-implementation` moves Review→Merge, creates bugs in Todo
@@ -162,7 +163,7 @@ Backlog → Todo → In Progress → Review → Merge → Done
 | Transition | Triggered By | When |
 |------------|--------------|------|
 | → Backlog | code-audit, manual | Issue discovered or created |
-| Backlog → Todo | plan-todo | Issue selected for planning |
+| Backlog → Todo | plan-backlog | Issue selected for planning |
 | → Todo | plan-inline, plan-fix, plan-review (bugs) | Task enters PLANS.md |
 | Todo → In Progress | plan-implement | Task work **starts** (real-time) |
 | In Progress → Review | plan-implement | Task work **completes** (real-time) |

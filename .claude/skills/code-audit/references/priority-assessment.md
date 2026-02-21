@@ -2,7 +2,7 @@
 
 Assess priority independently for each issue. Priority is NOT determined by tag alone.
 
-## Impact × Likelihood Matrix
+## Impact x Likelihood Matrix
 
 | | High Likelihood | Medium Likelihood | Low Likelihood |
 |---|---|---|---|

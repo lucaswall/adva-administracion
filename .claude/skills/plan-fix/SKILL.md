@@ -2,128 +2,122 @@
 name: plan-fix
 description: Investigates bugs AND creates actionable TDD fix plans. Creates Linear issues in Todo state. Use when you know you want to fix something - user reports extraction errors, deployment failures, wrong data, missing matches, or prompt issues. Can be chained from investigate skill. Discovers MCPs from CLAUDE.md for debugging (logs, files, prompts).
 argument-hint: <bug description>
-allowed-tools: Read, Edit, Write, Glob, Grep, Task, Bash, mcp__linear__list_issues, mcp__linear__get_issue, mcp__linear__create_issue, mcp__linear__update_issue, mcp__linear__list_issue_labels, mcp__linear__list_issue_statuses
+allowed-tools: Read, Edit, Write, Glob, Grep, Task, Bash, mcp__linear__list_teams, mcp__linear__list_issues, mcp__linear__get_issue, mcp__linear__create_issue, mcp__linear__update_issue, mcp__linear__list_issue_labels, mcp__linear__list_issue_statuses
 disable-model-invocation: true
 ---
 
 Investigate bugs and create TDD fix plans in PLANS.md. Creates Linear issues in Todo state.
 
-## Git Pre-flight Check
+## 1. Git Pre-flight Check
 
-**Before doing anything else**, verify git state:
+Before starting any investigation, verify git status:
 
-1. Check current branch: `git branch --show-current`
-2. If NOT on `main` or `master`:
-   - **STOP** with message: "Not on main branch. Please switch to main before planning: `git checkout main`"
-3. Check for uncommitted changes: `git status --porcelain`
-4. If there are uncommitted changes:
-   - **STOP** with message: "Main branch has uncommitted changes. Please commit or stash them first."
-5. Check if branch is up-to-date with remote: `git fetch origin && git status -uno`
-6. If behind remote:
-   - **STOP** with message: "Main branch is behind remote. Please pull latest: `git pull origin main`"
+```bash
+git branch --show-current
+git status --porcelain
+```
 
-Only proceed to PLANS.md check if git state is clean.
+- **STOP if NOT on `main` branch.** Tell the user: "Not on main branch. Please switch to main before planning: `git checkout main`"
+- **STOP if there are uncommitted changes.** Tell the user to commit or stash first.
+- **Check if behind remote:** `git fetch origin && git status -uno` — STOP if behind.
 
-## Purpose
+## 2. PLANS.md Pre-flight
 
-- Investigate bugs found after processing files (extraction errors, wrong data, missing matches)
-- Debug deployment failures using Railway MCP
-- Test and iterate Gemini prompts when extraction issues are suspected
-- Create investigation report documenting findings and root cause
-- Generate TDD-based fix plan in PLANS.md with Linear issue links
-- Create Linear issues in Todo state for each fix task
-- Does NOT implement fixes (integrates with plan-implement)
+Check if `PLANS.md` already exists at the project root:
 
-## Pre-flight Check
+- If it does not exist: OK, you will create it when documenting findings.
+- If it exists with `Status: COMPLETE`: OK, overwrite with new fix plan.
+- If it exists with active (non-COMPLETE) content: **STOP.** Tell the user there is an active plan that must be completed or removed first.
+- In all cases, check for an existing section about this bug to avoid duplicates.
 
-**Before doing anything**, read PLANS.md and check if it contains incomplete work:
-- If PLANS.md has content but NO "Status: COMPLETE" at the end → **STOP**
-- Tell the user: "PLANS.md has incomplete work. Please review and clear it before planning new items."
-- Do not proceed.
+## 3. Verify Linear MCP
 
-If PLANS.md is empty or has "Status: COMPLETE" → proceed with investigation.
+Call `mcp__linear__list_teams`. If unavailable, **STOP** and tell the user: "Linear MCP is not connected. Run `/mcp` to reconnect, then re-run this skill."
 
-## Arguments
+## 4. Read Project Context
 
-$ARGUMENTS should contain the bug description with context:
-- What happened vs what was expected
-- File IDs if relevant (Google Drive file IDs)
-- Error messages or unexpected values
-- Deployment ID if it's a deployment issue
-- Any other context that helps investigation
+Read `CLAUDE.md` at the project root (if it exists) to understand:
+- Project structure and conventions
+- Available MCPs (Linear, Railway, Google Drive, Gemini, etc.)
+- Tech stack details
+- Testing conventions
+- Any project-specific debugging notes
 
-## Context Gathering
+## 5. Classify Bug Type
 
-**IMPORTANT: Do NOT hardcode MCP names or folder paths.** Always read CLAUDE.md to discover:
+Categorize the reported issue into one of these types:
 
-1. **Available MCP servers** - Look for "MCP SERVERS" section to find:
-   - File/storage MCPs for accessing documents and data
-   - Deployment MCPs for logs and service status
-   - AI/LLM MCPs for prompt testing
+| Category | Description | Key Investigation Areas |
+|----------|-------------|------------------------|
+| **Extraction** | Wrong data extracted, missing fields, null values | Prompts, Google Drive MCP, Gemini MCP, Codebase |
+| **Deployment** | Build errors, runtime crashes on Railway | Build logs, environment variables, dependency issues |
+| **Matching** | Wrong matches, missing matches, unexpected links | Google Drive MCP, Codebase |
+| **Storage** | Data not saved, wrong spreadsheet, missing records | Google Drive MCP, Codebase |
+| **Prompt** | Consistent extraction errors on specific doc types | Gemini MCP, current prompts |
+| **API Error** | Backend route failures, 500s, bad responses | Route handlers, middleware, error handling |
+| **Data Issue** | Wrong data, missing data, data corruption | Database queries, API transformations, caching |
+| **Frontend Bug** | UI rendering issues, broken interactions | React components, state management, data fetching |
 
-2. **Project structure** - Look for "STRUCTURE" or "FOLDER STRUCTURE" sections to understand:
-   - Where source code and documents are stored
-   - Naming conventions and organization
+## 6. Gather Evidence
 
-3. **Domain concepts** - Look for sections describing:
-   - Document types and their processing
-   - Data schemas and formats
-   - Business rules and validation
+### 6.1 Codebase Investigation
 
-## Investigation Workflow
+Search the codebase for relevant code:
 
-### Step 0: Git Pre-flight Check
+Use Glob and Grep tools to:
+- Find the files involved in the bug
+- Trace the code path from entry point to the error
+- Look for recent changes that might have introduced the bug
+- Check test files for related test coverage
 
-Run the Git Pre-flight Check (see section above) before proceeding. Only continue if git state is clean.
+### 6.2 Deployment Logs (if MCP available)
 
-### Step 1: Classify the Bug Type
+If CLAUDE.md lists deployment MCPs (e.g., Railway MCP) and the bug involves deployment or runtime errors, use the MCP to check logs:
 
-Based on $ARGUMENTS, determine the bug category:
+- Check recent deployment status
+- Look for error logs around the time of the reported issue
+- Check environment variable configuration (without exposing values)
+- Review build logs for warnings or errors
 
-| Category | Indicators | Primary Tools |
-|----------|-----------|---------------|
-| **Extraction** | Wrong data extracted, missing fields | Google Drive MCP, Gemini MCP |
-| **Deployment** | Service down, build failures, runtime errors | Railway MCP |
-| **Matching** | Wrong matches, missing matches | Google Drive MCP, Codebase |
-| **Storage** | Data not saved, wrong spreadsheet | Google Drive MCP, Codebase |
-| **Prompt** | Consistent extraction errors on specific doc types | Gemini MCP |
+### 6.3 Document/File Issues (if file MCPs available)
 
-### Step 2: Gather Evidence
-
-**For Codebase Issues:**
-- Use Grep/Glob for searching the codebase
-- Use Task tool with subagent_type=Explore for broader exploration
-- Read relevant source files and tests
-
-**For Deployment Issues (if deployment MCPs available):**
-1. Check MCP/CLI status
-2. List services to find affected service
-3. List recent deployments with statuses
-4. Get deployment and build logs
-5. Verify environment configuration
-
-**For Document/File Issues (if file MCPs available):**
-- Search for the problematic file
+- Search for the problematic file using Google Drive MCP
 - Read file contents
 - Check related data stores (spreadsheets, databases)
 
-**For Prompt/AI Issues (when extraction is consistently wrong):**
-1. Get the source document
-2. Test alternative prompts using AI MCPs
-3. Compare current vs expected output
-4. Iterate until extraction improves
-5. Document the improved prompt for implementation
+### 6.4 Linear Context
 
-### Step 3: Document Findings
+Search Linear for related issues:
 
-Write PLANS.md with this structure:
+- Use `mcp__linear__list_issues` to find existing issues about this bug
+- Check if there are related issues that provide context
+- Look for previously attempted fixes
+
+### 6.5 Reproduce the Issue
+
+When possible, try to reproduce:
+
+```bash
+# Check if tests exist and if they catch the issue
+npm test 2>&1 | tail -50
+
+# Check for TypeScript errors
+npx tsc --noEmit 2>&1 | tail -50
+
+# Check for lint errors
+npm run lint 2>&1 | tail -50
+```
+
+## 7. Document Findings in PLANS.md
+
+Write or append to `PLANS.md` at the project root with this structure:
 
 ```markdown
 # Bug Fix Plan
 
 **Created:** YYYY-MM-DD
 **Bug Report:** [Summary from $ARGUMENTS]
-**Category:** [Extraction | Deployment | Matching | Storage | Prompt]
+**Category:** [Extraction | Deployment | Matching | Storage | Prompt | API Error | Data Issue | Frontend Bug]
 **Linear Issues:** [ADVA-123](https://linear.app/...), [ADVA-124](https://linear.app/...)
 
 ## Investigation
@@ -137,6 +131,16 @@ Write PLANS.md with this structure:
 
 ### Root Cause
 [Clear explanation of why the bug occurs]
+
+#### Related Code
+- `path/to/file.ts:lineNumber` — [describe what this code does and why it's problematic]
+- `path/to/other-file.ts:lineNumber` — [describe the related code]
+(Reference files and line numbers. Do NOT paste code blocks — the implementer will read the files.)
+
+### Impact
+- [What breaks because of this bug]
+- [Who is affected]
+- [Any data implications]
 
 ## Fix Plan
 
@@ -176,9 +180,9 @@ Write PLANS.md with this structure:
 - [Key risk or consideration 2, if any]
 ```
 
-## Linear Issue Creation
+## 8. Create Linear Issue
 
-After writing the fix plan to PLANS.md, create a Linear issue for each fix:
+Create a Linear issue for each fix:
 
 1. Use `mcp__linear__create_issue` with:
    - `team`: "ADVA Administracion"
@@ -219,7 +223,7 @@ When investigating deployment issues (if deployment MCPs available):
    - Specific error types or messages
 4. **Check environment** - Verify configuration variables
 
-## Error Handling
+## 9. Error Handling
 
 | Situation | Action |
 |-----------|--------|
@@ -230,31 +234,51 @@ When investigating deployment issues (if deployment MCPs available):
 | File/resource not found | Document as part of investigation (may be the bug) |
 | Cannot reproduce issue | Document investigation steps taken, ask user for more context |
 | Root cause unclear | Document possible causes ranked by likelihood |
+| Existing fix in progress | Check the existing Linear issue and PLANS.md entry, update rather than duplicate |
+| Bug is actually a feature request | Reclassify and suggest using add-to-backlog skill instead |
 
-## Rules
+## 10. Rules
 
-- **Refuse to proceed if PLANS.md has incomplete work**
+- **NEVER modify application code.** This skill only investigates and plans.
+- **NEVER run destructive commands** (no `rm`, no `git reset --hard`, no database mutations).
+- **ALWAYS use TDD approach** in fix plans - tests first, then implementation.
+- **ALWAYS check for existing Linear issues** before creating new ones to avoid duplicates.
+- **ALWAYS include file paths and line numbers** in evidence and fix plans.
+- **ALWAYS propose a branch name** following the pattern `fix/ADVA-xxx-brief-description`.
 - **Discover MCPs from CLAUDE.md** - don't hardcode MCP names or paths
-- **Investigation only** - do not modify source code
-- All fixes must follow TDD (test first)
-- Include enough detail for another model to implement without context
-- Always include post-implementation checklist
+- **Keep fix plans actionable** - another developer (or AI agent) should be able to follow the plan without additional context.
+- **Severity guidelines:**
+  - **Critical:** Production down, data loss, security vulnerability
+  - **High:** Feature broken for all users, significant data issues
+  - **Medium:** Feature partially broken, workaround exists
+  - **Low:** Minor UI issue, edge case, cosmetic problem
+- **DO NOT expose secrets, API keys, or sensitive environment variable values** in PLANS.md or Linear issues.
+- **DO NOT hallucinate code** - only reference code that actually exists in the codebase.
+- **Plans describe WHAT and WHY, not HOW at the code level.** Include: file paths, function names, behavioral specs, test assertions, patterns to follow (reference existing files by path), state transitions. Do NOT include: implementation code blocks, ready-to-paste TypeScript/TSX, full function bodies. The implementer (plan-implement workers) writes all code — your job is architecture and specification. Exception: short one-liners for surgical changes (e.g., "add `if (!session.x)` check after the existing `!session.y` check") are fine.
+- **Flag migration-relevant fixes** — If the fix changes DB schema, renames columns, changes identity models, renames env vars, or changes session/token formats, add a note in the fix plan: "**Migration note:** [what production data is affected]". The implementer will log this in `MIGRATIONS.md`.
 - For prompt issues, test multiple variations before recommending changes
 - Create Linear issues in Todo state for each fix task
 - Include Linear issue links in PLANS.md
 
-## CRITICAL: Scope Boundaries
+## 11. Scope Boundaries
 
-**This skill creates plans. It does NOT implement them.**
+This skill is specifically for:
+- Investigating reported bugs and errors
+- Creating structured fix plans with TDD approach
+- Creating Linear issues for tracking
 
-1. **NEVER ask to "exit plan mode"** - This skill doesn't use Claude Code's plan mode feature
-2. **NEVER implement code** - Your job ends when PLANS.md is written
-3. **NEVER ask ambiguous questions** like "should I proceed?" or "ready to continue?"
-4. **NEVER start implementing** after writing the plan, even if user says "yes" to something
+This skill is NOT for:
+- Actually implementing fixes (use plan-implement for that)
+- Adding new features (use plan-backlog or add-to-backlog)
+- Code reviews (use code-audit)
+- General investigation without a fix intent (use investigate)
+- Refactoring (create a separate task)
 
-## Termination
+## 12. Termination and Git Workflow
 
-When you finish writing PLANS.md (and creating Linear issues), output the plan summary followed by the completion message:
+When investigation and planning are complete:
+
+1. **Output the plan summary:**
 
 ```
 ✓ Plan created in PLANS.md
@@ -283,16 +307,17 @@ When you finish writing PLANS.md (and creating Linear issues), output the plan s
 Create a feature branch and commit the plan.
 ```
 
-**Then execute git workflow:**
+2. **Create branch, commit (no `Co-Authored-By` tags), and push:**
+   ```bash
+   git checkout -b fix/<bug-description> && git add PLANS.md && git commit -m "plan: <bug-description>" && git push -u origin fix/<bug-description>
+   ```
 
-1. Create a fix branch with proper naming:
-   - Always use `fix/` prefix for bug fixes
-   - Branch name should be kebab-case, derived from the bug description
-   - Example: `fix/sql-injection-query-builder`, `fix/race-condition-cache`
+3. **Suggest next steps:**
+   - "Run `/plan-implement` to implement the fix plan"
+   - If critical: "This is a critical issue - recommend implementing immediately"
 
-2. Stage, commit, and push:
-```bash
-git checkout -b fix/<bug-description> && git add PLANS.md && git commit -m "plan: <bug-description>" && git push -u origin fix/<bug-description>
-```
+4. **If chained from investigate skill:**
+   - Reference the investigation findings
+   - Note any additional evidence found during the fix planning phase
 
 Do not ask follow-up questions. Do not offer to implement. Output the summary and stop.

@@ -93,3 +93,53 @@ The `facturaCuitField` and `pagoCuitField` parameters are passed through `matchF
 **Risks/Considerations:**
 - The fix must not create false positive matches by accidentally matching emisor CUIT with receptor CUIT in the wrong direction. Each check compares the correct pago field with the correct factura field based on the flow direction.
 - After deploying, run `/api/rematch` to re-match existing Ingresos documents, then `/api/match-movimientos?force=true` to update bank movimientos.
+
+---
+
+## Iteration 1
+
+**Implemented:** 2026-02-04
+
+### Tasks Completed This Iteration
+- Fix 1: Make FacturaPagoMatcher CUIT/name matching work for both Ingresos and Egresos — Extended CUIT matching to check `cuitReceptor` and name matching to check `razonSocialReceptor`, added `.trim()` to `normalizeString` to prevent whitespace false positives
+
+### Files Modified
+- `src/matching/matcher.ts` — Added receptor field checks for CUIT matching (4 clauses: emisor first, then receptor fallback) and name matching (separate checks for razonSocialReceptor after razonSocialEmisor). Added `.trim()` to `normalizeString`.
+- `src/matching/matcher.test.ts` — Added 5 new tests in "FacturaPagoMatcher Ingresos scenario (receptor fields)" describe block: CUIT match via receptor, name match via receptor, no false positive with wrong CUIT, Egresos CUIT regression, Egresos name regression. Fixed test CUITs to use fictional values.
+
+### Linear Updates
+- ADV-79: Todo → In Progress → Review
+
+### Pre-commit Verification
+- bug-hunter: Found 5 issues (1 HIGH, 3 MEDIUM, 1 LOW). Fixed: fictional CUITs in tests (LOW), added `.trim()` to normalizeString (MEDIUM). HIGH (cross-direction false positive) is mitigated by caller contract — `factura-pago-matcher.ts` only populates one side of emisor/receptor fields.
+- verifier: All 1590 tests pass, zero warnings
+
+### Continuation Status
+All tasks completed.
+
+### Review Findings
+
+Files reviewed: 2 (`src/matching/matcher.ts`, `src/matching/matcher.test.ts`)
+Checks applied: Security, Logic, Async, Resources, Type Safety, Edge Cases, Conventions
+
+No issues found — all implementations are correct and follow project conventions.
+
+Key validations:
+- CUIT matching correctly checks both emisor and receptor fields with `if/else if` short-circuit
+- Cross-direction false positives are prevented by the caller contract (`factura-pago-matcher.ts` sets `cuitReceptor: undefined` for Egresos)
+- Name matching falls through to receptor fields only when emisor match is not found
+- `.trim()` addition to `normalizeString` is a safe defensive improvement
+- All 5 new tests cover the required scenarios (Ingresos CUIT, Ingresos name, false positive guard, 2 Egresos regressions)
+- Test data uses fictional CUITs per CLAUDE.md conventions
+
+### Linear Updates
+- ADV-79: Review → Merge
+
+<!-- REVIEW COMPLETE -->
+
+---
+
+## Status: COMPLETE
+
+All tasks implemented and reviewed successfully. All Linear issues moved to Merge.
+Ready for PR creation.
