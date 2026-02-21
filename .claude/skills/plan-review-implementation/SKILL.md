@@ -482,7 +482,7 @@ If the scope assessment chose single-agent mode (≤4 changed files) OR `TeamCre
 - **Lead handles all Linear/git writes** — Reviewers NEVER create issues or modify PLANS.md
 - **No co-author attribution** — Commit messages must NOT include `Co-Authored-By` tags
 - **Never stage sensitive files** — Skip `.env*`, `*.key`, `*.pem`, `credentials*`, `secrets*`
-- **Check MIGRATIONS.md** — If implementation changed spreadsheet schema, column names, folder structure, env vars, or API response shapes, verify that `MIGRATIONS.md` has a corresponding note AND that the code includes migration logic (startup detection of old format + automatic migration). If migration logic is missing, add it as a FIX finding — breaking changes without migration paths are bugs in production.
+- **Check MIGRATIONS.md** — If implementation changed spreadsheet schema, column names, folder structure, or env vars, verify that `MIGRATIONS.md` has a corresponding note AND that the code includes migration logic (startup detection of old format + automatic migration). If migration logic is missing, add it as a FIX finding — breaking changes to persistent data without migration paths are bugs in production.
 - **Every finding is FIX or DISCARD** — No "document only" category. Real bugs at any severity get Linear issues + Fix Plan. Non-bugs get discarded with reasoning.
 - **Never discard real bugs** — Pre-existing, low-severity, or "already handled" are NOT valid reasons to discard. Only discard findings that are genuinely not bugs (false positive, impossible, style-only). When in doubt, FIX.
 - **Always report findings to user** — PLANS.md is overwritten by the next plan. The user must see all findings (fixed and discarded) directly in the conversation output before the skill terminates.

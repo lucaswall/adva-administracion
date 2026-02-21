@@ -204,13 +204,12 @@ tests/unit/                # Unit tests mirroring src/ structure
 
 **This project is in production with two environments (production + staging):**
 
-- All changes must be backwards-compatible OR include a migration path
+- **Persistent data** (spreadsheets, folder structure) changes must be backwards-compatible OR include a migration path
 - Spreadsheet schema changes require startup migration logic (detect old format, migrate data)
 - Folder structure changes must handle both old and new formats gracefully
-- API changes must not break existing clients (Apps Script dashboard)
+- API changes are fine — the API is internal, consumed only by the co-deployed Apps Script
 - Environment variable changes need documentation and coordinated deployment
 - Delete unused code only when safe — verify no production data depends on it
-- When changing APIs/configs: ensure backwards compatibility or implement migration
 
 ---
 

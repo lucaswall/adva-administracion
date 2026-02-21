@@ -453,7 +453,7 @@ When planning, consider how MCPs will be used during implementation:
 11. **Keep scope tight.** Only plan what the issues ask for. Do not add nice-to-haves.
 12. **Plans describe WHAT and WHY, not HOW at the code level.** Include: file paths, function names, behavioral specs, test assertions, patterns to follow (reference existing files by path), state transitions. Do NOT include: implementation code blocks, ready-to-paste TypeScript/TSX, full function bodies. The implementer (plan-implement workers) writes all code — your job is architecture and specification. Exception: short one-liners for surgical changes (e.g., "add `if (!session.x)` check after the existing `!session.y` check") are fine.
 13. **Move valid issues to Todo.** After writing the plan, update the valid Linear issues to the "Todo" state.
-14. **Flag migration-relevant tasks.** If a task changes spreadsheet schema, renames columns, changes folder structure, renames env vars, or changes API response shapes, add a note in the task: "**Migration note:** [what production data is affected and how to migrate]". The plan MUST include a migration strategy (e.g., startup detection of old format + automatic migration). The implementer will log this in `MIGRATIONS.md`.
+14. **Flag migration-relevant tasks.** If a task changes spreadsheet schema, renames columns, changes folder structure, or renames env vars, add a note in the task: "**Migration note:** [what production data is affected and how to migrate]". The plan MUST include a migration strategy (e.g., startup detection of old format + automatic migration). The implementer will log this in `MIGRATIONS.md`.
 
 ---
 
