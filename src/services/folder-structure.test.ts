@@ -88,33 +88,11 @@ describe('clearFolderStructureCache', () => {
   });
 });
 
-describe('Bug #5: Folder structure cache race handling', () => {
-  it('documents cache clear behavior during locked operations', () => {
-    // Bug #5: Cache could be cleared during a locked operation
-    // Current behavior: Throws descriptive error when cache is cleared mid-operation
-    //
-    // This is ACCEPTABLE because:
-    // 1. Error is thrown (not silent failure)
-    // 2. Error message is descriptive: "Folder structure cache was cleared during operation"
-    // 3. Caller can recover by re-calling discoverFolderStructure()
-    //
-    // The lock prevents concurrent folder creation operations, but doesn't prevent
-    // clearFolderStructureCache() from being called externally. The error handling
-    // ensures the operation fails gracefully with a clear message.
-    //
-    // Code location: folder-structure.ts:642-645
-    //
-    // Expected error flow:
-    // 1. Operation starts with cached structure
-    // 2. clearFolderStructureCache() called externally
-    // 3. Operation detects cache cleared
-    // 4. Throws: "Folder structure cache was cleared during operation"
-    // 5. Caller catches error and can re-discover structure
-
-    // This test documents the expected behavior
-    expect(true).toBe(true);
-  });
-});
+// Bug #5: Cache could be cleared during a locked folder creation operation.
+// Current behavior (folder-structure.ts): Throws descriptive error "Folder structure cache
+// was cleared during operation" when the cache is cleared mid-operation inside withLock.
+// Not testable via unit tests because ensureClassificationFolders is non-exported and
+// requires concurrent async coordination to trigger. Verified by code review.
 
 describe('Spreadsheet lock timeout configuration', () => {
   it('should have SPREADSHEET_LOCK_TIMEOUT_MS constant exported', async () => {

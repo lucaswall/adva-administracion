@@ -177,10 +177,6 @@ function triggerRematch() {
   return ADVA.triggerRematch();
 }
 
-function triggerAutofillBank() {
-  return ADVA.triggerAutofillBank();
-}
-
 function showAbout() {
   return ADVA.showAbout();
 }

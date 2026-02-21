@@ -618,8 +618,8 @@ describe('QuotaThrottle', () => {
     await vi.advanceTimersByTimeAsync(5000);
     await waitPromise;
 
-    // Should have waited for the backoff delay
-    expect(true).toBe(true); // If we get here, the wait resolved after delay
+    // Should have waited for the backoff delay - verify the throttle has a non-zero delay set
+    expect(quotaThrottle.getCurrentDelayMs()).toBeGreaterThan(0);
   });
 
   it('increases backoff with consecutive quota errors', async () => {
