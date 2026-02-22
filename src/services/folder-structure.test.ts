@@ -186,7 +186,6 @@ describe('movimientosSpreadsheets cache population', () => {
   });
 });
 
-<<<<<<< HEAD
 describe('checkEnvironmentMarker', () => {
   const rootId = 'root-folder-id';
 
@@ -335,7 +334,7 @@ describe('migrateArchivosProcesadosHeaders', () => {
       ok: true,
       value: [['fileId', 'fileName', 'processedAt', 'documentType', 'status']],
     });
-    vi.mocked(setValues).mockResolvedValue({ ok: true, value: undefined });
+    vi.mocked(setValues).mockResolvedValue({ ok: true, value: 1 });
 
     const result = await migrateArchivosProcesadosHeaders('dashboard-id');
 

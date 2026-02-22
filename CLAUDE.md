@@ -387,7 +387,7 @@ Files with stale 'processing' status are automatically recovered on server start
 - Column C: `processedAt` (ISO timestamp when processing started)
 - Column D: `documentType`
 - Column E: `status` (`processing` | `success` | `failed: <error message>` | `duplicate`)
-- Column F: `environment` (`staging` | `production`)
+- Column F: `originalFileId` (Drive file ID of original document, populated for duplicates only)
 
 ## SECURITY
 
