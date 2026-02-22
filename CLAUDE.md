@@ -88,7 +88,7 @@ Skills are specialized workflows in `.claude/skills/`. Descriptions drive automa
 | `code-audit` | Audit codebase using an agent team with 3 domain-specialized reviewers. Creates Linear issues in Backlog. Falls back to single-agent mode if teams unavailable. |
 | `deep-review` | Deep, focused analysis of a single feature or service area. Combines code correctness, security, data integrity, and performance in one unified Opus pass. Use when user says "deep review X". |
 | `pull-from-roadmap` | Deep research and discussion of a roadmap feature or new idea. Gathers context from codebase, web, APIs, MCPs, then presents analysis for discussion. |
-| `push-to-production` | Release to production: version bump, changelog, push to main, verify Railway auto-deploy, GitHub Release, Linear state transitions. Use when user says "push to production", "release", or "ship it". |
+| `push-to-production` | Release to production: version bump, changelog, push to main + release, verify Railway production deploy, GitHub Release, Linear state transitions. Use when user says "push to production", "release", or "ship it". |
 | `tools-improve` | **REQUIRED before modifying skills/agents.** Contains best practices for `.claude/skills/` and `.claude/agents/`. ALWAYS load this skill FIRST when: creating, editing, or reviewing any SKILL.md or agent .md file. |
 
 **Skill workflow:** `add-to-backlog` or `code-audit` → `plan-backlog` → `plan-implement` → `plan-review-implementation` (repeat until COMPLETE) → `push-to-production`
@@ -96,6 +96,13 @@ Skills are specialized workflows in `.claude/skills/`. Descriptions drive automa
 ## MCP SERVERS
 
 ### Railway MCP (READ-ONLY)
+
+**Environments and branches:**
+- **Staging** → auto-deploys from `main` branch
+- **Production** → auto-deploys from `release` branch
+
+The Railway CLI / MCP is linked to **staging**. Always specify `environment: "production"` when querying production deployments or logs.
+
 Allowed: `get-logs`, `list-deployments`, `list-services`, `list-variables`, `check-railway-status`
 
 **FORBIDDEN - NEVER USE:**

@@ -1,12 +1,16 @@
 ---
 name: push-to-production
-description: Release to production by pushing to main, verifying Railway auto-deploy, creating a GitHub Release, and transitioning Linear issues. Use when user says "push to production", "release", "deploy to production", or "ship it". Bumps version, updates changelog, pushes to main, verifies Railway deployment, creates GitHub Release, and moves Linear issues to Released.
+description: Release to production by pushing to main and release branches, verifying Railway auto-deploy, creating a GitHub Release, and transitioning Linear issues. Use when user says "push to production", "release", "deploy to production", or "ship it". Bumps version, updates changelog, pushes to main + release, verifies Railway deployment, creates GitHub Release, and moves Linear issues to Released.
 allowed-tools: Read, Edit, Write, Glob, Grep, Bash, Task, mcp__linear__list_issues, mcp__linear__update_issue, mcp__linear__get_issue, mcp__linear__list_issue_statuses, mcp__Railway__get-logs, mcp__Railway__list-deployments
 argument-hint: [version]
 disable-model-invocation: true
 ---
 
-Release to production by pushing to main, verifying Railway auto-deploy, and creating a GitHub Release. Railway auto-deploys on push to main — there is no separate `release` branch.
+Release to production. Two Railway environments auto-deploy from different branches:
+- **Staging** auto-deploys from `main`
+- **Production** auto-deploys from `release`
+
+Both branches must be pushed. The Railway MCP is linked to **staging** — always specify `environment: "production"` when checking production deployments.
 
 ## Phase 1: Pre-flight Checks
 
@@ -14,7 +18,7 @@ Release to production by pushing to main, verifying Railway auto-deploy, and cre
 
 **ALWAYS call `mcp__linear__list_issues` with `team: "ADVA Administracion"`, `state: "Done"` directly.** Do NOT try to determine MCP availability by inspecting the tool list, checking settings, or reasoning about it — you MUST actually invoke the tool and check the result. If the call fails or returns an error, **warn** but do not stop — Linear state transitions are cosmetic, the release can proceed without them.
 
-Record any Done issues for Phase 4.
+Record any Done issues for Phase 5.
 
 ### 1.2 Git State
 
@@ -56,9 +60,11 @@ git log <last-tag>..HEAD --oneline
 git diff <last-tag>..HEAD --stat
 ```
 
+**First release (no prior tags):** If `git describe --tags` fails, this is the first tagged release. Use the full commit history and treat the current `package.json` version as the starting version. Show the user the recent commit list (last ~20 commits).
+
 If there are no commits since the last tag, **STOP**: "Nothing to release. No commits since last release."
 
-Show the user the commit list and file diff summary.
+**IMPORTANT:** Show the user the commit list and file diff summary. Wait for acknowledgment before proceeding to Phase 2.
 
 ## Phase 2: Version & Changelog
 
@@ -66,7 +72,7 @@ Show the user the commit list and file diff summary.
 
 Follows [Semantic Versioning 2.0.0](https://semver.org/):
 
-1. Read `CHANGELOG.md` and extract the current version from the first `## [x.y.z]` header
+1. Read `CHANGELOG.md` and extract the current version from the first `## [x.y.z]` header. If `CHANGELOG.md` doesn't exist, this is the first release.
 2. If `$ARGUMENTS` contains a version (e.g., `2.0.0`):
    - Validate it's valid semver (X.Y.Z)
    - Validate it's strictly higher than current version
@@ -76,7 +82,8 @@ Follows [Semantic Versioning 2.0.0](https://semver.org/):
    - **MINOR** (`x.y+1.0`): Backward-compatible new functionality — new document types, new API endpoints, new processing features, significant operational improvements
    - **PATCH** (`x.y.z+1`): Backward-compatible bug fixes — bug fixes, extraction accuracy improvements, refactoring, performance improvements, dependency updates
    - When commits span multiple categories, use the **highest** bump level (MAJOR > MINOR > PATCH)
-   - Show the user which bump level was chosen and why, so they can override if they disagree
+   - **First release:** Use the version already in `package.json` (e.g., `1.0.0`)
+   - Show the user which version was chosen and why, so they can override if they disagree
 
 ### 2.2 Write Changelog Entry
 
@@ -106,10 +113,11 @@ See [references/changelog-guidelines.md](references/changelog-guidelines.md) for
    - New version link: compare previous version tag to new version tag
    - Format: `[Unreleased]: https://github.com/<owner>/<repo>/compare/vNEW...HEAD`
    - Format: `[NEW]: https://github.com/<owner>/<repo>/compare/vOLD...vNEW`
+   - **First release:** Use `[NEW]: https://github.com/<owner>/<repo>/commits/vNEW` (no previous tag to compare against)
 
 ### 2.3 Update package.json
 
-Edit `package.json` to set `"version"` to the new version string.
+Edit `package.json` to set `"version"` to the new version string. Skip if version already matches.
 
 ## Phase 3: Commit, Tag & Push
 
@@ -130,34 +138,37 @@ Create an annotated git tag:
 git tag -a "v<version>" -m "v<version>"
 ```
 
-### 3.3 Push to Main
+### 3.3 Push to Main and Release
 
-Push the commit and tag to origin. This triggers Railway auto-deploy:
+Push the commit and tag to both branches:
 
 ```bash
 git push origin main --follow-tags
+git push origin main:release
 ```
 
-If push fails, **STOP**: "Push to main failed. Check remote access and try again."
+The first push triggers **staging** auto-deploy. The second push triggers **production** auto-deploy.
+
+If either push fails, **STOP**: "Push failed. Check remote access and try again."
 
 ## Phase 4: Verify Deployment
 
-### 4.1 Wait for Deployment
+### 4.1 Wait for Production Deployment
 
-Railway auto-deploys on push to main. Wait briefly (30 seconds) then check deployment status:
+Wait briefly (30 seconds) then check **production** deployment status:
 
 ```
-Use mcp__Railway__list-deployments to check if a new deployment was triggered
+Use mcp__Railway__list-deployments with environment: "production"
 ```
 
 Look for a deployment that started after the push. Check its status.
 
-### 4.2 Check Deployment Logs
+### 4.2 Check Production Deployment Logs
 
-Use Railway MCP to verify the deployment succeeded:
+Use Railway MCP to verify the **production** deployment succeeded:
 
 ```
-Use mcp__Railway__get-logs to check recent deployment logs
+Use mcp__Railway__get-logs with environment: "production"
 ```
 
 Look for:
@@ -222,14 +233,16 @@ Transition all Linear issues in "Done" to "Released" now that the code is live i
    mcp__linear__list_issues with team: "ADVA Administracion", state: "Done"
    ```
 
-2. Look up the Released state UUID using `mcp__linear__list_issue_statuses` with team "ADVA Administracion". Find the status with `name: "Released"` (or similar — check what states exist in the team).
+2. Look up the Released state UUID using `mcp__linear__list_issue_statuses` with team "ADVA Administracion". Find the status with `name: "Released"`.
 
 3. For each issue found, transition to Released using the **state UUID** (both Done and Released are `type: completed` — passing by name could silently no-op):
    ```
    mcp__linear__update_issue with id: <issue-id>, state: "<released-state-uuid>"
    ```
 
-4. Collect the list of moved issues (identifier + title) for the report.
+4. **Batch efficiently:** Call up to 10 `update_issue` calls in parallel. If there are more than 30 issues, update the first 30 and note the remainder in the report for manual transition.
+
+5. Collect the list of moved issues (identifier + title) for the report.
 
 If no issues are in Done, that's fine — skip silently.
 
@@ -252,20 +265,20 @@ If the Linear MCP is unavailable (tools fail), **do not STOP** — log a warning
 
 **Version:** X.Y.Z
 **Commits:** N commits
-**Deployment:** Railway auto-deploy [triggered successfully | check logs]
+**Staging:** Railway auto-deploy from main [triggered | check logs]
+**Production:** Railway auto-deploy from release [triggered | check logs]
 **GitHub Release:** [Created | Failed (see warning above)]
 
 ### Issues Released
 [List of ADVA-xxx: title moved to Released, or "None"]
 
 ### Deployment Verification
-- Railway deployment status: [status]
-- Server startup: [confirmed | check logs]
+- Production deployment status: [status]
+- Production server startup: [confirmed | check logs]
 
 ### Next Steps
-- Monitor Railway logs for any issues
+- Monitor Railway production logs for any issues
 - Verify API health at production endpoint
-- Check deployment dashboard if issues arise
 ```
 
 ## Error Handling
@@ -279,11 +292,13 @@ If the Linear MCP is unavailable (tools fail), **do not STOP** — log a warning
 | No commits to release | STOP — nothing to do |
 | Incomplete PLANS.md | STOP — finish implementation first |
 | Push to main fails | STOP — check remote access |
+| Push to release fails | STOP — check remote access |
 | Railway deploy fails | Warn in report — investigate separately |
 | Invalid/lower version argument | STOP — must be valid semver higher than current |
 | GitHub Release creation fails | Warn in report — release succeeded, create manually later |
 | Linear MCP unavailable | Warn in report — issue states are cosmetic |
 | Merge conflicts | STOP — user resolves manually |
+| No prior tags (first release) | Use package.json version, show full commit history |
 
 ## Rules
 
@@ -291,7 +306,7 @@ If the Linear MCP is unavailable (tools fail), **do not STOP** — log a warning
 - **Never force-push** — Use normal push only
 - **Semantic Versioning 2.0.0** — Version bumps follow semver rules: MAJOR for breaking changes, MINOR for new features, PATCH for bug fixes. Every release gets a CHANGELOG.md entry and matching package.json version
 - **Net-effect changelog** — Changelog describes what changed from production's perspective, not a commit-by-commit replay
-- **Railway auto-deploys** — Pushing to main triggers deployment automatically. No manual deploy step needed.
+- **Two-branch deploy** — Push to `main` (staging) AND `main:release` (production). Both must succeed.
+- **Verify production** — Always specify `environment: "production"` when checking Railway deployment. The MCP defaults to staging.
 - **Linear is cosmetic** — Issue state transitions are nice-to-have. Never block a release because Linear MCP is down.
-- **Verify after push** — Always check Railway deployment logs after pushing to confirm the deploy succeeded
 - **Stop on any pre-flight failure** — Better to abort than ship broken code
