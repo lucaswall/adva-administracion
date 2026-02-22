@@ -385,7 +385,11 @@ export class BankMovementMatcher {
 
     // --- Pagos ---
     for (const pago of pagos) {
-      if (!amountsMatch(pago.importePagado, amount)) continue;
+      // Use importeEnPesos for USD pagos (bank debits ARS), otherwise direct match
+      const pagoAmountMatch = pago.importeEnPesos && pago.moneda === 'USD'
+        ? amountsMatch(pago.importeEnPesos, amount)
+        : amountsMatch(pago.importePagado, amount);
+      if (!pagoAmountMatch) continue;
       const pagoDate = parseArgDate(pago.fechaPago);
       if (!pagoDate) continue;
       if (!isWithinDays(bankFecha, pagoDate, PAGO_DATE_RANGE, PAGO_DATE_RANGE)) continue;
@@ -400,7 +404,10 @@ export class BankMovementMatcher {
       if (pago.matchedFacturaFileId) {
         const linkedFactura = facturas.find(f => f.fileId === pago.matchedFacturaFileId);
         if (linkedFactura) {
-          const description = this.formatDebitFacturaDescription(linkedFactura);
+          let description = this.formatDebitFacturaDescription(linkedFactura);
+          if (pago.tipoDeCambio) {
+            description += ` - tipo de cambio ${pago.tipoDeCambio.toFixed(2)}`;
+          }
           candidates.push({
             tier: 1,
             matchType: 'pago_factura',
@@ -605,11 +612,18 @@ export class BankMovementMatcher {
       if (!pagoFecha) continue;
       if (!isWithinDays(bankFecha, pagoFecha, PAGO_DATE_RANGE, PAGO_DATE_RANGE)) continue;
 
-      // Use cross-currency matching for pagos recibidos
-      const amountOk = amountsMatchCrossCurrency(
-        pago.importePagado, pago.moneda || 'ARS', pago.fechaPago,
-        amount, 'ARS', this.crossCurrencyTolerancePercent
-      );
+      // Use importeEnPesos for precise matching when available, otherwise cross-currency
+      let amountOk: { matches: boolean; isCrossCurrency: boolean; rate?: number; expectedArs?: number };
+      if (pago.importeEnPesos && pago.moneda === 'USD') {
+        // Direct ARS-to-ARS match using bank's actual conversion
+        const matches = amountsMatch(pago.importeEnPesos, amount);
+        amountOk = { matches, isCrossCurrency: false };
+      } else {
+        amountOk = amountsMatchCrossCurrency(
+          pago.importePagado, pago.moneda || 'ARS', pago.fechaPago,
+          amount, 'ARS', this.crossCurrencyTolerancePercent
+        );
+      }
       if (!amountOk.matches) continue;
 
       // Hard CUIT filter
@@ -625,12 +639,19 @@ export class BankMovementMatcher {
       if (pago.matchedFacturaFileId) {
         const linkedFactura = facturasEmitidas.find(f => f.fileId === pago.matchedFacturaFileId);
         if (linkedFactura) {
-          const isCrossCurrency = linkedFactura.moneda === 'USD';
+          // When importeEnPesos is used, the match is exact ARS — not cross-currency
+          const isCrossCurrency = amountOk.isCrossCurrency;
           const cliente = linkedFactura.razonSocialReceptor || 'Cliente';
           const concepto = linkedFactura.concepto || '';
-          const description = concepto
-            ? `Cobro Factura de ${cliente} - ${concepto}`
-            : `Cobro Factura de ${cliente}`;
+          const facturaId = linkedFactura.tipoComprobante && linkedFactura.nroFactura
+            ? `${linkedFactura.tipoComprobante} ${linkedFactura.nroFactura} `
+            : '';
+          let description = concepto
+            ? `Cobro Factura ${facturaId}de ${cliente} - ${concepto}`
+            : `Cobro Factura ${facturaId}de ${cliente}`;
+          if (pago.tipoDeCambio) {
+            description += ` - tipo de cambio ${pago.tipoDeCambio.toFixed(2)}`;
+          }
           const confidence = isCrossCurrency ? 'MEDIUM' : 'HIGH';
 
           if (isCrossCurrency) {
@@ -759,9 +780,12 @@ export class BankMovementMatcher {
       // Build description
       const cliente = factura.razonSocialReceptor || 'Cliente';
       const concepto = factura.concepto || '';
+      const facturaId = factura.tipoComprobante && factura.nroFactura
+        ? `${factura.tipoComprobante} ${factura.nroFactura} `
+        : '';
       let description = concepto
-        ? `Cobro Factura de ${cliente} - ${concepto}`
-        : `Cobro Factura de ${cliente}`;
+        ? `Cobro Factura ${facturaId}de ${cliente} - ${concepto}`
+        : `Cobro Factura ${facturaId}de ${cliente}`;
       if (usedRetenciones.length > 0) {
         description += ` (con retencion)`;
       }
@@ -856,10 +880,13 @@ export class BankMovementMatcher {
   private formatDebitFacturaDescription(factura: Factura): string {
     const razonSocial = factura.razonSocialEmisor || 'Proveedor';
     const concepto = factura.concepto || '';
+    const facturaId = factura.tipoComprobante && factura.nroFactura
+      ? `${factura.tipoComprobante} ${factura.nroFactura} `
+      : '';
     if (concepto) {
-      return `Pago Factura a ${razonSocial} - ${concepto}`;
+      return `Pago Factura ${facturaId}a ${razonSocial} - ${concepto}`;
     }
-    return `Pago Factura a ${razonSocial}`;
+    return `Pago Factura ${facturaId}a ${razonSocial}`;
   }
 
   /**

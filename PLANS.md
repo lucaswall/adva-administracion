@@ -272,3 +272,39 @@ Tasks 1, 2, 3 can be done in parallel. Tasks 4 and 5 depend on Task 1. Task 6 is
 - Changes to Gemini extraction or parser logic
 - Changes to spreadsheet schema or column layout
 - UI/Apps Script changes
+
+---
+
+## Iteration 1
+
+**Implemented:** 2026-02-22
+**Method:** Single-agent (2 work units, 9 effort points)
+
+### Tasks Completed This Iteration
+- Task 1 (ADV-116): Extend column ranges and parsers — added tipoDeCambio to parseFacturasEmitidas/parseFacturasRecibidas, added tipoDeCambio+importeEnPesos to parsePagos, updated loadControlIngresos/loadControlEgresos ranges
+- Task 2 (ADV-119): Extend factura-pago-matcher column range — pagos A:O→A:Q, facturas ranges updated, pago parser extended
+- Task 3 (ADV-115): Add nroFactura and tipoComprobante to detalle descriptions — formatDebitFacturaDescription, credit Tier 1, credit direct factura all now include "Factura {tipo} {nro}"
+- Task 4 (ADV-117): Add tipoDeCambio to COMEX detalle descriptions — credit Tier 1 and debit Tier 1 append " - tipo de cambio NNNN.NN" when pago.tipoDeCambio is available
+- Task 5 (ADV-118): Use importeEnPesos for precise cross-currency bank matching — credit and debit pago matching use importeEnPesos for exact ARS match when available, falling back to amountsMatchCrossCurrency
+- Task 6: Final verification — bug-hunter and full verifier passed
+
+### Files Modified
+- `src/bank/match-movimientos.ts` — Extended column ranges, added tipoDeCambio/importeEnPesos parsing, exported parsePagos
+- `src/bank/match-movimientos.test.ts` — Added tests for new field parsing, updated mock ranges
+- `src/bank/matcher.ts` — nroFactura/tipoComprobante in descriptions, tipoDeCambio suffix, importeEnPesos matching
+- `src/bank/matcher.test.ts` — Added tests for descriptions, tipoDeCambio, importeEnPesos matching, updated pre-existing expectations
+- `src/processing/matching/factura-pago-matcher.ts` — Extended pagos range A:O→A:Q, facturas ranges A:R→A:S / A:S→A:T, added pago tipoDeCambio/importeEnPesos parsing
+
+### Linear Updates
+- ADV-116: Todo → In Progress → Review
+- ADV-119: Todo → In Progress → Review
+- ADV-115: Todo → In Progress → Review
+- ADV-117: Todo → In Progress → Review
+- ADV-118: Todo → In Progress → Review
+
+### Pre-commit Verification
+- bug-hunter: Found 2 HIGH issues (factura-pago-matcher ranges and pago parser), fixed before commit
+- verifier: All 1,728 tests pass, zero warnings
+
+### Continuation Status
+All tasks completed.

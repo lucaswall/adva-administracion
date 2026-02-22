@@ -10,6 +10,7 @@ import {
   getRequiredColumnIndex,
   parseFacturasEmitidas,
   parseFacturasRecibidas,
+  parsePagos,
   type MatchQuality,
 } from './match-movimientos.js';
 
@@ -309,6 +310,99 @@ describe('parseFacturasRecibidas', () => {
     expect(result).toHaveLength(1);
     // Serial number 45671 => '2025-01-14'
     expect(result[0].fechaEmision).toBe('2025-01-14');
+  });
+});
+
+describe('parseFacturasEmitidas - tipoDeCambio', () => {
+  it('parses tipoDeCambio from column S when present', () => {
+    const data = [
+      ['fechaEmision', 'fileId', 'fileName', 'tipoComprobante', 'nroFactura', 'cuitReceptor', 'razonSocialReceptor', 'importeNeto', 'importeIva', 'importeTotal', 'moneda', 'concepto', 'processedAt', 'confidence', 'needsReview', 'matchedPagoFileId', 'matchConfidence', 'hasCuitMatch', 'tipoDeCambio'],
+      ['2025-01-15', 'file1', 'test.pdf', 'E', '00003-00001957', '20123456786', 'CLIENTE SA', '90.91', '9.09', '100', 'USD', '', '2025-01-15T10:00:00Z', '0.95', 'NO', '', '', '', '1234.56'],
+    ];
+
+    const result = parseFacturasEmitidas(data);
+
+    expect(result).toHaveLength(1);
+    expect(result[0].tipoDeCambio).toBe(1234.56);
+  });
+
+  it('returns undefined tipoDeCambio when column is missing', () => {
+    const data = [
+      ['fechaEmision', 'fileId', 'fileName', 'tipoComprobante', 'nroFactura', 'cuitReceptor', 'razonSocialReceptor', 'importeNeto', 'importeIva', 'importeTotal', 'moneda', 'concepto', 'processedAt', 'confidence', 'needsReview', 'matchedPagoFileId', 'matchConfidence', 'hasCuitMatch'],
+      ['2025-01-15', 'file1', 'test.pdf', 'E', '00003-00001957', '20123456786', 'CLIENTE SA', '90.91', '9.09', '100', 'USD', '', '2025-01-15T10:00:00Z', '0.95', 'NO', '', '', ''],
+    ];
+
+    const result = parseFacturasEmitidas(data);
+
+    expect(result).toHaveLength(1);
+    expect(result[0].tipoDeCambio).toBeUndefined();
+  });
+});
+
+describe('parseFacturasRecibidas - tipoDeCambio', () => {
+  it('parses tipoDeCambio from column T when present', () => {
+    const data = [
+      ['fechaEmision', 'fileId', 'fileName', 'tipoComprobante', 'nroFactura', 'cuitEmisor', 'razonSocialEmisor', 'cuitReceptor', 'razonSocialReceptor', 'importeNeto', 'importeIva', 'importeTotal', 'moneda', 'concepto', 'processedAt', 'confidence', 'needsReview', 'matchedPagoFileId', 'matchConfidence', 'hasCuitMatch', 'tipoDeCambio'],
+      ['2025-01-15', 'file1', 'test.pdf', 'E', '00003-00001957', '20123456786', 'PROVEEDOR SA', '30709076783', 'ADVA', '90.91', '9.09', '100', 'USD', '', '2025-01-15T10:00:00Z', '0.95', 'NO', '', '', '', '1234.56'],
+    ];
+
+    const result = parseFacturasRecibidas(data);
+
+    expect(result).toHaveLength(1);
+    expect(result[0].tipoDeCambio).toBe(1234.56);
+  });
+
+  it('returns undefined tipoDeCambio when column is missing', () => {
+    const data = [
+      ['fechaEmision', 'fileId', 'fileName', 'tipoComprobante', 'nroFactura', 'cuitEmisor', 'razonSocialEmisor', 'importeTotal', 'moneda'],
+      ['2025-01-15', 'file1', 'test.pdf', 'E', '00003-00001957', '20123456786', 'PROVEEDOR SA', '100', 'USD'],
+    ];
+
+    const result = parseFacturasRecibidas(data);
+
+    expect(result).toHaveLength(1);
+    expect(result[0].tipoDeCambio).toBeUndefined();
+  });
+});
+
+describe('parsePagos', () => {
+  it('parses tipoDeCambio and importeEnPesos when present', () => {
+    const data = [
+      ['fechaPago', 'fileId', 'fileName', 'banco', 'importePagado', 'moneda', 'referencia', 'cuitPagador', 'nombrePagador', 'cuitBeneficiario', 'nombreBeneficiario', 'concepto', 'processedAt', 'confidence', 'needsReview', 'tipoDeCambio', 'importeEnPesos'],
+      ['2025-01-15', 'pago1', 'pago.pdf', 'BBVA', '6750', 'USD', '4084946', '20123456786', 'CLIENTE SA', '30709076783', 'ADVA', '', '2025-01-15T10:00:00Z', '0.95', 'NO', '1234.56', '8333000'],
+    ];
+
+    const result = parsePagos(data);
+
+    expect(result).toHaveLength(1);
+    expect(result[0].tipoDeCambio).toBe(1234.56);
+    expect(result[0].importeEnPesos).toBe(8333000);
+  });
+
+  it('returns undefined tipoDeCambio and importeEnPesos when columns are missing', () => {
+    const data = [
+      ['fechaPago', 'fileId', 'fileName', 'banco', 'importePagado', 'moneda', 'referencia', 'cuitPagador', 'nombrePagador', 'cuitBeneficiario', 'nombreBeneficiario', 'concepto', 'processedAt', 'confidence', 'needsReview'],
+      ['2025-01-15', 'pago1', 'pago.pdf', 'BBVA', '50000', 'ARS', '', '20123456786', 'CLIENTE SA', '30709076783', 'ADVA', '', '2025-01-15T10:00:00Z', '0.95', 'NO'],
+    ];
+
+    const result = parsePagos(data);
+
+    expect(result).toHaveLength(1);
+    expect(result[0].tipoDeCambio).toBeUndefined();
+    expect(result[0].importeEnPesos).toBeUndefined();
+  });
+
+  it('parses tipoDeCambio correctly when importeEnPesos is empty', () => {
+    const data = [
+      ['fechaPago', 'fileId', 'fileName', 'banco', 'importePagado', 'moneda', 'referencia', 'cuitPagador', 'nombrePagador', 'cuitBeneficiario', 'nombreBeneficiario', 'concepto', 'processedAt', 'confidence', 'needsReview', 'tipoDeCambio', 'importeEnPesos'],
+      ['2025-01-15', 'pago1', 'pago.pdf', 'BBVA', '6750', 'USD', '', '20123456786', 'CLIENTE SA', '30709076783', 'ADVA', '', '2025-01-15T10:00:00Z', '0.95', 'NO', '1234.56', ''],
+    ];
+
+    const result = parsePagos(data);
+
+    expect(result).toHaveLength(1);
+    expect(result[0].tipoDeCambio).toBe(1234.56);
+    expect(result[0].importeEnPesos).toBeUndefined();
   });
 });
 
@@ -899,7 +993,7 @@ describe('matchAllMovimientos', () => {
 
     // Mock Control data with two facturas - one existing (far date), one new (close date)
     vi.mocked(getValues).mockImplementation(async (_spreadsheetId, range) => {
-      if (range === 'Facturas Recibidas!A:S') {
+      if (range === 'Facturas Recibidas!A:T') {
         return {
           ok: true,
           value: [
@@ -972,7 +1066,7 @@ describe('matchAllMovimientos', () => {
 
     // Mock Control data - existing match has CUIT, new candidate doesn't
     vi.mocked(getValues).mockImplementation(async (_spreadsheetId, range) => {
-      if (range === 'Facturas Recibidas!A:S') {
+      if (range === 'Facturas Recibidas!A:T') {
         return {
           ok: true,
           value: [
@@ -1040,7 +1134,7 @@ describe('matchAllMovimientos', () => {
 
     // Mock Control data - two facturas with same distance, same CUIT
     vi.mocked(getValues).mockImplementation(async (_spreadsheetId, range) => {
-      if (range === 'Facturas Recibidas!A:S') {
+      if (range === 'Facturas Recibidas!A:T') {
         return {
           ok: true,
           value: [
@@ -1112,7 +1206,7 @@ describe('matchAllMovimientos', () => {
 
     // Mock Control data - only one factura exists (factura-b)
     vi.mocked(getValues).mockImplementation(async (_spreadsheetId, range) => {
-      if (range === 'Facturas Recibidas!A:S') {
+      if (range === 'Facturas Recibidas!A:T') {
         return {
           ok: true,
           value: [
@@ -1817,7 +1911,7 @@ describe('exchange rate prefetch', () => {
 
     // Mock Control data with USD documents
     vi.mocked(getValues).mockImplementation(async (_spreadsheetId, range) => {
-      if (range === 'Pagos Recibidos!A:O') {
+      if (range === 'Pagos Recibidos!A:Q') {
         return {
           ok: true,
           value: [
@@ -1828,7 +1922,7 @@ describe('exchange rate prefetch', () => {
           ],
         };
       }
-      if (range === 'Facturas Emitidas!A:R') {
+      if (range === 'Facturas Emitidas!A:S') {
         return {
           ok: true,
           value: [
@@ -1837,7 +1931,7 @@ describe('exchange rate prefetch', () => {
           ],
         };
       }
-      if (range === 'Facturas Recibidas!A:S') {
+      if (range === 'Facturas Recibidas!A:T') {
         return {
           ok: true,
           value: [

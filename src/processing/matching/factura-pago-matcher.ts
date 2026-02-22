@@ -295,11 +295,11 @@ async function doMatchFacturasWithPagos(
   const correlationId = getCorrelationId();
 
   // Determine correct column ranges based on sheet type
-  // Facturas Recibidas has pagada column (A:S), Facturas Emitidas doesn't (A:R)
+  // Facturas Recibidas has pagada column + tipoDeCambio (A:T), Facturas Emitidas has tipoDeCambio (A:S)
   const facturasRange = facturasSheetName === 'Facturas Recibidas'
-    ? `${facturasSheetName}!A:S`
-    : `${facturasSheetName}!A:R`;
-  const pagosRange = `${pagosSheetName}!A:O`; // Both pago sheets use A:O
+    ? `${facturasSheetName}!A:T`
+    : `${facturasSheetName}!A:S`;
+  const pagosRange = `${pagosSheetName}!A:Q`; // Both pago sheets use A:Q (includes tipoDeCambio, importeEnPesos)
 
   // Get all facturas
   const facturasResult = await getValues(spreadsheetId, facturasRange);
@@ -378,6 +378,8 @@ async function doMatchFacturasWithPagos(
         needsReview: row[12] === 'YES',
         matchedFacturaFileId: row[13] ? String(row[13]) : undefined,
         matchConfidence: validateMatchConfidence(row[14]),
+        tipoDeCambio: parseNumber(row[15]) || undefined,
+        importeEnPesos: parseNumber(row[16]) || undefined,
       };
 
       pagos.push(pago);
