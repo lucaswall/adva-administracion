@@ -342,3 +342,65 @@
 
 ### Continuation Status
 All tasks completed.
+
+### Review Findings
+
+Summary: 1 issue found (Team: security, reliability, quality reviewers)
+- FIX: 1 issue — implementation lost during merge
+- DISCARDED: 0 findings
+
+**Issues requiring fix:**
+- [HIGH] BUG: Task 5 (ADV-113) implementation entirely missing — Worker 3 changes lost during merge. Files `src/utils/file-naming.ts`, `src/utils/validation.ts` are unmodified vs main. `TipoComprobante` type not expanded in `src/types/index.ts`. No NC A/B/C patterns in parser or prompts. Comprobante letter never appears in filenames.
+
+### Linear Updates
+- ADV-108: Review → Merge (tipoDeCambio types/prompts/parser)
+- ADV-109: Review → Merge (tipoDeCambio extractor/headers/stores)
+- ADV-110: Review → Merge (schema migration + docs)
+- ADV-111: Review → Merge (same-currency matching fix)
+- ADV-112: Review → Merge (better duplicate replacement)
+- ADV-114: Review → Merge (reprocessing support)
+- ADV-113: Review → Todo (implementation lost — needs re-implementation)
+
+<!-- REVIEW COMPLETE -->
+
+---
+
+## Fix Plan
+
+**Source:** Review findings from Iteration 1
+**Linear Issues:** [ADV-113](https://linear.app/lw-claude/issue/ADV-113/factura-filename-with-comprobante-letter-abce-nc-abc)
+
+### Fix 1: Re-implement comprobante letter in factura filenames (ADV-113)
+**Linear Issue:** [ADV-113](https://linear.app/lw-claude/issue/ADV-113/factura-filename-with-comprobante-letter-abce-nc-abc)
+
+1. Write tests in `src/utils/file-naming.test.ts`:
+   - Factura with tipoComprobante 'A' → filename contains "Factura A Emitida"
+   - Factura with tipoComprobante 'C' → "Factura C Recibida"
+   - Factura with tipoComprobante 'E' → "Factura E Emitida"
+   - Factura with tipoComprobante 'NC A' → "Nota de Credito A Emitida"
+   - Factura with tipoComprobante 'NC B' → "Nota de Credito B Recibida"
+   - Factura with tipoComprobante 'ND A' → "Nota de Debito A Emitida"
+   - Backward compat: tipoComprobante 'NC' (old format) → "Nota de Credito Emitida" (no letter)
+2. Write tests in `src/gemini/parser.test.ts`:
+   - Response with `tipoComprobante: "NC A"` → parsed correctly
+   - Response with `tipoComprobante: "ND B"` → parsed correctly
+   - Response with `tipoComprobante: "NC"` → still accepted (backward compat)
+3. Run `verifier "file-naming"` (expect fail)
+4. Update `TipoComprobante` type in `src/types/index.ts`:
+   - Expand to: `'A' | 'B' | 'C' | 'E' | 'NC' | 'NC A' | 'NC B' | 'NC C' | 'ND' | 'ND A' | 'ND B' | 'ND C' | 'LP'`
+5. Update `FACTURA_PROMPT` in `src/gemini/prompts.ts`:
+   - Change tipoComprobante instruction to ask for letter variant: "For Notas de Credito, include the letter: NC A, NC B, NC C. For Notas de Debito: ND A, ND B, ND C."
+6. Update `validateTipoComprobante` in `src/utils/validation.ts`:
+   - Accept new values ('NC A', 'NC B', 'NC C', 'ND A', 'ND B', 'ND C')
+7. Update `generateFacturaFileName` in `src/utils/file-naming.ts`:
+   - For A/B/C/E: `Factura ${tipoComprobante} ${direction}` (e.g., "Factura C Emitida")
+   - For 'NC A'/'NC B'/'NC C': `Nota de Credito ${letter} ${direction}`
+   - For 'ND A'/'ND B'/'ND C': `Nota de Debito ${letter} ${direction}`
+   - For plain 'NC'/'ND' (backward compat): `Nota de Credito ${direction}` / `Nota de Debito ${direction}`
+   - For 'LP': `Liquidacion de Premio ${direction}`
+8. Run `verifier "file-naming"` then `verifier "parser"` (expect pass)
+
+### Post-Implementation Checklist
+
+1. Run `bug-hunter` agent — review all git changes for bugs, fix any issues
+2. Run `verifier` agent — all tests pass, zero warnings, fix any issues
