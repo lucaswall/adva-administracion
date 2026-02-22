@@ -57,7 +57,7 @@ export async function markFileProcessing(
     // ADV-22: Explicit timeout (10s) prevents indefinite wait if lock is held
     const lockResult = await withLock(lockKey, async () => {
       // Check if file already exists in tracking sheet (for retry scenarios)
-      const existingResult = await getValues(dashboardId, 'Archivos Procesados!A:E');
+      const existingResult = await getValues(dashboardId, 'Archivos Procesados!A:F');
       if (!existingResult.ok) {
         logError('Failed to read tracking sheet', {
           module: 'storage',
@@ -99,7 +99,7 @@ export async function markFileProcessing(
           : dateToSerialInTimezone(new Date(processedAt), 'UTC');
 
         const updateResult = await batchUpdate(dashboardId, [
-          { range: `Archivos Procesados!C${existingRowIndex}:E${existingRowIndex}`, values: [[processedAtSerial, documentType, 'processing']] },
+          { range: `Archivos Procesados!C${existingRowIndex}:F${existingRowIndex}`, values: [[processedAtSerial, documentType, 'processing', '']] },
         ]);
 
         if (!updateResult.ok) {
@@ -116,11 +116,11 @@ export async function markFileProcessing(
         // Update cache with row index
         fileRowIndexCache.set(cacheKey, existingRowIndex);
       } else {
-        // New file - append a new row
+        // New file - append a new row (6 columns: include empty originalFileId)
         const result = await appendRowsWithLinks(
           dashboardId,
           'Archivos Procesados',
-          [[fileId, fileName, processedAt, documentType, 'processing']],
+          [[fileId, fileName, processedAt, documentType, 'processing', '']],
           timeZone
         );
 
@@ -162,14 +162,16 @@ export async function markFileProcessing(
  *
  * @param dashboardId - Dashboard Operativo Contable spreadsheet ID
  * @param fileId - Google Drive file ID
- * @param status - New status ('success' or 'failed')
+ * @param status - New status ('success', 'failed', or 'duplicate')
  * @param errorMessage - Optional error message for failed status
+ * @param originalFileId - Optional original file ID for duplicate status (written to Column F)
  */
 export async function updateFileStatus(
   dashboardId: string,
   fileId: string,
-  status: 'success' | 'failed',
-  errorMessage?: string
+  status: 'success' | 'failed' | 'duplicate',
+  errorMessage?: string,
+  originalFileId?: string
 ): Promise<Result<void, Error>> {
   const correlationId = getCorrelationId();
   const cacheKey = `${dashboardId}:${fileId}`;
@@ -182,8 +184,8 @@ export async function updateFileStatus(
     // This prevents TOCTOU: always re-read within lock
     fileRowIndexCache.delete(cacheKey);
 
-    // Read fresh data from sheet (need column E for current status)
-    const valuesResult = await getValues(dashboardId, 'Archivos Procesados!A:E');
+    // Read fresh data from sheet (columns A:F to cover full schema)
+    const valuesResult = await getValues(dashboardId, 'Archivos Procesados!A:F');
 
     if (!valuesResult.ok) {
       logError('Failed to read tracking sheet for status update', {
@@ -222,6 +224,7 @@ export async function updateFileStatus(
 
     // Update status using fresh row index
     // For failed status, track retry count: failed(1): message, failed(2): message, etc.
+    // Duplicate status does not participate in retry logic.
     let statusValue: string;
     if (status === 'failed' && errorMessage) {
       // Check if current status is already a failed status with retry count
@@ -240,9 +243,17 @@ export async function updateFileStatus(
       statusValue = status;
     }
 
-    const updateResult = await batchUpdate(dashboardId, [
-      { range: `Archivos Procesados!E${rowIndex}`, values: [[statusValue]] },
-    ]);
+    // For duplicate: write both E (status) and F (originalFileId or empty to clear stale value)
+    let updateResult;
+    if (status === 'duplicate') {
+      updateResult = await batchUpdate(dashboardId, [
+        { range: `Archivos Procesados!E${rowIndex}:F${rowIndex}`, values: [[statusValue, originalFileId ?? '']] },
+      ]);
+    } else {
+      updateResult = await batchUpdate(dashboardId, [
+        { range: `Archivos Procesados!E${rowIndex}`, values: [[statusValue]] },
+      ]);
+    }
 
     if (!updateResult.ok) {
       logError('Failed to update file status', {
@@ -287,9 +298,9 @@ export async function getProcessedFileIds(dashboardId: string): Promise<Result<S
     // Skip header row (index 0)
     for (let i = 1; i < result.value.length; i++) {
       const row = result.value[i];
-      // Only include files with 'success' status (column E, index 4)
+      // Only include files with terminal statuses: 'success' or 'duplicate' (column E, index 4)
       // Files with 'failed' or 'processing' status will be retried
-      if (row && row[0] && row[4] === 'success') {
+      if (row && row[0] && (row[4] === 'success' || row[4] === 'duplicate')) {
         processedIds.add(String(row[0]));
       }
     }

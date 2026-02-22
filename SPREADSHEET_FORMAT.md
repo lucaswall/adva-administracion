@@ -346,6 +346,21 @@ Auto-synced from Facturas Recibidas where `pagada != "SI"`.
 | G | tasaExito | number | Success rate |
 | H | duracionPromedio | number | Average duration |
 
+### Archivos Procesados (6 columns, A:F)
+
+Centralized file tracking to prevent duplicate processing and enable startup recovery.
+
+| Column | Field | Type | Description |
+|--------|-------|------|-------------|
+| A | fileId | string | Google Drive file ID |
+| B | fileName | string | File name |
+| C | processedAt | timestamp | Timestamp when processing started |
+| D | documentType | enum | Document type after classification |
+| E | status | string | `processing` \| `success` \| `duplicate` \| `failed: <message>` |
+| F | originalFileId | string | Drive file ID of the original document (populated for duplicates only) |
+
+**Schema migration:** Column F was added in ADV-104. Existing rows will have Column F empty — this is expected and correct. The startup migration (`migrateArchivosProcesadosHeaders`) detects the old 5-column schema and appends the header automatically.
+
 ### Uso de API (15 columns, A:O)
 
 | Column | Field | Type | Description |

@@ -906,8 +906,8 @@ async function storeAndSortDocument(
             fileName: fileInfo.name,
             correlationId,
           });
-          // Mark as success in tracking sheet (duplicate is successfully handled)
-          const statusResult = await updateFileStatus(dashboardOperativoId, fileInfo.id, 'success');
+          // Mark as duplicate in tracking sheet (duplicate is successfully handled)
+          const statusResult = await updateFileStatus(dashboardOperativoId, fileInfo.id, 'duplicate', undefined, storeResult.value.existingFileId);
           if (!statusResult.ok) {
             logError('Failed to update file status', {
               module: 'scanner',
@@ -1028,8 +1028,8 @@ async function storeAndSortDocument(
             fileName: fileInfo.name,
             correlationId,
           });
-          // Mark as success in tracking sheet (duplicate is successfully handled)
-          const statusResult = await updateFileStatus(dashboardOperativoId, fileInfo.id, 'success');
+          // Mark as duplicate in tracking sheet (duplicate is successfully handled)
+          const statusResult = await updateFileStatus(dashboardOperativoId, fileInfo.id, 'duplicate', undefined, storeResult.value.existingFileId);
           if (!statusResult.ok) {
             logError('Failed to update file status', {
               module: 'scanner',
@@ -1147,7 +1147,7 @@ async function storeAndSortDocument(
             fileName: fileInfo.name,
             correlationId,
           });
-          const statusResult = await updateFileStatus(dashboardOperativoId, fileInfo.id, 'success');
+          const statusResult = await updateFileStatus(dashboardOperativoId, fileInfo.id, 'duplicate', undefined, storeResult.value.existingFileId);
           if (!statusResult.ok) {
             logError('Failed to update file status', {
               module: 'scanner',
@@ -1264,7 +1264,7 @@ async function storeAndSortDocument(
             fileName: fileInfo.name,
             correlationId,
           });
-          const statusResult = await updateFileStatus(dashboardOperativoId, fileInfo.id, 'success');
+          const statusResult = await updateFileStatus(dashboardOperativoId, fileInfo.id, 'duplicate', undefined, storeResult.value.existingFileId);
           if (!statusResult.ok) {
             logError('Failed to update file status', {
               module: 'scanner',
@@ -1381,7 +1381,7 @@ async function storeAndSortDocument(
             fileName: fileInfo.name,
             correlationId,
           });
-          const statusResult = await updateFileStatus(dashboardOperativoId, fileInfo.id, 'success');
+          const statusResult = await updateFileStatus(dashboardOperativoId, fileInfo.id, 'duplicate', undefined, storeResult.value.existingFileId);
           if (!statusResult.ok) {
             logError('Failed to update file status', {
               module: 'scanner',
@@ -1599,7 +1599,7 @@ async function storeAndSortDocument(
                 fileName: fileInfo.name,
                 correlationId,
               });
-              const statusResult = await updateFileStatus(dashboardOperativoId, fileInfo.id, 'success');
+              const statusResult = await updateFileStatus(dashboardOperativoId, fileInfo.id, 'duplicate', undefined, storeResult.value.existingFileId);
               if (!statusResult.ok) {
                 logError('Failed to update file status', {
                   module: 'scanner',
@@ -1811,7 +1811,7 @@ async function storeAndSortDocument(
               }
               result.errors++;
             } else {
-              const statusResult = await updateFileStatus(dashboardOperativoId, fileInfo.id, 'success');
+              const statusResult = await updateFileStatus(dashboardOperativoId, fileInfo.id, 'duplicate', undefined, storeResult.value.existingFileId);
               if (!statusResult.ok) {
                 logError('Failed to update file status', {
                   module: 'scanner',
@@ -2020,7 +2020,7 @@ async function storeAndSortDocument(
               }
               result.errors++;
             } else {
-              const statusResult = await updateFileStatus(dashboardOperativoId, fileInfo.id, 'success');
+              const statusResult = await updateFileStatus(dashboardOperativoId, fileInfo.id, 'duplicate', undefined, storeResult.value.existingFileId);
               if (!statusResult.ok) {
                 logError('Failed to update file status', {
                   module: 'scanner',
@@ -2137,7 +2137,7 @@ async function storeAndSortDocument(
             fileName: fileInfo.name,
             correlationId,
           });
-          const statusResult = await updateFileStatus(dashboardOperativoId, fileInfo.id, 'success');
+          const statusResult = await updateFileStatus(dashboardOperativoId, fileInfo.id, 'duplicate', undefined, storeResult.value.existingFileId);
           if (!statusResult.ok) {
             logError('Failed to update file status', {
               module: 'scanner',

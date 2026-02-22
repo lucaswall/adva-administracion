@@ -2,8 +2,24 @@
  * Tests for folder structure service
  */
 
-import { describe, it, expect } from 'vitest';
-import { validateYear, clearFolderStructureCache, getCachedFolderStructure } from './folder-structure.js';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { validateYear, clearFolderStructureCache, getCachedFolderStructure, migrateArchivosProcesadosHeaders } from './folder-structure.js';
+
+// Mock sheets.js so migration tests can control getValues/setValues
+vi.mock('./sheets.js', () => ({
+  getSheetMetadata: vi.fn(),
+  createSheet: vi.fn(),
+  setValues: vi.fn(),
+  getValues: vi.fn(),
+  formatSheet: vi.fn(),
+  formatStatusSheet: vi.fn(),
+  deleteSheet: vi.fn(),
+  moveSheetToFirst: vi.fn(),
+  applyConditionalFormat: vi.fn(),
+  batchUpdate: vi.fn(),
+}));
+
+import { getValues, setValues } from './sheets.js';
 
 describe('validateYear', () => {
   it('returns ok for valid years in range 2000-current+1', () => {
@@ -150,5 +166,96 @@ describe('movimientosSpreadsheets cache population', () => {
 
     // Verify discoverMovimientosSpreadsheets is called in discoverFolderStructure
     expect(sourceCode).toContain('discoverMovimientosSpreadsheets');
+  });
+});
+
+describe('migrateArchivosProcesadosHeaders', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('detects 5-column schema and appends originalFileId header to Column F', async () => {
+    vi.mocked(getValues).mockResolvedValue({
+      ok: true,
+      value: [['fileId', 'fileName', 'processedAt', 'documentType', 'status']],
+    });
+    vi.mocked(setValues).mockResolvedValue({ ok: true, value: undefined });
+
+    const result = await migrateArchivosProcesadosHeaders('dashboard-id');
+
+    expect(result.ok).toBe(true);
+    expect(setValues).toHaveBeenCalledWith(
+      'dashboard-id',
+      'Archivos Procesados!F1',
+      [['originalFileId']]
+    );
+  });
+
+  it('leaves 6-column schema untouched when already migrated', async () => {
+    vi.mocked(getValues).mockResolvedValue({
+      ok: true,
+      value: [['fileId', 'fileName', 'processedAt', 'documentType', 'status', 'originalFileId']],
+    });
+
+    const result = await migrateArchivosProcesadosHeaders('dashboard-id');
+
+    expect(result.ok).toBe(true);
+    expect(setValues).not.toHaveBeenCalled();
+  });
+
+  it('handles empty sheet gracefully without writing headers (ensureSheetsExist handles those)', async () => {
+    vi.mocked(getValues).mockResolvedValue({
+      ok: true,
+      value: [],
+    });
+
+    const result = await migrateArchivosProcesadosHeaders('dashboard-id');
+
+    expect(result.ok).toBe(true);
+    expect(setValues).not.toHaveBeenCalled();
+  });
+
+  it('returns error when getValues fails', async () => {
+    vi.mocked(getValues).mockResolvedValue({
+      ok: false,
+      error: new Error('Sheets API error'),
+    });
+
+    const result = await migrateArchivosProcesadosHeaders('dashboard-id');
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.message).toContain('Sheets API error');
+    }
+  });
+
+  it('returns error when setValues fails during migration', async () => {
+    vi.mocked(getValues).mockResolvedValue({
+      ok: true,
+      value: [['fileId', 'fileName', 'processedAt', 'documentType', 'status']],
+    });
+    vi.mocked(setValues).mockResolvedValue({
+      ok: false,
+      error: new Error('Write failed'),
+    });
+
+    const result = await migrateArchivosProcesadosHeaders('dashboard-id');
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.message).toContain('Write failed');
+    }
+  });
+
+  it('handles schemas with more than 6 columns (e.g., future migration) without writing', async () => {
+    vi.mocked(getValues).mockResolvedValue({
+      ok: true,
+      value: [['fileId', 'fileName', 'processedAt', 'documentType', 'status', 'originalFileId', 'futureColumn']],
+    });
+
+    const result = await migrateArchivosProcesadosHeaders('dashboard-id');
+
+    expect(result.ok).toBe(true);
+    expect(setValues).not.toHaveBeenCalled();
   });
 });
