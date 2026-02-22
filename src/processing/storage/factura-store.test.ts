@@ -11,6 +11,7 @@ vi.mock('../../services/sheets.js', () => ({
   appendRowsWithLinks: vi.fn(),
   sortSheet: vi.fn(),
   getValues: vi.fn(),
+  batchUpdate: vi.fn(),
   getSpreadsheetTimezone: vi.fn(() => Promise.resolve({ ok: true, value: 'America/Argentina/Buenos_Aires' })),
 }));
 
@@ -25,7 +26,7 @@ vi.mock('../../utils/correlation.js', () => ({
   getCorrelationId: () => 'test-correlation-id',
 }));
 
-import { appendRowsWithLinks, sortSheet, getValues } from '../../services/sheets.js';
+import { appendRowsWithLinks, sortSheet, getValues, batchUpdate } from '../../services/sheets.js';
 
 const createTestFactura = (overrides: Partial<Factura> = {}): Factura => ({
   fileId: 'test-file-id',
@@ -307,6 +308,83 @@ describe('storeFactura', () => {
       expect(result.ok).toBe(true);
       if (result.ok) {
         expect(result.value.stored).toBe(false); // Should detect duplicate
+      }
+    });
+  });
+
+  describe('reprocessing (same fileId already in sheet)', () => {
+    it('updates existing row when fileId already exists in sheet', async () => {
+      // First getValues call (findRowByFileId → B:B): fileId found at row 2
+      vi.mocked(getValues).mockResolvedValueOnce({
+        ok: true,
+        value: [
+          ['fileId'],
+          ['test-file-id'], // matching fileId
+        ],
+      });
+      vi.mocked(batchUpdate).mockResolvedValue({ ok: true, value: 18 });
+      vi.mocked(sortSheet).mockResolvedValue({ ok: true, value: undefined });
+
+      const factura = createTestFactura();
+      const result = await storeFactura(factura, 'spreadsheet-id', 'Facturas Emitidas', 'factura_emitida');
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value.stored).toBe(true);
+        expect(result.value.updated).toBe(true);
+      }
+      expect(batchUpdate).toHaveBeenCalledWith(
+        'spreadsheet-id',
+        expect.arrayContaining([
+          expect.objectContaining({ range: expect.stringContaining('Facturas Emitidas!A2') }),
+        ])
+      );
+      expect(appendRowsWithLinks).not.toHaveBeenCalled();
+    });
+
+    it('does normal insert when fileId is NOT in sheet and no business key match', async () => {
+      vi.mocked(getValues).mockResolvedValue({
+        ok: true,
+        value: [['Header']], // Only header row, no data
+      });
+      vi.mocked(appendRowsWithLinks).mockResolvedValue({ ok: true, value: 1 });
+      vi.mocked(sortSheet).mockResolvedValue({ ok: true, value: undefined });
+
+      const factura = createTestFactura();
+      const result = await storeFactura(factura, 'spreadsheet-id', 'Facturas Emitidas', 'factura_emitida');
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value.stored).toBe(true);
+        expect(result.value.updated).toBeUndefined();
+      }
+      expect(appendRowsWithLinks).toHaveBeenCalled();
+    });
+
+    it('detects business key duplicate when fileId is NOT in sheet', async () => {
+      const existingFileId = 'different-existing-file';
+      // Both getValues calls return same data; B:B check sees '2025-01-15' ≠ 'test-file-id'
+      vi.mocked(getValues).mockResolvedValue({
+        ok: true,
+        value: [
+          ['fechaEmision', 'fileId', 'etc', 'etc', 'nroFactura', 'cuit', 'etc', 'etc', 'etc', 'importeTotal'],
+          ['2025-01-15', existingFileId, 'etc', 'etc', '0001-00001234', '30709076783', 'etc', 'etc', 'etc', '1,210.00'],
+        ],
+      });
+
+      const factura = createTestFactura({
+        nroFactura: '0001-00001234',
+        fechaEmision: '2025-01-15',
+        importeTotal: 1210,
+        cuitReceptor: '30709076783',
+      });
+
+      const result = await storeFactura(factura, 'spreadsheet-id', 'Facturas Emitidas', 'factura_emitida');
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value.stored).toBe(false);
+        expect(result.value.existingFileId).toBe(existingFileId);
       }
     });
   });

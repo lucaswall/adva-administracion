@@ -5,13 +5,100 @@
 
 import type { Result, Factura, StoreResult } from '../../types/index.js';
 import type { ScanContext } from '../scanner.js';
-import { appendRowsWithLinks, sortSheet, getValues, getSpreadsheetTimezone, type CellValueOrLink, type CellDate } from '../../services/sheets.js';
+import { appendRowsWithLinks, sortSheet, getValues, batchUpdate, getSpreadsheetTimezone, type CellValueOrLink, type CellDate, type CellValue } from '../../services/sheets.js';
 import { formatUSCurrency, parseNumber } from '../../utils/numbers.js';
 import { generateFacturaFileName } from '../../utils/file-naming.js';
 import { normalizeSpreadsheetDate } from '../../utils/date.js';
 import { info, warn } from '../../utils/logger.js';
 import { getCorrelationId } from '../../utils/correlation.js';
 import { withLock } from '../../utils/concurrency.js';
+
+/**
+ * Builds a flat CellValue[] row for batchUpdate (reprocessing)
+ * Uses plain values (no rich cell types) since batchUpdate takes CellValue[][]
+ *
+ * @param factura - The factura data
+ * @param documentType - The document type
+ * @param renamedFileName - The renamed filename
+ * @returns Flat row values
+ */
+function buildFacturaRow(
+  factura: Factura,
+  documentType: 'factura_emitida' | 'factura_recibida',
+  renamedFileName: string
+): CellValue[] {
+  if (documentType === 'factura_emitida') {
+    return [
+      factura.fechaEmision,                               // A - date string (USER_ENTERED parses)
+      factura.fileId,                                     // B
+      renamedFileName,                                    // C - text only (no link in batchUpdate)
+      factura.tipoComprobante,                            // D
+      factura.nroFactura,                                 // E
+      factura.cuitReceptor || '',                         // F
+      factura.razonSocialReceptor || '',                  // G
+      formatUSCurrency(factura.importeNeto),              // H
+      formatUSCurrency(factura.importeIva),               // I
+      formatUSCurrency(factura.importeTotal),             // J
+      factura.moneda,                                     // K
+      factura.concepto || '',                             // L
+      factura.processedAt,                                // M
+      factura.confidence,                                 // N
+      factura.needsReview ? 'YES' : 'NO',                 // O
+      factura.matchedPagoFileId || '',                    // P
+      factura.matchConfidence || '',                      // Q
+      factura.hasCuitMatch ? 'YES' : 'NO',                // R
+    ];
+  } else {
+    return [
+      factura.fechaEmision,                               // A
+      factura.fileId,                                     // B
+      renamedFileName,                                    // C
+      factura.tipoComprobante,                            // D
+      factura.nroFactura,                                 // E
+      factura.cuitEmisor || '',                           // F
+      factura.razonSocialEmisor || '',                    // G
+      formatUSCurrency(factura.importeNeto),              // H
+      formatUSCurrency(factura.importeIva),               // I
+      formatUSCurrency(factura.importeTotal),             // J
+      factura.moneda,                                     // K
+      factura.concepto || '',                             // L
+      factura.processedAt,                                // M
+      factura.confidence,                                 // N
+      factura.needsReview ? 'YES' : 'NO',                 // O
+      factura.matchedPagoFileId || '',                    // P
+      factura.matchConfidence || '',                      // Q
+      factura.hasCuitMatch ? 'YES' : 'NO',                // R
+      '',                                                 // S - pagada
+    ];
+  }
+}
+
+/**
+ * Finds the spreadsheet row index of a document by its fileId (column B)
+ *
+ * @param spreadsheetId - The spreadsheet ID
+ * @param sheetName - The sheet name
+ * @param fileId - Google Drive file ID to search for
+ * @returns Row found result with 1-indexed rowIndex, or not found
+ */
+async function findRowByFileId(
+  spreadsheetId: string,
+  sheetName: string,
+  fileId: string
+): Promise<{ found: true; rowIndex: number } | { found: false }> {
+  const rowsResult = await getValues(spreadsheetId, `${sheetName}!B:B`);
+  if (!rowsResult.ok || rowsResult.value.length <= 1) {
+    return { found: false };
+  }
+  // Skip header row (index 0 = row 1 in spreadsheet)
+  for (let i = 1; i < rowsResult.value.length; i++) {
+    const row = rowsResult.value[i];
+    if (row && String(row[0]) === fileId) {
+      return { found: true, rowIndex: i + 1 }; // 1-indexed spreadsheet row
+    }
+  }
+  return { found: false };
+}
 
 /**
  * Checks if a factura already exists in the sheet
@@ -89,7 +176,40 @@ export async function storeFactura(
   const lockKey = `store:factura:${factura.nroFactura}:${factura.fechaEmision}:${factura.importeTotal}:${counterpartyCuit}`;
 
   return withLock(lockKey, async () => {
-    // Use cache if available, otherwise API
+    // REPROCESSING CHECK: If the same fileId already exists in sheet, update it in place
+    const fileIdCheck = await findRowByFileId(spreadsheetId, sheetName, factura.fileId);
+    if (fileIdCheck.found) {
+      const renamedFileName = generateFacturaFileName(factura, documentType);
+      const updateRow = buildFacturaRow(factura, documentType, renamedFileName);
+      const lastCol = documentType === 'factura_emitida' ? 'R' : 'S';
+      const updateResult = await batchUpdate(spreadsheetId, [{
+        range: `${sheetName}!A${fileIdCheck.rowIndex}:${lastCol}${fileIdCheck.rowIndex}`,
+        values: [updateRow],
+      }]);
+      if (!updateResult.ok) {
+        throw updateResult.error;
+      }
+
+      info('Factura reprocessed (existing row updated)', {
+        module: 'storage',
+        phase: 'factura',
+        fileId: factura.fileId,
+        documentType,
+        spreadsheet: sheetName,
+        rowIndex: fileIdCheck.rowIndex,
+        correlationId: getCorrelationId(),
+      });
+
+      if (context) {
+        context.sortBatch.addPendingSort(spreadsheetId, sheetName, 0, true);
+      } else {
+        await sortSheet(spreadsheetId, sheetName, 0, true);
+      }
+
+      return { stored: true, updated: true };
+    }
+
+    // DUPLICATE CHECK (business key): Use cache if available, otherwise API
     const dupeCheck = context?.duplicateCache
       ? context.duplicateCache.isDuplicateFactura(
           spreadsheetId,

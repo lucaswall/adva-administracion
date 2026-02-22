@@ -853,7 +853,9 @@ async function storeAndSortDocument(
     const storeResult = await storeFactura(doc as Factura, controlIngresosId, 'Facturas Emitidas', 'factura_emitida', context);
     if (storeResult.ok) {
       if (storeResult.value.stored) {
-        result.facturasAdded++;
+        if (!storeResult.value.updated) {
+          result.facturasAdded++;
+        }
 
         // ADV-51: Update status to 'success' BEFORE sorting to prevent race condition
         const statusResult = await updateFileStatus(dashboardOperativoId, fileInfo.id, 'success');
@@ -975,7 +977,9 @@ async function storeAndSortDocument(
     const storeResult = await storeFactura(doc as Factura, controlEgresosId, 'Facturas Recibidas', 'factura_recibida', context);
     if (storeResult.ok) {
       if (storeResult.value.stored) {
-        result.facturasAdded++;
+        if (!storeResult.value.updated) {
+          result.facturasAdded++;
+        }
 
         // ADV-51: Update status to 'success' BEFORE sorting to prevent race condition
         // If server restarts after storage but before status update, file would be stuck in 'processing'
@@ -1099,7 +1103,9 @@ async function storeAndSortDocument(
     const storeResult = await storePago(doc as Pago, controlIngresosId, 'Pagos Recibidos', 'pago_recibido', context);
     if (storeResult.ok) {
       if (storeResult.value.stored) {
-        result.pagosAdded++;
+        if (!storeResult.value.updated) {
+          result.pagosAdded++;
+        }
 
         // ADV-51: Update status to 'success' BEFORE sorting to prevent race condition
         const statusResult = await updateFileStatus(dashboardOperativoId, fileInfo.id, 'success');
@@ -1110,6 +1116,37 @@ async function storeAndSortDocument(
             error: statusResult.error.message,
             correlationId,
           });
+        }
+
+        // ADV-112: If this replaced a lower-quality existing pago, move old file to Duplicado
+        if (storeResult.value.replacedFileId) {
+          const replacedId = storeResult.value.replacedFileId;
+          const replaceMove = await moveToDuplicadoFolder(replacedId, `[replaced:${replacedId}]`);
+          if (!replaceMove.ok) {
+            warn('Failed to move replaced pago to Duplicado (new pago stored, old row overwritten)', {
+              module: 'scanner',
+              phase: 'storage',
+              replacedFileId: replacedId,
+              error: replaceMove.error.message,
+              correlationId,
+            });
+          } else {
+            info('Moved replaced pago to Duplicado', {
+              module: 'scanner',
+              phase: 'storage',
+              replacedFileId: replacedId,
+              correlationId,
+            });
+          }
+          const oldStatusResult = await updateFileStatus(dashboardOperativoId, replacedId, 'duplicate', undefined, fileInfo.id);
+          if (!oldStatusResult.ok) {
+            warn('Failed to update replaced pago status to duplicate', {
+              module: 'scanner',
+              fileId: replacedId,
+              error: oldStatusResult.error.message,
+              correlationId,
+            });
+          }
         }
 
         info('Pago recibido stored, moving to Ingresos folder', {
@@ -1218,7 +1255,9 @@ async function storeAndSortDocument(
     const storeResult = await storePago(doc as Pago, controlEgresosId, 'Pagos Enviados', 'pago_enviado', context);
     if (storeResult.ok) {
       if (storeResult.value.stored) {
-        result.pagosAdded++;
+        if (!storeResult.value.updated) {
+          result.pagosAdded++;
+        }
 
         // ADV-51: Update status to 'success' BEFORE sorting to prevent race condition
         const statusResult = await updateFileStatus(dashboardOperativoId, fileInfo.id, 'success');
@@ -1229,6 +1268,37 @@ async function storeAndSortDocument(
             error: statusResult.error.message,
             correlationId,
           });
+        }
+
+        // ADV-112: If this replaced a lower-quality existing pago, move old file to Duplicado
+        if (storeResult.value.replacedFileId) {
+          const replacedId = storeResult.value.replacedFileId;
+          const replaceMove = await moveToDuplicadoFolder(replacedId, `[replaced:${replacedId}]`);
+          if (!replaceMove.ok) {
+            warn('Failed to move replaced pago to Duplicado (new pago stored, old row overwritten)', {
+              module: 'scanner',
+              phase: 'storage',
+              replacedFileId: replacedId,
+              error: replaceMove.error.message,
+              correlationId,
+            });
+          } else {
+            info('Moved replaced pago to Duplicado', {
+              module: 'scanner',
+              phase: 'storage',
+              replacedFileId: replacedId,
+              correlationId,
+            });
+          }
+          const oldStatusResult = await updateFileStatus(dashboardOperativoId, replacedId, 'duplicate', undefined, fileInfo.id);
+          if (!oldStatusResult.ok) {
+            warn('Failed to update replaced pago status to duplicate', {
+              module: 'scanner',
+              fileId: replacedId,
+              error: oldStatusResult.error.message,
+              correlationId,
+            });
+          }
         }
 
         info('Pago enviado stored, moving to Egresos folder', {

@@ -25,6 +25,10 @@ export interface StoreResult {
   stored: boolean;
   /** fileId of existing duplicate if skipped */
   existingFileId?: string;
+  /** true if an existing row was updated in place (reprocessing) */
+  updated?: boolean;
+  /** fileId of the existing entry that was replaced by a better-quality document */
+  replacedFileId?: string;
 }
 
 /**
