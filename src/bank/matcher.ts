@@ -451,7 +451,7 @@ export class BankMovementMatcher {
     for (const factura of facturas) {
       const crossCurrencyResult = amountsMatchCrossCurrency(
         factura.importeTotal, factura.moneda, factura.fechaEmision,
-        amount, this.crossCurrencyTolerancePercent
+        amount, 'ARS', this.crossCurrencyTolerancePercent
       );
       if (!crossCurrencyResult.matches) continue;
 
@@ -608,7 +608,7 @@ export class BankMovementMatcher {
       // Use cross-currency matching for pagos recibidos
       const amountOk = amountsMatchCrossCurrency(
         pago.importePagado, pago.moneda || 'ARS', pago.fechaPago,
-        amount, this.crossCurrencyTolerancePercent
+        amount, 'ARS', this.crossCurrencyTolerancePercent
       );
       if (!amountOk.matches) continue;
 
@@ -698,7 +698,7 @@ export class BankMovementMatcher {
       } else if (factura.moneda === 'USD') {
         const matchResult = amountsMatchCrossCurrency(
           factura.importeTotal, factura.moneda, factura.fechaEmision,
-          amount, this.crossCurrencyTolerancePercent
+          amount, 'ARS', this.crossCurrencyTolerancePercent
         );
         amountMatches = matchResult.matches;
       }
@@ -714,7 +714,7 @@ export class BankMovementMatcher {
         } else if (factura.moneda === 'USD') {
           const matchResult = amountsMatchCrossCurrency(
             factura.importeTotal, factura.moneda, factura.fechaEmision,
-            amountWithRetenciones, this.crossCurrencyTolerancePercent
+            amountWithRetenciones, 'ARS', this.crossCurrencyTolerancePercent
           );
           amountMatches = matchResult.matches;
         }
