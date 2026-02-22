@@ -50,6 +50,12 @@ $ARGUMENTS should describe what to investigate:
    - Associated branches and URLs
    - Deployment service configurations
 
+5. **Drive Folder Resolution** - When accessing Google Drive, determine the correct root folder:
+   - Check `.env` for `DRIVE_ROOT_FOLDER_ID_PRODUCTION` and `DRIVE_ROOT_FOLDER_ID_STAGING`
+   - If **both** are set: ask the user which environment to investigate (production or staging), then use the corresponding folder ID as the root for all Drive MCP queries
+   - If **only one** is set: use it without asking
+   - If **neither** is set: fall back to `DRIVE_ROOT_FOLDER_ID`
+
 ## Investigation Workflow
 
 ### Step 1: Classify the Investigation Type
