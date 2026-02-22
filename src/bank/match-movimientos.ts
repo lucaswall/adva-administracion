@@ -20,7 +20,7 @@ import { getValues, type CellValue } from '../services/sheets.js';
 import { parseNumber } from '../utils/numbers.js';
 import { parseArgDate, normalizeSpreadsheetDate } from '../utils/date.js';
 import { validateMoneda, validateMatchConfidence, validateTipoComprobante } from '../utils/validation.js';
-import { BankMovementMatcher, type MatchQuality } from './matcher.js';
+import { BankMovementMatcher, calculateKeywordMatchScore, extractReferencia, type MatchQuality } from './matcher.js';
 import { getMovimientosToFill } from '../services/movimientos-reader.js';
 import { updateDetalle, type DetalleUpdate } from '../services/movimientos-detalle.js';
 
@@ -597,7 +597,8 @@ function buildMatchQuality(
   cuitDocumento: string,
   conceptoMovimiento: string,
   hasLinkedPago: boolean,
-  isExactAmount: boolean
+  isExactAmount: boolean,
+  document?: any
 ): MatchQuality {
   // Calculate date distance in days using parseArgDate for Argentine format support
   const docDate = parseArgDate(fechaDocumento);
@@ -617,6 +618,19 @@ function buildMatchQuality(
     tier = 1; // Pago with linked factura
   } else if (hasCuitMatch) {
     tier = 2; // CUIT match
+  } else if (document && document.referencia) {
+    // Tier 3: Check if concepto contains a referencia pattern matching the document's referencia
+    const extractedRef = extractReferencia(conceptoMovimiento);
+    if (extractedRef && extractedRef === document.referencia) {
+      tier = 3;
+    } else {
+      tier = 5;
+    }
+  } else if (document) {
+    // Tier 4: Check for keyword matches using available matching logic
+    const counterpartyName = document.razonSocialEmisor || document.razonSocialReceptor || document.nombreBeneficiario || document.nombrePagador || '';
+    const score = calculateKeywordMatchScore(conceptoMovimiento, counterpartyName, document.concepto || '');
+    tier = score >= 2 ? 4 : 5;
   } else {
     tier = 5; // Amount + date only (can't determine keyword/referencia from existing data)
   }
@@ -729,7 +743,8 @@ function buildMatchQualityFromFileId(
     cuitDocumento,
     conceptoMovimiento,
     hasLinkedPago,
-    true  // Set to true for both to ensure fair comparison on other dimensions
+    true,  // Set to true for both to ensure fair comparison on other dimensions
+    document
   );
 }
 
@@ -878,7 +893,8 @@ async function matchBankMovimientos(
                 cuitDocumento,
                 mov.concepto,
                 hasLinkedPago,
-                true  // Consistent with existing for fair comparison
+                true,  // Consistent with existing for fair comparison
+                document
               );
 
               // Compare: replace if candidate is better
@@ -985,7 +1001,15 @@ export async function matchAllMovimientos(
         egresosResult.value.facturasRecibidas
       );
       if (usdDates.length > 0) {
-        await prefetchExchangeRates(usdDates);
+        try {
+          await prefetchExchangeRates(usdDates);
+        } catch (err) {
+          warn('Failed to prefetch exchange rates, continuing without pre-cached rates', {
+            module: 'match-movimientos',
+            action: 'prefetchExchangeRates',
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
       }
 
       // Create matcher instance

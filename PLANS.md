@@ -382,3 +382,33 @@ All tasks completed.
    - Verify the returned confidence is `'LOW'` (Tier 5 mapping), not `'HIGH'`
 2. Change `confidence: 'HIGH'` to `confidence: tierToConfidence(5, false)` at `src/bank/matcher.ts:534`
 3. Verify tests pass
+
+---
+
+## Iteration 2
+
+**Implemented:** 2026-02-22
+**Method:** Single-agent (3 fixes, 4 effort points)
+
+### Tasks Completed This Iteration
+- Fix 1 (ADV-120): buildMatchQuality Tier 3/4 reconstruction — added `document` parameter, `extractReferencia` for Tier 3, `calculateKeywordMatchScore` for Tier 4
+- Fix 2 (ADV-121): prefetchExchangeRates error handling — wrapped in try/catch with warning log, graceful degradation
+- Fix 3 (ADV-122): Recibo confidence mapping — changed hardcoded `'HIGH'` to `tierToConfidence(5, false)` → `'LOW'`
+
+### Files Modified
+- `src/bank/match-movimientos.ts` — Added `extractReferencia` and `calculateKeywordMatchScore` imports, enhanced `buildMatchQuality` with Tier 3/4 detection, wrapped prefetchExchangeRates in try/catch
+- `src/bank/match-movimientos.test.ts` — Added 3 tests: Tier 3 preservation, Tier 4 preservation, prefetch failure resilience; updated matcher mock with `extractReferencia`
+- `src/bank/matcher.ts` — Changed recibo confidence from `'HIGH'` to `tierToConfidence(5, false)`
+- `src/bank/matcher.test.ts` — Added recibo confidence test
+
+### Linear Updates
+- ADV-120: Todo → In Progress → Review
+- ADV-121: Todo → In Progress → Review
+- ADV-122: Todo → In Progress → Review
+
+### Pre-commit Verification
+- bug-hunter: Passed (0 bugs found)
+- verifier: All 1,732 tests pass, zero warnings
+
+### Continuation Status
+All tasks completed.

@@ -1699,6 +1699,35 @@ describe('Detalle description includes tipoDeCambio for COMEX (ADV-117)', () => 
     });
   });
 
+  describe('Debit - recibo confidence (ADV-122)', () => {
+    it('recibo match should have LOW confidence (Tier 5), not HIGH', () => {
+      const recibo: import('../types/index.js').Recibo & { row: number } = {
+        fileId: 'r1',
+        fileName: 'recibo.pdf',
+        tipoRecibo: 'sueldo',
+        nombreEmpleado: 'Juan Perez',
+        cuilEmpleado: '20123456786',
+        legajo: '001',
+        cuitEmpleador: '30709076783',
+        periodoAbonado: 'diciembre/2024',
+        fechaPago: '2024-01-10',
+        subtotalRemuneraciones: 200000,
+        subtotalDescuentos: 50000,
+        totalNeto: 150000,
+        processedAt: '2024-01-10T10:00:00Z',
+        confidence: 0.95,
+        needsReview: false,
+        row: 2
+      };
+
+      const movement = makeMovimiento({ fecha: '2024-01-10', concepto: 'TRANSFERENCIA SUELDO', debito: 150000, credito: null });
+      const result = matcher.matchMovement(movement, [], [recibo], []);
+
+      expect(result.matchType).toBe('recibo');
+      expect(result.confidence).toBe('LOW');
+    });
+  });
+
   describe('Debit Tier 1 (pago+factura)', () => {
     it('appends tipoDeCambio when pago enviado has it', () => {
       const factura: Factura & { row: number } = {

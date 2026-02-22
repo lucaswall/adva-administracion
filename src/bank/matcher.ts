@@ -531,7 +531,7 @@ export class BankMovementMatcher {
         matchType: 'recibo',
         fileId: recibo.fileId,
         description,
-        confidence: 'HIGH',
+        confidence: tierToConfidence(5, false),
         reasons: [`Amount match: ${amount}`, `Date match: Recibo ${recibo.fechaPago}`, `Employee: ${recibo.nombreEmpleado}`],
         dateDiff,
         isExactAmount: true,
