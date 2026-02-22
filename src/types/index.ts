@@ -72,7 +72,7 @@ export type MatchConfidence = 'HIGH' | 'MEDIUM' | 'LOW';
  * ARCA comprobante types
  * LP = Liquidación de Premio (insurance documents)
  */
-export type TipoComprobante = 'A' | 'B' | 'C' | 'E' | 'NC' | 'ND' | 'LP';
+export type TipoComprobante = 'A' | 'B' | 'C' | 'E' | 'NC' | 'NC A' | 'NC B' | 'NC C' | 'ND' | 'ND A' | 'ND B' | 'ND C' | 'LP';
 
 /**
  * Currency types
@@ -95,7 +95,7 @@ export interface Factura {
   fileName: string;
 
   // Comprobante identification
-  /** Type of comprobante (A, B, C, E, NC, ND, LP) */
+  /** Type of comprobante (A, B, C, E, NC, NC A/B/C, ND, ND A/B/C, LP) */
   tipoComprobante: TipoComprobante;
   /** Full invoice number (e.g., "00003-00001957" or "0003-00001957") */
   nroFactura: string;

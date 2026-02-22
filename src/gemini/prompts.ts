@@ -209,7 +209,7 @@ Required fields to extract:
 - issuerName: The NAME of the company/person at the TOP of the document (issuer/emisor)
 - clientName: The NAME of the company/person in the CLIENT section (receptor)
 - allCuits: Array of ALL CUITs found in the document (as strings, 11 digits each, no dashes)
-- tipoComprobante: ONLY the single letter code (A, B, C, E) or two-letter code (NC for Nota de Crédito, ND for Nota de Débito, LP for Liquidación de Premio). DO NOT include the word "FACTURA" - extract ONLY the letter code that follows it. Examples: if the document shows "FACTURA C", extract "C"; if it shows "FACTURA B", extract "B".
+- tipoComprobante: ONLY the letter code (A, B, C, E) or compound code for special types. DO NOT include the word "FACTURA" - extract ONLY the letter code that follows it. Examples: if the document shows "FACTURA C", extract "C"; if it shows "FACTURA B", extract "B". For Notas de Crédito, include the letter: "NC A", "NC B", "NC C". For Notas de Débito, include the letter: "ND A", "ND B", "ND C". For Liquidación de Premio: "LP".
 - nroFactura: Full invoice number combining point of sale and invoice number (format: "XXXXX-XXXXXXXX" or "XXXX-XXXXXXXX"). Example: "00003-00001957" or "0003-00001957". For insurance documents, use "POL-{poliza_number}" format.
 - fechaEmision: Issue date (format as YYYY-MM-DD)
 - importeNeto: Net amount before tax (number)
@@ -254,7 +254,7 @@ Example with Consumidor Final (Doc. Receptor):
 Important:
 - Return ONLY the JSON object, no additional text
 - If a field is not visible, omit it from the JSON (except importeIva - set to 0 if not itemized)
-- CRITICAL: tipoComprobante must be ONLY the letter code (A, B, C, E, NC, ND), NOT "FACTURA" or "FACTURA A" - just the letter(s)
+- CRITICAL: tipoComprobante must be ONLY the letter code (A, B, C, E, NC A, NC B, NC C, ND A, ND B, ND C, LP), NOT "FACTURA" or "FACTURA A" - just the code
 - Ensure all dates are in YYYY-MM-DD format
 - Remove dashes, spaces and slashes from CUIT numbers in allCuits array
 - CRITICAL: Argentine number format uses DOTS (.) as thousand separators and COMMA (,) as decimal separator

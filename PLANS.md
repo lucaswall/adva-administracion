@@ -404,3 +404,32 @@ Summary: 1 issue found (Team: security, reliability, quality reviewers)
 
 1. Run `bug-hunter` agent — review all git changes for bugs, fix any issues
 2. Run `verifier` agent — all tests pass, zero warnings, fix any issues
+
+---
+
+## Iteration 2
+
+**Implemented:** 2026-02-22
+**Method:** Single-agent (fly solo)
+
+### Tasks Completed This Iteration
+- Fix 1: Re-implement comprobante letter in factura filenames (ADV-113)
+
+### Files Modified
+- `src/types/index.ts` - Expanded TipoComprobante with NC A/B/C, ND A/B/C variants
+- `src/gemini/prompts.ts` - Updated FACTURA_PROMPT to ask for letter variant in NC/ND
+- `src/utils/validation.ts` - Expanded validateTipoComprobante to accept new values
+- `src/utils/file-naming.ts` - Include letter in filename for A/B/C/E, NC A/B/C, ND A/B/C, LP
+- `src/processing/matching/nc-factura-matcher.ts` - Fixed NC/ND filtering for compound types
+- `src/utils/file-naming.test.ts` - Added tests for letter variants, updated existing tests
+- `src/utils/validation.test.ts` - Added tests for NC A/B/C, ND A/B/C validation
+
+### Linear Updates
+- ADV-113: Todo → In Progress → Review
+
+### Pre-commit Verification
+- bug-hunter: Found 2 HIGH bugs (nc-factura-matcher filtering), fixed before proceeding
+- verifier: All tests pass, zero warnings
+
+### Continuation Status
+All tasks completed.

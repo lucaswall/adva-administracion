@@ -76,19 +76,19 @@ describe('generateFacturaFileName', () => {
 
   it('generates factura_emitida with all fields', () => {
     const result = generateFacturaFileName(baseFactura, 'factura_emitida');
-    expect(result).toBe('2024-01-15 - Factura Emitida - 00001-00001234 - CLIENTE SA - Desarrollo de software.pdf');
+    expect(result).toBe('2024-01-15 - Factura A Emitida - 00001-00001234 - CLIENTE SA - Desarrollo de software.pdf');
   });
 
   it('generates factura_emitida without concepto', () => {
     const factura: Factura = { ...baseFactura, concepto: undefined };
     const result = generateFacturaFileName(factura, 'factura_emitida');
-    expect(result).toBe('2024-01-15 - Factura Emitida - 00001-00001234 - CLIENTE SA.pdf');
+    expect(result).toBe('2024-01-15 - Factura A Emitida - 00001-00001234 - CLIENTE SA.pdf');
   });
 
   it('generates factura_emitida without razonSocialReceptor (fallback to CUIT)', () => {
     const factura: Factura = { ...baseFactura, razonSocialReceptor: undefined };
     const result = generateFacturaFileName(factura, 'factura_emitida');
-    expect(result).toBe('2024-01-15 - Factura Emitida - 00001-00001234 - 20123456786 - Desarrollo de software.pdf');
+    expect(result).toBe('2024-01-15 - Factura A Emitida - 00001-00001234 - 20123456786 - Desarrollo de software.pdf');
   });
 
   it('generates factura_recibida with all fields', () => {
@@ -100,7 +100,7 @@ describe('generateFacturaFileName', () => {
       concepto: 'Servicios de hosting',
     };
     const result = generateFacturaFileName(factura, 'factura_recibida');
-    expect(result).toBe('2024-01-15 - Factura Recibida - 00001-00001234 - PROVEEDOR SA - Servicios de hosting.pdf');
+    expect(result).toBe('2024-01-15 - Factura A Recibida - 00001-00001234 - PROVEEDOR SA - Servicios de hosting.pdf');
   });
 
   it('generates factura_recibida without concepto', () => {
@@ -112,7 +112,7 @@ describe('generateFacturaFileName', () => {
       concepto: undefined,
     };
     const result = generateFacturaFileName(factura, 'factura_recibida');
-    expect(result).toBe('2024-01-15 - Factura Recibida - 00001-00001234 - PROVEEDOR SA.pdf');
+    expect(result).toBe('2024-01-15 - Factura A Recibida - 00001-00001234 - PROVEEDOR SA.pdf');
   });
 
   it('generates Nota de Credito Emitida', () => {
@@ -137,6 +137,60 @@ describe('generateFacturaFileName', () => {
     };
     const result = generateFacturaFileName(notaCredito, 'factura_recibida');
     expect(result).toBe('2024-01-15 - Nota de Credito Recibida - 00001-00001234 - PROVEEDOR SA - Desarrollo de software.pdf');
+  });
+
+  it('generates Factura A Emitida (with letter)', () => {
+    const factura: Factura = { ...baseFactura, tipoComprobante: 'A' };
+    const result = generateFacturaFileName(factura, 'factura_emitida');
+    expect(result).toBe('2024-01-15 - Factura A Emitida - 00001-00001234 - CLIENTE SA - Desarrollo de software.pdf');
+  });
+
+  it('generates Factura C Recibida (with letter)', () => {
+    const factura: Factura = {
+      ...baseFactura,
+      tipoComprobante: 'C',
+      cuitEmisor: '20123456786',
+      razonSocialEmisor: 'PROVEEDOR SA',
+      cuitReceptor: '30709076783',
+    };
+    const result = generateFacturaFileName(factura, 'factura_recibida');
+    expect(result).toBe('2024-01-15 - Factura C Recibida - 00001-00001234 - PROVEEDOR SA - Desarrollo de software.pdf');
+  });
+
+  it('generates Factura E Emitida (with letter)', () => {
+    const factura: Factura = { ...baseFactura, tipoComprobante: 'E' };
+    const result = generateFacturaFileName(factura, 'factura_emitida');
+    expect(result).toBe('2024-01-15 - Factura E Emitida - 00001-00001234 - CLIENTE SA - Desarrollo de software.pdf');
+  });
+
+  it('generates Nota de Credito A Emitida (NC with letter)', () => {
+    const factura: Factura = { ...baseFactura, tipoComprobante: 'NC A' };
+    const result = generateFacturaFileName(factura, 'factura_emitida');
+    expect(result).toBe('2024-01-15 - Nota de Credito A Emitida - 00001-00001234 - CLIENTE SA - Desarrollo de software.pdf');
+  });
+
+  it('generates Nota de Credito B Recibida (NC with letter)', () => {
+    const factura: Factura = {
+      ...baseFactura,
+      tipoComprobante: 'NC B',
+      cuitEmisor: '20123456786',
+      razonSocialEmisor: 'PROVEEDOR SA',
+      cuitReceptor: '30709076783',
+    };
+    const result = generateFacturaFileName(factura, 'factura_recibida');
+    expect(result).toBe('2024-01-15 - Nota de Credito B Recibida - 00001-00001234 - PROVEEDOR SA - Desarrollo de software.pdf');
+  });
+
+  it('generates Nota de Debito A Emitida (ND with letter)', () => {
+    const factura: Factura = { ...baseFactura, tipoComprobante: 'ND A' };
+    const result = generateFacturaFileName(factura, 'factura_emitida');
+    expect(result).toBe('2024-01-15 - Nota de Debito A Emitida - 00001-00001234 - CLIENTE SA - Desarrollo de software.pdf');
+  });
+
+  it('generates Liquidacion de Premio (LP)', () => {
+    const factura: Factura = { ...baseFactura, tipoComprobante: 'LP' };
+    const result = generateFacturaFileName(factura, 'factura_emitida');
+    expect(result).toBe('2024-01-15 - Liquidacion de Premio Emitida - 00001-00001234 - CLIENTE SA - Desarrollo de software.pdf');
   });
 });
 
