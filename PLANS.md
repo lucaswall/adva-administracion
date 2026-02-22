@@ -1,6 +1,6 @@
 # Implementation Plan
 
-**Status:** IN_PROGRESS
+**Status:** IMPLEMENTED
 **Branch:** feat/ADV-100-backlog-batch
 **Issues:** ADV-100, ADV-103, ADV-104
 **Created:** 2026-02-22
@@ -320,3 +320,65 @@ This plan implements three operational safety and traceability improvements: (1)
 - Server-side use of `DRIVE_ROOT_FOLDER_ID_PRODUCTION`/`STAGING` (these are skill-only)
 - Dashboard UI changes for duplicate display
 - Retroactive backfill of existing duplicate rows
+
+---
+
+## Iteration 1
+
+**Implemented:** 2026-02-22
+**Method:** Agent team (3 workers, worktree-isolated)
+
+### Tasks Completed This Iteration
+- Task 1: Add ENVIRONMENT config variable with validation (worker-1)
+- Task 2: Implement environment marker file check in folder structure (worker-1)
+- Task 3: Wire marker check into server startup (worker-1)
+- Task 4: Add dual Drive folder IDs for investigation (worker-3)
+- Task 5: Add originalFileId column to Archivos Procesados with startup migration (worker-2)
+- Task 6: Extend updateFileStatus with duplicate support (worker-2)
+- Task 7: Update scanner duplicate branches to use new status (worker-2)
+- Task 8: Update documentation (worker-3)
+
+### Files Modified
+- `src/config.ts` — Added ENVIRONMENT env var parsing and validation
+- `src/config.test.ts` — 7 new tests for ENVIRONMENT config
+- `vitest.config.ts` — Added ENVIRONMENT to test env block
+- `src/services/drive.ts` — Added `createFile()` function
+- `src/services/folder-structure.ts` — `checkEnvironmentMarker()`, `migrateArchivosProcesadosHeaders()`, wired into startup
+- `src/services/folder-structure.test.ts` — 14 new tests (8 marker, 6 migration)
+- `src/constants/spreadsheet-headers.ts` — Added `originalFileId` to ARCHIVOS_PROCESADOS_HEADERS
+- `src/constants/spreadsheet-headers.test.ts` — Updated for 6-column schema
+- `src/processing/storage/index.ts` — `duplicate` status, `originalFileId` parameter
+- `src/processing/storage/index.test.ts` — Tests for duplicate status tracking
+- `src/processing/scanner.ts` — 9 duplicate branches updated to use `duplicate` status
+- `src/middleware/auth.test.ts` — Added environment to mock config
+- `src/routes/status.test.ts` — Added environment to mock config
+- `src/routes/scan.test.ts` — Added environment to mock config
+- `src/server.test.ts` — Added environment to mock config
+- `SPREADSHEET_FORMAT.md` — Documented Column F originalFileId
+- `.env.example` — Added DRIVE_ROOT_FOLDER_ID_PRODUCTION/STAGING
+- `.claude/skills/investigate/SKILL.md` — Added Drive Folder Resolution step
+- `CLAUDE.md` — ENV VARS, folder structure diagram, Archivos Procesados schema, duplicate status
+- `package.json` — Added `typecheck` npm script
+
+### Linear Updates
+- ADV-100: Todo → In Progress → Review
+- ADV-103: Todo → In Progress → Review
+- ADV-104: Todo → In Progress → Review
+
+### Pre-commit Verification
+- bug-hunter: Found 1 critical (committed conflict marker) and 1 low (mock type), both fixed before final commit
+- verifier: All 1640 tests pass, zero warnings, build clean
+
+### Work Partition
+- Worker 1: Tasks 1, 2, 3 (environment marker — config, folder-structure, startup wiring)
+- Worker 2: Tasks 5, 6, 7 (duplicate tracking — headers, storage, scanner)
+- Worker 3: Tasks 4, 8 (config/docs — .env, investigate skill, CLAUDE.md)
+
+### Merge Summary
+- Worker 1: fast-forward (no conflicts)
+- Worker 2: 1 conflict in folder-structure.test.ts (both workers added tests at EOF), resolved
+- Worker 3: clean merge (no conflicts)
+- Post-merge fix: Updated spreadsheet-headers.test.ts for 6-column schema, fixed Column F docs
+
+### Continuation Status
+All tasks completed.
