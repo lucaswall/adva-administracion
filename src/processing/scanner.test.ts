@@ -1180,7 +1180,7 @@ describe('scanner', () => {
       expect(statusIndex).toBeLessThan(sortIndex);
     });
 
-    it('should keep status as success even if sort fails (data was stored)', async () => {
+    it('should revert status to failed when sort fails so file can be recovered', async () => {
       const { updateFileStatus } = await import('./storage/index.js');
 
       const mockFile = {
@@ -1224,19 +1224,20 @@ describe('scanner', () => {
 
       await scanFolder('entrada');
 
-      // Status should be 'success' because data was stored, not 'failed' because sort failed
-      // The key insight: status reflects data storage success, not file location
+      // Status is first set to 'success' (data stored), then reverted to 'failed' (move failed)
+      // This allows the recovery logic to pick up the file on next scan
       expect(updateFileStatus).toHaveBeenCalledWith(
         'dashboard',
         'sort-fail-file',
         'success'
       );
 
-      // Should NOT have been called with 'failed' for this file
+      // Should have been called with 'failed' to revert status for recovery
       const failedCalls = vi.mocked(updateFileStatus).mock.calls.filter(
         call => call[1] === 'sort-fail-file' && call[2] === 'failed'
       );
-      expect(failedCalls).toHaveLength(0);
+      expect(failedCalls).toHaveLength(1);
+      expect(failedCalls[0][3]).toContain('move failed');
     });
   });
 
@@ -1417,6 +1418,68 @@ describe('scanner', () => {
       if (result2.ok && 'skipped' in result2.value) {
         expect(result2.value.skipped).toBe(false);
       }
+    });
+
+    it('should recover files stuck in Entrada with success status', async () => {
+      const { getProcessedFileIds } = await import('./storage/index.js');
+
+      const mockFiles = [
+        { id: 'stuck-file-1', name: 'stuck1.pdf', mimeType: 'application/pdf', parents: ['folder-id'] },
+        { id: 'stuck-file-2', name: 'stuck2.pdf', mimeType: 'application/pdf', parents: ['folder-id'] },
+        { id: 'new-file-3', name: 'new3.pdf', mimeType: 'application/pdf', parents: ['folder-id'] },
+      ];
+
+      mockListFiles.mockResolvedValue({ ok: true, value: mockFiles });
+
+      // stuck-file-1 and stuck-file-2 are marked as "success" in tracking sheet
+      // but still in Entrada (they should be recovered)
+      vi.mocked(getProcessedFileIds).mockResolvedValue({
+        ok: true,
+        value: new Set(['stuck-file-1', 'stuck-file-2']),
+      });
+
+      await scanFolder('folder-id');
+
+      // All 3 files should be processed (2 recovered + 1 new)
+      // markFileProcessing is called twice per file: once with 'unknown' before extraction,
+      // and once with actual documentType after successful extraction
+      expect(mockMarkFileProcessing).toHaveBeenCalledTimes(6);
+      // Verify all 3 file IDs were passed to markFileProcessing (recovery worked)
+      const processedFileIds = mockMarkFileProcessing.mock.calls.map((call: unknown[]) => call[1]);
+      expect(processedFileIds.filter((id: unknown) => id === 'stuck-file-1')).toHaveLength(2);
+      expect(processedFileIds.filter((id: unknown) => id === 'stuck-file-2')).toHaveLength(2);
+      expect(processedFileIds.filter((id: unknown) => id === 'new-file-3')).toHaveLength(2);
+    });
+
+    it('should revert status to failed when file move fails after success', async () => {
+      const { updateFileStatus } = await import('./storage/index.js');
+      const mockFile = {
+        id: 'move-fail-file',
+        name: 'invoice.pdf',
+        mimeType: 'application/pdf',
+        parents: ['folder-id'],
+      };
+
+      mockListFiles.mockResolvedValue({ ok: true, value: [mockFile] });
+
+      // sortAndRenameDocument fails
+      mockSortAndRename.mockResolvedValue({
+        success: false,
+        error: 'Target folder not found',
+      });
+
+      await scanFolder('folder-id');
+
+      // First call: status set to 'success' (before move attempt)
+      // Second call: status reverted to 'failed' (after move failure)
+      const statusCalls = vi.mocked(updateFileStatus).mock.calls;
+      const successCall = statusCalls.find(c => c[2] === 'success');
+      const failedCall = statusCalls.find(c => c[2] === 'failed');
+
+      expect(successCall).toBeDefined();
+      expect(failedCall).toBeDefined();
+      expect(failedCall![1]).toBe('move-fail-file');
+      expect(failedCall![3]).toContain('move failed');
     });
 
     it('resets scanState even if lock acquisition fails', async () => {

@@ -550,6 +550,26 @@ export async function scanFolder(folderId?: string): Promise<Result<ScanResult, 
         correlationId,
       });
 
+      // Recover files stuck in Entrada with 'success' status
+      // These are files where data was stored and status marked 'success', but the file move
+      // to the destination folder failed (or server was killed between status update and move).
+      // Re-adding them to processing lets markFileProcessing reset their status to 'processing',
+      // and the duplicate checker will handle any already-written data.
+      const stuckSuccessFiles = allFiles.filter(f => processedIds.has(f.id));
+      if (stuckSuccessFiles.length > 0) {
+        warn(`Recovering ${stuckSuccessFiles.length} files stuck in Entrada with success/duplicate status`, {
+          module: 'scanner',
+          phase: 'scan-start',
+          stuckCount: stuckSuccessFiles.length,
+          fileNames: stuckSuccessFiles.map(f => f.name),
+          correlationId,
+        });
+        // Remove from processedIds so they pass the filter
+        for (const f of stuckSuccessFiles) {
+          processedIds.delete(f.id);
+        }
+      }
+
       // Filter to only new files
       const newFiles = allFiles.filter(f => !processedIds.has(f.id));
       info(`${newFiles.length} new files to process`, {
@@ -861,6 +881,8 @@ async function storeAndSortDocument(
             error: sortResult.error,
             correlationId,
           });
+          // Revert status so file can be recovered on next scan
+          await updateFileStatus(dashboardOperativoId, fileInfo.id, 'failed', `move failed: ${sortResult.error}`);
           result.errors++;
         } else {
           info(`Moved to ${sortResult.targetPath}`, {
@@ -983,6 +1005,8 @@ async function storeAndSortDocument(
             error: sortResult.error,
             correlationId,
           });
+          // Revert status so file can be recovered on next scan
+          await updateFileStatus(dashboardOperativoId, fileInfo.id, 'failed', `move failed: ${sortResult.error}`);
           result.errors++;
         } else {
           info(`Moved to ${sortResult.targetPath}`, {
@@ -1103,6 +1127,8 @@ async function storeAndSortDocument(
             error: sortResult.error,
             correlationId,
           });
+          // Revert status so file can be recovered on next scan
+          await updateFileStatus(dashboardOperativoId, fileInfo.id, 'failed', `move failed: ${sortResult.error}`);
           result.errors++;
         } else {
           info(`Moved to ${sortResult.targetPath}`, {
@@ -1220,6 +1246,8 @@ async function storeAndSortDocument(
             error: sortResult.error,
             correlationId,
           });
+          // Revert status so file can be recovered on next scan
+          await updateFileStatus(dashboardOperativoId, fileInfo.id, 'failed', `move failed: ${sortResult.error}`);
           result.errors++;
         } else {
           info(`Moved to ${sortResult.targetPath}`, {
@@ -1337,6 +1365,8 @@ async function storeAndSortDocument(
             error: sortResult.error,
             correlationId,
           });
+          // Revert status so file can be recovered on next scan
+          await updateFileStatus(dashboardOperativoId, fileInfo.id, 'failed', `move failed: ${sortResult.error}`);
           result.errors++;
         } else {
           info(`Moved to ${sortResult.targetPath}`, {
@@ -1555,6 +1585,8 @@ async function storeAndSortDocument(
                 error: sortResult.error,
                 correlationId,
               });
+              // Revert status so file can be recovered on next scan
+              await updateFileStatus(dashboardOperativoId, fileInfo.id, 'failed', `move failed: ${sortResult.error}`);
               result.errors++;
             } else {
               info(`Stored and moved to ${sortResult.targetPath}`, {
@@ -1774,6 +1806,8 @@ async function storeAndSortDocument(
                 error: sortResult.error,
                 correlationId,
               });
+              // Revert status so file can be recovered on next scan
+              await updateFileStatus(dashboardOperativoId, fileInfo.id, 'failed', `move failed: ${sortResult.error}`);
               result.errors++;
             } else {
               info(`Stored and moved to ${sortResult.targetPath}`, {
@@ -1983,6 +2017,8 @@ async function storeAndSortDocument(
                 error: sortResult.error,
                 correlationId,
               });
+              // Revert status so file can be recovered on next scan
+              await updateFileStatus(dashboardOperativoId, fileInfo.id, 'failed', `move failed: ${sortResult.error}`);
               result.errors++;
             } else {
               info(`Stored and moved to ${sortResult.targetPath}`, {
@@ -2093,6 +2129,8 @@ async function storeAndSortDocument(
             error: sortResult.error,
             correlationId,
           });
+          // Revert status so file can be recovered on next scan
+          await updateFileStatus(dashboardOperativoId, fileInfo.id, 'failed', `move failed: ${sortResult.error}`);
           result.errors++;
         } else {
           info(`Moved to ${sortResult.targetPath}`, {
