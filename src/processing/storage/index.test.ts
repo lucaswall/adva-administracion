@@ -11,11 +11,6 @@ vi.mock('../../services/sheets.js', () => ({
   getValues: vi.fn(),
   batchUpdate: vi.fn(),
   getSpreadsheetTimezone: vi.fn(() => Promise.resolve({ ok: true, value: 'America/Argentina/Buenos_Aires' })),
-  dateToSerialInTimezone: vi.fn((date: Date) => {
-    // Return a realistic serial number for testing (around 46000 for 2026 dates)
-    const epoch = new Date(Date.UTC(1899, 11, 30));
-    return (date.getTime() - epoch.getTime()) / (1000 * 60 * 60 * 24);
-  }),
 }));
 
 vi.mock('../../utils/logger.js', () => ({
@@ -98,13 +93,13 @@ describe('File Tracking Functions', () => {
       expect(batchUpdate).toHaveBeenCalledWith('dashboard-id', [
         {
           range: 'Archivos Procesados!C2:F2',
-          // processedAt is now a serial number (converted from ISO timestamp)
-          values: [[expect.any(Number), 'factura_emitida', 'processing', '']],
+          // ADV-105: processedAt stored as ISO string (not serial number) for stale detection compatibility
+          values: [[expect.any(String), 'factura_emitida', 'processing', '']],
         },
       ]);
     });
 
-    it('converts processedAt ISO timestamp to serial number for retry updates', async () => {
+    it('stores processedAt as ISO string for retry updates (not serial number)', async () => {
       // Mock existing failed entry for this file
       vi.mocked(getValues).mockResolvedValue({
         ok: true,
@@ -123,16 +118,15 @@ describe('File Tracking Functions', () => {
         'factura_emitida'
       );
 
-      // Verify batchUpdate was called with a serial number (number), not an ISO string
+      // Verify batchUpdate was called with an ISO string, not a serial number
+      // ADV-105: Serial numbers break getStaleProcessingFileIds which parses ISO strings
       const batchUpdateCall = vi.mocked(batchUpdate).mock.calls[0];
       const values = batchUpdateCall[1][0].values[0];
       const processedAtValue = values[0];
 
-      // The processedAt value should be a number (serial date), not a string
-      expect(typeof processedAtValue).toBe('number');
-      // Serial numbers for dates in 2026 should be around 46000-47000
-      expect(processedAtValue).toBeGreaterThan(45000);
-      expect(processedAtValue).toBeLessThan(50000);
+      // The processedAt value should be a string (ISO timestamp), not a number
+      expect(typeof processedAtValue).toBe('string');
+      expect(processedAtValue).toMatch(/^\d{4}-\d{2}-\d{2}T/);
     });
 
     it('fetches spreadsheet timezone for proper timestamp formatting', async () => {
@@ -1022,6 +1016,38 @@ describe('File Tracking Functions', () => {
         // file-3 is valid and recent, should not be stale
         expect(result.value.has('file-3')).toBe(false);
         expect(result.value.size).toBe(2);
+      }
+    });
+
+    it('handles serial number processedAt from appendRowsWithLinks (ADV-105)', async () => {
+      // appendRowsWithLinks converts ISO timestamps to serial numbers with DATE_TIME formatting
+      // getValues with SERIAL_NUMBER render returns these as numbers (e.g., 46123.5)
+      // getStaleProcessingFileIds must handle both formats
+      const now = Date.now();
+      const EXCEL_EPOCH = new Date(Date.UTC(1899, 11, 30)).getTime();
+
+      // 10 minutes ago as serial number — should be stale
+      const staleSerial = (now - 10 * 60 * 1000 - EXCEL_EPOCH) / 86400000;
+      // 2 minutes ago as serial number — should be recent
+      const recentSerial = (now - 2 * 60 * 1000 - EXCEL_EPOCH) / 86400000;
+
+      vi.mocked(getValues).mockResolvedValue({
+        ok: true,
+        value: [
+          ['fileId', 'fileName', 'processedAt', 'documentType', 'status'],
+          ['file-1', 'doc1.pdf', staleSerial, 'factura_emitida', 'processing'], // Stale (serial number)
+          ['file-2', 'doc2.pdf', recentSerial, 'pago_enviado', 'processing'], // Recent (serial number)
+        ],
+      });
+
+      const { getStaleProcessingFileIds } = await import('./index.js');
+      const result = await getStaleProcessingFileIds('dashboard-id', 5 * 60 * 1000);
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value.has('file-1')).toBe(true); // Stale serial number detected
+        expect(result.value.has('file-2')).toBe(false); // Recent serial number not stale
+        expect(result.value.size).toBe(1);
       }
     });
 

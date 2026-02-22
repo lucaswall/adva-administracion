@@ -1,6 +1,6 @@
 # Implementation Plan
 
-**Status:** IMPLEMENTED
+**Status:** COMPLETE
 **Branch:** feat/ADV-100-backlog-batch
 **Issues:** ADV-100, ADV-103, ADV-104
 **Created:** 2026-02-22
@@ -382,14 +382,17 @@ This plan implements three operational safety and traceability improvements: (1)
 
 ### Review Findings
 
-Summary: 3 issue(s) found (Team: security, reliability, quality reviewers)
-- FIX: 3 issue(s) — Linear issues created
+Summary: 3 issue(s) found initially, 1 false positive identified during fix analysis (Team: security, reliability, quality reviewers)
+- FIX: 2 issue(s) — fixed inline
+- FALSE POSITIVE: 1 finding — ADV-106 canceled (scanner already updates documentType via second markFileProcessing call at line 212)
 - DISCARDED: 9 finding(s) — false positives / not applicable
 
-**Issues requiring fix:**
-- [HIGH] BUG: processedAt serial number format in retry path causes `getStaleProcessingFileIds` to always flag retried files as stale — infinite reprocessing loop (`src/processing/storage/index.ts:97-99, 355-360`)
-- [MEDIUM] BUG: documentType column permanently shows 'unknown' — `updateFileStatus` never updates column D after classification (`src/processing/scanner.ts:85`, `src/processing/storage/index.ts`)
-- [LOW] BUG: Missing `environment` field in server.test.ts default mock config — future tests using default mock would get undefined (`src/server.test.ts:9-25`)
+**Issues fixed:**
+- [HIGH] BUG: processedAt format mismatch — retry path stored serial numbers, new-file path stored serial via appendRowsWithLinks, but `getStaleProcessingFileIds` only parsed ISO strings. Fixed both: retry path now stores ISO string, reader now handles both serial and ISO formats. (`src/processing/storage/index.ts`)
+- [LOW] BUG: Missing `environment` field in server.test.ts default mock config (`src/server.test.ts:13`)
+
+**False positive (canceled):**
+- [MEDIUM] BUG: documentType column 'unknown' — ADV-106 canceled. Scanner already calls `markFileProcessing` a second time at line 212 with `processed.documentType`, which updates column D correctly.
 
 **Discarded findings (not bugs):**
 - [DISCARDED] SECURITY: Drive API query parameter sanitization in `findByName`/`listByMimeType` — all callers pass hardcoded internal constants, no user input path
@@ -406,9 +409,9 @@ Summary: 3 issue(s) found (Team: security, reliability, quality reviewers)
 - ADV-100: Review → Merge (original task)
 - ADV-103: Review → Merge (original task)
 - ADV-104: Review → Merge (original task)
-- ADV-105: Created in Todo (Fix: processedAt serial number format)
-- ADV-106: Created in Todo (Fix: documentType permanently unknown)
-- ADV-107: Created in Todo (Fix: missing environment in mock)
+- ADV-105: Created in Todo → Merge (Fix: processedAt format — fixed inline)
+- ADV-106: Created in Todo → Canceled (false positive — scanner already updates documentType)
+- ADV-107: Created in Todo → Merge (Fix: missing environment in mock — fixed inline)
 
 <!-- REVIEW COMPLETE -->
 
@@ -417,32 +420,13 @@ All tasks completed. Fix Plan below.
 
 ---
 
-## Fix Plan
+## Status: COMPLETE
 
-**Source:** Review findings from Iteration 1
-**Linear Issues:** [ADV-105](https://linear.app/lw-claude/issue/ADV-105/fix-processedat-serial-number-format-in-retry-path-causing-infinite), [ADV-106](https://linear.app/lw-claude/issue/ADV-106/fix-documenttype-column-permanently-showing-unknown-in-archivos), [ADV-107](https://linear.app/lw-claude/issue/ADV-107/fix-missing-environment-field-in-servertestts-default-mock-config)
+All tasks implemented and reviewed successfully. All Linear issues moved to Merge.
 
-### Fix 1: processedAt serial number format in retry path
-**Linear Issue:** [ADV-105](https://linear.app/lw-claude/issue/ADV-105/fix-processedat-serial-number-format-in-retry-path-causing-infinite)
+**Fixes applied inline:**
+- ADV-105: Removed `dateToSerialInTimezone` in retry path, added dual-format handling (serial + ISO) in `getStaleProcessingFileIds`
+- ADV-106: Canceled — false positive (scanner already updates documentType via second `markFileProcessing` call)
+- ADV-107: Added `environment: 'staging'` to server.test.ts default mock config
 
-1. Write test in `src/processing/storage/index.test.ts` verifying that `markFileProcessing` retry path stores processedAt as ISO string (not serial number), and that `getStaleProcessingFileIds` correctly evaluates age of retried files
-2. Run verifier (expect fail)
-3. In `src/processing/storage/index.ts` retry path (line 97-99): remove `dateToSerialInTimezone` conversion, store raw ISO string `processedAt` directly in batchUpdate (matching the new-file path)
-4. Run verifier (expect pass)
-
-### Fix 2: documentType column permanently showing 'unknown'
-**Linear Issue:** [ADV-106](https://linear.app/lw-claude/issue/ADV-106/fix-documenttype-column-permanently-showing-unknown-in-archivos)
-
-1. Write tests in `src/processing/storage/index.test.ts` verifying that `updateFileStatus` with 'success' or 'duplicate' status also updates column D (documentType)
-2. Run verifier (expect fail)
-3. In `src/processing/storage/index.ts`: add `documentType?: string` parameter to `updateFileStatus`, extend batchUpdate range from `E:F` to `D:F` when documentType is provided
-4. In `src/processing/scanner.ts`: update all ~9 branches that call `updateFileStatus` to pass the classified documentType (e.g., `'factura_emitida'`, `'pago_recibido'`, etc.)
-5. Remove `as any` cast on scanner.ts:85 — use a proper type assertion or add 'unknown' to the type if appropriate
-6. Run verifier (expect pass)
-
-### Fix 3: Missing environment field in server.test.ts default mock
-**Linear Issue:** [ADV-107](https://linear.app/lw-claude/issue/ADV-107/fix-missing-environment-field-in-servertestts-default-mock-config)
-
-1. Write test (or verify existing tests cover this) — the fix is self-verifying via TypeScript type checking
-2. In `src/server.test.ts`: add `environment: 'staging'` to the default mock config factory (line ~9-25)
-3. Run verifier (expect pass)
+**Verification:** 1,641 tests pass, zero warnings, bug-hunter clean.

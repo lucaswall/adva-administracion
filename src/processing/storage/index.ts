@@ -2,7 +2,7 @@
  * Storage module index - exports all storage functions
  */
 
-import { getValues, appendRowsWithLinks, batchUpdate, getSpreadsheetTimezone, dateToSerialInTimezone } from '../../services/sheets.js';
+import { getValues, appendRowsWithLinks, batchUpdate, getSpreadsheetTimezone } from '../../services/sheets.js';
 import type { Result, DocumentType } from '../../types/index.js';
 import { info as logInfo, error as logError } from '../../utils/logger.js';
 import { getCorrelationId } from '../../utils/correlation.js';
@@ -92,14 +92,10 @@ export async function markFileProcessing(
           correlationId,
         });
 
-        // Convert ISO timestamp to serial number for proper spreadsheet formatting
-        // Use timezone if available, otherwise fall back to UTC-based conversion
-        const processedAtSerial = timeZone
-          ? dateToSerialInTimezone(new Date(processedAt), timeZone)
-          : dateToSerialInTimezone(new Date(processedAt), 'UTC');
-
+        // ADV-105: Store processedAt as ISO string (not serial number)
+        // getStaleProcessingFileIds parses this as new Date(String(value)) — serial numbers produce NaN
         const updateResult = await batchUpdate(dashboardId, [
-          { range: `Archivos Procesados!C${existingRowIndex}:F${existingRowIndex}`, values: [[processedAtSerial, documentType, 'processing', '']] },
+          { range: `Archivos Procesados!C${existingRowIndex}:F${existingRowIndex}`, values: [[processedAt, documentType, 'processing', '']] },
         ]);
 
         if (!updateResult.ok) {
@@ -352,7 +348,16 @@ export async function getStaleProcessingFileIds(
         continue;
       }
 
-      const timestamp = new Date(String(processedAt)).getTime();
+      // ADV-105: processedAt may be a serial number (from appendRowsWithLinks + SERIAL_NUMBER render)
+      // or an ISO string (from batchUpdate). Handle both formats.
+      let timestamp: number;
+      if (typeof processedAt === 'number') {
+        // Excel serial number — convert to JS timestamp
+        const EXCEL_EPOCH = new Date(Date.UTC(1899, 11, 30)).getTime();
+        timestamp = EXCEL_EPOCH + processedAt * 86400000;
+      } else {
+        timestamp = new Date(String(processedAt)).getTime();
+      }
       if (Number.isNaN(timestamp)) {
         // Invalid timestamp - treat as stale (safety mechanism)
         staleIds.add(String(fileId));

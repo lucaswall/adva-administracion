@@ -10,6 +10,7 @@ vi.mock('./config.js', () => ({
   getConfig: vi.fn(() => ({
     port: 3000,
     nodeEnv: 'test',
+    environment: 'staging',
     apiSecret: 'test-secret',
     driveRootFolderId: 'test-root',
     webhookUrl: null,
