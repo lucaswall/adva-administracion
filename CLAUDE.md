@@ -386,7 +386,8 @@ Files with stale 'processing' status are automatically recovered on server start
 - Column B: `fileName`
 - Column C: `processedAt` (ISO timestamp when processing started)
 - Column D: `documentType`
-- Column E: `status` (`processing` | `success` | `failed: <error message>`)
+- Column E: `status` (`processing` | `success` | `failed: <error message>` | `duplicate`)
+- Column F: `environment` (`staging` | `production`)
 
 ## SECURITY
 
@@ -419,14 +420,21 @@ npm run deploy:script # Build + deploy to Dashboard
 | GEMINI_API_KEY | Yes | - |
 | DRIVE_ROOT_FOLDER_ID | Yes | - |
 | API_SECRET | Yes | - |
+| ENVIRONMENT | Yes (production only) | - |
 | API_BASE_URL | No | - |
 | PORT | No | 3000 |
 | LOG_LEVEL | No | INFO |
 | MATCH_DAYS_BEFORE | No | 10 |
 | MATCH_DAYS_AFTER | No | 60 |
 | USD_ARS_TOLERANCE_PERCENT | No | 5 |
+| DRIVE_ROOT_FOLDER_ID_PRODUCTION | No | - |
+| DRIVE_ROOT_FOLDER_ID_STAGING | No | - |
 
 **Note:** `API_BASE_URL` enables webhooks (URL + `/webhooks/drive`) and Apps Script (domain extracted at build)
+
+**Note:** `ENVIRONMENT` is the server's own identity (`staging` | `production`). Required in production to prevent cross-environment data writes; if unset, treated as staging.
+
+**Note:** `DRIVE_ROOT_FOLDER_ID_PRODUCTION` and `DRIVE_ROOT_FOLDER_ID_STAGING` are used by Claude Code skills only (e.g., `investigate`), not loaded by the server at runtime.
 
 ## API ENDPOINTS
 
@@ -492,6 +500,7 @@ ADVA CUIT: 30709076783 | Direction determines routing:
 
 ```
 ROOT/
+├── .production              # or .staging — environment marker file (one per root folder)
 ├── Control de Ingresos.gsheet
 ├── Control de Egresos.gsheet
 ├── Dashboard Operativo Contable.gsheet
