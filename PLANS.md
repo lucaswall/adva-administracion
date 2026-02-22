@@ -306,5 +306,79 @@ Tasks 1, 2, 3 can be done in parallel. Tasks 4 and 5 depend on Task 1. Task 6 is
 - bug-hunter: Found 2 HIGH issues (factura-pago-matcher ranges and pago parser), fixed before commit
 - verifier: All 1,728 tests pass, zero warnings
 
+### Review Findings
+
+Summary: 3 issue(s) found (Team: security, reliability, quality reviewers)
+- FIX: 3 issue(s) — Linear issues created
+- DISCARDED: 8 finding(s) — false positives / not applicable
+
+**Issues requiring fix:**
+- [HIGH] BUG: buildMatchQuality cannot reconstruct Tier 3/4, causing incorrect match replacement (`src/bank/match-movimientos.ts:611-622`)
+- [MEDIUM] ASYNC: prefetchExchangeRates failure crashes entire matchAllMovimientos (`src/bank/match-movimientos.ts:988`)
+- [MEDIUM] BUG: Recibo candidates hardcoded HIGH confidence instead of using tierToConfidence (`src/bank/matcher.ts:529-534`)
+
+**Discarded findings (not bugs):**
+- [DISCARDED] RegExp allocation in matchesWordBoundary (`src/bank/matcher.ts:187-192`) — performance optimization, not a correctness bug; regex is correctly constructed
+- [DISCARDED] findDocumentByFileId returns `document: any` (`src/bank/match-movimientos.ts:643`) — type improvement for future maintainability, code works correctly at runtime
+- [DISCARDED] lockResult.value type assertion (`src/bank/match-movimientos.ts:1071`) — redundant but correct assertion, TypeScript already infers the type
+- [DISCARDED] Pago cast without guard (`src/processing/matching/factura-pago-matcher.ts:54`) — correct in context, displacement queue only contains pagos at this point
+- [DISCARDED] warn() missing module field (`src/bank/matcher.ts:423-427`) — convention style with zero correctness impact, not enforced by CLAUDE.md critical rules
+- [DISCARDED] warn() missing module field (`src/bank/match-movimientos.ts:828-831`) — convention style with zero correctness impact, not enforced by CLAUDE.md critical rules
+- [DISCARDED] Fragile test CUITs substring match (`src/bank/match-movimientos.test.ts:1141-1143`) — test behavior is correct; equal quality comparison works regardless of which tier both facturas land on
+- [DISCARDED] Double cast in test (`src/bank/match-movimientos.test.ts:1867`) — common test pattern, not a bug
+
+### Linear Updates
+- ADV-115: Review → Merge (original task completed)
+- ADV-116: Review → Merge (original task completed)
+- ADV-117: Review → Merge (original task completed)
+- ADV-118: Review → Merge (original task completed)
+- ADV-119: Review → Merge (original task completed)
+- ADV-120: Created in Todo (Fix: buildMatchQuality Tier 3/4 reconstruction)
+- ADV-121: Created in Todo (Fix: prefetchExchangeRates error handling)
+- ADV-122: Created in Todo (Fix: Recibo confidence mapping)
+
+<!-- REVIEW COMPLETE -->
+
 ### Continuation Status
 All tasks completed.
+
+---
+
+## Fix Plan
+
+**Source:** Review findings from Iteration 1
+**Linear Issues:** [ADV-120](https://linear.app/lw-claude/issue/ADV-120/buildmatchquality-cannot-reconstruct-tier-34-causing-incorrect-match), [ADV-121](https://linear.app/lw-claude/issue/ADV-121/prefetchexchangerates-failure-crashes-entire-matchallmovimientos), [ADV-122](https://linear.app/lw-claude/issue/ADV-122/recibo-candidates-hardcoded-high-confidence-instead-of-using)
+
+### Fix 1: buildMatchQuality cannot reconstruct Tier 3/4
+**Linear Issue:** [ADV-120](https://linear.app/lw-claude/issue/ADV-120/buildmatchquality-cannot-reconstruct-tier-34-causing-incorrect-match)
+
+1. Write tests in `src/bank/match-movimientos.test.ts` for the Tier 3/4 downgrade scenario:
+   - Set up an existing Tier 3 match (referencia in concepto matches a document's referencia) and a new Tier 5 candidate with closer date
+   - Verify the existing Tier 3 match is NOT replaced by the Tier 5 candidate
+   - Same test for Tier 4 (keyword match)
+2. Add referencia and keyword detection to `buildMatchQuality` in `src/bank/match-movimientos.ts:611-622`:
+   - Check if concepto contains a referencia pattern that matches a document field
+   - Check if name tokens from the document match keywords in the concepto (reuse `extractKeywordTokens` and `matchesWordBoundary` logic from matcher.ts)
+   - Map to Tier 3 for referencia, Tier 4 for keyword matches
+3. Verify tests pass
+
+### Fix 2: prefetchExchangeRates error handling
+**Linear Issue:** [ADV-121](https://linear.app/lw-claude/issue/ADV-121/prefetchexchangerates-failure-crashes-entire-matchallmovimientos)
+
+1. Write test in `src/bank/match-movimientos.test.ts` for prefetch failure:
+   - Mock `prefetchExchangeRates` to throw an error
+   - Verify `matchAllMovimientos` still completes successfully
+   - Verify a warning is logged
+2. Wrap the `prefetchExchangeRates` call at line 988 in try/catch:
+   - Log a warning with `{ module: 'match-movimientos', action: 'prefetchExchangeRates' }` on failure
+   - Continue matching without prefetched rates
+3. Verify tests pass
+
+### Fix 3: Recibo confidence mapping
+**Linear Issue:** [ADV-122](https://linear.app/lw-claude/issue/ADV-122/recibo-candidates-hardcoded-high-confidence-instead-of-using)
+
+1. Write test in `src/bank/matcher.test.ts` for recibo confidence:
+   - Set up a recibo match scenario
+   - Verify the returned confidence is `'LOW'` (Tier 5 mapping), not `'HIGH'`
+2. Change `confidence: 'HIGH'` to `confidence: tierToConfidence(5, false)` at `src/bank/matcher.ts:534`
+3. Verify tests pass
