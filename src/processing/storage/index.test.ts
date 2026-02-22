@@ -45,7 +45,7 @@ describe('File Tracking Functions', () => {
       // Mock no existing entry for this file
       vi.mocked(getValues).mockResolvedValue({
         ok: true,
-        value: [['fileId', 'fileName', 'processedAt', 'documentType', 'status']],
+        value: [['fileId', 'fileName', 'processedAt', 'documentType', 'status', 'originalFileId']],
       });
       vi.mocked(appendRowsWithLinks).mockResolvedValue({ ok: true, value: 1 });
 
@@ -67,6 +67,7 @@ describe('File Tracking Functions', () => {
             expect.any(String), // processedAt timestamp
             'factura_emitida',
             'processing',
+            '', // originalFileId empty for non-duplicate files
           ],
         ],
         'America/Argentina/Buenos_Aires' // timezone
@@ -78,8 +79,8 @@ describe('File Tracking Functions', () => {
       vi.mocked(getValues).mockResolvedValue({
         ok: true,
         value: [
-          ['fileId', 'fileName', 'processedAt', 'documentType', 'status'],
-          ['test-file-id', 'test-document.pdf', '2025-01-15T10:00:00Z', 'factura_emitida', 'failed: Lock timeout'],
+          ['fileId', 'fileName', 'processedAt', 'documentType', 'status', 'originalFileId'],
+          ['test-file-id', 'test-document.pdf', '2025-01-15T10:00:00Z', 'factura_emitida', 'failed: Lock timeout', ''],
         ],
       });
       vi.mocked(batchUpdate).mockResolvedValue({ ok: true, value: 1 });
@@ -96,9 +97,9 @@ describe('File Tracking Functions', () => {
       expect(appendRowsWithLinks).not.toHaveBeenCalled();
       expect(batchUpdate).toHaveBeenCalledWith('dashboard-id', [
         {
-          range: 'Archivos Procesados!C2:E2',
+          range: 'Archivos Procesados!C2:F2',
           // processedAt is now a serial number (converted from ISO timestamp)
-          values: [[expect.any(Number), 'factura_emitida', 'processing']],
+          values: [[expect.any(Number), 'factura_emitida', 'processing', '']],
         },
       ]);
     });
@@ -108,8 +109,8 @@ describe('File Tracking Functions', () => {
       vi.mocked(getValues).mockResolvedValue({
         ok: true,
         value: [
-          ['fileId', 'fileName', 'processedAt', 'documentType', 'status'],
-          ['test-file-id', 'test-document.pdf', '2025-01-15T10:00:00Z', 'factura_emitida', 'failed: Lock timeout'],
+          ['fileId', 'fileName', 'processedAt', 'documentType', 'status', 'originalFileId'],
+          ['test-file-id', 'test-document.pdf', '2025-01-15T10:00:00Z', 'factura_emitida', 'failed: Lock timeout', ''],
         ],
       });
       vi.mocked(batchUpdate).mockResolvedValue({ ok: true, value: 1 });
@@ -221,6 +222,18 @@ describe('File Tracking Functions', () => {
       if (!result.ok) {
         expect(result.error.message).toBe('Failed to read tracking sheet');
       }
+    });
+
+    it('reads columns A:F when checking for existing rows (full schema)', async () => {
+      vi.mocked(getValues).mockResolvedValue({
+        ok: true,
+        value: [['fileId', 'fileName', 'processedAt', 'documentType', 'status', 'originalFileId']],
+      });
+      vi.mocked(appendRowsWithLinks).mockResolvedValue({ ok: true, value: 1 });
+
+      await markFileProcessing('dashboard-id', 'test-file-id', 'test-document.pdf', 'factura_emitida');
+
+      expect(getValues).toHaveBeenCalledWith('dashboard-id', 'Archivos Procesados!A:F');
     });
   });
 
@@ -349,12 +362,12 @@ describe('File Tracking Functions', () => {
       }
     });
 
-    it('should read columns A:E on first status update', async () => {
+    it('should read columns A:F on first status update', async () => {
       vi.mocked(getValues).mockResolvedValue({
         ok: true,
         value: [
-          ['fileId', 'fileName', 'processedAt', 'documentType', 'status'],
-          ['test-file-id', 'test-document.pdf', '2025-01-15T10:00:00Z', 'factura_emitida', 'processing'],
+          ['fileId', 'fileName', 'processedAt', 'documentType', 'status', 'originalFileId'],
+          ['test-file-id', 'test-document.pdf', '2025-01-15T10:00:00Z', 'factura_emitida', 'processing', ''],
         ],
       });
 
@@ -364,7 +377,113 @@ describe('File Tracking Functions', () => {
 
       expect(result.ok).toBe(true);
       expect(getValues).toHaveBeenCalledTimes(1);
-      expect(getValues).toHaveBeenCalledWith('dashboard-id', 'Archivos Procesados!A:E');
+      expect(getValues).toHaveBeenCalledWith('dashboard-id', 'Archivos Procesados!A:F');
+    });
+
+    it('updates file status to duplicate in tracking sheet', async () => {
+      vi.mocked(getValues).mockResolvedValue({
+        ok: true,
+        value: [
+          ['fileId', 'fileName', 'processedAt', 'documentType', 'status', 'originalFileId'],
+          ['test-file-id', 'test-document.pdf', '2025-01-15T10:00:00Z', 'factura_emitida', 'processing', ''],
+        ],
+      });
+      vi.mocked(batchUpdate).mockResolvedValue({ ok: true, value: 1 });
+
+      const result = await updateFileStatus('dashboard-id', 'test-file-id', 'duplicate');
+
+      expect(result.ok).toBe(true);
+      expect(batchUpdate).toHaveBeenCalledWith('dashboard-id', [
+        {
+          range: 'Archivos Procesados!E2:F2',
+          values: [['duplicate', '']],
+        },
+      ]);
+    });
+
+    it('updates file status to duplicate with originalFileId written to Column F', async () => {
+      vi.mocked(getValues).mockResolvedValue({
+        ok: true,
+        value: [
+          ['fileId', 'fileName', 'processedAt', 'documentType', 'status', 'originalFileId'],
+          ['test-file-id', 'test-document.pdf', '2025-01-15T10:00:00Z', 'factura_emitida', 'processing', ''],
+        ],
+      });
+      vi.mocked(batchUpdate).mockResolvedValue({ ok: true, value: 1 });
+
+      const result = await updateFileStatus('dashboard-id', 'test-file-id', 'duplicate', undefined, 'original-abc123');
+
+      expect(result.ok).toBe(true);
+      expect(batchUpdate).toHaveBeenCalledWith('dashboard-id', [
+        {
+          range: 'Archivos Procesados!E2:F2',
+          values: [['duplicate', 'original-abc123']],
+        },
+      ]);
+    });
+
+    it('success status does not write to Column F', async () => {
+      vi.mocked(getValues).mockResolvedValue({
+        ok: true,
+        value: [
+          ['fileId', 'fileName', 'processedAt', 'documentType', 'status', 'originalFileId'],
+          ['test-file-id', 'test-document.pdf', '2025-01-15T10:00:00Z', 'factura_emitida', 'processing', ''],
+        ],
+      });
+      vi.mocked(batchUpdate).mockResolvedValue({ ok: true, value: 1 });
+
+      const result = await updateFileStatus('dashboard-id', 'test-file-id', 'success');
+
+      expect(result.ok).toBe(true);
+      expect(batchUpdate).toHaveBeenCalledWith('dashboard-id', [
+        {
+          range: 'Archivos Procesados!E2',
+          values: [['success']],
+        },
+      ]);
+    });
+
+    it('failed status does not write to Column F and preserves retry count logic', async () => {
+      vi.mocked(getValues).mockResolvedValue({
+        ok: true,
+        value: [
+          ['fileId', 'fileName', 'processedAt', 'documentType', 'status', 'originalFileId'],
+          ['test-file-id', 'test-document.pdf', '2025-01-15T10:00:00Z', 'factura_emitida', 'processing', ''],
+        ],
+      });
+      vi.mocked(batchUpdate).mockResolvedValue({ ok: true, value: 1 });
+
+      const result = await updateFileStatus('dashboard-id', 'test-file-id', 'failed', 'Extraction error');
+
+      expect(result.ok).toBe(true);
+      expect(batchUpdate).toHaveBeenCalledWith('dashboard-id', [
+        {
+          range: 'Archivos Procesados!E2',
+          values: [['failed(1): Extraction error']],
+        },
+      ]);
+    });
+
+    it('duplicate status does not participate in retry count logic', async () => {
+      vi.mocked(getValues).mockResolvedValue({
+        ok: true,
+        value: [
+          ['fileId', 'fileName', 'processedAt', 'documentType', 'status', 'originalFileId'],
+          ['test-file-id', 'test-document.pdf', '2025-01-15T10:00:00Z', 'factura_emitida', 'processing', ''],
+        ],
+      });
+      vi.mocked(batchUpdate).mockResolvedValue({ ok: true, value: 1 });
+
+      // Call duplicate with no error message (should just write 'duplicate', not 'duplicate(1): ...')
+      const result = await updateFileStatus('dashboard-id', 'test-file-id', 'duplicate', undefined, 'orig-id');
+
+      expect(result.ok).toBe(true);
+      expect(batchUpdate).toHaveBeenCalledWith('dashboard-id', [
+        {
+          range: 'Archivos Procesados!E2:F2',
+          values: [['duplicate', 'orig-id']],
+        },
+      ]);
     });
 
     it('should re-read on each update for safety (lock-based)', async () => {
@@ -643,6 +762,28 @@ describe('File Tracking Functions', () => {
         expect(result.value.has('file-1')).toBe(true);
         expect(result.value.has('file-3')).toBe(true);
         expect(result.value.has('')).toBe(false);
+        expect(result.value.size).toBe(2);
+      }
+    });
+
+    it('includes duplicate files in processed set (so they are not reprocessed)', async () => {
+      vi.mocked(getValues).mockResolvedValue({
+        ok: true,
+        value: [
+          ['fileId', 'fileName', 'processedAt', 'documentType', 'status', 'originalFileId'],
+          ['file-1', 'doc1.pdf', '2025-01-15T10:00:00Z', 'factura_emitida', 'success', ''],
+          ['file-2', 'doc2.pdf', '2025-01-15T11:00:00Z', 'pago_enviado', 'duplicate', 'original-abc'],
+          ['file-3', 'doc3.pdf', '2025-01-15T12:00:00Z', 'factura_recibida', 'processing', ''],
+        ],
+      });
+
+      const result = await getProcessedFileIds('dashboard-id');
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value.has('file-1')).toBe(true);
+        expect(result.value.has('file-2')).toBe(true); // duplicate is terminal - don't reprocess
+        expect(result.value.has('file-3')).toBe(false); // processing is retried
         expect(result.value.size).toBe(2);
       }
     });

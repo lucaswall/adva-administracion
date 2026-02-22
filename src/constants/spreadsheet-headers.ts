@@ -396,6 +396,7 @@ export const ARCHIVOS_PROCESADOS_HEADERS = [
   'processedAt',
   'documentType',
   'status',
+  'originalFileId',
 ];
 
 /**

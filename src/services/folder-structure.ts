@@ -322,6 +322,45 @@ async function ensureSheetsExist(
 }
 
 /**
+ * Migrates Archivos Procesados sheet to add Column F (originalFileId) if missing.
+ * Production/staging sheets created before ADV-104 have 5 columns (A:E).
+ * This migration detects the old schema and appends the new column header.
+ *
+ * @param dashboardId - Dashboard Operativo Contable spreadsheet ID
+ * @returns Success or error
+ */
+export async function migrateArchivosProcesadosHeaders(
+  dashboardId: string
+): Promise<Result<void, Error>> {
+  const headersResult = await getValues(dashboardId, 'Archivos Procesados!A1:Z1');
+  if (!headersResult.ok) return headersResult;
+
+  const headerRow = headersResult.value[0] ?? [];
+
+  if (headerRow.length === 0) {
+    // Empty sheet — ensureSheetsExist will write full 6-column headers
+    return { ok: true, value: undefined };
+  }
+
+  if (headerRow.length >= 6) {
+    // Already migrated (6+ columns) — skip
+    return { ok: true, value: undefined };
+  }
+
+  // Old 5-column schema detected — append Column F header
+  const setResult = await setValues(dashboardId, 'Archivos Procesados!F1', [['originalFileId']]);
+  if (!setResult.ok) return setResult;
+
+  info('Migrated Archivos Procesados headers: added originalFileId column', {
+    module: 'folder-structure',
+    phase: 'migration',
+    dashboardId,
+  });
+
+  return { ok: true, value: undefined };
+}
+
+/**
  * Initializes Dashboard Operativo Contable spreadsheet with sheets and data
  * Creates "API Mensual" and "Uso de API" sheets with headers
  * Initializes "API Mensual" with current month only, with IFERROR handling for empty data
@@ -335,6 +374,10 @@ async function initializeDashboardOperativo(
   // Ensure all sheets exist with headers
   const ensureSheetsResult = await ensureSheetsExist(spreadsheetId, DASHBOARD_OPERATIVO_SHEETS);
   if (!ensureSheetsResult.ok) return ensureSheetsResult;
+
+  // Migrate Archivos Procesados schema: add Column F (originalFileId) if missing
+  const migrateResult = await migrateArchivosProcesadosHeaders(spreadsheetId);
+  if (!migrateResult.ok) return migrateResult;
 
   // Move Pagos Pendientes to first position (leftmost tab)
   const moveResult = await moveSheetToFirst(spreadsheetId, 'Pagos Pendientes');
