@@ -380,5 +380,69 @@ This plan implements three operational safety and traceability improvements: (1)
 - Worker 3: clean merge (no conflicts)
 - Post-merge fix: Updated spreadsheet-headers.test.ts for 6-column schema, fixed Column F docs
 
+### Review Findings
+
+Summary: 3 issue(s) found (Team: security, reliability, quality reviewers)
+- FIX: 3 issue(s) — Linear issues created
+- DISCARDED: 9 finding(s) — false positives / not applicable
+
+**Issues requiring fix:**
+- [HIGH] BUG: processedAt serial number format in retry path causes `getStaleProcessingFileIds` to always flag retried files as stale — infinite reprocessing loop (`src/processing/storage/index.ts:97-99, 355-360`)
+- [MEDIUM] BUG: documentType column permanently shows 'unknown' — `updateFileStatus` never updates column D after classification (`src/processing/scanner.ts:85`, `src/processing/storage/index.ts`)
+- [LOW] BUG: Missing `environment` field in server.test.ts default mock config — future tests using default mock would get undefined (`src/server.test.ts:9-25`)
+
+**Discarded findings (not bugs):**
+- [DISCARDED] SECURITY: Drive API query parameter sanitization in `findByName`/`listByMimeType` — all callers pass hardcoded internal constants, no user input path
+- [DISCARDED] SECURITY: Internal error messages in 500 API responses — API is internal, consumed only by co-deployed Apps Script
+- [DISCARDED] SECURITY: No minimum length for API_SECRET — developer-set value in .env, non-empty check catches the common mistake
+- [DISCARDED] SECURITY: Timing test threshold too lenient (< 1.0) — implementation is correct (SHA-256 + timingSafeEqual), timing tests are inherently unreliable in CI
+- [DISCARDED] SECURITY: No rate limiting on failed auth — feature request, not a bug
+- [DISCARDED] CONVENTION: CLAUDE.md vs numberFormats contradiction for processedAt — documentation issue subsumed by processedAt format bug
+- [DISCARDED] TEST: Fragile regex-based documentation tests in folder-structure.test.ts — weak assertions but zero correctness impact
+- [DISCARDED] BUG: Stale comment "10s timeout" when value is 30s — zero correctness impact
+- [DISCARDED] EDGE CASE: getDriveService double-initialization race — harmless per reviewer, no functional impact
+
+### Linear Updates
+- ADV-100: Review → Merge (original task)
+- ADV-103: Review → Merge (original task)
+- ADV-104: Review → Merge (original task)
+- ADV-105: Created in Todo (Fix: processedAt serial number format)
+- ADV-106: Created in Todo (Fix: documentType permanently unknown)
+- ADV-107: Created in Todo (Fix: missing environment in mock)
+
+<!-- REVIEW COMPLETE -->
+
 ### Continuation Status
-All tasks completed.
+All tasks completed. Fix Plan below.
+
+---
+
+## Fix Plan
+
+**Source:** Review findings from Iteration 1
+**Linear Issues:** [ADV-105](https://linear.app/lw-claude/issue/ADV-105/fix-processedat-serial-number-format-in-retry-path-causing-infinite), [ADV-106](https://linear.app/lw-claude/issue/ADV-106/fix-documenttype-column-permanently-showing-unknown-in-archivos), [ADV-107](https://linear.app/lw-claude/issue/ADV-107/fix-missing-environment-field-in-servertestts-default-mock-config)
+
+### Fix 1: processedAt serial number format in retry path
+**Linear Issue:** [ADV-105](https://linear.app/lw-claude/issue/ADV-105/fix-processedat-serial-number-format-in-retry-path-causing-infinite)
+
+1. Write test in `src/processing/storage/index.test.ts` verifying that `markFileProcessing` retry path stores processedAt as ISO string (not serial number), and that `getStaleProcessingFileIds` correctly evaluates age of retried files
+2. Run verifier (expect fail)
+3. In `src/processing/storage/index.ts` retry path (line 97-99): remove `dateToSerialInTimezone` conversion, store raw ISO string `processedAt` directly in batchUpdate (matching the new-file path)
+4. Run verifier (expect pass)
+
+### Fix 2: documentType column permanently showing 'unknown'
+**Linear Issue:** [ADV-106](https://linear.app/lw-claude/issue/ADV-106/fix-documenttype-column-permanently-showing-unknown-in-archivos)
+
+1. Write tests in `src/processing/storage/index.test.ts` verifying that `updateFileStatus` with 'success' or 'duplicate' status also updates column D (documentType)
+2. Run verifier (expect fail)
+3. In `src/processing/storage/index.ts`: add `documentType?: string` parameter to `updateFileStatus`, extend batchUpdate range from `E:F` to `D:F` when documentType is provided
+4. In `src/processing/scanner.ts`: update all ~9 branches that call `updateFileStatus` to pass the classified documentType (e.g., `'factura_emitida'`, `'pago_recibido'`, etc.)
+5. Remove `as any` cast on scanner.ts:85 — use a proper type assertion or add 'unknown' to the type if appropriate
+6. Run verifier (expect pass)
+
+### Fix 3: Missing environment field in server.test.ts default mock
+**Linear Issue:** [ADV-107](https://linear.app/lw-claude/issue/ADV-107/fix-missing-environment-field-in-servertestts-default-mock-config)
+
+1. Write test (or verify existing tests cover this) — the fix is self-verifying via TypeScript type checking
+2. In `src/server.test.ts`: add `environment: 'staging'` to the default mock config factory (line ~9-25)
+3. Run verifier (expect pass)
