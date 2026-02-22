@@ -1,8 +1,8 @@
 # Implementation Plan
 
 **Created:** 2026-02-22
-**Source:** Inline request: Extract and store tipo de cambio from COMEX pagos and Factura E, fix same-currency matching bug, implement "better duplicate replaces existing" mechanism
-**Linear Issues:** [ADV-108](https://linear.app/lw-claude/issue/ADV-108), [ADV-109](https://linear.app/lw-claude/issue/ADV-109), [ADV-110](https://linear.app/lw-claude/issue/ADV-110), [ADV-111](https://linear.app/lw-claude/issue/ADV-111), [ADV-112](https://linear.app/lw-claude/issue/ADV-112)
+**Source:** Inline request: Extract tipoDeCambio, fix USD-USD matching, reprocessing support, better duplicates, factura filename with tipo letter
+**Linear Issues:** [ADV-108](https://linear.app/lw-claude/issue/ADV-108), [ADV-109](https://linear.app/lw-claude/issue/ADV-109), [ADV-110](https://linear.app/lw-claude/issue/ADV-110), [ADV-111](https://linear.app/lw-claude/issue/ADV-111), [ADV-112](https://linear.app/lw-claude/issue/ADV-112), [ADV-113](https://linear.app/lw-claude/issue/ADV-113), [ADV-114](https://linear.app/lw-claude/issue/ADV-114)
 
 ## Context Gathered
 
@@ -11,33 +11,31 @@
 **TipoDeCambio extraction:**
 - `Factura` type (`src/types/index.ts:86-140`): Has `moneda` but no `tipoDeCambio`
 - `Pago` type (`src/types/index.ts:145-195`): Has `moneda` but no `tipoDeCambio`/`importeEnPesos`
-- `FACTURA_PROMPT` (`src/gemini/prompts.ts:148-265`): Does not ask for exchange rate
-- `PAGO_BBVA_PROMPT` (`src/gemini/prompts.ts:270-319`): Does not ask for tipo de cambio or importe en pesos
-- Parser validates required fields but has no tipoDeCambio handling
-- Extractor (`src/processing/extractor.ts:338-356, 411-427`): Builds objects from parse results, no tipoDeCambio passthrough
+- Prompts (`src/gemini/prompts.ts`): Neither FACTURA_PROMPT nor PAGO_BBVA_PROMPT ask for exchange rate data
 - Headers: Facturas Emitidas 18 cols (A:R), Facturas Recibidas 19 cols (A:S), Pagos Enviados/Recibidos 15 cols (A:O)
-- Stores: factura-store.ts rows match header counts exactly, pago-store.ts same
 
-**Matching bug:**
-- `amountsMatchCrossCurrency` (`src/utils/exchange-rate.ts:318-373`): Signature takes `(facturaAmount, facturaMoneda, facturaFecha, pagoAmount, tolerancePercent)` — no `pagoMoneda`
-- Comment says "Payment amount (always in ARS)" — incorrect for COMEX USD pagos
-- When both are USD, tries to convert factura USD→ARS via exchange rate, then compares with pago's USD amount → guaranteed mismatch
-- Single call site: `src/matching/matcher.ts:142-148` — passes `pago.importePagado` without `pago.moneda`
-- Production logs show hundreds of "Exchange rate cache miss" errors for these USD-USD pairs
-- Existing tests in `src/utils/exchange-rate.test.ts` and `src/matching/matcher.test.ts` — extensive coverage to update
+**Matching bug (affects both ingresos AND egresos):**
+- `amountsMatchCrossCurrency` (`src/utils/exchange-rate.ts:318-373`): No `pagoMoneda` parameter — assumes all pagos are ARS
+- Same matcher code (`src/matching/matcher.ts`) handles both ingresos (Facturas Emitidas↔Pagos Recibidos) and egresos (Facturas Recibidas↔Pagos Enviados)
+- Production logs: hundreds of "Exchange rate cache miss" errors
 
-**Duplicate replacement:**
-- Current flow: pago-store.ts `isDuplicatePago` (lines 26-62) checks fecha+importe+cuit → returns `{isDuplicate, existingFileId}` → scanner moves new file to Duplicado
-- No quality comparison, no "replace existing" path
-- `batchUpdate` in `src/services/sheets.ts:284-305` can update existing rows
-- Duplicate cache reads columns A:H — has fileId (B), all core data fields
-- Scanner duplicate branches (5+ branches) all follow same pattern: `moveToDuplicadoFolder` → `updateFileStatus('duplicate', ..., existingFileId)`
-- Key insight: quality signals include tipoDeCambio presence, non-empty CUITs, confidence score
+**Reprocessing (moving files back to Entrada):**
+- `markFileProcessing` (`src/processing/storage/index.ts:43-154`): Already handles known fileIds — updates tracking row instead of creating new one
+- Store functions (`isDuplicateFactura`, `isDuplicatePago`): Detect by business key, return `{isDuplicate, existingFileId}` but NOT the row index
+- If same fileId is reprocessed, business key check would match → currently returns `{stored: false}` → scanner moves file to Duplicado
+- Problem: no way to distinguish "same file reprocessed" from "different file, same transaction"
+- Fix: check fileId column BEFORE business key check. If fileId already in sheet → update that row (reprocessing)
+
+**File naming:**
+- `generateFacturaFileName` (`src/utils/file-naming.ts:101-145`): Currently produces "Factura Emitida" for all A/B/C/E types — no letter
+- NC → "Nota de Credito Emitida" — no letter variant
+- `TipoComprobante = 'A' | 'B' | 'C' | 'E' | 'NC' | 'ND' | 'LP'` — NC/ND don't carry the letter
+- FACTURA_PROMPT asks for "A/B/C/E/NC/ND/LP" — Gemini returns "NC" not "NC A"
 
 ### MCP Context
-- **Railway (production):** Confirmed hundreds of exchange rate cache miss errors in production logs
+- **Railway (production):** Confirmed exchange rate cache miss errors affect both ingresos and egresos
 - **Google Drive (production):** Verified Factura E has `Exchange Rate: 1429.50`, COMEX pago has `Tipo de Cambio: 1396.25` + `Importe equivalente en Pesos: 1,675,500.00`
-- **Linear:** No existing backlog issues for these items
+- **Linear:** No existing backlog issues
 
 ## Original Plan
 
@@ -120,6 +118,8 @@
 ### Task 4: Fix amountsMatchCrossCurrency for same-currency matching
 **Linear Issue:** [ADV-111](https://linear.app/lw-claude/issue/ADV-111/fix-same-currency-matching-usd-usd-in-amountsmatchcrosscurrency)
 
+**Note:** This fix applies to both ingresos and egresos since both use the same `FacturaPagoMatcher` class. Ingresos: Facturas Emitidas↔Pagos Recibidos. Egresos: Facturas Recibidas↔Pagos Enviados. The single call site in `matcher.ts:142-148` is shared.
+
 1. Write tests in `src/utils/exchange-rate.test.ts`:
    - USD factura + USD pago with matching amounts → `{matches: true, isCrossCurrency: false}` (same-currency, no exchange rate needed)
    - USD factura + USD pago with non-matching amounts → `{matches: false, isCrossCurrency: false}`
@@ -133,44 +133,101 @@
    - Add `pagoMoneda: Moneda` parameter after `pagoAmount`
    - When `facturaMoneda === pagoMoneda` (same currency): use `amountsMatch()` regardless of currency, return `{matches, isCrossCurrency: false}`
    - When currencies differ: existing cross-currency logic (exchange rate lookup + tolerance)
-   - Update `CrossCurrencyMatchResult` if needed (the `isCrossCurrency` flag already exists)
 5. Update the caller in `src/matching/matcher.ts` (line 142-148): pass `pago.moneda` as the new parameter
 6. Run `verifier "exchange-rate"` then `verifier "matcher"` (expect pass)
 
-### Task 5: Better duplicate replaces existing (pagos)
+### Task 5: Factura filename with comprobante letter
+**Linear Issue:** [ADV-113](https://linear.app/lw-claude/issue/ADV-113/factura-filename-with-comprobante-letter-abce-nc-abc)
+
+**Context:** Current filenames use "Factura Emitida" for all types (A/B/C/E). User needs the letter for quick identification: "Factura C Emitida", "Factura E Emitida". For NC/ND, the letter variant (A/B/C) is also needed: "Nota de Credito A Emitida". Currently `TipoComprobante` stores 'NC' without the letter — Gemini prompt needs to be updated to extract the full type.
+
+1. Write tests in `src/utils/file-naming.test.ts`:
+   - Factura with tipoComprobante 'A' → filename contains "Factura A Emitida"
+   - Factura with tipoComprobante 'C' → "Factura C Recibida"
+   - Factura with tipoComprobante 'E' → "Factura E Emitida"
+   - Factura with tipoComprobante 'NC A' → "Nota de Credito A Emitida"
+   - Factura with tipoComprobante 'NC B' → "Nota de Credito B Recibida"
+   - Factura with tipoComprobante 'ND A' → "Nota de Debito A Emitida"
+   - Backward compat: tipoComprobante 'NC' (old format) → "Nota de Credito Emitida" (no letter, graceful)
+2. Write tests in `src/gemini/parser.test.ts`:
+   - Response with `tipoComprobante: "NC A"` → parsed correctly
+   - Response with `tipoComprobante: "ND B"` → parsed correctly
+   - Response with `tipoComprobante: "NC"` → still accepted (backward compat)
+3. Run `verifier "file-naming"` (expect fail)
+4. Update `TipoComprobante` type in `src/types/index.ts`:
+   - Expand to: `'A' | 'B' | 'C' | 'E' | 'NC' | 'NC A' | 'NC B' | 'NC C' | 'ND' | 'ND A' | 'ND B' | 'ND C' | 'LP'`
+   - Keep plain 'NC'/'ND' for backward compatibility with existing spreadsheet data
+5. Update `FACTURA_PROMPT` in `src/gemini/prompts.ts`:
+   - Change tipoComprobante instruction to ask for letter variant: "For Notas de Credito, include the letter: NC A, NC B, NC C. For Notas de Debito: ND A, ND B, ND C."
+6. Update `validateTipoComprobante` in `src/utils/validation.ts` (or parser):
+   - Accept new values ('NC A', 'NC B', 'NC C', 'ND A', 'ND B', 'ND C')
+7. Update `generateFacturaFileName` in `src/utils/file-naming.ts`:
+   - For A/B/C/E: `Factura ${tipoComprobante} ${direction}` (e.g., "Factura C Emitida")
+   - For 'NC A'/'NC B'/'NC C': `Nota de Credito ${letter} ${direction}`
+   - For 'ND A'/'ND B'/'ND C': `Nota de Debito ${letter} ${direction}`
+   - For plain 'NC'/'ND' (backward compat): `Nota de Credito ${direction}` / `Nota de Debito ${direction}`
+   - For 'LP': `Liquidacion de Premio ${direction}`
+8. Run `verifier "file-naming"` then `verifier "parser"` (expect pass)
+
+### Task 6: Reprocessing support (stores + scanner)
+**Linear Issue:** [ADV-114](https://linear.app/lw-claude/issue/ADV-114/reprocessing-support-re-extract-files-moved-back-to-entrada)
+
+**Context:** When the user moves a previously-processed file from a subfolder back to Entrada, the system should re-extract it and update the existing spreadsheet row rather than treating it as a duplicate. This enables bulk reprocessing (e.g., to populate tipoDeCambio for all existing documents). The file must also be re-sorted to the correct year/month folder and renamed with the current naming convention.
+
+**Flow:** File enters Entrada → `markFileProcessing` updates tracking row (already works) → Gemini extracts → store detects fileId already in sheet → updates existing row → scanner sorts/renames file to correct folder.
+
+1. Write tests in `src/processing/storage/factura-store.test.ts`:
+   - Factura with fileId already in sheet → returns `{stored: true, updated: true}`, row data updated via `batchUpdate`
+   - Factura with fileId NOT in sheet, no business key match → normal insert (existing behavior)
+   - Factura with fileId NOT in sheet, business key matches different fileId → `{stored: false, existingFileId}` (existing duplicate behavior)
+2. Write tests in `src/processing/storage/pago-store.test.ts`:
+   - Same three scenarios as factura
+3. Run `verifier "factura-store"` (expect fail)
+4. Add `findRowByFileId(spreadsheetId, sheetName, fileId)` utility (in stores or shared):
+   - Read column B (fileId column) from sheet
+   - Return `{found: true, rowIndex: number}` or `{found: false}`
+   - rowIndex is 1-indexed (for spreadsheet API ranges)
+5. Update `storeFactura` in `src/processing/storage/factura-store.ts`:
+   - BEFORE the business key duplicate check, call `findRowByFileId`
+   - If found: build updated row (same format as new insert), call `batchUpdate` to overwrite the existing row, return `{stored: true, updated: true}`
+   - If not found: proceed to existing `isDuplicateFactura` check (no change)
+6. Update `storePago` in `src/processing/storage/pago-store.ts`:
+   - Same pattern: `findRowByFileId` before `isDuplicatePago`
+   - If found: build updated row, `batchUpdate`, return `{stored: true, updated: true}`
+7. Add `updated?: boolean` to `StoreResult` type in `src/types/index.ts`
+8. Update scanner branches for ALL document types (factura_emitida, factura_recibida, pago_recibido, pago_enviado):
+   - When `storeResult.value.stored === true` (whether new or updated), always call `sortAndRenameDocument` to move and rename the file
+   - The existing code already does this — `sortAndRenameDocument` is called for `stored === true`, the `else` branch (duplicate) handles `stored === false`
+   - **Verify** that `sortAndRenameDocument` works correctly when the file is in Entrada (not in a year/month folder) — it should, since `sortDocument` moves from current parent to target folder
+9. Run `verifier` (expect pass)
+
+### Task 7: Better duplicate replaces existing (pagos)
 **Linear Issue:** [ADV-112](https://linear.app/lw-claude/issue/ADV-112/better-duplicate-replaces-existing-pagos)
+
+**Context:** When a DIFFERENT file contains the same transaction (same fecha+importe+cuit but different fileId), compare quality. If new is better, replace the existing entry. This is separate from reprocessing (Task 6) which handles same-fileId re-extraction.
 
 1. Write tests in `src/processing/storage/pago-store.test.ts`:
-   - New pago with tipoDeCambio vs existing without → returns `{stored: true, replacedFileId: existingFileId}` (new is better)
-   - New pago without tipoDeCambio vs existing with → returns `{stored: false, existingFileId}` (existing is better, current behavior)
-   - New pago identical quality → returns `{stored: false, existingFileId}` (existing wins on tie)
-   - New pago with more populated counterparty fields vs existing with fewer → new wins
+   - Different fileId, same business key, new has tipoDeCambio, existing doesn't → returns `{stored: true, replacedFileId: existingFileId}`
+   - Different fileId, same business key, existing has tipoDeCambio, new doesn't → returns `{stored: false, existingFileId}` (existing wins)
+   - Different fileId, same business key, equal quality → returns `{stored: false, existingFileId}` (existing wins on tie)
 2. Run `verifier "pago-store"` (expect fail)
-3. Add `isQualityBetter(newPago, existingRowData)` function to `src/processing/storage/pago-store.ts`:
-   - Compare quality signals in priority order: (1) has tipoDeCambio > doesn't, (2) has non-empty counterparty CUIT > empty, (3) higher confidence > lower
+3. Update `isDuplicatePago` to also return `existingRowIndex` (the 1-indexed row number for batchUpdate)
+4. Add `isQualityBetter(newPago, existingRowData)` function to `src/processing/storage/pago-store.ts`:
+   - Compare quality signals: (1) has tipoDeCambio > doesn't, (2) has non-empty counterparty CUIT > empty, (3) higher confidence > lower
    - Return `'better' | 'worse' | 'equal'`
-   - Existing row data available from duplicate cache/check (columns A:H plus new tipoDeCambio columns)
-4. Modify `storePago` flow: when duplicate detected AND new is better quality:
-   - Instead of returning `{stored: false}`, proceed to update the existing spreadsheet row via `batchUpdate`
-   - Return `{stored: true, replacedFileId: existingFileId}` (new return variant)
-5. Add `replacedFileId?: string` to `StoreResult` type in `src/types/index.ts`
-6. Update duplicate cache read range from `A:H` to `A:Q` to include new tipoDeCambio columns
-7. Run `verifier "pago-store"` (expect pass)
-
-### Task 6: Scanner support for duplicate replacement
-**Linear Issue:** [ADV-112](https://linear.app/lw-claude/issue/ADV-112/better-duplicate-replaces-existing-pagos)
-
-1. Write tests or verify existing scanner test coverage for the replacement path
-2. Update scanner duplicate branches for `pago_recibido` and `pago_enviado` (lines ~1141-1186, ~1260-1305):
+5. Modify `storePago`: when duplicate detected (after reprocessing check from Task 6):
+   - If quality is better: build new row, `batchUpdate` to overwrite existing row, return `{stored: true, replacedFileId: existingFileId}`
+   - If worse or equal: return `{stored: false, existingFileId}` (current behavior)
+6. Add `replacedFileId?: string` to `StoreResult` type in `src/types/index.ts`
+7. Update duplicate cache read range from `A:H` to full column range to include tipoDeCambio columns for quality comparison
+8. Update scanner duplicate branches for `pago_recibido` and `pago_enviado`:
    - Check `storeResult.value.replacedFileId`: if present, the new file replaced an existing one
-   - Move the OLD file (replacedFileId) to Duplicado folder instead of the new file
-   - Move the NEW file to the year/month folder (normal storage path)
-   - Update dashboard: new file gets `'success'` status; old file gets `'duplicate'` status with `originalFileId` pointing to new file
-   - Log the replacement event
-3. If `storeResult.value.replacedFileId` is absent, keep current behavior (move new file to Duplicado)
-4. Run `verifier` (expect pass)
+   - Move the OLD file (replacedFileId) to Duplicado folder
+   - Sort/rename the NEW file to correct year/month folder (call `sortAndRenameDocument`)
+   - Update dashboard: new file gets `'success'` status; old file needs a tracking entry with `'duplicate'` status
+9. Run `verifier "pago-store"` (expect pass)
 
-### Task 7: Documentation
+### Task 8: Documentation
 **Linear Issue:** [ADV-110](https://linear.app/lw-claude/issue/ADV-110/schema-migration-docs-for-tipodecambio-columns)
 
 1. Update `SPREADSHEET_FORMAT.md`:
@@ -178,9 +235,12 @@
    - Add tipoDeCambio + importeEnPesos columns to Pagos Enviados and Pagos Recibidos (17 cols A:Q) tables
    - Update column counts
    - Update Cross-Currency Matching section to mention same-currency support
+   - Document reprocessing behavior
 2. Update `CLAUDE.md`:
    - Update column counts in SPREADSHEETS section
+   - Update TipoComprobante values (add NC A/B/C, ND A/B/C)
    - Note the matching fix (same-currency support)
+   - Document reprocessing capability
 
 ## Post-Implementation Checklist
 
@@ -191,26 +251,29 @@
 
 ## Plan Summary
 
-**Objective:** Extract exchange rate data from documents, fix USD-USD matching, and enable smarter duplicate replacement
+**Objective:** Extract exchange rate data, fix USD-USD matching, enable file reprocessing, smarter duplicates, and descriptive factura filenames
 
-**Request:** Extract and store tipo de cambio from COMEX pagos and Factura E documents. Fix the matching bug where USD pagos can't match USD facturas because the matcher assumes all pagos are ARS. Implement "better duplicate replaces existing" so higher-quality documents aren't discarded.
+**Request:** (1) Extract and store tipo de cambio from COMEX pagos and Factura E. (2) Fix same-currency matching bug (USD↔USD). (3) Enable reprocessing: moving a file back to Entrada re-extracts, updates the row, and re-sorts/renames. (4) Better duplicate replacement for pagos. (5) Factura filenames include comprobante letter ("Factura C Emitida", "Nota de Credito A Emitida").
 
-**Linear Issues:** ADV-108, ADV-109, ADV-110, ADV-111, ADV-112
+**Linear Issues:** ADV-108, ADV-109, ADV-110, ADV-111, ADV-112, ADV-113, ADV-114
 
-**Approach:** Three interconnected improvements: (1) Add tipoDeCambio/importeEnPesos fields through the full extraction→storage pipeline with schema migration for existing spreadsheets. (2) Fix `amountsMatchCrossCurrency` by adding a `pagoMoneda` parameter — when currencies match, use direct comparison instead of exchange rate conversion. (3) Add quality comparison to pago duplicate detection so a document with more data (e.g., tipoDeCambio, signed status) replaces a less complete one.
+**Approach:** Five interconnected improvements: (1) tipoDeCambio through the full extraction→storage pipeline with schema migration. (2) Fix `amountsMatchCrossCurrency` with `pagoMoneda` parameter — same-currency uses direct comparison. (3) Store functions check fileId before business key — same fileId updates row (reprocessing), different fileId checks quality (duplicate). (4) Quality comparison for pago duplicates. (5) Expand `TipoComprobante` to carry NC/ND letter variants, update prompts and filename generation.
 
 **Scope:**
-- Tasks: 7
-- Files affected: ~15
+- Tasks: 8
+- Files affected: ~18
 - New tests: yes
 
 **Key Decisions:**
-- tipoDeCambio columns appended at end of each sheet to avoid breaking existing column indices
-- Same-currency matching (USD-USD) uses direct `amountsMatch()` — no exchange rate needed
-- Duplicate quality comparison uses tipoDeCambio presence as primary signal, counterparty CUIT presence as secondary
-- Only pago duplicates get replacement logic initially (facturas have stronger business keys — nroFactura — making quality differences rarer)
+- tipoDeCambio columns appended at end of each sheet to avoid breaking column indices
+- Reprocessing check (same fileId) runs BEFORE business key duplicate check — always updates the row
+- Better duplicate (different fileId, same business key) only for pagos initially
+- `TipoComprobante` expanded with backward-compatible values ('NC' still valid alongside 'NC A')
+- Same-currency matching uses direct `amountsMatch()` — no exchange rate needed
+- All matching and store changes apply to both ingresos and egresos (shared code)
 
 **Risks/Considerations:**
-- Duplicate replacement involves multiple atomic operations (update row, move old file, move new file) — partial failures must be handled gracefully
-- Duplicate cache read range expansion (A:H → A:Q) slightly increases memory usage per scan
-- Exchange rate tests need careful update — the function signature change affects all call sites and test mocks
+- Reprocessing bulk files: moving many files to Entrada at once could trigger long processing runs — existing queue handles this but scan duration may be long
+- `TipoComprobante` expansion: old rows in spreadsheets have 'NC', new rows have 'NC A' — acceptable, no migration needed since both are valid display values
+- Duplicate replacement involves multiple operations (update row, move old file, sort new file) — partial failures need graceful handling
+- `findRowByFileId` adds one API call per store operation — acceptable since it's a simple column read, and can share the data already fetched by `isDuplicate*`
