@@ -144,6 +144,7 @@ export class FacturaPagoMatcher {
         factura.moneda,
         factura.fechaEmision,
         pago.importePagado,
+        pago.moneda,
         this.crossCurrencyTolerancePercent
       );
 

@@ -178,6 +178,78 @@ describe('exchange-rate', () => {
       vi.clearAllMocks();
     });
 
+    describe('same-currency matching (ADV-111)', () => {
+      it('USD factura + USD pago with matching amounts → same-currency, no exchange rate', () => {
+        // No exchange rate cache needed — should use direct comparison
+        const result = amountsMatchCrossCurrency(
+          100,
+          'USD',
+          '2024-01-15',
+          100,
+          'USD',
+          5
+        );
+        expect(result.matches).toBe(true);
+        expect(result.isCrossCurrency).toBe(false);
+        expect(result.rate).toBeUndefined();
+        expect(result.expectedArs).toBeUndefined();
+        expect(result.cacheMiss).toBeUndefined();
+      });
+
+      it('USD factura + USD pago with non-matching amounts → no match, not cross-currency', () => {
+        const result = amountsMatchCrossCurrency(
+          100,
+          'USD',
+          '2024-01-15',
+          200,
+          'USD',
+          5
+        );
+        expect(result.matches).toBe(false);
+        expect(result.isCrossCurrency).toBe(false);
+      });
+
+      it('ARS factura + ARS pago → exact match (unchanged behavior)', () => {
+        const result = amountsMatchCrossCurrency(
+          1210,
+          'ARS',
+          '2024-01-15',
+          1210,
+          'ARS',
+          5
+        );
+        expect(result.matches).toBe(true);
+        expect(result.isCrossCurrency).toBe(false);
+      });
+
+      it('USD factura + ARS pago → cross-currency behavior (uses exchange rate)', async () => {
+        // Pre-populate cache
+        const { setExchangeRateCache: setCache } = await import('./exchange-rate.js');
+        setCache('2024-01-15', { fecha: '2024-01-15', compra: 800, venta: 850 });
+
+        const result = amountsMatchCrossCurrency(
+          100,
+          'USD',
+          '2024-01-15',
+          85000,
+          'ARS',
+          5
+        );
+        expect(result.matches).toBe(true);
+        expect(result.isCrossCurrency).toBe(true);
+        expect(result.rate).toBe(850);
+      });
+
+      it('USD factura + USD pago does not fetch exchange rate', () => {
+        // global.fetch should not be called for same-currency USD matching
+        global.fetch = vi.fn();
+
+        amountsMatchCrossCurrency(100, 'USD', '2024-01-15', 100, 'USD', 5);
+
+        expect(global.fetch).not.toHaveBeenCalled();
+      });
+    });
+
     // Bug #3: Fix floating-point precision errors
     it('matches amounts with proper monetary rounding', async () => {
       const mockRate: ExchangeRate = {
@@ -199,6 +271,7 @@ describe('exchange-rate', () => {
         'USD',
         '2025-01-15',
         125000.00,
+        'ARS',
         5 // 5% tolerance
       );
 
@@ -228,6 +301,7 @@ describe('exchange-rate', () => {
         'USD',
         '2025-01-16',
         124987.50,
+        'ARS',
         5
       );
 
@@ -255,6 +329,7 @@ describe('exchange-rate', () => {
         'USD',
         '2025-01-17',
         1537.50,
+        'ARS',
         5
       );
 
@@ -283,6 +358,7 @@ describe('exchange-rate', () => {
         'USD',
         '2025-01-20',
         12866.31,
+        'ARS',
         5
       );
 
@@ -312,6 +388,7 @@ describe('exchange-rate', () => {
         'USD',
         '2025-01-21',
         9715.06,
+        'ARS',
         5
       );
 

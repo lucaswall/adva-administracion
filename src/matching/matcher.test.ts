@@ -837,6 +837,47 @@ describe('FacturaPagoMatcher cross-currency matching (USD→ARS)', () => {
     expect(matches.length).toBe(0);
   });
 
+  it('matches USD factura with USD pago using direct comparison (no exchange rate)', () => {
+    // USD → USD: same currency, should use amountsMatch directly without exchange rate
+    // No exchange rate cached — if it tried to use cross-currency, it would fail
+    const pagoUsd: Pago = {
+      fileId: 'pago-usd1',
+      fileName: 'pago-usd1.pdf',
+      banco: 'BBVA',
+      fechaPago: '2024-01-17',
+      importePagado: 100, // exact match to usdFactura.importeTotal
+      moneda: 'USD',
+      processedAt: '2024-01-17T10:00:00Z',
+      confidence: 1.0,
+      needsReview: false
+    };
+
+    const matches = matcher.findMatches(pagoUsd, [usdFactura]);
+    expect(matches.length).toBe(1);
+    if (matches.length > 0) {
+      // Not a cross-currency match
+      expect(matches[0].reasons.some(r => r.includes('Cross-currency'))).toBe(false);
+      expect(matches[0].reasons.some(r => r.includes('Amount match'))).toBe(true);
+    }
+  });
+
+  it('does not match USD factura with USD pago when amounts differ', () => {
+    const pagoUsd: Pago = {
+      fileId: 'pago-usd2',
+      fileName: 'pago-usd2.pdf',
+      banco: 'BBVA',
+      fechaPago: '2024-01-17',
+      importePagado: 200, // different amount
+      moneda: 'USD',
+      processedAt: '2024-01-17T10:00:00Z',
+      confidence: 1.0,
+      needsReview: false
+    };
+
+    const matches = matcher.findMatches(pagoUsd, [usdFactura]);
+    expect(matches.length).toBe(0);
+  });
+
   it('still uses exact match for ARS facturas (no cross-currency)', () => {
     // No HTTP mocks needed for ARS matching
     const arsFactura: Factura & { row: number } = {

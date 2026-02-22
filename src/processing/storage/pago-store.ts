@@ -5,13 +5,148 @@
 
 import type { Result, Pago, StoreResult } from '../../types/index.js';
 import type { ScanContext } from '../scanner.js';
-import { appendRowsWithLinks, sortSheet, getValues, getSpreadsheetTimezone, type CellValueOrLink, type CellDate } from '../../services/sheets.js';
+import { appendRowsWithLinks, sortSheet, getValues, batchUpdate, getSpreadsheetTimezone, type CellValueOrLink, type CellDate, type CellValue, type CellNumber } from '../../services/sheets.js';
 import { formatUSCurrency, parseNumber } from '../../utils/numbers.js';
 import { generatePagoFileName } from '../../utils/file-naming.js';
 import { normalizeSpreadsheetDate } from '../../utils/date.js';
 import { info, warn } from '../../utils/logger.js';
 import { getCorrelationId } from '../../utils/correlation.js';
 import { withLock } from '../../utils/concurrency.js';
+
+/**
+ * Builds a flat CellValue[] row for batchUpdate (reprocessing or replacement)
+ *
+ * @param pago - The pago data
+ * @param documentType - The document type
+ * @param renamedFileName - The renamed filename
+ * @returns Flat row values
+ */
+function buildPagoRow(
+  pago: Pago,
+  documentType: 'pago_enviado' | 'pago_recibido',
+  renamedFileName: string
+): CellValue[] {
+  const tipoDeCambioVal: CellValue = pago.tipoDeCambio ?? '';
+  const importeEnPesosVal: CellValue = pago.importeEnPesos ?? '';
+
+  if (documentType === 'pago_enviado') {
+    return [
+      pago.fechaPago,                                     // A - date string
+      pago.fileId,                                        // B
+      renamedFileName,                                    // C - text only
+      pago.banco,                                         // D
+      formatUSCurrency(pago.importePagado),               // E
+      pago.moneda || 'ARS',                               // F
+      pago.referencia || '',                              // G
+      pago.cuitBeneficiario || '',                        // H
+      pago.nombreBeneficiario || '',                      // I
+      pago.concepto || '',                                // J
+      pago.processedAt,                                   // K
+      pago.confidence,                                    // L
+      pago.needsReview ? 'YES' : 'NO',                    // M
+      pago.matchedFacturaFileId || '',                    // N
+      pago.matchConfidence || '',                         // O
+      tipoDeCambioVal,                                    // P
+      importeEnPesosVal,                                  // Q
+    ];
+  } else {
+    return [
+      pago.fechaPago,                                     // A - date string
+      pago.fileId,                                        // B
+      renamedFileName,                                    // C - text only
+      pago.banco,                                         // D
+      formatUSCurrency(pago.importePagado),               // E
+      pago.moneda || 'ARS',                               // F
+      pago.referencia || '',                              // G
+      pago.cuitPagador || '',                             // H
+      pago.nombrePagador || '',                           // I
+      pago.concepto || '',                                // J
+      pago.processedAt,                                   // K
+      pago.confidence,                                    // L
+      pago.needsReview ? 'YES' : 'NO',                    // M
+      pago.matchedFacturaFileId || '',                    // N
+      pago.matchConfidence || '',                         // O
+      tipoDeCambioVal,                                    // P
+      importeEnPesosVal,                                  // Q
+    ];
+  }
+}
+
+/**
+ * Finds the spreadsheet row index of a document by its fileId (column B)
+ *
+ * @param spreadsheetId - The spreadsheet ID
+ * @param sheetName - The sheet name
+ * @param fileId - Google Drive file ID to search for
+ * @returns Row found result with 1-indexed rowIndex, or not found
+ */
+async function findRowByFileId(
+  spreadsheetId: string,
+  sheetName: string,
+  fileId: string
+): Promise<{ found: true; rowIndex: number } | { found: false }> {
+  const rowsResult = await getValues(spreadsheetId, `${sheetName}!B:B`);
+  if (!rowsResult.ok || rowsResult.value.length <= 1) {
+    return { found: false };
+  }
+  // Skip header row (index 0 = row 1 in spreadsheet)
+  for (let i = 1; i < rowsResult.value.length; i++) {
+    const row = rowsResult.value[i];
+    if (row && String(row[0]) === fileId) {
+      return { found: true, rowIndex: i + 1 }; // 1-indexed spreadsheet row
+    }
+  }
+  return { found: false };
+}
+
+/**
+ * Compares quality between a new pago and an existing spreadsheet row
+ *
+ * Quality signals (in order of priority):
+ * 1. Has tipoDeCambio > doesn't have tipoDeCambio
+ * 2. Has counterparty CUIT > doesn't have CUIT
+ * 3. Higher confidence > lower confidence
+ *
+ * @param newPago - The new pago being stored
+ * @param existingRowData - The existing row data from spreadsheet
+ * @param documentType - The document type (to determine which CUIT to use)
+ * @returns 'better' | 'worse' | 'equal'
+ */
+function isQualityBetter(
+  newPago: Pago,
+  existingRowData: CellValue[],
+  documentType: 'pago_enviado' | 'pago_recibido'
+): 'better' | 'worse' | 'equal' {
+  // Column P (index 15): tipoDeCambio
+  const existingTipoDeCambio = parseNumber(String(existingRowData[15] ?? '')) ?? 0;
+  // Column H (index 7): counterparty CUIT
+  const existingCuit = existingRowData[7] ? String(existingRowData[7]) : '';
+  // Column L (index 11): confidence
+  const existingConfidence = parseNumber(String(existingRowData[11] ?? '0')) ?? 0;
+
+  const newCuit = documentType === 'pago_enviado'
+    ? (newPago.cuitBeneficiario || '')
+    : (newPago.cuitPagador || '');
+  const newConfidence = newPago.confidence;
+
+  // Signal 1: Has tipoDeCambio
+  const newHasTipoDeCambio = (newPago.tipoDeCambio ?? 0) > 0;
+  const existingHasTipoDeCambio = existingTipoDeCambio > 0;
+  if (newHasTipoDeCambio && !existingHasTipoDeCambio) return 'better';
+  if (!newHasTipoDeCambio && existingHasTipoDeCambio) return 'worse';
+
+  // Signal 2: Has CUIT
+  const existingHasCuit = existingCuit !== '';
+  const newHasCuit = newCuit !== '';
+  if (newHasCuit && !existingHasCuit) return 'better';
+  if (!newHasCuit && existingHasCuit) return 'worse';
+
+  // Signal 3: Confidence (only compared when above signals are equal)
+  if (newConfidence > existingConfidence + 0.001) return 'better';
+  if (newConfidence < existingConfidence - 0.001) return 'worse';
+
+  return 'equal';
+}
 
 /**
  * Checks if a pago already exists in the sheet
@@ -21,7 +156,7 @@ import { withLock } from '../../utils/concurrency.js';
  * @param fecha - Payment date
  * @param importePagado - Amount paid
  * @param cuit - CUIT of counterparty (pagador or beneficiario)
- * @returns Duplicate check result
+ * @returns Duplicate check result with row index for potential replacement
  */
 async function isDuplicatePago(
   spreadsheetId: string,
@@ -29,8 +164,9 @@ async function isDuplicatePago(
   fecha: string,
   importePagado: number,
   cuit: string
-): Promise<{ isDuplicate: boolean; existingFileId?: string }> {
-  const rowsResult = await getValues(spreadsheetId, `${sheetName}!A:H`);
+): Promise<{ isDuplicate: boolean; existingFileId?: string; existingRowIndex?: number; existingRowData?: CellValue[] }> {
+  // Extended range to A:Q to support quality comparison (includes tipoDeCambio at col P)
+  const rowsResult = await getValues(spreadsheetId, `${sheetName}!A:Q`);
   if (!rowsResult.ok || rowsResult.value.length <= 1) {
     return { isDuplicate: false };
   }
@@ -55,7 +191,12 @@ async function isDuplicatePago(
     if (rowFecha === fecha &&
         Math.abs(rowImporte - importePagado) < 0.01 &&
         rowCuit === cuit) {
-      return { isDuplicate: true, existingFileId: String(rowFileId) };
+      return {
+        isDuplicate: true,
+        existingFileId: String(rowFileId),
+        existingRowIndex: i + 1, // 1-indexed
+        existingRowData: row,
+      };
     }
   }
   return { isDuplicate: false };
@@ -85,8 +226,41 @@ export async function storePago(
   const lockKey = `store:pago:${pago.fechaPago}:${pago.importePagado}:${counterpartyCuit}`;
 
   return withLock(lockKey, async () => {
-    // Use cache if available, otherwise API
-    const dupeCheck = context?.duplicateCache
+    // REPROCESSING CHECK: If same fileId already exists, update the row in place
+    const fileIdCheck = await findRowByFileId(spreadsheetId, sheetName, pago.fileId);
+    if (fileIdCheck.found) {
+      const renamedFileName = generatePagoFileName(pago, documentType);
+      const updateRow = buildPagoRow(pago, documentType, renamedFileName);
+      const updateResult = await batchUpdate(spreadsheetId, [{
+        range: `${sheetName}!A${fileIdCheck.rowIndex}:Q${fileIdCheck.rowIndex}`,
+        values: [updateRow],
+      }]);
+      if (!updateResult.ok) {
+        throw updateResult.error;
+      }
+
+      info('Pago reprocessed (existing row updated)', {
+        module: 'storage',
+        phase: 'pago',
+        fileId: pago.fileId,
+        documentType,
+        spreadsheet: sheetName,
+        rowIndex: fileIdCheck.rowIndex,
+        correlationId: getCorrelationId(),
+      });
+
+      if (context) {
+        context.sortBatch.addPendingSort(spreadsheetId, sheetName, 0, true);
+      } else {
+        await sortSheet(spreadsheetId, sheetName, 0, true);
+      }
+
+      return { stored: true, updated: true };
+    }
+
+    // DUPLICATE CHECK (business key): Use cache for fast non-duplicate detection.
+    // If cache reports a duplicate, always fall through to API to get full row data for quality comparison.
+    const cacheHit = context?.duplicateCache
       ? context.duplicateCache.isDuplicatePago(
           spreadsheetId,
           sheetName,
@@ -94,15 +268,52 @@ export async function storePago(
           pago.importePagado,
           counterpartyCuit
         )
-      : await isDuplicatePago(
-          spreadsheetId,
-          sheetName,
-          pago.fechaPago,
-          pago.importePagado,
-          counterpartyCuit
-        );
+      : null;
+
+    const dupeCheck: { isDuplicate: boolean; existingFileId?: string; existingRowIndex?: number; existingRowData?: CellValue[] } =
+      (cacheHit === null || cacheHit.isDuplicate)
+        ? await isDuplicatePago(
+            spreadsheetId,
+            sheetName,
+            pago.fechaPago,
+            pago.importePagado,
+            counterpartyCuit
+          )
+        : cacheHit;
 
     if (dupeCheck.isDuplicate) {
+      // QUALITY COMPARISON: If new document is better, replace the existing one
+      if (dupeCheck.existingRowData && dupeCheck.existingRowIndex) {
+        const quality = isQualityBetter(pago, dupeCheck.existingRowData, documentType);
+        if (quality === 'better') {
+          const renamedFileName = generatePagoFileName(pago, documentType);
+          const updateRow = buildPagoRow(pago, documentType, renamedFileName);
+          const updateResult = await batchUpdate(spreadsheetId, [{
+            range: `${sheetName}!A${dupeCheck.existingRowIndex}:Q${dupeCheck.existingRowIndex}`,
+            values: [updateRow],
+          }]);
+          if (!updateResult.ok) {
+            throw updateResult.error;
+          }
+
+          info('Better quality pago replaced existing', {
+            module: 'storage',
+            phase: 'pago',
+            newFileId: pago.fileId,
+            replacedFileId: dupeCheck.existingFileId,
+            correlationId: getCorrelationId(),
+          });
+
+          if (context) {
+            context.sortBatch.addPendingSort(spreadsheetId, sheetName, 0, true);
+          } else {
+            await sortSheet(spreadsheetId, sheetName, 0, true);
+          }
+
+          return { stored: true, replacedFileId: dupeCheck.existingFileId };
+        }
+      }
+
       warn('Duplicate pago detected, skipping', {
         module: 'storage',
         phase: 'pago',
@@ -125,8 +336,16 @@ export async function storePago(
   // Create CellDate for proper date formatting
   const fechaPagoDate: CellDate = { type: 'date', value: pago.fechaPago };
 
+  // Validate tipoDeCambio and importeEnPesos as CellNumber or empty string
+  const tipoDeCambioCell: CellNumber | '' = pago.tipoDeCambio
+    ? { type: 'number', value: pago.tipoDeCambio }
+    : '';
+  const importeEnPesosCell: CellNumber | '' = pago.importeEnPesos
+    ? { type: 'number', value: pago.importeEnPesos }
+    : '';
+
   if (documentType === 'pago_enviado') {
-    // Pagos Enviados: Only beneficiario info (columns A:O)
+    // Pagos Enviados: Only beneficiario info (columns A:Q)
     row = [
       fechaPagoDate,                       // A - proper date cell
       pago.fileId,                         // B
@@ -143,10 +362,12 @@ export async function storePago(
       pago.needsReview ? 'YES' : 'NO',     // M
       pago.matchedFacturaFileId || '',     // N
       pago.matchConfidence || '',          // O
+      tipoDeCambioCell,                    // P
+      importeEnPesosCell,                  // Q
     ];
-    range = `${sheetName}!A:O`;
+    range = `${sheetName}!A:Q`;
   } else {
-    // Pagos Recibidos: Only pagador info (columns A:O)
+    // Pagos Recibidos: Only pagador info (columns A:Q)
     row = [
       fechaPagoDate,                       // A - proper date cell
       pago.fileId,                         // B
@@ -163,8 +384,10 @@ export async function storePago(
       pago.needsReview ? 'YES' : 'NO',     // M
       pago.matchedFacturaFileId || '',     // N
       pago.matchConfidence || '',          // O
+      tipoDeCambioCell,                    // P
+      importeEnPesosCell,                  // Q
     ];
-    range = `${sheetName}!A:O`;
+    range = `${sheetName}!A:Q`;
   }
 
   // Get spreadsheet timezone for proper timestamp formatting

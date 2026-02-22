@@ -13,7 +13,35 @@ import {
   CONTROL_RESUMENES_TARJETA_SHEET,
   CONTROL_RESUMENES_BROKER_SHEET,
   MOVIMIENTOS_BANCARIO_SHEET,
+  FACTURA_EMITIDA_HEADERS,
+  FACTURA_RECIBIDA_HEADERS,
+  PAGO_ENVIADO_HEADERS,
+  PAGO_RECIBIDO_HEADERS,
 } from './spreadsheet-headers.js';
+
+describe('tipoDeCambio headers', () => {
+  it('FACTURA_EMITIDA_HEADERS has 19 elements, last is tipoDeCambio', () => {
+    expect(FACTURA_EMITIDA_HEADERS).toHaveLength(19);
+    expect(FACTURA_EMITIDA_HEADERS[18]).toBe('tipoDeCambio');
+  });
+
+  it('FACTURA_RECIBIDA_HEADERS has 20 elements, last is tipoDeCambio', () => {
+    expect(FACTURA_RECIBIDA_HEADERS).toHaveLength(20);
+    expect(FACTURA_RECIBIDA_HEADERS[19]).toBe('tipoDeCambio');
+  });
+
+  it('PAGO_ENVIADO_HEADERS has 17 elements, last two are tipoDeCambio and importeEnPesos', () => {
+    expect(PAGO_ENVIADO_HEADERS).toHaveLength(17);
+    expect(PAGO_ENVIADO_HEADERS[15]).toBe('tipoDeCambio');
+    expect(PAGO_ENVIADO_HEADERS[16]).toBe('importeEnPesos');
+  });
+
+  it('PAGO_RECIBIDO_HEADERS has 17 elements, last two are tipoDeCambio and importeEnPesos', () => {
+    expect(PAGO_RECIBIDO_HEADERS).toHaveLength(17);
+    expect(PAGO_RECIBIDO_HEADERS[15]).toBe('tipoDeCambio');
+    expect(PAGO_RECIBIDO_HEADERS[16]).toBe('importeEnPesos');
+  });
+});
 
 describe('Status Sheet Headers', () => {
   describe('STATUS_HEADERS', () => {

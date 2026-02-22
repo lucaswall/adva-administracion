@@ -25,6 +25,10 @@ export interface StoreResult {
   stored: boolean;
   /** fileId of existing duplicate if skipped */
   existingFileId?: string;
+  /** true if an existing row was updated in place (reprocessing) */
+  updated?: boolean;
+  /** fileId of the existing entry that was replaced by a better-quality document */
+  replacedFileId?: string;
 }
 
 /**
@@ -68,7 +72,7 @@ export type MatchConfidence = 'HIGH' | 'MEDIUM' | 'LOW';
  * ARCA comprobante types
  * LP = Liquidación de Premio (insurance documents)
  */
-export type TipoComprobante = 'A' | 'B' | 'C' | 'E' | 'NC' | 'ND' | 'LP';
+export type TipoComprobante = 'A' | 'B' | 'C' | 'E' | 'NC' | 'NC A' | 'NC B' | 'NC C' | 'ND' | 'ND A' | 'ND B' | 'ND C' | 'LP';
 
 /**
  * Currency types
@@ -91,7 +95,7 @@ export interface Factura {
   fileName: string;
 
   // Comprobante identification
-  /** Type of comprobante (A, B, C, E, NC, ND, LP) */
+  /** Type of comprobante (A, B, C, E, NC, NC A/B/C, ND, ND A/B/C, LP) */
   tipoComprobante: TipoComprobante;
   /** Full invoice number (e.g., "00003-00001957" or "0003-00001957") */
   nroFactura: string;
@@ -119,6 +123,8 @@ export interface Factura {
   importeTotal: number;
   /** Currency */
   moneda: Moneda;
+  /** Exchange rate for USD invoices (AFIP rate at invoice date) */
+  tipoDeCambio?: number;
 
   // Optional
   /** Brief description or concept */
@@ -160,6 +166,10 @@ export interface Pago {
   importePagado: number;
   /** Currency */
   moneda: Moneda;
+  /** Exchange rate for cross-currency payments (bank liquidation rate) */
+  tipoDeCambio?: number;
+  /** Equivalent amount in ARS for cross-currency payments */
+  importeEnPesos?: number;
   /** Transaction reference/ID (if visible) */
   referencia?: string;
 

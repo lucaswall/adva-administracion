@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { validateYear, clearFolderStructureCache, getCachedFolderStructure, checkEnvironmentMarker, migrateArchivosProcesadosHeaders } from './folder-structure.js';
+import { validateYear, clearFolderStructureCache, getCachedFolderStructure, checkEnvironmentMarker, migrateArchivosProcesadosHeaders, migrateTipoDeCambioHeaders } from './folder-structure.js';
 
 // Mock drive.js for environment marker tests
 vi.mock('./drive.js', () => ({
@@ -412,5 +412,129 @@ describe('migrateArchivosProcesadosHeaders', () => {
 
     expect(result.ok).toBe(true);
     expect(setValues).not.toHaveBeenCalled();
+  });
+});
+
+describe('migrateTipoDeCambioHeaders', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  describe('Facturas Emitidas (18→19 cols)', () => {
+    it('adds tipoDeCambio header at column S when 18 columns present', async () => {
+      const headers18 = Array.from({ length: 18 }, (_, i) => `col${i}`);
+      vi.mocked(getValues).mockResolvedValue({ ok: true, value: [headers18] });
+      vi.mocked(setValues).mockResolvedValue({ ok: true, value: 1 });
+
+      const result = await migrateTipoDeCambioHeaders('ingresos-id', 'Facturas Emitidas', 18, 'S', ['tipoDeCambio']);
+
+      expect(result.ok).toBe(true);
+      expect(setValues).toHaveBeenCalledWith('ingresos-id', 'Facturas Emitidas!S1', [['tipoDeCambio']]);
+    });
+
+    it('skips when already 19+ columns', async () => {
+      const headers19 = Array.from({ length: 19 }, (_, i) => `col${i}`);
+      vi.mocked(getValues).mockResolvedValue({ ok: true, value: [headers19] });
+
+      const result = await migrateTipoDeCambioHeaders('ingresos-id', 'Facturas Emitidas', 18, 'S', ['tipoDeCambio']);
+
+      expect(result.ok).toBe(true);
+      expect(setValues).not.toHaveBeenCalled();
+    });
+
+    it('skips when sheet is empty', async () => {
+      vi.mocked(getValues).mockResolvedValue({ ok: true, value: [] });
+
+      const result = await migrateTipoDeCambioHeaders('ingresos-id', 'Facturas Emitidas', 18, 'S', ['tipoDeCambio']);
+
+      expect(result.ok).toBe(true);
+      expect(setValues).not.toHaveBeenCalled();
+    });
+
+    it('returns error when getValues fails', async () => {
+      vi.mocked(getValues).mockResolvedValue({ ok: false, error: new Error('API error') });
+
+      const result = await migrateTipoDeCambioHeaders('ingresos-id', 'Facturas Emitidas', 18, 'S', ['tipoDeCambio']);
+
+      expect(result.ok).toBe(false);
+    });
+
+    it('returns error when setValues fails', async () => {
+      const headers18 = Array.from({ length: 18 }, (_, i) => `col${i}`);
+      vi.mocked(getValues).mockResolvedValue({ ok: true, value: [headers18] });
+      vi.mocked(setValues).mockResolvedValue({ ok: false, error: new Error('Write failed') });
+
+      const result = await migrateTipoDeCambioHeaders('ingresos-id', 'Facturas Emitidas', 18, 'S', ['tipoDeCambio']);
+
+      expect(result.ok).toBe(false);
+    });
+  });
+
+  describe('Facturas Recibidas (19→20 cols)', () => {
+    it('adds tipoDeCambio header at column T when 19 columns present', async () => {
+      const headers19 = Array.from({ length: 19 }, (_, i) => `col${i}`);
+      vi.mocked(getValues).mockResolvedValue({ ok: true, value: [headers19] });
+      vi.mocked(setValues).mockResolvedValue({ ok: true, value: 1 });
+
+      const result = await migrateTipoDeCambioHeaders('egresos-id', 'Facturas Recibidas', 19, 'T', ['tipoDeCambio']);
+
+      expect(result.ok).toBe(true);
+      expect(setValues).toHaveBeenCalledWith('egresos-id', 'Facturas Recibidas!T1', [['tipoDeCambio']]);
+    });
+
+    it('skips when already 20+ columns', async () => {
+      const headers20 = Array.from({ length: 20 }, (_, i) => `col${i}`);
+      vi.mocked(getValues).mockResolvedValue({ ok: true, value: [headers20] });
+
+      const result = await migrateTipoDeCambioHeaders('egresos-id', 'Facturas Recibidas', 19, 'T', ['tipoDeCambio']);
+
+      expect(result.ok).toBe(true);
+      expect(setValues).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('Pagos Enviados/Recibidos (15→17 cols, two new columns)', () => {
+    it('adds tipoDeCambio and importeEnPesos headers at P-Q when 15 columns present', async () => {
+      const headers15 = Array.from({ length: 15 }, (_, i) => `col${i}`);
+      vi.mocked(getValues).mockResolvedValue({ ok: true, value: [headers15] });
+      vi.mocked(setValues).mockResolvedValue({ ok: true, value: 1 });
+
+      const result = await migrateTipoDeCambioHeaders('egresos-id', 'Pagos Enviados', 15, 'P', ['tipoDeCambio', 'importeEnPesos']);
+
+      expect(result.ok).toBe(true);
+      expect(setValues).toHaveBeenCalledWith('egresos-id', 'Pagos Enviados!P1', [['tipoDeCambio', 'importeEnPesos']]);
+    });
+
+    it('skips when already 17+ columns (fully migrated)', async () => {
+      const headers17 = Array.from({ length: 17 }, (_, i) => `col${i}`);
+      vi.mocked(getValues).mockResolvedValue({ ok: true, value: [headers17] });
+
+      const result = await migrateTipoDeCambioHeaders('egresos-id', 'Pagos Enviados', 15, 'P', ['tipoDeCambio', 'importeEnPesos']);
+
+      expect(result.ok).toBe(true);
+      expect(setValues).not.toHaveBeenCalled();
+    });
+
+    it('still migrates when 16 columns present (partial migration — re-runs idempotently)', async () => {
+      const headers16 = Array.from({ length: 16 }, (_, i) => `col${i}`);
+      vi.mocked(getValues).mockResolvedValue({ ok: true, value: [headers16] });
+      vi.mocked(setValues).mockResolvedValue({ ok: true, value: 1 });
+
+      const result = await migrateTipoDeCambioHeaders('egresos-id', 'Pagos Enviados', 15, 'P', ['tipoDeCambio', 'importeEnPesos']);
+
+      expect(result.ok).toBe(true);
+      expect(setValues).toHaveBeenCalledWith('egresos-id', 'Pagos Enviados!P1', [['tipoDeCambio', 'importeEnPesos']]);
+    });
+
+    it('applies same logic for Pagos Recibidos', async () => {
+      const headers15 = Array.from({ length: 15 }, (_, i) => `col${i}`);
+      vi.mocked(getValues).mockResolvedValue({ ok: true, value: [headers15] });
+      vi.mocked(setValues).mockResolvedValue({ ok: true, value: 1 });
+
+      const result = await migrateTipoDeCambioHeaders('ingresos-id', 'Pagos Recibidos', 15, 'P', ['tipoDeCambio', 'importeEnPesos']);
+
+      expect(result.ok).toBe(true);
+      expect(setValues).toHaveBeenCalledWith('ingresos-id', 'Pagos Recibidos!P1', [['tipoDeCambio', 'importeEnPesos']]);
+    });
   });
 });

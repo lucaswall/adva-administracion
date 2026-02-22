@@ -209,7 +209,7 @@ Required fields to extract:
 - issuerName: The NAME of the company/person at the TOP of the document (issuer/emisor)
 - clientName: The NAME of the company/person in the CLIENT section (receptor)
 - allCuits: Array of ALL CUITs found in the document (as strings, 11 digits each, no dashes)
-- tipoComprobante: ONLY the single letter code (A, B, C, E) or two-letter code (NC for Nota de Crédito, ND for Nota de Débito, LP for Liquidación de Premio). DO NOT include the word "FACTURA" - extract ONLY the letter code that follows it. Examples: if the document shows "FACTURA C", extract "C"; if it shows "FACTURA B", extract "B".
+- tipoComprobante: ONLY the letter code (A, B, C, E) or compound code for special types. DO NOT include the word "FACTURA" - extract ONLY the letter code that follows it. Examples: if the document shows "FACTURA C", extract "C"; if it shows "FACTURA B", extract "B". For Notas de Crédito, include the letter: "NC A", "NC B", "NC C". For Notas de Débito, include the letter: "ND A", "ND B", "ND C". For Liquidación de Premio: "LP".
 - nroFactura: Full invoice number combining point of sale and invoice number (format: "XXXXX-XXXXXXXX" or "XXXX-XXXXXXXX"). Example: "00003-00001957" or "0003-00001957". For insurance documents, use "POL-{poliza_number}" format.
 - fechaEmision: Issue date (format as YYYY-MM-DD)
 - importeNeto: Net amount before tax (number)
@@ -219,6 +219,7 @@ Required fields to extract:
 
 Optional fields:
 - concepto: Brief one-line summary describing what the invoice is for. Analyze the line items/services listed in the invoice and summarize them (e.g., "Desarrollo de software para pagina web de ADVA", "Alojamiento y comidas para viaje a Tierra del Fuego", "Servicios de hosting y dominio para portal institucional"). IMPORTANT: Do NOT use tax category labels like "EXENTO", "GRAVADO", "NO GRAVADO" as the concepto - these are tax classifications, not descriptions.
+- tipoDeCambio: Exchange rate for USD invoices (number). Look for "Exchange Rate:", "Tipo de Cambio:", "T.C." Only extract if moneda is USD.
 
 Return ONLY valid JSON in this exact format:
 {
@@ -253,7 +254,7 @@ Example with Consumidor Final (Doc. Receptor):
 Important:
 - Return ONLY the JSON object, no additional text
 - If a field is not visible, omit it from the JSON (except importeIva - set to 0 if not itemized)
-- CRITICAL: tipoComprobante must be ONLY the letter code (A, B, C, E, NC, ND), NOT "FACTURA" or "FACTURA A" - just the letter(s)
+- CRITICAL: tipoComprobante must be ONLY the letter code (A, B, C, E, NC A, NC B, NC C, ND A, ND B, ND C, LP), NOT "FACTURA" or "FACTURA A" - just the code
 - Ensure all dates are in YYYY-MM-DD format
 - Remove dashes, spaces and slashes from CUIT numbers in allCuits array
 - CRITICAL: Argentine number format uses DOTS (.) as thousand separators and COMMA (,) as decimal separator
@@ -303,6 +304,8 @@ Optional fields:
 - cuitBeneficiario: Beneficiary CUIT (11 digits) or DNI (7-8 digits). Remove dashes.
 - nombreBeneficiario: Beneficiary name
 - concepto: Payment description
+- tipoDeCambio: Exchange rate for cross-currency payments (number). Look for "Tipo de Cambio:", "T.C.", "Exchange Rate:". Only extract if payment involves currency conversion.
+- importeEnPesos: Equivalent amount in Argentine Pesos (number). Look for "Importe equivalente en Pesos:", "Total en Pesos". Only extract if tipoDeCambio is present.
 
 NUMBER FORMAT: "2.917.310,00" = 2917310.00 (dots=thousands, comma=decimal)
 

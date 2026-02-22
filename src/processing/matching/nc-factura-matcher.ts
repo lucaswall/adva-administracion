@@ -157,10 +157,13 @@ export async function matchNCsWithFacturas(
   }
 
   // Separate NCs and regular facturas
-  const ncs = facturas.filter(f => f.tipoComprobante === 'NC');
+  // Match both plain 'NC'/'ND' and compound 'NC A'/'ND B' etc.
+  const isNC = (tc: string) => tc === 'NC' || tc.startsWith('NC ');
+  const isND = (tc: string) => tc === 'ND' || tc.startsWith('ND ');
+  const ncs = facturas.filter(f => isNC(f.tipoComprobante));
   const regularFacturas = facturas.filter(f =>
-    f.tipoComprobante !== 'NC' &&
-    f.tipoComprobante !== 'ND' && // Exclude notas de debito
+    !isNC(f.tipoComprobante) &&
+    !isND(f.tipoComprobante) && // Exclude notas de debito
     f.pagada !== 'SI' // Only unpaid facturas
   );
 

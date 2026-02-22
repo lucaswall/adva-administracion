@@ -388,6 +388,7 @@ interface RawFacturaExtraction {
   importeTotal?: number;
   moneda?: string;
   concepto?: string;
+  tipoDeCambio?: number;
 }
 
 /**
@@ -459,6 +460,11 @@ export function parseFacturaResponse(
       const assignment = assignCuitsAndClassify(issuerName, clientName, normalizedCuits);
       actualDocumentType = assignment.documentType;
 
+      // Validate tipoDeCambio: only positive numbers are valid
+      const tipoDeCambio = typeof rawData.tipoDeCambio === 'number' && rawData.tipoDeCambio > 0
+        ? rawData.tipoDeCambio
+        : undefined;
+
       data = {
         tipoComprobante: rawData.tipoComprobante as Factura['tipoComprobante'],
         nroFactura: rawData.nroFactura,
@@ -471,6 +477,7 @@ export function parseFacturaResponse(
         importeIva: rawData.importeIva,
         importeTotal: rawData.importeTotal,
         moneda: rawData.moneda as Factura['moneda'],
+        tipoDeCambio,
         concepto: rawData.concepto,
       };
 
@@ -626,6 +633,25 @@ export function parsePagoResponse(
 
     // Parse JSON
     const data = JSON.parse(jsonStr) as Partial<Pago>;
+
+    // Validate tipoDeCambio: only positive numbers are valid
+    if (data.tipoDeCambio !== undefined) {
+      if (typeof data.tipoDeCambio !== 'number' || data.tipoDeCambio <= 0) {
+        data.tipoDeCambio = undefined;
+      }
+    }
+
+    // Validate importeEnPesos: only positive numbers are valid
+    if (data.importeEnPesos !== undefined) {
+      if (typeof data.importeEnPesos !== 'number' || data.importeEnPesos <= 0) {
+        data.importeEnPesos = undefined;
+      }
+    }
+
+    // importeEnPesos without tipoDeCambio is meaningless — clear it
+    if (data.tipoDeCambio === undefined) {
+      data.importeEnPesos = undefined;
+    }
 
     // Check for required fields
     const requiredFields: (keyof Pago)[] = [

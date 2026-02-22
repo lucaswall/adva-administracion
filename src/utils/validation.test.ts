@@ -609,6 +609,30 @@ describe('validateTipoComprobante', () => {
     expect(validateTipoComprobante('LP')).toBe('LP');
   });
 
+  it('returns valid tipo for NC A', () => {
+    expect(validateTipoComprobante('NC A')).toBe('NC A');
+  });
+
+  it('returns valid tipo for NC B', () => {
+    expect(validateTipoComprobante('NC B')).toBe('NC B');
+  });
+
+  it('returns valid tipo for NC C', () => {
+    expect(validateTipoComprobante('NC C')).toBe('NC C');
+  });
+
+  it('returns valid tipo for ND A', () => {
+    expect(validateTipoComprobante('ND A')).toBe('ND A');
+  });
+
+  it('returns valid tipo for ND B', () => {
+    expect(validateTipoComprobante('ND B')).toBe('ND B');
+  });
+
+  it('returns valid tipo for ND C', () => {
+    expect(validateTipoComprobante('ND C')).toBe('ND C');
+  });
+
   it('returns default A for invalid string', () => {
     expect(validateTipoComprobante('X')).toBe('A');
   });

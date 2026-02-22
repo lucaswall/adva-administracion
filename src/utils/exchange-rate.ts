@@ -302,16 +302,17 @@ export async function prefetchExchangeRates(dates: string[]): Promise<void> {
 /**
  * Compares factura amount with pago amount, handling cross-currency matching
  *
- * For ARS facturas: Uses match with ±1 peso tolerance (amountsMatch)
- * For USD facturas: Converts using historical exchange rate and applies tolerance
+ * For same-currency (ARS/ARS or USD/USD): Uses exact match with ±1 tolerance (amountsMatch)
+ * For cross-currency (USD factura + ARS pago): Converts using historical exchange rate and applies tolerance
  *
- * Note: This function uses cached exchange rates. For USD facturas,
+ * Note: This function uses cached exchange rates. For cross-currency matching,
  * ensure rates are pre-fetched using prefetchExchangeRates() before calling.
  *
  * @param facturaAmount - Invoice total amount (in its original currency)
  * @param facturaMoneda - Invoice currency (ARS or USD)
  * @param facturaFecha - Invoice date (for exchange rate lookup)
- * @param pagoAmount - Payment amount (always in ARS)
+ * @param pagoAmount - Payment amount (in pagoMoneda currency)
+ * @param pagoMoneda - Payment currency (ARS or USD)
  * @param tolerancePercent - Tolerance percentage for cross-currency match (e.g., 5 for 5%)
  * @returns Match result with details
  */
@@ -320,17 +321,18 @@ export function amountsMatchCrossCurrency(
   facturaMoneda: Moneda,
   facturaFecha: string,
   pagoAmount: number,
+  pagoMoneda: Moneda,
   tolerancePercent: number
 ): CrossCurrencyMatchResult {
-  // For ARS facturas, use exact match
-  if (facturaMoneda === 'ARS') {
+  // For same-currency matching (ARS/ARS or USD/USD), use exact match regardless of currency
+  if (facturaMoneda === pagoMoneda) {
     return {
       matches: amountsMatch(facturaAmount, pagoAmount),
       isCrossCurrency: false,
     };
   }
 
-  // For USD facturas, fetch exchange rate from cache and apply tolerance
+  // For cross-currency (USD factura + ARS pago), fetch exchange rate from cache and apply tolerance
   const rateResult = getExchangeRateSync(facturaFecha);
 
   if (!rateResult.ok) {

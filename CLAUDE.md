@@ -541,8 +541,8 @@ ROOT/
 
 See `SPREADSHEET_FORMAT.md` for complete schema.
 
-- **Control de Ingresos**: Facturas Emitidas (18 cols), Pagos Recibidos (15 cols), Retenciones Recibidas (15 cols)
-- **Control de Egresos**: Facturas Recibidas (19 cols), Pagos Enviados (15 cols), Recibos (18 cols)
+- **Control de Ingresos**: Facturas Emitidas (19 cols), Pagos Recibidos (17 cols), Retenciones Recibidas (15 cols)
+- **Control de Egresos**: Facturas Recibidas (20 cols), Pagos Enviados (17 cols), Recibos (18 cols)
 - **Control de Resumenes**: 3 distinct schemas based on document type:
   - `resumen_bancario`: 12 cols (A:L) with `periodo` (YYYY-MM) as first column, `moneda` (ARS/USD), includes `balanceOk` and `balanceDiff` columns for validation
   - `resumen_tarjeta`: 10 cols (A:J) with `periodo` (YYYY-MM) as first column, `tipoTarjeta` (Visa/Mastercard/etc)

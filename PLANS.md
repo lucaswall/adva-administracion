@@ -1,432 +1,455 @@
 # Implementation Plan
 
 **Status:** COMPLETE
-**Branch:** feat/ADV-100-backlog-batch
-**Issues:** ADV-100, ADV-103, ADV-104
 **Created:** 2026-02-22
-**Last Updated:** 2026-02-22
-
-## Summary
-
-This plan implements three operational safety and traceability improvements: (1) environment marker files to prevent cross-environment contamination between staging and production, (2) dual Drive root folder IDs in `.env` for the investigate skill, and (3) distinct duplicate status tracking in the Dashboard's Archivos Procesados sheet.
-
-## Issues
-
-### ADV-100: Environment marker files to prevent cross-environment contamination
-
-**Priority:** High
-**Labels:** Improvement
-**Description:** Both staging and production servers access Google Drive via DRIVE_ROOT_FOLDER_ID, but there's no safeguard against misconfiguration. A staging server could point at the production Drive folder (or vice versa) and corrupt real data. This adds a marker file mechanism in the Drive root folder to detect and prevent mismatches at startup.
-
-**Acceptance Criteria:**
-- [ ] New `ENVIRONMENT` env var required in production (values: `staging` | `production`)
-- [ ] On startup, server checks root Drive folder for `.staging` or `.production` marker file
-- [ ] If no marker exists: creates the correct one and proceeds
-- [ ] If correct marker exists: proceeds normally
-- [ ] If wrong marker exists: refuses to start with clear error
-- [ ] CLAUDE.md updated with new env var and marker file documentation
-- [ ] Tests cover all three scenarios (no marker, correct marker, wrong marker)
-
-### ADV-103: Add staging and production Drive root folder IDs to .env for dual-environment investigation
-
-**Priority:** High
-**Labels:** Improvement
-**Description:** Claude Code can only investigate one Google Drive environment at a time because only a single DRIVE_ROOT_FOLDER_ID is in `.env`. When debugging issues, the user needs to compare staging vs production Drive contents. This adds two new env vars for Claude Code skills only (not server code).
-
-**Acceptance Criteria:**
-- [ ] Two new env vars: `DRIVE_ROOT_FOLDER_ID_PRODUCTION` and `DRIVE_ROOT_FOLDER_ID_STAGING`
-- [ ] Investigate skill reads both vars and asks which environment to target
-- [ ] If only one var is set, uses it without asking
-- [ ] CLAUDE.md ENV VARS table updated with new vars
-- [ ] `.env.example` updated
-
-### ADV-104: Track duplicate files in Dashboard with distinct status and original file reference
-
-**Priority:** High
-**Labels:** Improvement
-**Description:** When a duplicate file is detected and moved to the Duplicado folder, it's recorded in the Dashboard tracking sheet (Archivos Procesados) with status `success` — indistinguishable from normally processed files. The existingFileId is logged but not persisted, making it impossible to trace duplicates from the Dashboard.
-
-**Acceptance Criteria:**
-- [ ] New Column F in Archivos Procesados: `originalFileId` (empty for non-duplicates)
-- [ ] Duplicate files get status `duplicate` instead of `success`
-- [ ] Column F contains the Drive file ID of the original document
-- [ ] SPREADSHEET_FORMAT.md updated with new column
-- [ ] Startup migration: existing sheets get new column F header automatically
-- [ ] Tests cover duplicate tracking with new status and originalFileId column
-
-## Prerequisites
-
-- [ ] On `main` branch with clean working tree
-- [ ] Linear MCP connected
-- [ ] Google Drive MCP available (for testing marker files)
-
-## Implementation Tasks
-
-### Task 1: Add ENVIRONMENT config variable with validation
-
-**Issue:** ADV-100
-**Files:**
-- `src/config.ts` (modify)
-- `src/config.test.ts` (modify)
-- `vitest.config.ts` (modify)
-
-**TDD Steps:**
-
-1. **RED** — Write tests in `src/config.test.ts`:
-   - Test that `ENVIRONMENT` is parsed from env var with values `staging` | `production`
-   - Test that missing `ENVIRONMENT` in production mode (`NODE_ENV=production`) throws descriptive error
-   - Test that `ENVIRONMENT` is optional in development/test modes (defaults to `development`)
-   - Test that invalid `ENVIRONMENT` values are rejected
-   - Follow existing config validation test patterns (lines 27-92 of `config.test.ts`)
-2. **Run verifier** (expect fail — config property doesn't exist yet)
-3. **GREEN** — Implement in `src/config.ts`:
-   - Add `environment: 'development' | 'staging' | 'production'` to the Config interface (near line 158)
-   - Parse `process.env.ENVIRONMENT` with validation (after line 231)
-   - Default to `'development'` when `NODE_ENV` is not `production`
-   - Require it when `NODE_ENV === 'production'`
-   - Add to returned config object (near line 266)
-   - Update `vitest.config.ts` to include `ENVIRONMENT: 'test-env'` or similar in env block
-4. **Run verifier** (expect pass)
-
-**Notes:**
-- The existing `nodeEnv` field stays — `ENVIRONMENT` is a separate concept (server identity vs Node mode)
-- `ENVIRONMENT` is about which Drive folder this server owns, not about Node.js runtime mode
-
-### Task 2: Implement environment marker file check in folder structure
-
-**Issue:** ADV-100
-**Files:**
-- `src/services/folder-structure.ts` (modify)
-- `src/services/folder-structure.test.ts` (modify)
-
-**TDD Steps:**
-
-1. **RED** — Write tests in `src/services/folder-structure.test.ts`:
-   - Test `checkEnvironmentMarker()` function:
-     - When no marker file exists in root folder → creates correct marker (`.staging` or `.production`), returns ok
-     - When correct marker exists → returns ok, does not create anything
-     - When wrong marker exists → returns error with message "Environment mismatch: server is {X} but Drive folder is marked {Y}"
-   - Mock `findByName()` and Drive file creation calls
-   - Follow existing test patterns in the file (Vitest mocks)
-2. **Run verifier** (expect fail)
-3. **GREEN** — Implement `checkEnvironmentMarker()` in `src/services/folder-structure.ts`:
-   - New exported async function: `checkEnvironmentMarker(rootId: string, environment: string): Promise<Result<void, Error>>`
-   - Use `findByName(rootId, '.staging')` and `findByName(rootId, '.production')` to check for existing markers
-   - If no marker: create the correct one using Drive API (create an empty file with the marker name)
-   - If correct marker: return ok
-   - If wrong marker: return error Result with descriptive message
-   - Skip check when `environment === 'development'` (return ok immediately)
-4. **Run verifier** (expect pass)
-
-**Notes:**
-- Marker files are plain empty files named `.staging` or `.production` in the Drive root folder
-- Use `findByName()` from `src/services/drive.ts` for detection (returns `DriveFileInfo | null`)
-- For file creation, use the Drive API to create a minimal file (not a folder) — check existing patterns in `drive.ts` for creating non-folder files, or add a `createFile()` function if needed
-- The function should be called from `discoverFolderStructure()` early, before any folder creation
-
-### Task 3: Wire marker check into server startup
-
-**Issue:** ADV-100
-**Files:**
-- `src/services/folder-structure.ts` (modify — integrate into `discoverFolderStructure()`)
-- `src/server.ts` (no changes needed if integrated into `discoverFolderStructure()`)
-
-**Steps:**
-
-1. Integrate `checkEnvironmentMarker()` call into `discoverFolderStructure()` (line ~630, right after getting `rootId` from config):
-   - Read `config.environment` from `getConfig()`
-   - Call `checkEnvironmentMarker(rootId, config.environment)` before any folder creation
-   - If it returns error, propagate it (will cause `initializeFolderStructure()` in server.ts to throw and abort startup)
-2. **Run verifier** (expect pass — existing tests should still pass, new integration is behind environment check)
-
-**Notes:**
-- The abort-on-mismatch happens naturally: `discoverFolderStructure()` returns `Result`, and `initializeFolderStructure()` in `server.ts:66-72` already throws on error, causing `start()` to catch and `process.exit(1)`
-- No changes to `server.ts` needed — the existing error propagation handles it
-
-### Task 4: Add dual Drive folder IDs for investigation
-
-**Issue:** ADV-103
-**Files:**
-- `.env.example` (modify)
-- `.claude/skills/investigate/SKILL.md` (modify)
-- `CLAUDE.md` (modify)
-
-**Steps (no TDD — config/skill files only, no TypeScript code):**
-
-1. Add to `.env.example`:
-   - `DRIVE_ROOT_FOLDER_ID_PRODUCTION=your_production_drive_root_folder_id`
-   - `DRIVE_ROOT_FOLDER_ID_STAGING=your_staging_drive_root_folder_id`
-   - Add comment explaining these are for Claude Code skills only, not used by server
-2. Update `.claude/skills/investigate/SKILL.md`:
-   - In the context-gathering phase, add a step to check for both `DRIVE_ROOT_FOLDER_ID_PRODUCTION` and `DRIVE_ROOT_FOLDER_ID_STAGING` in `.env`
-   - If both are set, ask the user which environment to investigate (production or staging), then use that folder ID as the root for Drive MCP queries
-   - If only one is set, use it without asking
-   - If neither is set, fall back to `DRIVE_ROOT_FOLDER_ID`
-3. Update `CLAUDE.md` ENV VARS table:
-   - Add `DRIVE_ROOT_FOLDER_ID_PRODUCTION` — No — "Production Drive root folder ID (for Claude Code investigate skill)"
-   - Add `DRIVE_ROOT_FOLDER_ID_STAGING` — No — "Staging Drive root folder ID (for Claude Code investigate skill)"
-
-**Notes:**
-- These vars are NOT loaded by `src/config.ts` — they are read by Claude Code skills directly from `.env`
-- The existing `DRIVE_ROOT_FOLDER_ID` remains unchanged (server runtime var)
-- The Drive MCP service account already has access to both folders
-
-### Task 5: Add originalFileId column to Archivos Procesados schema with startup migration
-
-**Issue:** ADV-104
-**Files:**
-- `src/constants/spreadsheet-headers.ts` (modify)
-- `src/services/folder-structure.ts` (modify — add header migration)
-- `src/services/folder-structure.test.ts` (modify)
-- `SPREADSHEET_FORMAT.md` (modify)
-
-**Migration note:** This adds Column F to the Archivos Procesados sheet in Dashboard Operativo. Existing production/staging sheets have 5 columns (A:E). The startup migration must detect old schema and append the new header.
-
-**TDD Steps:**
-
-1. **RED** — Write tests in `src/services/folder-structure.test.ts`:
-   - Test that `migrateArchivosProcesadosHeaders()` detects 5-column schema and appends Column F header
-   - Test that 6-column schema (already migrated) is left untouched
-   - Test that empty sheet gets full 6-column headers (handled by existing `ensureSheetsExist`)
-   - Mock `getValues()` and `setValues()` calls
-2. **Run verifier** (expect fail)
-3. **GREEN** — Implement:
-   - In `src/constants/spreadsheet-headers.ts`: Add `'originalFileId'` to `ARCHIVOS_PROCESADOS_HEADERS` array (after `'status'`)
-   - In `src/services/folder-structure.ts`: Add `migrateArchivosProcesadosHeaders(dashboardId)` function
-     - Read header row: `getValues(dashboardId, 'Archivos Procesados!A1:Z1')`
-     - If header count is 5 (old schema): write `'originalFileId'` to cell F1
-     - If header count is 6+: skip (already migrated)
-   - Call `migrateArchivosProcesadosHeaders()` in `initializeDashboardOperativo()` after `ensureSheetsExist()` (near line 337)
-4. **Run verifier** (expect pass)
-5. Update `SPREADSHEET_FORMAT.md`:
-   - Add Column F: `originalFileId` — string — "Drive file ID of the original document (populated for duplicates only)"
-
-**Notes:**
-- The existing `ensureSheetsExist()` only checks if `firstRow[0]` matches — it does NOT detect added columns. That's why we need explicit migration logic.
-- Existing rows in production will have Column F empty — this is expected and correct per the acceptance criteria.
-- `getStaleProcessingFileIds()` reads `A:E` by column index and is unaffected by the new column.
-
-### Task 6: Extend updateFileStatus with duplicate support
-
-**Issue:** ADV-104
-**Files:**
-- `src/processing/storage/index.ts` (modify)
-- `src/processing/storage/index.test.ts` (modify)
-
-**TDD Steps:**
-
-1. **RED** — Write tests in `src/processing/storage/index.test.ts`:
-   - Test `updateFileStatus()` with `status: 'duplicate'` writes `'duplicate'` to Column E
-   - Test `updateFileStatus()` with `status: 'duplicate'` and `originalFileId: 'abc123'` writes `'abc123'` to Column F
-   - Test `updateFileStatus()` with `status: 'success'` still works (no Column F write)
-   - Test `updateFileStatus()` with `status: 'failed'` still works (no Column F write, retry logic preserved)
-   - Follow existing test patterns at lines 232-319 of `index.test.ts`
-2. **Run verifier** (expect fail)
-3. **GREEN** — Implement in `src/processing/storage/index.ts`:
-   - Change `updateFileStatus` signature: `status: 'success' | 'failed' | 'duplicate'`
-   - Add optional parameter: `originalFileId?: string`
-   - Expand the read range from `A:E` to `A:F` (line 186)
-   - When `status === 'duplicate'` and `originalFileId` is provided: write both Column E (`'duplicate'`) and Column F (`originalFileId`) in a single `batchUpdate` call
-   - For `'success'` and `'failed'` statuses: behavior unchanged (only write Column E)
-   - Also update `markFileProcessing()` to include empty string for Column F in new rows (line 123: add `''` to the row array)
-   - Update the retry branch (line 102) range from `C:E` to `C:F` to include the new column, with empty string for Column F
-4. **Run verifier** (expect pass)
-
-**Notes:**
-- The `'duplicate'` status should NOT participate in retry count logic — duplicates are final
-- `batchUpdate` range for duplicate: `Archivos Procesados!E${rowIndex}:F${rowIndex}` with values `[['duplicate', originalFileId]]`
-
-### Task 7: Update scanner duplicate branches to use new status
-
-**Issue:** ADV-104
-**Files:**
-- `src/processing/scanner.ts` (modify)
-
-**Steps:**
-
-1. Update ALL duplicate handling branches in `scanner.ts` to use `'duplicate'` status instead of `'success'`:
-   - `factura_emitida` duplicate (line ~910): change `updateFileStatus(dashboardOperativoId, fileInfo.id, 'success')` to `updateFileStatus(dashboardOperativoId, fileInfo.id, 'duplicate', undefined, storeResult.value.existingFileId)`
-   - `factura_recibida` duplicate (line ~1032): same pattern
-   - `pago_recibido` duplicate (line ~1150): same pattern
-   - `pago_enviado` duplicate (line ~1267): same pattern
-   - `recibo` duplicate (line ~1384): same pattern
-   - Resumenes duplicate (line ~1602): same pattern
-   - `certificado_retencion` duplicate (line ~2140): same pattern
-   - Each branch already has `storeResult.value.existingFileId` available in scope
-2. **Run verifier** (expect pass — scanner tests should pass if they exist, or verify no regressions)
-
-**Notes:**
-- There are ~7 duplicate branches in scanner.ts, each following the same pattern
-- The failed branch for duplicate move errors should remain `'failed'` (not `'duplicate'`) — only successful duplicate handling gets the new status
-- The `existingFileId` is already logged in each branch; now it's also persisted
-
-### Task 8: Update documentation
-
-**Issues:** ADV-100, ADV-103, ADV-104
-**Files:**
-- `CLAUDE.md` (modify)
-
-**Steps:**
-
-1. Update `CLAUDE.md` ENV VARS table:
-   - Add `ENVIRONMENT` — Yes (production only) — "Server environment identity: `staging` | `production`"
-   - Add `DRIVE_ROOT_FOLDER_ID_PRODUCTION` — No — "Production Drive root folder (Claude Code skills only)"
-   - Add `DRIVE_ROOT_FOLDER_ID_STAGING` — No — "Staging Drive root folder (Claude Code skills only)"
-2. Update `CLAUDE.md` FOLDER STRUCTURE section:
-   - Add marker files `.staging` / `.production` to the root folder diagram
-3. Update `CLAUDE.md` Archivos Procesados schema reference (if any) to mention Column F
-4. Update `CLAUDE.md` status values: add `'duplicate'` to the list alongside `'processing'`, `'success'`, `'failed'`
-
-### Post-Implementation Checklist
-
-1. Run `bug-hunter` agent — review all git changes for bugs
-2. Fix any issues found
-3. Run `verifier` agent (full mode) — all tests + build with zero warnings
-4. Fix any issues found
-
-## MCP Usage During Implementation
-
-| MCP Server | Tool | Purpose |
-|------------|------|---------|
-| Linear | `update_issue` | Move issues to In Progress when starting, Review when complete |
-
-## Error Handling
-
-| Error Scenario | Expected Behavior | Test Coverage |
-|---------------|-------------------|---------------|
-| ENVIRONMENT not set in production | Startup throws with descriptive error | Unit test (Task 1) |
-| Wrong marker file in Drive folder | Startup aborts with "Environment mismatch" error | Unit test (Task 2) |
-| Marker file creation fails (Drive API error) | Startup aborts, error propagated | Unit test (Task 2) |
-| File not found in tracking sheet during duplicate update | Returns error Result (existing behavior) | Unit test (Task 6) |
-
-## Risks & Open Questions
-
-- [ ] Drive API may not support creating empty files (only folders) — Task 2 implementer should verify and use appropriate MIME type (e.g., `text/plain` with empty content)
-- [ ] Marker file names with dots (`.staging`) may behave differently in Google Drive search — verify `findByName()` handles this correctly
-
-## Scope Boundaries
-
-**In Scope:**
-- Environment marker file creation and validation at startup
-- ENVIRONMENT env var in config.ts
-- Dual Drive folder IDs in .env for investigate skill
-- Dashboard Column F for originalFileId
-- 'duplicate' status in Archivos Procesados
-- Startup header migration for existing sheets
-- Documentation updates
-
-**Out of Scope:**
-- Changing existing `NODE_ENV` behavior
-- Server-side use of `DRIVE_ROOT_FOLDER_ID_PRODUCTION`/`STAGING` (these are skill-only)
-- Dashboard UI changes for duplicate display
-- Retroactive backfill of existing duplicate rows
+**Source:** Inline request: Extract tipoDeCambio, fix USD-USD matching, reprocessing support, better duplicates, factura filename with tipo letter
+**Linear Issues:** [ADV-108](https://linear.app/lw-claude/issue/ADV-108), [ADV-109](https://linear.app/lw-claude/issue/ADV-109), [ADV-110](https://linear.app/lw-claude/issue/ADV-110), [ADV-111](https://linear.app/lw-claude/issue/ADV-111), [ADV-112](https://linear.app/lw-claude/issue/ADV-112), [ADV-113](https://linear.app/lw-claude/issue/ADV-113), [ADV-114](https://linear.app/lw-claude/issue/ADV-114)
+
+## Context Gathered
+
+### Codebase Analysis
+
+**TipoDeCambio extraction:**
+- `Factura` type (`src/types/index.ts:86-140`): Has `moneda` but no `tipoDeCambio`
+- `Pago` type (`src/types/index.ts:145-195`): Has `moneda` but no `tipoDeCambio`/`importeEnPesos`
+- Prompts (`src/gemini/prompts.ts`): Neither FACTURA_PROMPT nor PAGO_BBVA_PROMPT ask for exchange rate data
+- Headers: Facturas Emitidas 18 cols (A:R), Facturas Recibidas 19 cols (A:S), Pagos Enviados/Recibidos 15 cols (A:O)
+
+**Matching bug (affects both ingresos AND egresos):**
+- `amountsMatchCrossCurrency` (`src/utils/exchange-rate.ts:318-373`): No `pagoMoneda` parameter — assumes all pagos are ARS
+- Same matcher code (`src/matching/matcher.ts`) handles both ingresos (Facturas Emitidas↔Pagos Recibidos) and egresos (Facturas Recibidas↔Pagos Enviados)
+- Production logs: hundreds of "Exchange rate cache miss" errors
+
+**Reprocessing (moving files back to Entrada):**
+- `markFileProcessing` (`src/processing/storage/index.ts:43-154`): Already handles known fileIds — updates tracking row instead of creating new one
+- Store functions (`isDuplicateFactura`, `isDuplicatePago`): Detect by business key, return `{isDuplicate, existingFileId}` but NOT the row index
+- If same fileId is reprocessed, business key check would match → currently returns `{stored: false}` → scanner moves file to Duplicado
+- Problem: no way to distinguish "same file reprocessed" from "different file, same transaction"
+- Fix: check fileId column BEFORE business key check. If fileId already in sheet → update that row (reprocessing)
+
+**File naming:**
+- `generateFacturaFileName` (`src/utils/file-naming.ts:101-145`): Currently produces "Factura Emitida" for all A/B/C/E types — no letter
+- NC → "Nota de Credito Emitida" — no letter variant
+- `TipoComprobante = 'A' | 'B' | 'C' | 'E' | 'NC' | 'ND' | 'LP'` — NC/ND don't carry the letter
+- FACTURA_PROMPT asks for "A/B/C/E/NC/ND/LP" — Gemini returns "NC" not "NC A"
+
+### MCP Context
+- **Railway (production):** Confirmed exchange rate cache miss errors affect both ingresos and egresos
+- **Google Drive (production):** Verified Factura E has `Exchange Rate: 1429.50`, COMEX pago has `Tipo de Cambio: 1396.25` + `Importe equivalente en Pesos: 1,675,500.00`
+- **Linear:** No existing backlog issues
+
+## Original Plan
+
+### Task 1: Add tipoDeCambio to types, prompts, and parser
+**Linear Issue:** [ADV-108](https://linear.app/lw-claude/issue/ADV-108/extract-tipodecambio-types-prompts-parser)
+
+1. Write tests in `src/gemini/parser.test.ts`:
+   - USD factura response with `tipoDeCambio: 1429.5` parses correctly
+   - ARS factura response without `tipoDeCambio` → field is undefined
+   - USD pago response with `tipoDeCambio: 1396.25` and `importeEnPesos: 1675500` parses correctly
+   - ARS pago response without these fields → undefined
+   - `tipoDeCambio` with value 0 or negative → treated as undefined
+2. Run `verifier "parser"` (expect fail)
+3. Add to `Factura` interface in `src/types/index.ts` (after `moneda`):
+   - `tipoDeCambio?: number` — Exchange rate for USD invoices (AFIP rate at invoice date)
+4. Add to `Pago` interface in `src/types/index.ts` (after `moneda`):
+   - `tipoDeCambio?: number` — Exchange rate for cross-currency payments (bank liquidation rate)
+   - `importeEnPesos?: number` — Equivalent amount in ARS for cross-currency payments
+5. Update `FACTURA_PROMPT` in `src/gemini/prompts.ts` — add to optional fields:
+   - tipoDeCambio: Exchange rate for USD invoices (number). Look for "Exchange Rate:", "Tipo de Cambio:", "T.C." Only extract if moneda is USD.
+6. Update `PAGO_BBVA_PROMPT` in `src/gemini/prompts.ts` — add to optional fields:
+   - tipoDeCambio: Exchange rate for cross-currency payments (number). Look for "Tipo de Cambio:", "T.C.", "Exchange Rate:". Only extract if payment involves currency conversion.
+   - importeEnPesos: Equivalent amount in Argentine Pesos (number). Look for "Importe equivalente en Pesos:", "Total en Pesos". Only extract if tipoDeCambio is present.
+7. Update `parseFacturaResponse` in `src/gemini/parser.ts` — add validation for tipoDeCambio: accept only positive numbers, else undefined
+8. Update `parsePagoResponse` in `src/gemini/parser.ts` — add validation for tipoDeCambio and importeEnPesos: accept only positive numbers, else undefined
+9. Run `verifier "parser"` (expect pass)
+
+### Task 2: Update extractor, headers, and stores for tipoDeCambio
+**Linear Issue:** [ADV-109](https://linear.app/lw-claude/issue/ADV-109/store-tipodecambio-extractor-headers-stores)
+
+**Migration note:** This adds columns to Control de Ingresos (Facturas Emitidas S, Pagos Recibidos P-Q) and Control de Egresos (Facturas Recibidas T, Pagos Enviados P-Q). Existing production/staging sheets will be migrated by Task 3.
+
+1. Write tests in `src/constants/spreadsheet-headers.test.ts`:
+   - `FACTURA_EMITIDA_HEADERS` has 19 elements, last is `'tipoDeCambio'`
+   - `FACTURA_RECIBIDA_HEADERS` has 20 elements, last is `'tipoDeCambio'`
+   - `PAGO_ENVIADO_HEADERS` has 17 elements, last two are `'tipoDeCambio'`, `'importeEnPesos'`
+   - `PAGO_RECIBIDO_HEADERS` has 17 elements, last two are `'tipoDeCambio'`, `'importeEnPesos'`
+2. Write tests in `src/processing/storage/factura-store.test.ts`:
+   - USD factura with `tipoDeCambio: 1429.5` → row has `CellNumber` at new column position (index 18 for emitida, index 19 for recibida)
+   - ARS factura without tipoDeCambio → row has empty string at new column position
+3. Write tests in `src/processing/storage/pago-store.test.ts`:
+   - USD pago with `tipoDeCambio: 1396.25` and `importeEnPesos: 1675500` → row has `CellNumber` values at positions 15-16
+   - ARS pago without these fields → row has empty strings at positions 15-16
+4. Run `verifier` (expect fail)
+5. Update `src/constants/spreadsheet-headers.ts`:
+   - Append `'tipoDeCambio'` to `FACTURA_EMITIDA_HEADERS` (19 cols) and `FACTURA_RECIBIDA_HEADERS` (20 cols)
+   - Append `'tipoDeCambio'`, `'importeEnPesos'` to `PAGO_ENVIADO_HEADERS` and `PAGO_RECIBIDO_HEADERS` (17 cols each)
+   - Add number formats: `{ type: 'number', decimals: 2 }` for tipoDeCambio, `{ type: 'currency', decimals: 2 }` for importeEnPesos in the relevant `CONTROL_INGRESOS_SHEETS` and `CONTROL_EGRESOS_SHEETS` format definitions
+6. Update `src/processing/extractor.ts`:
+   - Factura object (line ~352 area): pass through `tipoDeCambio: parseResult.value.data.tipoDeCambio`
+   - Pago object (line ~423 area): pass through `tipoDeCambio` and `importeEnPesos`
+7. Update `src/processing/storage/factura-store.ts`:
+   - Import `CellNumber` type from sheets
+   - factura_emitida row (lines 130-156): append tipoDeCambio as `CellNumber` or empty string after hasCuitMatch. Change range from `A:R` to `A:S`
+   - factura_recibida row (lines 160-180): append tipoDeCambio after pagada. Change range from `A:S` to `A:T`
+8. Update `src/processing/storage/pago-store.ts`:
+   - Import `CellNumber` type from sheets
+   - Both pago_enviado (lines 130-146) and pago_recibido (lines 150-166): append tipoDeCambio + importeEnPesos as `CellNumber` or empty string. Change ranges from `A:O` to `A:Q`
+9. Run `verifier` (expect pass)
+
+### Task 3: Schema migration for tipoDeCambio columns
+**Linear Issue:** [ADV-110](https://linear.app/lw-claude/issue/ADV-110/schema-migration-docs-for-tipodecambio-columns)
+
+**Migration note:** Existing production sheets (Facturas Emitidas 18 cols, Facturas Recibidas 19 cols, Pagos Enviados/Recibidos 15 cols) need new headers appended. Migration must be idempotent.
+
+1. Write tests in `src/services/folder-structure.test.ts`:
+   - `migrateControlIngresosHeaders`: 18-col Facturas Emitidas gets `tipoDeCambio` appended at S; 15-col Pagos Recibidos gets `tipoDeCambio`+`importeEnPesos` appended at P-Q
+   - `migrateControlEgresosHeaders`: 19-col Facturas Recibidas gets `tipoDeCambio` appended at T; 15-col Pagos Enviados gets `tipoDeCambio`+`importeEnPesos` appended at P-Q
+   - Already-migrated sheets (correct column count) are skipped (idempotent)
+   - Empty sheets are skipped
+2. Run `verifier "folder-structure"` (expect fail)
+3. Implement `migrateControlIngresosHeaders(spreadsheetId)` and `migrateControlEgresosHeaders(spreadsheetId)` in `src/services/folder-structure.ts`:
+   - Follow `migrateArchivosProcesadosHeaders` pattern (lines 332-361): read header row → check column count → append missing headers
+   - Facturas Emitidas: if exactly 18 cols, append `tipoDeCambio` at S1
+   - Facturas Recibidas: if exactly 19 cols, append `tipoDeCambio` at T1
+   - Pagos Recibidos/Enviados: if exactly 15 cols, append `tipoDeCambio` and `importeEnPesos` at P1:Q1
+4. Call both migration functions in `discoverFolderStructure()` after the `ensureSheetsExist` calls (~line 770-774)
+5. Run `verifier "folder-structure"` (expect pass)
+
+### Task 4: Fix amountsMatchCrossCurrency for same-currency matching
+**Linear Issue:** [ADV-111](https://linear.app/lw-claude/issue/ADV-111/fix-same-currency-matching-usd-usd-in-amountsmatchcrosscurrency)
+
+**Note:** This fix applies to both ingresos and egresos since both use the same `FacturaPagoMatcher` class. Ingresos: Facturas Emitidas↔Pagos Recibidos. Egresos: Facturas Recibidas↔Pagos Enviados. The single call site in `matcher.ts:142-148` is shared.
+
+1. Write tests in `src/utils/exchange-rate.test.ts`:
+   - USD factura + USD pago with matching amounts → `{matches: true, isCrossCurrency: false}` (same-currency, no exchange rate needed)
+   - USD factura + USD pago with non-matching amounts → `{matches: false, isCrossCurrency: false}`
+   - USD factura + ARS pago → existing cross-currency behavior (uses exchange rate, tolerance)
+   - ARS factura + ARS pago → existing exact match behavior (unchanged)
+2. Update tests in `src/matching/matcher.test.ts`:
+   - Test that USD pago matching USD factura uses direct comparison (no exchange rate fetch)
+   - Update any existing cross-currency tests that need the new `pagoMoneda` parameter
+3. Run `verifier "exchange-rate"` (expect fail)
+4. Update `amountsMatchCrossCurrency` in `src/utils/exchange-rate.ts`:
+   - Add `pagoMoneda: Moneda` parameter after `pagoAmount`
+   - When `facturaMoneda === pagoMoneda` (same currency): use `amountsMatch()` regardless of currency, return `{matches, isCrossCurrency: false}`
+   - When currencies differ: existing cross-currency logic (exchange rate lookup + tolerance)
+5. Update the caller in `src/matching/matcher.ts` (line 142-148): pass `pago.moneda` as the new parameter
+6. Run `verifier "exchange-rate"` then `verifier "matcher"` (expect pass)
+
+### Task 5: Factura filename with comprobante letter
+**Linear Issue:** [ADV-113](https://linear.app/lw-claude/issue/ADV-113/factura-filename-with-comprobante-letter-abce-nc-abc)
+
+**Context:** Current filenames use "Factura Emitida" for all types (A/B/C/E). User needs the letter for quick identification: "Factura C Emitida", "Factura E Emitida". For NC/ND, the letter variant (A/B/C) is also needed: "Nota de Credito A Emitida". Currently `TipoComprobante` stores 'NC' without the letter — Gemini prompt needs to be updated to extract the full type.
+
+1. Write tests in `src/utils/file-naming.test.ts`:
+   - Factura with tipoComprobante 'A' → filename contains "Factura A Emitida"
+   - Factura with tipoComprobante 'C' → "Factura C Recibida"
+   - Factura with tipoComprobante 'E' → "Factura E Emitida"
+   - Factura with tipoComprobante 'NC A' → "Nota de Credito A Emitida"
+   - Factura with tipoComprobante 'NC B' → "Nota de Credito B Recibida"
+   - Factura with tipoComprobante 'ND A' → "Nota de Debito A Emitida"
+   - Backward compat: tipoComprobante 'NC' (old format) → "Nota de Credito Emitida" (no letter, graceful)
+2. Write tests in `src/gemini/parser.test.ts`:
+   - Response with `tipoComprobante: "NC A"` → parsed correctly
+   - Response with `tipoComprobante: "ND B"` → parsed correctly
+   - Response with `tipoComprobante: "NC"` → still accepted (backward compat)
+3. Run `verifier "file-naming"` (expect fail)
+4. Update `TipoComprobante` type in `src/types/index.ts`:
+   - Expand to: `'A' | 'B' | 'C' | 'E' | 'NC' | 'NC A' | 'NC B' | 'NC C' | 'ND' | 'ND A' | 'ND B' | 'ND C' | 'LP'`
+   - Keep plain 'NC'/'ND' for backward compatibility with existing spreadsheet data
+5. Update `FACTURA_PROMPT` in `src/gemini/prompts.ts`:
+   - Change tipoComprobante instruction to ask for letter variant: "For Notas de Credito, include the letter: NC A, NC B, NC C. For Notas de Debito: ND A, ND B, ND C."
+6. Update `validateTipoComprobante` in `src/utils/validation.ts` (or parser):
+   - Accept new values ('NC A', 'NC B', 'NC C', 'ND A', 'ND B', 'ND C')
+7. Update `generateFacturaFileName` in `src/utils/file-naming.ts`:
+   - For A/B/C/E: `Factura ${tipoComprobante} ${direction}` (e.g., "Factura C Emitida")
+   - For 'NC A'/'NC B'/'NC C': `Nota de Credito ${letter} ${direction}`
+   - For 'ND A'/'ND B'/'ND C': `Nota de Debito ${letter} ${direction}`
+   - For plain 'NC'/'ND' (backward compat): `Nota de Credito ${direction}` / `Nota de Debito ${direction}`
+   - For 'LP': `Liquidacion de Premio ${direction}`
+8. Run `verifier "file-naming"` then `verifier "parser"` (expect pass)
+
+### Task 6: Reprocessing support (stores + scanner)
+**Linear Issue:** [ADV-114](https://linear.app/lw-claude/issue/ADV-114/reprocessing-support-re-extract-files-moved-back-to-entrada)
+
+**Context:** When the user moves a previously-processed file from a subfolder back to Entrada, the system should re-extract it and update the existing spreadsheet row rather than treating it as a duplicate. This enables bulk reprocessing (e.g., to populate tipoDeCambio for all existing documents). The file must also be re-sorted to the correct year/month folder and renamed with the current naming convention.
+
+**Flow:** File enters Entrada → `markFileProcessing` updates tracking row (already works) → Gemini extracts → store detects fileId already in sheet → updates existing row → scanner sorts/renames file to correct folder.
+
+1. Write tests in `src/processing/storage/factura-store.test.ts`:
+   - Factura with fileId already in sheet → returns `{stored: true, updated: true}`, row data updated via `batchUpdate`
+   - Factura with fileId NOT in sheet, no business key match → normal insert (existing behavior)
+   - Factura with fileId NOT in sheet, business key matches different fileId → `{stored: false, existingFileId}` (existing duplicate behavior)
+2. Write tests in `src/processing/storage/pago-store.test.ts`:
+   - Same three scenarios as factura
+3. Run `verifier "factura-store"` (expect fail)
+4. Add `findRowByFileId(spreadsheetId, sheetName, fileId)` utility (in stores or shared):
+   - Read column B (fileId column) from sheet
+   - Return `{found: true, rowIndex: number}` or `{found: false}`
+   - rowIndex is 1-indexed (for spreadsheet API ranges)
+5. Update `storeFactura` in `src/processing/storage/factura-store.ts`:
+   - BEFORE the business key duplicate check, call `findRowByFileId`
+   - If found: build updated row (same format as new insert), call `batchUpdate` to overwrite the existing row, return `{stored: true, updated: true}`
+   - If not found: proceed to existing `isDuplicateFactura` check (no change)
+6. Update `storePago` in `src/processing/storage/pago-store.ts`:
+   - Same pattern: `findRowByFileId` before `isDuplicatePago`
+   - If found: build updated row, `batchUpdate`, return `{stored: true, updated: true}`
+7. Add `updated?: boolean` to `StoreResult` type in `src/types/index.ts`
+8. Update scanner branches for ALL document types (factura_emitida, factura_recibida, pago_recibido, pago_enviado):
+   - When `storeResult.value.stored === true` (whether new or updated), always call `sortAndRenameDocument` to move and rename the file
+   - The existing code already does this — `sortAndRenameDocument` is called for `stored === true`, the `else` branch (duplicate) handles `stored === false`
+   - **Verify** that `sortAndRenameDocument` works correctly when the file is in Entrada (not in a year/month folder) — it should, since `sortDocument` moves from current parent to target folder
+9. Run `verifier` (expect pass)
+
+### Task 7: Better duplicate replaces existing (pagos)
+**Linear Issue:** [ADV-112](https://linear.app/lw-claude/issue/ADV-112/better-duplicate-replaces-existing-pagos)
+
+**Context:** When a DIFFERENT file contains the same transaction (same fecha+importe+cuit but different fileId), compare quality. If new is better, replace the existing entry. This is separate from reprocessing (Task 6) which handles same-fileId re-extraction.
+
+1. Write tests in `src/processing/storage/pago-store.test.ts`:
+   - Different fileId, same business key, new has tipoDeCambio, existing doesn't → returns `{stored: true, replacedFileId: existingFileId}`
+   - Different fileId, same business key, existing has tipoDeCambio, new doesn't → returns `{stored: false, existingFileId}` (existing wins)
+   - Different fileId, same business key, equal quality → returns `{stored: false, existingFileId}` (existing wins on tie)
+2. Run `verifier "pago-store"` (expect fail)
+3. Update `isDuplicatePago` to also return `existingRowIndex` (the 1-indexed row number for batchUpdate)
+4. Add `isQualityBetter(newPago, existingRowData)` function to `src/processing/storage/pago-store.ts`:
+   - Compare quality signals: (1) has tipoDeCambio > doesn't, (2) has non-empty counterparty CUIT > empty, (3) higher confidence > lower
+   - Return `'better' | 'worse' | 'equal'`
+5. Modify `storePago`: when duplicate detected (after reprocessing check from Task 6):
+   - If quality is better: build new row, `batchUpdate` to overwrite existing row, return `{stored: true, replacedFileId: existingFileId}`
+   - If worse or equal: return `{stored: false, existingFileId}` (current behavior)
+6. Add `replacedFileId?: string` to `StoreResult` type in `src/types/index.ts`
+7. Update duplicate cache read range from `A:H` to full column range to include tipoDeCambio columns for quality comparison
+8. Update scanner duplicate branches for `pago_recibido` and `pago_enviado`:
+   - Check `storeResult.value.replacedFileId`: if present, the new file replaced an existing one
+   - Move the OLD file (replacedFileId) to Duplicado folder
+   - Sort/rename the NEW file to correct year/month folder (call `sortAndRenameDocument`)
+   - Update dashboard: new file gets `'success'` status; old file needs a tracking entry with `'duplicate'` status
+9. Run `verifier "pago-store"` (expect pass)
+
+### Task 8: Documentation
+**Linear Issue:** [ADV-110](https://linear.app/lw-claude/issue/ADV-110/schema-migration-docs-for-tipodecambio-columns)
+
+1. Update `SPREADSHEET_FORMAT.md`:
+   - Add tipoDeCambio column to Facturas Emitidas (19 cols A:S) and Facturas Recibidas (20 cols A:T) tables
+   - Add tipoDeCambio + importeEnPesos columns to Pagos Enviados and Pagos Recibidos (17 cols A:Q) tables
+   - Update column counts
+   - Update Cross-Currency Matching section to mention same-currency support
+   - Document reprocessing behavior
+2. Update `CLAUDE.md`:
+   - Update column counts in SPREADSHEETS section
+   - Update TipoComprobante values (add NC A/B/C, ND A/B/C)
+   - Note the matching fix (same-currency support)
+   - Document reprocessing capability
+
+## Post-Implementation Checklist
+
+1. Run `bug-hunter` agent — review all git changes for bugs, fix any issues
+2. Run `verifier` agent — all tests pass, zero warnings, fix any issues
+
+---
+
+## Plan Summary
+
+**Objective:** Extract exchange rate data, fix USD-USD matching, enable file reprocessing, smarter duplicates, and descriptive factura filenames
+
+**Request:** (1) Extract and store tipo de cambio from COMEX pagos and Factura E. (2) Fix same-currency matching bug (USD↔USD). (3) Enable reprocessing: moving a file back to Entrada re-extracts, updates the row, and re-sorts/renames. (4) Better duplicate replacement for pagos. (5) Factura filenames include comprobante letter ("Factura C Emitida", "Nota de Credito A Emitida").
+
+**Linear Issues:** ADV-108, ADV-109, ADV-110, ADV-111, ADV-112, ADV-113, ADV-114
+
+**Approach:** Five interconnected improvements: (1) tipoDeCambio through the full extraction→storage pipeline with schema migration. (2) Fix `amountsMatchCrossCurrency` with `pagoMoneda` parameter — same-currency uses direct comparison. (3) Store functions check fileId before business key — same fileId updates row (reprocessing), different fileId checks quality (duplicate). (4) Quality comparison for pago duplicates. (5) Expand `TipoComprobante` to carry NC/ND letter variants, update prompts and filename generation.
+
+**Scope:**
+- Tasks: 8
+- Files affected: ~18
+- New tests: yes
+
+**Key Decisions:**
+- tipoDeCambio columns appended at end of each sheet to avoid breaking column indices
+- Reprocessing check (same fileId) runs BEFORE business key duplicate check — always updates the row
+- Better duplicate (different fileId, same business key) only for pagos initially
+- `TipoComprobante` expanded with backward-compatible values ('NC' still valid alongside 'NC A')
+- Same-currency matching uses direct `amountsMatch()` — no exchange rate needed
+- All matching and store changes apply to both ingresos and egresos (shared code)
+
+**Risks/Considerations:**
+- Reprocessing bulk files: moving many files to Entrada at once could trigger long processing runs — existing queue handles this but scan duration may be long
+- `TipoComprobante` expansion: old rows in spreadsheets have 'NC', new rows have 'NC A' — acceptable, no migration needed since both are valid display values
+- Duplicate replacement involves multiple operations (update row, move old file, sort new file) — partial failures need graceful handling
+- `findRowByFileId` adds one API call per store operation — acceptable since it's a simple column read, and can share the data already fetched by `isDuplicate*`
 
 ---
 
 ## Iteration 1
 
 **Implemented:** 2026-02-22
-**Method:** Agent team (3 workers, worktree-isolated)
+**Method:** Agent team (4 workers, worktree-isolated)
 
 ### Tasks Completed This Iteration
-- Task 1: Add ENVIRONMENT config variable with validation (worker-1)
-- Task 2: Implement environment marker file check in folder structure (worker-1)
-- Task 3: Wire marker check into server startup (worker-1)
-- Task 4: Add dual Drive folder IDs for investigation (worker-3)
-- Task 5: Add originalFileId column to Archivos Procesados with startup migration (worker-2)
-- Task 6: Extend updateFileStatus with duplicate support (worker-2)
-- Task 7: Update scanner duplicate branches to use new status (worker-2)
-- Task 8: Update documentation (worker-3)
+- Task 1: Add tipoDeCambio to Factura and Pago types (ADV-108) (worker-1)
+- Task 2: Extract tipoDeCambio in Gemini prompts and parser (ADV-109) (worker-1)
+- Task 3: Pass tipoDeCambio through extractor to storage (ADV-110) (worker-1)
+- Task 4: Fix same-currency matching in amountsMatchCrossCurrency (ADV-111) (worker-2)
+- Task 5: Add comprobante letter to factura filenames (ADV-113) (worker-3)
+- Task 6: Enable file reprocessing via findRowByFileId (ADV-114) (worker-4)
+- Task 7: Better duplicate replacement for pagos (ADV-112) (worker-4)
+- Task 8: Update documentation (SPREADSHEET_FORMAT.md, CLAUDE.md) (lead)
 
 ### Files Modified
-- `src/config.ts` — Added ENVIRONMENT env var parsing and validation
-- `src/config.test.ts` — 7 new tests for ENVIRONMENT config
-- `vitest.config.ts` — Added ENVIRONMENT to test env block
-- `src/services/drive.ts` — Added `createFile()` function
-- `src/services/folder-structure.ts` — `checkEnvironmentMarker()`, `migrateArchivosProcesadosHeaders()`, wired into startup
-- `src/services/folder-structure.test.ts` — 14 new tests (8 marker, 6 migration)
-- `src/constants/spreadsheet-headers.ts` — Added `originalFileId` to ARCHIVOS_PROCESADOS_HEADERS
-- `src/constants/spreadsheet-headers.test.ts` — Updated for 6-column schema
-- `src/processing/storage/index.ts` — `duplicate` status, `originalFileId` parameter
-- `src/processing/storage/index.test.ts` — Tests for duplicate status tracking
-- `src/processing/scanner.ts` — 9 duplicate branches updated to use `duplicate` status
-- `src/middleware/auth.test.ts` — Added environment to mock config
-- `src/routes/status.test.ts` — Added environment to mock config
-- `src/routes/scan.test.ts` — Added environment to mock config
-- `src/server.test.ts` — Added environment to mock config
-- `SPREADSHEET_FORMAT.md` — Documented Column F originalFileId
-- `.env.example` — Added DRIVE_ROOT_FOLDER_ID_PRODUCTION/STAGING
-- `.claude/skills/investigate/SKILL.md` — Added Drive Folder Resolution step
-- `CLAUDE.md` — ENV VARS, folder structure diagram, Archivos Procesados schema, duplicate status
-- `package.json` — Added `typecheck` npm script
+- `src/types/index.ts` - Added tipoDeCambio to Factura/Pago, expanded TipoComprobante, added updated/replacedFileId to StoreResult
+- `src/gemini/prompts.ts` - Added tipoDeCambio instructions, NC/ND letter extraction
+- `src/gemini/parser.ts` - tipoDeCambio validation in parseFacturaResponse/parsePagoResponse, importeEnPesos cascade clear
+- `src/processing/extractor.ts` - tipoDeCambio pass-through for factura and pago
+- `src/constants/spreadsheet-headers.ts` - tipoDeCambio/importeEnPesos headers and number formats
+- `src/services/folder-structure.ts` - migrateTipoDeCambioHeaders function and startup calls
+- `src/processing/storage/factura-store.ts` - tipoDeCambio in buildFacturaRow, append, batchUpdate
+- `src/processing/storage/pago-store.ts` - tipoDeCambio/importeEnPesos in buildPagoRow, isQualityBetter, isDuplicatePago
+- `src/utils/exchange-rate.ts` - pagoMoneda parameter for same-currency matching
+- `src/matching/matcher.ts` - Pass pago.moneda to amountsMatchCrossCurrency
+- `src/bank/matcher.ts` - Pass 'ARS' as bank movement currency
+- `src/utils/file-naming.ts` - Comprobante letter in factura filenames
+- `src/utils/validation.ts` - Expanded validateTipoComprobante for NC A/B/C, ND A/B/C
+- `src/processing/scanner.ts` - Reprocessing handling (updated flag, replacedFileId)
+- `SPREADSHEET_FORMAT.md` - Updated column counts and schemas
+- `CLAUDE.md` - Updated column counts
 
 ### Linear Updates
-- ADV-100: Todo → In Progress → Review
-- ADV-103: Todo → In Progress → Review
-- ADV-104: Todo → In Progress → Review
+- ADV-108: Todo → In Progress → Review
+- ADV-109: Todo → In Progress → Review
+- ADV-110: Todo → In Progress → Review
+- ADV-111: Todo → In Progress → Review
+- ADV-112: Todo → In Progress → Review
+- ADV-113: Todo → In Progress → Review
+- ADV-114: Todo → In Progress → Review
 
 ### Pre-commit Verification
-- bug-hunter: Found 1 critical (committed conflict marker) and 1 low (mock type), both fixed before final commit
-- verifier: All 1640 tests pass, zero warnings, build clean
+- bug-hunter: Found 2 medium bugs, 1 fixed (importeEnPesos cascade clear), 1 accepted (migration condition theoretical)
+- verifier: All 1694 tests pass, zero warnings
 
 ### Work Partition
-- Worker 1: Tasks 1, 2, 3 (environment marker — config, folder-structure, startup wiring)
-- Worker 2: Tasks 5, 6, 7 (duplicate tracking — headers, storage, scanner)
-- Worker 3: Tasks 4, 8 (config/docs — .env, investigate skill, CLAUDE.md)
+- Worker 1: Tasks 1, 2, 3 (tipoDeCambio pipeline — types, prompts, parser, extractor, storage, migration)
+- Worker 2: Task 4 (matching fix — exchange-rate, matcher)
+- Worker 3: Task 5 (filename — file-naming, validation, parser tipoComprobante)
+- Worker 4: Tasks 6, 7 (reprocessing + duplicates — scanner, factura-store, pago-store)
+- Lead: Task 8 (documentation), merge fix, bug fixes
 
 ### Merge Summary
-- Worker 1: fast-forward (no conflicts)
-- Worker 2: 1 conflict in folder-structure.test.ts (both workers added tests at EOF), resolved
-- Worker 3: clean merge (no conflicts)
-- Post-merge fix: Updated spreadsheet-headers.test.ts for 6-column schema, fixed Column F docs
+- Worker 1: salvaged (uncommitted changes committed by lead)
+- Worker 3: merged, auto-merge silently dropped worker 1 additions
+- Worker 2: merged cleanly
+- Worker 4: merged, auto-merge silently dropped worker 1 additions
+- Lead manually restored all worker 1 changes lost in merge (8 source + 5 test files)
+
+### Continuation Status
+All tasks completed.
 
 ### Review Findings
 
-Summary: 3 issue(s) found initially, 1 false positive identified during fix analysis (Team: security, reliability, quality reviewers)
-- FIX: 2 issue(s) — fixed inline
-- FALSE POSITIVE: 1 finding — ADV-106 canceled (scanner already updates documentType via second markFileProcessing call at line 212)
-- DISCARDED: 9 finding(s) — false positives / not applicable
+Summary: 1 issue found (Team: security, reliability, quality reviewers)
+- FIX: 1 issue — implementation lost during merge
+- DISCARDED: 0 findings
 
-**Issues fixed:**
-- [HIGH] BUG: processedAt format mismatch — retry path stored serial numbers, new-file path stored serial via appendRowsWithLinks, but `getStaleProcessingFileIds` only parsed ISO strings. Fixed both: retry path now stores ISO string, reader now handles both serial and ISO formats. (`src/processing/storage/index.ts`)
-- [LOW] BUG: Missing `environment` field in server.test.ts default mock config (`src/server.test.ts:13`)
-
-**False positive (canceled):**
-- [MEDIUM] BUG: documentType column 'unknown' — ADV-106 canceled. Scanner already calls `markFileProcessing` a second time at line 212 with `processed.documentType`, which updates column D correctly.
-
-**Discarded findings (not bugs):**
-- [DISCARDED] SECURITY: Drive API query parameter sanitization in `findByName`/`listByMimeType` — all callers pass hardcoded internal constants, no user input path
-- [DISCARDED] SECURITY: Internal error messages in 500 API responses — API is internal, consumed only by co-deployed Apps Script
-- [DISCARDED] SECURITY: No minimum length for API_SECRET — developer-set value in .env, non-empty check catches the common mistake
-- [DISCARDED] SECURITY: Timing test threshold too lenient (< 1.0) — implementation is correct (SHA-256 + timingSafeEqual), timing tests are inherently unreliable in CI
-- [DISCARDED] SECURITY: No rate limiting on failed auth — feature request, not a bug
-- [DISCARDED] CONVENTION: CLAUDE.md vs numberFormats contradiction for processedAt — documentation issue subsumed by processedAt format bug
-- [DISCARDED] TEST: Fragile regex-based documentation tests in folder-structure.test.ts — weak assertions but zero correctness impact
-- [DISCARDED] BUG: Stale comment "10s timeout" when value is 30s — zero correctness impact
-- [DISCARDED] EDGE CASE: getDriveService double-initialization race — harmless per reviewer, no functional impact
+**Issues requiring fix:**
+- [HIGH] BUG: Task 5 (ADV-113) implementation entirely missing — Worker 3 changes lost during merge. Files `src/utils/file-naming.ts`, `src/utils/validation.ts` are unmodified vs main. `TipoComprobante` type not expanded in `src/types/index.ts`. No NC A/B/C patterns in parser or prompts. Comprobante letter never appears in filenames.
 
 ### Linear Updates
-- ADV-100: Review → Merge (original task)
-- ADV-103: Review → Merge (original task)
-- ADV-104: Review → Merge (original task)
-- ADV-105: Created in Todo → Merge (Fix: processedAt format — fixed inline)
-- ADV-106: Created in Todo → Canceled (false positive — scanner already updates documentType)
-- ADV-107: Created in Todo → Merge (Fix: missing environment in mock — fixed inline)
+- ADV-108: Review → Merge (tipoDeCambio types/prompts/parser)
+- ADV-109: Review → Merge (tipoDeCambio extractor/headers/stores)
+- ADV-110: Review → Merge (schema migration + docs)
+- ADV-111: Review → Merge (same-currency matching fix)
+- ADV-112: Review → Merge (better duplicate replacement)
+- ADV-114: Review → Merge (reprocessing support)
+- ADV-113: Review → Todo (implementation lost — needs re-implementation)
 
 <!-- REVIEW COMPLETE -->
 
+---
+
+## Fix Plan
+
+**Source:** Review findings from Iteration 1
+**Linear Issues:** [ADV-113](https://linear.app/lw-claude/issue/ADV-113/factura-filename-with-comprobante-letter-abce-nc-abc)
+
+### Fix 1: Re-implement comprobante letter in factura filenames (ADV-113)
+**Linear Issue:** [ADV-113](https://linear.app/lw-claude/issue/ADV-113/factura-filename-with-comprobante-letter-abce-nc-abc)
+
+1. Write tests in `src/utils/file-naming.test.ts`:
+   - Factura with tipoComprobante 'A' → filename contains "Factura A Emitida"
+   - Factura with tipoComprobante 'C' → "Factura C Recibida"
+   - Factura with tipoComprobante 'E' → "Factura E Emitida"
+   - Factura with tipoComprobante 'NC A' → "Nota de Credito A Emitida"
+   - Factura with tipoComprobante 'NC B' → "Nota de Credito B Recibida"
+   - Factura with tipoComprobante 'ND A' → "Nota de Debito A Emitida"
+   - Backward compat: tipoComprobante 'NC' (old format) → "Nota de Credito Emitida" (no letter)
+2. Write tests in `src/gemini/parser.test.ts`:
+   - Response with `tipoComprobante: "NC A"` → parsed correctly
+   - Response with `tipoComprobante: "ND B"` → parsed correctly
+   - Response with `tipoComprobante: "NC"` → still accepted (backward compat)
+3. Run `verifier "file-naming"` (expect fail)
+4. Update `TipoComprobante` type in `src/types/index.ts`:
+   - Expand to: `'A' | 'B' | 'C' | 'E' | 'NC' | 'NC A' | 'NC B' | 'NC C' | 'ND' | 'ND A' | 'ND B' | 'ND C' | 'LP'`
+5. Update `FACTURA_PROMPT` in `src/gemini/prompts.ts`:
+   - Change tipoComprobante instruction to ask for letter variant: "For Notas de Credito, include the letter: NC A, NC B, NC C. For Notas de Debito: ND A, ND B, ND C."
+6. Update `validateTipoComprobante` in `src/utils/validation.ts`:
+   - Accept new values ('NC A', 'NC B', 'NC C', 'ND A', 'ND B', 'ND C')
+7. Update `generateFacturaFileName` in `src/utils/file-naming.ts`:
+   - For A/B/C/E: `Factura ${tipoComprobante} ${direction}` (e.g., "Factura C Emitida")
+   - For 'NC A'/'NC B'/'NC C': `Nota de Credito ${letter} ${direction}`
+   - For 'ND A'/'ND B'/'ND C': `Nota de Debito ${letter} ${direction}`
+   - For plain 'NC'/'ND' (backward compat): `Nota de Credito ${direction}` / `Nota de Debito ${direction}`
+   - For 'LP': `Liquidacion de Premio ${direction}`
+8. Run `verifier "file-naming"` then `verifier "parser"` (expect pass)
+
+### Post-Implementation Checklist
+
+1. Run `bug-hunter` agent — review all git changes for bugs, fix any issues
+2. Run `verifier` agent — all tests pass, zero warnings, fix any issues
+
+---
+
+## Iteration 2
+
+**Implemented:** 2026-02-22
+**Method:** Single-agent (fly solo)
+
+### Tasks Completed This Iteration
+- Fix 1: Re-implement comprobante letter in factura filenames (ADV-113)
+
+### Files Modified
+- `src/types/index.ts` - Expanded TipoComprobante with NC A/B/C, ND A/B/C variants
+- `src/gemini/prompts.ts` - Updated FACTURA_PROMPT to ask for letter variant in NC/ND
+- `src/utils/validation.ts` - Expanded validateTipoComprobante to accept new values
+- `src/utils/file-naming.ts` - Include letter in filename for A/B/C/E, NC A/B/C, ND A/B/C, LP
+- `src/processing/matching/nc-factura-matcher.ts` - Fixed NC/ND filtering for compound types
+- `src/utils/file-naming.test.ts` - Added tests for letter variants, updated existing tests
+- `src/utils/validation.test.ts` - Added tests for NC A/B/C, ND A/B/C validation
+
+### Linear Updates
+- ADV-113: Todo → In Progress → Review
+
+### Pre-commit Verification
+- bug-hunter: Found 2 HIGH bugs (nc-factura-matcher filtering), fixed before proceeding
+- verifier: All tests pass, zero warnings
+
 ### Continuation Status
-All tasks completed. Fix Plan below.
+All tasks completed.
+
+### Review Findings
+
+Files reviewed: 7
+Reviewers: single-agent (fly solo)
+Checks applied: Security, Logic, Async, Resources, Type Safety, Conventions
+
+No issues found - all implementations are correct and follow project conventions.
+
+### Linear Updates
+- ADV-113: Review → Merge
+
+<!-- REVIEW COMPLETE -->
 
 ---
 
 ## Status: COMPLETE
 
 All tasks implemented and reviewed successfully. All Linear issues moved to Merge.
-
-**Fixes applied inline:**
-- ADV-105: Removed `dateToSerialInTimezone` in retry path, added dual-format handling (serial + ISO) in `getStaleProcessingFileIds`
-- ADV-106: Canceled — false positive (scanner already updates documentType via second `markFileProcessing` call)
-- ADV-107: Added `environment: 'staging'` to server.test.ts default mock config
-
-**Verification:** 1,641 tests pass, zero warnings, bug-hunter clean.
