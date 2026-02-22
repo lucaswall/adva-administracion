@@ -5,7 +5,7 @@
 
 import type { Result, Pago, StoreResult } from '../../types/index.js';
 import type { ScanContext } from '../scanner.js';
-import { appendRowsWithLinks, sortSheet, getValues, batchUpdate, getSpreadsheetTimezone, type CellValueOrLink, type CellDate, type CellValue } from '../../services/sheets.js';
+import { appendRowsWithLinks, sortSheet, getValues, batchUpdate, getSpreadsheetTimezone, type CellValueOrLink, type CellDate, type CellValue, type CellNumber } from '../../services/sheets.js';
 import { formatUSCurrency, parseNumber } from '../../utils/numbers.js';
 import { generatePagoFileName } from '../../utils/file-naming.js';
 import { normalizeSpreadsheetDate } from '../../utils/date.js';
@@ -26,6 +26,9 @@ function buildPagoRow(
   documentType: 'pago_enviado' | 'pago_recibido',
   renamedFileName: string
 ): CellValue[] {
+  const tipoDeCambioVal: CellValue = pago.tipoDeCambio ?? '';
+  const importeEnPesosVal: CellValue = pago.importeEnPesos ?? '';
+
   if (documentType === 'pago_enviado') {
     return [
       pago.fechaPago,                                     // A - date string
@@ -43,6 +46,8 @@ function buildPagoRow(
       pago.needsReview ? 'YES' : 'NO',                    // M
       pago.matchedFacturaFileId || '',                    // N
       pago.matchConfidence || '',                         // O
+      tipoDeCambioVal,                                    // P
+      importeEnPesosVal,                                  // Q
     ];
   } else {
     return [
@@ -61,6 +66,8 @@ function buildPagoRow(
       pago.needsReview ? 'YES' : 'NO',                    // M
       pago.matchedFacturaFileId || '',                    // N
       pago.matchConfidence || '',                         // O
+      tipoDeCambioVal,                                    // P
+      importeEnPesosVal,                                  // Q
     ];
   }
 }
@@ -96,8 +103,9 @@ async function findRowByFileId(
  * Compares quality between a new pago and an existing spreadsheet row
  *
  * Quality signals (in order of priority):
- * 1. Has counterparty CUIT > doesn't have CUIT
- * 2. Higher confidence > lower confidence
+ * 1. Has tipoDeCambio > doesn't have tipoDeCambio
+ * 2. Has counterparty CUIT > doesn't have CUIT
+ * 3. Higher confidence > lower confidence
  *
  * @param newPago - The new pago being stored
  * @param existingRowData - The existing row data from spreadsheet
@@ -109,6 +117,8 @@ function isQualityBetter(
   existingRowData: CellValue[],
   documentType: 'pago_enviado' | 'pago_recibido'
 ): 'better' | 'worse' | 'equal' {
+  // Column P (index 15): tipoDeCambio
+  const existingTipoDeCambio = parseNumber(String(existingRowData[15] ?? '')) ?? 0;
   // Column H (index 7): counterparty CUIT
   const existingCuit = existingRowData[7] ? String(existingRowData[7]) : '';
   // Column L (index 11): confidence
@@ -119,13 +129,19 @@ function isQualityBetter(
     : (newPago.cuitPagador || '');
   const newConfidence = newPago.confidence;
 
-  // Signal 1: Has CUIT
+  // Signal 1: Has tipoDeCambio
+  const newHasTipoDeCambio = (newPago.tipoDeCambio ?? 0) > 0;
+  const existingHasTipoDeCambio = existingTipoDeCambio > 0;
+  if (newHasTipoDeCambio && !existingHasTipoDeCambio) return 'better';
+  if (!newHasTipoDeCambio && existingHasTipoDeCambio) return 'worse';
+
+  // Signal 2: Has CUIT
   const existingHasCuit = existingCuit !== '';
   const newHasCuit = newCuit !== '';
   if (newHasCuit && !existingHasCuit) return 'better';
   if (!newHasCuit && existingHasCuit) return 'worse';
 
-  // Signal 2: Confidence (only compared when CUIT situation is the same)
+  // Signal 3: Confidence (only compared when above signals are equal)
   if (newConfidence > existingConfidence + 0.001) return 'better';
   if (newConfidence < existingConfidence - 0.001) return 'worse';
 
@@ -149,8 +165,8 @@ async function isDuplicatePago(
   importePagado: number,
   cuit: string
 ): Promise<{ isDuplicate: boolean; existingFileId?: string; existingRowIndex?: number; existingRowData?: CellValue[] }> {
-  // Extended range to A:O to support quality comparison (includes confidence at col L)
-  const rowsResult = await getValues(spreadsheetId, `${sheetName}!A:O`);
+  // Extended range to A:Q to support quality comparison (includes tipoDeCambio at col P)
+  const rowsResult = await getValues(spreadsheetId, `${sheetName}!A:Q`);
   if (!rowsResult.ok || rowsResult.value.length <= 1) {
     return { isDuplicate: false };
   }
@@ -216,7 +232,7 @@ export async function storePago(
       const renamedFileName = generatePagoFileName(pago, documentType);
       const updateRow = buildPagoRow(pago, documentType, renamedFileName);
       const updateResult = await batchUpdate(spreadsheetId, [{
-        range: `${sheetName}!A${fileIdCheck.rowIndex}:O${fileIdCheck.rowIndex}`,
+        range: `${sheetName}!A${fileIdCheck.rowIndex}:Q${fileIdCheck.rowIndex}`,
         values: [updateRow],
       }]);
       if (!updateResult.ok) {
@@ -273,7 +289,7 @@ export async function storePago(
           const renamedFileName = generatePagoFileName(pago, documentType);
           const updateRow = buildPagoRow(pago, documentType, renamedFileName);
           const updateResult = await batchUpdate(spreadsheetId, [{
-            range: `${sheetName}!A${dupeCheck.existingRowIndex}:O${dupeCheck.existingRowIndex}`,
+            range: `${sheetName}!A${dupeCheck.existingRowIndex}:Q${dupeCheck.existingRowIndex}`,
             values: [updateRow],
           }]);
           if (!updateResult.ok) {
@@ -320,8 +336,16 @@ export async function storePago(
   // Create CellDate for proper date formatting
   const fechaPagoDate: CellDate = { type: 'date', value: pago.fechaPago };
 
+  // Validate tipoDeCambio and importeEnPesos as CellNumber or empty string
+  const tipoDeCambioCell: CellNumber | '' = pago.tipoDeCambio
+    ? { type: 'number', value: pago.tipoDeCambio }
+    : '';
+  const importeEnPesosCell: CellNumber | '' = pago.importeEnPesos
+    ? { type: 'number', value: pago.importeEnPesos }
+    : '';
+
   if (documentType === 'pago_enviado') {
-    // Pagos Enviados: Only beneficiario info (columns A:O)
+    // Pagos Enviados: Only beneficiario info (columns A:Q)
     row = [
       fechaPagoDate,                       // A - proper date cell
       pago.fileId,                         // B
@@ -338,10 +362,12 @@ export async function storePago(
       pago.needsReview ? 'YES' : 'NO',     // M
       pago.matchedFacturaFileId || '',     // N
       pago.matchConfidence || '',          // O
+      tipoDeCambioCell,                    // P
+      importeEnPesosCell,                  // Q
     ];
-    range = `${sheetName}!A:O`;
+    range = `${sheetName}!A:Q`;
   } else {
-    // Pagos Recibidos: Only pagador info (columns A:O)
+    // Pagos Recibidos: Only pagador info (columns A:Q)
     row = [
       fechaPagoDate,                       // A - proper date cell
       pago.fileId,                         // B
@@ -358,8 +384,10 @@ export async function storePago(
       pago.needsReview ? 'YES' : 'NO',     // M
       pago.matchedFacturaFileId || '',     // N
       pago.matchConfidence || '',          // O
+      tipoDeCambioCell,                    // P
+      importeEnPesosCell,                  // Q
     ];
-    range = `${sheetName}!A:O`;
+    range = `${sheetName}!A:Q`;
   }
 
   // Get spreadsheet timezone for proper timestamp formatting

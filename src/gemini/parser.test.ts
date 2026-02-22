@@ -1579,6 +1579,206 @@ describe('isAdvaName', () => {
   });
 });
 
+describe('tipoDeCambio parsing', () => {
+  describe('parseFacturaResponse - tipoDeCambio', () => {
+    it('parses USD factura with tipoDeCambio correctly', () => {
+      const response = JSON.stringify({
+        issuerName: 'ASOCIACION CIVIL DE DESARROLLADORES DE VIDEOJUEGOS ARGENTINOS',
+        clientName: 'Empresa Cliente SA',
+        allCuits: ['30709076783', '20123456786'],
+        tipoComprobante: 'E',
+        nroFactura: '00001-00000001',
+        fechaEmision: '2025-01-15',
+        importeNeto: 1000,
+        importeIva: 0,
+        importeTotal: 1000,
+        moneda: 'USD',
+        tipoDeCambio: 1429.5,
+      });
+
+      const result = parseFacturaResponse(response, 'factura_emitida');
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value.data.moneda).toBe('USD');
+        expect(result.value.data.tipoDeCambio).toBe(1429.5);
+      }
+    });
+
+    it('returns tipoDeCambio as undefined for ARS factura without it', () => {
+      const response = JSON.stringify({
+        issuerName: 'ASOCIACION CIVIL DE DESARROLLADORES DE VIDEOJUEGOS ARGENTINOS',
+        clientName: 'Empresa Cliente SA',
+        allCuits: ['30709076783', '20123456786'],
+        tipoComprobante: 'A',
+        nroFactura: '00001-00000001',
+        fechaEmision: '2025-01-15',
+        importeNeto: 100000,
+        importeIva: 21000,
+        importeTotal: 121000,
+        moneda: 'ARS',
+      });
+
+      const result = parseFacturaResponse(response, 'factura_emitida');
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value.data.tipoDeCambio).toBeUndefined();
+      }
+    });
+
+    it('treats tipoDeCambio of 0 as undefined', () => {
+      const response = JSON.stringify({
+        issuerName: 'ASOCIACION CIVIL DE DESARROLLADORES DE VIDEOJUEGOS ARGENTINOS',
+        clientName: 'Empresa Cliente SA',
+        allCuits: ['30709076783', '20123456786'],
+        tipoComprobante: 'E',
+        nroFactura: '00001-00000001',
+        fechaEmision: '2025-01-15',
+        importeNeto: 1000,
+        importeIva: 0,
+        importeTotal: 1000,
+        moneda: 'USD',
+        tipoDeCambio: 0,
+      });
+
+      const result = parseFacturaResponse(response, 'factura_emitida');
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value.data.tipoDeCambio).toBeUndefined();
+      }
+    });
+
+    it('treats negative tipoDeCambio as undefined', () => {
+      const response = JSON.stringify({
+        issuerName: 'ASOCIACION CIVIL DE DESARROLLADORES DE VIDEOJUEGOS ARGENTINOS',
+        clientName: 'Empresa Cliente SA',
+        allCuits: ['30709076783', '20123456786'],
+        tipoComprobante: 'E',
+        nroFactura: '00001-00000001',
+        fechaEmision: '2025-01-15',
+        importeNeto: 1000,
+        importeIva: 0,
+        importeTotal: 1000,
+        moneda: 'USD',
+        tipoDeCambio: -100,
+      });
+
+      const result = parseFacturaResponse(response, 'factura_emitida');
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value.data.tipoDeCambio).toBeUndefined();
+      }
+    });
+  });
+
+  describe('parsePagoResponse - tipoDeCambio and importeEnPesos', () => {
+    it('parses USD pago with tipoDeCambio and importeEnPesos correctly', () => {
+      const response = JSON.stringify({
+        fechaPago: '2025-01-15',
+        banco: 'BBVA',
+        importePagado: 1200,
+        moneda: 'USD',
+        cuitPagador: '30709076783',
+        nombrePagador: 'ADVA',
+        cuitBeneficiario: '20123456786',
+        nombreBeneficiario: 'Proveedor SA',
+        tipoDeCambio: 1396.25,
+        importeEnPesos: 1675500,
+      });
+
+      const result = parsePagoResponse(response, 'pago_enviado');
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value.data.moneda).toBe('USD');
+        expect(result.value.data.tipoDeCambio).toBe(1396.25);
+        expect(result.value.data.importeEnPesos).toBe(1675500);
+      }
+    });
+
+    it('returns tipoDeCambio and importeEnPesos as undefined for ARS pago', () => {
+      const response = JSON.stringify({
+        fechaPago: '2025-01-15',
+        banco: 'BBVA',
+        importePagado: 10000,
+        moneda: 'ARS',
+        cuitPagador: '30709076783',
+        nombrePagador: 'ADVA',
+        cuitBeneficiario: '20123456786',
+        nombreBeneficiario: 'Proveedor SA',
+      });
+
+      const result = parsePagoResponse(response, 'pago_enviado');
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value.data.tipoDeCambio).toBeUndefined();
+        expect(result.value.data.importeEnPesos).toBeUndefined();
+      }
+    });
+
+    it('treats pago tipoDeCambio of 0 as undefined', () => {
+      const response = JSON.stringify({
+        fechaPago: '2025-01-15',
+        banco: 'BBVA',
+        importePagado: 1200,
+        moneda: 'USD',
+        tipoDeCambio: 0,
+        importeEnPesos: 0,
+      });
+
+      const result = parsePagoResponse(response, 'pago_enviado');
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value.data.tipoDeCambio).toBeUndefined();
+        expect(result.value.data.importeEnPesos).toBeUndefined();
+      }
+    });
+
+    it('treats negative pago tipoDeCambio as undefined', () => {
+      const response = JSON.stringify({
+        fechaPago: '2025-01-15',
+        banco: 'BBVA',
+        importePagado: 1200,
+        moneda: 'USD',
+        tipoDeCambio: -500,
+        importeEnPesos: -621250,
+      });
+
+      const result = parsePagoResponse(response, 'pago_enviado');
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value.data.tipoDeCambio).toBeUndefined();
+        expect(result.value.data.importeEnPesos).toBeUndefined();
+      }
+    });
+
+    it('clears importeEnPesos when tipoDeCambio is invalid but importeEnPesos is valid', () => {
+      const response = JSON.stringify({
+        fechaPago: '2025-01-15',
+        banco: 'BBVA',
+        importePagado: 1200,
+        moneda: 'USD',
+        tipoDeCambio: -100,
+        importeEnPesos: 50000,
+      });
+
+      const result = parsePagoResponse(response, 'pago_enviado');
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value.data.tipoDeCambio).toBeUndefined();
+        expect(result.value.data.importeEnPesos).toBeUndefined();
+      }
+    });
+  });
+});
+
 describe('Confidence calculation without artificial floor', () => {
   describe('parsePagoResponse', () => {
     it('returns low confidence when most required fields missing', () => {
@@ -1656,5 +1856,46 @@ describe('Confidence calculation without artificial floor', () => {
         expect(result.value.confidence).toBeGreaterThanOrEqual(0.9);
       }
     });
+  });
+});
+
+describe('parseFacturaResponse - tipoComprobante letter variants', () => {
+  const validFacturaBase = {
+    issuerName: 'ADVA',
+    clientName: 'TEST SA',
+    allCuits: ['30709076783', '20123456786'],
+    nroFactura: '00001-00000001',
+    fechaEmision: '2024-01-15',
+    importeNeto: 1000,
+    importeIva: 210,
+    importeTotal: 1210,
+    moneda: 'ARS',
+  };
+
+  it('parses tipoComprobante "NC A" correctly', () => {
+    const response = JSON.stringify({ ...validFacturaBase, tipoComprobante: 'NC A' });
+    const result = parseFacturaResponse(response, 'factura_emitida');
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.data.tipoComprobante).toBe('NC A');
+    }
+  });
+
+  it('parses tipoComprobante "ND B" correctly', () => {
+    const response = JSON.stringify({ ...validFacturaBase, tipoComprobante: 'ND B' });
+    const result = parseFacturaResponse(response, 'factura_emitida');
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.data.tipoComprobante).toBe('ND B');
+    }
+  });
+
+  it('parses tipoComprobante "NC" (old format) correctly - backward compat', () => {
+    const response = JSON.stringify({ ...validFacturaBase, tipoComprobante: 'NC' });
+    const result = parseFacturaResponse(response, 'factura_emitida');
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.data.tipoComprobante).toBe('NC');
+    }
   });
 });

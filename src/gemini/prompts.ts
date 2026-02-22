@@ -219,6 +219,7 @@ Required fields to extract:
 
 Optional fields:
 - concepto: Brief one-line summary describing what the invoice is for. Analyze the line items/services listed in the invoice and summarize them (e.g., "Desarrollo de software para pagina web de ADVA", "Alojamiento y comidas para viaje a Tierra del Fuego", "Servicios de hosting y dominio para portal institucional"). IMPORTANT: Do NOT use tax category labels like "EXENTO", "GRAVADO", "NO GRAVADO" as the concepto - these are tax classifications, not descriptions.
+- tipoDeCambio: Exchange rate for USD invoices (number). Look for "Exchange Rate:", "Tipo de Cambio:", "T.C." Only extract if moneda is USD.
 
 Return ONLY valid JSON in this exact format:
 {
@@ -303,6 +304,8 @@ Optional fields:
 - cuitBeneficiario: Beneficiary CUIT (11 digits) or DNI (7-8 digits). Remove dashes.
 - nombreBeneficiario: Beneficiary name
 - concepto: Payment description
+- tipoDeCambio: Exchange rate for cross-currency payments (number). Look for "Tipo de Cambio:", "T.C.", "Exchange Rate:". Only extract if payment involves currency conversion.
+- importeEnPesos: Equivalent amount in Argentine Pesos (number). Look for "Importe equivalente en Pesos:", "Total en Pesos". Only extract if tipoDeCambio is present.
 
 NUMBER FORMAT: "2.917.310,00" = 2917310.00 (dots=thousands, comma=decimal)
 

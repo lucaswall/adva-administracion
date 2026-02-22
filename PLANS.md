@@ -277,3 +277,68 @@
 - `TipoComprobante` expansion: old rows in spreadsheets have 'NC', new rows have 'NC A' — acceptable, no migration needed since both are valid display values
 - Duplicate replacement involves multiple operations (update row, move old file, sort new file) — partial failures need graceful handling
 - `findRowByFileId` adds one API call per store operation — acceptable since it's a simple column read, and can share the data already fetched by `isDuplicate*`
+
+---
+
+## Iteration 1
+
+**Implemented:** 2026-02-22
+**Method:** Agent team (4 workers, worktree-isolated)
+
+### Tasks Completed This Iteration
+- Task 1: Add tipoDeCambio to Factura and Pago types (ADV-108) (worker-1)
+- Task 2: Extract tipoDeCambio in Gemini prompts and parser (ADV-109) (worker-1)
+- Task 3: Pass tipoDeCambio through extractor to storage (ADV-110) (worker-1)
+- Task 4: Fix same-currency matching in amountsMatchCrossCurrency (ADV-111) (worker-2)
+- Task 5: Add comprobante letter to factura filenames (ADV-113) (worker-3)
+- Task 6: Enable file reprocessing via findRowByFileId (ADV-114) (worker-4)
+- Task 7: Better duplicate replacement for pagos (ADV-112) (worker-4)
+- Task 8: Update documentation (SPREADSHEET_FORMAT.md, CLAUDE.md) (lead)
+
+### Files Modified
+- `src/types/index.ts` - Added tipoDeCambio to Factura/Pago, expanded TipoComprobante, added updated/replacedFileId to StoreResult
+- `src/gemini/prompts.ts` - Added tipoDeCambio instructions, NC/ND letter extraction
+- `src/gemini/parser.ts` - tipoDeCambio validation in parseFacturaResponse/parsePagoResponse, importeEnPesos cascade clear
+- `src/processing/extractor.ts` - tipoDeCambio pass-through for factura and pago
+- `src/constants/spreadsheet-headers.ts` - tipoDeCambio/importeEnPesos headers and number formats
+- `src/services/folder-structure.ts` - migrateTipoDeCambioHeaders function and startup calls
+- `src/processing/storage/factura-store.ts` - tipoDeCambio in buildFacturaRow, append, batchUpdate
+- `src/processing/storage/pago-store.ts` - tipoDeCambio/importeEnPesos in buildPagoRow, isQualityBetter, isDuplicatePago
+- `src/utils/exchange-rate.ts` - pagoMoneda parameter for same-currency matching
+- `src/matching/matcher.ts` - Pass pago.moneda to amountsMatchCrossCurrency
+- `src/bank/matcher.ts` - Pass 'ARS' as bank movement currency
+- `src/utils/file-naming.ts` - Comprobante letter in factura filenames
+- `src/utils/validation.ts` - Expanded validateTipoComprobante for NC A/B/C, ND A/B/C
+- `src/processing/scanner.ts` - Reprocessing handling (updated flag, replacedFileId)
+- `SPREADSHEET_FORMAT.md` - Updated column counts and schemas
+- `CLAUDE.md` - Updated column counts
+
+### Linear Updates
+- ADV-108: Todo → In Progress → Review
+- ADV-109: Todo → In Progress → Review
+- ADV-110: Todo → In Progress → Review
+- ADV-111: Todo → In Progress → Review
+- ADV-112: Todo → In Progress → Review
+- ADV-113: Todo → In Progress → Review
+- ADV-114: Todo → In Progress → Review
+
+### Pre-commit Verification
+- bug-hunter: Found 2 medium bugs, 1 fixed (importeEnPesos cascade clear), 1 accepted (migration condition theoretical)
+- verifier: All 1694 tests pass, zero warnings
+
+### Work Partition
+- Worker 1: Tasks 1, 2, 3 (tipoDeCambio pipeline — types, prompts, parser, extractor, storage, migration)
+- Worker 2: Task 4 (matching fix — exchange-rate, matcher)
+- Worker 3: Task 5 (filename — file-naming, validation, parser tipoComprobante)
+- Worker 4: Tasks 6, 7 (reprocessing + duplicates — scanner, factura-store, pago-store)
+- Lead: Task 8 (documentation), merge fix, bug fixes
+
+### Merge Summary
+- Worker 1: salvaged (uncommitted changes committed by lead)
+- Worker 3: merged, auto-merge silently dropped worker 1 additions
+- Worker 2: merged cleanly
+- Worker 4: merged, auto-merge silently dropped worker 1 additions
+- Lead manually restored all worker 1 changes lost in merge (8 source + 5 test files)
+
+### Continuation Status
+All tasks completed.

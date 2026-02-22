@@ -312,6 +312,60 @@ describe('storeFactura', () => {
     });
   });
 
+  describe('tipoDeCambio column', () => {
+    it('USD factura_emitida with tipoDeCambio stores CellNumber at index 18', async () => {
+      vi.mocked(getValues).mockResolvedValue({ ok: true, value: [['Header']] });
+      vi.mocked(appendRowsWithLinks).mockResolvedValue({ ok: true, value: 1 });
+      vi.mocked(sortSheet).mockResolvedValue({ ok: true, value: undefined });
+
+      const factura = createTestFactura({ moneda: 'USD', tipoDeCambio: 1429.5 });
+      await storeFactura(factura, 'spreadsheet-id', 'Facturas Emitidas', 'factura_emitida');
+
+      const callArgs = vi.mocked(appendRowsWithLinks).mock.calls[0];
+      const row = callArgs[2][0]; // first row
+      expect(row[18]).toEqual({ type: 'number', value: 1429.5 });
+    });
+
+    it('ARS factura_emitida without tipoDeCambio stores empty string at index 18', async () => {
+      vi.mocked(getValues).mockResolvedValue({ ok: true, value: [['Header']] });
+      vi.mocked(appendRowsWithLinks).mockResolvedValue({ ok: true, value: 1 });
+      vi.mocked(sortSheet).mockResolvedValue({ ok: true, value: undefined });
+
+      const factura = createTestFactura({ moneda: 'ARS' });
+      await storeFactura(factura, 'spreadsheet-id', 'Facturas Emitidas', 'factura_emitida');
+
+      const callArgs = vi.mocked(appendRowsWithLinks).mock.calls[0];
+      const row = callArgs[2][0];
+      expect(row[18]).toBe('');
+    });
+
+    it('USD factura_recibida with tipoDeCambio stores CellNumber at index 19', async () => {
+      vi.mocked(getValues).mockResolvedValue({ ok: true, value: [['Header']] });
+      vi.mocked(appendRowsWithLinks).mockResolvedValue({ ok: true, value: 1 });
+      vi.mocked(sortSheet).mockResolvedValue({ ok: true, value: undefined });
+
+      const factura = createTestFactura({ moneda: 'USD', tipoDeCambio: 1429.5 });
+      await storeFactura(factura, 'spreadsheet-id', 'Facturas Recibidas', 'factura_recibida');
+
+      const callArgs = vi.mocked(appendRowsWithLinks).mock.calls[0];
+      const row = callArgs[2][0];
+      expect(row[19]).toEqual({ type: 'number', value: 1429.5 });
+    });
+
+    it('ARS factura_recibida without tipoDeCambio stores empty string at index 19', async () => {
+      vi.mocked(getValues).mockResolvedValue({ ok: true, value: [['Header']] });
+      vi.mocked(appendRowsWithLinks).mockResolvedValue({ ok: true, value: 1 });
+      vi.mocked(sortSheet).mockResolvedValue({ ok: true, value: undefined });
+
+      const factura = createTestFactura({ moneda: 'ARS' });
+      await storeFactura(factura, 'spreadsheet-id', 'Facturas Recibidas', 'factura_recibida');
+
+      const callArgs = vi.mocked(appendRowsWithLinks).mock.calls[0];
+      const row = callArgs[2][0];
+      expect(row[19]).toBe('');
+    });
+  });
+
   describe('reprocessing (same fileId already in sheet)', () => {
     it('updates existing row when fileId already exists in sheet', async () => {
       // First getValues call (findRowByFileId → B:B): fileId found at row 2

@@ -5,7 +5,7 @@
 
 import type { Result, Factura, StoreResult } from '../../types/index.js';
 import type { ScanContext } from '../scanner.js';
-import { appendRowsWithLinks, sortSheet, getValues, batchUpdate, getSpreadsheetTimezone, type CellValueOrLink, type CellDate, type CellValue } from '../../services/sheets.js';
+import { appendRowsWithLinks, sortSheet, getValues, batchUpdate, getSpreadsheetTimezone, type CellValueOrLink, type CellDate, type CellValue, type CellNumber } from '../../services/sheets.js';
 import { formatUSCurrency, parseNumber } from '../../utils/numbers.js';
 import { generateFacturaFileName } from '../../utils/file-naming.js';
 import { normalizeSpreadsheetDate } from '../../utils/date.js';
@@ -27,6 +27,8 @@ function buildFacturaRow(
   documentType: 'factura_emitida' | 'factura_recibida',
   renamedFileName: string
 ): CellValue[] {
+  const tipoDeCambioVal: CellValue = factura.tipoDeCambio ?? '';
+
   if (documentType === 'factura_emitida') {
     return [
       factura.fechaEmision,                               // A - date string (USER_ENTERED parses)
@@ -47,6 +49,7 @@ function buildFacturaRow(
       factura.matchedPagoFileId || '',                    // P
       factura.matchConfidence || '',                      // Q
       factura.hasCuitMatch ? 'YES' : 'NO',                // R
+      tipoDeCambioVal,                                    // S
     ];
   } else {
     return [
@@ -69,6 +72,7 @@ function buildFacturaRow(
       factura.matchConfidence || '',                      // Q
       factura.hasCuitMatch ? 'YES' : 'NO',                // R
       '',                                                 // S - pagada
+      tipoDeCambioVal,                                    // T
     ];
   }
 }
@@ -181,7 +185,7 @@ export async function storeFactura(
     if (fileIdCheck.found) {
       const renamedFileName = generateFacturaFileName(factura, documentType);
       const updateRow = buildFacturaRow(factura, documentType, renamedFileName);
-      const lastCol = documentType === 'factura_emitida' ? 'R' : 'S';
+      const lastCol = documentType === 'factura_emitida' ? 'S' : 'T';
       const updateResult = await batchUpdate(spreadsheetId, [{
         range: `${sheetName}!A${fileIdCheck.rowIndex}:${lastCol}${fileIdCheck.rowIndex}`,
         values: [updateRow],
@@ -252,8 +256,13 @@ export async function storeFactura(
   // Create CellDate for proper date formatting
   const fechaEmisionDate: CellDate = { type: 'date', value: factura.fechaEmision };
 
+  // Validate tipoDeCambio as CellNumber or empty string
+  const tipoDeCambioCell: CellNumber | '' = factura.tipoDeCambio
+    ? { type: 'number', value: factura.tipoDeCambio }
+    : '';
+
   if (documentType === 'factura_emitida') {
-    // Facturas Emitidas: Only receptor info (columns A:R)
+    // Facturas Emitidas: Only receptor info (columns A:S)
     row = [
       fechaEmisionDate,                     // A - proper date cell
       factura.fileId,                       // B
@@ -273,10 +282,11 @@ export async function storeFactura(
       factura.matchedPagoFileId || '',      // P
       factura.matchConfidence || '',        // Q
       factura.hasCuitMatch ? 'YES' : 'NO',  // R
+      tipoDeCambioCell,                     // S
     ];
-    range = `${sheetName}!A:R`;
+    range = `${sheetName}!A:S`;
   } else {
-    // Facturas Recibidas: Only emisor info (columns A:S)
+    // Facturas Recibidas: Only emisor info (columns A:T)
     row = [
       fechaEmisionDate,                     // A - proper date cell
       factura.fileId,                       // B
@@ -297,8 +307,9 @@ export async function storeFactura(
       factura.matchConfidence || '',        // Q
       factura.hasCuitMatch ? 'YES' : 'NO',  // R
       '',                                   // S - pagada (initially empty)
+      tipoDeCambioCell,                     // T
     ];
-    range = `${sheetName}!A:S`;
+    range = `${sheetName}!A:T`;
   }
 
   // Get spreadsheet timezone for proper timestamp formatting

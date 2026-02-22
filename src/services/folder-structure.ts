@@ -322,6 +322,55 @@ async function ensureSheetsExist(
 }
 
 /**
+ * Generic schema migration: appends new column headers to a sheet if it has exactly `oldColumnCount` columns.
+ * Production/staging sheets created before tipoDeCambio support have fewer columns.
+ * Detects the old schema and appends the new column headers.
+ *
+ * @param spreadsheetId - Spreadsheet ID (Control de Ingresos or Control de Egresos)
+ * @param sheetName - Sheet name (e.g., 'Facturas Emitidas')
+ * @param oldColumnCount - Number of columns in the old schema (migration triggers only when count matches)
+ * @param startColumn - Column letter to start writing new headers (e.g., 'S', 'T', 'P')
+ * @param newHeaders - Array of header names to append
+ * @returns Success or error
+ */
+export async function migrateTipoDeCambioHeaders(
+  spreadsheetId: string,
+  sheetName: string,
+  oldColumnCount: number,
+  startColumn: string,
+  newHeaders: string[]
+): Promise<Result<void, Error>> {
+  const headersResult = await getValues(spreadsheetId, `${sheetName}!A1:Z1`);
+  if (!headersResult.ok) return headersResult;
+
+  const headerRow = headersResult.value[0] ?? [];
+
+  if (headerRow.length === 0) {
+    // Empty sheet — ensureSheetsExist will write full headers
+    return { ok: true, value: undefined };
+  }
+
+  if (headerRow.length >= oldColumnCount + newHeaders.length) {
+    // Already migrated (has all new columns) — skip
+    return { ok: true, value: undefined };
+  }
+
+  // Old schema detected — append new column headers
+  const setResult = await setValues(spreadsheetId, `${sheetName}!${startColumn}1`, [newHeaders]);
+  if (!setResult.ok) return setResult;
+
+  info(`Migrated ${sheetName} headers: added ${newHeaders.join(', ')}`, {
+    module: 'folder-structure',
+    phase: 'migration',
+    spreadsheetId,
+    sheetName,
+    newHeaders,
+  });
+
+  return { ok: true, value: undefined };
+}
+
+/**
  * Migrates Archivos Procesados sheet to add Column F (originalFileId) if missing.
  * Production/staging sheets created before ADV-104 have 5 columns (A:E).
  * This migration detects the old schema and appends the new column header.
@@ -772,6 +821,28 @@ export async function discoverFolderStructure(): Promise<Result<FolderStructure,
 
   const ensureEgresosSheetsResult = await ensureSheetsExist(controlEgresosResult.value, CONTROL_EGRESOS_SHEETS);
   if (!ensureEgresosSheetsResult.ok) return ensureEgresosSheetsResult;
+
+  // Migrate tipoDeCambio columns in Ingresos sheets (ADV-110)
+  const migrateFacturasEmitidasResult = await migrateTipoDeCambioHeaders(
+    controlIngresosResult.value, 'Facturas Emitidas', 18, 'S', ['tipoDeCambio']
+  );
+  if (!migrateFacturasEmitidasResult.ok) return migrateFacturasEmitidasResult;
+
+  const migratePagosRecibidosResult = await migrateTipoDeCambioHeaders(
+    controlIngresosResult.value, 'Pagos Recibidos', 15, 'P', ['tipoDeCambio', 'importeEnPesos']
+  );
+  if (!migratePagosRecibidosResult.ok) return migratePagosRecibidosResult;
+
+  // Migrate tipoDeCambio columns in Egresos sheets (ADV-110)
+  const migrateFacturasRecibidasResult = await migrateTipoDeCambioHeaders(
+    controlEgresosResult.value, 'Facturas Recibidas', 19, 'T', ['tipoDeCambio']
+  );
+  if (!migrateFacturasRecibidasResult.ok) return migrateFacturasRecibidasResult;
+
+  const migratePagosEnviadosResult = await migrateTipoDeCambioHeaders(
+    controlEgresosResult.value, 'Pagos Enviados', 15, 'P', ['tipoDeCambio', 'importeEnPesos']
+  );
+  if (!migratePagosEnviadosResult.ok) return migratePagosEnviadosResult;
 
   // Initialize Dashboard Operativo Contable with sheets and data
   const initializeDashboardResult = await initializeDashboardOperativo(dashboardOperativoResult.value);

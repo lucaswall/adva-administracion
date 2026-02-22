@@ -123,6 +123,8 @@ export interface Factura {
   importeTotal: number;
   /** Currency */
   moneda: Moneda;
+  /** Exchange rate for USD invoices (AFIP rate at invoice date) */
+  tipoDeCambio?: number;
 
   // Optional
   /** Brief description or concept */
@@ -164,6 +166,10 @@ export interface Pago {
   importePagado: number;
   /** Currency */
   moneda: Moneda;
+  /** Exchange rate for cross-currency payments (bank liquidation rate) */
+  tipoDeCambio?: number;
+  /** Equivalent amount in ARS for cross-currency payments */
+  importeEnPesos?: number;
   /** Transaction reference/ID (if visible) */
   referencia?: string;
 

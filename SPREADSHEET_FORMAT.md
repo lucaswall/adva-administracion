@@ -16,7 +16,7 @@ Dual control spreadsheets based on money flow direction:
 
 Located at root: `Control de Ingresos.gsheet`
 
-### Facturas Emitidas (18 columns, A:R)
+### Facturas Emitidas (19 columns, A:S)
 
 Invoices FROM ADVA (ADVA is emisor). ADVA info is implicit; only receptor (counterparty) stored.
 
@@ -25,7 +25,7 @@ Invoices FROM ADVA (ADVA is emisor). ADVA info is implicit; only receptor (count
 | A | fechaEmision | date | Issue date (YYYY-MM-DD) |
 | B | fileId | string | Google Drive file ID |
 | C | fileName | hyperlink | Link to Drive file |
-| D | tipoComprobante | enum | A\|B\|C\|E\|NC\|ND |
+| D | tipoComprobante | enum | A\|B\|C\|E\|NC\|ND\|NC A\|NC B\|NC C\|ND A\|ND B\|ND C |
 | E | nroFactura | string | Full invoice number (e.g., "00003-00001957") |
 | F | cuitReceptor | string | Client CUIT (11 digits) |
 | G | razonSocialReceptor | string | Client business name |
@@ -40,10 +40,11 @@ Invoices FROM ADVA (ADVA is emisor). ADVA info is implicit; only receptor (count
 | P | matchedPagoFileId | string | Linked Pago Recibido fileId |
 | Q | matchConfidence | enum | HIGH\|MEDIUM\|LOW |
 | R | hasCuitMatch | boolean | Match based on CUIT |
+| S | tipoDeCambio | number | Exchange rate for USD invoices (optional) |
 
 Rows sorted by `fechaEmision` descending after insert.
 
-### Pagos Recibidos (15 columns, A:O)
+### Pagos Recibidos (17 columns, A:Q)
 
 Payments TO ADVA (ADVA is beneficiario). ADVA info is implicit; only pagador (counterparty) stored.
 
@@ -64,6 +65,8 @@ Payments TO ADVA (ADVA is beneficiario). ADVA info is implicit; only pagador (co
 | M | needsReview | boolean | Manual review needed |
 | N | matchedFacturaFileId | string | Linked Factura Emitida fileId |
 | O | matchConfidence | enum | HIGH\|MEDIUM\|LOW |
+| P | tipoDeCambio | number | Exchange rate for USD payments (optional) |
+| Q | importeEnPesos | currency | ARS equivalent amount (optional) |
 
 Rows sorted by `fechaPago` descending after insert.
 
@@ -97,7 +100,7 @@ Rows sorted by `fechaEmision` descending after insert.
 
 Located at root: `Control de Egresos.gsheet`
 
-### Facturas Recibidas (19 columns, A:S)
+### Facturas Recibidas (20 columns, A:T)
 
 Invoices TO ADVA (ADVA is receptor). ADVA info is implicit; only emisor (counterparty) stored.
 
@@ -106,7 +109,7 @@ Invoices TO ADVA (ADVA is receptor). ADVA info is implicit; only emisor (counter
 | A | fechaEmision | date | Issue date (YYYY-MM-DD) |
 | B | fileId | string | Google Drive file ID |
 | C | fileName | hyperlink | Link to Drive file |
-| D | tipoComprobante | enum | A\|B\|C\|E\|NC\|ND |
+| D | tipoComprobante | enum | A\|B\|C\|E\|NC\|ND\|NC A\|NC B\|NC C\|ND A\|ND B\|ND C |
 | E | nroFactura | string | Full invoice number (e.g., "00003-00001957") |
 | F | cuitEmisor | string | Provider CUIT (11 digits) |
 | G | razonSocialEmisor | string | Provider business name |
@@ -122,10 +125,11 @@ Invoices TO ADVA (ADVA is receptor). ADVA info is implicit; only emisor (counter
 | Q | matchConfidence | enum | HIGH\|MEDIUM\|LOW |
 | R | hasCuitMatch | boolean | Match based on CUIT |
 | S | pagada | enum | SI\|NO - Payment status |
+| T | tipoDeCambio | number | Exchange rate for USD invoices (optional) |
 
 Rows sorted by `fechaEmision` descending after insert.
 
-### Pagos Enviados (15 columns, A:O)
+### Pagos Enviados (17 columns, A:Q)
 
 Payments BY ADVA (ADVA is pagador). ADVA info is implicit; only beneficiario (counterparty) stored.
 
@@ -146,6 +150,8 @@ Payments BY ADVA (ADVA is pagador). ADVA info is implicit; only beneficiario (co
 | M | needsReview | boolean | Manual review needed |
 | N | matchedFacturaFileId | string | Linked Factura/Recibo fileId |
 | O | matchConfidence | enum | HIGH\|MEDIUM\|LOW |
+| P | tipoDeCambio | number | Exchange rate for USD payments (optional) |
+| Q | importeEnPesos | currency | ARS equivalent amount (optional) |
 
 Rows sorted by `fechaPago` descending after insert.
 

@@ -216,6 +216,64 @@ describe('storePago', () => {
     });
   });
 
+  describe('tipoDeCambio and importeEnPesos columns', () => {
+    it('USD pago_enviado with tipoDeCambio and importeEnPesos stores CellNumbers at positions 15-16', async () => {
+      vi.mocked(getValues).mockResolvedValue({ ok: true, value: [['Header']] });
+      vi.mocked(appendRowsWithLinks).mockResolvedValue({ ok: true, value: 1 });
+      vi.mocked(sortSheet).mockResolvedValue({ ok: true, value: undefined });
+
+      const pago = createTestPago({ moneda: 'USD', tipoDeCambio: 1396.25, importeEnPesos: 1675500 });
+      await storePago(pago, 'spreadsheet-id', 'Pagos Enviados', 'pago_enviado');
+
+      const callArgs = vi.mocked(appendRowsWithLinks).mock.calls[0];
+      const row = callArgs[2][0];
+      expect(row[15]).toEqual({ type: 'number', value: 1396.25 });
+      expect(row[16]).toEqual({ type: 'number', value: 1675500 });
+    });
+
+    it('ARS pago_enviado without tipoDeCambio stores empty strings at positions 15-16', async () => {
+      vi.mocked(getValues).mockResolvedValue({ ok: true, value: [['Header']] });
+      vi.mocked(appendRowsWithLinks).mockResolvedValue({ ok: true, value: 1 });
+      vi.mocked(sortSheet).mockResolvedValue({ ok: true, value: undefined });
+
+      const pago = createTestPago({ moneda: 'ARS' });
+      await storePago(pago, 'spreadsheet-id', 'Pagos Enviados', 'pago_enviado');
+
+      const callArgs = vi.mocked(appendRowsWithLinks).mock.calls[0];
+      const row = callArgs[2][0];
+      expect(row[15]).toBe('');
+      expect(row[16]).toBe('');
+    });
+
+    it('USD pago_recibido with tipoDeCambio and importeEnPesos stores CellNumbers at positions 15-16', async () => {
+      vi.mocked(getValues).mockResolvedValue({ ok: true, value: [['Header']] });
+      vi.mocked(appendRowsWithLinks).mockResolvedValue({ ok: true, value: 1 });
+      vi.mocked(sortSheet).mockResolvedValue({ ok: true, value: undefined });
+
+      const pago = createTestPago({ moneda: 'USD', tipoDeCambio: 1396.25, importeEnPesos: 1675500 });
+      await storePago(pago, 'spreadsheet-id', 'Pagos Recibidos', 'pago_recibido');
+
+      const callArgs = vi.mocked(appendRowsWithLinks).mock.calls[0];
+      const row = callArgs[2][0];
+      expect(row[15]).toEqual({ type: 'number', value: 1396.25 });
+      expect(row[16]).toEqual({ type: 'number', value: 1675500 });
+    });
+
+    it('ARS pago_recibido without tipoDeCambio stores empty strings at positions 15-16', async () => {
+      vi.mocked(getValues).mockResolvedValue({ ok: true, value: [['Header']] });
+      vi.mocked(appendRowsWithLinks).mockResolvedValue({ ok: true, value: 1 });
+      vi.mocked(sortSheet).mockResolvedValue({ ok: true, value: undefined });
+
+      const pago = createTestPago({ moneda: 'ARS' });
+      await storePago(pago, 'spreadsheet-id', 'Pagos Recibidos', 'pago_recibido');
+
+      const callArgs = vi.mocked(appendRowsWithLinks).mock.calls[0];
+      const row = callArgs[2][0];
+      expect(row[15]).toBe('');
+      expect(row[16]).toBe('');
+    });
+  });
+
   describe('pago recibido vs enviado', () => {
     it('uses cuitPagador for pago_recibido duplicate check', async () => {
       vi.mocked(getValues).mockResolvedValue({

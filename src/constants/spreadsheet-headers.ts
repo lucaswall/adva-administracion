@@ -3,7 +3,7 @@
  * These headers match the SPREADSHEET_FORMAT.md specification
  */
 
-/** Headers for Facturas Emitidas sheet - ADVA is emisor, only store receptor info (columns A:R) */
+/** Headers for Facturas Emitidas sheet - ADVA is emisor, only store receptor info (columns A:S) */
 export const FACTURA_EMITIDA_HEADERS = [
   'fechaEmision',
   'fileId',
@@ -23,9 +23,10 @@ export const FACTURA_EMITIDA_HEADERS = [
   'matchedPagoFileId',
   'matchConfidence',
   'hasCuitMatch',
+  'tipoDeCambio',
 ];
 
-/** Headers for Facturas Recibidas sheet - ADVA is receptor, only store emisor info (columns A:S) */
+/** Headers for Facturas Recibidas sheet - ADVA is receptor, only store emisor info (columns A:T) */
 export const FACTURA_RECIBIDA_HEADERS = [
   'fechaEmision',
   'fileId',
@@ -46,9 +47,10 @@ export const FACTURA_RECIBIDA_HEADERS = [
   'matchConfidence',
   'hasCuitMatch',
   'pagada',
+  'tipoDeCambio',
 ];
 
-/** Headers for Pagos Enviados sheet - ADVA is pagador, only store beneficiario info (columns A:O) */
+/** Headers for Pagos Enviados sheet - ADVA is pagador, only store beneficiario info (columns A:Q) */
 export const PAGO_ENVIADO_HEADERS = [
   'fechaPago',
   'fileId',
@@ -65,9 +67,11 @@ export const PAGO_ENVIADO_HEADERS = [
   'needsReview',
   'matchedFacturaFileId',
   'matchConfidence',
+  'tipoDeCambio',
+  'importeEnPesos',
 ];
 
-/** Headers for Pagos Recibidos sheet - ADVA is beneficiario, only store pagador info (columns A:O) */
+/** Headers for Pagos Recibidos sheet - ADVA is beneficiario, only store pagador info (columns A:Q) */
 export const PAGO_RECIBIDO_HEADERS = [
   'fechaPago',
   'fileId',
@@ -84,6 +88,8 @@ export const PAGO_RECIBIDO_HEADERS = [
   'needsReview',
   'matchedFacturaFileId',
   'matchConfidence',
+  'tipoDeCambio',
+  'importeEnPesos',
 ];
 
 /** Headers for Retenciones Recibidas sheet - Tax withholding certificates (columns A:O) */
@@ -321,6 +327,7 @@ export const CONTROL_INGRESOS_SHEETS: SheetConfig[] = [
       [7, { type: 'currency', decimals: 2 }],   // importeNeto
       [8, { type: 'currency', decimals: 2 }],   // importeIva
       [9, { type: 'currency', decimals: 2 }],   // importeTotal
+      [18, { type: 'number', decimals: 2 }],    // tipoDeCambio
     ]),
   },
   {
@@ -329,6 +336,8 @@ export const CONTROL_INGRESOS_SHEETS: SheetConfig[] = [
     numberFormats: new Map([
       [0, { type: 'date' }],                    // fechaPago
       [4, { type: 'currency', decimals: 2 }],   // importePagado
+      [15, { type: 'number', decimals: 2 }],    // tipoDeCambio
+      [16, { type: 'currency', decimals: 2 }],  // importeEnPesos
     ]),
   },
   {
@@ -355,6 +364,7 @@ export const CONTROL_EGRESOS_SHEETS: SheetConfig[] = [
       [7, { type: 'currency', decimals: 2 }],   // importeNeto
       [8, { type: 'currency', decimals: 2 }],   // importeIva
       [9, { type: 'currency', decimals: 2 }],   // importeTotal
+      [19, { type: 'number', decimals: 2 }],    // tipoDeCambio
     ]),
   },
   {
@@ -363,6 +373,8 @@ export const CONTROL_EGRESOS_SHEETS: SheetConfig[] = [
     numberFormats: new Map([
       [0, { type: 'date' }],                    // fechaPago
       [4, { type: 'currency', decimals: 2 }],   // importePagado
+      [15, { type: 'number', decimals: 2 }],    // tipoDeCambio
+      [16, { type: 'currency', decimals: 2 }],  // importeEnPesos
     ]),
   },
   {
