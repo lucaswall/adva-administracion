@@ -4,7 +4,7 @@
  */
 
 import { getConfig, SPREADSHEET_LOCK_TIMEOUT_MS } from '../config.js';
-import { findByName, listByMimeType, createFolder, createSpreadsheet } from './drive.js';
+import { findByName, listByMimeType, createFolder, createSpreadsheet, createFile } from './drive.js';
 import { getSheetMetadata, createSheet, setValues, getValues, formatSheet, formatStatusSheet, deleteSheet, moveSheetToFirst, applyConditionalFormat } from './sheets.js';
 import { formatMonthFolder } from '../utils/spanish-date.js';
 import { CONTROL_INGRESOS_SHEETS, CONTROL_EGRESOS_SHEETS, DASHBOARD_OPERATIVO_SHEETS, CONTROL_RESUMENES_BANCARIO_SHEET, CONTROL_RESUMENES_TARJETA_SHEET, CONTROL_RESUMENES_BROKER_SHEET, type SheetConfig } from '../constants/spreadsheet-headers.js';
@@ -619,6 +619,69 @@ export async function discoverMovimientosSpreadsheets(
 }
 
 /**
+ * Checks or creates the environment marker file in the Drive root folder
+ * Prevents mixing staging and production data in the same folder
+ *
+ * Marker files are empty plain-text files named `.staging` or `.production`
+ * located at the root of the Drive folder.
+ *
+ * - If no marker exists: creates the correct one for this environment
+ * - If correct marker exists: returns ok
+ * - If wrong marker exists: returns error (environment mismatch)
+ * - If environment is "development": skips check (returns ok immediately)
+ *
+ * @param rootId - Root Drive folder ID
+ * @param environment - Server environment identity
+ * @returns ok or error
+ */
+export async function checkEnvironmentMarker(
+  rootId: string,
+  environment: string
+): Promise<Result<void, Error>> {
+  if (environment === 'development') {
+    return { ok: true, value: undefined };
+  }
+
+  const expectedMarker = `.${environment}`;
+  const otherMarker = environment === 'staging' ? '.production' : '.staging';
+  const otherEnvironment = environment === 'staging' ? 'production' : 'staging';
+
+  // Check for both markers in parallel
+  const [expectedResult, otherResult] = await Promise.all([
+    findByName(rootId, expectedMarker),
+    findByName(rootId, otherMarker),
+  ]);
+
+  if (!expectedResult.ok) return expectedResult;
+  if (!otherResult.ok) return otherResult;
+
+  if (otherResult.value) {
+    return {
+      ok: false,
+      error: new Error(
+        `Environment mismatch: server is ${environment} but Drive folder is marked ${otherEnvironment}`
+      ),
+    };
+  }
+
+  if (expectedResult.value) {
+    return { ok: true, value: undefined };
+  }
+
+  // No marker exists — create the correct one
+  info('Creating environment marker file', {
+    module: 'folder-structure',
+    phase: 'env-marker',
+    marker: expectedMarker,
+    rootId
+  });
+  const createResult = await createFile(rootId, expectedMarker);
+  if (!createResult.ok) return createResult;
+
+  return { ok: true, value: undefined };
+}
+
+/**
  * Discovers and caches the folder structure from Drive
  * Creates root-level folders and spreadsheets only
  * Year folders and classification folders are created on-demand
@@ -634,6 +697,10 @@ export async function discoverFolderStructure(): Promise<Result<FolderStructure,
     phase: 'discovery',
     rootId
   });
+
+  // Check environment marker before any folder creation
+  const markerResult = await checkEnvironmentMarker(rootId, config.environment);
+  if (!markerResult.ok) return markerResult;
 
   // Find or create root-level folders (Entrada, Sin Procesar, and Duplicado)
   const entradaResult = await findOrCreateFolder(rootId, FOLDER_NAMES.entrada);

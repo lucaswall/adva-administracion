@@ -562,6 +562,81 @@ export async function createFolder(
 }
 
 /**
+ * Creates an empty plain-text file in a parent folder
+ * Used for marker files such as .staging and .production
+ *
+ * @param parentId - Parent folder ID
+ * @param name - File name
+ * @returns Created file info
+ */
+export async function createFile(
+  parentId: string,
+  name: string
+): Promise<Result<DriveFileInfo, Error>> {
+  try {
+    const drive = await getDriveService();
+
+    debug('Creating file', {
+      module: 'drive',
+      phase: 'create-file',
+      name,
+      parentId
+    });
+
+    const createResult = await withQuotaRetry(async () =>
+      drive.files.create({
+        requestBody: {
+          name,
+          mimeType: 'text/plain',
+          parents: [parentId],
+        },
+        fields: 'id, name, mimeType',
+        supportsAllDrives: true,
+      })
+    );
+
+    if (!createResult.ok) {
+      return createResult;
+    }
+
+    const file = createResult.value.data;
+    if (!file.id) {
+      return {
+        ok: false,
+        error: new Error(`Failed to create file "${name}": no ID returned`),
+      };
+    }
+
+    debug('Successfully created file', {
+      module: 'drive',
+      phase: 'create-file',
+      name,
+      fileId: file.id
+    });
+
+    return {
+      ok: true,
+      value: {
+        id: file.id,
+        name: file.name || name,
+        mimeType: file.mimeType || 'text/plain',
+      },
+    };
+  } catch (error) {
+    logError('Error creating file', {
+      module: 'drive',
+      phase: 'create-file',
+      name,
+      error: error instanceof Error ? error.message : String(error)
+    });
+    return {
+      ok: false,
+      error: error instanceof Error ? error : new Error(String(error)),
+    };
+  }
+}
+
+/**
  * Moves a file from one folder to another
  *
  * @param fileId - File ID to move

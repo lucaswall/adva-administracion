@@ -10,6 +10,7 @@ export default defineConfig({
       GOOGLE_SERVICE_ACCOUNT_KEY: 'test-service-account-key',
       GEMINI_API_KEY: 'test-gemini-key',
       DRIVE_ROOT_FOLDER_ID: 'test-root-folder-id',
+      ENVIRONMENT: 'staging',
     },
     coverage: {
       provider: 'v8',
