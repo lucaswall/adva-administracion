@@ -59,6 +59,7 @@ describe('Scan routes', () => {
     matchDaysAfter: 60,
     usdArsTolerancePercent: 5,
     geminiRpmLimit: 150,
+    environment: 'staging' as const,
   };
 
   const mockFolderStructure = {

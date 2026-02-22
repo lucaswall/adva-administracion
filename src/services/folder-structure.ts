@@ -4,7 +4,7 @@
  */
 
 import { getConfig, SPREADSHEET_LOCK_TIMEOUT_MS } from '../config.js';
-import { findByName, listByMimeType, createFolder, createSpreadsheet } from './drive.js';
+import { findByName, listByMimeType, createFolder, createSpreadsheet, createFile } from './drive.js';
 import { getSheetMetadata, createSheet, setValues, getValues, formatSheet, formatStatusSheet, deleteSheet, moveSheetToFirst, applyConditionalFormat } from './sheets.js';
 import { formatMonthFolder } from '../utils/spanish-date.js';
 import { CONTROL_INGRESOS_SHEETS, CONTROL_EGRESOS_SHEETS, DASHBOARD_OPERATIVO_SHEETS, CONTROL_RESUMENES_BANCARIO_SHEET, CONTROL_RESUMENES_TARJETA_SHEET, CONTROL_RESUMENES_BROKER_SHEET, type SheetConfig } from '../constants/spreadsheet-headers.js';
@@ -322,6 +322,45 @@ async function ensureSheetsExist(
 }
 
 /**
+ * Migrates Archivos Procesados sheet to add Column F (originalFileId) if missing.
+ * Production/staging sheets created before ADV-104 have 5 columns (A:E).
+ * This migration detects the old schema and appends the new column header.
+ *
+ * @param dashboardId - Dashboard Operativo Contable spreadsheet ID
+ * @returns Success or error
+ */
+export async function migrateArchivosProcesadosHeaders(
+  dashboardId: string
+): Promise<Result<void, Error>> {
+  const headersResult = await getValues(dashboardId, 'Archivos Procesados!A1:Z1');
+  if (!headersResult.ok) return headersResult;
+
+  const headerRow = headersResult.value[0] ?? [];
+
+  if (headerRow.length === 0) {
+    // Empty sheet — ensureSheetsExist will write full 6-column headers
+    return { ok: true, value: undefined };
+  }
+
+  if (headerRow.length >= 6) {
+    // Already migrated (6+ columns) — skip
+    return { ok: true, value: undefined };
+  }
+
+  // Old 5-column schema detected — append Column F header
+  const setResult = await setValues(dashboardId, 'Archivos Procesados!F1', [['originalFileId']]);
+  if (!setResult.ok) return setResult;
+
+  info('Migrated Archivos Procesados headers: added originalFileId column', {
+    module: 'folder-structure',
+    phase: 'migration',
+    dashboardId,
+  });
+
+  return { ok: true, value: undefined };
+}
+
+/**
  * Initializes Dashboard Operativo Contable spreadsheet with sheets and data
  * Creates "API Mensual" and "Uso de API" sheets with headers
  * Initializes "API Mensual" with current month only, with IFERROR handling for empty data
@@ -335,6 +374,10 @@ async function initializeDashboardOperativo(
   // Ensure all sheets exist with headers
   const ensureSheetsResult = await ensureSheetsExist(spreadsheetId, DASHBOARD_OPERATIVO_SHEETS);
   if (!ensureSheetsResult.ok) return ensureSheetsResult;
+
+  // Migrate Archivos Procesados schema: add Column F (originalFileId) if missing
+  const migrateResult = await migrateArchivosProcesadosHeaders(spreadsheetId);
+  if (!migrateResult.ok) return migrateResult;
 
   // Move Pagos Pendientes to first position (leftmost tab)
   const moveResult = await moveSheetToFirst(spreadsheetId, 'Pagos Pendientes');
@@ -619,6 +662,69 @@ export async function discoverMovimientosSpreadsheets(
 }
 
 /**
+ * Checks or creates the environment marker file in the Drive root folder
+ * Prevents mixing staging and production data in the same folder
+ *
+ * Marker files are empty plain-text files named `.staging` or `.production`
+ * located at the root of the Drive folder.
+ *
+ * - If no marker exists: creates the correct one for this environment
+ * - If correct marker exists: returns ok
+ * - If wrong marker exists: returns error (environment mismatch)
+ * - If environment is "development": skips check (returns ok immediately)
+ *
+ * @param rootId - Root Drive folder ID
+ * @param environment - Server environment identity
+ * @returns ok or error
+ */
+export async function checkEnvironmentMarker(
+  rootId: string,
+  environment: string
+): Promise<Result<void, Error>> {
+  if (environment === 'development') {
+    return { ok: true, value: undefined };
+  }
+
+  const expectedMarker = `.${environment}`;
+  const otherMarker = environment === 'staging' ? '.production' : '.staging';
+  const otherEnvironment = environment === 'staging' ? 'production' : 'staging';
+
+  // Check for both markers in parallel
+  const [expectedResult, otherResult] = await Promise.all([
+    findByName(rootId, expectedMarker),
+    findByName(rootId, otherMarker),
+  ]);
+
+  if (!expectedResult.ok) return expectedResult;
+  if (!otherResult.ok) return otherResult;
+
+  if (otherResult.value) {
+    return {
+      ok: false,
+      error: new Error(
+        `Environment mismatch: server is ${environment} but Drive folder is marked ${otherEnvironment}`
+      ),
+    };
+  }
+
+  if (expectedResult.value) {
+    return { ok: true, value: undefined };
+  }
+
+  // No marker exists — create the correct one
+  info('Creating environment marker file', {
+    module: 'folder-structure',
+    phase: 'env-marker',
+    marker: expectedMarker,
+    rootId
+  });
+  const createResult = await createFile(rootId, expectedMarker);
+  if (!createResult.ok) return createResult;
+
+  return { ok: true, value: undefined };
+}
+
+/**
  * Discovers and caches the folder structure from Drive
  * Creates root-level folders and spreadsheets only
  * Year folders and classification folders are created on-demand
@@ -634,6 +740,10 @@ export async function discoverFolderStructure(): Promise<Result<FolderStructure,
     phase: 'discovery',
     rootId
   });
+
+  // Check environment marker before any folder creation
+  const markerResult = await checkEnvironmentMarker(rootId, config.environment);
+  if (!markerResult.ok) return markerResult;
 
   // Find or create root-level folders (Entrada, Sin Procesar, and Duplicado)
   const entradaResult = await findOrCreateFolder(rootId, FOLDER_NAMES.entrada);

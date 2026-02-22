@@ -168,6 +168,9 @@ export interface Config {
 
   // Gemini API
   geminiRpmLimit: number;
+
+  // Environment identity (which Drive folder this server owns)
+  environment: 'development' | 'staging' | 'production';
 }
 
 /**
@@ -230,6 +233,21 @@ export function loadConfig(): Config {
     throw new Error('DRIVE_ROOT_FOLDER_ID is required');
   }
 
+  // Environment identity - which Drive folder this server owns
+  const validEnvironments = ['staging', 'production'] as const;
+  const rawEnvironment = process.env.ENVIRONMENT;
+  let environment: Config['environment'];
+  if (!rawEnvironment) {
+    if (nodeEnv === 'production') {
+      throw new Error('ENVIRONMENT is required in production (must be "staging" or "production")');
+    }
+    environment = 'development';
+  } else if (!validEnvironments.includes(rawEnvironment as typeof validEnvironments[number])) {
+    throw new Error(`ENVIRONMENT must be "staging" or "production", got "${rawEnvironment}"`);
+  } else {
+    environment = rawEnvironment as 'staging' | 'production';
+  }
+
   // API Base URL - optional (required for webhooks and Apps Script)
   const apiBaseUrl = process.env.API_BASE_URL || null;
 
@@ -269,6 +287,7 @@ export function loadConfig(): Config {
     matchDaysAfter,
     usdArsTolerancePercent,
     geminiRpmLimit,
+    environment,
   };
 }
 

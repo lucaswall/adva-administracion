@@ -33,6 +33,7 @@ describe('Status routes', () => {
     matchDaysAfter: 60,
     usdArsTolerancePercent: 5,
     geminiRpmLimit: 150,
+    environment: 'staging' as const,
   };
 
   beforeEach(async () => {

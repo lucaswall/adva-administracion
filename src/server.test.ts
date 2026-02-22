@@ -10,6 +10,7 @@ vi.mock('./config.js', () => ({
   getConfig: vi.fn(() => ({
     port: 3000,
     nodeEnv: 'test',
+    environment: 'staging',
     apiSecret: 'test-secret',
     driveRootFolderId: 'test-root',
     webhookUrl: null,
@@ -134,6 +135,7 @@ describe('Server startup scan (ADV-26)', () => {
         matchDaysAfter: 60,
         usdArsTolerancePercent: 5,
         geminiRpmLimit: 150,
+        environment: 'staging' as const,
       });
 
       // Mock successful scan
@@ -175,6 +177,7 @@ describe('Server startup scan (ADV-26)', () => {
         matchDaysAfter: 60,
         usdArsTolerancePercent: 5,
         geminiRpmLimit: 150,
+        environment: 'staging' as const,
       });
 
       // Mock auth failure - critical error
@@ -207,6 +210,7 @@ describe('Server startup scan (ADV-26)', () => {
         matchDaysAfter: 60,
         usdArsTolerancePercent: 5,
         geminiRpmLimit: 150,
+        environment: 'staging' as const,
       });
 
       // Mock missing folder - critical error
@@ -239,6 +243,7 @@ describe('Server startup scan (ADV-26)', () => {
         matchDaysAfter: 60,
         usdArsTolerancePercent: 5,
         geminiRpmLimit: 150,
+        environment: 'staging' as const,
       });
 
       // Mock transient error - should NOT fail startup
@@ -269,6 +274,7 @@ describe('Server startup scan (ADV-26)', () => {
         matchDaysAfter: 60,
         usdArsTolerancePercent: 5,
         geminiRpmLimit: 150,
+        environment: 'staging' as const,
       });
 
       // Mock successful scan with no files
@@ -308,6 +314,7 @@ describe('Server startup scan (ADV-26)', () => {
         matchDaysAfter: 60,
         usdArsTolerancePercent: 5,
         geminiRpmLimit: 150,
+        environment: 'staging' as const,
       });
 
       const { performStartupScan } = await import('./server.js');

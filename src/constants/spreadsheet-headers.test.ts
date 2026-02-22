@@ -56,18 +56,19 @@ describe('Status Sheet Headers', () => {
 
 describe('Archivos Procesados Sheet Headers', () => {
   describe('ARCHIVOS_PROCESADOS_HEADERS', () => {
-    it('should have fileId, fileName, processedAt, documentType, and status columns', () => {
+    it('should have fileId, fileName, processedAt, documentType, status, and originalFileId columns', () => {
       expect(ARCHIVOS_PROCESADOS_HEADERS).toEqual([
         'fileId',
         'fileName',
         'processedAt',
         'documentType',
         'status',
+        'originalFileId',
       ]);
     });
 
-    it('should have exactly 5 headers', () => {
-      expect(ARCHIVOS_PROCESADOS_HEADERS).toHaveLength(5);
+    it('should have exactly 6 headers', () => {
+      expect(ARCHIVOS_PROCESADOS_HEADERS).toHaveLength(6);
     });
   });
 

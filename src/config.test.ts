@@ -266,3 +266,67 @@ describe('Numeric env var validation', () => {
     });
   });
 });
+
+describe('ENVIRONMENT validation', () => {
+  const originalEnv = process.env;
+
+  beforeEach(() => {
+    vi.resetModules();
+    process.env = { ...originalEnv };
+    // Set required vars to valid values
+    process.env.API_SECRET = 'test-secret';
+    process.env.NODE_ENV = 'development';
+  });
+
+  afterEach(() => {
+    process.env = originalEnv;
+  });
+
+  it('accepts "staging" as valid ENVIRONMENT', async () => {
+    process.env.ENVIRONMENT = 'staging';
+    const { loadConfig } = await import('./config.js');
+    expect(loadConfig().environment).toBe('staging');
+  });
+
+  it('accepts "production" as valid ENVIRONMENT', async () => {
+    process.env.ENVIRONMENT = 'production';
+    const { loadConfig } = await import('./config.js');
+    expect(loadConfig().environment).toBe('production');
+  });
+
+  it('defaults to "development" when ENVIRONMENT is not set and NODE_ENV is not production', async () => {
+    delete process.env.ENVIRONMENT;
+    process.env.NODE_ENV = 'development';
+    const { loadConfig } = await import('./config.js');
+    expect(loadConfig().environment).toBe('development');
+  });
+
+  it('defaults to "development" when ENVIRONMENT is not set and NODE_ENV is test', async () => {
+    delete process.env.ENVIRONMENT;
+    process.env.NODE_ENV = 'test';
+    const { loadConfig } = await import('./config.js');
+    expect(loadConfig().environment).toBe('development');
+  });
+
+  it('throws when ENVIRONMENT is missing in production mode', async () => {
+    delete process.env.ENVIRONMENT;
+    process.env.NODE_ENV = 'production';
+    process.env.GOOGLE_SERVICE_ACCOUNT_KEY = 'test-key';
+    process.env.GEMINI_API_KEY = 'test-key';
+    process.env.DRIVE_ROOT_FOLDER_ID = 'test-folder';
+    const { loadConfig } = await import('./config.js');
+    expect(() => loadConfig()).toThrow('ENVIRONMENT is required in production (must be "staging" or "production")');
+  });
+
+  it('throws when ENVIRONMENT has an invalid value', async () => {
+    process.env.ENVIRONMENT = 'local';
+    const { loadConfig } = await import('./config.js');
+    expect(() => loadConfig()).toThrow('ENVIRONMENT must be "staging" or "production", got "local"');
+  });
+
+  it('throws when ENVIRONMENT is "development" (not a valid server identity)', async () => {
+    process.env.ENVIRONMENT = 'development';
+    const { loadConfig } = await import('./config.js');
+    expect(() => loadConfig()).toThrow('ENVIRONMENT must be "staging" or "production", got "development"');
+  });
+});

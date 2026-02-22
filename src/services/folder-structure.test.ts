@@ -2,8 +2,41 @@
  * Tests for folder structure service
  */
 
-import { describe, it, expect } from 'vitest';
-import { validateYear, clearFolderStructureCache, getCachedFolderStructure } from './folder-structure.js';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { validateYear, clearFolderStructureCache, getCachedFolderStructure, checkEnvironmentMarker, migrateArchivosProcesadosHeaders } from './folder-structure.js';
+
+// Mock drive.js for environment marker tests
+vi.mock('./drive.js', () => ({
+  findByName: vi.fn(),
+  createFile: vi.fn(),
+  listByMimeType: vi.fn(),
+  createFolder: vi.fn(),
+  createSpreadsheet: vi.fn(),
+  moveFile: vi.fn(),
+  getParents: vi.fn(),
+  renameFile: vi.fn(),
+  listFilesInFolder: vi.fn(),
+  downloadFile: vi.fn(),
+  trashFile: vi.fn(),
+}));
+
+import { findByName, createFile } from './drive.js';
+
+// Mock sheets.js so migration tests can control getValues/setValues
+vi.mock('./sheets.js', () => ({
+  getSheetMetadata: vi.fn(),
+  createSheet: vi.fn(),
+  setValues: vi.fn(),
+  getValues: vi.fn(),
+  formatSheet: vi.fn(),
+  formatStatusSheet: vi.fn(),
+  deleteSheet: vi.fn(),
+  moveSheetToFirst: vi.fn(),
+  applyConditionalFormat: vi.fn(),
+  batchUpdate: vi.fn(),
+}));
+
+import { getValues, setValues } from './sheets.js';
 
 describe('validateYear', () => {
   it('returns ok for valid years in range 2000-current+1', () => {
@@ -150,5 +183,234 @@ describe('movimientosSpreadsheets cache population', () => {
 
     // Verify discoverMovimientosSpreadsheets is called in discoverFolderStructure
     expect(sourceCode).toContain('discoverMovimientosSpreadsheets');
+  });
+});
+
+describe('checkEnvironmentMarker', () => {
+  const rootId = 'root-folder-id';
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('creates correct marker when no marker exists (staging)', async () => {
+    vi.mocked(findByName).mockResolvedValue({ ok: true, value: null });
+    vi.mocked(createFile).mockResolvedValue({
+      ok: true,
+      value: { id: 'marker-id', name: '.staging', mimeType: 'text/plain' },
+    });
+
+    const result = await checkEnvironmentMarker(rootId, 'staging');
+
+    expect(result.ok).toBe(true);
+    expect(findByName).toHaveBeenCalledWith(rootId, '.staging');
+    expect(findByName).toHaveBeenCalledWith(rootId, '.production');
+    expect(createFile).toHaveBeenCalledWith(rootId, '.staging');
+  });
+
+  it('creates correct marker when no marker exists (production)', async () => {
+    vi.mocked(findByName).mockResolvedValue({ ok: true, value: null });
+    vi.mocked(createFile).mockResolvedValue({
+      ok: true,
+      value: { id: 'marker-id', name: '.production', mimeType: 'text/plain' },
+    });
+
+    const result = await checkEnvironmentMarker(rootId, 'production');
+
+    expect(result.ok).toBe(true);
+    expect(findByName).toHaveBeenCalledWith(rootId, '.staging');
+    expect(findByName).toHaveBeenCalledWith(rootId, '.production');
+    expect(createFile).toHaveBeenCalledWith(rootId, '.production');
+  });
+
+  it('returns ok and does not create anything when correct marker exists (staging)', async () => {
+    vi.mocked(findByName).mockImplementation((_rootId, name) => {
+      if (name === '.staging') {
+        return Promise.resolve({
+          ok: true as const,
+          value: { id: 'existing-marker', name: '.staging', mimeType: 'text/plain' },
+        });
+      }
+      return Promise.resolve({ ok: true as const, value: null });
+    });
+
+    const result = await checkEnvironmentMarker(rootId, 'staging');
+
+    expect(result.ok).toBe(true);
+    expect(createFile).not.toHaveBeenCalled();
+  });
+
+  it('returns ok and does not create anything when correct marker exists (production)', async () => {
+    vi.mocked(findByName).mockImplementation((_rootId, name) => {
+      if (name === '.production') {
+        return Promise.resolve({
+          ok: true as const,
+          value: { id: 'existing-marker', name: '.production', mimeType: 'text/plain' },
+        });
+      }
+      return Promise.resolve({ ok: true as const, value: null });
+    });
+
+    const result = await checkEnvironmentMarker(rootId, 'production');
+
+    expect(result.ok).toBe(true);
+    expect(createFile).not.toHaveBeenCalled();
+  });
+
+  it('returns error when wrong marker exists (server staging, folder production)', async () => {
+    vi.mocked(findByName).mockImplementation((_rootId, name) => {
+      if (name === '.production') {
+        return Promise.resolve({
+          ok: true as const,
+          value: { id: 'wrong-marker', name: '.production', mimeType: 'text/plain' },
+        });
+      }
+      return Promise.resolve({ ok: true as const, value: null });
+    });
+
+    const result = await checkEnvironmentMarker(rootId, 'staging');
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.message).toBe(
+        'Environment mismatch: server is staging but Drive folder is marked production'
+      );
+    }
+    expect(createFile).not.toHaveBeenCalled();
+  });
+
+  it('returns error when wrong marker exists (server production, folder staging)', async () => {
+    vi.mocked(findByName).mockImplementation((_rootId, name) => {
+      if (name === '.staging') {
+        return Promise.resolve({
+          ok: true as const,
+          value: { id: 'wrong-marker', name: '.staging', mimeType: 'text/plain' },
+        });
+      }
+      return Promise.resolve({ ok: true as const, value: null });
+    });
+
+    const result = await checkEnvironmentMarker(rootId, 'production');
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.message).toBe(
+        'Environment mismatch: server is production but Drive folder is marked staging'
+      );
+    }
+    expect(createFile).not.toHaveBeenCalled();
+  });
+
+  it('returns ok immediately when environment is "development" (skip check)', async () => {
+    const result = await checkEnvironmentMarker(rootId, 'development');
+
+    expect(result.ok).toBe(true);
+    expect(findByName).not.toHaveBeenCalled();
+    expect(createFile).not.toHaveBeenCalled();
+  });
+
+  it('propagates findByName error', async () => {
+    vi.mocked(findByName).mockResolvedValue({
+      ok: false,
+      error: new Error('Drive API error'),
+    });
+
+    const result = await checkEnvironmentMarker(rootId, 'staging');
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.message).toBe('Drive API error');
+    }
+  });
+});
+
+describe('migrateArchivosProcesadosHeaders', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('detects 5-column schema and appends originalFileId header to Column F', async () => {
+    vi.mocked(getValues).mockResolvedValue({
+      ok: true,
+      value: [['fileId', 'fileName', 'processedAt', 'documentType', 'status']],
+    });
+    vi.mocked(setValues).mockResolvedValue({ ok: true, value: 1 });
+
+    const result = await migrateArchivosProcesadosHeaders('dashboard-id');
+
+    expect(result.ok).toBe(true);
+    expect(setValues).toHaveBeenCalledWith(
+      'dashboard-id',
+      'Archivos Procesados!F1',
+      [['originalFileId']]
+    );
+  });
+
+  it('leaves 6-column schema untouched when already migrated', async () => {
+    vi.mocked(getValues).mockResolvedValue({
+      ok: true,
+      value: [['fileId', 'fileName', 'processedAt', 'documentType', 'status', 'originalFileId']],
+    });
+
+    const result = await migrateArchivosProcesadosHeaders('dashboard-id');
+
+    expect(result.ok).toBe(true);
+    expect(setValues).not.toHaveBeenCalled();
+  });
+
+  it('handles empty sheet gracefully without writing headers (ensureSheetsExist handles those)', async () => {
+    vi.mocked(getValues).mockResolvedValue({
+      ok: true,
+      value: [],
+    });
+
+    const result = await migrateArchivosProcesadosHeaders('dashboard-id');
+
+    expect(result.ok).toBe(true);
+    expect(setValues).not.toHaveBeenCalled();
+  });
+
+  it('returns error when getValues fails', async () => {
+    vi.mocked(getValues).mockResolvedValue({
+      ok: false,
+      error: new Error('Sheets API error'),
+    });
+
+    const result = await migrateArchivosProcesadosHeaders('dashboard-id');
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.message).toContain('Sheets API error');
+    }
+  });
+
+  it('returns error when setValues fails during migration', async () => {
+    vi.mocked(getValues).mockResolvedValue({
+      ok: true,
+      value: [['fileId', 'fileName', 'processedAt', 'documentType', 'status']],
+    });
+    vi.mocked(setValues).mockResolvedValue({
+      ok: false,
+      error: new Error('Write failed'),
+    });
+
+    const result = await migrateArchivosProcesadosHeaders('dashboard-id');
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.message).toContain('Write failed');
+    }
+  });
+
+  it('handles schemas with more than 6 columns (e.g., future migration) without writing', async () => {
+    vi.mocked(getValues).mockResolvedValue({
+      ok: true,
+      value: [['fileId', 'fileName', 'processedAt', 'documentType', 'status', 'originalFileId', 'futureColumn']],
+    });
+
+    const result = await migrateArchivosProcesadosHeaders('dashboard-id');
+
+    expect(result.ok).toBe(true);
+    expect(setValues).not.toHaveBeenCalled();
   });
 });
