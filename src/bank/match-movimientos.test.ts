@@ -1827,7 +1827,7 @@ describe('computeRowVersion', () => {
       credito: null,
       matchedFileId: 'file123',
       detalle: 'Test detalle',
-      matchedType: ''
+      matchedType: '' as const,
     };
 
     const version1 = computeRowVersion(row);
@@ -1847,7 +1847,7 @@ describe('computeRowVersion', () => {
       credito: null,
       matchedFileId: 'file123',
       detalle: 'Test detalle',
-      matchedType: '',
+      matchedType: '' as const,
     };
 
     const row2 = {
@@ -1868,13 +1868,12 @@ describe('computeRowVersion', () => {
       credito: null,
       matchedFileId: 'file123',
       detalle: 'Detalle A',
-      matchedType: '',
+      matchedType: '' as const,
     };
 
     const row2 = {
       ...row1,
       detalle: 'Detalle B',
-      matchedType: '',
     };
 
     expect(computeRowVersion(row1)).not.toBe(computeRowVersion(row2));
@@ -1890,7 +1889,7 @@ describe('computeRowVersion', () => {
       credito: 1000,
       matchedFileId: '',
       detalle: '',
-      matchedType: '',
+      matchedType: '' as const,
     };
 
     const row2 = {
@@ -1900,7 +1899,7 @@ describe('computeRowVersion', () => {
       credito: 1000,
       matchedFileId: '',
       detalle: '',
-      matchedType: '',
+      matchedType: '' as const,
     };
 
     expect(computeRowVersion(row1)).toBe(computeRowVersion(row2));
@@ -2459,6 +2458,98 @@ describe('MANUAL matchedType and usedFileIds deduplication', () => {
         detalle: expect.stringContaining('PROVEEDOR SA'),
       }),
     ]));
+  });
+
+  it('should not count MANUAL detalle fills in movimientosFilled metric', async () => {
+    const mockFolderStructure = {
+      controlIngresosId: 'ingresos-id',
+      controlEgresosId: 'egresos-id',
+      bankSpreadsheets: new Map(),
+      movimientosSpreadsheets: new Map([['BBVA', 'bbva-id']]),
+    };
+
+    vi.mocked(withLock).mockImplementation(async (_id, fn) => {
+      const result = await fn();
+      return { ok: true, value: result };
+    });
+
+    vi.mocked(getCachedFolderStructure).mockReturnValue(mockFolderStructure as any);
+
+    // Mock Control data with a factura matching the MANUAL fileId
+    vi.mocked(getValues).mockImplementation(async (_spreadsheetId, range) => {
+      if (range === 'Facturas Recibidas!A:T') {
+        return {
+          ok: true,
+          value: [
+            ['fechaemision', 'fileid', 'filename', 'tipocomprobante', 'nrofactura', 'cuitemisor', 'razonsocialemisor', 'importeneto', 'importeiva', 'importetotal', 'moneda', 'concepto', 'processedat', 'confidence', 'needsreview', 'matchedpagofileid', 'matchconfidence', 'hascuitmatch', 'pagada'],
+            ['2025-01-10', 'manual-factura', 'factura.pdf', 'B', '00001-00000123', '20123456786', 'PROVEEDOR SA', '', '', '5000', 'ARS', '', '2025-01-10T10:00:00Z', '0.95', 'NO', '', '', '', ''],
+          ],
+        };
+      }
+      return { ok: true, value: [['header']] };
+    });
+
+    // MANUAL row with blank detalle (will generate MANUAL fill) + one AUTO-matchable debit
+    vi.mocked(getMovimientosToFill).mockResolvedValue({
+      ok: true,
+      value: [
+        {
+          sheetName: '2025-01',
+          rowNumber: 2,
+          fecha: '2025-01-15',
+          concepto: 'PAGO PROVEEDOR',
+          debito: 5000,
+          credito: null,
+          saldo: 5000,
+          saldoCalculado: 5000,
+          matchedFileId: 'manual-factura',
+          detalle: '',
+          matchedType: 'MANUAL',
+        },
+        {
+          sheetName: '2025-01',
+          rowNumber: 3,
+          fecha: '2025-01-16',
+          concepto: 'OTRO PAGO',
+          debito: 2000,
+          credito: null,
+          saldo: 3000,
+          saldoCalculado: 3000,
+          matchedFileId: '',
+          detalle: '',
+          matchedType: '',
+        },
+      ],
+    });
+
+    mockMatchMovement.mockReturnValue({
+      matchType: 'direct_factura',
+      description: 'Auto match',
+      matchedFileId: 'auto-file',
+      confidence: 'HIGH',
+    });
+
+    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: 2 });
+
+    const resultPromise = matchAllMovimientos();
+    await vi.runAllTimersAsync();
+    const result = await resultPromise;
+
+    expect(result.ok).toBe(true);
+    const value = result.ok ? result.value : null;
+    expect(value).not.toBeNull();
+
+    // Should have 2 updates total (1 MANUAL fill + 1 AUTO match)
+    expect(updateDetalle).toHaveBeenCalledWith('bbva-id', expect.any(Array));
+    const updateCall = vi.mocked(updateDetalle).mock.calls[0];
+    const updates = updateCall[1] as any[];
+    expect(updates.length).toBe(2);
+
+    // But movimientosFilled should only count AUTO matches (1), not MANUAL fills
+    const bankResult = value!.results[0];
+    expect(bankResult.debitsFilled).toBe(1);
+    expect(bankResult.creditsFilled).toBe(0);
+    expect(bankResult.movimientosFilled).toBe(1); // NOT 2
   });
 
   it('should not assign same fileId to two different movements (usedFileIds dedup)', async () => {

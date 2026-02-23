@@ -101,7 +101,7 @@ interface VersionableRow {
   /** Human-readable match description */
   detalle: string;
   /** Match type: 'AUTO' | 'MANUAL' | '' */
-  matchedType: string;
+  matchedType: 'AUTO' | 'MANUAL' | '';
 }
 
 /**
@@ -146,6 +146,7 @@ export interface MatchMovimientosResult {
   spreadsheetName?: string;
   sheetsProcessed: number;
   movimientosProcessed: number;
+  /** Count of AUTO algorithm matches (excludes MANUAL detalle fills) */
   movimientosFilled: number;
   debitsFilled: number;
   creditsFilled: number;
@@ -1074,7 +1075,7 @@ async function matchBankMovimientos(
     spreadsheetName: bankName,
     sheetsProcessed,
     movimientosProcessed: movimientos.length,
-    movimientosFilled: updates.length,
+    movimientosFilled: debitsFilled + creditsFilled,
     debitsFilled,
     creditsFilled,
     noMatches,
