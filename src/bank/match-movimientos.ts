@@ -20,7 +20,7 @@ import { getValues, type CellValue } from '../services/sheets.js';
 import { parseNumber } from '../utils/numbers.js';
 import { parseArgDate, normalizeSpreadsheetDate } from '../utils/date.js';
 import { validateMoneda, validateMatchConfidence, validateTipoComprobante } from '../utils/validation.js';
-import { BankMovementMatcher, type MatchQuality } from './matcher.js';
+import { BankMovementMatcher, calculateKeywordMatchScore, extractReferencia, type MatchQuality } from './matcher.js';
 import { getMovimientosToFill } from '../services/movimientos-reader.js';
 import { updateDetalle, type DetalleUpdate } from '../services/movimientos-detalle.js';
 
@@ -239,6 +239,7 @@ export function parseFacturasEmitidas(data: CellValue[][]): Array<Factura & { ro
     matchedPagoFileId: headers.indexOf('matchedpagofileid'),
     matchConfidence: headers.indexOf('matchconfidence'),
     hasCuitMatch: headers.indexOf('hascuitmatch'),
+    tipoDeCambio: headers.indexOf('tipodecambio'),
   };
 
   for (let i = 1; i < data.length; i++) {
@@ -261,6 +262,7 @@ export function parseFacturasEmitidas(data: CellValue[][]): Array<Factura & { ro
       importeIva: parseNumber(row[colIndex.importeIva]) || 0,
       importeTotal: parseNumber(row[colIndex.importeTotal]) || 0,
       moneda: validateMoneda(row[colIndex.moneda]),
+      tipoDeCambio: parseNumber(row[colIndex.tipoDeCambio]) || undefined,
       concepto: String(row[colIndex.concepto] || ''),
       processedAt: String(row[colIndex.processedAt] || ''),
       confidence: parseNumber(row[colIndex.confidence]) || 0,
@@ -308,6 +310,7 @@ export function parseFacturasRecibidas(data: CellValue[][]): Array<Factura & { r
     matchConfidence: headers.indexOf('matchconfidence'),
     hasCuitMatch: headers.indexOf('hascuitmatch'),
     pagada: headers.indexOf('pagada'),
+    tipoDeCambio: headers.indexOf('tipodecambio'),
   };
 
   for (let i = 1; i < data.length; i++) {
@@ -329,6 +332,7 @@ export function parseFacturasRecibidas(data: CellValue[][]): Array<Factura & { r
       importeIva: parseNumber(row[colIndex.importeIva]) || 0,
       importeTotal: parseNumber(row[colIndex.importeTotal]) || 0,
       moneda: validateMoneda(row[colIndex.moneda]),
+      tipoDeCambio: parseNumber(row[colIndex.tipoDeCambio]) || undefined,
       concepto: String(row[colIndex.concepto] || ''),
       processedAt: String(row[colIndex.processedAt] || ''),
       confidence: parseNumber(row[colIndex.confidence]) || 0,
@@ -344,7 +348,7 @@ export function parseFacturasRecibidas(data: CellValue[][]): Array<Factura & { r
 /**
  * Parses Pagos from spreadsheet data using header-based lookup
  */
-function parsePagos(data: CellValue[][]): Array<Pago & { row: number }> {
+export function parsePagos(data: CellValue[][]): Array<Pago & { row: number }> {
   if (data.length < 2) return [];
 
   const headers = data[0].map(h => String(h || '').toLowerCase());
@@ -370,6 +374,8 @@ function parsePagos(data: CellValue[][]): Array<Pago & { row: number }> {
     needsReview: headers.indexOf('needsreview'),
     matchedFacturaFileId: headers.indexOf('matchedfacturafileid'),
     matchConfidence: headers.indexOf('matchconfidence'),
+    tipoDeCambio: headers.indexOf('tipodecambio'),
+    importeEnPesos: headers.indexOf('importeenpesos'),
   };
 
   for (let i = 1; i < data.length; i++) {
@@ -395,6 +401,8 @@ function parsePagos(data: CellValue[][]): Array<Pago & { row: number }> {
       needsReview: row[colIndex.needsReview] === 'YES',
       matchedFacturaFileId: row[colIndex.matchedFacturaFileId] ? String(row[colIndex.matchedFacturaFileId]) : undefined,
       matchConfidence: validateMatchConfidence(row[colIndex.matchConfidence]),
+      tipoDeCambio: parseNumber(row[colIndex.tipoDeCambio]) || undefined,
+      importeEnPesos: parseNumber(row[colIndex.importeEnPesos]) || undefined,
     });
   }
 
@@ -522,8 +530,8 @@ function parseRetenciones(data: CellValue[][]): Array<Retencion & { row: number 
 async function loadControlIngresos(spreadsheetId: string): Promise<Result<IngresosData, Error>> {
   try {
     const [facturasResult, pagosResult, retencionesResult] = await Promise.all([
-      getValues(spreadsheetId, 'Facturas Emitidas!A:R'),
-      getValues(spreadsheetId, 'Pagos Recibidos!A:O'),
+      getValues(spreadsheetId, 'Facturas Emitidas!A:S'),
+      getValues(spreadsheetId, 'Pagos Recibidos!A:Q'),
       getValues(spreadsheetId, 'Retenciones Recibidas!A:O'),
     ]);
 
@@ -553,8 +561,8 @@ async function loadControlIngresos(spreadsheetId: string): Promise<Result<Ingres
 async function loadControlEgresos(spreadsheetId: string): Promise<Result<EgresosData, Error>> {
   try {
     const [facturasResult, pagosResult, recibosResult] = await Promise.all([
-      getValues(spreadsheetId, 'Facturas Recibidas!A:S'),
-      getValues(spreadsheetId, 'Pagos Enviados!A:O'),
+      getValues(spreadsheetId, 'Facturas Recibidas!A:T'),
+      getValues(spreadsheetId, 'Pagos Enviados!A:Q'),
       getValues(spreadsheetId, 'Recibos!A:R'),
     ]);
 
@@ -589,7 +597,8 @@ function buildMatchQuality(
   cuitDocumento: string,
   conceptoMovimiento: string,
   hasLinkedPago: boolean,
-  isExactAmount: boolean
+  isExactAmount: boolean,
+  document?: any
 ): MatchQuality {
   // Calculate date distance in days using parseArgDate for Argentine format support
   const docDate = parseArgDate(fechaDocumento);
@@ -609,6 +618,19 @@ function buildMatchQuality(
     tier = 1; // Pago with linked factura
   } else if (hasCuitMatch) {
     tier = 2; // CUIT match
+  } else if (document && document.referencia) {
+    // Tier 3: Check if concepto contains a referencia pattern matching the document's referencia
+    const extractedRef = extractReferencia(conceptoMovimiento);
+    if (extractedRef && extractedRef === document.referencia) {
+      tier = 3;
+    } else {
+      tier = 5;
+    }
+  } else if (document) {
+    // Tier 4: Check for keyword matches using available matching logic
+    const counterpartyName = document.razonSocialEmisor || document.razonSocialReceptor || document.nombreBeneficiario || document.nombrePagador || '';
+    const score = calculateKeywordMatchScore(conceptoMovimiento, counterpartyName, document.concepto || '');
+    tier = score >= 2 ? 4 : 5;
   } else {
     tier = 5; // Amount + date only (can't determine keyword/referencia from existing data)
   }
@@ -721,7 +743,8 @@ function buildMatchQualityFromFileId(
     cuitDocumento,
     conceptoMovimiento,
     hasLinkedPago,
-    true  // Set to true for both to ensure fair comparison on other dimensions
+    true,  // Set to true for both to ensure fair comparison on other dimensions
+    document
   );
 }
 
@@ -870,7 +893,8 @@ async function matchBankMovimientos(
                 cuitDocumento,
                 mov.concepto,
                 hasLinkedPago,
-                true  // Consistent with existing for fair comparison
+                true,  // Consistent with existing for fair comparison
+                document
               );
 
               // Compare: replace if candidate is better
@@ -977,7 +1001,15 @@ export async function matchAllMovimientos(
         egresosResult.value.facturasRecibidas
       );
       if (usdDates.length > 0) {
-        await prefetchExchangeRates(usdDates);
+        try {
+          await prefetchExchangeRates(usdDates);
+        } catch (err) {
+          warn('Failed to prefetch exchange rates, continuing without pre-cached rates', {
+            module: 'match-movimientos',
+            action: 'prefetchExchangeRates',
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
       }
 
       // Create matcher instance

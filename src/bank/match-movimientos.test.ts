@@ -10,6 +10,7 @@ import {
   getRequiredColumnIndex,
   parseFacturasEmitidas,
   parseFacturasRecibidas,
+  parsePagos,
   type MatchQuality,
 } from './match-movimientos.js';
 
@@ -56,6 +57,24 @@ vi.mock('./matcher.js', () => {
       matchMovement = mockMatchMovement;
       matchCreditMovement = mockMatchCreditMovement;
     },
+    extractReferencia: vi.fn((concepto: string) => {
+      if (!concepto) return undefined;
+      const match = concepto.match(/(\d{7})\.\d{2}\.\d{4}/);
+      return match ? match[1] : undefined;
+    }),
+    calculateKeywordMatchScore: vi.fn((concepto, emisor, _facturaConcepto) => {
+      // Mock implementation: basic keyword matching for testing
+      // Split concepto into words and check if they appear in emisor
+      if (!concepto || !emisor) return 0;
+      const conceptoWords = concepto.toUpperCase().split(/\s+/);
+      let score = 0;
+      for (const word of conceptoWords) {
+        if (word.length >= 3 && emisor.toUpperCase().includes(word)) {
+          score += 2;
+        }
+      }
+      return score;
+    }),
   };
 });
 
@@ -309,6 +328,99 @@ describe('parseFacturasRecibidas', () => {
     expect(result).toHaveLength(1);
     // Serial number 45671 => '2025-01-14'
     expect(result[0].fechaEmision).toBe('2025-01-14');
+  });
+});
+
+describe('parseFacturasEmitidas - tipoDeCambio', () => {
+  it('parses tipoDeCambio from column S when present', () => {
+    const data = [
+      ['fechaEmision', 'fileId', 'fileName', 'tipoComprobante', 'nroFactura', 'cuitReceptor', 'razonSocialReceptor', 'importeNeto', 'importeIva', 'importeTotal', 'moneda', 'concepto', 'processedAt', 'confidence', 'needsReview', 'matchedPagoFileId', 'matchConfidence', 'hasCuitMatch', 'tipoDeCambio'],
+      ['2025-01-15', 'file1', 'test.pdf', 'E', '00003-00001957', '20123456786', 'CLIENTE SA', '90.91', '9.09', '100', 'USD', '', '2025-01-15T10:00:00Z', '0.95', 'NO', '', '', '', '1234.56'],
+    ];
+
+    const result = parseFacturasEmitidas(data);
+
+    expect(result).toHaveLength(1);
+    expect(result[0].tipoDeCambio).toBe(1234.56);
+  });
+
+  it('returns undefined tipoDeCambio when column is missing', () => {
+    const data = [
+      ['fechaEmision', 'fileId', 'fileName', 'tipoComprobante', 'nroFactura', 'cuitReceptor', 'razonSocialReceptor', 'importeNeto', 'importeIva', 'importeTotal', 'moneda', 'concepto', 'processedAt', 'confidence', 'needsReview', 'matchedPagoFileId', 'matchConfidence', 'hasCuitMatch'],
+      ['2025-01-15', 'file1', 'test.pdf', 'E', '00003-00001957', '20123456786', 'CLIENTE SA', '90.91', '9.09', '100', 'USD', '', '2025-01-15T10:00:00Z', '0.95', 'NO', '', '', ''],
+    ];
+
+    const result = parseFacturasEmitidas(data);
+
+    expect(result).toHaveLength(1);
+    expect(result[0].tipoDeCambio).toBeUndefined();
+  });
+});
+
+describe('parseFacturasRecibidas - tipoDeCambio', () => {
+  it('parses tipoDeCambio from column T when present', () => {
+    const data = [
+      ['fechaEmision', 'fileId', 'fileName', 'tipoComprobante', 'nroFactura', 'cuitEmisor', 'razonSocialEmisor', 'cuitReceptor', 'razonSocialReceptor', 'importeNeto', 'importeIva', 'importeTotal', 'moneda', 'concepto', 'processedAt', 'confidence', 'needsReview', 'matchedPagoFileId', 'matchConfidence', 'hasCuitMatch', 'tipoDeCambio'],
+      ['2025-01-15', 'file1', 'test.pdf', 'E', '00003-00001957', '20123456786', 'PROVEEDOR SA', '30709076783', 'ADVA', '90.91', '9.09', '100', 'USD', '', '2025-01-15T10:00:00Z', '0.95', 'NO', '', '', '', '1234.56'],
+    ];
+
+    const result = parseFacturasRecibidas(data);
+
+    expect(result).toHaveLength(1);
+    expect(result[0].tipoDeCambio).toBe(1234.56);
+  });
+
+  it('returns undefined tipoDeCambio when column is missing', () => {
+    const data = [
+      ['fechaEmision', 'fileId', 'fileName', 'tipoComprobante', 'nroFactura', 'cuitEmisor', 'razonSocialEmisor', 'importeTotal', 'moneda'],
+      ['2025-01-15', 'file1', 'test.pdf', 'E', '00003-00001957', '20123456786', 'PROVEEDOR SA', '100', 'USD'],
+    ];
+
+    const result = parseFacturasRecibidas(data);
+
+    expect(result).toHaveLength(1);
+    expect(result[0].tipoDeCambio).toBeUndefined();
+  });
+});
+
+describe('parsePagos', () => {
+  it('parses tipoDeCambio and importeEnPesos when present', () => {
+    const data = [
+      ['fechaPago', 'fileId', 'fileName', 'banco', 'importePagado', 'moneda', 'referencia', 'cuitPagador', 'nombrePagador', 'cuitBeneficiario', 'nombreBeneficiario', 'concepto', 'processedAt', 'confidence', 'needsReview', 'tipoDeCambio', 'importeEnPesos'],
+      ['2025-01-15', 'pago1', 'pago.pdf', 'BBVA', '6750', 'USD', '4084946', '20123456786', 'CLIENTE SA', '30709076783', 'ADVA', '', '2025-01-15T10:00:00Z', '0.95', 'NO', '1234.56', '8333000'],
+    ];
+
+    const result = parsePagos(data);
+
+    expect(result).toHaveLength(1);
+    expect(result[0].tipoDeCambio).toBe(1234.56);
+    expect(result[0].importeEnPesos).toBe(8333000);
+  });
+
+  it('returns undefined tipoDeCambio and importeEnPesos when columns are missing', () => {
+    const data = [
+      ['fechaPago', 'fileId', 'fileName', 'banco', 'importePagado', 'moneda', 'referencia', 'cuitPagador', 'nombrePagador', 'cuitBeneficiario', 'nombreBeneficiario', 'concepto', 'processedAt', 'confidence', 'needsReview'],
+      ['2025-01-15', 'pago1', 'pago.pdf', 'BBVA', '50000', 'ARS', '', '20123456786', 'CLIENTE SA', '30709076783', 'ADVA', '', '2025-01-15T10:00:00Z', '0.95', 'NO'],
+    ];
+
+    const result = parsePagos(data);
+
+    expect(result).toHaveLength(1);
+    expect(result[0].tipoDeCambio).toBeUndefined();
+    expect(result[0].importeEnPesos).toBeUndefined();
+  });
+
+  it('parses tipoDeCambio correctly when importeEnPesos is empty', () => {
+    const data = [
+      ['fechaPago', 'fileId', 'fileName', 'banco', 'importePagado', 'moneda', 'referencia', 'cuitPagador', 'nombrePagador', 'cuitBeneficiario', 'nombreBeneficiario', 'concepto', 'processedAt', 'confidence', 'needsReview', 'tipoDeCambio', 'importeEnPesos'],
+      ['2025-01-15', 'pago1', 'pago.pdf', 'BBVA', '6750', 'USD', '', '20123456786', 'CLIENTE SA', '30709076783', 'ADVA', '', '2025-01-15T10:00:00Z', '0.95', 'NO', '1234.56', ''],
+    ];
+
+    const result = parsePagos(data);
+
+    expect(result).toHaveLength(1);
+    expect(result[0].tipoDeCambio).toBe(1234.56);
+    expect(result[0].importeEnPesos).toBeUndefined();
   });
 });
 
@@ -899,7 +1011,7 @@ describe('matchAllMovimientos', () => {
 
     // Mock Control data with two facturas - one existing (far date), one new (close date)
     vi.mocked(getValues).mockImplementation(async (_spreadsheetId, range) => {
-      if (range === 'Facturas Recibidas!A:S') {
+      if (range === 'Facturas Recibidas!A:T') {
         return {
           ok: true,
           value: [
@@ -972,7 +1084,7 @@ describe('matchAllMovimientos', () => {
 
     // Mock Control data - existing match has CUIT, new candidate doesn't
     vi.mocked(getValues).mockImplementation(async (_spreadsheetId, range) => {
-      if (range === 'Facturas Recibidas!A:S') {
+      if (range === 'Facturas Recibidas!A:T') {
         return {
           ok: true,
           value: [
@@ -1040,7 +1152,7 @@ describe('matchAllMovimientos', () => {
 
     // Mock Control data - two facturas with same distance, same CUIT
     vi.mocked(getValues).mockImplementation(async (_spreadsheetId, range) => {
-      if (range === 'Facturas Recibidas!A:S') {
+      if (range === 'Facturas Recibidas!A:T') {
         return {
           ok: true,
           value: [
@@ -1091,6 +1203,154 @@ describe('matchAllMovimientos', () => {
     expect(updateDetalle).toHaveBeenCalledWith('bbva-id', []);
   });
 
+  it('keeps existing Tier 3 (referencia) match when new candidate is Tier 5 with closer date (ADV-120)', async () => {
+    const mockFolderStructure = {
+      controlIngresosId: 'ingresos-id',
+      controlEgresosId: 'egresos-id',
+      bankSpreadsheets: new Map(),
+      movimientosSpreadsheets: new Map([['BBVA', 'bbva-id']]),
+    };
+
+    vi.mocked(withLock).mockImplementation(async (_id, fn) => {
+      const result = await fn();
+      return { ok: true, value: result };
+    });
+
+    vi.mocked(getCachedFolderStructure).mockReturnValue(mockFolderStructure as any);
+
+    // Mock Control data:
+    // - pago-ref: a pago with referencia '1234567' matching the concepto
+    // - factura-close: a factura with closer date but no CUIT/referencia match
+    vi.mocked(getValues).mockImplementation(async (_spreadsheetId, range) => {
+      if (range === 'Pagos Enviados!A:Q') {
+        return {
+          ok: true,
+          value: [
+            ['fechapago', 'fileid', 'filename', 'banco', 'importepagado', 'moneda', 'referencia', 'cuitpagador', 'nombrepagador', 'cuitbeneficiario', 'nombrebeneficiario', 'concepto', 'processedat', 'confidence', 'needsreview', 'matchedfacturafileid', 'matchconfidence'],
+            ['2025-01-05', 'pago-ref', 'pago.pdf', 'BBVA', '1000', 'ARS', '1234567', '', '', '20123456786', 'PROVEEDOR SA', 'transferencia', '2025-01-05T10:00:00Z', '0.95', 'NO', '', ''],
+          ],
+        };
+      }
+      if (range === 'Facturas Recibidas!A:T') {
+        return {
+          ok: true,
+          value: [
+            ['fechaemision', 'fileid', 'filename', 'tipocomprobante', 'nrofactura', 'cuitemisor', 'razonsocialemisor', 'importeneto', 'importeiva', 'importetotal', 'moneda', 'concepto', 'processedat', 'confidence', 'needsreview', 'matchedpagofileid', 'matchconfidence', 'hascuitmatch', 'pagada'],
+            ['2025-01-14', 'factura-close', 'close.pdf', 'B', '999', '27234567891', 'OTRO SA', '', '', '1000', 'ARS', '', '2025-01-14T10:00:00Z', '0.95', 'NO', '', '', '', ''],
+          ],
+        };
+      }
+      return { ok: true, value: [['header']] };
+    });
+
+    // Movement with existing match to pago-ref (referencia match, 10 days away)
+    vi.mocked(getMovimientosToFill).mockResolvedValue({
+      ok: true,
+      value: [
+        {
+          sheetName: '2025-01',
+          rowNumber: 2,
+          fecha: '2025-01-15',
+          concepto: 'TRANSFERENCIA 1234567.00.0001',  // Contains referencia pattern
+          debito: 1000,
+          credito: null,
+          saldo: 9000,
+          saldoCalculado: 9000,
+          matchedFileId: 'pago-ref',  // Existing Tier 3 match (referencia)
+          detalle: 'REVISAR! Pago a PROVEEDOR SA',
+        },
+      ],
+    });
+
+    // New candidate - closer date (1 day) but no CUIT/referencia match → Tier 5
+    mockMatchMovement.mockReturnValue({
+      matchType: 'direct_factura',
+      description: 'Pago Factura B 00000-00000999 a OTRO SA',
+      matchedFileId: 'factura-close',
+      confidence: 'LOW',
+    });
+
+    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: 0 });
+
+    const resultPromise = matchAllMovimientos();
+    await vi.runAllTimersAsync();
+    const result = await resultPromise;
+
+    expect(result.ok).toBe(true);
+    // Should NOT replace — existing Tier 3 (referencia) beats Tier 5 (amount+date only)
+    expect(updateDetalle).toHaveBeenCalledWith('bbva-id', []);
+  });
+
+  it('keeps existing Tier 4 (keyword) match when new candidate is Tier 5 with closer date (ADV-120)', async () => {
+    const mockFolderStructure = {
+      controlIngresosId: 'ingresos-id',
+      controlEgresosId: 'egresos-id',
+      bankSpreadsheets: new Map(),
+      movimientosSpreadsheets: new Map([['BBVA', 'bbva-id']]),
+    };
+
+    vi.mocked(withLock).mockImplementation(async (_id, fn) => {
+      const result = await fn();
+      return { ok: true, value: result };
+    });
+
+    vi.mocked(getCachedFolderStructure).mockReturnValue(mockFolderStructure as any);
+
+    // Mock Control data:
+    // - factura-keyword: a factura whose razonSocialEmisor matches keywords in concepto
+    // - factura-close: a factura with closer date but no keyword/CUIT match
+    vi.mocked(getValues).mockImplementation(async (_spreadsheetId, range) => {
+      if (range === 'Facturas Recibidas!A:T') {
+        return {
+          ok: true,
+          value: [
+            ['fechaemision', 'fileid', 'filename', 'tipocomprobante', 'nrofactura', 'cuitemisor', 'razonsocialemisor', 'importeneto', 'importeiva', 'importetotal', 'moneda', 'concepto', 'processedat', 'confidence', 'needsreview', 'matchedpagofileid', 'matchconfidence', 'hascuitmatch', 'pagada'],
+            ['2025-01-05', 'factura-keyword', 'keyword.pdf', 'B', '100', '20123456786', 'EMPRESA ACME ARGENTINA', '', '', '1000', 'ARS', 'servicios', '2025-01-05T10:00:00Z', '0.95', 'NO', '', '', '', ''],
+            ['2025-01-14', 'factura-close', 'close.pdf', 'B', '101', '27234567891', 'DESCONOCIDO XYZ', '', '', '1000', 'ARS', 'otros', '2025-01-14T10:00:00Z', '0.95', 'NO', '', '', '', ''],
+          ],
+        };
+      }
+      return { ok: true, value: [['header']] };
+    });
+
+    // Movement with existing match to factura-keyword (keyword match, 10 days away)
+    vi.mocked(getMovimientosToFill).mockResolvedValue({
+      ok: true,
+      value: [
+        {
+          sheetName: '2025-01',
+          rowNumber: 2,
+          fecha: '2025-01-15',
+          concepto: 'ACME ARGENTINA SERVICIOS',  // Keywords match razonSocialEmisor
+          debito: 1000,
+          credito: null,
+          saldo: 9000,
+          saldoCalculado: 9000,
+          matchedFileId: 'factura-keyword',  // Existing Tier 4 match (keyword)
+          detalle: 'Pago Factura B 00000-00000100 a EMPRESA ACME ARGENTINA',
+        },
+      ],
+    });
+
+    // New candidate - closer date (1 day) but no keyword/CUIT/referencia match → Tier 5
+    mockMatchMovement.mockReturnValue({
+      matchType: 'direct_factura',
+      description: 'Pago Factura B 00000-00000101 a DESCONOCIDO XYZ',
+      matchedFileId: 'factura-close',
+      confidence: 'LOW',
+    });
+
+    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: 0 });
+
+    const resultPromise = matchAllMovimientos();
+    await vi.runAllTimersAsync();
+    const result = await resultPromise;
+
+    expect(result.ok).toBe(true);
+    // Should NOT replace — existing Tier 4 (keyword) beats Tier 5 (amount+date only)
+    expect(updateDetalle).toHaveBeenCalledWith('bbva-id', []);
+  });
+
   it('keeps existing match when buildMatchQualityFromFileId returns null (bug #18)', async () => {
     // Bug: Code replaces match when existingQuality is null, but should keep it
     // and log a warning instead (can't compare quality if document doesn't exist)
@@ -1112,7 +1372,7 @@ describe('matchAllMovimientos', () => {
 
     // Mock Control data - only one factura exists (factura-b)
     vi.mocked(getValues).mockImplementation(async (_spreadsheetId, range) => {
-      if (range === 'Facturas Recibidas!A:S') {
+      if (range === 'Facturas Recibidas!A:T') {
         return {
           ok: true,
           value: [
@@ -1817,7 +2077,7 @@ describe('exchange rate prefetch', () => {
 
     // Mock Control data with USD documents
     vi.mocked(getValues).mockImplementation(async (_spreadsheetId, range) => {
-      if (range === 'Pagos Recibidos!A:O') {
+      if (range === 'Pagos Recibidos!A:Q') {
         return {
           ok: true,
           value: [
@@ -1828,7 +2088,7 @@ describe('exchange rate prefetch', () => {
           ],
         };
       }
-      if (range === 'Facturas Emitidas!A:R') {
+      if (range === 'Facturas Emitidas!A:S') {
         return {
           ok: true,
           value: [
@@ -1837,7 +2097,7 @@ describe('exchange rate prefetch', () => {
           ],
         };
       }
-      if (range === 'Facturas Recibidas!A:S') {
+      if (range === 'Facturas Recibidas!A:T') {
         return {
           ok: true,
           value: [
@@ -1902,5 +2162,53 @@ describe('exchange rate prefetch', () => {
     expect(result.ok).toBe(true);
     // Should not call prefetchExchangeRates when there are no USD documents
     expect(prefetchExchangeRates).not.toHaveBeenCalled();
+  });
+
+  it('should continue matching when prefetchExchangeRates throws (ADV-121)', async () => {
+    const mockFolderStructure = {
+      controlIngresosId: 'ingresos-id',
+      controlEgresosId: 'egresos-id',
+      bankSpreadsheets: new Map(),
+      movimientosSpreadsheets: new Map([['BBVA', 'bbva-id']]),
+    };
+
+    vi.mocked(withLock).mockImplementation(async (_id, fn) => {
+      const result = await fn();
+      return { ok: true, value: result };
+    });
+
+    vi.mocked(getCachedFolderStructure).mockReturnValue(mockFolderStructure as any);
+
+    // Mock Control data with a USD pago to trigger prefetch
+    vi.mocked(getValues).mockImplementation(async (_spreadsheetId, range) => {
+      if (range === 'Pagos Recibidos!A:Q') {
+        return {
+          ok: true,
+          value: [
+            ['fechapago', 'fileid', 'filename', 'banco', 'importepagado', 'moneda', 'referencia', 'cuitpagador', 'nombrepagador', 'cuitbeneficiario', 'nombrebeneficiario', 'concepto', 'processedat', 'confidence', 'needsreview'],
+            ['2025-10-15', 'pago1', 'pago1.pdf', 'BBVA', '6750', 'USD', '', '20123456786', 'FRITO PLAY', '30709076783', 'ADVA', '', '2025-10-15T10:00:00Z', '0.95', 'NO'],
+          ],
+        };
+      }
+      return { ok: true, value: [['header']] };
+    });
+
+    // Make prefetchExchangeRates throw
+    vi.mocked(prefetchExchangeRates).mockRejectedValue(new Error('API rate limited'));
+
+    vi.mocked(getMovimientosToFill).mockResolvedValue({ ok: true, value: [] });
+    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: 0 });
+
+    const resultPromise = matchAllMovimientos();
+    await vi.runAllTimersAsync();
+    const result = await resultPromise;
+
+    // Should still succeed despite prefetch failure
+    expect(result.ok).toBe(true);
+    // Should log a warning
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining('prefetch'),
+      expect.objectContaining({ module: 'match-movimientos' })
+    );
   });
 });

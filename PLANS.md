@@ -1,450 +1,427 @@
 # Implementation Plan
 
 **Status:** COMPLETE
+**Branch:** feat/ADV-115-bank-matching-improvements
+**Issues:** ADV-115, ADV-116, ADV-117, ADV-118, ADV-119
 **Created:** 2026-02-22
-**Source:** Inline request: Extract tipoDeCambio, fix USD-USD matching, reprocessing support, better duplicates, factura filename with tipo letter
-**Linear Issues:** [ADV-108](https://linear.app/lw-claude/issue/ADV-108), [ADV-109](https://linear.app/lw-claude/issue/ADV-109), [ADV-110](https://linear.app/lw-claude/issue/ADV-110), [ADV-111](https://linear.app/lw-claude/issue/ADV-111), [ADV-112](https://linear.app/lw-claude/issue/ADV-112), [ADV-113](https://linear.app/lw-claude/issue/ADV-113), [ADV-114](https://linear.app/lw-claude/issue/ADV-114)
+**Last Updated:** 2026-02-22
 
-## Context Gathered
+## Summary
 
-### Codebase Analysis
+Improve bank movement matching by loading missing spreadsheet columns (tipoDeCambio, importeEnPesos), enriching detalle descriptions with factura numbers and exchange rates, and using importeEnPesos for precise cross-currency matching instead of API-rate tolerance.
 
-**TipoDeCambio extraction:**
-- `Factura` type (`src/types/index.ts:86-140`): Has `moneda` but no `tipoDeCambio`
-- `Pago` type (`src/types/index.ts:145-195`): Has `moneda` but no `tipoDeCambio`/`importeEnPesos`
-- Prompts (`src/gemini/prompts.ts`): Neither FACTURA_PROMPT nor PAGO_BBVA_PROMPT ask for exchange rate data
-- Headers: Facturas Emitidas 18 cols (A:R), Facturas Recibidas 19 cols (A:S), Pagos Enviados/Recibidos 15 cols (A:O)
+## Issues
 
-**Matching bug (affects both ingresos AND egresos):**
-- `amountsMatchCrossCurrency` (`src/utils/exchange-rate.ts:318-373`): No `pagoMoneda` parameter — assumes all pagos are ARS
-- Same matcher code (`src/matching/matcher.ts`) handles both ingresos (Facturas Emitidas↔Pagos Recibidos) and egresos (Facturas Recibidas↔Pagos Enviados)
-- Production logs: hundreds of "Exchange rate cache miss" errors
+### ADV-116: tipoDeCambio/importeEnPesos not loaded during bank matching
 
-**Reprocessing (moving files back to Entrada):**
-- `markFileProcessing` (`src/processing/storage/index.ts:43-154`): Already handles known fileIds — updates tracking row instead of creating new one
-- Store functions (`isDuplicateFactura`, `isDuplicatePago`): Detect by business key, return `{isDuplicate, existingFileId}` but NOT the row index
-- If same fileId is reprocessed, business key check would match → currently returns `{stored: false}` → scanner moves file to Duplicado
-- Problem: no way to distinguish "same file reprocessed" from "different file, same transaction"
-- Fix: check fileId column BEFORE business key check. If fileId already in sheet → update that row (reprocessing)
+**Priority:** High
+**Labels:** Bug
+**Description:** The bank matching pipeline reads truncated column ranges from Control spreadsheets, causing tipoDeCambio and importeEnPesos fields to be silently dropped. The parser functions also don't include these columns in their header lookups.
 
-**File naming:**
-- `generateFacturaFileName` (`src/utils/file-naming.ts:101-145`): Currently produces "Factura Emitida" for all A/B/C/E types — no letter
-- NC → "Nota de Credito Emitida" — no letter variant
-- `TipoComprobante = 'A' | 'B' | 'C' | 'E' | 'NC' | 'ND' | 'LP'` — NC/ND don't carry the letter
-- FACTURA_PROMPT asks for "A/B/C/E/NC/ND/LP" — Gemini returns "NC" not "NC A"
+**Acceptance Criteria:**
+- [ ] `loadControlIngresos` reads `Facturas Emitidas!A:S` and `Pagos Recibidos!A:Q`
+- [ ] `loadControlEgresos` reads `Facturas Recibidas!A:T` and `Pagos Enviados!A:Q`
+- [ ] `parseFacturasEmitidas` includes `tipodecambio` in colIndex (optional header)
+- [ ] `parseFacturasRecibidas` includes `tipodecambio` in colIndex (optional header)
+- [ ] `parsePagos` includes `tipodecambio` and `importeenpesos` in colIndex (optional headers)
+- [ ] Parsed objects have `tipoDeCambio` and `importeEnPesos` populated when present in sheet
 
-### MCP Context
-- **Railway (production):** Confirmed exchange rate cache miss errors affect both ingresos and egresos
-- **Google Drive (production):** Verified Factura E has `Exchange Rate: 1429.50`, COMEX pago has `Tipo de Cambio: 1396.25` + `Importe equivalente en Pesos: 1,675,500.00`
-- **Linear:** No existing backlog issues
+### ADV-119: factura-pago-matcher reads truncated pago column range
 
-## Original Plan
+**Priority:** Medium
+**Labels:** Bug
+**Description:** The factura-pago matcher reads Pagos sheets as `A:O`, which excludes columns P (tipoDeCambio) and Q (importeEnPesos). While matching correctness isn't affected (uses API rates), the parsed Pago objects are incomplete.
 
-### Task 1: Add tipoDeCambio to types, prompts, and parser
-**Linear Issue:** [ADV-108](https://linear.app/lw-claude/issue/ADV-108/extract-tipodecambio-types-prompts-parser)
+**Acceptance Criteria:**
+- [ ] Change pagosRange to `A:Q` in `factura-pago-matcher.ts`
+- [ ] Verify hardcoded column index parsing handles additional columns without breaking
 
-1. Write tests in `src/gemini/parser.test.ts`:
-   - USD factura response with `tipoDeCambio: 1429.5` parses correctly
-   - ARS factura response without `tipoDeCambio` → field is undefined
-   - USD pago response with `tipoDeCambio: 1396.25` and `importeEnPesos: 1675500` parses correctly
-   - ARS pago response without these fields → undefined
-   - `tipoDeCambio` with value 0 or negative → treated as undefined
-2. Run `verifier "parser"` (expect fail)
-3. Add to `Factura` interface in `src/types/index.ts` (after `moneda`):
-   - `tipoDeCambio?: number` — Exchange rate for USD invoices (AFIP rate at invoice date)
-4. Add to `Pago` interface in `src/types/index.ts` (after `moneda`):
-   - `tipoDeCambio?: number` — Exchange rate for cross-currency payments (bank liquidation rate)
-   - `importeEnPesos?: number` — Equivalent amount in ARS for cross-currency payments
-5. Update `FACTURA_PROMPT` in `src/gemini/prompts.ts` — add to optional fields:
-   - tipoDeCambio: Exchange rate for USD invoices (number). Look for "Exchange Rate:", "Tipo de Cambio:", "T.C." Only extract if moneda is USD.
-6. Update `PAGO_BBVA_PROMPT` in `src/gemini/prompts.ts` — add to optional fields:
-   - tipoDeCambio: Exchange rate for cross-currency payments (number). Look for "Tipo de Cambio:", "T.C.", "Exchange Rate:". Only extract if payment involves currency conversion.
-   - importeEnPesos: Equivalent amount in Argentine Pesos (number). Look for "Importe equivalente en Pesos:", "Total en Pesos". Only extract if tipoDeCambio is present.
-7. Update `parseFacturaResponse` in `src/gemini/parser.ts` — add validation for tipoDeCambio: accept only positive numbers, else undefined
-8. Update `parsePagoResponse` in `src/gemini/parser.ts` — add validation for tipoDeCambio and importeEnPesos: accept only positive numbers, else undefined
-9. Run `verifier "parser"` (expect pass)
+### ADV-115: Movimiento detalle missing nroFactura and tipoComprobante
 
-### Task 2: Update extractor, headers, and stores for tipoDeCambio
-**Linear Issue:** [ADV-109](https://linear.app/lw-claude/issue/ADV-109/store-tipodecambio-extractor-headers-stores)
+**Priority:** High
+**Labels:** Bug
+**Description:** Movimiento detalle descriptions omit the factura number and comprobante type. User expects "Factura E 00003-00001957 - Empresa - concepto" but gets "Cobro Factura de Empresa - concepto".
 
-**Migration note:** This adds columns to Control de Ingresos (Facturas Emitidas S, Pagos Recibidos P-Q) and Control de Egresos (Facturas Recibidas T, Pagos Enviados P-Q). Existing production/staging sheets will be migrated by Task 3.
+**Acceptance Criteria:**
+- [ ] `formatDebitFacturaDescription` includes tipoComprobante and nroFactura
+- [ ] Credit Tier 1 description includes tipoComprobante and nroFactura from linked factura
+- [ ] Credit direct factura match description includes tipoComprobante and nroFactura
+- [ ] Pago-only descriptions remain unchanged (no factura info available)
 
-1. Write tests in `src/constants/spreadsheet-headers.test.ts`:
-   - `FACTURA_EMITIDA_HEADERS` has 19 elements, last is `'tipoDeCambio'`
-   - `FACTURA_RECIBIDA_HEADERS` has 20 elements, last is `'tipoDeCambio'`
-   - `PAGO_ENVIADO_HEADERS` has 17 elements, last two are `'tipoDeCambio'`, `'importeEnPesos'`
-   - `PAGO_RECIBIDO_HEADERS` has 17 elements, last two are `'tipoDeCambio'`, `'importeEnPesos'`
-2. Write tests in `src/processing/storage/factura-store.test.ts`:
-   - USD factura with `tipoDeCambio: 1429.5` → row has `CellNumber` at new column position (index 18 for emitida, index 19 for recibida)
-   - ARS factura without tipoDeCambio → row has empty string at new column position
-3. Write tests in `src/processing/storage/pago-store.test.ts`:
-   - USD pago with `tipoDeCambio: 1396.25` and `importeEnPesos: 1675500` → row has `CellNumber` values at positions 15-16
-   - ARS pago without these fields → row has empty strings at positions 15-16
-4. Run `verifier` (expect fail)
-5. Update `src/constants/spreadsheet-headers.ts`:
-   - Append `'tipoDeCambio'` to `FACTURA_EMITIDA_HEADERS` (19 cols) and `FACTURA_RECIBIDA_HEADERS` (20 cols)
-   - Append `'tipoDeCambio'`, `'importeEnPesos'` to `PAGO_ENVIADO_HEADERS` and `PAGO_RECIBIDO_HEADERS` (17 cols each)
-   - Add number formats: `{ type: 'number', decimals: 2 }` for tipoDeCambio, `{ type: 'currency', decimals: 2 }` for importeEnPesos in the relevant `CONTROL_INGRESOS_SHEETS` and `CONTROL_EGRESOS_SHEETS` format definitions
-6. Update `src/processing/extractor.ts`:
-   - Factura object (line ~352 area): pass through `tipoDeCambio: parseResult.value.data.tipoDeCambio`
-   - Pago object (line ~423 area): pass through `tipoDeCambio` and `importeEnPesos`
-7. Update `src/processing/storage/factura-store.ts`:
-   - Import `CellNumber` type from sheets
-   - factura_emitida row (lines 130-156): append tipoDeCambio as `CellNumber` or empty string after hasCuitMatch. Change range from `A:R` to `A:S`
-   - factura_recibida row (lines 160-180): append tipoDeCambio after pagada. Change range from `A:S` to `A:T`
-8. Update `src/processing/storage/pago-store.ts`:
-   - Import `CellNumber` type from sheets
-   - Both pago_enviado (lines 130-146) and pago_recibido (lines 150-166): append tipoDeCambio + importeEnPesos as `CellNumber` or empty string. Change ranges from `A:O` to `A:Q`
-9. Run `verifier` (expect pass)
+### ADV-117: Movimiento detalle missing tipoDeCambio for COMEX operations
 
-### Task 3: Schema migration for tipoDeCambio columns
-**Linear Issue:** [ADV-110](https://linear.app/lw-claude/issue/ADV-110/schema-migration-docs-for-tipodecambio-columns)
+**Priority:** High
+**Labels:** Bug
+**Description:** For COMEX operations (USD invoices with bank USD→ARS conversion), the detalle description does not include the exchange rate. User expects "Factura E 00003-00001957 - Empresa - concepto - tipo de cambio 1234.56". The tipoDeCambio should come from the Pago (bank conversion rate), not the Factura (AFIP rate).
 
-**Migration note:** Existing production sheets (Facturas Emitidas 18 cols, Facturas Recibidas 19 cols, Pagos Enviados/Recibidos 15 cols) need new headers appended. Migration must be idempotent.
+**Acceptance Criteria:**
+- [ ] When a COMEX match is found, include tipoDeCambio in detalle description
+- [ ] Format: "... - tipo de cambio NNNN.NN" appended when tipoDeCambio is available
+- [ ] Use the pago's tipoDeCambio (bank conversion rate), not the factura's
+- [ ] Only append when tipoDeCambio is present (graceful degradation)
 
-1. Write tests in `src/services/folder-structure.test.ts`:
-   - `migrateControlIngresosHeaders`: 18-col Facturas Emitidas gets `tipoDeCambio` appended at S; 15-col Pagos Recibidos gets `tipoDeCambio`+`importeEnPesos` appended at P-Q
-   - `migrateControlEgresosHeaders`: 19-col Facturas Recibidas gets `tipoDeCambio` appended at T; 15-col Pagos Enviados gets `tipoDeCambio`+`importeEnPesos` appended at P-Q
-   - Already-migrated sheets (correct column count) are skipped (idempotent)
-   - Empty sheets are skipped
-2. Run `verifier "folder-structure"` (expect fail)
-3. Implement `migrateControlIngresosHeaders(spreadsheetId)` and `migrateControlEgresosHeaders(spreadsheetId)` in `src/services/folder-structure.ts`:
-   - Follow `migrateArchivosProcesadosHeaders` pattern (lines 332-361): read header row → check column count → append missing headers
-   - Facturas Emitidas: if exactly 18 cols, append `tipoDeCambio` at S1
-   - Facturas Recibidas: if exactly 19 cols, append `tipoDeCambio` at T1
-   - Pagos Recibidos/Enviados: if exactly 15 cols, append `tipoDeCambio` and `importeEnPesos` at P1:Q1
-4. Call both migration functions in `discoverFolderStructure()` after the `ensureSheetsExist` calls (~line 770-774)
-5. Run `verifier "folder-structure"` (expect pass)
+### ADV-118: Use importeEnPesos for precise cross-currency bank matching
 
-### Task 4: Fix amountsMatchCrossCurrency for same-currency matching
-**Linear Issue:** [ADV-111](https://linear.app/lw-claude/issue/ADV-111/fix-same-currency-matching-usd-usd-in-amountsmatchcrosscurrency)
+**Priority:** Medium
+**Labels:** Improvement
+**Description:** Cross-currency bank matching uses ArgentinaDatos API official rate with ±5% tolerance. However, Pago already has `importeEnPesos` — the exact ARS amount the bank deposited. Using this enables exact ARS matching instead of tolerance-based.
 
-**Note:** This fix applies to both ingresos and egresos since both use the same `FacturaPagoMatcher` class. Ingresos: Facturas Emitidas↔Pagos Recibidos. Egresos: Facturas Recibidas↔Pagos Enviados. The single call site in `matcher.ts:142-148` is shared.
+**Acceptance Criteria:**
+- [ ] When `importeEnPesos` is available on pago, use it for direct ARS-to-ARS matching against bank credit amount
+- [ ] Fall back to `amountsMatchCrossCurrency()` when `importeEnPesos` is not available
+- [ ] Prefer importeEnPesos match (exact) over API-rate match (tolerance) in tier scoring
+- [ ] Add tests for both paths
 
-1. Write tests in `src/utils/exchange-rate.test.ts`:
-   - USD factura + USD pago with matching amounts → `{matches: true, isCrossCurrency: false}` (same-currency, no exchange rate needed)
-   - USD factura + USD pago with non-matching amounts → `{matches: false, isCrossCurrency: false}`
-   - USD factura + ARS pago → existing cross-currency behavior (uses exchange rate, tolerance)
-   - ARS factura + ARS pago → existing exact match behavior (unchanged)
-2. Update tests in `src/matching/matcher.test.ts`:
-   - Test that USD pago matching USD factura uses direct comparison (no exchange rate fetch)
-   - Update any existing cross-currency tests that need the new `pagoMoneda` parameter
-3. Run `verifier "exchange-rate"` (expect fail)
-4. Update `amountsMatchCrossCurrency` in `src/utils/exchange-rate.ts`:
-   - Add `pagoMoneda: Moneda` parameter after `pagoAmount`
-   - When `facturaMoneda === pagoMoneda` (same currency): use `amountsMatch()` regardless of currency, return `{matches, isCrossCurrency: false}`
-   - When currencies differ: existing cross-currency logic (exchange rate lookup + tolerance)
-5. Update the caller in `src/matching/matcher.ts` (line 142-148): pass `pago.moneda` as the new parameter
-6. Run `verifier "exchange-rate"` then `verifier "matcher"` (expect pass)
+## Prerequisites
 
-### Task 5: Factura filename with comprobante letter
-**Linear Issue:** [ADV-113](https://linear.app/lw-claude/issue/ADV-113/factura-filename-with-comprobante-letter-abce-nc-abc)
+- [ ] No spreadsheet schema changes required — columns already exist, just not being read
+- [ ] No migration needed — changes are read-only improvements to matching quality
 
-**Context:** Current filenames use "Factura Emitida" for all types (A/B/C/E). User needs the letter for quick identification: "Factura C Emitida", "Factura E Emitida". For NC/ND, the letter variant (A/B/C) is also needed: "Nota de Credito A Emitida". Currently `TipoComprobante` stores 'NC' without the letter — Gemini prompt needs to be updated to extract the full type.
+## Implementation Tasks
 
-1. Write tests in `src/utils/file-naming.test.ts`:
-   - Factura with tipoComprobante 'A' → filename contains "Factura A Emitida"
-   - Factura with tipoComprobante 'C' → "Factura C Recibida"
-   - Factura with tipoComprobante 'E' → "Factura E Emitida"
-   - Factura with tipoComprobante 'NC A' → "Nota de Credito A Emitida"
-   - Factura with tipoComprobante 'NC B' → "Nota de Credito B Recibida"
-   - Factura with tipoComprobante 'ND A' → "Nota de Debito A Emitida"
-   - Backward compat: tipoComprobante 'NC' (old format) → "Nota de Credito Emitida" (no letter, graceful)
-2. Write tests in `src/gemini/parser.test.ts`:
-   - Response with `tipoComprobante: "NC A"` → parsed correctly
-   - Response with `tipoComprobante: "ND B"` → parsed correctly
-   - Response with `tipoComprobante: "NC"` → still accepted (backward compat)
-3. Run `verifier "file-naming"` (expect fail)
-4. Update `TipoComprobante` type in `src/types/index.ts`:
-   - Expand to: `'A' | 'B' | 'C' | 'E' | 'NC' | 'NC A' | 'NC B' | 'NC C' | 'ND' | 'ND A' | 'ND B' | 'ND C' | 'LP'`
-   - Keep plain 'NC'/'ND' for backward compatibility with existing spreadsheet data
-5. Update `FACTURA_PROMPT` in `src/gemini/prompts.ts`:
-   - Change tipoComprobante instruction to ask for letter variant: "For Notas de Credito, include the letter: NC A, NC B, NC C. For Notas de Debito: ND A, ND B, ND C."
-6. Update `validateTipoComprobante` in `src/utils/validation.ts` (or parser):
-   - Accept new values ('NC A', 'NC B', 'NC C', 'ND A', 'ND B', 'ND C')
-7. Update `generateFacturaFileName` in `src/utils/file-naming.ts`:
-   - For A/B/C/E: `Factura ${tipoComprobante} ${direction}` (e.g., "Factura C Emitida")
-   - For 'NC A'/'NC B'/'NC C': `Nota de Credito ${letter} ${direction}`
-   - For 'ND A'/'ND B'/'ND C': `Nota de Debito ${letter} ${direction}`
-   - For plain 'NC'/'ND' (backward compat): `Nota de Credito ${direction}` / `Nota de Debito ${direction}`
-   - For 'LP': `Liquidacion de Premio ${direction}`
-8. Run `verifier "file-naming"` then `verifier "parser"` (expect pass)
+### Task 1: Extend column ranges and parsers in match-movimientos.ts
 
-### Task 6: Reprocessing support (stores + scanner)
-**Linear Issue:** [ADV-114](https://linear.app/lw-claude/issue/ADV-114/reprocessing-support-re-extract-files-moved-back-to-entrada)
+**Issue:** ADV-116
+**Files:**
+- `src/bank/match-movimientos.test.ts` (modify)
+- `src/bank/match-movimientos.ts` (modify)
 
-**Context:** When the user moves a previously-processed file from a subfolder back to Entrada, the system should re-extract it and update the existing spreadsheet row rather than treating it as a duplicate. This enables bulk reprocessing (e.g., to populate tipoDeCambio for all existing documents). The file must also be re-sorted to the correct year/month folder and renamed with the current naming convention.
+**TDD Steps:**
 
-**Flow:** File enters Entrada → `markFileProcessing` updates tracking row (already works) → Gemini extracts → store detects fileId already in sheet → updates existing row → scanner sorts/renames file to correct folder.
+1. **RED** - Write tests in `match-movimientos.test.ts`:
+   - Test `parseFacturasEmitidas` with tipoDeCambio in column S (index 18) — verify parsed object has `tipoDeCambio` populated
+   - Test `parseFacturasEmitidas` without tipoDeCambio column — verify `tipoDeCambio` is undefined (graceful)
+   - Test `parseFacturasRecibidas` with tipoDeCambio in column T (index 19) — verify parsed object has `tipoDeCambio` populated
+   - Test `parsePagos` with tipoDeCambio (index 15) and importeEnPesos (index 16) — verify both fields populated
+   - Test `parsePagos` without those columns — verify fields are undefined
+   - Use existing `parseFacturasEmitidas` and `parseFacturasRecibidas` test patterns in the file
+   - Note: `parsePagos` is a private function not exported. Tests should go through the exported parsers or the function should be exported for testing (follow existing pattern — `parseFacturasEmitidas` and `parseFacturasRecibidas` are already exported)
+   - Run `verifier "match-movimientos"` — expect fail
 
-1. Write tests in `src/processing/storage/factura-store.test.ts`:
-   - Factura with fileId already in sheet → returns `{stored: true, updated: true}`, row data updated via `batchUpdate`
-   - Factura with fileId NOT in sheet, no business key match → normal insert (existing behavior)
-   - Factura with fileId NOT in sheet, business key matches different fileId → `{stored: false, existingFileId}` (existing duplicate behavior)
-2. Write tests in `src/processing/storage/pago-store.test.ts`:
-   - Same three scenarios as factura
-3. Run `verifier "factura-store"` (expect fail)
-4. Add `findRowByFileId(spreadsheetId, sheetName, fileId)` utility (in stores or shared):
-   - Read column B (fileId column) from sheet
-   - Return `{found: true, rowIndex: number}` or `{found: false}`
-   - rowIndex is 1-indexed (for spreadsheet API ranges)
-5. Update `storeFactura` in `src/processing/storage/factura-store.ts`:
-   - BEFORE the business key duplicate check, call `findRowByFileId`
-   - If found: build updated row (same format as new insert), call `batchUpdate` to overwrite the existing row, return `{stored: true, updated: true}`
-   - If not found: proceed to existing `isDuplicateFactura` check (no change)
-6. Update `storePago` in `src/processing/storage/pago-store.ts`:
-   - Same pattern: `findRowByFileId` before `isDuplicatePago`
-   - If found: build updated row, `batchUpdate`, return `{stored: true, updated: true}`
-7. Add `updated?: boolean` to `StoreResult` type in `src/types/index.ts`
-8. Update scanner branches for ALL document types (factura_emitida, factura_recibida, pago_recibido, pago_enviado):
-   - When `storeResult.value.stored === true` (whether new or updated), always call `sortAndRenameDocument` to move and rename the file
-   - The existing code already does this — `sortAndRenameDocument` is called for `stored === true`, the `else` branch (duplicate) handles `stored === false`
-   - **Verify** that `sortAndRenameDocument` works correctly when the file is in Entrada (not in a year/month folder) — it should, since `sortDocument` moves from current parent to target folder
-9. Run `verifier` (expect pass)
+2. **GREEN** - Modify `match-movimientos.ts`:
+   - In `parseFacturasEmitidas` (line 222-242): add `tipodecambio` to optional headers using `headers.indexOf('tipodecambio')`. In the push block, add `tipoDeCambio: parseNumber(row[colIndex.tipoDeCambio]) || undefined`
+   - In `parseFacturasRecibidas` (line 288-311): same pattern — add `tipodecambio` optional header and parse it
+   - In `parsePagos` (line 354-373): add `tipodecambio` and `importeenpesos` to optional headers. In the push block, add both fields using `parseNumber()` with `|| undefined` for optional semantics
+   - In `loadControlIngresos` (line 524-527): change `Facturas Emitidas!A:R` → `A:S`, change `Pagos Recibidos!A:O` → `A:Q`
+   - In `loadControlEgresos` (line 555-558): change `Facturas Recibidas!A:S` → `A:T`, change `Pagos Enviados!A:O` → `A:Q`
+   - Export `parsePagos` if needed for testing (or test through integration)
+   - Run `verifier "match-movimientos"` — expect pass
 
-### Task 7: Better duplicate replaces existing (pagos)
-**Linear Issue:** [ADV-112](https://linear.app/lw-claude/issue/ADV-112/better-duplicate-replaces-existing-pagos)
+**Notes:**
+- The header-based lookup (`headers.indexOf`) returns -1 if column is missing, which is safe — `row[-1]` returns undefined in JS
+- Use `parseNumber(val) || undefined` pattern so 0 doesn't become a falsy tipoDeCambio (exchange rates are never 0)
+- Follow existing optional header pattern established by `fileName`, `concepto`, etc.
 
-**Context:** When a DIFFERENT file contains the same transaction (same fecha+importe+cuit but different fileId), compare quality. If new is better, replace the existing entry. This is separate from reprocessing (Task 6) which handles same-fileId re-extraction.
+### Task 2: Extend factura-pago-matcher column range
 
-1. Write tests in `src/processing/storage/pago-store.test.ts`:
-   - Different fileId, same business key, new has tipoDeCambio, existing doesn't → returns `{stored: true, replacedFileId: existingFileId}`
-   - Different fileId, same business key, existing has tipoDeCambio, new doesn't → returns `{stored: false, existingFileId}` (existing wins)
-   - Different fileId, same business key, equal quality → returns `{stored: false, existingFileId}` (existing wins on tie)
-2. Run `verifier "pago-store"` (expect fail)
-3. Update `isDuplicatePago` to also return `existingRowIndex` (the 1-indexed row number for batchUpdate)
-4. Add `isQualityBetter(newPago, existingRowData)` function to `src/processing/storage/pago-store.ts`:
-   - Compare quality signals: (1) has tipoDeCambio > doesn't, (2) has non-empty counterparty CUIT > empty, (3) higher confidence > lower
-   - Return `'better' | 'worse' | 'equal'`
-5. Modify `storePago`: when duplicate detected (after reprocessing check from Task 6):
-   - If quality is better: build new row, `batchUpdate` to overwrite existing row, return `{stored: true, replacedFileId: existingFileId}`
-   - If worse or equal: return `{stored: false, existingFileId}` (current behavior)
-6. Add `replacedFileId?: string` to `StoreResult` type in `src/types/index.ts`
-7. Update duplicate cache read range from `A:H` to full column range to include tipoDeCambio columns for quality comparison
-8. Update scanner duplicate branches for `pago_recibido` and `pago_enviado`:
-   - Check `storeResult.value.replacedFileId`: if present, the new file replaced an existing one
-   - Move the OLD file (replacedFileId) to Duplicado folder
-   - Sort/rename the NEW file to correct year/month folder (call `sortAndRenameDocument`)
-   - Update dashboard: new file gets `'success'` status; old file needs a tracking entry with `'duplicate'` status
-9. Run `verifier "pago-store"` (expect pass)
+**Issue:** ADV-119
+**Files:**
+- `src/processing/matching/factura-pago-matcher.ts` (modify)
 
-### Task 8: Documentation
-**Linear Issue:** [ADV-110](https://linear.app/lw-claude/issue/ADV-110/schema-migration-docs-for-tipodecambio-columns)
+**TDD Steps:**
 
-1. Update `SPREADSHEET_FORMAT.md`:
-   - Add tipoDeCambio column to Facturas Emitidas (19 cols A:S) and Facturas Recibidas (20 cols A:T) tables
-   - Add tipoDeCambio + importeEnPesos columns to Pagos Enviados and Pagos Recibidos (17 cols A:Q) tables
-   - Update column counts
-   - Update Cross-Currency Matching section to mention same-currency support
-   - Document reprocessing behavior
-2. Update `CLAUDE.md`:
-   - Update column counts in SPREADSHEETS section
-   - Update TipoComprobante values (add NC A/B/C, ND A/B/C)
-   - Note the matching fix (same-currency support)
-   - Document reprocessing capability
+1. **RED** - No separate test needed. The factura-pago-matcher uses hardcoded indices (0-14) for existing columns. Extending the range from `A:O` to `A:Q` just provides more data in the row array without breaking existing parsing. The parser reads up to index 14 (column O), so columns P and Q are simply available but unused by this parser.
 
-## Post-Implementation Checklist
+2. **GREEN** - Modify `factura-pago-matcher.ts`:
+   - Line 302: change `const pagosRange = '${pagosSheetName}!A:O'` → `'${pagosSheetName}!A:Q'`
+   - Run `verifier "factura-pago"` — expect pass
 
-1. Run `bug-hunter` agent — review all git changes for bugs, fix any issues
-2. Run `verifier` agent — all tests pass, zero warnings, fix any issues
+**Notes:**
+- This is a one-line fix. The hardcoded index parsing (lines 362-385) reads up to index 14, so extending to A:Q provides tipoDeCambio (index 15) and importeEnPesos (index 16) in the raw row data, but the existing parsing code simply ignores them.
+- If the factura-pago-matcher ever needs these fields in the future, they'll be available in the row data.
 
----
+### Task 3: Add nroFactura and tipoComprobante to detalle descriptions
 
-## Plan Summary
+**Issue:** ADV-115
+**Files:**
+- `src/bank/matcher.test.ts` (modify)
+- `src/bank/matcher.ts` (modify)
 
-**Objective:** Extract exchange rate data, fix USD-USD matching, enable file reprocessing, smarter duplicates, and descriptive factura filenames
+**TDD Steps:**
 
-**Request:** (1) Extract and store tipo de cambio from COMEX pagos and Factura E. (2) Fix same-currency matching bug (USD↔USD). (3) Enable reprocessing: moving a file back to Entrada re-extracts, updates the row, and re-sorts/renames. (4) Better duplicate replacement for pagos. (5) Factura filenames include comprobante letter ("Factura C Emitida", "Nota de Credito A Emitida").
+1. **RED** - Write tests in `matcher.test.ts`:
+   - Test `formatDebitFacturaDescription` returns format "Pago Factura {tipo} {nro} a {razonSocial} - {concepto}" (e.g., "Pago Factura E 00003-00001957 a TEST SA - servicios")
+   - Test `formatDebitFacturaDescription` with missing concepto: "Pago Factura E 00003-00001957 a TEST SA"
+   - Test credit Tier 1 (pago+factura) description includes factura number: "Cobro Factura {tipo} {nro} de {cliente} - {concepto}"
+   - Test credit direct factura description includes factura number
+   - Test pago-only descriptions remain unchanged (no factura info to include)
+   - Note: `formatDebitFacturaDescription` is private. Test indirectly through `matchMovement`/`matchCreditMovement` by setting up scenarios that produce Tier 1 and direct factura matches, then asserting on the `description` field of the returned result
+   - Follow existing test patterns in matcher.test.ts (use `makeMovimiento` helper, set up exchange rate cache)
+   - Run `verifier "matcher"` — expect fail
 
-**Linear Issues:** ADV-108, ADV-109, ADV-110, ADV-111, ADV-112, ADV-113, ADV-114
+2. **GREEN** - Modify `matcher.ts`:
+   - `formatDebitFacturaDescription` (line 856-863): prepend tipoComprobante and nroFactura to the description. Change format from "Pago Factura a {razonSocial}" to "Pago Factura {tipo} {nro} a {razonSocial}". Only include tipo/nro when they are non-empty.
+   - Credit Tier 1 (line 631-633): change "Cobro Factura de {cliente}" to "Cobro Factura {tipo} {nro} de {cliente}" using `linkedFactura.tipoComprobante` and `linkedFactura.nroFactura`
+   - Credit direct factura (line 762-764): same pattern — change "Cobro Factura de {cliente}" to "Cobro Factura {tipo} {nro} de {cliente}"
+   - Run `verifier "matcher"` — expect pass
 
-**Approach:** Five interconnected improvements: (1) tipoDeCambio through the full extraction→storage pipeline with schema migration. (2) Fix `amountsMatchCrossCurrency` with `pagoMoneda` parameter — same-currency uses direct comparison. (3) Store functions check fileId before business key — same fileId updates row (reprocessing), different fileId checks quality (duplicate). (4) Quality comparison for pago duplicates. (5) Expand `TipoComprobante` to carry NC/ND letter variants, update prompts and filename generation.
+**Notes:**
+- The `Factura` objects already have `tipoComprobante` and `nroFactura` fields populated (confirmed at match-movimientos.ts:253-254)
+- Debit uses `razonSocialEmisor` (proveedor), credit uses `razonSocialReceptor` (cliente) — don't mix these up
+- Only include tipo/nro prefix when both are available (graceful for edge cases with missing data)
 
-**Scope:**
-- Tasks: 8
-- Files affected: ~18
-- New tests: yes
+### Task 4: Add tipoDeCambio to COMEX detalle descriptions
 
-**Key Decisions:**
-- tipoDeCambio columns appended at end of each sheet to avoid breaking column indices
-- Reprocessing check (same fileId) runs BEFORE business key duplicate check — always updates the row
-- Better duplicate (different fileId, same business key) only for pagos initially
-- `TipoComprobante` expanded with backward-compatible values ('NC' still valid alongside 'NC A')
-- Same-currency matching uses direct `amountsMatch()` — no exchange rate needed
-- All matching and store changes apply to both ingresos and egresos (shared code)
+**Issue:** ADV-117
+**Files:**
+- `src/bank/matcher.test.ts` (modify)
+- `src/bank/matcher.ts` (modify)
 
-**Risks/Considerations:**
-- Reprocessing bulk files: moving many files to Entrada at once could trigger long processing runs — existing queue handles this but scan duration may be long
-- `TipoComprobante` expansion: old rows in spreadsheets have 'NC', new rows have 'NC A' — acceptable, no migration needed since both are valid display values
-- Duplicate replacement involves multiple operations (update row, move old file, sort new file) — partial failures need graceful handling
-- `findRowByFileId` adds one API call per store operation — acceptable since it's a simple column read, and can share the data already fetched by `isDuplicate*`
+**TDD Steps:**
+
+1. **RED** - Write tests in `matcher.test.ts`:
+   - Test credit Tier 1 COMEX match: when pago has `tipoDeCambio`, description ends with " - tipo de cambio 1234.56"
+   - Test credit Tier 1 non-COMEX match: when pago has no `tipoDeCambio`, description has no tipo de cambio suffix
+   - Test debit Tier 1 COMEX match: when linked pago (Pago Enviado) has `tipoDeCambio`, description includes it
+   - Test debit direct factura COMEX match: no tipoDeCambio appended (no pago available, only factura tipoDeCambio which is AFIP rate, not bank rate)
+   - Pago objects in tests need `tipoDeCambio` field set (will work because Task 1 makes parsers load it)
+   - Run `verifier "matcher"` — expect fail
+
+2. **GREEN** - Modify `matcher.ts`:
+   - Credit Tier 1 (around line 631-633): after building the description with factura info, check if `pago.tipoDeCambio` exists. If so, append ` - tipo de cambio ${pago.tipoDeCambio.toFixed(2)}`
+   - Debit Tier 1 (around line 403): the `pago` object is available. After calling `formatDebitFacturaDescription(linkedFactura)`, check if `pago.tipoDeCambio` exists and append the same suffix
+   - Do NOT add tipoDeCambio to debit direct factura matches (line 494) — there's no pago, only factura.tipoDeCambio which is the AFIP rate
+   - Do NOT add tipoDeCambio to pago-only matches — they already have no factura context
+   - Run `verifier "matcher"` — expect pass
+
+**Notes:**
+- The key insight is: tipoDeCambio comes from the Pago (bank conversion rate), NOT from the Factura (AFIP official rate). They are different numbers.
+- Only append when `pago.tipoDeCambio` is defined and > 0
+- Use `.toFixed(2)` for consistent formatting
+- This task depends on Task 1 (ADV-116) because tipoDeCambio must be loaded into Pago objects first
+
+### Task 5: Use importeEnPesos for precise cross-currency bank matching
+
+**Issue:** ADV-118
+**Files:**
+- `src/bank/matcher.test.ts` (modify)
+- `src/bank/matcher.ts` (modify)
+
+**TDD Steps:**
+
+1. **RED** - Write tests in `matcher.test.ts`:
+   - Test credit pago matching: when pago has `importeEnPesos` and pago is USD, match against bank credit using `importeEnPesos` (ARS-to-ARS exact match with standard ±1 tolerance) instead of `amountsMatchCrossCurrency`
+   - Test credit pago matching: when pago has NO `importeEnPesos`, fall back to `amountsMatchCrossCurrency()` as before
+   - Test credit pago matching: when importeEnPesos matches exactly, the match is treated as exact amount (not cross-currency), improving confidence
+   - Test debit pago matching: when pago has `importeEnPesos`, match using importeEnPesos against bank debit amount
+   - Run `verifier "matcher"` — expect fail
+
+2. **GREEN** - Modify `matcher.ts`:
+   - Credit pago matching (around line 608-613): before calling `amountsMatchCrossCurrency`, check if `pago.importeEnPesos` is available and `pago.moneda === 'USD'`. If so, use `amountsMatch(pago.importeEnPesos, amount)` for direct ARS comparison. Set `isExactAmount: true` and don't flag as cross-currency.
+   - If `importeEnPesos` is not available, fall back to existing `amountsMatchCrossCurrency()` logic
+   - The confidence should be treated as same-currency (HIGH for tier 1-3) when importeEnPesos is used, since it's an exact ARS match
+   - Debit pago matching: similar logic — check `pago.importeEnPesos` before `amountsMatch(pago.importePagado, amount)` which currently only checks same-currency
+   - Run `verifier "matcher"` — expect pass
+
+**Notes:**
+- `importeEnPesos` is the exact ARS amount the bank deposited/debited after its own USD→ARS conversion
+- Using it avoids the ±5% tolerance window that can cause false matches/misses
+- The existing `amountsMatch()` function uses ±1 tolerance which is appropriate for same-currency exact matching
+- This task depends on Task 1 (ADV-116) for importeEnPesos to be loaded into Pago objects
+- Debit pagos currently use `amountsMatch(pago.importePagado, amount)` at line 388. For USD pagos with importeEnPesos, the bank movement is in ARS, so we need to match against importeEnPesos, not importePagado
+
+### Task 6: Final verification
+
+**Issue:** ADV-115, ADV-116, ADV-117, ADV-118, ADV-119
+
+**Steps:**
+1. Run `verifier` (full mode — all tests + build)
+2. Run `bug-hunter` to review all changes
+
+## Dependencies Between Tasks
+
+```
+Task 1 (ADV-116: load fields) ──┬──→ Task 4 (ADV-117: tipoDeCambio in detalle)
+                                └──→ Task 5 (ADV-118: importeEnPesos matching)
+Task 2 (ADV-119: factura-pago range) — independent
+Task 3 (ADV-115: nroFactura in detalle) — independent
+Task 6 (final verification) — depends on all others
+```
+
+Tasks 1, 2, 3 can be done in parallel. Tasks 4 and 5 depend on Task 1. Task 6 is last.
+
+## MCP Usage During Implementation
+
+| MCP Server | Tool | Purpose |
+|------------|------|---------|
+| Linear | `update_issue` | Move issues to "In Progress" when starting, "Review" when complete |
+
+## Error Handling
+
+| Error Scenario | Expected Behavior | Test Coverage |
+|---------------|-------------------|---------------|
+| tipoDeCambio column missing from sheet | Field is undefined on parsed object, no error | Unit test (Task 1) |
+| importeEnPesos column missing from sheet | Field is undefined, falls back to API-rate matching | Unit test (Task 5) |
+| tipoDeCambio is 0 or NaN | Treated as absent, graceful degradation | Unit test (Task 4) |
+| nroFactura or tipoComprobante empty | Description omits the factura number prefix | Unit test (Task 3) |
+
+## Risks & Open Questions
+
+- None identified. All changes are backward-compatible read-only improvements to matching quality. No spreadsheet schema changes, no folder structure changes, no migration needed.
+
+## Scope Boundaries
+
+**In Scope:**
+- Loading tipoDeCambio and importeEnPesos from existing spreadsheet columns during bank matching
+- Enriching detalle descriptions with factura numbers, comprobante types, and exchange rates
+- Using importeEnPesos for precise cross-currency matching
+- Extending factura-pago-matcher column range
+
+**Out of Scope:**
+- Changes to how tipoDeCambio/importeEnPesos are written to spreadsheets (already working)
+- Changes to Gemini extraction or parser logic
+- Changes to spreadsheet schema or column layout
+- UI/Apps Script changes
 
 ---
 
 ## Iteration 1
 
 **Implemented:** 2026-02-22
-**Method:** Agent team (4 workers, worktree-isolated)
+**Method:** Single-agent (2 work units, 9 effort points)
 
 ### Tasks Completed This Iteration
-- Task 1: Add tipoDeCambio to Factura and Pago types (ADV-108) (worker-1)
-- Task 2: Extract tipoDeCambio in Gemini prompts and parser (ADV-109) (worker-1)
-- Task 3: Pass tipoDeCambio through extractor to storage (ADV-110) (worker-1)
-- Task 4: Fix same-currency matching in amountsMatchCrossCurrency (ADV-111) (worker-2)
-- Task 5: Add comprobante letter to factura filenames (ADV-113) (worker-3)
-- Task 6: Enable file reprocessing via findRowByFileId (ADV-114) (worker-4)
-- Task 7: Better duplicate replacement for pagos (ADV-112) (worker-4)
-- Task 8: Update documentation (SPREADSHEET_FORMAT.md, CLAUDE.md) (lead)
+- Task 1 (ADV-116): Extend column ranges and parsers — added tipoDeCambio to parseFacturasEmitidas/parseFacturasRecibidas, added tipoDeCambio+importeEnPesos to parsePagos, updated loadControlIngresos/loadControlEgresos ranges
+- Task 2 (ADV-119): Extend factura-pago-matcher column range — pagos A:O→A:Q, facturas ranges updated, pago parser extended
+- Task 3 (ADV-115): Add nroFactura and tipoComprobante to detalle descriptions — formatDebitFacturaDescription, credit Tier 1, credit direct factura all now include "Factura {tipo} {nro}"
+- Task 4 (ADV-117): Add tipoDeCambio to COMEX detalle descriptions — credit Tier 1 and debit Tier 1 append " - tipo de cambio NNNN.NN" when pago.tipoDeCambio is available
+- Task 5 (ADV-118): Use importeEnPesos for precise cross-currency bank matching — credit and debit pago matching use importeEnPesos for exact ARS match when available, falling back to amountsMatchCrossCurrency
+- Task 6: Final verification — bug-hunter and full verifier passed
 
 ### Files Modified
-- `src/types/index.ts` - Added tipoDeCambio to Factura/Pago, expanded TipoComprobante, added updated/replacedFileId to StoreResult
-- `src/gemini/prompts.ts` - Added tipoDeCambio instructions, NC/ND letter extraction
-- `src/gemini/parser.ts` - tipoDeCambio validation in parseFacturaResponse/parsePagoResponse, importeEnPesos cascade clear
-- `src/processing/extractor.ts` - tipoDeCambio pass-through for factura and pago
-- `src/constants/spreadsheet-headers.ts` - tipoDeCambio/importeEnPesos headers and number formats
-- `src/services/folder-structure.ts` - migrateTipoDeCambioHeaders function and startup calls
-- `src/processing/storage/factura-store.ts` - tipoDeCambio in buildFacturaRow, append, batchUpdate
-- `src/processing/storage/pago-store.ts` - tipoDeCambio/importeEnPesos in buildPagoRow, isQualityBetter, isDuplicatePago
-- `src/utils/exchange-rate.ts` - pagoMoneda parameter for same-currency matching
-- `src/matching/matcher.ts` - Pass pago.moneda to amountsMatchCrossCurrency
-- `src/bank/matcher.ts` - Pass 'ARS' as bank movement currency
-- `src/utils/file-naming.ts` - Comprobante letter in factura filenames
-- `src/utils/validation.ts` - Expanded validateTipoComprobante for NC A/B/C, ND A/B/C
-- `src/processing/scanner.ts` - Reprocessing handling (updated flag, replacedFileId)
-- `SPREADSHEET_FORMAT.md` - Updated column counts and schemas
-- `CLAUDE.md` - Updated column counts
+- `src/bank/match-movimientos.ts` — Extended column ranges, added tipoDeCambio/importeEnPesos parsing, exported parsePagos
+- `src/bank/match-movimientos.test.ts` — Added tests for new field parsing, updated mock ranges
+- `src/bank/matcher.ts` — nroFactura/tipoComprobante in descriptions, tipoDeCambio suffix, importeEnPesos matching
+- `src/bank/matcher.test.ts` — Added tests for descriptions, tipoDeCambio, importeEnPesos matching, updated pre-existing expectations
+- `src/processing/matching/factura-pago-matcher.ts` — Extended pagos range A:O→A:Q, facturas ranges A:R→A:S / A:S→A:T, added pago tipoDeCambio/importeEnPesos parsing
 
 ### Linear Updates
-- ADV-108: Todo → In Progress → Review
-- ADV-109: Todo → In Progress → Review
-- ADV-110: Todo → In Progress → Review
-- ADV-111: Todo → In Progress → Review
-- ADV-112: Todo → In Progress → Review
-- ADV-113: Todo → In Progress → Review
-- ADV-114: Todo → In Progress → Review
+- ADV-116: Todo → In Progress → Review
+- ADV-119: Todo → In Progress → Review
+- ADV-115: Todo → In Progress → Review
+- ADV-117: Todo → In Progress → Review
+- ADV-118: Todo → In Progress → Review
 
 ### Pre-commit Verification
-- bug-hunter: Found 2 medium bugs, 1 fixed (importeEnPesos cascade clear), 1 accepted (migration condition theoretical)
-- verifier: All 1694 tests pass, zero warnings
-
-### Work Partition
-- Worker 1: Tasks 1, 2, 3 (tipoDeCambio pipeline — types, prompts, parser, extractor, storage, migration)
-- Worker 2: Task 4 (matching fix — exchange-rate, matcher)
-- Worker 3: Task 5 (filename — file-naming, validation, parser tipoComprobante)
-- Worker 4: Tasks 6, 7 (reprocessing + duplicates — scanner, factura-store, pago-store)
-- Lead: Task 8 (documentation), merge fix, bug fixes
-
-### Merge Summary
-- Worker 1: salvaged (uncommitted changes committed by lead)
-- Worker 3: merged, auto-merge silently dropped worker 1 additions
-- Worker 2: merged cleanly
-- Worker 4: merged, auto-merge silently dropped worker 1 additions
-- Lead manually restored all worker 1 changes lost in merge (8 source + 5 test files)
-
-### Continuation Status
-All tasks completed.
+- bug-hunter: Found 2 HIGH issues (factura-pago-matcher ranges and pago parser), fixed before commit
+- verifier: All 1,728 tests pass, zero warnings
 
 ### Review Findings
 
-Summary: 1 issue found (Team: security, reliability, quality reviewers)
-- FIX: 1 issue — implementation lost during merge
-- DISCARDED: 0 findings
+Summary: 3 issue(s) found (Team: security, reliability, quality reviewers)
+- FIX: 3 issue(s) — Linear issues created
+- DISCARDED: 8 finding(s) — false positives / not applicable
 
 **Issues requiring fix:**
-- [HIGH] BUG: Task 5 (ADV-113) implementation entirely missing — Worker 3 changes lost during merge. Files `src/utils/file-naming.ts`, `src/utils/validation.ts` are unmodified vs main. `TipoComprobante` type not expanded in `src/types/index.ts`. No NC A/B/C patterns in parser or prompts. Comprobante letter never appears in filenames.
+- [HIGH] BUG: buildMatchQuality cannot reconstruct Tier 3/4, causing incorrect match replacement (`src/bank/match-movimientos.ts:611-622`)
+- [MEDIUM] ASYNC: prefetchExchangeRates failure crashes entire matchAllMovimientos (`src/bank/match-movimientos.ts:988`)
+- [MEDIUM] BUG: Recibo candidates hardcoded HIGH confidence instead of using tierToConfidence (`src/bank/matcher.ts:529-534`)
+
+**Discarded findings (not bugs):**
+- [DISCARDED] RegExp allocation in matchesWordBoundary (`src/bank/matcher.ts:187-192`) — performance optimization, not a correctness bug; regex is correctly constructed
+- [DISCARDED] findDocumentByFileId returns `document: any` (`src/bank/match-movimientos.ts:643`) — type improvement for future maintainability, code works correctly at runtime
+- [DISCARDED] lockResult.value type assertion (`src/bank/match-movimientos.ts:1071`) — redundant but correct assertion, TypeScript already infers the type
+- [DISCARDED] Pago cast without guard (`src/processing/matching/factura-pago-matcher.ts:54`) — correct in context, displacement queue only contains pagos at this point
+- [DISCARDED] warn() missing module field (`src/bank/matcher.ts:423-427`) — convention style with zero correctness impact, not enforced by CLAUDE.md critical rules
+- [DISCARDED] warn() missing module field (`src/bank/match-movimientos.ts:828-831`) — convention style with zero correctness impact, not enforced by CLAUDE.md critical rules
+- [DISCARDED] Fragile test CUITs substring match (`src/bank/match-movimientos.test.ts:1141-1143`) — test behavior is correct; equal quality comparison works regardless of which tier both facturas land on
+- [DISCARDED] Double cast in test (`src/bank/match-movimientos.test.ts:1867`) — common test pattern, not a bug
 
 ### Linear Updates
-- ADV-108: Review → Merge (tipoDeCambio types/prompts/parser)
-- ADV-109: Review → Merge (tipoDeCambio extractor/headers/stores)
-- ADV-110: Review → Merge (schema migration + docs)
-- ADV-111: Review → Merge (same-currency matching fix)
-- ADV-112: Review → Merge (better duplicate replacement)
-- ADV-114: Review → Merge (reprocessing support)
-- ADV-113: Review → Todo (implementation lost — needs re-implementation)
+- ADV-115: Review → Merge (original task completed)
+- ADV-116: Review → Merge (original task completed)
+- ADV-117: Review → Merge (original task completed)
+- ADV-118: Review → Merge (original task completed)
+- ADV-119: Review → Merge (original task completed)
+- ADV-120: Created in Todo (Fix: buildMatchQuality Tier 3/4 reconstruction)
+- ADV-121: Created in Todo (Fix: prefetchExchangeRates error handling)
+- ADV-122: Created in Todo (Fix: Recibo confidence mapping)
 
 <!-- REVIEW COMPLETE -->
+
+### Continuation Status
+All tasks completed.
 
 ---
 
 ## Fix Plan
 
 **Source:** Review findings from Iteration 1
-**Linear Issues:** [ADV-113](https://linear.app/lw-claude/issue/ADV-113/factura-filename-with-comprobante-letter-abce-nc-abc)
+**Linear Issues:** [ADV-120](https://linear.app/lw-claude/issue/ADV-120/buildmatchquality-cannot-reconstruct-tier-34-causing-incorrect-match), [ADV-121](https://linear.app/lw-claude/issue/ADV-121/prefetchexchangerates-failure-crashes-entire-matchallmovimientos), [ADV-122](https://linear.app/lw-claude/issue/ADV-122/recibo-candidates-hardcoded-high-confidence-instead-of-using)
 
-### Fix 1: Re-implement comprobante letter in factura filenames (ADV-113)
-**Linear Issue:** [ADV-113](https://linear.app/lw-claude/issue/ADV-113/factura-filename-with-comprobante-letter-abce-nc-abc)
+### Fix 1: buildMatchQuality cannot reconstruct Tier 3/4
+**Linear Issue:** [ADV-120](https://linear.app/lw-claude/issue/ADV-120/buildmatchquality-cannot-reconstruct-tier-34-causing-incorrect-match)
 
-1. Write tests in `src/utils/file-naming.test.ts`:
-   - Factura with tipoComprobante 'A' → filename contains "Factura A Emitida"
-   - Factura with tipoComprobante 'C' → "Factura C Recibida"
-   - Factura with tipoComprobante 'E' → "Factura E Emitida"
-   - Factura with tipoComprobante 'NC A' → "Nota de Credito A Emitida"
-   - Factura with tipoComprobante 'NC B' → "Nota de Credito B Recibida"
-   - Factura with tipoComprobante 'ND A' → "Nota de Debito A Emitida"
-   - Backward compat: tipoComprobante 'NC' (old format) → "Nota de Credito Emitida" (no letter)
-2. Write tests in `src/gemini/parser.test.ts`:
-   - Response with `tipoComprobante: "NC A"` → parsed correctly
-   - Response with `tipoComprobante: "ND B"` → parsed correctly
-   - Response with `tipoComprobante: "NC"` → still accepted (backward compat)
-3. Run `verifier "file-naming"` (expect fail)
-4. Update `TipoComprobante` type in `src/types/index.ts`:
-   - Expand to: `'A' | 'B' | 'C' | 'E' | 'NC' | 'NC A' | 'NC B' | 'NC C' | 'ND' | 'ND A' | 'ND B' | 'ND C' | 'LP'`
-5. Update `FACTURA_PROMPT` in `src/gemini/prompts.ts`:
-   - Change tipoComprobante instruction to ask for letter variant: "For Notas de Credito, include the letter: NC A, NC B, NC C. For Notas de Debito: ND A, ND B, ND C."
-6. Update `validateTipoComprobante` in `src/utils/validation.ts`:
-   - Accept new values ('NC A', 'NC B', 'NC C', 'ND A', 'ND B', 'ND C')
-7. Update `generateFacturaFileName` in `src/utils/file-naming.ts`:
-   - For A/B/C/E: `Factura ${tipoComprobante} ${direction}` (e.g., "Factura C Emitida")
-   - For 'NC A'/'NC B'/'NC C': `Nota de Credito ${letter} ${direction}`
-   - For 'ND A'/'ND B'/'ND C': `Nota de Debito ${letter} ${direction}`
-   - For plain 'NC'/'ND' (backward compat): `Nota de Credito ${direction}` / `Nota de Debito ${direction}`
-   - For 'LP': `Liquidacion de Premio ${direction}`
-8. Run `verifier "file-naming"` then `verifier "parser"` (expect pass)
+1. Write tests in `src/bank/match-movimientos.test.ts` for the Tier 3/4 downgrade scenario:
+   - Set up an existing Tier 3 match (referencia in concepto matches a document's referencia) and a new Tier 5 candidate with closer date
+   - Verify the existing Tier 3 match is NOT replaced by the Tier 5 candidate
+   - Same test for Tier 4 (keyword match)
+2. Add referencia and keyword detection to `buildMatchQuality` in `src/bank/match-movimientos.ts:611-622`:
+   - Check if concepto contains a referencia pattern that matches a document field
+   - Check if name tokens from the document match keywords in the concepto (reuse `extractKeywordTokens` and `matchesWordBoundary` logic from matcher.ts)
+   - Map to Tier 3 for referencia, Tier 4 for keyword matches
+3. Verify tests pass
 
-### Post-Implementation Checklist
+### Fix 2: prefetchExchangeRates error handling
+**Linear Issue:** [ADV-121](https://linear.app/lw-claude/issue/ADV-121/prefetchexchangerates-failure-crashes-entire-matchallmovimientos)
 
-1. Run `bug-hunter` agent — review all git changes for bugs, fix any issues
-2. Run `verifier` agent — all tests pass, zero warnings, fix any issues
+1. Write test in `src/bank/match-movimientos.test.ts` for prefetch failure:
+   - Mock `prefetchExchangeRates` to throw an error
+   - Verify `matchAllMovimientos` still completes successfully
+   - Verify a warning is logged
+2. Wrap the `prefetchExchangeRates` call at line 988 in try/catch:
+   - Log a warning with `{ module: 'match-movimientos', action: 'prefetchExchangeRates' }` on failure
+   - Continue matching without prefetched rates
+3. Verify tests pass
+
+### Fix 3: Recibo confidence mapping
+**Linear Issue:** [ADV-122](https://linear.app/lw-claude/issue/ADV-122/recibo-candidates-hardcoded-high-confidence-instead-of-using)
+
+1. Write test in `src/bank/matcher.test.ts` for recibo confidence:
+   - Set up a recibo match scenario
+   - Verify the returned confidence is `'LOW'` (Tier 5 mapping), not `'HIGH'`
+2. Change `confidence: 'HIGH'` to `confidence: tierToConfidence(5, false)` at `src/bank/matcher.ts:534`
+3. Verify tests pass
 
 ---
 
 ## Iteration 2
 
 **Implemented:** 2026-02-22
-**Method:** Single-agent (fly solo)
+**Method:** Single-agent (3 fixes, 4 effort points)
 
 ### Tasks Completed This Iteration
-- Fix 1: Re-implement comprobante letter in factura filenames (ADV-113)
+- Fix 1 (ADV-120): buildMatchQuality Tier 3/4 reconstruction — added `document` parameter, `extractReferencia` for Tier 3, `calculateKeywordMatchScore` for Tier 4
+- Fix 2 (ADV-121): prefetchExchangeRates error handling — wrapped in try/catch with warning log, graceful degradation
+- Fix 3 (ADV-122): Recibo confidence mapping — changed hardcoded `'HIGH'` to `tierToConfidence(5, false)` → `'LOW'`
 
 ### Files Modified
-- `src/types/index.ts` - Expanded TipoComprobante with NC A/B/C, ND A/B/C variants
-- `src/gemini/prompts.ts` - Updated FACTURA_PROMPT to ask for letter variant in NC/ND
-- `src/utils/validation.ts` - Expanded validateTipoComprobante to accept new values
-- `src/utils/file-naming.ts` - Include letter in filename for A/B/C/E, NC A/B/C, ND A/B/C, LP
-- `src/processing/matching/nc-factura-matcher.ts` - Fixed NC/ND filtering for compound types
-- `src/utils/file-naming.test.ts` - Added tests for letter variants, updated existing tests
-- `src/utils/validation.test.ts` - Added tests for NC A/B/C, ND A/B/C validation
+- `src/bank/match-movimientos.ts` — Added `extractReferencia` and `calculateKeywordMatchScore` imports, enhanced `buildMatchQuality` with Tier 3/4 detection, wrapped prefetchExchangeRates in try/catch
+- `src/bank/match-movimientos.test.ts` — Added 3 tests: Tier 3 preservation, Tier 4 preservation, prefetch failure resilience; updated matcher mock with `extractReferencia`
+- `src/bank/matcher.ts` — Changed recibo confidence from `'HIGH'` to `tierToConfidence(5, false)`
+- `src/bank/matcher.test.ts` — Added recibo confidence test
 
 ### Linear Updates
-- ADV-113: Todo → In Progress → Review
+- ADV-120: Todo → In Progress → Review
+- ADV-121: Todo → In Progress → Review
+- ADV-122: Todo → In Progress → Review
 
 ### Pre-commit Verification
-- bug-hunter: Found 2 HIGH bugs (nc-factura-matcher filtering), fixed before proceeding
-- verifier: All tests pass, zero warnings
-
-### Continuation Status
-All tasks completed.
+- bug-hunter: Passed (0 bugs found)
+- verifier: All 1,732 tests pass, zero warnings
 
 ### Review Findings
 
-Files reviewed: 7
-Reviewers: single-agent (fly solo)
+Files reviewed: 4
+Reviewer: single-agent
 Checks applied: Security, Logic, Async, Resources, Type Safety, Conventions
 
 No issues found - all implementations are correct and follow project conventions.
 
 ### Linear Updates
-- ADV-113: Review → Merge
+- ADV-120: Review → Merge
+- ADV-121: Review → Merge
+- ADV-122: Review → Merge
 
 <!-- REVIEW COMPLETE -->
 
