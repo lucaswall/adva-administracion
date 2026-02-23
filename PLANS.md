@@ -1,116 +1,228 @@
 # Bug Fix Plan
 
 **Created:** 2026-02-23
-**Bug Report:** Monetary values written as escaped strings instead of numbers in production spreadsheets. Row 5 of Pagos Recibidos also missing fileName link and has raw ISO processedAt.
-**Category:** Storage
-**Linear Issues:** [ADV-123](https://linear.app/lw-claude/issue/ADV-123/replace-formatuscurrency-with-cellnumber-for-monetary-spreadsheet), [ADV-124](https://linear.app/lw-claude/issue/ADV-124/fix-batchupdate-reprocessing-path-monetary-strings-missing-links-raw)
+**Bug Report:** Pagos Recibidos and Retenciones don't match in staging. USD payments miss due to $1 tolerance (bank fees ~$20), 60-day date cap (international wires take 75+ days), punctuation in names preventing substring matching, and no retencion→factura matching logic. Also need a manual match locking column to prevent automatic overwrite of user-confirmed matches.
+**Category:** Matching
+**Linear Issues:** [ADV-127](https://linear.app/lw-claude/issue/ADV-127/add-dollar30-same-currency-tolerance-for-usd-factura-pago-matching), [ADV-128](https://linear.app/lw-claude/issue/ADV-128/extend-low-date-range-to-90-days-for-usd-factura-matching), [ADV-129](https://linear.app/lw-claude/issue/ADV-129/improve-name-matching-by-stripping-punctuation-in-normalizestring), [ADV-130](https://linear.app/lw-claude/issue/ADV-130/implement-retencionfactura-matching-in-runmatching-pipeline), [ADV-131](https://linear.app/lw-claude/issue/ADV-131/add-matchmanual-column-to-all-matching-sheets-for-manual-match-locking)
 
 ## Investigation
 
 ### Context Gathered
-- **MCPs used:** Google Drive (gsheets_read — production spreadsheet), Linear (issue search)
-- **Files examined:** All 5 store files, sheets.ts, numbers.ts, spreadsheet.ts, cascade-matcher.ts, factura-pago-matcher.ts
-- **Production evidence:** Spreadsheet `1m9UNuNWvF0toN-Zc4LwGoxakm7BIporiDF844DDps2g`, sheet "Pagos Recibidos"
+- **MCPs used:** Google Drive (gsheets_read — staging Control de Ingresos), Linear (issue search)
+- **Files examined:** Staging spreadsheet `1mt5VB7Qp7trCnl1tR8oFH35WWBWLbzsMhtzS_z7f2YQ` (Facturas Emitidas, Pagos Recibidos, Retenciones Recibidas), all matching code, exchange-rate.ts, config.ts, spreadsheet-headers.ts, types/index.ts
 
 ### Evidence
 
-**Production spreadsheet confirms:**
-- All `importePagado` values (column E) are formatted strings like `"5,500.00"` — stored as text, not numbers
-- Row 5: `processedAt` is `"2026-02-23T11:10:51.139Z"` (raw ISO) vs other rows with `"2026-02-23 11:07:05"` (formatted)
-- Row 5: `fileName` has no hyperlink (plain text)
-- Row 5 has `tipoDeCambio` and `importeEnPesos` — indicates it went through quality replacement path
+**Staging spreadsheet analysis (11 Pagos Recibidos, all USD):**
 
-**Code path analysis:**
-- `formatUSCurrency()` at `src/utils/numbers.ts:179` returns formatted string `"1,200.00"`
-- `convertToSheetsCellData()` at `src/services/sheets.ts:968-991` treats this string as text → `stringValue`
-- Negative values (e.g., `"-500.00"`) also get `'` prefix from `sanitizeForSpreadsheet()` (formula injection protection triggers on leading `-`)
-- `resumen-store.ts` already uses `CellNumber` correctly — proving the pattern works
+| Pago | Amount | Factura Match? | Root Cause |
+|------|--------|----------------|------------|
+| MICROSOFT (Dec 23) | 5,500 USD | Factura exists (5,500 USD, Oct 9) | Date gap 75 days > 60-day LOW max |
+| DEVOLVER DIGITAL (Nov 1) | 1,780 USD | Factura exists (1,800 USD, Oct 21) | Amount diff $20 > $1 tolerance |
+| STANDARD CHARTERED (Oct 30) | 1,200 USD | No factura for this company | Expected — no factura exists |
+| ODACLICK (Oct 22) | 2,480 USD | Factura exists (2,500 USD, Oct 17) | Amount diff $20 > $1 tolerance |
+| FRITO PLAY (Oct 22) | 430 USD | Matched MEDIUM | Comma in "FRITO PLAY, LLC" prevents HIGH |
+| FRITO PLAY (Oct 16) | 6,750 USD | Matched MEDIUM | Same comma issue |
 
-**Two code paths affected:**
-1. **`appendRowsWithLinks` path** (initial storage): Uses `CellValueOrLink[]` with rich types. `formatUSCurrency()` returns string instead of `CellNumber`.
-2. **`batchUpdate` path** (reprocessing/quality replacement): Uses `CellValue[]` (plain types). `formatUSCurrency()` produces strings, `renamedFileName` has no link formula, and `processedAt` isn't timezone-formatted.
+**Retenciones Recibidas (2 rows, both CFI):**
+- CERT-8884: montoComprobante=12M ARS → Factura 00003-00002175 (CFI, 12M ARS) — obvious match by CUIT + amount
+- CERT-8987: montoComprobante=242,984 ARS → 2× Factura 121,492 ARS — multi-factura case
+- Both have empty matchedFacturaFileId — no retencion matching code exists
 
-### Root Cause
+**All Pagos Recibidos have empty `cuitPagador`** — CUIT matching never fires for Ingresos.
 
-`formatUSCurrency()` was used as the formatting function for monetary values, but it returns a **string** (`"1,200.00"`), not a number. When passed to `appendRowsWithLinks()`, the `convertToSheetsCellData()` function writes it as `stringValue` instead of `numberValue`. The correct approach is `CellNumber` (`{ type: 'number', value }`) which is already used successfully in `resumen-store.ts`.
+### Root Causes
 
-For the `batchUpdate` path, additional issues exist: no hyperlink formula for fileName, and no timezone conversion for processedAt.
+1. **USD amount tolerance:** `amountsMatchCrossCurrency()` at `src/utils/exchange-rate.ts:328-332` calls `amountsMatch(facturaAmount, pagoAmount)` with default tolerance $1. International wire fees ($10-30) cause mismatches.
+
+2. **USD date range:** `FacturaPagoMatcher` at `src/matching/matcher.ts:111` uses single `dateRangeAfter` (60 days). International USD payments can take 75+ days.
+
+3. **Name punctuation:** `normalizeString()` at `src/matching/matcher.ts:43-49` strips accents but not punctuation. "FRITO PLAY, LLC" vs "Frito Play LLC" fails substring match.
+
+4. **Missing retencion matching:** `runMatching()` at `src/processing/matching/index.ts:29-193` has 4 matching steps but none for retenciones→facturas. Schema has columns N:O (matchedFacturaFileId, matchConfidence) but they're never populated.
+
+5. **No manual lock:** No mechanism exists to prevent automatic matching from overwriting user-confirmed matches.
 
 #### Related Code
 
-**appendRowsWithLinks path (Bug 1):**
-- `src/processing/storage/factura-store.ts:274-276, 298-300` — `formatUSCurrency(factura.importeNeto/importeIva/importeTotal)` produces strings for 6 monetary cells
-- `src/processing/storage/pago-store.ts:354, 376` — `formatUSCurrency(pago.importePagado)` produces strings for 2 monetary cells
-- `src/processing/storage/recibo-store.ts:120-122` — `formatUSCurrency(recibo.subtotalRemuneraciones/subtotalDescuentos/totalNeto)` produces strings for 3 monetary cells
-- `src/processing/storage/retencion-store.ts:122-123` — `formatUSCurrency(retencion.montoComprobante/montoRetencion)` produces strings for 2 monetary cells
-- `src/services/sheets.ts:933-943` — `convertToSheetsCellData` correctly handles `CellNumber` with `numberValue` + `#,##0.00` format
-- `src/services/sheets.ts:968-991` — string path: runs `sanitizeForSpreadsheet()` then writes `stringValue`
+**Fix 1 (USD tolerance):**
+- `src/utils/exchange-rate.ts:319-375` — `amountsMatchCrossCurrency()`: same-currency path at line 328-332 calls `amountsMatch` with implicit $1 tolerance
+- `src/utils/numbers.ts:233-246` — `amountsMatch()`: accepts `tolerance` param (default 1)
+- `src/matching/matcher.ts:142-153` — `findMatches()` calls `amountsMatchCrossCurrency` without USD tolerance
+- `src/matching/matcher.ts:91-114` — `FacturaPagoMatcher` constructor: takes `crossCurrencyTolerancePercent` but no same-currency tolerance
+- `src/config.ts:164-167` — Config interface: has `usdArsTolerancePercent` but no USD same-currency tolerance
 
-**batchUpdate path (Bug 2):**
-- `src/processing/storage/pago-store.ts:24-73` — `buildPagoRow()` uses `formatUSCurrency` (lines 38, 58), plain string `renamedFileName` (lines 36, 56), raw `pago.processedAt` (lines 44, 64)
-- `src/processing/storage/factura-store.ts:25-78` — `buildFacturaRow()` uses `formatUSCurrency` (lines 41-43, 63-65), plain string `renamedFileName` (lines 36, 58), raw `factura.processedAt` (lines 46, 68)
-- `src/utils/spreadsheet.ts:26` — `sanitizeForSpreadsheet()` prefixes strings starting with `-` with `'`, breaking negative monetary values
-- `src/utils/spreadsheet.ts` — has `createDriveHyperlink(fileId, fileName)` which produces `=HYPERLINK(...)` formula strings compatible with `USER_ENTERED`
+**Fix 2 (USD date range):**
+- `src/matching/matcher.ts:107-112` — date ranges set at construction time, single `dateRangeAfter` for LOW tier
+- `src/matching/matcher.ts:162-169` — `isWithinLowRange` check uses single range for all currencies
+- `src/config.ts:165-166` — `matchDaysBefore`/`matchDaysAfter` (single value, no per-currency)
+- `src/processing/matching/factura-pago-matcher.ts:405-408` — matcher constructed with `config.matchDaysAfter`
+
+**Fix 3 (Name punctuation):**
+- `src/matching/matcher.ts:43-49` — `normalizeString()`: strips accents via NFD, but no punctuation removal
+- `src/matching/matcher.ts:217-248` — name matching: uses `normalizeString` then `.includes()` comparison
+
+**Fix 4 (Retencion matching):**
+- `src/processing/matching/index.ts:29-193` — `runMatching()`: no retencion step
+- `src/processing/matching/nc-factura-matcher.ts` — model for non-cascading matcher (CUIT + amount matching)
+- `src/constants/spreadsheet-headers.ts:96-112` — `RETENCIONES_RECIBIDAS_HEADERS`: columns N (matchedFacturaFileId) and O (matchConfidence) at indices 13-14
+- `src/types/index.ts` — `Retencion` type: has `matchedFacturaFileId?` and `matchConfidence?` fields
+
+**Fix 5 (matchManual column):**
+- `src/constants/spreadsheet-headers.ts:7-134` — all 6 header arrays need new `matchManual` column appended
+- `src/processing/matching/factura-pago-matcher.ts:299-302` — read ranges need extending (+1 column)
+- `src/processing/matching/factura-pago-matcher.ts:390` — `unmatchedPagos` filter needs to exclude locked rows
+- `src/processing/matching/factura-pago-matcher.ts:448-520` — displacement logic must skip locked facturas
+- `src/processing/matching/factura-pago-matcher.ts:553-616` — update writes must include matchManual='NO'
+- `src/processing/matching/recibo-pago-matcher.ts` — same patterns as factura-pago
+- `src/processing/matching/nc-factura-matcher.ts` — same patterns
+- `src/services/folder-structure.ts` — startup migration: check header row length, append missing headers
 
 ### Impact
-- All monetary columns across all document types display as text strings in Google Sheets
-- Values cannot be summed, filtered numerically, or used in formulas
-- Negative values display with `'` prefix (broken)
-- Reprocessed/quality-replaced rows lose their fileName hyperlink and have unformatted timestamps
-- Affects production data currently being written
+- 4 out of 11 Pagos Recibidos in staging fail to match (36% miss rate)
+- All retenciones fail to match (100% miss rate)
+- Matched pagos get MEDIUM instead of HIGH due to punctuation (reduced confidence)
+- Users cannot lock manual corrections — risk of overwrite on next scan
 
 ## Fix Plan
 
-### Fix 1: Replace formatUSCurrency with CellNumber in appendRowsWithLinks path
-**Linear Issue:** [ADV-123](https://linear.app/lw-claude/issue/ADV-123/replace-formatuscurrency-with-cellnumber-for-monetary-spreadsheet)
+### Fix 1: Add $30 same-currency tolerance for USD matching
+**Linear Issue:** [ADV-127](https://linear.app/lw-claude/issue/ADV-127/add-dollar30-same-currency-tolerance-for-usd-factura-pago-matching)
 
-1. Write tests in each store's test file verifying that monetary fields produce `CellNumber` objects (not strings) in the row arrays passed to `appendRowsWithLinks`:
-   - `src/processing/storage/factura-store.test.ts` — verify importeNeto, importeIva, importeTotal are `{ type: 'number', value: <number> }`
-   - `src/processing/storage/pago-store.test.ts` — verify importePagado is `CellNumber`
-   - `src/processing/storage/recibo-store.test.ts` — verify subtotalRemuneraciones, subtotalDescuentos, totalNeto are `CellNumber`
-   - `src/processing/storage/retencion-store.test.ts` — verify montoComprobante, montoRetencion are `CellNumber`
-   - Mock `appendRowsWithLinks` and capture the row argument to assert cell types
-   - Follow existing test patterns in each file (they already mock sheets functions)
-   - Run `verifier` filtered to storage tests — expect fail
+1. Write tests in `src/utils/exchange-rate.test.ts`:
+   - Test `amountsMatchCrossCurrency` with USD/USD: $1780 vs $1800 should match with tolerance=30
+   - Test USD/USD: $1780 vs $1800 should NOT match with default tolerance=1
+   - Test ARS/ARS: amounts must still use $1 tolerance (unchanged)
+   - Run `verifier` filtered — expect fail
 
-2. Replace `formatUSCurrency(value)` with `{ type: 'number', value: value } as CellNumber` in each store file:
-   - `src/processing/storage/factura-store.ts` lines 274-276, 298-300 (6 replacements)
-   - `src/processing/storage/pago-store.ts` lines 354, 376 (2 replacements)
-   - `src/processing/storage/recibo-store.ts` lines 120-122 (3 replacements) — also add `CellNumber` to the import from sheets.ts
-   - `src/processing/storage/retencion-store.ts` lines 122-123 (2 replacements) — also add `CellNumber` to the import from sheets.ts
-   - Handle null/undefined: use pattern `value != null ? { type: 'number', value } : ''` where the field is optional
-   - Run `verifier` filtered to storage tests — expect pass
+2. Add `sameCurrencyUsdTolerance` optional param to `amountsMatchCrossCurrency()` in `src/utils/exchange-rate.ts`:
+   - Signature: add `sameCurrencyUsdTolerance?: number` (default 1)
+   - In same-currency path (line 328-332): when both are USD, use `amountsMatch(facturaAmount, pagoAmount, sameCurrencyUsdTolerance)`; when ARS, keep default $1
 
-**Notes:**
-- `factura-store.ts` and `pago-store.ts` already import `CellNumber` from sheets.ts
-- `recibo-store.ts` and `retencion-store.ts` do NOT import `CellNumber` — add to import
-- Follow the exact pattern used in `resumen-store.ts:185-186` which already works correctly
-- `confidence` field (e.g., `pago.confidence`) is already a plain number, which `convertToSheetsCellData` handles at line 994-997 as `numberValue` without formatting — this is correct, leave it as-is
+3. Add `USD_SAME_CURRENCY_TOLERANCE = 30` constant in `src/config.ts`
 
-### Fix 2: Fix batchUpdate reprocessing path
-**Linear Issue:** [ADV-124](https://linear.app/lw-claude/issue/ADV-124/fix-batchupdate-reprocessing-path-monetary-strings-missing-links-raw)
+4. Thread through `FacturaPagoMatcher`:
+   - Add `sameCurrencyUsdTolerance` constructor param in `src/matching/matcher.ts`
+   - Pass to `amountsMatchCrossCurrency()` call at line 142
+   - In `src/processing/matching/factura-pago-matcher.ts:405-408`: pass `USD_SAME_CURRENCY_TOLERANCE` to matcher constructor
 
-1. Write tests for `buildPagoRow` and `buildFacturaRow`:
-   - `src/processing/storage/pago-store.test.ts` — test that `buildPagoRow` produces raw numbers for importePagado (not formatted strings), `=HYPERLINK(...)` formula for fileName, and formatted processedAt (not raw ISO)
-   - `src/processing/storage/factura-store.test.ts` — test that `buildFacturaRow` produces raw numbers for importeNeto/importeIva/importeTotal, `=HYPERLINK(...)` for fileName, and formatted processedAt
-   - These functions are currently private — export them for testing (or test indirectly through the store function with a reprocessing scenario)
-   - Run `verifier` filtered to storage tests — expect fail
+5. Write test in `src/matching/matcher.test.ts`:
+   - Test FacturaPagoMatcher finds match for USD pago $1780 vs USD factura $1800
+   - Run `verifier` filtered — expect pass
 
-2. Fix `buildPagoRow` in `src/processing/storage/pago-store.ts`:
-   - Replace `formatUSCurrency(pago.importePagado)` (lines 38, 58) with raw `pago.importePagado` — `USER_ENTERED` correctly interprets plain numbers
-   - Replace `renamedFileName` (lines 36, 56) with `createDriveHyperlink(pago.fileId, renamedFileName)` from `src/utils/spreadsheet.ts` — `USER_ENTERED` interprets `=HYPERLINK(...)` formulas
-   - Add `timeZone?: string` parameter to `buildPagoRow`. In calling locations (lines 233, 290), fetch timezone from spreadsheet (already available via `getSpreadsheetTimezone`) and pass it. Format `pago.processedAt` using the same timezone logic as `appendRowsWithLinks` — convert ISO timestamp to local time string like `"2026-02-23 11:07:05"` before passing to row
+### Fix 2: Extend LOW date range to 90 days for USD factura matching
+**Linear Issue:** [ADV-128](https://linear.app/lw-claude/issue/ADV-128/extend-low-date-range-to-90-days-for-usd-factura-matching)
 
-3. Fix `buildFacturaRow` in `src/processing/storage/factura-store.ts`:
-   - Same three fixes: raw numbers for monetary fields, `createDriveHyperlink` for fileName, timezone-formatted processedAt
-   - Add `timeZone?: string` parameter, fetch and pass from calling location (line 187)
-   - Run `verifier` filtered to storage tests — expect pass
+1. Write tests in `src/matching/matcher.test.ts`:
+   - Test FacturaPagoMatcher matches USD factura at 75 days distance with usdDaysAfter=90
+   - Test ARS factura at 75 days distance is NOT matched (keeps 60-day range)
+   - Run `verifier` filtered — expect fail
 
-**Notes:**
-- `batchUpdate` uses `USER_ENTERED` value input option (`src/services/sheets.ts:293`), which correctly interprets: plain numbers as numeric cells, `=HYPERLINK(...)` as formula cells, and plain strings as text
-- `createDriveHyperlink` is already imported in some files or available from `src/utils/spreadsheet.ts` — add import where needed
-- For `processedAt` formatting: extract the ISO-to-local conversion logic. The simplest approach is to format the timestamp before building the row using a helper (e.g., `formatTimestampForSheet(isoString, timeZone)`) that produces `"YYYY-MM-DD HH:mm:ss"` format. This can reuse the `dateToSerialInTimezone` approach or simply format with `Intl.DateTimeFormat`.
-- The `getSpreadsheetTimezone` call is already present in `storePago` (line 394) and `storeFactura` (line 316) — move it earlier so both append and batchUpdate paths can use it, or call it in the reprocessing branch too
+2. Add `MATCH_DAYS_AFTER_USD` env var and `usdMatchDaysAfter` to Config:
+   - `src/config.ts`: add `usdMatchDaysAfter: number` to Config interface
+   - In `getConfig()`: read `MATCH_DAYS_AFTER_USD` env var (default 90)
+   - Add env var documentation to CLAUDE.md
+
+3. Modify `FacturaPagoMatcher` in `src/matching/matcher.ts`:
+   - Add `usdDateRangeAfter` constructor param (default same as `dateRangeAfter`)
+   - Store as `this.dateRanges.lowUsd: { before, after }` alongside existing `this.dateRanges.low`
+   - In `findMatches()`: after line 164, compute `isWithinLowRange` using `lowUsd` range when `factura.moneda === 'USD'`, standard `low` range otherwise
+   - HIGH and MEDIUM ranges stay the same for all currencies
+
+4. Pass `config.usdMatchDaysAfter` from `factura-pago-matcher.ts` matcher construction (line 405-408)
+   - Run `verifier` filtered — expect pass
+
+### Fix 3: Improve name matching by stripping punctuation
+**Linear Issue:** [ADV-129](https://linear.app/lw-claude/issue/ADV-129/improve-name-matching-by-stripping-punctuation-in-normalizestring)
+
+1. Write tests in `src/matching/matcher.test.ts`:
+   - Test: "FRITO PLAY, LLC" matches "Frito Play LLC" (comma stripped)
+   - Test: "S.R.L." matches "SRL" (periods stripped)
+   - Test: "Empresa (Argentina)" matches "Empresa Argentina" (parens stripped)
+   - Run `verifier` filtered — expect fail
+
+2. Modify `normalizeString()` in `src/matching/matcher.ts:43-49`:
+   - Add `.replace(/[.,\-_()]/g, '')` after accent removal
+   - Add `.replace(/\s+/g, ' ')` to collapse multiple spaces from removed chars
+   - Final `.trim()`
+   - Run `verifier` filtered — expect pass
+
+### Fix 4: Implement retencion→factura matching
+**Linear Issue:** [ADV-130](https://linear.app/lw-claude/issue/ADV-130/implement-retencionfactura-matching-in-runmatching-pipeline)
+
+1. Write tests in new `src/processing/matching/retencion-factura-matcher.test.ts`:
+   - Test: retencion with matching CUIT + montoComprobante = importeTotal → match with HIGH confidence
+   - Test: retencion with matching CUIT but different amount → no match
+   - Test: retencion with different CUIT → no match
+   - Test: already-matched retencion → skip (don't re-match)
+   - Test: date outside 90-day window → no match
+   - Run `verifier` filtered — expect fail
+
+2. Create `src/processing/matching/retencion-factura-matcher.ts`:
+   - Follow the `nc-factura-matcher.ts` pattern (non-cascading, direct matching)
+   - Export `matchRetencionesWithFacturas(spreadsheetId: string): Promise<Result<number, Error>>`
+   - Read Retenciones Recibidas (A:O or A:P if matchManual added) and Facturas Emitidas (A:S or A:T)
+   - For each unmatched retencion:
+     - Find facturas where `cuitReceptor === cuitAgenteRetencion`
+     - Check `montoComprobante === importeTotal` (using `amountsMatch` with $1 tolerance — retenciones are always ARS)
+     - Check date: retencion `fechaEmision` within 0-90 days after factura `fechaEmision`
+     - Set confidence: CUIT match + amount match + close date → HIGH; CUIT match + amount only → MEDIUM
+   - Write to Retenciones columns N:O (matchedFacturaFileId, matchConfidence)
+   - Use `batchUpdate()` for writes, same pattern as nc-factura-matcher
+
+3. Add to `runMatching()` in `src/processing/matching/index.ts`:
+   - Import `matchRetencionesWithFacturas`
+   - Add as step 5 after NC matching (around line 155), reading from `folderStructure.controlIngresosId`
+   - Re-export from index.ts
+
+4. Update `src/processing/matching/index.ts` exports
+   - Run `verifier` filtered — expect pass
+
+### Fix 5: Add matchManual column to all matching sheets
+**Linear Issue:** [ADV-131](https://linear.app/lw-claude/issue/ADV-131/add-matchmanual-column-to-all-matching-sheets-for-manual-match-locking)
+
+**Migration note:** This changes spreadsheet schema by adding a new column to 6 sheets across 2 spreadsheets (Control de Ingresos, Control de Egresos). Existing rows with empty matchManual = not locked (correct default). Startup migration must add headers to existing sheets.
+
+1. Write tests for matchManual behavior in `src/processing/matching/factura-pago-matcher.test.ts`:
+   - Test: pago with matchManual='SI' is excluded from unmatched pool
+   - Test: factura with matchManual='SI' is not displaced even if better match exists
+   - Test: new automatic match writes matchManual='NO' to both factura and pago rows
+   - Test: displacement clears matchManual on both sides
+   - Run `verifier` filtered — expect fail
+
+2. Update header arrays in `src/constants/spreadsheet-headers.ts`:
+   - `FACTURA_EMITIDA_HEADERS`: append `'matchManual'` (new column T, index 19)
+   - `FACTURA_RECIBIDA_HEADERS`: append `'matchManual'` (new column U, index 20)
+   - `PAGO_RECIBIDO_HEADERS`: append `'matchManual'` (new column R, index 17)
+   - `PAGO_ENVIADO_HEADERS`: append `'matchManual'` (new column R, index 17)
+   - `RECIBO_HEADERS`: append `'matchManual'` (new column S, index 18)
+   - `RETENCIONES_RECIBIDAS_HEADERS`: append `'matchManual'` (new column P, index 15)
+
+3. Add startup migration in `src/services/folder-structure.ts`:
+   - After validating sheet existence, check if the header row has fewer columns than the expected header array
+   - If so, append missing headers to the header row using `batchUpdate`
+   - This handles existing spreadsheets that don't have the new column yet
+
+4. Update `src/processing/matching/factura-pago-matcher.ts`:
+   - Extend read ranges: Facturas Emitidas `A:T` (was `A:S`), Facturas Recibidas `A:U` (was `A:T`), Pagos `A:R` (was `A:Q`)
+   - Parse `matchManual` from new column index during data loading (for both facturas and pagos)
+   - Add `matchManual?: string` field to the parsed factura and pago objects
+   - In unmatched filter (line 390): add `&& p.matchManual !== 'SI'`
+   - In displacement check: skip facturas with `matchManual === 'SI'` (don't consider them for displacement)
+   - In update writes: include matchManual='NO' in both factura and pago update ranges
+   - When clearing a match (displacement unmatch): write empty matchManual
+
+5. Update `src/processing/matching/recibo-pago-matcher.ts`:
+   - Same pattern: extend read ranges, parse matchManual, skip locked rows, write 'NO' on match
+
+6. Update `src/processing/matching/nc-factura-matcher.ts`:
+   - Same pattern: extend read ranges, parse matchManual, skip locked rows, write 'NO' on match
+
+7. Update `src/processing/matching/retencion-factura-matcher.ts` (from Fix 4):
+   - Build with matchManual support from the start
+
+8. Update `SPREADSHEET_FORMAT.md` and `CLAUDE.md` with new column documentation
+   - Run `verifier` — expect pass
 
 ## Post-Implementation Checklist
 1. Run `bug-hunter` agent - Review changes for bugs
@@ -118,156 +230,23 @@ For the `batchUpdate` path, additional issues exist: no hyperlink formula for fi
 
 ---
 
-## Iteration 1
-
-**Implemented:** 2026-02-23
-**Method:** Single-agent (1 work unit, effort 4 — no parallelism benefit)
-
-### Tasks Completed This Iteration
-- Fix 1 (ADV-123): Replace formatUSCurrency with CellNumber in appendRowsWithLinks path — replaced 13 `formatUSCurrency()` calls with `CellNumber` objects across 4 store files, cleaned up unused imports in recibo-store.ts and retencion-store.ts
-- Fix 2 (ADV-124): Fix batchUpdate reprocessing path — replaced formatted strings with raw numbers, added `createDriveHyperlink()` for fileName, added `formatTimestampInTimezone()` for processedAt, moved `getSpreadsheetTimezone()` to top of `withLock` callback for both paths
-
-### Files Modified
-- `src/processing/storage/factura-store.ts` — CellNumber for monetary fields, buildFacturaRow: raw numbers + hyperlink + timezone processedAt
-- `src/processing/storage/factura-store.test.ts` — Tests for CellNumber and batchUpdate path fixes
-- `src/processing/storage/pago-store.ts` — CellNumber for monetary fields, buildPagoRow: raw numbers + hyperlink + timezone processedAt
-- `src/processing/storage/pago-store.test.ts` — Tests for CellNumber and batchUpdate path fixes
-- `src/processing/storage/recibo-store.ts` — CellNumber for monetary fields, removed formatUSCurrency import
-- `src/processing/storage/recibo-store.test.ts` — Tests for CellNumber
-- `src/processing/storage/retencion-store.ts` — CellNumber for monetary fields, removed formatUSCurrency import
-- `src/processing/storage/retencion-store.test.ts` — Tests for CellNumber
-
-### Linear Updates
-- ADV-123: Todo → In Progress → Review
-- ADV-124: Todo → In Progress → Review
-
-### Pre-commit Verification
-- bug-hunter: Passed — no bugs found
-- verifier: All 1,745 tests pass, zero warnings
-
-### Continuation Status
-All tasks completed.
-
-### Review Findings
-
-Summary: 2 issue(s) found (Team: security, reliability, quality reviewers)
-- FIX: 2 issue(s) — Linear issues created
-- DISCARDED: 6 finding(s) — false positives / not applicable
-
-**Issues requiring fix:**
-- [MEDIUM] BUG: Missing reprocessing path in recibo-store.ts / retencion-store.ts — `storeRecibo` and `storeRetencion` lack `findRowByFileId` check; reprocessed files are incorrectly marked as duplicates instead of updated in-place (ADV-125)
-- [MEDIUM] TEST: Missing `withLock` mock in pago-store.test.ts, recibo-store.test.ts, retencion-store.test.ts — tests use real lock implementation with shared mutable state, risking flakiness (ADV-126)
-
-**Discarded findings (not bugs):**
-- [DISCARDED] SECURITY: Lock key collision from malicious PDF fields — theoretical DoS at most, not exploitable; spreadsheet-based duplicate check remains intact
-- [DISCARDED] SECURITY: sheetName interpolation in range strings — all callers use hardcoded string literals, not exploitable
-- [DISCARDED] SECURITY: CUIT format validation — internal inputs from Gemini extraction, low risk
-- [DISCARDED] TEST: Missing error path tests in recibo-store.test.ts and retencion-store.test.ts — test coverage improvement, not a bug
-- [DISCARDED] CONVENTION: Module name 'retencion-store' instead of 'storage' in retencion-store.ts — style preference not enforced by CLAUDE.md
-- [DISCARDED] CONVENTION: Indentation inconsistency in factura-store.ts — style-only, zero correctness impact
-
-### Linear Updates
-- ADV-123: Review → Merge (original task)
-- ADV-124: Review → Merge (original task)
-- ADV-125: Created in Todo (Fix: Missing reprocessing path in recibo/retencion stores)
-- ADV-126: Created in Todo (Fix: Missing withLock mock in 3 test files)
-
-<!-- REVIEW COMPLETE -->
-
----
-
-## Fix Plan
-
-**Source:** Review findings from Iteration 1
-**Linear Issues:** [ADV-125](https://linear.app/lw-claude/issue/ADV-125/add-reprocessing-path-findrowbyfileid-batchupdate-to-recibo-store-and), [ADV-126](https://linear.app/lw-claude/issue/ADV-126/add-missing-withlock-mock-to-pago-store-recibo-store-and-retencion)
-
-### Fix 1: Add reprocessing path to recibo-store and retencion-store
-**Linear Issue:** [ADV-125](https://linear.app/lw-claude/issue/ADV-125/add-reprocessing-path-findrowbyfileid-batchupdate-to-recibo-store-and)
-
-1. Write tests in `src/processing/storage/recibo-store.test.ts` and `src/processing/storage/retencion-store.test.ts`:
-   - Test that when `findRowByFileId` returns a matching row index, the store calls `batchUpdate` to update in-place instead of marking as duplicate
-   - Test that the reprocessing row includes raw numbers for monetary fields, `=HYPERLINK(...)` for fileName, and timezone-formatted processedAt
-   - Follow the reprocessing test patterns from `factura-store.test.ts` and `pago-store.test.ts`
-   - Run `verifier` filtered to storage tests — expect fail
-
-2. Add `findRowByFileId` check in `storeRecibo` (before the business-key duplicate check):
-   - Import `findRowByFileId` from sheets service
-   - If fileId already has a row, call `batchUpdate` with `buildReciboRow()` to update in-place
-   - Create `buildReciboRow(recibo, renamedFileName, timeZone?)` function following `buildPagoRow` pattern:
-     raw numbers for monetary fields, `createDriveHyperlink()` for fileName, timezone-formatted processedAt
-
-3. Add same reprocessing path in `storeRetencion`:
-   - Same pattern: `findRowByFileId` check + `buildRetencionRow()` + `batchUpdate`
-   - Run `verifier` filtered to storage tests — expect pass
-
-### Fix 2: Add missing withLock mock to 3 test files
-**Linear Issue:** [ADV-126](https://linear.app/lw-claude/issue/ADV-126/add-missing-withlock-mock-to-pago-store-recibo-store-and-retencion)
-
-1. Add `vi.mock('../../utils/concurrency.js', ...)` to `src/processing/storage/pago-store.test.ts`, `src/processing/storage/recibo-store.test.ts`, and `src/processing/storage/retencion-store.test.ts` — matching the pattern in `factura-store.test.ts`
-2. Run `verifier` filtered to storage tests — expect pass
-
----
-
-## Iteration 2
-
-**Implemented:** 2026-02-23
-**Method:** Single-agent (Fix Plan from review)
-
-### Tasks Completed This Iteration
-- Fix 1 (ADV-125): Add reprocessing path to recibo-store and retencion-store — added `findRowByFileId`, `buildReciboRow`/`buildRetencionRow`, reprocessing check before duplicate check, `StoreResult` return type
-- Fix 2 (ADV-126): Add missing withLock mock to 3 test files — added `vi.mock('../../utils/concurrency.js', ...)` to pago-store.test.ts, recibo-store.test.ts, retencion-store.test.ts
-- Bug-hunter fixes: Fixed duplicate detection tests to use `mockResolvedValueOnce` chains (recibo-store.test.ts, retencion-store.test.ts), fixed retencion-store.ts append path to use `generateRetencionFileName` instead of `retencion.fileName`
-
-### Files Modified
-- `src/processing/storage/recibo-store.ts` — Added reprocessing path (findRowByFileId, buildReciboRow, batchUpdate), StoreResult return type
-- `src/processing/storage/recibo-store.test.ts` — Added withLock mock, reprocessing tests, fixed duplicate detection mocks
-- `src/processing/storage/retencion-store.ts` — Added reprocessing path (findRowByFileId, buildRetencionRow, batchUpdate), StoreResult return type, fixed append path fileName
-- `src/processing/storage/retencion-store.test.ts` — Added withLock mock, reprocessing tests, fixed duplicate detection mocks
-- `src/processing/storage/pago-store.test.ts` — Added withLock mock
-
-### Linear Updates
-- ADV-125: Todo → In Progress → Review → Merge
-- ADV-126: Todo → In Progress → Review → Merge
-
-### Pre-commit Verification
-- bug-hunter: Passed — no bugs found (second run after fixing 3 bugs from first run)
-- verifier: All 1,755 tests pass, zero warnings
-
-### Review Findings
-
-Files reviewed: 5
-Checks applied: Security, Logic, Async, Resources, Type Safety, Conventions
-
-No issues found after bug-hunter fixes — all implementations correct and follow project conventions.
-
-<!-- REVIEW COMPLETE -->
-
-### Continuation Status
-All tasks completed.
-
----
-
-## Status: COMPLETE
-
-All tasks implemented and reviewed successfully. All Linear issues moved to Merge.
-
----
-
 ## Plan Summary
 
-**Problem:** All monetary values in production spreadsheets are stored as text strings instead of numbers, caused by `formatUSCurrency()` returning formatted strings. Reprocessed rows additionally lose their fileName hyperlink and have unformatted timestamps.
+**Problem:** Pagos Recibidos and Retenciones don't match in staging due to strict USD amount tolerance ($1), short date range (60 days), punctuation-sensitive name matching, missing retencion matching logic, and no manual match locking.
 
-**Root Cause:** `formatUSCurrency()` returns a string like `"1,200.00"` which `convertToSheetsCellData()` writes as `stringValue` (text). The correct approach is `CellNumber` (`{ type: 'number', value }`) which writes `numberValue` with `#,##0.00` formatting. The `batchUpdate` reprocessing path has the same issue plus missing hyperlink formulas and raw ISO timestamps.
+**Root Cause:** Five independent issues: (1) same-currency USD tolerance too tight for wire transfer fees, (2) LOW date range too short for international payments, (3) punctuation not stripped in name normalization, (4) retencion→factura matching never implemented, (5) no mechanism to lock manual matches.
 
-**Linear Issues:** ADV-123, ADV-124
+**Linear Issues:** ADV-127, ADV-128, ADV-129, ADV-130, ADV-131
 
-**Solution Approach:** Replace all `formatUSCurrency()` calls in the `appendRowsWithLinks` path with `CellNumber` objects (13 replacements across 4 store files). For the `batchUpdate` reprocessing path, use raw numbers (USER_ENTERED handles them), `createDriveHyperlink()` for fileName, and timezone-formatted processedAt.
+**Solution Approach:** Add $30 USD same-currency tolerance and 90-day LOW range for USD facturas. Strip punctuation in normalizeString for better name matching. Create new retencion-factura-matcher following the NC matcher pattern. Add matchManual column (SI/NO/empty) to all 6 matching sheets with startup migration for existing spreadsheets.
 
 **Scope:**
-- Files affected: 4 store files + their test files
-- New tests: yes
-- Breaking changes: no — values will change from text to numbers in spreadsheets (improvement, not breaking)
+- Files affected: ~15 (matchers, config, headers, types, folder-structure, exchange-rate, SPREADSHEET_FORMAT.md, CLAUDE.md)
+- New tests: yes (all 5 fixes)
+- New file: `src/processing/matching/retencion-factura-matcher.ts` + test
+- Breaking changes: no — new columns are appended, existing data unaffected
 
 **Risks/Considerations:**
-- Existing production data has text values — manually correcting existing rows is out of scope (new writes will be correct)
-- `formatUSCurrency` import may become unused in some store files after fix — clean up unused imports
+- matchManual column migration must handle both existing (empty) and new spreadsheets
+- Retencion matching for multi-factura cases (montoComprobante = sum of multiple facturas) is deferred — first implementation matches 1:1 only
+- USD tolerance of $30 could theoretically match wrong documents if two USD facturas have amounts within $30 of each other for the same client — mitigated by CUIT/name matching tiers
