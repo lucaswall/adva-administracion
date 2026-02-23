@@ -325,3 +325,107 @@
 
 ### Continuation Status
 All tasks completed.
+
+### Review Findings
+
+Summary: 4 issue(s) found (Team: security, reliability, quality reviewers)
+- FIX: 4 issue(s) — Linear issues created
+- DISCARDED: 5 finding(s) — false positives / not applicable
+
+**Issues requiring fix:**
+- [HIGH] BUG: MANUAL lock for movimientos is dead code — matchConfidence column missing from schema, reader never populates it, guard condition also requires matchedFileId (`src/bank/match-movimientos.ts:796`, `src/services/movimientos-reader.ts:52-63`)
+- [MEDIUM] TEST: MANUAL pago exclusion test doesn't test production function — tests local filter instead of `doMatchFacturasWithPagos` (`src/processing/matching/factura-pago-matcher.test.ts:228-247`)
+- [LOW] TEST: Missing test for multi-retencion same factura design rule (`src/processing/matching/retencion-factura-matcher.ts:186-188`)
+- [LOW] TEST: Timing test assertion is a tautology — `Math.abs(a-b)/Math.max(a,b) < 1.0` always passes for positive numbers (`src/middleware/auth.test.ts:196-200`)
+
+**Discarded findings (not bugs):**
+- [DISCARDED] SECURITY: Internal error messages returned verbatim in API responses — internal API, authenticated, standard practice for internal APIs
+- [DISCARDED] CONVENTION: Identical debug log messages across success/error paths in exchange-rate.ts — style-only, zero correctness impact
+- [DISCARDED] TYPE: `result.reason` logged without coercing to string in prefetchExchangeRates — Pino handles arbitrary objects, rejected reasons are typically Error objects
+- [DISCARDED] TYPE: `displaced.document as Pago` unsafe cast — correct in context, only Pago objects are enqueued in the displacement queue
+- [DISCARDED] CONVENTION: Map key used instead of `update.facturaFileId` — functionally equivalent, key IS the facturaFileId
+
+### Linear Updates
+- ADV-127: Review → Merge (original task)
+- ADV-128: Review → Merge (original task)
+- ADV-129: Review → Merge (original task)
+- ADV-130: Review → Merge (original task)
+- ADV-131: Review → Merge (original task)
+- ADV-132: Created in Todo (Fix: MANUAL lock for movimientos dead code)
+- ADV-133: Created in Todo (Fix: MANUAL pago exclusion test)
+- ADV-134: Created in Todo (Fix: Missing multi-retencion test)
+- ADV-135: Created in Todo (Fix: Timing test tautology)
+
+<!-- REVIEW COMPLETE -->
+
+---
+
+## Fix Plan
+
+**Source:** Review findings from Iteration 1
+**Linear Issues:** [ADV-132](https://linear.app/lw-claude/issue/ADV-132/manual-lock-for-movimientos-is-dead-code-missing-matchconfidence), [ADV-133](https://linear.app/lw-claude/issue/ADV-133/manual-pago-exclusion-test-doesnt-test-production-function), [ADV-134](https://linear.app/lw-claude/issue/ADV-134/missing-test-for-multi-retencion-same-factura-design-rule), [ADV-135](https://linear.app/lw-claude/issue/ADV-135/timing-test-assertion-is-a-tautology-always-passes)
+
+### Fix 1: MANUAL lock for movimientos — add matchConfidence column + fix guard
+**Linear Issue:** [ADV-132](https://linear.app/lw-claude/issue/ADV-132/manual-lock-for-movimientos-is-dead-code-missing-matchconfidence)
+
+1. Write tests in `src/services/movimientos-reader.test.ts`:
+   - Test: `parseMovimientoRow` with 9-column row (including matchConfidence in col I) populates `matchConfidence`
+   - Test: `parseMovimientoRow` with 8-column row (legacy) leaves `matchConfidence` undefined
+   - Run `verifier` filtered — expect fail
+
+2. Update `src/services/movimientos-reader.ts`:
+   - In `parseMovimientoRow`: read `row[8]` as matchConfidence using `validateMatchConfidence`
+   - Import `validateMatchConfidence` from `../utils/validation.js`
+
+3. Write tests in `src/bank/match-movimientos.test.ts`:
+   - Test: movimiento with `matchConfidence='MANUAL'` and empty `matchedFileId` is skipped (not overwritten)
+   - Test: movimiento with `matchConfidence='MANUAL'` is skipped even in force mode
+   - Run `verifier` filtered — expect fail
+
+4. Fix guard in `src/bank/match-movimientos.ts:796`:
+   - Change `if (mov.matchedFileId && mov.matchConfidence === 'MANUAL')` to `if (mov.matchConfidence === 'MANUAL')`
+
+5. Update `src/bank/match-movimientos.ts` write logic:
+   - When writing detalle updates, preserve existing matchConfidence value (don't overwrite column I)
+   - Or if matchConfidence is written as part of the update, ensure it's preserved
+
+6. Add startup migration in `src/services/movimientos-detalle.ts` or appropriate location:
+   - On first access to a movimientos spreadsheet, check if column I header is `matchConfidence`
+   - If missing (8-column legacy format), add the header to all YYYY-MM sheets
+
+7. Update `SPREADSHEET_FORMAT.md`:
+   - Movimientos Bancario: 8 cols (A:H) → 9 cols (A:I)
+   - Add column I: `matchConfidence | enum | HIGH|MEDIUM|LOW|MANUAL`
+
+8. Update `CLAUDE.md`:
+   - Update "Movimientos Bancario: 8 cols (A:H)" to "9 cols (A:I)"
+   - Run `verifier` filtered — expect pass
+
+### Fix 2: MANUAL pago exclusion test — rewrite to test production function
+**Linear Issue:** [ADV-133](https://linear.app/lw-claude/issue/ADV-133/manual-pago-exclusion-test-doesnt-test-production-function)
+
+1. Rewrite test in `src/processing/matching/factura-pago-matcher.test.ts:228-247`:
+   - Call `doMatchFacturasWithPagos` with a pago that has `matchConfidence='MANUAL'` and a matching factura
+   - Assert the MANUAL pago is NOT re-matched (its existing match is preserved)
+   - Run `verifier` filtered — expect pass (test now exercises production code path)
+
+### Fix 3: Missing multi-retencion same factura test
+**Linear Issue:** [ADV-134](https://linear.app/lw-claude/issue/ADV-134/missing-test-for-multi-retencion-same-factura-design-rule)
+
+1. Add test in `src/processing/matching/retencion-factura-matcher.test.ts`:
+   - Create two retenciones with different `impuesto` (e.g., "IVA" and "Ganancias") but same `cuitAgenteRetencion` and `montoComprobante`
+   - Create one matching factura
+   - Assert both retenciones match the same factura (no "claimed factura" exclusion)
+   - Run `verifier` filtered — expect pass
+
+### Fix 4: Timing test tautology
+**Linear Issue:** [ADV-135](https://linear.app/lw-claude/issue/ADV-135/timing-test-assertion-is-a-tautology-always-passes)
+
+1. Update test in `src/middleware/auth.test.ts:196-200`:
+   - Remove the tautological timing ratio assertion
+   - Replace with a simpler test that just verifies both valid and invalid tokens complete without timing-based assertions (constant-time is guaranteed by `crypto.timingSafeEqual`, not reliably testable in CI)
+   - Run `verifier` filtered — expect pass
+
+## Post-Implementation Checklist
+1. Run `bug-hunter` agent - Review changes for bugs
+2. Run `verifier` agent - Verify all tests pass and zero warnings
