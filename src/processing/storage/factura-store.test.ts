@@ -26,6 +26,27 @@ vi.mock('../../utils/correlation.js', () => ({
   getCorrelationId: () => 'test-correlation-id',
 }));
 
+vi.mock('../../utils/spreadsheet.js', () => ({
+  createDriveHyperlink: vi.fn((fileId: string, displayText: string) =>
+    `=HYPERLINK("https://drive.google.com/file/d/${fileId}/view", "${displayText}")`
+  ),
+}));
+
+vi.mock('../../services/status-sheet.js', () => ({
+  formatTimestampInTimezone: vi.fn((date: Date, _timeZone: string) => {
+    // Simulate Argentina timezone (UTC-3) formatting
+    const offset = -3 * 60 * 60 * 1000;
+    const local = new Date(date.getTime() + offset);
+    const y = local.getUTCFullYear();
+    const m = String(local.getUTCMonth() + 1).padStart(2, '0');
+    const d = String(local.getUTCDate()).padStart(2, '0');
+    const h = String(local.getUTCHours()).padStart(2, '0');
+    const min = String(local.getUTCMinutes()).padStart(2, '0');
+    const s = String(local.getUTCSeconds()).padStart(2, '0');
+    return `${y}-${m}-${d} ${h}:${min}:${s}`;
+  }),
+}));
+
 import { appendRowsWithLinks, sortSheet, getValues, batchUpdate } from '../../services/sheets.js';
 
 const createTestFactura = (overrides: Partial<Factura> = {}): Factura => ({
@@ -440,6 +461,117 @@ describe('storeFactura', () => {
         expect(result.value.stored).toBe(false);
         expect(result.value.existingFileId).toBe(existingFileId);
       }
+    });
+  });
+
+  describe('monetary fields use CellNumber in appendRowsWithLinks path', () => {
+    it('factura_emitida stores importeNeto, importeIva, importeTotal as CellNumber', async () => {
+      vi.mocked(getValues).mockResolvedValue({ ok: true, value: [['Header']] });
+      vi.mocked(appendRowsWithLinks).mockResolvedValue({ ok: true, value: 1 });
+      vi.mocked(sortSheet).mockResolvedValue({ ok: true, value: undefined });
+
+      const factura = createTestFactura({ importeNeto: 1000, importeIva: 210, importeTotal: 1210 });
+      await storeFactura(factura, 'spreadsheet-id', 'Facturas Emitidas', 'factura_emitida');
+
+      const callArgs = vi.mocked(appendRowsWithLinks).mock.calls[0];
+      const row = callArgs[2][0];
+      // H=7, I=8, J=9
+      expect(row[7]).toEqual({ type: 'number', value: 1000 });
+      expect(row[8]).toEqual({ type: 'number', value: 210 });
+      expect(row[9]).toEqual({ type: 'number', value: 1210 });
+    });
+
+    it('factura_recibida stores importeNeto, importeIva, importeTotal as CellNumber', async () => {
+      vi.mocked(getValues).mockResolvedValue({ ok: true, value: [['Header']] });
+      vi.mocked(appendRowsWithLinks).mockResolvedValue({ ok: true, value: 1 });
+      vi.mocked(sortSheet).mockResolvedValue({ ok: true, value: undefined });
+
+      const factura = createTestFactura({ importeNeto: 5000, importeIva: 1050, importeTotal: 6050 });
+      await storeFactura(factura, 'spreadsheet-id', 'Facturas Recibidas', 'factura_recibida');
+
+      const callArgs = vi.mocked(appendRowsWithLinks).mock.calls[0];
+      const row = callArgs[2][0];
+      // H=7, I=8, J=9
+      expect(row[7]).toEqual({ type: 'number', value: 5000 });
+      expect(row[8]).toEqual({ type: 'number', value: 1050 });
+      expect(row[9]).toEqual({ type: 'number', value: 6050 });
+    });
+  });
+
+  describe('batchUpdate reprocessing path fixes (ADV-124)', () => {
+    it('uses raw numbers for monetary fields in buildFacturaRow (factura_emitida)', async () => {
+      vi.mocked(getValues).mockResolvedValueOnce({
+        ok: true,
+        value: [['fileId'], ['test-file-id']],
+      });
+      vi.mocked(batchUpdate).mockResolvedValue({ ok: true, value: 18 });
+      vi.mocked(sortSheet).mockResolvedValue({ ok: true, value: undefined });
+
+      const factura = createTestFactura({ importeNeto: 1000, importeIva: 210, importeTotal: 1210 });
+      await storeFactura(factura, 'spreadsheet-id', 'Facturas Emitidas', 'factura_emitida');
+
+      const batchArgs = vi.mocked(batchUpdate).mock.calls[0];
+      const row = batchArgs[1][0].values[0];
+      // H=7, I=8, J=9 — should be raw numbers, not formatted strings
+      expect(row[7]).toBe(1000);
+      expect(row[8]).toBe(210);
+      expect(row[9]).toBe(1210);
+    });
+
+    it('uses raw numbers for monetary fields in buildFacturaRow (factura_recibida)', async () => {
+      vi.mocked(getValues).mockResolvedValueOnce({
+        ok: true,
+        value: [['fileId'], ['test-file-id']],
+      });
+      vi.mocked(batchUpdate).mockResolvedValue({ ok: true, value: 18 });
+      vi.mocked(sortSheet).mockResolvedValue({ ok: true, value: undefined });
+
+      const factura = createTestFactura({ importeNeto: 5000, importeIva: 1050, importeTotal: 6050 });
+      await storeFactura(factura, 'spreadsheet-id', 'Facturas Recibidas', 'factura_recibida');
+
+      const batchArgs = vi.mocked(batchUpdate).mock.calls[0];
+      const row = batchArgs[1][0].values[0];
+      expect(row[7]).toBe(5000);
+      expect(row[8]).toBe(1050);
+      expect(row[9]).toBe(6050);
+    });
+
+    it('uses HYPERLINK formula for fileName in buildFacturaRow', async () => {
+      vi.mocked(getValues).mockResolvedValueOnce({
+        ok: true,
+        value: [['fileId'], ['test-file-id']],
+      });
+      vi.mocked(batchUpdate).mockResolvedValue({ ok: true, value: 18 });
+      vi.mocked(sortSheet).mockResolvedValue({ ok: true, value: undefined });
+
+      const factura = createTestFactura();
+      await storeFactura(factura, 'spreadsheet-id', 'Facturas Emitidas', 'factura_emitida');
+
+      const batchArgs = vi.mocked(batchUpdate).mock.calls[0];
+      const row = batchArgs[1][0].values[0];
+      // C=2 — should be HYPERLINK formula, not plain text
+      expect(row[2]).toContain('=HYPERLINK(');
+      expect(row[2]).toContain('test-file-id');
+    });
+
+    it('formats processedAt as local time string in buildFacturaRow', async () => {
+      vi.mocked(getValues).mockResolvedValueOnce({
+        ok: true,
+        value: [['fileId'], ['test-file-id']],
+      });
+      vi.mocked(batchUpdate).mockResolvedValue({ ok: true, value: 18 });
+      vi.mocked(sortSheet).mockResolvedValue({ ok: true, value: undefined });
+
+      const factura = createTestFactura({ processedAt: '2025-01-15T10:00:00Z' });
+      await storeFactura(factura, 'spreadsheet-id', 'Facturas Emitidas', 'factura_emitida');
+
+      const batchArgs = vi.mocked(batchUpdate).mock.calls[0];
+      const row = batchArgs[1][0].values[0];
+      // M=12 — should NOT be raw ISO string
+      expect(row[12]).not.toContain('T');
+      expect(row[12]).not.toContain('Z');
+      // Should be formatted like "2025-01-15 07:00:00" (Argentina = UTC-3)
+      expect(row[12]).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
     });
   });
 

@@ -1,341 +1,244 @@
-# Implementation Plan
+# Bug Fix Plan
 
-**Status:** COMPLETE
-**Branch:** feat/ADV-115-bank-matching-improvements
-**Issues:** ADV-115, ADV-116, ADV-117, ADV-118, ADV-119
-**Created:** 2026-02-22
-**Last Updated:** 2026-02-22
+**Created:** 2026-02-23
+**Bug Report:** Monetary values written as escaped strings instead of numbers in production spreadsheets. Row 5 of Pagos Recibidos also missing fileName link and has raw ISO processedAt.
+**Category:** Storage
+**Linear Issues:** [ADV-123](https://linear.app/lw-claude/issue/ADV-123/replace-formatuscurrency-with-cellnumber-for-monetary-spreadsheet), [ADV-124](https://linear.app/lw-claude/issue/ADV-124/fix-batchupdate-reprocessing-path-monetary-strings-missing-links-raw)
 
-## Summary
+## Investigation
 
-Improve bank movement matching by loading missing spreadsheet columns (tipoDeCambio, importeEnPesos), enriching detalle descriptions with factura numbers and exchange rates, and using importeEnPesos for precise cross-currency matching instead of API-rate tolerance.
+### Context Gathered
+- **MCPs used:** Google Drive (gsheets_read — production spreadsheet), Linear (issue search)
+- **Files examined:** All 5 store files, sheets.ts, numbers.ts, spreadsheet.ts, cascade-matcher.ts, factura-pago-matcher.ts
+- **Production evidence:** Spreadsheet `1m9UNuNWvF0toN-Zc4LwGoxakm7BIporiDF844DDps2g`, sheet "Pagos Recibidos"
 
-## Issues
+### Evidence
 
-### ADV-116: tipoDeCambio/importeEnPesos not loaded during bank matching
+**Production spreadsheet confirms:**
+- All `importePagado` values (column E) are formatted strings like `"5,500.00"` — stored as text, not numbers
+- Row 5: `processedAt` is `"2026-02-23T11:10:51.139Z"` (raw ISO) vs other rows with `"2026-02-23 11:07:05"` (formatted)
+- Row 5: `fileName` has no hyperlink (plain text)
+- Row 5 has `tipoDeCambio` and `importeEnPesos` — indicates it went through quality replacement path
 
-**Priority:** High
-**Labels:** Bug
-**Description:** The bank matching pipeline reads truncated column ranges from Control spreadsheets, causing tipoDeCambio and importeEnPesos fields to be silently dropped. The parser functions also don't include these columns in their header lookups.
+**Code path analysis:**
+- `formatUSCurrency()` at `src/utils/numbers.ts:179` returns formatted string `"1,200.00"`
+- `convertToSheetsCellData()` at `src/services/sheets.ts:968-991` treats this string as text → `stringValue`
+- Negative values (e.g., `"-500.00"`) also get `'` prefix from `sanitizeForSpreadsheet()` (formula injection protection triggers on leading `-`)
+- `resumen-store.ts` already uses `CellNumber` correctly — proving the pattern works
 
-**Acceptance Criteria:**
-- [ ] `loadControlIngresos` reads `Facturas Emitidas!A:S` and `Pagos Recibidos!A:Q`
-- [ ] `loadControlEgresos` reads `Facturas Recibidas!A:T` and `Pagos Enviados!A:Q`
-- [ ] `parseFacturasEmitidas` includes `tipodecambio` in colIndex (optional header)
-- [ ] `parseFacturasRecibidas` includes `tipodecambio` in colIndex (optional header)
-- [ ] `parsePagos` includes `tipodecambio` and `importeenpesos` in colIndex (optional headers)
-- [ ] Parsed objects have `tipoDeCambio` and `importeEnPesos` populated when present in sheet
+**Two code paths affected:**
+1. **`appendRowsWithLinks` path** (initial storage): Uses `CellValueOrLink[]` with rich types. `formatUSCurrency()` returns string instead of `CellNumber`.
+2. **`batchUpdate` path** (reprocessing/quality replacement): Uses `CellValue[]` (plain types). `formatUSCurrency()` produces strings, `renamedFileName` has no link formula, and `processedAt` isn't timezone-formatted.
 
-### ADV-119: factura-pago-matcher reads truncated pago column range
+### Root Cause
 
-**Priority:** Medium
-**Labels:** Bug
-**Description:** The factura-pago matcher reads Pagos sheets as `A:O`, which excludes columns P (tipoDeCambio) and Q (importeEnPesos). While matching correctness isn't affected (uses API rates), the parsed Pago objects are incomplete.
+`formatUSCurrency()` was used as the formatting function for monetary values, but it returns a **string** (`"1,200.00"`), not a number. When passed to `appendRowsWithLinks()`, the `convertToSheetsCellData()` function writes it as `stringValue` instead of `numberValue`. The correct approach is `CellNumber` (`{ type: 'number', value }`) which is already used successfully in `resumen-store.ts`.
 
-**Acceptance Criteria:**
-- [ ] Change pagosRange to `A:Q` in `factura-pago-matcher.ts`
-- [ ] Verify hardcoded column index parsing handles additional columns without breaking
+For the `batchUpdate` path, additional issues exist: no hyperlink formula for fileName, and no timezone conversion for processedAt.
 
-### ADV-115: Movimiento detalle missing nroFactura and tipoComprobante
+#### Related Code
 
-**Priority:** High
-**Labels:** Bug
-**Description:** Movimiento detalle descriptions omit the factura number and comprobante type. User expects "Factura E 00003-00001957 - Empresa - concepto" but gets "Cobro Factura de Empresa - concepto".
+**appendRowsWithLinks path (Bug 1):**
+- `src/processing/storage/factura-store.ts:274-276, 298-300` — `formatUSCurrency(factura.importeNeto/importeIva/importeTotal)` produces strings for 6 monetary cells
+- `src/processing/storage/pago-store.ts:354, 376` — `formatUSCurrency(pago.importePagado)` produces strings for 2 monetary cells
+- `src/processing/storage/recibo-store.ts:120-122` — `formatUSCurrency(recibo.subtotalRemuneraciones/subtotalDescuentos/totalNeto)` produces strings for 3 monetary cells
+- `src/processing/storage/retencion-store.ts:122-123` — `formatUSCurrency(retencion.montoComprobante/montoRetencion)` produces strings for 2 monetary cells
+- `src/services/sheets.ts:933-943` — `convertToSheetsCellData` correctly handles `CellNumber` with `numberValue` + `#,##0.00` format
+- `src/services/sheets.ts:968-991` — string path: runs `sanitizeForSpreadsheet()` then writes `stringValue`
 
-**Acceptance Criteria:**
-- [ ] `formatDebitFacturaDescription` includes tipoComprobante and nroFactura
-- [ ] Credit Tier 1 description includes tipoComprobante and nroFactura from linked factura
-- [ ] Credit direct factura match description includes tipoComprobante and nroFactura
-- [ ] Pago-only descriptions remain unchanged (no factura info available)
+**batchUpdate path (Bug 2):**
+- `src/processing/storage/pago-store.ts:24-73` — `buildPagoRow()` uses `formatUSCurrency` (lines 38, 58), plain string `renamedFileName` (lines 36, 56), raw `pago.processedAt` (lines 44, 64)
+- `src/processing/storage/factura-store.ts:25-78` — `buildFacturaRow()` uses `formatUSCurrency` (lines 41-43, 63-65), plain string `renamedFileName` (lines 36, 58), raw `factura.processedAt` (lines 46, 68)
+- `src/utils/spreadsheet.ts:26` — `sanitizeForSpreadsheet()` prefixes strings starting with `-` with `'`, breaking negative monetary values
+- `src/utils/spreadsheet.ts` — has `createDriveHyperlink(fileId, fileName)` which produces `=HYPERLINK(...)` formula strings compatible with `USER_ENTERED`
 
-### ADV-117: Movimiento detalle missing tipoDeCambio for COMEX operations
+### Impact
+- All monetary columns across all document types display as text strings in Google Sheets
+- Values cannot be summed, filtered numerically, or used in formulas
+- Negative values display with `'` prefix (broken)
+- Reprocessed/quality-replaced rows lose their fileName hyperlink and have unformatted timestamps
+- Affects production data currently being written
 
-**Priority:** High
-**Labels:** Bug
-**Description:** For COMEX operations (USD invoices with bank USD→ARS conversion), the detalle description does not include the exchange rate. User expects "Factura E 00003-00001957 - Empresa - concepto - tipo de cambio 1234.56". The tipoDeCambio should come from the Pago (bank conversion rate), not the Factura (AFIP rate).
+## Fix Plan
 
-**Acceptance Criteria:**
-- [ ] When a COMEX match is found, include tipoDeCambio in detalle description
-- [ ] Format: "... - tipo de cambio NNNN.NN" appended when tipoDeCambio is available
-- [ ] Use the pago's tipoDeCambio (bank conversion rate), not the factura's
-- [ ] Only append when tipoDeCambio is present (graceful degradation)
+### Fix 1: Replace formatUSCurrency with CellNumber in appendRowsWithLinks path
+**Linear Issue:** [ADV-123](https://linear.app/lw-claude/issue/ADV-123/replace-formatuscurrency-with-cellnumber-for-monetary-spreadsheet)
 
-### ADV-118: Use importeEnPesos for precise cross-currency bank matching
+1. Write tests in each store's test file verifying that monetary fields produce `CellNumber` objects (not strings) in the row arrays passed to `appendRowsWithLinks`:
+   - `src/processing/storage/factura-store.test.ts` — verify importeNeto, importeIva, importeTotal are `{ type: 'number', value: <number> }`
+   - `src/processing/storage/pago-store.test.ts` — verify importePagado is `CellNumber`
+   - `src/processing/storage/recibo-store.test.ts` — verify subtotalRemuneraciones, subtotalDescuentos, totalNeto are `CellNumber`
+   - `src/processing/storage/retencion-store.test.ts` — verify montoComprobante, montoRetencion are `CellNumber`
+   - Mock `appendRowsWithLinks` and capture the row argument to assert cell types
+   - Follow existing test patterns in each file (they already mock sheets functions)
+   - Run `verifier` filtered to storage tests — expect fail
 
-**Priority:** Medium
-**Labels:** Improvement
-**Description:** Cross-currency bank matching uses ArgentinaDatos API official rate with ±5% tolerance. However, Pago already has `importeEnPesos` — the exact ARS amount the bank deposited. Using this enables exact ARS matching instead of tolerance-based.
-
-**Acceptance Criteria:**
-- [ ] When `importeEnPesos` is available on pago, use it for direct ARS-to-ARS matching against bank credit amount
-- [ ] Fall back to `amountsMatchCrossCurrency()` when `importeEnPesos` is not available
-- [ ] Prefer importeEnPesos match (exact) over API-rate match (tolerance) in tier scoring
-- [ ] Add tests for both paths
-
-## Prerequisites
-
-- [ ] No spreadsheet schema changes required — columns already exist, just not being read
-- [ ] No migration needed — changes are read-only improvements to matching quality
-
-## Implementation Tasks
-
-### Task 1: Extend column ranges and parsers in match-movimientos.ts
-
-**Issue:** ADV-116
-**Files:**
-- `src/bank/match-movimientos.test.ts` (modify)
-- `src/bank/match-movimientos.ts` (modify)
-
-**TDD Steps:**
-
-1. **RED** - Write tests in `match-movimientos.test.ts`:
-   - Test `parseFacturasEmitidas` with tipoDeCambio in column S (index 18) — verify parsed object has `tipoDeCambio` populated
-   - Test `parseFacturasEmitidas` without tipoDeCambio column — verify `tipoDeCambio` is undefined (graceful)
-   - Test `parseFacturasRecibidas` with tipoDeCambio in column T (index 19) — verify parsed object has `tipoDeCambio` populated
-   - Test `parsePagos` with tipoDeCambio (index 15) and importeEnPesos (index 16) — verify both fields populated
-   - Test `parsePagos` without those columns — verify fields are undefined
-   - Use existing `parseFacturasEmitidas` and `parseFacturasRecibidas` test patterns in the file
-   - Note: `parsePagos` is a private function not exported. Tests should go through the exported parsers or the function should be exported for testing (follow existing pattern — `parseFacturasEmitidas` and `parseFacturasRecibidas` are already exported)
-   - Run `verifier "match-movimientos"` — expect fail
-
-2. **GREEN** - Modify `match-movimientos.ts`:
-   - In `parseFacturasEmitidas` (line 222-242): add `tipodecambio` to optional headers using `headers.indexOf('tipodecambio')`. In the push block, add `tipoDeCambio: parseNumber(row[colIndex.tipoDeCambio]) || undefined`
-   - In `parseFacturasRecibidas` (line 288-311): same pattern — add `tipodecambio` optional header and parse it
-   - In `parsePagos` (line 354-373): add `tipodecambio` and `importeenpesos` to optional headers. In the push block, add both fields using `parseNumber()` with `|| undefined` for optional semantics
-   - In `loadControlIngresos` (line 524-527): change `Facturas Emitidas!A:R` → `A:S`, change `Pagos Recibidos!A:O` → `A:Q`
-   - In `loadControlEgresos` (line 555-558): change `Facturas Recibidas!A:S` → `A:T`, change `Pagos Enviados!A:O` → `A:Q`
-   - Export `parsePagos` if needed for testing (or test through integration)
-   - Run `verifier "match-movimientos"` — expect pass
+2. Replace `formatUSCurrency(value)` with `{ type: 'number', value: value } as CellNumber` in each store file:
+   - `src/processing/storage/factura-store.ts` lines 274-276, 298-300 (6 replacements)
+   - `src/processing/storage/pago-store.ts` lines 354, 376 (2 replacements)
+   - `src/processing/storage/recibo-store.ts` lines 120-122 (3 replacements) — also add `CellNumber` to the import from sheets.ts
+   - `src/processing/storage/retencion-store.ts` lines 122-123 (2 replacements) — also add `CellNumber` to the import from sheets.ts
+   - Handle null/undefined: use pattern `value != null ? { type: 'number', value } : ''` where the field is optional
+   - Run `verifier` filtered to storage tests — expect pass
 
 **Notes:**
-- The header-based lookup (`headers.indexOf`) returns -1 if column is missing, which is safe — `row[-1]` returns undefined in JS
-- Use `parseNumber(val) || undefined` pattern so 0 doesn't become a falsy tipoDeCambio (exchange rates are never 0)
-- Follow existing optional header pattern established by `fileName`, `concepto`, etc.
+- `factura-store.ts` and `pago-store.ts` already import `CellNumber` from sheets.ts
+- `recibo-store.ts` and `retencion-store.ts` do NOT import `CellNumber` — add to import
+- Follow the exact pattern used in `resumen-store.ts:185-186` which already works correctly
+- `confidence` field (e.g., `pago.confidence`) is already a plain number, which `convertToSheetsCellData` handles at line 994-997 as `numberValue` without formatting — this is correct, leave it as-is
 
-### Task 2: Extend factura-pago-matcher column range
+### Fix 2: Fix batchUpdate reprocessing path
+**Linear Issue:** [ADV-124](https://linear.app/lw-claude/issue/ADV-124/fix-batchupdate-reprocessing-path-monetary-strings-missing-links-raw)
 
-**Issue:** ADV-119
-**Files:**
-- `src/processing/matching/factura-pago-matcher.ts` (modify)
+1. Write tests for `buildPagoRow` and `buildFacturaRow`:
+   - `src/processing/storage/pago-store.test.ts` — test that `buildPagoRow` produces raw numbers for importePagado (not formatted strings), `=HYPERLINK(...)` formula for fileName, and formatted processedAt (not raw ISO)
+   - `src/processing/storage/factura-store.test.ts` — test that `buildFacturaRow` produces raw numbers for importeNeto/importeIva/importeTotal, `=HYPERLINK(...)` for fileName, and formatted processedAt
+   - These functions are currently private — export them for testing (or test indirectly through the store function with a reprocessing scenario)
+   - Run `verifier` filtered to storage tests — expect fail
 
-**TDD Steps:**
+2. Fix `buildPagoRow` in `src/processing/storage/pago-store.ts`:
+   - Replace `formatUSCurrency(pago.importePagado)` (lines 38, 58) with raw `pago.importePagado` — `USER_ENTERED` correctly interprets plain numbers
+   - Replace `renamedFileName` (lines 36, 56) with `createDriveHyperlink(pago.fileId, renamedFileName)` from `src/utils/spreadsheet.ts` — `USER_ENTERED` interprets `=HYPERLINK(...)` formulas
+   - Add `timeZone?: string` parameter to `buildPagoRow`. In calling locations (lines 233, 290), fetch timezone from spreadsheet (already available via `getSpreadsheetTimezone`) and pass it. Format `pago.processedAt` using the same timezone logic as `appendRowsWithLinks` — convert ISO timestamp to local time string like `"2026-02-23 11:07:05"` before passing to row
 
-1. **RED** - No separate test needed. The factura-pago-matcher uses hardcoded indices (0-14) for existing columns. Extending the range from `A:O` to `A:Q` just provides more data in the row array without breaking existing parsing. The parser reads up to index 14 (column O), so columns P and Q are simply available but unused by this parser.
-
-2. **GREEN** - Modify `factura-pago-matcher.ts`:
-   - Line 302: change `const pagosRange = '${pagosSheetName}!A:O'` → `'${pagosSheetName}!A:Q'`
-   - Run `verifier "factura-pago"` — expect pass
-
-**Notes:**
-- This is a one-line fix. The hardcoded index parsing (lines 362-385) reads up to index 14, so extending to A:Q provides tipoDeCambio (index 15) and importeEnPesos (index 16) in the raw row data, but the existing parsing code simply ignores them.
-- If the factura-pago-matcher ever needs these fields in the future, they'll be available in the row data.
-
-### Task 3: Add nroFactura and tipoComprobante to detalle descriptions
-
-**Issue:** ADV-115
-**Files:**
-- `src/bank/matcher.test.ts` (modify)
-- `src/bank/matcher.ts` (modify)
-
-**TDD Steps:**
-
-1. **RED** - Write tests in `matcher.test.ts`:
-   - Test `formatDebitFacturaDescription` returns format "Pago Factura {tipo} {nro} a {razonSocial} - {concepto}" (e.g., "Pago Factura E 00003-00001957 a TEST SA - servicios")
-   - Test `formatDebitFacturaDescription` with missing concepto: "Pago Factura E 00003-00001957 a TEST SA"
-   - Test credit Tier 1 (pago+factura) description includes factura number: "Cobro Factura {tipo} {nro} de {cliente} - {concepto}"
-   - Test credit direct factura description includes factura number
-   - Test pago-only descriptions remain unchanged (no factura info to include)
-   - Note: `formatDebitFacturaDescription` is private. Test indirectly through `matchMovement`/`matchCreditMovement` by setting up scenarios that produce Tier 1 and direct factura matches, then asserting on the `description` field of the returned result
-   - Follow existing test patterns in matcher.test.ts (use `makeMovimiento` helper, set up exchange rate cache)
-   - Run `verifier "matcher"` — expect fail
-
-2. **GREEN** - Modify `matcher.ts`:
-   - `formatDebitFacturaDescription` (line 856-863): prepend tipoComprobante and nroFactura to the description. Change format from "Pago Factura a {razonSocial}" to "Pago Factura {tipo} {nro} a {razonSocial}". Only include tipo/nro when they are non-empty.
-   - Credit Tier 1 (line 631-633): change "Cobro Factura de {cliente}" to "Cobro Factura {tipo} {nro} de {cliente}" using `linkedFactura.tipoComprobante` and `linkedFactura.nroFactura`
-   - Credit direct factura (line 762-764): same pattern — change "Cobro Factura de {cliente}" to "Cobro Factura {tipo} {nro} de {cliente}"
-   - Run `verifier "matcher"` — expect pass
+3. Fix `buildFacturaRow` in `src/processing/storage/factura-store.ts`:
+   - Same three fixes: raw numbers for monetary fields, `createDriveHyperlink` for fileName, timezone-formatted processedAt
+   - Add `timeZone?: string` parameter, fetch and pass from calling location (line 187)
+   - Run `verifier` filtered to storage tests — expect pass
 
 **Notes:**
-- The `Factura` objects already have `tipoComprobante` and `nroFactura` fields populated (confirmed at match-movimientos.ts:253-254)
-- Debit uses `razonSocialEmisor` (proveedor), credit uses `razonSocialReceptor` (cliente) — don't mix these up
-- Only include tipo/nro prefix when both are available (graceful for edge cases with missing data)
+- `batchUpdate` uses `USER_ENTERED` value input option (`src/services/sheets.ts:293`), which correctly interprets: plain numbers as numeric cells, `=HYPERLINK(...)` as formula cells, and plain strings as text
+- `createDriveHyperlink` is already imported in some files or available from `src/utils/spreadsheet.ts` — add import where needed
+- For `processedAt` formatting: extract the ISO-to-local conversion logic. The simplest approach is to format the timestamp before building the row using a helper (e.g., `formatTimestampForSheet(isoString, timeZone)`) that produces `"YYYY-MM-DD HH:mm:ss"` format. This can reuse the `dateToSerialInTimezone` approach or simply format with `Intl.DateTimeFormat`.
+- The `getSpreadsheetTimezone` call is already present in `storePago` (line 394) and `storeFactura` (line 316) — move it earlier so both append and batchUpdate paths can use it, or call it in the reprocessing branch too
 
-### Task 4: Add tipoDeCambio to COMEX detalle descriptions
-
-**Issue:** ADV-117
-**Files:**
-- `src/bank/matcher.test.ts` (modify)
-- `src/bank/matcher.ts` (modify)
-
-**TDD Steps:**
-
-1. **RED** - Write tests in `matcher.test.ts`:
-   - Test credit Tier 1 COMEX match: when pago has `tipoDeCambio`, description ends with " - tipo de cambio 1234.56"
-   - Test credit Tier 1 non-COMEX match: when pago has no `tipoDeCambio`, description has no tipo de cambio suffix
-   - Test debit Tier 1 COMEX match: when linked pago (Pago Enviado) has `tipoDeCambio`, description includes it
-   - Test debit direct factura COMEX match: no tipoDeCambio appended (no pago available, only factura tipoDeCambio which is AFIP rate, not bank rate)
-   - Pago objects in tests need `tipoDeCambio` field set (will work because Task 1 makes parsers load it)
-   - Run `verifier "matcher"` — expect fail
-
-2. **GREEN** - Modify `matcher.ts`:
-   - Credit Tier 1 (around line 631-633): after building the description with factura info, check if `pago.tipoDeCambio` exists. If so, append ` - tipo de cambio ${pago.tipoDeCambio.toFixed(2)}`
-   - Debit Tier 1 (around line 403): the `pago` object is available. After calling `formatDebitFacturaDescription(linkedFactura)`, check if `pago.tipoDeCambio` exists and append the same suffix
-   - Do NOT add tipoDeCambio to debit direct factura matches (line 494) — there's no pago, only factura.tipoDeCambio which is the AFIP rate
-   - Do NOT add tipoDeCambio to pago-only matches — they already have no factura context
-   - Run `verifier "matcher"` — expect pass
-
-**Notes:**
-- The key insight is: tipoDeCambio comes from the Pago (bank conversion rate), NOT from the Factura (AFIP official rate). They are different numbers.
-- Only append when `pago.tipoDeCambio` is defined and > 0
-- Use `.toFixed(2)` for consistent formatting
-- This task depends on Task 1 (ADV-116) because tipoDeCambio must be loaded into Pago objects first
-
-### Task 5: Use importeEnPesos for precise cross-currency bank matching
-
-**Issue:** ADV-118
-**Files:**
-- `src/bank/matcher.test.ts` (modify)
-- `src/bank/matcher.ts` (modify)
-
-**TDD Steps:**
-
-1. **RED** - Write tests in `matcher.test.ts`:
-   - Test credit pago matching: when pago has `importeEnPesos` and pago is USD, match against bank credit using `importeEnPesos` (ARS-to-ARS exact match with standard ±1 tolerance) instead of `amountsMatchCrossCurrency`
-   - Test credit pago matching: when pago has NO `importeEnPesos`, fall back to `amountsMatchCrossCurrency()` as before
-   - Test credit pago matching: when importeEnPesos matches exactly, the match is treated as exact amount (not cross-currency), improving confidence
-   - Test debit pago matching: when pago has `importeEnPesos`, match using importeEnPesos against bank debit amount
-   - Run `verifier "matcher"` — expect fail
-
-2. **GREEN** - Modify `matcher.ts`:
-   - Credit pago matching (around line 608-613): before calling `amountsMatchCrossCurrency`, check if `pago.importeEnPesos` is available and `pago.moneda === 'USD'`. If so, use `amountsMatch(pago.importeEnPesos, amount)` for direct ARS comparison. Set `isExactAmount: true` and don't flag as cross-currency.
-   - If `importeEnPesos` is not available, fall back to existing `amountsMatchCrossCurrency()` logic
-   - The confidence should be treated as same-currency (HIGH for tier 1-3) when importeEnPesos is used, since it's an exact ARS match
-   - Debit pago matching: similar logic — check `pago.importeEnPesos` before `amountsMatch(pago.importePagado, amount)` which currently only checks same-currency
-   - Run `verifier "matcher"` — expect pass
-
-**Notes:**
-- `importeEnPesos` is the exact ARS amount the bank deposited/debited after its own USD→ARS conversion
-- Using it avoids the ±5% tolerance window that can cause false matches/misses
-- The existing `amountsMatch()` function uses ±1 tolerance which is appropriate for same-currency exact matching
-- This task depends on Task 1 (ADV-116) for importeEnPesos to be loaded into Pago objects
-- Debit pagos currently use `amountsMatch(pago.importePagado, amount)` at line 388. For USD pagos with importeEnPesos, the bank movement is in ARS, so we need to match against importeEnPesos, not importePagado
-
-### Task 6: Final verification
-
-**Issue:** ADV-115, ADV-116, ADV-117, ADV-118, ADV-119
-
-**Steps:**
-1. Run `verifier` (full mode — all tests + build)
-2. Run `bug-hunter` to review all changes
-
-## Dependencies Between Tasks
-
-```
-Task 1 (ADV-116: load fields) ──┬──→ Task 4 (ADV-117: tipoDeCambio in detalle)
-                                └──→ Task 5 (ADV-118: importeEnPesos matching)
-Task 2 (ADV-119: factura-pago range) — independent
-Task 3 (ADV-115: nroFactura in detalle) — independent
-Task 6 (final verification) — depends on all others
-```
-
-Tasks 1, 2, 3 can be done in parallel. Tasks 4 and 5 depend on Task 1. Task 6 is last.
-
-## MCP Usage During Implementation
-
-| MCP Server | Tool | Purpose |
-|------------|------|---------|
-| Linear | `update_issue` | Move issues to "In Progress" when starting, "Review" when complete |
-
-## Error Handling
-
-| Error Scenario | Expected Behavior | Test Coverage |
-|---------------|-------------------|---------------|
-| tipoDeCambio column missing from sheet | Field is undefined on parsed object, no error | Unit test (Task 1) |
-| importeEnPesos column missing from sheet | Field is undefined, falls back to API-rate matching | Unit test (Task 5) |
-| tipoDeCambio is 0 or NaN | Treated as absent, graceful degradation | Unit test (Task 4) |
-| nroFactura or tipoComprobante empty | Description omits the factura number prefix | Unit test (Task 3) |
-
-## Risks & Open Questions
-
-- None identified. All changes are backward-compatible read-only improvements to matching quality. No spreadsheet schema changes, no folder structure changes, no migration needed.
-
-## Scope Boundaries
-
-**In Scope:**
-- Loading tipoDeCambio and importeEnPesos from existing spreadsheet columns during bank matching
-- Enriching detalle descriptions with factura numbers, comprobante types, and exchange rates
-- Using importeEnPesos for precise cross-currency matching
-- Extending factura-pago-matcher column range
-
-**Out of Scope:**
-- Changes to how tipoDeCambio/importeEnPesos are written to spreadsheets (already working)
-- Changes to Gemini extraction or parser logic
-- Changes to spreadsheet schema or column layout
-- UI/Apps Script changes
+## Post-Implementation Checklist
+1. Run `bug-hunter` agent - Review changes for bugs
+2. Run `verifier` agent - Verify all tests pass and zero warnings
 
 ---
 
 ## Iteration 1
 
-**Implemented:** 2026-02-22
-**Method:** Single-agent (2 work units, 9 effort points)
+**Implemented:** 2026-02-23
+**Method:** Single-agent (1 work unit, effort 4 — no parallelism benefit)
 
 ### Tasks Completed This Iteration
-- Task 1 (ADV-116): Extend column ranges and parsers — added tipoDeCambio to parseFacturasEmitidas/parseFacturasRecibidas, added tipoDeCambio+importeEnPesos to parsePagos, updated loadControlIngresos/loadControlEgresos ranges
-- Task 2 (ADV-119): Extend factura-pago-matcher column range — pagos A:O→A:Q, facturas ranges updated, pago parser extended
-- Task 3 (ADV-115): Add nroFactura and tipoComprobante to detalle descriptions — formatDebitFacturaDescription, credit Tier 1, credit direct factura all now include "Factura {tipo} {nro}"
-- Task 4 (ADV-117): Add tipoDeCambio to COMEX detalle descriptions — credit Tier 1 and debit Tier 1 append " - tipo de cambio NNNN.NN" when pago.tipoDeCambio is available
-- Task 5 (ADV-118): Use importeEnPesos for precise cross-currency bank matching — credit and debit pago matching use importeEnPesos for exact ARS match when available, falling back to amountsMatchCrossCurrency
-- Task 6: Final verification — bug-hunter and full verifier passed
+- Fix 1 (ADV-123): Replace formatUSCurrency with CellNumber in appendRowsWithLinks path — replaced 13 `formatUSCurrency()` calls with `CellNumber` objects across 4 store files, cleaned up unused imports in recibo-store.ts and retencion-store.ts
+- Fix 2 (ADV-124): Fix batchUpdate reprocessing path — replaced formatted strings with raw numbers, added `createDriveHyperlink()` for fileName, added `formatTimestampInTimezone()` for processedAt, moved `getSpreadsheetTimezone()` to top of `withLock` callback for both paths
 
 ### Files Modified
-- `src/bank/match-movimientos.ts` — Extended column ranges, added tipoDeCambio/importeEnPesos parsing, exported parsePagos
-- `src/bank/match-movimientos.test.ts` — Added tests for new field parsing, updated mock ranges
-- `src/bank/matcher.ts` — nroFactura/tipoComprobante in descriptions, tipoDeCambio suffix, importeEnPesos matching
-- `src/bank/matcher.test.ts` — Added tests for descriptions, tipoDeCambio, importeEnPesos matching, updated pre-existing expectations
-- `src/processing/matching/factura-pago-matcher.ts` — Extended pagos range A:O→A:Q, facturas ranges A:R→A:S / A:S→A:T, added pago tipoDeCambio/importeEnPesos parsing
+- `src/processing/storage/factura-store.ts` — CellNumber for monetary fields, buildFacturaRow: raw numbers + hyperlink + timezone processedAt
+- `src/processing/storage/factura-store.test.ts` — Tests for CellNumber and batchUpdate path fixes
+- `src/processing/storage/pago-store.ts` — CellNumber for monetary fields, buildPagoRow: raw numbers + hyperlink + timezone processedAt
+- `src/processing/storage/pago-store.test.ts` — Tests for CellNumber and batchUpdate path fixes
+- `src/processing/storage/recibo-store.ts` — CellNumber for monetary fields, removed formatUSCurrency import
+- `src/processing/storage/recibo-store.test.ts` — Tests for CellNumber
+- `src/processing/storage/retencion-store.ts` — CellNumber for monetary fields, removed formatUSCurrency import
+- `src/processing/storage/retencion-store.test.ts` — Tests for CellNumber
 
 ### Linear Updates
-- ADV-116: Todo → In Progress → Review
-- ADV-119: Todo → In Progress → Review
-- ADV-115: Todo → In Progress → Review
-- ADV-117: Todo → In Progress → Review
-- ADV-118: Todo → In Progress → Review
+- ADV-123: Todo → In Progress → Review
+- ADV-124: Todo → In Progress → Review
 
 ### Pre-commit Verification
-- bug-hunter: Found 2 HIGH issues (factura-pago-matcher ranges and pago parser), fixed before commit
-- verifier: All 1,728 tests pass, zero warnings
+- bug-hunter: Passed — no bugs found
+- verifier: All 1,745 tests pass, zero warnings
+
+### Continuation Status
+All tasks completed.
 
 ### Review Findings
 
-Summary: 3 issue(s) found (Team: security, reliability, quality reviewers)
-- FIX: 3 issue(s) — Linear issues created
-- DISCARDED: 8 finding(s) — false positives / not applicable
+Summary: 2 issue(s) found (Team: security, reliability, quality reviewers)
+- FIX: 2 issue(s) — Linear issues created
+- DISCARDED: 6 finding(s) — false positives / not applicable
 
 **Issues requiring fix:**
-- [HIGH] BUG: buildMatchQuality cannot reconstruct Tier 3/4, causing incorrect match replacement (`src/bank/match-movimientos.ts:611-622`)
-- [MEDIUM] ASYNC: prefetchExchangeRates failure crashes entire matchAllMovimientos (`src/bank/match-movimientos.ts:988`)
-- [MEDIUM] BUG: Recibo candidates hardcoded HIGH confidence instead of using tierToConfidence (`src/bank/matcher.ts:529-534`)
+- [MEDIUM] BUG: Missing reprocessing path in recibo-store.ts / retencion-store.ts — `storeRecibo` and `storeRetencion` lack `findRowByFileId` check; reprocessed files are incorrectly marked as duplicates instead of updated in-place (ADV-125)
+- [MEDIUM] TEST: Missing `withLock` mock in pago-store.test.ts, recibo-store.test.ts, retencion-store.test.ts — tests use real lock implementation with shared mutable state, risking flakiness (ADV-126)
 
 **Discarded findings (not bugs):**
-- [DISCARDED] RegExp allocation in matchesWordBoundary (`src/bank/matcher.ts:187-192`) — performance optimization, not a correctness bug; regex is correctly constructed
-- [DISCARDED] findDocumentByFileId returns `document: any` (`src/bank/match-movimientos.ts:643`) — type improvement for future maintainability, code works correctly at runtime
-- [DISCARDED] lockResult.value type assertion (`src/bank/match-movimientos.ts:1071`) — redundant but correct assertion, TypeScript already infers the type
-- [DISCARDED] Pago cast without guard (`src/processing/matching/factura-pago-matcher.ts:54`) — correct in context, displacement queue only contains pagos at this point
-- [DISCARDED] warn() missing module field (`src/bank/matcher.ts:423-427`) — convention style with zero correctness impact, not enforced by CLAUDE.md critical rules
-- [DISCARDED] warn() missing module field (`src/bank/match-movimientos.ts:828-831`) — convention style with zero correctness impact, not enforced by CLAUDE.md critical rules
-- [DISCARDED] Fragile test CUITs substring match (`src/bank/match-movimientos.test.ts:1141-1143`) — test behavior is correct; equal quality comparison works regardless of which tier both facturas land on
-- [DISCARDED] Double cast in test (`src/bank/match-movimientos.test.ts:1867`) — common test pattern, not a bug
+- [DISCARDED] SECURITY: Lock key collision from malicious PDF fields — theoretical DoS at most, not exploitable; spreadsheet-based duplicate check remains intact
+- [DISCARDED] SECURITY: sheetName interpolation in range strings — all callers use hardcoded string literals, not exploitable
+- [DISCARDED] SECURITY: CUIT format validation — internal inputs from Gemini extraction, low risk
+- [DISCARDED] TEST: Missing error path tests in recibo-store.test.ts and retencion-store.test.ts — test coverage improvement, not a bug
+- [DISCARDED] CONVENTION: Module name 'retencion-store' instead of 'storage' in retencion-store.ts — style preference not enforced by CLAUDE.md
+- [DISCARDED] CONVENTION: Indentation inconsistency in factura-store.ts — style-only, zero correctness impact
 
 ### Linear Updates
-- ADV-115: Review → Merge (original task completed)
-- ADV-116: Review → Merge (original task completed)
-- ADV-117: Review → Merge (original task completed)
-- ADV-118: Review → Merge (original task completed)
-- ADV-119: Review → Merge (original task completed)
-- ADV-120: Created in Todo (Fix: buildMatchQuality Tier 3/4 reconstruction)
-- ADV-121: Created in Todo (Fix: prefetchExchangeRates error handling)
-- ADV-122: Created in Todo (Fix: Recibo confidence mapping)
+- ADV-123: Review → Merge (original task)
+- ADV-124: Review → Merge (original task)
+- ADV-125: Created in Todo (Fix: Missing reprocessing path in recibo/retencion stores)
+- ADV-126: Created in Todo (Fix: Missing withLock mock in 3 test files)
+
+<!-- REVIEW COMPLETE -->
+
+---
+
+## Fix Plan
+
+**Source:** Review findings from Iteration 1
+**Linear Issues:** [ADV-125](https://linear.app/lw-claude/issue/ADV-125/add-reprocessing-path-findrowbyfileid-batchupdate-to-recibo-store-and), [ADV-126](https://linear.app/lw-claude/issue/ADV-126/add-missing-withlock-mock-to-pago-store-recibo-store-and-retencion)
+
+### Fix 1: Add reprocessing path to recibo-store and retencion-store
+**Linear Issue:** [ADV-125](https://linear.app/lw-claude/issue/ADV-125/add-reprocessing-path-findrowbyfileid-batchupdate-to-recibo-store-and)
+
+1. Write tests in `src/processing/storage/recibo-store.test.ts` and `src/processing/storage/retencion-store.test.ts`:
+   - Test that when `findRowByFileId` returns a matching row index, the store calls `batchUpdate` to update in-place instead of marking as duplicate
+   - Test that the reprocessing row includes raw numbers for monetary fields, `=HYPERLINK(...)` for fileName, and timezone-formatted processedAt
+   - Follow the reprocessing test patterns from `factura-store.test.ts` and `pago-store.test.ts`
+   - Run `verifier` filtered to storage tests — expect fail
+
+2. Add `findRowByFileId` check in `storeRecibo` (before the business-key duplicate check):
+   - Import `findRowByFileId` from sheets service
+   - If fileId already has a row, call `batchUpdate` with `buildReciboRow()` to update in-place
+   - Create `buildReciboRow(recibo, renamedFileName, timeZone?)` function following `buildPagoRow` pattern:
+     raw numbers for monetary fields, `createDriveHyperlink()` for fileName, timezone-formatted processedAt
+
+3. Add same reprocessing path in `storeRetencion`:
+   - Same pattern: `findRowByFileId` check + `buildRetencionRow()` + `batchUpdate`
+   - Run `verifier` filtered to storage tests — expect pass
+
+### Fix 2: Add missing withLock mock to 3 test files
+**Linear Issue:** [ADV-126](https://linear.app/lw-claude/issue/ADV-126/add-missing-withlock-mock-to-pago-store-recibo-store-and-retencion)
+
+1. Add `vi.mock('../../utils/concurrency.js', ...)` to `src/processing/storage/pago-store.test.ts`, `src/processing/storage/recibo-store.test.ts`, and `src/processing/storage/retencion-store.test.ts` — matching the pattern in `factura-store.test.ts`
+2. Run `verifier` filtered to storage tests — expect pass
+
+---
+
+## Iteration 2
+
+**Implemented:** 2026-02-23
+**Method:** Single-agent (Fix Plan from review)
+
+### Tasks Completed This Iteration
+- Fix 1 (ADV-125): Add reprocessing path to recibo-store and retencion-store — added `findRowByFileId`, `buildReciboRow`/`buildRetencionRow`, reprocessing check before duplicate check, `StoreResult` return type
+- Fix 2 (ADV-126): Add missing withLock mock to 3 test files — added `vi.mock('../../utils/concurrency.js', ...)` to pago-store.test.ts, recibo-store.test.ts, retencion-store.test.ts
+- Bug-hunter fixes: Fixed duplicate detection tests to use `mockResolvedValueOnce` chains (recibo-store.test.ts, retencion-store.test.ts), fixed retencion-store.ts append path to use `generateRetencionFileName` instead of `retencion.fileName`
+
+### Files Modified
+- `src/processing/storage/recibo-store.ts` — Added reprocessing path (findRowByFileId, buildReciboRow, batchUpdate), StoreResult return type
+- `src/processing/storage/recibo-store.test.ts` — Added withLock mock, reprocessing tests, fixed duplicate detection mocks
+- `src/processing/storage/retencion-store.ts` — Added reprocessing path (findRowByFileId, buildRetencionRow, batchUpdate), StoreResult return type, fixed append path fileName
+- `src/processing/storage/retencion-store.test.ts` — Added withLock mock, reprocessing tests, fixed duplicate detection mocks
+- `src/processing/storage/pago-store.test.ts` — Added withLock mock
+
+### Linear Updates
+- ADV-125: Todo → In Progress → Review → Merge
+- ADV-126: Todo → In Progress → Review → Merge
+
+### Pre-commit Verification
+- bug-hunter: Passed — no bugs found (second run after fixing 3 bugs from first run)
+- verifier: All 1,755 tests pass, zero warnings
+
+### Review Findings
+
+Files reviewed: 5
+Checks applied: Security, Logic, Async, Resources, Type Safety, Conventions
+
+No issues found after bug-hunter fixes — all implementations correct and follow project conventions.
 
 <!-- REVIEW COMPLETE -->
 
@@ -344,89 +247,27 @@ All tasks completed.
 
 ---
 
-## Fix Plan
-
-**Source:** Review findings from Iteration 1
-**Linear Issues:** [ADV-120](https://linear.app/lw-claude/issue/ADV-120/buildmatchquality-cannot-reconstruct-tier-34-causing-incorrect-match), [ADV-121](https://linear.app/lw-claude/issue/ADV-121/prefetchexchangerates-failure-crashes-entire-matchallmovimientos), [ADV-122](https://linear.app/lw-claude/issue/ADV-122/recibo-candidates-hardcoded-high-confidence-instead-of-using)
-
-### Fix 1: buildMatchQuality cannot reconstruct Tier 3/4
-**Linear Issue:** [ADV-120](https://linear.app/lw-claude/issue/ADV-120/buildmatchquality-cannot-reconstruct-tier-34-causing-incorrect-match)
-
-1. Write tests in `src/bank/match-movimientos.test.ts` for the Tier 3/4 downgrade scenario:
-   - Set up an existing Tier 3 match (referencia in concepto matches a document's referencia) and a new Tier 5 candidate with closer date
-   - Verify the existing Tier 3 match is NOT replaced by the Tier 5 candidate
-   - Same test for Tier 4 (keyword match)
-2. Add referencia and keyword detection to `buildMatchQuality` in `src/bank/match-movimientos.ts:611-622`:
-   - Check if concepto contains a referencia pattern that matches a document field
-   - Check if name tokens from the document match keywords in the concepto (reuse `extractKeywordTokens` and `matchesWordBoundary` logic from matcher.ts)
-   - Map to Tier 3 for referencia, Tier 4 for keyword matches
-3. Verify tests pass
-
-### Fix 2: prefetchExchangeRates error handling
-**Linear Issue:** [ADV-121](https://linear.app/lw-claude/issue/ADV-121/prefetchexchangerates-failure-crashes-entire-matchallmovimientos)
-
-1. Write test in `src/bank/match-movimientos.test.ts` for prefetch failure:
-   - Mock `prefetchExchangeRates` to throw an error
-   - Verify `matchAllMovimientos` still completes successfully
-   - Verify a warning is logged
-2. Wrap the `prefetchExchangeRates` call at line 988 in try/catch:
-   - Log a warning with `{ module: 'match-movimientos', action: 'prefetchExchangeRates' }` on failure
-   - Continue matching without prefetched rates
-3. Verify tests pass
-
-### Fix 3: Recibo confidence mapping
-**Linear Issue:** [ADV-122](https://linear.app/lw-claude/issue/ADV-122/recibo-candidates-hardcoded-high-confidence-instead-of-using)
-
-1. Write test in `src/bank/matcher.test.ts` for recibo confidence:
-   - Set up a recibo match scenario
-   - Verify the returned confidence is `'LOW'` (Tier 5 mapping), not `'HIGH'`
-2. Change `confidence: 'HIGH'` to `confidence: tierToConfidence(5, false)` at `src/bank/matcher.ts:534`
-3. Verify tests pass
-
----
-
-## Iteration 2
-
-**Implemented:** 2026-02-22
-**Method:** Single-agent (3 fixes, 4 effort points)
-
-### Tasks Completed This Iteration
-- Fix 1 (ADV-120): buildMatchQuality Tier 3/4 reconstruction — added `document` parameter, `extractReferencia` for Tier 3, `calculateKeywordMatchScore` for Tier 4
-- Fix 2 (ADV-121): prefetchExchangeRates error handling — wrapped in try/catch with warning log, graceful degradation
-- Fix 3 (ADV-122): Recibo confidence mapping — changed hardcoded `'HIGH'` to `tierToConfidence(5, false)` → `'LOW'`
-
-### Files Modified
-- `src/bank/match-movimientos.ts` — Added `extractReferencia` and `calculateKeywordMatchScore` imports, enhanced `buildMatchQuality` with Tier 3/4 detection, wrapped prefetchExchangeRates in try/catch
-- `src/bank/match-movimientos.test.ts` — Added 3 tests: Tier 3 preservation, Tier 4 preservation, prefetch failure resilience; updated matcher mock with `extractReferencia`
-- `src/bank/matcher.ts` — Changed recibo confidence from `'HIGH'` to `tierToConfidence(5, false)`
-- `src/bank/matcher.test.ts` — Added recibo confidence test
-
-### Linear Updates
-- ADV-120: Todo → In Progress → Review
-- ADV-121: Todo → In Progress → Review
-- ADV-122: Todo → In Progress → Review
-
-### Pre-commit Verification
-- bug-hunter: Passed (0 bugs found)
-- verifier: All 1,732 tests pass, zero warnings
-
-### Review Findings
-
-Files reviewed: 4
-Reviewer: single-agent
-Checks applied: Security, Logic, Async, Resources, Type Safety, Conventions
-
-No issues found - all implementations are correct and follow project conventions.
-
-### Linear Updates
-- ADV-120: Review → Merge
-- ADV-121: Review → Merge
-- ADV-122: Review → Merge
-
-<!-- REVIEW COMPLETE -->
-
----
-
 ## Status: COMPLETE
 
 All tasks implemented and reviewed successfully. All Linear issues moved to Merge.
+
+---
+
+## Plan Summary
+
+**Problem:** All monetary values in production spreadsheets are stored as text strings instead of numbers, caused by `formatUSCurrency()` returning formatted strings. Reprocessed rows additionally lose their fileName hyperlink and have unformatted timestamps.
+
+**Root Cause:** `formatUSCurrency()` returns a string like `"1,200.00"` which `convertToSheetsCellData()` writes as `stringValue` (text). The correct approach is `CellNumber` (`{ type: 'number', value }`) which writes `numberValue` with `#,##0.00` formatting. The `batchUpdate` reprocessing path has the same issue plus missing hyperlink formulas and raw ISO timestamps.
+
+**Linear Issues:** ADV-123, ADV-124
+
+**Solution Approach:** Replace all `formatUSCurrency()` calls in the `appendRowsWithLinks` path with `CellNumber` objects (13 replacements across 4 store files). For the `batchUpdate` reprocessing path, use raw numbers (USER_ENTERED handles them), `createDriveHyperlink()` for fileName, and timezone-formatted processedAt.
+
+**Scope:**
+- Files affected: 4 store files + their test files
+- New tests: yes
+- Breaking changes: no — values will change from text to numbers in spreadsheets (improvement, not breaking)
+
+**Risks/Considerations:**
+- Existing production data has text values — manually correcting existing rows is out of scope (new writes will be correct)
+- `formatUSCurrency` import may become unused in some store files after fix — clean up unused imports

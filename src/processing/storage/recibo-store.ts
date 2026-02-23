@@ -3,14 +3,83 @@
  * Handles writing recibos to Control de Egresos spreadsheet
  */
 
-import type { Result, Recibo } from '../../types/index.js';
+import type { Result, Recibo, StoreResult } from '../../types/index.js';
 import type { ScanContext } from '../scanner.js';
-import { appendRowsWithLinks, sortSheet, getSpreadsheetTimezone, getValues, type CellValueOrLink, type CellDate } from '../../services/sheets.js';
-import { formatUSCurrency, parseNumber } from '../../utils/numbers.js';
+import { appendRowsWithLinks, sortSheet, getSpreadsheetTimezone, getValues, batchUpdate, type CellValueOrLink, type CellDate, type CellNumber, type CellValue } from '../../services/sheets.js';
+import { parseNumber } from '../../utils/numbers.js';
 import { generateReciboFileName } from '../../utils/file-naming.js';
 import { info, warn } from '../../utils/logger.js';
 import { getCorrelationId } from '../../utils/correlation.js';
 import { withLock } from '../../utils/concurrency.js';
+import { createDriveHyperlink } from '../../utils/spreadsheet.js';
+import { formatTimestampInTimezone } from '../../services/status-sheet.js';
+
+/**
+ * Builds a flat CellValue[] row for batchUpdate (reprocessing)
+ *
+ * @param recibo - The recibo data
+ * @param renamedFileName - The renamed filename
+ * @param timeZone - Optional timezone for processedAt formatting
+ * @returns Flat row values
+ */
+function buildReciboRow(
+  recibo: Recibo,
+  renamedFileName: string,
+  timeZone?: string
+): CellValue[] {
+  const fileNameCell = createDriveHyperlink(recibo.fileId, renamedFileName) || renamedFileName;
+  const processedAtCell = timeZone
+    ? formatTimestampInTimezone(new Date(recibo.processedAt), timeZone)
+    : recibo.processedAt;
+
+  return [
+    recibo.fechaPago,                                     // A - date string (USER_ENTERED parses)
+    recibo.fileId,                                        // B
+    fileNameCell,                                         // C - HYPERLINK formula
+    recibo.tipoRecibo,                                    // D
+    recibo.nombreEmpleado,                                // E
+    recibo.cuilEmpleado,                                  // F
+    recibo.legajo,                                        // G
+    recibo.tareaDesempenada || '',                         // H
+    recibo.cuitEmpleador,                                 // I
+    recibo.periodoAbonado,                                // J
+    recibo.subtotalRemuneraciones,                        // K - raw number (USER_ENTERED handles)
+    recibo.subtotalDescuentos,                            // L
+    recibo.totalNeto,                                     // M
+    processedAtCell,                                      // N
+    recibo.confidence,                                    // O
+    recibo.needsReview ? 'YES' : 'NO',                    // P
+    recibo.matchedPagoFileId || '',                       // Q
+    recibo.matchConfidence || '',                         // R
+  ];
+}
+
+/**
+ * Finds the spreadsheet row index of a document by its fileId (column B)
+ *
+ * @param spreadsheetId - The spreadsheet ID
+ * @param sheetName - The sheet name
+ * @param fileId - Google Drive file ID to search for
+ * @returns Row found result with 1-indexed rowIndex, or not found
+ */
+async function findRowByFileId(
+  spreadsheetId: string,
+  sheetName: string,
+  fileId: string
+): Promise<{ found: true; rowIndex: number } | { found: false }> {
+  const rowsResult = await getValues(spreadsheetId, `${sheetName}!B:B`);
+  if (!rowsResult.ok || rowsResult.value.length <= 1) {
+    return { found: false };
+  }
+  // Skip header row (index 0 = row 1 in spreadsheet)
+  for (let i = 1; i < rowsResult.value.length; i++) {
+    const row = rowsResult.value[i];
+    if (row && String(row[0]) === fileId) {
+      return { found: true, rowIndex: i + 1 }; // 1-indexed spreadsheet row
+    }
+  }
+  return { found: false };
+}
 
 /**
  * Duplicate key: (cuilEmpleado, periodoAbonado, totalNeto)
@@ -63,12 +132,47 @@ export async function storeRecibo(
   recibo: Recibo,
   spreadsheetId: string,
   context?: ScanContext
-): Promise<Result<{ stored: boolean; existingFileId?: string }, Error>> {
+): Promise<Result<StoreResult, Error>> {
   // Create lock key from business key (prevents concurrent identical stores)
   const lockKey = `store:recibo:${recibo.cuilEmpleado}:${recibo.periodoAbonado}:${recibo.totalNeto}`;
 
   return withLock(lockKey, async () => {
+    const sheetName = 'Recibos';
     const correlationId = getCorrelationId();
+
+    // Get spreadsheet timezone early — used by both reprocessing and append paths
+    const timezoneResult = await getSpreadsheetTimezone(spreadsheetId);
+    const timeZone = timezoneResult.ok ? timezoneResult.value : undefined;
+
+    // REPROCESSING CHECK: If same fileId already exists, update the row in place
+    const fileIdCheck = await findRowByFileId(spreadsheetId, sheetName, recibo.fileId);
+    if (fileIdCheck.found) {
+      const renamedFileName = generateReciboFileName(recibo);
+      const updateRow = buildReciboRow(recibo, renamedFileName, timeZone);
+      const updateResult = await batchUpdate(spreadsheetId, [{
+        range: `${sheetName}!A${fileIdCheck.rowIndex}:R${fileIdCheck.rowIndex}`,
+        values: [updateRow],
+      }]);
+      if (!updateResult.ok) {
+        throw updateResult.error;
+      }
+
+      info('Recibo reprocessed (existing row updated)', {
+        module: 'storage',
+        phase: 'recibo',
+        fileId: recibo.fileId,
+        rowIndex: fileIdCheck.rowIndex,
+        correlationId,
+      });
+
+      if (context) {
+        context.sortBatch.addPendingSort(spreadsheetId, sheetName, 0, true);
+      } else {
+        await sortSheet(spreadsheetId, sheetName, 0, true);
+      }
+
+      return { stored: true, updated: true };
+    }
 
     // Use cache if available, otherwise API
     const dupeCheck = context?.duplicateCache
@@ -117,9 +221,9 @@ export async function storeRecibo(
       recibo.tareaDesempenada || '',
       recibo.cuitEmpleador,
       recibo.periodoAbonado,
-      formatUSCurrency(recibo.subtotalRemuneraciones),
-      formatUSCurrency(recibo.subtotalDescuentos),
-      formatUSCurrency(recibo.totalNeto),
+      { type: 'number', value: recibo.subtotalRemuneraciones } as CellNumber,
+      { type: 'number', value: recibo.subtotalDescuentos } as CellNumber,
+      { type: 'number', value: recibo.totalNeto } as CellNumber,
       recibo.processedAt,
       recibo.confidence,
       recibo.needsReview ? 'YES' : 'NO',
@@ -127,11 +231,7 @@ export async function storeRecibo(
       recibo.matchConfidence || '',
     ];
 
-    // Get spreadsheet timezone for proper timestamp formatting
-    const timezoneResult = await getSpreadsheetTimezone(spreadsheetId);
-    const timeZone = timezoneResult.ok ? timezoneResult.value : undefined;
-
-    const result = await appendRowsWithLinks(spreadsheetId, 'Recibos!A:R', [row], timeZone, context?.metadataCache);
+    const result = await appendRowsWithLinks(spreadsheetId, `${sheetName}!A:R`, [row], timeZone, context?.metadataCache);
     if (!result.ok) {
       throw result.error;
     }
