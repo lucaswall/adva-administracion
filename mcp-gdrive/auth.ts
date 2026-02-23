@@ -5,10 +5,10 @@
 
 import { google, Auth } from 'googleapis';
 
-/** Read-only scopes for Drive and Sheets */
+/** Read-write scopes for Drive and Sheets */
 export const SCOPES = [
-  'https://www.googleapis.com/auth/drive.readonly',
-  'https://www.googleapis.com/auth/spreadsheets.readonly',
+  'https://www.googleapis.com/auth/drive',
+  'https://www.googleapis.com/auth/spreadsheets',
 ];
 
 interface ServiceAccountCredentials {

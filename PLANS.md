@@ -184,3 +184,38 @@ No TDD — this is a skill file (markdown instructions), not TypeScript code.
 - Scope upgrade from read-only to read-write on Drive and Sheets — mitigated by restricting write tools to `manual-match` skill only
 - Wrong cell updates could corrupt spreadsheet data — mitigated by verification step (re-read after write)
 - Moving files to wrong folder — mitigated by confirmation requirement in skill
+
+---
+
+## Iteration 1
+
+**Implemented:** 2026-02-23
+**Method:** Single-agent (effort score 2 — no workers justified)
+
+### Tasks Completed This Iteration
+- Task 1: Add write capabilities to gdrive MCP server (ADV-136) — Upgraded auth scopes, created gsheets_update/gdrive_move_file/gdrive_rename_file tools, registered in index, added permissions
+- Task 2: Create manual-match skill (ADV-137) — Created SKILL.md with environment selection, match/unmatch workflows, file operations, column reference, verification
+- Task 3: Update CLAUDE.md (ADV-138) — Added new MCP tools to Google Drive section with write restriction note, added manual-match to SKILLS table
+
+### Files Modified
+- `mcp-gdrive/auth.ts` — Upgraded scopes from readonly to read-write
+- `mcp-gdrive/tools/types.ts` — Added GSheetsUpdateInput, GDriveMoveFileInput, GDriveRenameFileInput
+- `mcp-gdrive/tools/gsheets_update.ts` — New: batch cell update tool
+- `mcp-gdrive/tools/gdrive_move_file.ts` — New: file move tool with parent validation
+- `mcp-gdrive/tools/gdrive_rename_file.ts` — New: file rename tool
+- `mcp-gdrive/tools/index.ts` — Registered 3 new tools
+- `.claude/settings.json` — Added 3 new MCP tool permissions
+- `.claude/skills/manual-match/SKILL.md` — New: manual-match skill
+- `CLAUDE.md` — Added write tools and manual-match skill documentation
+
+### Linear Updates
+- ADV-136: Todo → In Progress → Review
+- ADV-137: Todo → In Progress → Review
+- ADV-138: Todo → In Progress → Review
+
+### Pre-commit Verification
+- bug-hunter: Found 5 issues (1 HIGH, 3 MEDIUM, 1 LOW), all fixed before proceeding
+- verifier: All 1792 tests pass, zero warnings
+
+### Continuation Status
+All tasks completed.

@@ -3,6 +3,9 @@ import { schema as gdriveReadFileSchema, readFile } from './gdrive_read_file.js'
 import { schema as gdriveListFolderSchema, listFolder } from './gdrive_list_folder.js';
 import { schema as gdriveGetPdfSchema, getPdf } from './gdrive_get_pdf.js';
 import { schema as gsheetsReadSchema, readSheet } from './gsheets_read.js';
+import { schema as gsheetsUpdateSchema, updateSheet } from './gsheets_update.js';
+import { schema as gdriveMoveFileSchema, moveFile } from './gdrive_move_file.js';
+import { schema as gdriveRenameFileSchema, renameFile } from './gdrive_rename_file.js';
 import {
   Tool,
   GDriveSearchInput,
@@ -10,6 +13,9 @@ import {
   GDriveListFolderInput,
   GDriveGetPdfInput,
   GSheetsReadInput,
+  GSheetsUpdateInput,
+  GDriveMoveFileInput,
+  GDriveRenameFileInput,
 } from './types.js';
 
 export const tools: [
@@ -17,7 +23,10 @@ export const tools: [
   Tool<GDriveReadFileInput>,
   Tool<GDriveListFolderInput>,
   Tool<GDriveGetPdfInput>,
-  Tool<GSheetsReadInput>
+  Tool<GSheetsReadInput>,
+  Tool<GSheetsUpdateInput>,
+  Tool<GDriveMoveFileInput>,
+  Tool<GDriveRenameFileInput>
 ] = [
   {
     ...gdriveSearchSchema,
@@ -38,5 +47,17 @@ export const tools: [
   {
     ...gsheetsReadSchema,
     handler: readSheet,
+  },
+  {
+    ...gsheetsUpdateSchema,
+    handler: updateSheet,
+  },
+  {
+    ...gdriveMoveFileSchema,
+    handler: moveFile,
+  },
+  {
+    ...gdriveRenameFileSchema,
+    handler: renameFile,
   },
 ];

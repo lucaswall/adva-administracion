@@ -47,3 +47,18 @@ export interface GSheetsReadInput {
   ranges?: string[];
   sheetId?: number;
 }
+
+export interface GSheetsUpdateInput {
+  spreadsheetId: string;
+  updates: Array<{ range: string; value: string }>;
+}
+
+export interface GDriveMoveFileInput {
+  fileId: string;
+  newParentFolderId: string;
+}
+
+export interface GDriveRenameFileInput {
+  fileId: string;
+  newName: string;
+}
