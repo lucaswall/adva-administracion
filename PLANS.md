@@ -1,369 +1,186 @@
-# Bug Fix Plan
+# Implementation Plan
 
-**Status:** COMPLETE
 **Created:** 2026-02-23
-**Bug Report:** Pagos Recibidos and Retenciones don't match in staging. USD payments miss due to $1 tolerance (bank fees ~$20), 60-day date cap (international wires take 75+ days), punctuation in names preventing substring matching, and no retencion→factura matching logic. Also need a manual match locking column to prevent automatic overwrite of user-confirmed matches.
-**Category:** Matching
-**Linear Issues:** [ADV-127](https://linear.app/lw-claude/issue/ADV-127/add-dollar30-same-currency-tolerance-for-usd-factura-pago-matching), [ADV-128](https://linear.app/lw-claude/issue/ADV-128/extend-low-date-range-to-90-days-for-usd-factura-matching), [ADV-129](https://linear.app/lw-claude/issue/ADV-129/improve-name-matching-by-stripping-punctuation-in-normalizestring), [ADV-130](https://linear.app/lw-claude/issue/ADV-130/implement-retencionfactura-matching-in-runmatching-pipeline), [ADV-131](https://linear.app/lw-claude/issue/ADV-131/add-matchmanual-column-to-all-matching-sheets-for-manual-match-locking)
+**Source:** Inline request: Create manual-match skill for Claude Code. Requires adding spreadsheet write + file move/rename capabilities to gdrive MCP server. Skill handles manual document matching in Control de Ingresos/Egresos, file moves/renames with confirmation, environment selection (staging/production), and scoped queries (by sheet, date, area).
+**Linear Issues:** [ADV-136](https://linear.app/lw-claude/issue/ADV-136/add-write-capabilities-to-gdrive-mcp-server-gsheets_update-move-rename), [ADV-137](https://linear.app/lw-claude/issue/ADV-137/create-manual-match-skill-for-document-matching-file-moves-and-renames), [ADV-138](https://linear.app/lw-claude/issue/ADV-138/update-claudemd-with-new-mcp-tools-and-manual-match-skill)
 
-## Investigation
+## Context Gathered
 
-### Context Gathered
-- **MCPs used:** Google Drive (gsheets_read — staging Control de Ingresos), Linear (issue search)
-- **Files examined:** Staging spreadsheet `1mt5VB7Qp7trCnl1tR8oFH35WWBWLbzsMhtzS_z7f2YQ` (Facturas Emitidas, Pagos Recibidos, Retenciones Recibidas), all matching code, exchange-rate.ts, config.ts, spreadsheet-headers.ts, types/index.ts
+### Codebase Analysis
 
-### Evidence
+**MCP Server (`mcp-gdrive/`):**
+- Custom MCP server using `@modelcontextprotocol/sdk` with `googleapis`
+- Currently read-only: scopes are `drive.readonly` + `spreadsheets.readonly` (`mcp-gdrive/auth.ts`)
+- 5 tools: `gdrive_search`, `gdrive_read_file`, `gdrive_list_folder`, `gdrive_get_pdf`, `gsheets_read`
+- Tool pattern: schema export + handler function, registered in `tools/index.ts`
+- Types in `tools/types.ts`, each tool has its own input interface
 
-**Staging spreadsheet analysis (11 Pagos Recibidos, all USD):**
+**Spreadsheet Schema (matching-relevant columns):**
+- Facturas Emitidas (A:S): matchedPagoFileId=P, matchConfidence=Q
+- Pagos Recibidos (A:Q): matchedFacturaFileId=N, matchConfidence=O
+- Retenciones Recibidas (A:O): matchedFacturaFileId=N, matchConfidence=O
+- Facturas Recibidas (A:T): matchedPagoFileId=P, matchConfidence=Q, pagada=S
+- Pagos Enviados (A:Q): matchedFacturaFileId=N, matchConfidence=O
+- Recibos (A:R): matchedPagoFileId=Q, matchConfidence=R
 
-| Pago | Amount | Factura Match? | Root Cause |
-|------|--------|----------------|------------|
-| MICROSOFT (Dec 23) | 5,500 USD | Factura exists (5,500 USD, Oct 9) | Date gap 75 days > 60-day LOW max |
-| DEVOLVER DIGITAL (Nov 1) | 1,780 USD | Factura exists (1,800 USD, Oct 21) | Amount diff $20 > $1 tolerance |
-| STANDARD CHARTERED (Oct 30) | 1,200 USD | No factura for this company | Expected — no factura exists |
-| ODACLICK (Oct 22) | 2,480 USD | Factura exists (2,500 USD, Oct 17) | Amount diff $20 > $1 tolerance |
-| FRITO PLAY (Oct 22) | 430 USD | Matched MEDIUM | Comma in "FRITO PLAY, LLC" prevents HIGH |
-| FRITO PLAY (Oct 16) | 6,750 USD | Matched MEDIUM | Same comma issue |
+**Environment handling:**
+- `.env` has `DRIVE_ROOT_FOLDER_ID_PRODUCTION` and `DRIVE_ROOT_FOLDER_ID_STAGING`
+- Investigate skill pattern: read `.env`, ask user which environment, use corresponding root folder
+- Root folder contains `Control de Ingresos.gsheet` and `Control de Egresos.gsheet`
 
-**Retenciones Recibidas (2 rows, both CFI):**
-- CERT-8884: montoComprobante=12M ARS → Factura 00003-00002175 (CFI, 12M ARS) — obvious match by CUIT + amount
-- CERT-8987: montoComprobante=242,984 ARS → 2× Factura 121,492 ARS — multi-factura case
-- Both have empty matchedFacturaFileId — no retencion matching code exists
+**Existing patterns:**
+- `investigate` skill in `.claude/skills/investigate/SKILL.md` — good model for environment selection + Drive MCP usage
+- All matching sheets use `MANUAL` value in `matchConfidence` to lock matches (ADV-131, already implemented)
 
-**All Pagos Recibidos have empty `cuitPagador`** — CUIT matching never fires for Ingresos.
+### MCP Context
+- Linear MCP verified: team "ADVA Administracion" exists
+- Google Drive MCP: `drive.files.update()` handles both move (addParents/removeParents) and rename (requestBody.name)
+- Sheets API: `sheets.spreadsheets.values.batchUpdate()` for multi-cell updates with `USER_ENTERED` mode
 
-### Root Causes
+## Original Plan
 
-1. **USD amount tolerance:** `amountsMatchCrossCurrency()` at `src/utils/exchange-rate.ts:328-332` calls `amountsMatch(facturaAmount, pagoAmount)` with default tolerance $1. International wire fees ($10-30) cause mismatches.
+### Task 1: Add write capabilities to gdrive MCP server
+**Linear Issue:** [ADV-136](https://linear.app/lw-claude/issue/ADV-136/add-write-capabilities-to-gdrive-mcp-server-gsheets_update-move-rename)
 
-2. **USD date range:** `FacturaPagoMatcher` at `src/matching/matcher.ts:111` uses single `dateRangeAfter` (60 days). International USD payments can take 75+ days.
+Adds three new MCP tools: `gsheets_update` (batch cell updates), `gdrive_move_file`, `gdrive_rename_file`. Upgrades auth scopes from read-only to read-write.
 
-3. **Name punctuation:** `normalizeString()` at `src/matching/matcher.ts:43-49` strips accents but not punctuation. "FRITO PLAY, LLC" vs "Frito Play LLC" fails substring match.
+No TDD — MCP tools are external integrations with no test infrastructure in `mcp-gdrive/`. Verified via manual testing after implementation.
 
-4. **Missing retencion matching:** `runMatching()` at `src/processing/matching/index.ts:29-193` has 4 matching steps but none for retenciones→facturas. Schema has columns N:O (matchedFacturaFileId, matchConfidence) but they're never populated.
+**Subtasks:**
 
-5. **No manual lock:** No mechanism exists to prevent automatic matching from overwriting user-confirmed matches. The `matchConfidence` column already exists on all matching sheets — adding a `MANUAL` value avoids schema changes.
+1. Upgrade auth scopes in `mcp-gdrive/auth.ts`:
+   - `drive.readonly` → `drive` (enables file move/rename)
+   - `spreadsheets.readonly` → `spreadsheets` (enables cell updates)
 
-#### Related Code
+2. Add new input types in `mcp-gdrive/tools/types.ts`:
+   - `GSheetsUpdateInput`: `{ spreadsheetId, updates: Array<{ range, value }> }`
+   - `GDriveMoveFileInput`: `{ fileId, newParentFolderId }`
+   - `GDriveRenameFileInput`: `{ fileId, newName }`
 
-**Fix 1 (USD tolerance):**
-- `src/utils/exchange-rate.ts:319-375` — `amountsMatchCrossCurrency()`: same-currency path at line 328-332 calls `amountsMatch` with implicit $1 tolerance
-- `src/utils/numbers.ts:233-246` — `amountsMatch()`: accepts `tolerance` param (default 1)
-- `src/matching/matcher.ts:142-153` — `findMatches()` calls `amountsMatchCrossCurrency` without USD tolerance
-- `src/matching/matcher.ts:91-114` — `FacturaPagoMatcher` constructor: takes `crossCurrencyTolerancePercent` but no same-currency tolerance
-- `src/config.ts:164-167` — Config interface: has `usdArsTolerancePercent` but no USD same-currency tolerance
+3. Create `mcp-gdrive/tools/gsheets_update.ts`:
+   - Uses `sheets.spreadsheets.values.batchUpdate()` with `USER_ENTERED` valueInputOption
+   - Takes array of `{ range, value }` pairs (A1 notation, e.g., `"'Facturas Emitidas'!P5"`)
+   - Returns count of updated cells + confirmation
 
-**Fix 2 (USD date range):**
-- `src/matching/matcher.ts:107-112` — date ranges set at construction time, single `dateRangeAfter` for LOW tier
-- `src/matching/matcher.ts:162-169` — `isWithinLowRange` check uses single range for all currencies
-- `src/config.ts:165-166` — `matchDaysBefore`/`matchDaysAfter` (single value, no per-currency)
-- `src/processing/matching/factura-pago-matcher.ts:405-408` — matcher constructed with `config.matchDaysAfter`
+4. Create `mcp-gdrive/tools/gdrive_move_file.ts`:
+   - Uses `drive.files.get()` to get current parents
+   - Uses `drive.files.update()` with `addParents` + `removeParents`
+   - Returns new file location info
+   - Include `supportsAllDrives: true` per existing pattern
 
-**Fix 3 (Name punctuation):**
-- `src/matching/matcher.ts:43-49` — `normalizeString()`: strips accents via NFD, but no punctuation removal
-- `src/matching/matcher.ts:217-248` — name matching: uses `normalizeString` then `.includes()` comparison
+5. Create `mcp-gdrive/tools/gdrive_rename_file.ts`:
+   - Uses `drive.files.update()` with `requestBody: { name }`
+   - Returns old name → new name confirmation
+   - Include `supportsAllDrives: true`
 
-**Fix 4 (Retencion matching):**
-- `src/processing/matching/index.ts:29-193` — `runMatching()`: no retencion step
-- `src/processing/matching/nc-factura-matcher.ts` — model for non-cascading matcher (CUIT + amount matching)
-- `src/constants/spreadsheet-headers.ts:96-112` — `RETENCIONES_RECIBIDAS_HEADERS`: columns N (matchedFacturaFileId) and O (matchConfidence) at indices 13-14
-- `src/types/index.ts` — `Retencion` type: has `matchedFacturaFileId?` and `matchConfidence?` fields
+6. Register all 3 tools in `mcp-gdrive/tools/index.ts`
 
-**Fix 5 (matchConfidence=MANUAL locking):**
-- `src/types/index.ts:69` — `MatchConfidence` type: add `'MANUAL'` to the union
-- `src/utils/validation.ts:383-388` — `validateMatchConfidence()`: add `'MANUAL'` to `validLevels` array
-- `src/matching/matcher.ts:54-86` — `compareMatchQuality()` and `confidenceOrder`: add `MANUAL: 4` (highest)
-- `src/matching/matcher.ts:250-287` — `findMatches()`: skip facturas where `matchConfidence === 'MANUAL'`
-- `src/processing/matching/factura-pago-matcher.ts:390` — `unmatchedPagos` filter: exclude `matchConfidence === 'MANUAL'`
-- `src/processing/matching/recibo-pago-matcher.ts:346` — same MANUAL skip pattern for recibos and pagos
-- `src/processing/matching/nc-factura-matcher.ts` — same MANUAL skip pattern for NCs and facturas
-- `src/bank/match-movimientos.ts:870-910` — bank matching loop: skip movimientos with `matchConfidence === 'MANUAL'`
-- No schema changes needed — `matchConfidence` column already exists in all matching sheets (Ingresos, Egresos, Movimientos)
+7. Add permissions in `.claude/settings.json`:
+   - `mcp__gdrive__gsheets_update`
+   - `mcp__gdrive__gdrive_move_file`
+   - `mcp__gdrive__gdrive_rename_file`
 
-### Impact
-- 4 out of 11 Pagos Recibidos in staging fail to match (36% miss rate)
-- All retenciones fail to match (100% miss rate)
-- Matched pagos get MEDIUM instead of HIGH due to punctuation (reduced confidence)
-- Users cannot lock manual corrections — risk of overwrite on next scan
+### Task 2: Create manual-match skill
+**Linear Issue:** [ADV-137](https://linear.app/lw-claude/issue/ADV-137/create-manual-match-skill-for-document-matching-file-moves-and-renames)
 
-## Fix Plan
+Create `.claude/skills/manual-match/SKILL.md` — a user-invocable skill for manually matching documents across Control de Ingresos and Control de Egresos spreadsheets.
 
-### Fix 1: Add $30 same-currency tolerance for USD matching
-**Linear Issue:** [ADV-127](https://linear.app/lw-claude/issue/ADV-127/add-dollar30-same-currency-tolerance-for-usd-factura-pago-matching)
+No TDD — this is a skill file (markdown instructions), not TypeScript code.
 
-1. Write tests in `src/utils/exchange-rate.test.ts`:
-   - Test `amountsMatchCrossCurrency` with USD/USD: $1780 vs $1800 should match with tolerance=30
-   - Test USD/USD: $1780 vs $1800 should NOT match with default tolerance=1
-   - Test ARS/ARS: amounts must still use $1 tolerance (unchanged)
-   - Run `verifier` filtered — expect fail
+**Skill frontmatter:**
+- `name: manual-match`
+- `description`: Triggers on "manual match", "fix match", "unmatch", "link factura", "link pago", "show unmatched", "review matches", "move file", "rename file", "fix document"
+- `disable-model-invocation: true` (has side effects — writes to spreadsheets, moves/renames files)
+- `allowed-tools`: Read, Glob, Grep, all `mcp__gdrive__*` tools (search, read, list, get_pdf, gsheets_read, gsheets_update, gdrive_move_file, gdrive_rename_file)
+- Does NOT include `mcp__gemini__*` — Claude reads/analyzes documents directly via `gdrive_read_file` or `gdrive_get_pdf` + Read tool
 
-2. Add `sameCurrencyUsdTolerance` optional param to `amountsMatchCrossCurrency()` in `src/utils/exchange-rate.ts`:
-   - Signature: add `sameCurrencyUsdTolerance?: number` (default 1)
-   - In same-currency path (line 328-332): when both are USD, use `amountsMatch(facturaAmount, pagoAmount, sameCurrencyUsdTolerance)`; when ARS, keep default $1
+**Skill workflow (embedded in SKILL.md):**
 
-3. Add `USD_SAME_CURRENCY_TOLERANCE = 30` constant in `src/config.ts`
+1. **Environment selection** — Read `.env` for `DRIVE_ROOT_FOLDER_ID_PRODUCTION` and `DRIVE_ROOT_FOLDER_ID_STAGING`. If both exist, ask user which environment. Use the selected root folder for all subsequent Drive queries.
 
-4. Thread through `FacturaPagoMatcher`:
-   - Add `sameCurrencyUsdTolerance` constructor param in `src/matching/matcher.ts`
-   - Pass to `amountsMatchCrossCurrency()` call at line 142
-   - In `src/processing/matching/factura-pago-matcher.ts:405-408`: pass `USD_SAME_CURRENCY_TOLERANCE` to matcher constructor
+2. **Find spreadsheets** — Use `gdrive_list_folder` on root folder to locate `Control de Ingresos` and `Control de Egresos` spreadsheet IDs.
 
-5. Write test in `src/matching/matcher.test.ts`:
-   - Test FacturaPagoMatcher finds match for USD pago $1780 vs USD factura $1800
-   - Run `verifier` filtered — expect pass
+3. **Interpret user request** — Parse `$ARGUMENTS` to determine action:
+   - **Show unmatched**: Read relevant sheet(s), filter rows where matchedFileId is empty
+   - **Show low-confidence**: Filter rows where matchConfidence is MEDIUM or LOW
+   - **Show needs review**: Filter rows where needsReview is TRUE
+   - **Match documents**: User specifies two documents to link (by nroFactura, fileId, CUIT, name, row number)
+   - **Unmatch**: Clear match columns on both sides of a link
+   - **Move file**: Move a file to a different folder (requires explicit confirmation)
+   - **Rename file**: Rename a file (requires explicit confirmation)
+   - **Scoped queries**: Filter by sheet name, date range, CUIT, company name, amount range
 
-### Fix 2: Extend LOW date range to 90 days for USD factura matching
-**Linear Issue:** [ADV-128](https://linear.app/lw-claude/issue/ADV-128/extend-low-date-range-to-90-days-for-usd-factura-matching)
+4. **Matching operations** — For each match type, update BOTH sides of the link and set `matchConfidence=MANUAL`:
 
-1. Write tests in `src/matching/matcher.test.ts`:
-   - Test FacturaPagoMatcher matches USD factura at 75 days distance with usdDaysAfter=90
-   - Test ARS factura at 75 days distance is NOT matched (keeps 60-day range)
-   - Run `verifier` filtered — expect fail
+   **Ingresos — Factura Emitida ↔ Pago Recibido:**
+   - FE: col P = pago fileId, col Q = MANUAL
+   - PR: col N = factura fileId, col O = MANUAL
 
-2. Add `MATCH_DAYS_AFTER_USD` env var and `usdMatchDaysAfter` to Config:
-   - `src/config.ts`: add `usdMatchDaysAfter: number` to Config interface
-   - In `getConfig()`: read `MATCH_DAYS_AFTER_USD` env var (default 90)
-   - Add env var documentation to CLAUDE.md
+   **Ingresos — Retencion Recibida → Factura Emitida:**
+   - RR: col N = factura fileId, col O = MANUAL
 
-3. Modify `FacturaPagoMatcher` in `src/matching/matcher.ts`:
-   - Add `usdDateRangeAfter` constructor param (default same as `dateRangeAfter`)
-   - Store as `this.dateRanges.lowUsd: { before, after }` alongside existing `this.dateRanges.low`
-   - In `findMatches()`: after line 164, compute `isWithinLowRange` using `lowUsd` range when `factura.moneda === 'USD'`, standard `low` range otherwise
-   - HIGH and MEDIUM ranges stay the same for all currencies
+   **Egresos — Factura Recibida ↔ Pago Enviado:**
+   - FR: col P = pago fileId, col Q = MANUAL, col S = SI
+   - PE: col N = factura fileId, col O = MANUAL
 
-4. Pass `config.usdMatchDaysAfter` from `factura-pago-matcher.ts` matcher construction (line 405-408)
-   - Run `verifier` filtered — expect pass
+   **Egresos — Recibo ↔ Pago Enviado:**
+   - R: col Q = pago fileId, col R = MANUAL
+   - PE: col N = recibo fileId, col O = MANUAL
 
-### Fix 3: Improve name matching by stripping punctuation
-**Linear Issue:** [ADV-129](https://linear.app/lw-claude/issue/ADV-129/improve-name-matching-by-stripping-punctuation-in-normalizestring)
+5. **Unmatch** — Clear match columns (empty string) on both sides. For Factura Recibida, also clear `pagada` (col S).
 
-1. Write tests in `src/matching/matcher.test.ts`:
-   - Test: "FRITO PLAY, LLC" matches "Frito Play LLC" (comma stripped)
-   - Test: "S.R.L." matches "SRL" (periods stripped)
-   - Test: "Empresa (Argentina)" matches "Empresa Argentina" (parens stripped)
-   - Run `verifier` filtered — expect fail
+6. **File operations** — For move/rename:
+   - Show current file location/name and proposed change
+   - Require explicit user confirmation before executing
+   - Use `gdrive_move_file` or `gdrive_rename_file` MCP tools
 
-2. Modify `normalizeString()` in `src/matching/matcher.ts:43-49`:
-   - Add `.replace(/[.,\-_()]/g, '')` after accent removal
-   - Add `.replace(/\s+/g, ' ')` to collapse multiple spaces from removed chars
-   - Final `.trim()`
-   - Run `verifier` filtered — expect pass
+7. **Verification** — After any write operation, re-read the affected rows to confirm changes applied correctly. Report the before/after state.
 
-### Fix 4: Implement retencion→factura matching
-**Linear Issue:** [ADV-130](https://linear.app/lw-claude/issue/ADV-130/implement-retencionfactura-matching-in-runmatching-pipeline)
+**Embedded schema reference** — The skill includes a condensed column mapping table so Claude can construct correct A1 notation ranges without needing to re-read SPREADSHEET_FORMAT.md each time.
 
-1. Write tests in new `src/processing/matching/retencion-factura-matcher.test.ts`:
-   - Test: retencion with matching CUIT + montoComprobante = importeTotal → match with HIGH confidence
-   - Test: retencion with matching CUIT but different amount → no match
-   - Test: retencion with different CUIT → no match
-   - Test: already-matched retencion → skip (don't re-match)
-   - Test: date outside 90-day window → no match
-   - Run `verifier` filtered — expect fail
+### Task 3: Update CLAUDE.md with new MCP tools and skill
+**Linear Issue:** [ADV-138](https://linear.app/lw-claude/issue/ADV-138/update-claudemd-with-new-mcp-tools-and-manual-match-skill)
 
-2. Create `src/processing/matching/retencion-factura-matcher.ts`:
-   - Follow the `nc-factura-matcher.ts` pattern (non-cascading, direct matching)
-   - Export `matchRetencionesWithFacturas(spreadsheetId: string): Promise<Result<number, Error>>`
-   - Read Retenciones Recibidas (A:O or A:P if matchManual added) and Facturas Emitidas (A:S or A:T)
-   - For each unmatched retencion:
-     - Find facturas where `cuitReceptor === cuitAgenteRetencion`
-     - Check `montoComprobante === importeTotal` (using `amountsMatch` with $1 tolerance — retenciones are always ARS)
-     - Check date: retencion `fechaEmision` within 0-90 days after factura `fechaEmision`
-     - Set confidence: CUIT match + amount match + close date → HIGH; CUIT match + amount only → MEDIUM
-   - Write to Retenciones columns N:O (matchedFacturaFileId, matchConfidence)
-   - Use `batchUpdate()` for writes, same pattern as nc-factura-matcher
+1. Add to MCP SERVERS → Google Drive section:
+   - `gsheets_update` — write to spreadsheet cells (used ONLY by `manual-match` skill)
+   - `gdrive_move_file` — move files between folders (used ONLY by `manual-match` skill)
+   - `gdrive_rename_file` — rename files (used ONLY by `manual-match` skill)
+   - Note: these write tools are restricted to the `manual-match` skill via `allowed-tools`
 
-3. Add to `runMatching()` in `src/processing/matching/index.ts`:
-   - Import `matchRetencionesWithFacturas`
-   - Add as step 5 after NC matching (around line 155), reading from `folderStructure.controlIngresosId`
-   - Re-export from index.ts
+2. Add `manual-match` to the SKILLS table:
+   - Description: Manually match documents, fix matches, move/rename files. Use when user says "manual match", "fix match", "unmatch", "show unmatched", "move file", "rename file".
 
-4. Update `src/processing/matching/index.ts` exports
-   - Run `verifier` filtered — expect pass
-
-### Fix 5: Use matchConfidence=MANUAL to lock manual matches
-**Linear Issue:** [ADV-131](https://linear.app/lw-claude/issue/ADV-131/add-matchmanual-column-to-all-matching-sheets-for-manual-match-locking)
-
-**No migration needed.** Reuses existing `matchConfidence` column in all 6 sheets. Users set `matchConfidence` to `MANUAL` in the spreadsheet to lock a match. No schema changes, no new columns.
-
-**Semantics:**
-- Empty `matchConfidence` → unmatched (can be matched automatically)
-- `HIGH` / `MEDIUM` / `LOW` → automatic match (can be displaced by better match)
-- `MANUAL` → user-confirmed match (never displaced, never cleared by matchers)
-
-1. Write tests in `src/processing/matching/factura-pago-matcher.test.ts`:
-   - Test: pago with `matchConfidence='MANUAL'` is excluded from unmatched pool (treated as matched)
-   - Test: factura with `matchConfidence='MANUAL'` is never displaced even if a better automatic match exists
-   - Test: the displaced pago from a MANUAL factura is not "unmatched" (MANUAL factura's matchedPagoFileId is never cleared)
-   - Run `verifier` filtered — expect fail
-
-2. Update `MatchConfidence` type in `src/types/index.ts:69`:
-   - Change from `'HIGH' | 'MEDIUM' | 'LOW'` to `'HIGH' | 'MEDIUM' | 'LOW' | 'MANUAL'`
-
-3. Update `validateMatchConfidence()` in `src/utils/validation.ts:383-388`:
-   - Add `'MANUAL'` to the `validLevels` array
-
-4. Update `compareMatchQuality()` in `src/matching/matcher.ts:54-86`:
-   - Add `MANUAL: 4` to the `confidenceOrder` map (highest priority)
-   - This ensures MANUAL matches are never considered "worse" than any automatic match
-
-5. Update `FacturaPagoMatcher.findMatches()` in `src/matching/matcher.ts`:
-   - Skip facturas with `matchConfidence === 'MANUAL'` — do not generate candidates for them (they are locked)
-   - This is the key guard: MANUAL facturas are invisible to the matcher
-
-6. Update `src/processing/matching/factura-pago-matcher.ts`:
-   - In unmatched pago filter (line 390): add `&& p.matchConfidence !== 'MANUAL'` — pagos with MANUAL are already locked
-   - In displacement logic: already handled by step 5 (MANUAL facturas won't appear as candidates), but also guard against displacing a pago that has MANUAL on its side
-
-7. Write tests in `src/processing/matching/recibo-pago-matcher.test.ts`:
-   - Test: recibo with `matchConfidence='MANUAL'` is not re-matched
-   - Test: pago with `matchConfidence='MANUAL'` is excluded from unmatched pool
-   - Run `verifier` filtered — expect fail
-
-8. Update `src/processing/matching/recibo-pago-matcher.ts`:
-   - Same MANUAL skip pattern: exclude MANUAL recibos and MANUAL pagos from matching
-
-9. Update `src/processing/matching/nc-factura-matcher.ts`:
-   - Same MANUAL skip pattern for NCs and facturas
-
-10. Update `src/processing/matching/retencion-factura-matcher.ts` (from Fix 4):
-    - Build with MANUAL support from the start — skip retenciones and facturas with MANUAL confidence
-
-11. Write tests in `src/bank/match-movimientos.test.ts`:
-    - Test: movimiento row with `matchConfidence='MANUAL'` is not re-matched (skipped entirely)
-    - Run `verifier` filtered — expect fail
-
-12. Update `src/bank/match-movimientos.ts`:
-    - In the main matching loop (around line 870-910): when a movimiento already has a match and `matchConfidence === 'MANUAL'`, skip it entirely — do not evaluate candidates or call `isBetterMatch()`
-    - The `isBetterMatch()` function itself doesn't need changes — the guard is at the row level before it's called
-
-13. Update `SPREADSHEET_FORMAT.md` and `CLAUDE.md` with MANUAL confidence documentation
-    - Run `verifier` — expect pass
+3. Add a note in the Google Drive MCP section that `manual-match` is the ONLY skill authorized to write to spreadsheets or move/rename files.
 
 ## Post-Implementation Checklist
-1. Run `bug-hunter` agent - Review changes for bugs
-2. Run `verifier` agent - Verify all tests pass and zero warnings
+1. Run `bug-hunter` agent — Review changes for bugs
+2. Run `verifier` agent — Verify all tests pass and zero warnings
 
 ---
 
 ## Plan Summary
 
-**Problem:** Pagos Recibidos and Retenciones don't match in staging due to strict USD amount tolerance ($1), short date range (60 days), punctuation-sensitive name matching, missing retencion matching logic, and no manual match locking.
+**Objective:** Create a manual-match skill with spreadsheet write and file management capabilities
 
-**Root Cause:** Five independent issues: (1) same-currency USD tolerance too tight for wire transfer fees, (2) LOW date range too short for international payments, (3) punctuation not stripped in name normalization, (4) retencion→factura matching never implemented, (5) no mechanism to lock manual matches.
+**Request:** Create a skill for Claude Code to help with manual matching of documents in Control de Ingresos/Egresos, with environment selection (staging/production), scoped queries, and file move/rename with confirmation. Add write capabilities to the gdrive MCP server.
 
-**Linear Issues:** ADV-127, ADV-128, ADV-129, ADV-130, ADV-131
+**Linear Issues:** ADV-136, ADV-137, ADV-138
 
-**Solution Approach:** Add $30 USD same-currency tolerance and 90-day LOW range for USD facturas. Strip punctuation in normalizeString for better name matching. Create new retencion-factura-matcher following the NC matcher pattern. Use existing `matchConfidence` column with new `MANUAL` value to lock matches — no new columns or schema migration needed.
+**Approach:** Add three new MCP tools (gsheets_update, gdrive_move_file, gdrive_rename_file) to the existing custom gdrive MCP server by upgrading auth scopes and creating new tool files following the existing pattern. Create a manual-match skill that orchestrates reading spreadsheet data, identifying unmatched/low-confidence documents, and writing manual matches with MANUAL confidence locking.
 
 **Scope:**
-- Files affected: ~13 (matchers, bank matcher, config, types, validation, exchange-rate, SPREADSHEET_FORMAT.md, CLAUDE.md)
-- New tests: yes (all 5 fixes)
-- New file: `src/processing/matching/retencion-factura-matcher.ts` + test
-- Breaking changes: no — `MANUAL` is a new value in existing column, no schema changes
+- Tasks: 3
+- Files affected: ~9 (3 new MCP tools + types + index + auth + settings.json + skill + CLAUDE.md)
+- New tests: no (MCP tools are external integrations; skill is markdown)
+
+**Key Decisions:**
+- Auth scopes upgraded to full drive + spreadsheets (necessary for write operations)
+- `gsheets_update` uses batch update with array of {range, value} pairs for atomic multi-cell updates
+- File move/rename require explicit user confirmation in the skill
+- Claude reads documents directly (no Gemini) when analysis is needed
+- Skill is the ONLY write-capable tool user, enforced via `allowed-tools` + CLAUDE.md documentation
 
 **Risks/Considerations:**
-- Retencion matching for multi-factura cases (montoComprobante = sum of multiple facturas) is deferred — first implementation matches 1:1 only
-- USD tolerance of $30 could theoretically match wrong documents if two USD facturas have amounts within $30 of each other for the same client — mitigated by CUIT/name matching tiers
-- Users must manually type `MANUAL` in the matchConfidence column — consider documenting in OPERATION-MANUAL.es.md
-
----
-
-## Iteration 1
-
-**Implemented:** 2026-02-23
-**Method:** Agent team (3 workers, worktree-isolated)
-
-### Tasks Completed This Iteration
-- Fix 1 (ADV-127): Add $30 same-currency USD tolerance — `sameCurrencyUsdTolerance` param in exchange-rate.ts, `USD_SAME_CURRENCY_TOLERANCE=30` constant (worker-1)
-- Fix 2 (ADV-128): Extend LOW date range to 90 days for USD — `usdMatchDaysAfter` config, `lowUsd` date range in matcher (worker-1)
-- Fix 3 (ADV-129): Punctuation stripping in normalizeString — commas, periods, hyphens, underscores, parens stripped (worker-1)
-- Fix 4 (ADV-130): Retencion→factura matcher — new `retencion-factura-matcher.ts` with CUIT + amount + date matching, added as step 5 in runMatching pipeline (worker-2)
-- Fix 5 (ADV-131): MANUAL match locking — `MANUAL` added to MatchConfidence type, all 6 matchers skip MANUAL rows, docs updated (worker-3 + worker-2 step 10)
-
-### Files Modified
-- `src/utils/exchange-rate.ts` — sameCurrencyUsdTolerance param
-- `src/utils/exchange-rate.test.ts` — USD tolerance tests
-- `src/config.ts` — USD_SAME_CURRENCY_TOLERANCE, usdMatchDaysAfter
-- `src/matching/matcher.ts` — lowUsd range, sameCurrencyUsdTolerance, punctuation stripping, MANUAL:4 in confidenceOrder, MANUAL guards
-- `src/matching/matcher.test.ts` — USD tolerance, date range, punctuation tests
-- `src/processing/matching/factura-pago-matcher.ts` — new matcher params, MANUAL guard
-- `src/processing/matching/factura-pago-matcher.test.ts` — MANUAL locking tests
-- `src/processing/matching/recibo-pago-matcher.ts` — MANUAL guard
-- `src/processing/matching/recibo-pago-matcher.test.ts` — MANUAL locking tests
-- `src/processing/matching/nc-factura-matcher.ts` — MANUAL guard
-- `src/processing/matching/nc-factura-matcher.test.ts` — MANUAL locking tests
-- `src/processing/matching/retencion-factura-matcher.ts` — NEW: retencion-factura matching with MANUAL support
-- `src/processing/matching/retencion-factura-matcher.test.ts` — NEW: 16 tests
-- `src/processing/matching/index.ts` — step 5: retencion matching
-- `src/bank/match-movimientos.ts` — MANUAL guard for movimientos
-- `src/bank/match-movimientos.test.ts` — MANUAL locking test
-- `src/types/index.ts` — MANUAL in MatchConfidence, matchConfidence in MovimientoRow
-- `src/utils/validation.ts` — MANUAL in validateMatchConfidence
-- `SPREADSHEET_FORMAT.md` — MANUAL confidence documentation
-- `CLAUDE.md` — MANUAL Confidence Lock section, MATCH_DAYS_AFTER_USD env var
-- `src/middleware/auth.test.ts`, `src/routes/scan.test.ts`, `src/routes/status.test.ts`, `src/server.test.ts` — Config mock updates
-
-### Linear Updates
-- ADV-127: Todo → In Progress → Review
-- ADV-128: Todo → In Progress → Review
-- ADV-129: Todo → In Progress → Review
-- ADV-130: Todo → In Progress → Review
-- ADV-131: Todo → In Progress → Review
-
-### Pre-commit Verification
-- bug-hunter: Found 4 issues (2 medium, 2 low) — all fixed before proceeding
-- verifier: All 1,792 tests pass, zero warnings
-
-### Work Partition
-- Worker 1: Fix 1, Fix 2, Fix 3 (matcher improvements — USD tolerance, date range, punctuation)
-- Worker 2: Fix 4, Fix 5 step 10 (retencion-factura matcher with MANUAL support)
-- Worker 3: Fix 5 steps 1-9, 11-13 (MANUAL locking across all existing matchers + docs)
-
-### Merge Summary
-- Worker 3: fast-forward (foundation — types, validation, all existing matcher guards)
-- Worker 2: auto-merge, 1 conflict in matcher.ts (duplicate MANUAL key — resolved, kept MANUAL:4)
-- Worker 1: auto-merge (no conflicts — orthogonal matcher improvements)
-
-### Continuation Status
-All tasks completed.
-
-### Review Findings
-
-Summary: 4 issue(s) found, fixed inline (Team: security, reliability, quality reviewers)
-- FIXED INLINE: 4 issue(s) — verified via TDD + bug-hunter
-
-**Issues fixed inline:**
-- [HIGH] BUG: MANUAL lock for movimientos was dead code — removed dead guard from `match-movimientos.ts`, removed `matchConfidence` from `MovimientoRow` type, removed orphaned test, updated CLAUDE.md + SPREADSHEET_FORMAT.md
-- [MEDIUM] TEST: MANUAL pago exclusion test didn't test production function — rewrote to call `matchFacturasWithPagos` end-to-end with mocked sheets (`factura-pago-matcher.test.ts`)
-- [LOW] TEST: Missing multi-retencion same factura test — added test verifying two retenciones with different impuesto types both match the same factura (`retencion-factura-matcher.test.ts`)
-- [LOW] TEST: Timing test assertion was a tautology — replaced with simple completion assertions, constant-time guaranteed by `crypto.timingSafeEqual` (`auth.test.ts`)
-
-**Discarded findings (not bugs):**
-- [DISCARDED] SECURITY: Internal error messages returned verbatim in API responses — internal API, authenticated, standard practice for internal APIs
-- [DISCARDED] CONVENTION: Identical debug log messages across success/error paths in exchange-rate.ts — style-only, zero correctness impact
-- [DISCARDED] TYPE: `result.reason` logged without coercing to string in prefetchExchangeRates — Pino handles arbitrary objects, rejected reasons are typically Error objects
-- [DISCARDED] TYPE: `displaced.document as Pago` unsafe cast — correct in context, only Pago objects are enqueued in the displacement queue
-- [DISCARDED] CONVENTION: Map key used instead of `update.facturaFileId` — functionally equivalent, key IS the facturaFileId
-
-### Linear Updates
-- ADV-127: Review → Merge (original task)
-- ADV-128: Review → Merge (original task)
-- ADV-129: Review → Merge (original task)
-- ADV-130: Review → Merge (original task)
-- ADV-131: Review → Merge (original task)
-- ADV-132: Created in Merge (Fix: removed MANUAL dead code from movimientos — fixed inline)
-- ADV-133: Created in Merge (Fix: rewrote MANUAL pago test to use production function — fixed inline)
-- ADV-134: Created in Merge (Fix: added multi-retencion same factura test — fixed inline)
-- ADV-135: Created in Merge (Fix: replaced tautological timing assertion — fixed inline)
-
-### Inline Fix Verification
-- Unit tests: 1,792 pass, zero warnings
-- Bug-hunter: 1 actionable finding (removed non-existent config property from test), fixed
-
-<!-- REVIEW COMPLETE -->
-
----
-
-## Status: COMPLETE
-
-All tasks implemented and reviewed successfully. All Linear issues moved to Merge.
+- Scope upgrade from read-only to read-write on Drive and Sheets — mitigated by restricting write tools to `manual-match` skill only
+- Wrong cell updates could corrupt spreadsheet data — mitigated by verification step (re-read after write)
+- Moving files to wrong folder — mitigated by confirmation requirement in skill
