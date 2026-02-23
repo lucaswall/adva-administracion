@@ -208,6 +208,51 @@ Summary: 2 issue(s) found (Team: security, reliability, quality reviewers)
 
 ---
 
+## Iteration 2
+
+**Implemented:** 2026-02-23
+**Method:** Single-agent (Fix Plan from review)
+
+### Tasks Completed This Iteration
+- Fix 1 (ADV-125): Add reprocessing path to recibo-store and retencion-store — added `findRowByFileId`, `buildReciboRow`/`buildRetencionRow`, reprocessing check before duplicate check, `StoreResult` return type
+- Fix 2 (ADV-126): Add missing withLock mock to 3 test files — added `vi.mock('../../utils/concurrency.js', ...)` to pago-store.test.ts, recibo-store.test.ts, retencion-store.test.ts
+- Bug-hunter fixes: Fixed duplicate detection tests to use `mockResolvedValueOnce` chains (recibo-store.test.ts, retencion-store.test.ts), fixed retencion-store.ts append path to use `generateRetencionFileName` instead of `retencion.fileName`
+
+### Files Modified
+- `src/processing/storage/recibo-store.ts` — Added reprocessing path (findRowByFileId, buildReciboRow, batchUpdate), StoreResult return type
+- `src/processing/storage/recibo-store.test.ts` — Added withLock mock, reprocessing tests, fixed duplicate detection mocks
+- `src/processing/storage/retencion-store.ts` — Added reprocessing path (findRowByFileId, buildRetencionRow, batchUpdate), StoreResult return type, fixed append path fileName
+- `src/processing/storage/retencion-store.test.ts` — Added withLock mock, reprocessing tests, fixed duplicate detection mocks
+- `src/processing/storage/pago-store.test.ts` — Added withLock mock
+
+### Linear Updates
+- ADV-125: Todo → In Progress → Review → Merge
+- ADV-126: Todo → In Progress → Review → Merge
+
+### Pre-commit Verification
+- bug-hunter: Passed — no bugs found (second run after fixing 3 bugs from first run)
+- verifier: All 1,755 tests pass, zero warnings
+
+### Review Findings
+
+Files reviewed: 5
+Checks applied: Security, Logic, Async, Resources, Type Safety, Conventions
+
+No issues found after bug-hunter fixes — all implementations correct and follow project conventions.
+
+<!-- REVIEW COMPLETE -->
+
+### Continuation Status
+All tasks completed.
+
+---
+
+## Status: COMPLETE
+
+All tasks implemented and reviewed successfully. All Linear issues moved to Merge.
+
+---
+
 ## Plan Summary
 
 **Problem:** All monetary values in production spreadsheets are stored as text strings instead of numbers, caused by `formatUSCurrency()` returning formatted strings. Reprocessed rows additionally lose their fileName hyperlink and have unformatted timestamps.

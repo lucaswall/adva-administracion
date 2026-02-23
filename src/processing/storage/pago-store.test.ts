@@ -46,6 +46,18 @@ vi.mock('../../services/status-sheet.js', () => ({
   }),
 }));
 
+// Mock concurrency module — transparent withLock that runs callback directly
+vi.mock('../../utils/concurrency.js', () => ({
+  withLock: vi.fn(async (_key: string, fn: () => Promise<unknown>) => {
+    try {
+      const result = await fn();
+      return { ok: true, value: result };
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error : new Error(String(error)) };
+    }
+  }),
+}));
+
 import { appendRowsWithLinks, sortSheet, getValues, batchUpdate } from '../../services/sheets.js';
 
 const createTestPago = (overrides: Partial<Pago> = {}): Pago => ({
