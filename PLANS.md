@@ -148,6 +148,64 @@ For the `batchUpdate` path, additional issues exist: no hyperlink formula for fi
 ### Continuation Status
 All tasks completed.
 
+### Review Findings
+
+Summary: 2 issue(s) found (Team: security, reliability, quality reviewers)
+- FIX: 2 issue(s) — Linear issues created
+- DISCARDED: 6 finding(s) — false positives / not applicable
+
+**Issues requiring fix:**
+- [MEDIUM] BUG: Missing reprocessing path in recibo-store.ts / retencion-store.ts — `storeRecibo` and `storeRetencion` lack `findRowByFileId` check; reprocessed files are incorrectly marked as duplicates instead of updated in-place (ADV-125)
+- [MEDIUM] TEST: Missing `withLock` mock in pago-store.test.ts, recibo-store.test.ts, retencion-store.test.ts — tests use real lock implementation with shared mutable state, risking flakiness (ADV-126)
+
+**Discarded findings (not bugs):**
+- [DISCARDED] SECURITY: Lock key collision from malicious PDF fields — theoretical DoS at most, not exploitable; spreadsheet-based duplicate check remains intact
+- [DISCARDED] SECURITY: sheetName interpolation in range strings — all callers use hardcoded string literals, not exploitable
+- [DISCARDED] SECURITY: CUIT format validation — internal inputs from Gemini extraction, low risk
+- [DISCARDED] TEST: Missing error path tests in recibo-store.test.ts and retencion-store.test.ts — test coverage improvement, not a bug
+- [DISCARDED] CONVENTION: Module name 'retencion-store' instead of 'storage' in retencion-store.ts — style preference not enforced by CLAUDE.md
+- [DISCARDED] CONVENTION: Indentation inconsistency in factura-store.ts — style-only, zero correctness impact
+
+### Linear Updates
+- ADV-123: Review → Merge (original task)
+- ADV-124: Review → Merge (original task)
+- ADV-125: Created in Todo (Fix: Missing reprocessing path in recibo/retencion stores)
+- ADV-126: Created in Todo (Fix: Missing withLock mock in 3 test files)
+
+<!-- REVIEW COMPLETE -->
+
+---
+
+## Fix Plan
+
+**Source:** Review findings from Iteration 1
+**Linear Issues:** [ADV-125](https://linear.app/lw-claude/issue/ADV-125/add-reprocessing-path-findrowbyfileid-batchupdate-to-recibo-store-and), [ADV-126](https://linear.app/lw-claude/issue/ADV-126/add-missing-withlock-mock-to-pago-store-recibo-store-and-retencion)
+
+### Fix 1: Add reprocessing path to recibo-store and retencion-store
+**Linear Issue:** [ADV-125](https://linear.app/lw-claude/issue/ADV-125/add-reprocessing-path-findrowbyfileid-batchupdate-to-recibo-store-and)
+
+1. Write tests in `src/processing/storage/recibo-store.test.ts` and `src/processing/storage/retencion-store.test.ts`:
+   - Test that when `findRowByFileId` returns a matching row index, the store calls `batchUpdate` to update in-place instead of marking as duplicate
+   - Test that the reprocessing row includes raw numbers for monetary fields, `=HYPERLINK(...)` for fileName, and timezone-formatted processedAt
+   - Follow the reprocessing test patterns from `factura-store.test.ts` and `pago-store.test.ts`
+   - Run `verifier` filtered to storage tests — expect fail
+
+2. Add `findRowByFileId` check in `storeRecibo` (before the business-key duplicate check):
+   - Import `findRowByFileId` from sheets service
+   - If fileId already has a row, call `batchUpdate` with `buildReciboRow()` to update in-place
+   - Create `buildReciboRow(recibo, renamedFileName, timeZone?)` function following `buildPagoRow` pattern:
+     raw numbers for monetary fields, `createDriveHyperlink()` for fileName, timezone-formatted processedAt
+
+3. Add same reprocessing path in `storeRetencion`:
+   - Same pattern: `findRowByFileId` check + `buildRetencionRow()` + `batchUpdate`
+   - Run `verifier` filtered to storage tests — expect pass
+
+### Fix 2: Add missing withLock mock to 3 test files
+**Linear Issue:** [ADV-126](https://linear.app/lw-claude/issue/ADV-126/add-missing-withlock-mock-to-pago-store-recibo-store-and-retencion)
+
+1. Add `vi.mock('../../utils/concurrency.js', ...)` to `src/processing/storage/pago-store.test.ts`, `src/processing/storage/recibo-store.test.ts`, and `src/processing/storage/retencion-store.test.ts` — matching the pattern in `factura-store.test.ts`
+2. Run `verifier` filtered to storage tests — expect pass
+
 ---
 
 ## Plan Summary
