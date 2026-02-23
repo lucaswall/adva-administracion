@@ -178,6 +178,63 @@ describe('exchange-rate', () => {
       vi.clearAllMocks();
     });
 
+    describe('same-currency USD tolerance (ADV-127)', () => {
+      it('USD/USD: $1780 vs $1800 matches with sameCurrencyUsdTolerance=30', () => {
+        const result = amountsMatchCrossCurrency(
+          1800,
+          'USD',
+          '2024-01-15',
+          1780,
+          'USD',
+          5,
+          30
+        );
+        expect(result.matches).toBe(true);
+        expect(result.isCrossCurrency).toBe(false);
+      });
+
+      it('USD/USD: $1780 vs $1800 does NOT match with default tolerance=1', () => {
+        const result = amountsMatchCrossCurrency(
+          1800,
+          'USD',
+          '2024-01-15',
+          1780,
+          'USD',
+          5
+          // no sameCurrencyUsdTolerance → uses default 1
+        );
+        expect(result.matches).toBe(false);
+        expect(result.isCrossCurrency).toBe(false);
+      });
+
+      it('ARS/ARS: same amounts still match with default $1 tolerance (unchanged)', () => {
+        const result = amountsMatchCrossCurrency(
+          1210,
+          'ARS',
+          '2024-01-15',
+          1210,
+          'ARS',
+          5
+        );
+        expect(result.matches).toBe(true);
+        expect(result.isCrossCurrency).toBe(false);
+      });
+
+      it('ARS/ARS: amounts $1780 vs $1800 do NOT match (no tolerance for ARS)', () => {
+        const result = amountsMatchCrossCurrency(
+          1800,
+          'ARS',
+          '2024-01-15',
+          1780,
+          'ARS',
+          5,
+          30 // sameCurrencyUsdTolerance should only apply to USD, not ARS
+        );
+        expect(result.matches).toBe(false);
+        expect(result.isCrossCurrency).toBe(false);
+      });
+    });
+
     describe('same-currency matching (ADV-111)', () => {
       it('USD factura + USD pago with matching amounts → same-currency, no exchange rate', () => {
         // No exchange rate cache needed — should use direct comparison
