@@ -86,6 +86,7 @@ Skills are specialized workflows in `.claude/skills/`. Descriptions drive automa
 | `plan-implement` | Execute the pending plan in PLANS.md using an agent team for parallel implementation. Spawns workers in isolated git worktrees. Updates Linear issues: Todo→In Progress→Review. Falls back to single-agent mode if teams unavailable. |
 | `plan-review-implementation` | QA review using an agent team with 3 domain-specialized reviewers (security, reliability, quality). Moves issues Review→Merge. Creates new issues in Todo for bugs found. Falls back to single-agent mode if teams unavailable. |
 | `code-audit` | Audit codebase using an agent team with 3 domain-specialized reviewers. Creates Linear issues in Backlog. Falls back to single-agent mode if teams unavailable. |
+| `manual-match` | Manually match documents, fix matches, unmatch, show unmatched/low-confidence items, move files, rename files. Use when user says "manual match", "fix match", "unmatch", "show unmatched", "move file", "rename file". |
 | `deep-review` | Deep, focused analysis of a single feature or service area. Combines code correctness, security, data integrity, and performance in one unified Opus pass. Use when user says "deep review X". |
 | `pull-from-roadmap` | Deep research and discussion of a roadmap feature or new idea. Gathers context from codebase, web, APIs, MCPs, then presents analysis for discussion. |
 | `push-to-production` | Release to production: version bump, changelog, push to main + release, verify Railway production deploy, GitHub Release, Linear state transitions. Use when user says "push to production", "release", or "ship it". |
@@ -116,7 +117,9 @@ Allowed: `get-logs`, `list-deployments`, `list-services`, `list-variables`, `che
 - `generate-domain`
 
 ### Google Drive MCP
-`gdrive_search`, `gdrive_read_file`, `gdrive_list_folder`, `gdrive_get_pdf`, `gsheets_read`
+`gdrive_search`, `gdrive_read_file`, `gdrive_list_folder`, `gdrive_get_pdf`, `gsheets_read`, `gsheets_update`, `gdrive_move_file`, `gdrive_rename_file`
+
+**Write tools** (`gsheets_update`, `gdrive_move_file`, `gdrive_rename_file`) are restricted to the `manual-match` skill via `allowed-tools`. Do not use them outside that skill.
 
 ### Gemini MCP (PROMPT TESTING ONLY)
 `gemini_analyze_pdf` - **NOT for document analysis.** The agent can read PDFs directly using the Read tool.
