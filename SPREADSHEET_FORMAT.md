@@ -250,7 +250,7 @@ Folder: `{YYYY}/Bancos/{Broker} {Comitente}/`
 **Note:** Multi-currency accounts - both ARS and USD balances can be present.
 **Sorting**: Rows sorted by `periodo` (column A) ascending (oldest first)
 
-### Movimientos Bancario (Per-Month Sheets) - 8 columns, A:H
+### Movimientos Bancario (Per-Month Sheets) - 9 columns, A:I
 
 Each bank/card/broker spreadsheet has per-month sheets named `YYYY-MM` containing transactions.
 
@@ -264,6 +264,7 @@ Each bank/card/broker spreadsheet has per-month sheets named `YYYY-MM` containin
 | F | saldoCalculado | formula | Running balance calculation |
 | G | matchedFileId | string | Google Drive fileId of matched document |
 | H | detalle | string | Human-readable match description |
+| I | matchedType | string | Match type: `AUTO` (algorithmic), `MANUAL` (user-set), or empty (unmatched) |
 
 **Special Rows:**
 - `SALDO INICIAL` - Opening balance row (skipped in matching)
@@ -309,7 +310,7 @@ When a new potential match is found for a movimiento that already has a match:
 
 **Known Limitations:**
 1. **Year boundary**: Only processes current + previous year (e.g., 2025-2026). Late payments from 2+ years ago won't match automatically.
-2. **Multiple banks matching same document**: If two bank accounts both have movements matching the same Factura, both will show the same detalle (could be inter-account transfers or legitimate scenario).
+2. **Multiple banks matching same document**: Within a single bank, deduplication prevents the same document from matching multiple movements. Across different banks, the same document could still match if both banks process the same payment.
 3. **Partial payments**: If a Factura is paid in installments, only the first payment with matching retencion sum will match automatically. Subsequent payments need manual review.
 4. **Inter-bank transfers**: Transfers between ADVA's own accounts may match incorrectly. Pattern detection could be added in future.
 5. **Credit card refunds**: Refunds appearing as credits are not currently auto-detected. Future enhancement if needed.
@@ -431,7 +432,7 @@ Documents classified by ADVA's role (CUIT: 30709076783):
 - Automatic matching will never displace or overwrite a MANUAL match
 - MANUAL facturas/recibos are invisible to `FacturaPagoMatcher.findMatches()` and `ReciboPagoMatcher.findMatches()` — no pago can displace them
 - MANUAL pagos are excluded from the unmatched pool — they are treated as already matched
-- **Note:** Movimientos bancarios do NOT support MANUAL locking — their 8-column schema (A:H) has no matchConfidence column
+- **Movimientos bancarios:** MANUAL locking is supported via the `matchedType` column (I). Set `matchedType` to `MANUAL` and provide a `matchedFileId` — the system will auto-generate the `detalle` and exclude the document from automatic matching. MANUAL rows are never overwritten, even with `force=true`.
 
 ### Cross-References
 

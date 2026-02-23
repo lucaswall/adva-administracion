@@ -100,6 +100,8 @@ interface VersionableRow {
   matchedFileId: string;
   /** Human-readable match description */
   detalle: string;
+  /** Match type: 'AUTO' | 'MANUAL' | '' */
+  matchedType: string;
 }
 
 /**
@@ -122,6 +124,7 @@ export function computeRowVersion(row: VersionableRow): string {
     row.credito?.toString() ?? '',
     row.matchedFileId,
     row.detalle,
+    row.matchedType,
   ].join('|');
 
   return createHash('md5').update(data).digest('hex').slice(0, 16);
@@ -749,6 +752,55 @@ function buildMatchQualityFromFileId(
 }
 
 /**
+ * Builds a human-readable detalle string for a matched document
+ * Used for auto-generating detalle for MANUAL rows with blank detalle
+ */
+function buildDetalleForDocument(
+  document: any,
+  type: 'factura_emitida' | 'pago_recibido' | 'factura_recibida' | 'pago_enviado' | 'recibo'
+): string {
+  if (type === 'factura_emitida') {
+    const razonSocial = document.razonSocialReceptor || 'Cliente';
+    const concepto = document.concepto || '';
+    const facturaId = document.tipoComprobante && document.nroFactura
+      ? `${document.tipoComprobante} ${document.nroFactura} `
+      : '';
+    if (concepto) {
+      return `Factura Emitida ${facturaId}a ${razonSocial} - ${concepto}`;
+    }
+    return `Factura Emitida ${facturaId}a ${razonSocial}`;
+  } else if (type === 'factura_recibida') {
+    const razonSocial = document.razonSocialEmisor || 'Proveedor';
+    const concepto = document.concepto || '';
+    const facturaId = document.tipoComprobante && document.nroFactura
+      ? `${document.tipoComprobante} ${document.nroFactura} `
+      : '';
+    if (concepto) {
+      return `Factura Recibida ${facturaId}de ${razonSocial} - ${concepto}`;
+    }
+    return `Factura Recibida ${facturaId}de ${razonSocial}`;
+  } else if (type === 'pago_recibido') {
+    const nombrePagador = document.nombrePagador || 'Pagador';
+    const concepto = document.concepto || '';
+    if (concepto) {
+      return `Pago de ${nombrePagador} - ${concepto}`;
+    }
+    return `Pago de ${nombrePagador}`;
+  } else if (type === 'pago_enviado') {
+    const nombreBeneficiario = document.nombreBeneficiario || 'Beneficiario';
+    const concepto = document.concepto || '';
+    if (concepto) {
+      return `Pago a ${nombreBeneficiario} - ${concepto}`;
+    }
+    return `Pago a ${nombreBeneficiario}`;
+  } else if (type === 'recibo') {
+    const nombreEmpleado = document.nombreEmpleado || 'Empleado';
+    return `Recibo de ${nombreEmpleado}`;
+  }
+  return '';
+}
+
+/**
  * Matches all movimientos for a single bank spreadsheet
  */
 async function matchBankMovimientos(
@@ -790,9 +842,61 @@ async function matchBankMovimientos(
   let creditsFilled = 0;
   let noMatches = 0;
 
+  // Pre-seed excludeFileIds with ALL existing matchedFileIds (MANUAL and AUTO)
+  // This prevents the same document from being assigned to multiple movements.
+  // Each movement temporarily removes its own fileId before calling the matcher,
+  // so it can still re-evaluate its current match.
+  const excludeFileIds = new Set<string>();
+  for (const mov of movimientos) {
+    if (mov.matchedFileId) {
+      excludeFileIds.add(mov.matchedFileId);
+    }
+  }
+
   // Process each movimiento
   for (const mov of movimientos) {
+    // Skip MANUAL rows from matching (but may need detalle generation)
+    if (mov.matchedType === 'MANUAL') {
+      // If MANUAL row has blank detalle, generate it from the matched document
+      if (!mov.detalle && mov.matchedFileId) {
+        const matchedDoc = findDocumentByFileId(
+          mov.matchedFileId,
+          ingresosData.facturasEmitidas,
+          ingresosData.pagosRecibidos,
+          egresosData.facturasRecibidas,
+          egresosData.pagosEnviados,
+          egresosData.recibos
+        );
+
+        if (matchedDoc) {
+          const { document, type } = matchedDoc;
+          const detalle = buildDetalleForDocument(document, type);
+          const expectedVersion = computeRowVersion(mov);
+
+          updates.push({
+            sheetName: mov.sheetName,
+            rowNumber: mov.rowNumber,
+            matchedFileId: mov.matchedFileId,
+            detalle,
+            matchedType: 'MANUAL',
+            expectedVersion,
+          });
+        }
+      }
+      continue;
+    }
+
     let matchResult;
+
+    // Temporarily remove this movement's own fileId from excludeFileIds
+    // so the matcher can re-evaluate it (it may find a better match or confirm the same one)
+    const ownFileId = mov.matchedFileId;
+    if (ownFileId) {
+      excludeFileIds.delete(ownFileId);
+    }
+
+    // Snapshot after temporary removal — each matcher call gets an immutable view
+    const currentExcludeFileIds = new Set(excludeFileIds);
 
     // Route to appropriate matcher based on debit/credit
     if (mov.debito !== null && mov.debito > 0) {
@@ -800,17 +904,22 @@ async function matchBankMovimientos(
         mov,
         egresosData.facturasRecibidas,
         egresosData.recibos,
-        egresosData.pagosEnviados
+        egresosData.pagosEnviados,
+        currentExcludeFileIds
       );
     } else if (mov.credito !== null && mov.credito > 0) {
       matchResult = matcher.matchCreditMovement(
         mov,
         ingresosData.facturasEmitidas,
         ingresosData.pagosRecibidos,
-        ingresosData.retenciones
+        ingresosData.retenciones,
+        currentExcludeFileIds
       );
     } else {
-      // No amount - skip
+      // No amount - skip, but restore ownFileId that was temporarily removed
+      if (ownFileId) {
+        excludeFileIds.add(ownFileId);
+      }
       continue;
     }
 
@@ -918,6 +1027,7 @@ async function matchBankMovimientos(
           rowNumber: mov.rowNumber,
           matchedFileId: matchResult.matchedFileId ?? '',
           detalle: matchResult.description,
+          matchedType: 'AUTO',
           expectedVersion,
         });
 
@@ -926,9 +1036,22 @@ async function matchBankMovimientos(
         } else {
           creditsFilled++;
         }
+
+        // Add new matched fileId to excludeFileIds (old one stays removed = freed up)
+        if (isFileIdMatch && matchResult.matchedFileId) {
+          excludeFileIds.add(matchResult.matchedFileId);
+        }
+      } else {
+        // Not updating — re-add the old fileId back to excludeFileIds
+        if (ownFileId) {
+          excludeFileIds.add(ownFileId);
+        }
       }
     } else {
-      // No match found
+      // No match found — re-add the old fileId back to excludeFileIds
+      if (ownFileId) {
+        excludeFileIds.add(ownFileId);
+      }
       noMatches++;
     }
   }
@@ -960,10 +1083,6 @@ async function matchBankMovimientos(
   };
 }
 
-/**
- * Matches all movimientos across all banks
- * Uses unified lock to prevent concurrent execution with scanner
- */
 export async function matchAllMovimientos(
   options: MatchOptions = {}
 ): Promise<Result<MatchAllResult, Error>> {

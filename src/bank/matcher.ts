@@ -40,17 +40,6 @@ const FACTURA_DATE_RANGE_AFTER = 30;
 const RETENCION_DATE_RANGE_DAYS = 90;
 
 /**
- * Direct debit patterns for automatic recognition
- * These patterns identify automatic/direct debit transactions
- */
-const DIRECT_DEBIT_PATTERNS = [
-  /DEBITO\s*DI\b/i,
-  /DEBITO\s*DIRECTO/i,
-  /DEBITO\s*AUTOMATICO/i,
-  /DEB\.?\s*AUT/i,
-];
-
-/**
  * Bank jargon words to exclude from keyword matching
  */
 const BANK_JARGON = new Set([
@@ -76,19 +65,6 @@ export function stripBankOriginPrefix(concepto: string): string {
     return '';
   }
   return concepto.replace(/^D\s+\d{2,3}\s+/, '').trim();
-}
-
-/**
- * Checks if a bank concept represents a direct debit transaction
- *
- * @param concepto - Bank transaction concept text
- * @returns True if the concept matches a direct debit pattern
- */
-export function isDirectDebit(concepto: string): boolean {
-  if (!concepto) {
-    return false;
-  }
-  return DIRECT_DEBIT_PATTERNS.some(pattern => pattern.test(concepto));
 }
 
 /**
@@ -241,6 +217,7 @@ const BANK_FEE_PATTERNS = [
   /^COMISION GES/i,
   /^GP-COM\.OPAGO/i,
   /^GP-IVA TASA/i,
+  /^PAGOS AFIP/i,
 ];
 
 /**
@@ -352,7 +329,8 @@ export class BankMovementMatcher {
     movement: MovimientoRow,
     facturas: Array<Factura & { row: number }>,
     recibos: Array<Recibo & { row: number }>,
-    pagos: Array<Pago & { row: number }>
+    pagos: Array<Pago & { row: number }>,
+    excludeFileIds?: Set<string>
   ): BankMovementMatchResult {
     // Phase 0: Auto-detect
     if (isBankFee(movement.concepto)) {
@@ -538,19 +516,24 @@ export class BankMovementMatcher {
       });
     }
 
+    // Filter out excluded fileIds (dedup: already matched to other movements)
+    const filtered = excludeFileIds
+      ? candidates.filter(c => !excludeFileIds.has(c.fileId))
+      : candidates;
+
     // Phase 4: Sort candidates by tier (lower wins), then date distance, then exact amount
-    candidates.sort((a, b) => {
+    filtered.sort((a, b) => {
       if (a.tier !== b.tier) return a.tier - b.tier;
       if (a.dateDiff !== b.dateDiff) return a.dateDiff - b.dateDiff;
       if (a.isExactAmount !== b.isExactAmount) return a.isExactAmount ? -1 : 1;
       return 0;
     });
 
-    if (candidates.length === 0) {
+    if (filtered.length === 0) {
       return this.noMatch(movement, ['No matching documents found']);
     }
 
-    const best = candidates[0];
+    const best = filtered[0];
     return {
       movement,
       matchType: best.matchType,
@@ -578,7 +561,8 @@ export class BankMovementMatcher {
     movement: MovimientoRow,
     facturasEmitidas: Array<Factura & { row: number }>,
     pagosRecibidos: Array<Pago & { row: number }>,
-    retenciones: Array<Retencion & { row: number }>
+    retenciones: Array<Retencion & { row: number }>,
+    excludeFileIds?: Set<string>
   ): BankMovementMatchResult {
     // Phase 0: Auto-detect
     if (isBankFee(movement.concepto)) {
@@ -810,19 +794,24 @@ export class BankMovementMatcher {
       });
     }
 
+    // Filter out excluded fileIds (dedup: already matched to other movements)
+    const filtered = excludeFileIds
+      ? candidates.filter(c => !excludeFileIds.has(c.fileId))
+      : candidates;
+
     // Sort by tier, then date, then exact amount
-    candidates.sort((a, b) => {
+    filtered.sort((a, b) => {
       if (a.tier !== b.tier) return a.tier - b.tier;
       if (a.dateDiff !== b.dateDiff) return a.dateDiff - b.dateDiff;
       if (a.isExactAmount !== b.isExactAmount) return a.isExactAmount ? -1 : 1;
       return 0;
     });
 
-    if (candidates.length === 0) {
+    if (filtered.length === 0) {
       return this.noMatchCredit(movement, ['No matching factura or pago found']);
     }
 
-    const best = candidates[0];
+    const best = filtered[0];
     return {
       movement,
       matchType: best.matchType,

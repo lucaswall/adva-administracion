@@ -16,6 +16,7 @@ function makeMovimiento(overrides: Partial<MovimientoRow> & Pick<MovimientoRow, 
     saldoCalculado: null,
     matchedFileId: '',
     detalle: '',
+    matchedType: '',
     ...overrides,
   };
 }
@@ -831,6 +832,14 @@ describe('isBankFee with origin prefix', () => {
 
   it('should still match bank fee without prefix', () => {
     expect(isBankFee('IMPUESTO LEY 25413')).toBe(true);
+  });
+
+  it('should match PAGOS AFIP as bank fee', () => {
+    expect(isBankFee('PAGOS AFIP')).toBe(true);
+  });
+
+  it('should match PAGOS AFIP with D prefix as bank fee', () => {
+    expect(isBankFee('D 500 PAGOS AFIP')).toBe(true);
   });
 });
 
@@ -1976,6 +1985,156 @@ describe('importeEnPesos for precise cross-currency matching (ADV-118)', () => {
 
       expect(result.matchType).toBe('pago_factura');
       expect(result.matchedFileId).toBe('p1');
+    });
+  });
+});
+
+describe('excludeFileIds parameter', () => {
+  let matcher: BankMovementMatcher;
+
+  beforeEach(() => {
+    matcher = new BankMovementMatcher(5);
+  });
+
+  describe('matchMovement with excludeFileIds', () => {
+    it('excludes specified fileIds from debit candidates', () => {
+      const factura1: Factura & { row: number } = {
+        fileId: 'f1',
+        fileName: 'f1.pdf',
+        tipoComprobante: 'A',
+        nroFactura: '00001-00000001',
+        fechaEmision: '2024-01-14',
+        cuitEmisor: '20123456786',
+        razonSocialEmisor: 'TEST SA',
+        cuitReceptor: '30709076783',
+        razonSocialReceptor: 'ADVA',
+        importeNeto: 41322.31,
+        importeIva: 8677.69,
+        importeTotal: 50000,
+        moneda: 'ARS',
+        processedAt: '2024-01-14T10:00:00Z',
+        needsReview: false,
+        confidence: 0.95,
+        row: 2
+      };
+
+      const factura2: Factura & { row: number } = {
+        ...factura1,
+        fileId: 'f2',
+        fileName: 'f2.pdf',
+        nroFactura: '00001-00000002',
+        cuitEmisor: '27234567891',
+        razonSocialEmisor: 'OTRO SA',
+        row: 3
+      };
+
+      const movement = makeMovimiento({ fecha: '2024-01-15', concepto: 'OPERACION 12345', debito: 50000, credito: null });
+
+      // Without exclusion, f1 matches (both match, but f1 first)
+      const resultNoExclude = matcher.matchMovement(movement, [factura1, factura2], [], []);
+      expect(resultNoExclude.matchedFileId).toBe('f1');
+
+      // Excluding f1 should make f2 the match
+      const resultWithExclude = matcher.matchMovement(movement, [factura1, factura2], [], [], new Set(['f1']));
+      expect(resultWithExclude.matchedFileId).toBe('f2');
+    });
+
+    it('returns no_match when all candidates are excluded', () => {
+      const factura: Factura & { row: number } = {
+        fileId: 'f1',
+        fileName: 'f1.pdf',
+        tipoComprobante: 'A',
+        nroFactura: '00001-00000001',
+        fechaEmision: '2024-01-14',
+        cuitEmisor: '20123456786',
+        razonSocialEmisor: 'TEST SA',
+        cuitReceptor: '30709076783',
+        razonSocialReceptor: 'ADVA',
+        importeNeto: 41322.31,
+        importeIva: 8677.69,
+        importeTotal: 50000,
+        moneda: 'ARS',
+        processedAt: '2024-01-14T10:00:00Z',
+        needsReview: false,
+        confidence: 0.95,
+        row: 2
+      };
+
+      const movement = makeMovimiento({ fecha: '2024-01-15', concepto: 'OPERACION 12345', debito: 50000, credito: null });
+
+      const result = matcher.matchMovement(movement, [factura], [], [], new Set(['f1']));
+      expect(result.matchType).toBe('no_match');
+    });
+
+    it('does not exclude bank_fee auto-labels', () => {
+      const movement = makeMovimiento({ fecha: '2024-01-15', concepto: 'IMPUESTO LEY 25413', debito: 500, credito: null });
+
+      const result = matcher.matchMovement(movement, [], [], [], new Set(['anything']));
+      expect(result.matchType).toBe('bank_fee');
+    });
+  });
+
+  describe('matchCreditMovement with excludeFileIds', () => {
+    it('excludes specified fileIds from credit candidates', () => {
+      const factura1: Factura & { row: number } = {
+        fileId: 'factura1',
+        fileName: 'factura-001.pdf',
+        tipoComprobante: 'A',
+        nroFactura: '00001-00000123',
+        fechaEmision: '2024-01-10',
+        cuitEmisor: '30709076783',
+        razonSocialEmisor: 'ADVA',
+        cuitReceptor: '20123456786',
+        razonSocialReceptor: 'TEST SA',
+        importeNeto: 90000,
+        importeIva: 10000,
+        importeTotal: 100000,
+        moneda: 'ARS',
+        processedAt: '2024-01-10T10:00:00Z',
+        needsReview: false,
+        confidence: 0.95,
+        row: 2
+      };
+
+      const factura2: Factura & { row: number } = {
+        ...factura1,
+        fileId: 'factura2',
+        fileName: 'factura-002.pdf',
+        nroFactura: '00001-00000456',
+        cuitReceptor: '27234567891',
+        razonSocialReceptor: 'OTRO SA',
+        row: 3
+      };
+
+      const movement = makeMovimiento({ fecha: '2024-01-15', concepto: 'TRANSFERENCIA', debito: null, credito: 100000 });
+
+      // Excluding factura1 should make factura2 the match
+      const result = matcher.matchCreditMovement(movement, [factura1, factura2], [], [], new Set(['factura1']));
+      expect(result.matchedFileId).toBe('factura2');
+    });
+
+    it('returns no_match when all credit candidates are excluded', () => {
+      const pago: Pago & { row: number } = {
+        fileId: 'pago1',
+        fileName: 'pago-001.pdf',
+        banco: 'BBVA',
+        fechaPago: '2024-01-15',
+        importePagado: 100000,
+        moneda: 'ARS',
+        cuitPagador: '20123456786',
+        nombrePagador: 'TEST SA',
+        cuitBeneficiario: '30709076783',
+        nombreBeneficiario: 'ADVA',
+        processedAt: '2024-01-15T10:00:00Z',
+        needsReview: false,
+        confidence: 0.95,
+        row: 2
+      };
+
+      const movement = makeMovimiento({ fecha: '2024-01-15', concepto: 'TRANSFERENCIA', debito: null, credito: 100000 });
+
+      const result = matcher.matchCreditMovement(movement, [], [pago], [], new Set(['pago1']));
+      expect(result.matchType).toBe('no_match');
     });
   });
 });

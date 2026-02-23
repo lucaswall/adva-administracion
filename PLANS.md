@@ -162,3 +162,43 @@ Add PAGOS AFIP pattern to `BANK_FEE_PATTERNS`. Remove dead `DIRECT_DEBIT_PATTERN
 - Schema expansion from 8→9 columns — mitigated by backward-compatible parsing (missing 9th column defaults to empty)
 - `excludeFileIds` changes matcher method signatures — needs careful integration with existing tests
 - MANUAL detalle generation reuses existing document lookup logic from `findDocumentByFileId` — no new API calls needed
+
+---
+
+## Iteration 1
+
+**Implemented:** 2026-02-23
+**Method:** Single-agent (7 effort points across 2 units)
+
+### Tasks Completed This Iteration
+- Fix 1 (ADV-139): Add matchedType column (I) to movimientos schema — expanded from 8→9 columns with backward-compatible parsing
+- Fix 2 (ADV-140): Implement usedFileIds deduplication and MANUAL support — pre-seeds ALL existing matchedFileIds into excludeFileIds, MANUAL rows skipped from matching, blank MANUAL detalles auto-generated, temporary own-fileId removal for re-evaluation
+- Fix 3 (ADV-141): Add PAGOS AFIP to bank fee patterns and remove dead direct debit code
+
+### Files Modified
+- `src/types/index.ts` — Added `matchedType: string` to `MovimientoRow` interface
+- `src/services/movimientos-reader.ts` — Range A:H→A:I, parse matchedType from row[8] with backward compat
+- `src/services/movimientos-reader.test.ts` — Tests for 9-column and 8-column compatibility
+- `src/services/movimientos-detalle.ts` — matchedType in DetalleUpdate, computeVersionFromRow hash, G:I write range, updated JSDoc
+- `src/services/movimientos-detalle.test.ts` — Updated ranges, values, hash inputs for 9-column schema
+- `src/bank/match-movimientos.ts` — Pre-seed excludeFileIds with all existing matchedFileIds, temporary own-fileId removal, MANUAL pre-processing with detalle generation, buildDetalleForDocument helper, zero-amount movement fileId restoration, removed dead recibo concepto branch
+- `src/bank/match-movimientos.test.ts` — 8 new tests (MANUAL skip, excludeFileIds pool, detalle generation, usedFileIds dedup, accumulation, AUTO pre-seeding, zero-amount restoration)
+- `src/bank/matcher.ts` — excludeFileIds parameter on matchMovement/matchCreditMovement, PAGOS AFIP pattern, removed DIRECT_DEBIT_PATTERNS and isDirectDebit
+- `src/bank/matcher.test.ts` — PAGOS AFIP tests, excludeFileIds tests
+- `SPREADSHEET_FORMAT.md` — 9 columns, matchedType column, MANUAL locking support
+- `CLAUDE.md` — Updated movimientos column count, MANUAL support note
+
+### Linear Updates
+- ADV-139: Todo → In Progress → Review
+- ADV-140: Todo → In Progress → Review
+- ADV-141: Todo → In Progress → Review
+
+### Pre-commit Verification
+- bug-hunter: Found 3 bugs (1 HIGH, 2 MEDIUM), all fixed before commit
+  - HIGH: Zero-amount movements leaked ownFileId from excludeFileIds on continue
+  - MEDIUM: Stale JSDoc in computeVersionFromRow (A:H → A:I)
+  - MEDIUM: Dead concepto branch in buildDetalleForDocument for recibo type
+- verifier: All 1808 tests pass, zero warnings, clean build
+
+### Continuation Status
+All tasks completed.

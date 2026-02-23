@@ -23,6 +23,8 @@ export interface DetalleUpdate {
   matchedFileId: string;
   /** Human-readable description (column H) */
   detalle: string;
+  /** Match type: 'AUTO' | 'MANUAL' | '' (column I) */
+  matchedType?: string;
   /**
    * Expected version hash of the row (for TOCTOU protection).
    * If provided, the update will be skipped if the row's current version
@@ -44,10 +46,10 @@ function escapeSheetName(sheetName: string): string {
 }
 
 /**
- * Computes version hash from raw row data (columns A-H)
+ * Computes version hash from raw row data (columns A-I)
  * Must match the algorithm in match-movimientos.ts computeRowVersion
  *
- * @param row - Raw cell values from spreadsheet [fecha, concepto, debito, credito, saldo, saldoCalculado, matchedFileId, detalle]
+ * @param row - Raw cell values [fecha, concepto, debito, credito, saldo, saldoCalculado, matchedFileId, detalle, matchedType]
  * @returns Hex string hash (16 chars)
  */
 function computeVersionFromRow(row: CellValue[]): string {
@@ -57,6 +59,7 @@ function computeVersionFromRow(row: CellValue[]): string {
   const credito = parseNumber(row[3]);
   const matchedFileId = String(row[6] || '');
   const detalle = String(row[7] || '');
+  const matchedType = String(row[8] || '');
 
   const data = [
     fecha,
@@ -65,6 +68,7 @@ function computeVersionFromRow(row: CellValue[]): string {
     credito?.toString() ?? '',
     matchedFileId,
     detalle,
+    matchedType,
   ].join('|');
 
   return createHash('md5').update(data).digest('hex').slice(0, 16);
@@ -109,7 +113,7 @@ export async function updateDetalle(
     // Verify each sheet's updates
     for (const [sheetName, sheetUpdates] of updatesBySheet) {
       // Read the full sheet to get current state (columns A:H)
-      const range = `'${escapeSheetName(sheetName)}'!A:H`;
+      const range = `'${escapeSheetName(sheetName)}'!A:I`;
       const readResult = await getValues(spreadsheetId, range);
 
       if (!readResult.ok) {
@@ -168,8 +172,8 @@ export async function updateDetalle(
 
   // Build update operations for batchUpdate
   const allUpdates: Array<{ range: string; values: CellValue[][] }> = verifiedUpdates.map(u => ({
-    range: `'${escapeSheetName(u.sheetName)}'!G${u.rowNumber}:H${u.rowNumber}`,
-    values: [[u.matchedFileId, u.detalle]],
+    range: `'${escapeSheetName(u.sheetName)}'!G${u.rowNumber}:I${u.rowNumber}`,
+    values: [[u.matchedFileId, u.detalle, u.matchedType || '']],
   }));
 
   debug('Preparing detalle updates', {

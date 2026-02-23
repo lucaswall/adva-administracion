@@ -60,6 +60,7 @@ function parseMovimientoRow(
     saldoCalculado: parseNumber(row[5]),
     matchedFileId: String(row[6] || ''),
     detalle: String(row[7] || ''),
+    matchedType: String(row[8] || ''),
   };
 }
 
@@ -114,7 +115,7 @@ export async function readMovimientosForPeriod(
   sheetName: string
 ): Promise<Result<MovimientoRow[], Error>> {
   // Use quoted sheet name for A1 notation (handles special characters)
-  const range = `'${sheetName}'!A:H`;
+  const range = `'${sheetName}'!A:I`;
 
   const valuesResult = await getValues(spreadsheetId, range);
   if (!valuesResult.ok) return valuesResult;

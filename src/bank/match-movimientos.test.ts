@@ -694,6 +694,7 @@ describe('matchAllMovimientos', () => {
           saldoCalculado: 9000,
           matchedFileId: '',
           detalle: '',
+          matchedType: '',
         },
       ],
     });
@@ -750,6 +751,7 @@ describe('matchAllMovimientos', () => {
           saldoCalculado: 15000,
           matchedFileId: '',
           detalle: '',
+          matchedType: '',
         },
       ],
     });
@@ -806,6 +808,7 @@ describe('matchAllMovimientos', () => {
           saldoCalculado: 9000,
           matchedFileId: '',
           detalle: '',
+          matchedType: '',
         },
       ],
     });
@@ -862,6 +865,7 @@ describe('matchAllMovimientos', () => {
           saldoCalculado: 9000,
           matchedFileId: 'old-file-id',  // Has existing match
           detalle: 'Old match',
+          matchedType: '',
         },
       ],
     });
@@ -955,9 +959,9 @@ describe('matchAllMovimientos', () => {
     vi.mocked(getMovimientosToFill).mockResolvedValue({
       ok: true,
       value: [
-        { sheetName: '2025-01', rowNumber: 2, fecha: '2025-01-15', concepto: 'TX1', debito: 1000, credito: null, saldo: 9000, saldoCalculado: 9000, matchedFileId: '', detalle: '' },
-        { sheetName: '2025-01', rowNumber: 3, fecha: '2025-01-16', concepto: 'TX2', debito: null, credito: 2000, saldo: 11000, saldoCalculado: 11000, matchedFileId: '', detalle: '' },
-        { sheetName: '2025-01', rowNumber: 4, fecha: '2025-01-17', concepto: 'TX3', debito: 500, credito: null, saldo: 10500, saldoCalculado: 10500, matchedFileId: '', detalle: '' },
+        { sheetName: '2025-01', rowNumber: 2, fecha: '2025-01-15', concepto: 'TX1', debito: 1000, credito: null, saldo: 9000, saldoCalculado: 9000, matchedFileId: '', detalle: '', matchedType: '' },
+        { sheetName: '2025-01', rowNumber: 3, fecha: '2025-01-16', concepto: 'TX2', debito: null, credito: 2000, saldo: 11000, saldoCalculado: 11000, matchedFileId: '', detalle: '', matchedType: '' },
+        { sheetName: '2025-01', rowNumber: 4, fecha: '2025-01-17', concepto: 'TX3', debito: 500, credito: null, saldo: 10500, saldoCalculado: 10500, matchedFileId: '', detalle: '', matchedType: '' },
       ],
     });
 
@@ -1039,6 +1043,7 @@ describe('matchAllMovimientos', () => {
           saldoCalculado: 9000,
           matchedFileId: 'factura-far',  // Existing match, 14 days away
           detalle: 'Pago Factura a PROVEEDOR SA',
+          matchedType: '',
         },
       ],
     });
@@ -1112,6 +1117,7 @@ describe('matchAllMovimientos', () => {
           saldoCalculado: 9000,
           matchedFileId: 'factura-with-cuit',  // Existing match with CUIT, 5 days away
           detalle: 'Pago Factura a PROVEEDOR SA',
+          matchedType: '',
         },
       ],
     });
@@ -1180,6 +1186,7 @@ describe('matchAllMovimientos', () => {
           saldoCalculado: 9000,
           matchedFileId: 'factura-a',  // 5 days away
           detalle: 'Pago Factura a PROVEEDOR SA',
+          matchedType: '',
         },
       ],
     });
@@ -1258,6 +1265,7 @@ describe('matchAllMovimientos', () => {
           saldoCalculado: 9000,
           matchedFileId: 'pago-ref',  // Existing Tier 3 match (referencia)
           detalle: 'REVISAR! Pago a PROVEEDOR SA',
+          matchedType: '',
         },
       ],
     });
@@ -1328,6 +1336,7 @@ describe('matchAllMovimientos', () => {
           saldoCalculado: 9000,
           matchedFileId: 'factura-keyword',  // Existing Tier 4 match (keyword)
           detalle: 'Pago Factura B 00000-00000100 a EMPRESA ACME ARGENTINA',
+          matchedType: '',
         },
       ],
     });
@@ -1399,6 +1408,7 @@ describe('matchAllMovimientos', () => {
           saldoCalculado: 9000,
           matchedFileId: 'factura-a',  // Document no longer exists
           detalle: 'Pago Factura a PROVEEDOR SA',
+          matchedType: '',
         },
       ],
     });
@@ -1490,6 +1500,7 @@ describe('bank fee and credit card payment detalle writing', () => {
           saldoCalculado: 9500,
           matchedFileId: '',
           detalle: '',
+          matchedType: '',
         },
       ],
     });
@@ -1550,6 +1561,7 @@ describe('bank fee and credit card payment detalle writing', () => {
           saldoCalculado: 5000,
           matchedFileId: '',
           detalle: '',
+          matchedType: '',
         },
       ],
     });
@@ -1610,6 +1622,7 @@ describe('bank fee and credit card payment detalle writing', () => {
           saldoCalculado: 9000,
           matchedFileId: '',
           detalle: '',
+          matchedType: '',
         },
       ],
     });
@@ -1660,6 +1673,7 @@ describe('bank fee and credit card payment detalle writing', () => {
           saldoCalculado: 9500,
           matchedFileId: '',
           detalle: 'Gastos bancarios',
+          matchedType: '',
         },
       ],
     });
@@ -1719,6 +1733,7 @@ describe('bank fee and credit card payment detalle writing', () => {
           saldoCalculado: 9500,
           matchedFileId: '',
           detalle: 'Gastos bancarios',  // Already has detalle
+          matchedType: '',
         },
       ],
     });
@@ -1775,6 +1790,7 @@ describe('bank fee and credit card payment detalle writing', () => {
           saldoCalculado: 9500,
           matchedFileId: '',
           detalle: '',
+          matchedType: '',
         },
       ],
     });
@@ -1811,6 +1827,7 @@ describe('computeRowVersion', () => {
       credito: null,
       matchedFileId: 'file123',
       detalle: 'Test detalle',
+      matchedType: ''
     };
 
     const version1 = computeRowVersion(row);
@@ -1830,6 +1847,7 @@ describe('computeRowVersion', () => {
       credito: null,
       matchedFileId: 'file123',
       detalle: 'Test detalle',
+      matchedType: '',
     };
 
     const row2 = {
@@ -1850,11 +1868,13 @@ describe('computeRowVersion', () => {
       credito: null,
       matchedFileId: 'file123',
       detalle: 'Detalle A',
+      matchedType: '',
     };
 
     const row2 = {
       ...row1,
       detalle: 'Detalle B',
+      matchedType: '',
     };
 
     expect(computeRowVersion(row1)).not.toBe(computeRowVersion(row2));
@@ -1870,6 +1890,7 @@ describe('computeRowVersion', () => {
       credito: 1000,
       matchedFileId: '',
       detalle: '',
+      matchedType: '',
     };
 
     const row2 = {
@@ -1879,6 +1900,7 @@ describe('computeRowVersion', () => {
       credito: 1000,
       matchedFileId: '',
       detalle: '',
+      matchedType: '',
     };
 
     expect(computeRowVersion(row1)).toBe(computeRowVersion(row2));
@@ -1942,6 +1964,7 @@ describe('TOCTOU protection', () => {
           saldoCalculado: 9000,
           matchedFileId: '',  // Empty initially
           detalle: '',
+          matchedType: '',
         },
       ],
     });
@@ -2011,6 +2034,7 @@ describe('TOCTOU protection', () => {
           saldoCalculado: 9000,
           matchedFileId: 'old-file',
           detalle: 'Old detalle',
+          matchedType: '',
         },
       ],
     });
@@ -2212,4 +2236,507 @@ describe('exchange rate prefetch', () => {
     );
   });
 
+});
+
+describe('MANUAL matchedType and usedFileIds deduplication', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.useFakeTimers();
+    mockMatchMovement = vi.fn().mockReturnValue({
+      matchType: 'no_match',
+      description: '',
+      matchedFileId: '',
+      confidence: 'LOW',
+    });
+    mockMatchCreditMovement = vi.fn().mockReturnValue({
+      matchType: 'no_match',
+      description: '',
+      matchedFileId: '',
+      confidence: 'LOW',
+    });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('should skip MANUAL rows entirely even with force=true', async () => {
+    const mockFolderStructure = {
+      controlIngresosId: 'ingresos-id',
+      controlEgresosId: 'egresos-id',
+      bankSpreadsheets: new Map(),
+      movimientosSpreadsheets: new Map([['BBVA', 'bbva-id']]),
+    };
+
+    vi.mocked(withLock).mockImplementation(async (_id, fn) => {
+      const result = await fn();
+      return { ok: true, value: result };
+    });
+
+    vi.mocked(getCachedFolderStructure).mockReturnValue(mockFolderStructure as any);
+
+    vi.mocked(getValues).mockResolvedValue({
+      ok: true,
+      value: [['header']],
+    });
+
+    // MANUAL row with existing match - should never be overwritten
+    vi.mocked(getMovimientosToFill).mockResolvedValue({
+      ok: true,
+      value: [
+        {
+          sheetName: '2025-01',
+          rowNumber: 2,
+          fecha: '2025-01-15',
+          concepto: 'PAGO A PROVEEDOR',
+          debito: 1000,
+          credito: null,
+          saldo: 9000,
+          saldoCalculado: 9000,
+          matchedFileId: 'manual-doc',
+          detalle: 'Manually matched document',
+          matchedType: 'MANUAL',
+        },
+      ],
+    });
+
+    // Even if matcher would return a match, it should never be called for MANUAL rows
+    mockMatchMovement.mockReturnValue({
+      matchType: 'direct_factura',
+      description: 'Would overwrite',
+      matchedFileId: 'other-doc',
+      confidence: 'HIGH',
+    });
+
+    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: 0 });
+
+    const resultPromise = matchAllMovimientos({ force: true });
+    await vi.runAllTimersAsync();
+    const result = await resultPromise;
+
+    expect(result.ok).toBe(true);
+    // Matcher should NOT be called for MANUAL rows
+    expect(mockMatchMovement).not.toHaveBeenCalled();
+    // No updates should include this row (no AUTO overwrites of MANUAL)
+    expect(updateDetalle).toHaveBeenCalledWith('bbva-id', []);
+  });
+
+  it('should exclude MANUAL fileIds from matching pool via excludeFileIds', async () => {
+    const mockFolderStructure = {
+      controlIngresosId: 'ingresos-id',
+      controlEgresosId: 'egresos-id',
+      bankSpreadsheets: new Map(),
+      movimientosSpreadsheets: new Map([['BBVA', 'bbva-id']]),
+    };
+
+    vi.mocked(withLock).mockImplementation(async (_id, fn) => {
+      const result = await fn();
+      return { ok: true, value: result };
+    });
+
+    vi.mocked(getCachedFolderStructure).mockReturnValue(mockFolderStructure as any);
+
+    vi.mocked(getValues).mockResolvedValue({
+      ok: true,
+      value: [['header']],
+    });
+
+    // Two movements: one MANUAL, one regular
+    vi.mocked(getMovimientosToFill).mockResolvedValue({
+      ok: true,
+      value: [
+        {
+          sheetName: '2025-01',
+          rowNumber: 2,
+          fecha: '2025-01-15',
+          concepto: 'PAGO MANUAL',
+          debito: 1000,
+          credito: null,
+          saldo: 9000,
+          saldoCalculado: 9000,
+          matchedFileId: 'manual-doc',
+          detalle: 'Manual match',
+          matchedType: 'MANUAL',
+        },
+        {
+          sheetName: '2025-01',
+          rowNumber: 3,
+          fecha: '2025-01-16',
+          concepto: 'PAGO NORMAL',
+          debito: 1000,
+          credito: null,
+          saldo: 8000,
+          saldoCalculado: 8000,
+          matchedFileId: '',
+          detalle: '',
+          matchedType: '',
+        },
+      ],
+    });
+
+    mockMatchMovement.mockReturnValue({
+      matchType: 'no_match',
+      description: '',
+      matchedFileId: '',
+      confidence: 'LOW',
+    });
+
+    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: 0 });
+
+    const resultPromise = matchAllMovimientos();
+    await vi.runAllTimersAsync();
+    await resultPromise;
+
+    // Matcher should only be called for the non-MANUAL row
+    expect(mockMatchMovement).toHaveBeenCalledTimes(1);
+    // The excludeFileIds parameter should contain the MANUAL doc's fileId
+    const lastArg = mockMatchMovement.mock.calls[0][4];
+    expect(lastArg).toBeInstanceOf(Set);
+    expect(lastArg.has('manual-doc')).toBe(true);
+  });
+
+  it('should auto-generate detalle for MANUAL row with blank detalle', async () => {
+    const mockFolderStructure = {
+      controlIngresosId: 'ingresos-id',
+      controlEgresosId: 'egresos-id',
+      bankSpreadsheets: new Map(),
+      movimientosSpreadsheets: new Map([['BBVA', 'bbva-id']]),
+    };
+
+    vi.mocked(withLock).mockImplementation(async (_id, fn) => {
+      const result = await fn();
+      return { ok: true, value: result };
+    });
+
+    vi.mocked(getCachedFolderStructure).mockReturnValue(mockFolderStructure as any);
+
+    // Mock Control data with a factura that matches the MANUAL fileId
+    vi.mocked(getValues).mockImplementation(async (_spreadsheetId, range) => {
+      if (range === 'Facturas Recibidas!A:T') {
+        return {
+          ok: true,
+          value: [
+            ['fechaemision', 'fileid', 'filename', 'tipocomprobante', 'nrofactura', 'cuitemisor', 'razonsocialemisor', 'importeneto', 'importeiva', 'importetotal', 'moneda', 'concepto', 'processedat', 'confidence', 'needsreview', 'matchedpagofileid', 'matchconfidence', 'hascuitmatch', 'pagada'],
+            ['2025-01-10', 'manual-factura', 'factura.pdf', 'B', '00001-00000123', '20123456786', 'PROVEEDOR SA', '', '', '5000', 'ARS', '', '2025-01-10T10:00:00Z', '0.95', 'NO', '', '', '', ''],
+          ],
+        };
+      }
+      return { ok: true, value: [['header']] };
+    });
+
+    // MANUAL row with matchedFileId but blank detalle
+    vi.mocked(getMovimientosToFill).mockResolvedValue({
+      ok: true,
+      value: [
+        {
+          sheetName: '2025-01',
+          rowNumber: 2,
+          fecha: '2025-01-15',
+          concepto: 'PAGO PROVEEDOR',
+          debito: 5000,
+          credito: null,
+          saldo: 5000,
+          saldoCalculado: 5000,
+          matchedFileId: 'manual-factura',
+          detalle: '',  // Blank - needs auto-generation
+          matchedType: 'MANUAL',
+        },
+      ],
+    });
+
+    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: 1 });
+
+    const resultPromise = matchAllMovimientos();
+    await vi.runAllTimersAsync();
+    const result = await resultPromise;
+
+    expect(result.ok).toBe(true);
+    // Should generate detalle for the MANUAL row
+    expect(updateDetalle).toHaveBeenCalledWith('bbva-id', expect.arrayContaining([
+      expect.objectContaining({
+        matchedFileId: 'manual-factura',
+        matchedType: 'MANUAL',
+        detalle: expect.stringContaining('PROVEEDOR SA'),
+      }),
+    ]));
+  });
+
+  it('should not assign same fileId to two different movements (usedFileIds dedup)', async () => {
+    const mockFolderStructure = {
+      controlIngresosId: 'ingresos-id',
+      controlEgresosId: 'egresos-id',
+      bankSpreadsheets: new Map(),
+      movimientosSpreadsheets: new Map([['BBVA', 'bbva-id']]),
+    };
+
+    vi.mocked(withLock).mockImplementation(async (_id, fn) => {
+      const result = await fn();
+      return { ok: true, value: result };
+    });
+
+    vi.mocked(getCachedFolderStructure).mockReturnValue(mockFolderStructure as any);
+
+    vi.mocked(getValues).mockResolvedValue({
+      ok: true,
+      value: [['header']],
+    });
+
+    // Two debit movements with same amount
+    vi.mocked(getMovimientosToFill).mockResolvedValue({
+      ok: true,
+      value: [
+        {
+          sheetName: '2025-01',
+          rowNumber: 2,
+          fecha: '2025-01-15',
+          concepto: 'PAGO A',
+          debito: 1000,
+          credito: null,
+          saldo: 9000,
+          saldoCalculado: 9000,
+          matchedFileId: '',
+          detalle: '',
+          matchedType: '',
+        },
+        {
+          sheetName: '2025-01',
+          rowNumber: 3,
+          fecha: '2025-01-16',
+          concepto: 'PAGO B',
+          debito: 1000,
+          credito: null,
+          saldo: 8000,
+          saldoCalculado: 8000,
+          matchedFileId: '',
+          detalle: '',
+          matchedType: '',
+        },
+      ],
+    });
+
+    // First call matches to file1, second call matches to file2
+    mockMatchMovement
+      .mockReturnValueOnce({
+        matchType: 'direct_factura',
+        description: 'Pago Factura a EMPRESA A',
+        matchedFileId: 'file1',
+        confidence: 'HIGH',
+      })
+      .mockReturnValueOnce({
+        matchType: 'direct_factura',
+        description: 'Pago Factura a EMPRESA B',
+        matchedFileId: 'file2',
+        confidence: 'HIGH',
+      });
+
+    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: 2 });
+
+    const resultPromise = matchAllMovimientos();
+    await vi.runAllTimersAsync();
+    const result = await resultPromise;
+
+    expect(result.ok).toBe(true);
+
+    // Second call to matchMovement should have 'file1' in excludeFileIds
+    expect(mockMatchMovement).toHaveBeenCalledTimes(2);
+    const secondCallExcludeFileIds = mockMatchMovement.mock.calls[1][4];
+    expect(secondCallExcludeFileIds).toBeInstanceOf(Set);
+    expect(secondCallExcludeFileIds.has('file1')).toBe(true);
+
+    // Both updates should have different fileIds
+    const updateCall = vi.mocked(updateDetalle).mock.calls[0];
+    const updates = updateCall[1] as any[];
+    expect(updates).toHaveLength(2);
+    expect(updates[0].matchedFileId).toBe('file1');
+    expect(updates[1].matchedFileId).toBe('file2');
+  });
+
+  it('should accumulate usedFileIds across multiple matched movements', async () => {
+    const mockFolderStructure = {
+      controlIngresosId: 'ingresos-id',
+      controlEgresosId: 'egresos-id',
+      bankSpreadsheets: new Map(),
+      movimientosSpreadsheets: new Map([['BBVA', 'bbva-id']]),
+    };
+
+    vi.mocked(withLock).mockImplementation(async (_id, fn) => {
+      const result = await fn();
+      return { ok: true, value: result };
+    });
+
+    vi.mocked(getCachedFolderStructure).mockReturnValue(mockFolderStructure as any);
+
+    vi.mocked(getValues).mockResolvedValue({
+      ok: true,
+      value: [['header']],
+    });
+
+    // Three debit movements
+    vi.mocked(getMovimientosToFill).mockResolvedValue({
+      ok: true,
+      value: [
+        {
+          sheetName: '2025-01', rowNumber: 2, fecha: '2025-01-15', concepto: 'PAGO A',
+          debito: 1000, credito: null, saldo: 9000, saldoCalculado: 9000,
+          matchedFileId: '', detalle: '', matchedType: '',
+        },
+        {
+          sheetName: '2025-01', rowNumber: 3, fecha: '2025-01-16', concepto: 'PAGO B',
+          debito: 1000, credito: null, saldo: 8000, saldoCalculado: 8000,
+          matchedFileId: '', detalle: '', matchedType: '',
+        },
+        {
+          sheetName: '2025-01', rowNumber: 4, fecha: '2025-01-17', concepto: 'PAGO C',
+          debito: 1000, credito: null, saldo: 7000, saldoCalculado: 7000,
+          matchedFileId: '', detalle: '', matchedType: '',
+        },
+      ],
+    });
+
+    mockMatchMovement
+      .mockReturnValueOnce({ matchType: 'direct_factura', description: 'Match A', matchedFileId: 'file1', confidence: 'HIGH' })
+      .mockReturnValueOnce({ matchType: 'direct_factura', description: 'Match B', matchedFileId: 'file2', confidence: 'HIGH' })
+      .mockReturnValueOnce({ matchType: 'direct_factura', description: 'Match C', matchedFileId: 'file3', confidence: 'HIGH' });
+
+    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: 3 });
+
+    const resultPromise = matchAllMovimientos();
+    await vi.runAllTimersAsync();
+    await resultPromise;
+
+    expect(mockMatchMovement).toHaveBeenCalledTimes(3);
+
+    // First call: empty excludeFileIds
+    const firstExclude = mockMatchMovement.mock.calls[0][4];
+    expect(firstExclude).toBeInstanceOf(Set);
+    expect(firstExclude.size).toBe(0);
+
+    // Second call: file1 excluded
+    const secondExclude = mockMatchMovement.mock.calls[1][4];
+    expect(secondExclude.has('file1')).toBe(true);
+    expect(secondExclude.size).toBe(1);
+
+    // Third call: file1 + file2 excluded
+    const thirdExclude = mockMatchMovement.mock.calls[2][4];
+    expect(thirdExclude.has('file1')).toBe(true);
+    expect(thirdExclude.has('file2')).toBe(true);
+    expect(thirdExclude.size).toBe(2);
+  });
+
+  it('should pre-seed excludeFileIds with existing AUTO matchedFileIds', async () => {
+    const mockFolderStructure = {
+      controlIngresosId: 'ingresos-id',
+      controlEgresosId: 'egresos-id',
+      bankSpreadsheets: new Map(),
+      movimientosSpreadsheets: new Map([['BBVA', 'bbva-id']]),
+    };
+
+    vi.mocked(withLock).mockImplementation(async (_id, fn) => {
+      const result = await fn();
+      return { ok: true, value: result };
+    });
+
+    vi.mocked(getCachedFolderStructure).mockReturnValue(mockFolderStructure as any);
+
+    vi.mocked(getValues).mockResolvedValue({
+      ok: true,
+      value: [['header']],
+    });
+
+    // Two movements: first already has an AUTO match, second is unmatched
+    vi.mocked(getMovimientosToFill).mockResolvedValue({
+      ok: true,
+      value: [
+        {
+          sheetName: '2025-01', rowNumber: 2, fecha: '2025-01-15', concepto: 'PAGO A',
+          debito: 1000, credito: null, saldo: 9000, saldoCalculado: 9000,
+          matchedFileId: 'existing-file', detalle: 'Already matched', matchedType: 'AUTO',
+        },
+        {
+          sheetName: '2025-01', rowNumber: 3, fecha: '2025-01-16', concepto: 'PAGO B',
+          debito: 2000, credito: null, saldo: 7000, saldoCalculado: 7000,
+          matchedFileId: '', detalle: '', matchedType: '',
+        },
+      ],
+    });
+
+    // First movement: matcher returns same file (no improvement) - should not update
+    mockMatchMovement
+      .mockReturnValueOnce({ matchType: 'direct_factura', description: 'Same match', matchedFileId: 'existing-file', confidence: 'HIGH' })
+      .mockReturnValueOnce({ matchType: 'direct_factura', description: 'New match', matchedFileId: 'new-file', confidence: 'HIGH' });
+
+    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: 1 });
+
+    const resultPromise = matchAllMovimientos();
+    await vi.runAllTimersAsync();
+    await resultPromise;
+
+    expect(mockMatchMovement).toHaveBeenCalledTimes(2);
+
+    // First call: excludeFileIds should NOT contain the movement's own fileId
+    // (temporarily removed so the matcher can re-evaluate it)
+    const firstExclude = mockMatchMovement.mock.calls[0][4];
+    expect(firstExclude.has('existing-file')).toBe(false);
+
+    // Second call: excludeFileIds should contain 'existing-file' (pre-seeded from existing AUTO match)
+    const secondExclude = mockMatchMovement.mock.calls[1][4];
+    expect(secondExclude.has('existing-file')).toBe(true);
+  });
+
+  it('should restore ownFileId to excludeFileIds when movement has zero amount', async () => {
+    const mockFolderStructure = {
+      controlIngresosId: 'ingresos-id',
+      controlEgresosId: 'egresos-id',
+      bankSpreadsheets: new Map(),
+      movimientosSpreadsheets: new Map([['BBVA', 'bbva-id']]),
+    };
+
+    vi.mocked(withLock).mockImplementation(async (_id, fn) => {
+      const result = await fn();
+      return { ok: true, value: result };
+    });
+
+    vi.mocked(getCachedFolderStructure).mockReturnValue(mockFolderStructure as any);
+
+    vi.mocked(getValues).mockResolvedValue({
+      ok: true,
+      value: [['header']],
+    });
+
+    // First movement: zero-amount with existing matchedFileId
+    // Second movement: normal debit
+    vi.mocked(getMovimientosToFill).mockResolvedValue({
+      ok: true,
+      value: [
+        {
+          sheetName: '2025-01', rowNumber: 2, fecha: '2025-01-15', concepto: 'ZERO',
+          debito: null, credito: null, saldo: 10000, saldoCalculado: 10000,
+          matchedFileId: 'zero-file', detalle: 'Some match', matchedType: 'AUTO',
+        },
+        {
+          sheetName: '2025-01', rowNumber: 3, fecha: '2025-01-16', concepto: 'PAGO',
+          debito: 1000, credito: null, saldo: 9000, saldoCalculado: 9000,
+          matchedFileId: '', detalle: '', matchedType: '',
+        },
+      ],
+    });
+
+    mockMatchMovement.mockReturnValueOnce({
+      matchType: 'direct_factura', description: 'Match', matchedFileId: 'new-file', confidence: 'HIGH',
+    });
+
+    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: 1 });
+
+    const resultPromise = matchAllMovimientos();
+    await vi.runAllTimersAsync();
+    await resultPromise;
+
+    // Only the second (debit) movement should call the matcher
+    expect(mockMatchMovement).toHaveBeenCalledTimes(1);
+
+    // The zero-amount movement's fileId should still be in excludeFileIds
+    // (restored after the continue), so the second movement sees it excluded
+    const excludeIds = mockMatchMovement.mock.calls[0][4];
+    expect(excludeIds.has('zero-file')).toBe(true);
+  });
 });
