@@ -67,6 +67,7 @@ export interface MatchQuality {
  */
 export function compareMatchQuality(a: MatchQuality, b: MatchQuality): number {
   const confidenceOrder: Record<MatchConfidence, number> = {
+    MANUAL: 4,
     HIGH: 3,
     MEDIUM: 2,
     LOW: 1
@@ -137,6 +138,11 @@ export class FacturaPagoMatcher {
     }
 
     for (const factura of facturas) {
+      // Skip facturas locked with MANUAL confidence — they are user-defined and immutable
+      if (factura.matchConfidence === 'MANUAL') {
+        continue;
+      }
+
       // Check amount match (required, with tolerance for floating-point precision)
       // For USD facturas, use cross-currency matching with exchange rate
       const crossCurrencyResult = amountsMatchCrossCurrency(
@@ -401,6 +407,11 @@ export class ReciboPagoMatcher {
     }
 
     for (const recibo of recibos) {
+      // Skip recibos locked with MANUAL confidence — they are user-defined and immutable
+      if (recibo.matchConfidence === 'MANUAL') {
+        continue;
+      }
+
       // Check amount match (pago amount should match recibo net salary)
       if (!amountsMatch(recibo.totalNeto, pago.importePagado)) {
         continue;

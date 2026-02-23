@@ -589,6 +589,15 @@ Bank movements are matched against documents using a tier-based algorithm (lower
 ### Match Replacement
 Better matches replace existing ones. Quality comparison: tier → date proximity → exact amount.
 
+### MANUAL Confidence Lock
+`matchConfidence='MANUAL'` is a special value that permanently locks a match against automatic re-matching:
+
+- **Facturas/Recibos with MANUAL**: invisible to `FacturaPagoMatcher.findMatches()` and `ReciboPagoMatcher.findMatches()` — no pago can ever displace their existing match
+- **Pagos with MANUAL**: excluded from the unmatched pool — treated as already matched
+- **Movimiento bancario rows with MANUAL**: skipped entirely by `matchAllMovimientos()` — no new candidate is evaluated
+- **NC-Factura matching**: MANUAL NCs are skipped (not matched to facturas); MANUAL facturas are excluded from match targets
+- MANUAL always wins over force mode — even `?force=true` respects MANUAL locks
+
 ### Date Windows
 - Pago: ±15 days from bank date
 - Factura: -5/+30 days from bank date

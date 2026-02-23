@@ -387,7 +387,8 @@ async function doMatchFacturasWithPagos(
   }
 
   // Find unmatched documents
-  const unmatchedPagos = pagos.filter(p => !p.matchedFacturaFileId);
+  // Exclude pagos with MANUAL matchConfidence — they are user-locked and must not be re-matched
+  const unmatchedPagos = pagos.filter(p => !p.matchedFacturaFileId && p.matchConfidence !== 'MANUAL');
 
   debug('Found unmatched documents', {
     module: 'matching',

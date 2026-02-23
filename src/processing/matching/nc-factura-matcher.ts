@@ -32,6 +32,8 @@ interface FacturaRow {
   concepto: string;
   /** Whether already marked as paid */
   pagada: string;
+  /** Match confidence level — 'MANUAL' means user-locked, must not be re-matched */
+  matchConfidence?: string;
 }
 
 /**
@@ -150,6 +152,7 @@ export async function matchNCsWithFacturas(
       cuitEmisor: String(row[5] || ''),
       importeTotal: parseNumber(String(row[9] || '0')) ?? 0,
       concepto: String(row[11] || ''),
+      matchConfidence: row[16] ? String(row[16]).toUpperCase() : undefined,
       pagada: String(row[18] || '').toUpperCase(),
     };
 
@@ -160,11 +163,13 @@ export async function matchNCsWithFacturas(
   // Match both plain 'NC'/'ND' and compound 'NC A'/'ND B' etc.
   const isNC = (tc: string) => tc === 'NC' || tc.startsWith('NC ');
   const isND = (tc: string) => tc === 'ND' || tc.startsWith('ND ');
-  const ncs = facturas.filter(f => isNC(f.tipoComprobante));
+  // Exclude MANUAL NCs — they have a user-defined match and must not be re-matched
+  const ncs = facturas.filter(f => isNC(f.tipoComprobante) && f.matchConfidence !== 'MANUAL');
   const regularFacturas = facturas.filter(f =>
     !isNC(f.tipoComprobante) &&
     !isND(f.tipoComprobante) && // Exclude notas de debito
-    f.pagada !== 'SI' // Only unpaid facturas
+    f.pagada !== 'SI' && // Only unpaid facturas
+    f.matchConfidence !== 'MANUAL' // Exclude MANUAL facturas — they are user-locked
   );
 
   debug('Found facturas for NC matching', {

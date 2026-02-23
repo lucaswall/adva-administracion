@@ -38,7 +38,7 @@ Invoices FROM ADVA (ADVA is emisor). ADVA info is implicit; only receptor (count
 | N | confidence | number | Extraction confidence (0.0-1.0) |
 | O | needsReview | boolean | Manual review needed |
 | P | matchedPagoFileId | string | Linked Pago Recibido fileId |
-| Q | matchConfidence | enum | HIGH\|MEDIUM\|LOW |
+| Q | matchConfidence | enum | HIGH\|MEDIUM\|LOW\|MANUAL |
 | R | hasCuitMatch | boolean | Match based on CUIT |
 | S | tipoDeCambio | number | Exchange rate for USD invoices (optional) |
 
@@ -64,7 +64,7 @@ Payments TO ADVA (ADVA is beneficiario). ADVA info is implicit; only pagador (co
 | L | confidence | number | Extraction confidence (0.0-1.0) |
 | M | needsReview | boolean | Manual review needed |
 | N | matchedFacturaFileId | string | Linked Factura Emitida fileId |
-| O | matchConfidence | enum | HIGH\|MEDIUM\|LOW |
+| O | matchConfidence | enum | HIGH\|MEDIUM\|LOW\|MANUAL |
 | P | tipoDeCambio | number | Exchange rate for USD payments (optional) |
 | Q | importeEnPesos | currency | ARS equivalent amount (optional) |
 
@@ -90,7 +90,7 @@ Tax withholding certificates received when ADVA is paid (ADVA is sujeto retenido
 | L | confidence | number | Extraction confidence (0.0-1.0) |
 | M | needsReview | boolean | Manual review needed |
 | N | matchedFacturaFileId | string | Linked Factura Emitida fileId |
-| O | matchConfidence | enum | HIGH\|MEDIUM\|LOW |
+| O | matchConfidence | enum | HIGH\|MEDIUM\|LOW\|MANUAL |
 
 Rows sorted by `fechaEmision` descending after insert.
 
@@ -122,7 +122,7 @@ Invoices TO ADVA (ADVA is receptor). ADVA info is implicit; only emisor (counter
 | N | confidence | number | Extraction confidence (0.0-1.0) |
 | O | needsReview | boolean | Manual review needed |
 | P | matchedPagoFileId | string | Linked Pago Enviado fileId |
-| Q | matchConfidence | enum | HIGH\|MEDIUM\|LOW |
+| Q | matchConfidence | enum | HIGH\|MEDIUM\|LOW\|MANUAL |
 | R | hasCuitMatch | boolean | Match based on CUIT |
 | S | pagada | enum | SI\|NO - Payment status |
 | T | tipoDeCambio | number | Exchange rate for USD invoices (optional) |
@@ -149,7 +149,7 @@ Payments BY ADVA (ADVA is pagador). ADVA info is implicit; only beneficiario (co
 | L | confidence | number | Extraction confidence (0.0-1.0) |
 | M | needsReview | boolean | Manual review needed |
 | N | matchedFacturaFileId | string | Linked Factura/Recibo fileId |
-| O | matchConfidence | enum | HIGH\|MEDIUM\|LOW |
+| O | matchConfidence | enum | HIGH\|MEDIUM\|LOW\|MANUAL |
 | P | tipoDeCambio | number | Exchange rate for USD payments (optional) |
 | Q | importeEnPesos | currency | ARS equivalent amount (optional) |
 
@@ -178,7 +178,7 @@ Employee salary receipts (ADVA is empleador). ADVA info is implicit; only employ
 | O | confidence | number | Extraction confidence (0.0-1.0) |
 | P | needsReview | boolean | Manual review needed |
 | Q | matchedPagoFileId | string | Linked Pago Enviado fileId |
-| R | matchConfidence | enum | HIGH\|MEDIUM\|LOW |
+| R | matchConfidence | enum | HIGH\|MEDIUM\|LOW\|MANUAL |
 
 Rows sorted by `fechaPago` descending after insert.
 
@@ -421,9 +421,17 @@ Documents classified by ADVA's role (CUIT: 30709076783):
 - **LOW range**: (-10, 60) days
 
 **Confidence calculation:**
+- **MANUAL**: User-defined lock — match was set manually and must never be overwritten by automatic matching
 - **HIGH**: amount match + date in HIGH/MEDIUM range + CUIT/name match
 - **MEDIUM**: amount match + date in HIGH/MEDIUM range, no CUIT/name match
 - **LOW**: amount match + date in LOW range only
+
+**MANUAL confidence semantics:**
+- Setting `matchConfidence=MANUAL` on a document (factura, pago, recibo) or a movimiento bancario row locks that match permanently
+- Automatic matching will never displace or overwrite a MANUAL match
+- MANUAL facturas/recibos are invisible to `FacturaPagoMatcher.findMatches()` and `ReciboPagoMatcher.findMatches()` — no pago can displace them
+- MANUAL pagos are excluded from the unmatched pool — they are treated as already matched
+- MANUAL movimiento bancario rows are entirely skipped by `matchAllMovimientos()`
 
 ### Cross-References
 

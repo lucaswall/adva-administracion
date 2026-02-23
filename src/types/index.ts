@@ -66,7 +66,7 @@ export type ProcessStatus = 'processed' | 'error' | 'pending';
 /**
  * Match confidence levels
  */
-export type MatchConfidence = 'HIGH' | 'MEDIUM' | 'LOW';
+export type MatchConfidence = 'HIGH' | 'MEDIUM' | 'LOW' | 'MANUAL';
 
 /**
  * ARCA comprobante types
@@ -862,6 +862,8 @@ export interface MovimientoRow {
   matchedFileId: string;
   /** Human-readable match description */
   detalle: string;
+  /** Match confidence — 'MANUAL' means user-locked, must not be re-matched automatically */
+  matchConfidence?: MatchConfidence;
 }
 
 /**

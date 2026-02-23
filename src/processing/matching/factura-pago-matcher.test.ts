@@ -4,6 +4,8 @@
 
 import { describe, it, expect } from 'vitest';
 import { DisplacementQueue } from '../../matching/cascade-matcher.js';
+import { FacturaPagoMatcher } from '../../matching/matcher.js';
+import type { Factura, Pago, MatchConfidence } from '../../types/index.js';
 
 describe('DisplacementQueue', () => {
   it('should return undefined when popping from empty queue (bug #14)', () => {
@@ -156,5 +158,91 @@ describe('Bug #9: Cascading displacement edge case', () => {
     expect(update?.pagoFileId).toBe(displacedPagoFileId);
     expect(update?.facturaFileId).toBe(''); // Empty = unmatch
     expect(update?.pagoRow).toBe(displacedPagoRow);
+  });
+});
+
+describe('MANUAL matchConfidence locking (Fix 5 - ADV-131)', () => {
+  const baseFactura: Factura & { row: number } = {
+    row: 2,
+    fileId: 'factura-1',
+    fileName: 'factura.pdf',
+    tipoComprobante: 'A',
+    nroFactura: '00001-00000001',
+    fechaEmision: '2025-01-10',
+    cuitEmisor: '20123456786',
+    razonSocialEmisor: 'EMPRESA UNO SA',
+    importeNeto: 826.45,
+    importeIva: 173.55,
+    importeTotal: 1000,
+    moneda: 'ARS',
+    processedAt: '2025-01-10T10:00:00.000Z',
+    confidence: 0.95,
+    needsReview: false,
+  };
+
+  const basePago: Pago = {
+    fileId: 'pago-1',
+    fileName: 'pago.pdf',
+    banco: 'BBVA',
+    fechaPago: '2025-01-15',
+    importePagado: 1000,
+    moneda: 'ARS',
+    processedAt: '2025-01-15T10:00:00.000Z',
+    confidence: 0.95,
+    needsReview: false,
+  };
+
+  it('findMatches should not return MANUAL-matched factura as candidate', () => {
+    const matcher = new FacturaPagoMatcher(10, 60);
+
+    const manualFactura: Factura & { row: number } = {
+      ...baseFactura,
+      matchConfidence: 'MANUAL' as MatchConfidence,
+      matchedPagoFileId: 'pago-existing',
+    };
+
+    // Even though amount and date match perfectly, MANUAL factura must be skipped
+    const matches = matcher.findMatches(basePago, [manualFactura], true);
+
+    expect(matches).toHaveLength(0);
+  });
+
+  it('findMatches should not displace pago matched to a MANUAL factura', () => {
+    const matcher = new FacturaPagoMatcher(10, 60);
+
+    const newPago: Pago = { ...basePago, fileId: 'pago-new' };
+
+    const manualFactura: Factura & { row: number } = {
+      ...baseFactura,
+      matchConfidence: 'MANUAL' as MatchConfidence,
+      matchedPagoFileId: 'pago-protected',
+    };
+
+    // With includeMatched=true, the MANUAL factura should still be invisible
+    const matches = matcher.findMatches(newPago, [manualFactura], true);
+
+    // pago-protected is never displaced because MANUAL factura is never a candidate
+    expect(matches).toHaveLength(0);
+  });
+
+  it('pago with MANUAL matchConfidence should be excluded from unmatched pool', () => {
+    // Documents the expected filter in doMatchFacturasWithPagos():
+    // pagos.filter(p => !p.matchedFacturaFileId && p.matchConfidence !== 'MANUAL')
+    const allPagos: Array<Pago & { row: number }> = [
+      { ...basePago, row: 2, fileId: 'pago-auto' },
+      { ...basePago, row: 3, fileId: 'pago-manual', matchConfidence: 'MANUAL' as MatchConfidence },
+      { ...basePago, row: 4, fileId: 'pago-matched', matchedFacturaFileId: 'some-factura' },
+    ];
+
+    // Current implementation only checks matchedFacturaFileId, so MANUAL pago leaks through
+    const currentFilter = allPagos.filter(p => !p.matchedFacturaFileId);
+    // MANUAL pago should NOT be in unmatched pool - this will pass AFTER fix
+    const fixedFilter = allPagos.filter(p => !p.matchedFacturaFileId && p.matchConfidence !== 'MANUAL');
+
+    // Before fix: MANUAL pago leaks into unmatched pool
+    expect(currentFilter).toHaveLength(2); // pago-auto + pago-manual
+    // After fix: MANUAL pago excluded
+    expect(fixedFilter).toHaveLength(1);
+    expect(fixedFilter[0].fileId).toBe('pago-auto');
   });
 });

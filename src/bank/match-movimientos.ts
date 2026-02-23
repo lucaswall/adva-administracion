@@ -792,6 +792,11 @@ async function matchBankMovimientos(
 
   // Process each movimiento
   for (const mov of movimientos) {
+    // Skip movimientos locked with MANUAL confidence — user-defined matches must not be overwritten
+    if (mov.matchedFileId && mov.matchConfidence === 'MANUAL') {
+      continue;
+    }
+
     let matchResult;
 
     // Route to appropriate matcher based on debit/credit
