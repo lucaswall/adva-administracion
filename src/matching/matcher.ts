@@ -26,6 +26,8 @@ interface DateRangeConfig {
   medium: { before: number; after: number };
   /** LOW confidence: payment within (-10, 60) days of invoice */
   low: { before: number; after: number };
+  /** LOW confidence for USD invoices: wider date range (e.g. -10, 90) */
+  lowUsd: { before: number; after: number };
 }
 
 /**
@@ -34,18 +36,22 @@ interface DateRangeConfig {
 const DEFAULT_DATE_RANGES: DateRangeConfig = {
   high: { before: 0, after: 15 },
   medium: { before: 3, after: 30 },
-  low: { before: 10, after: 60 }
+  low: { before: 10, after: 60 },
+  lowUsd: { before: 10, after: 90 }
 };
 
 /**
- * Normalizes a string for comparison by removing accents and converting to lowercase
+ * Normalizes a string for comparison by removing accents, punctuation, and converting to lowercase
  */
 function normalizeString(str: string): string {
   return str
     .trim()
     .toLowerCase()
     .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '');
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[.,\-_()]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 /**
@@ -92,6 +98,7 @@ export function compareMatchQuality(a: MatchQuality, b: MatchQuality): number {
 export class FacturaPagoMatcher {
   private readonly dateRanges: DateRangeConfig;
   private readonly crossCurrencyTolerancePercent: number;
+  private readonly sameCurrencyUsdTolerance: number;
 
   /**
    * Creates a new matcher
@@ -99,19 +106,25 @@ export class FacturaPagoMatcher {
    * @param dateRangeBefore - Days before invoice date for LOW tier (default: 10)
    * @param dateRangeAfter - Days after invoice date for LOW tier (default: 60)
    * @param crossCurrencyTolerancePercent - Tolerance for USD→ARS matching (default: 5%)
+   * @param sameCurrencyUsdTolerance - Absolute tolerance for USD/USD matching (default: 1)
+   * @param usdDateRangeAfter - Days after invoice date for USD LOW tier (default: 90)
    */
   constructor(
     dateRangeBefore: number = 10,
     dateRangeAfter: number = 60,
-    crossCurrencyTolerancePercent: number = DEFAULT_CROSS_CURRENCY_TOLERANCE
+    crossCurrencyTolerancePercent: number = DEFAULT_CROSS_CURRENCY_TOLERANCE,
+    sameCurrencyUsdTolerance: number = 1,
+    usdDateRangeAfter: number = 90
   ) {
     // Use provided values for LOW tier, keep HIGH and MEDIUM defaults
     this.dateRanges = {
       high: { ...DEFAULT_DATE_RANGES.high },
       medium: { ...DEFAULT_DATE_RANGES.medium },
-      low: { before: dateRangeBefore, after: dateRangeAfter }
+      low: { before: dateRangeBefore, after: dateRangeAfter },
+      lowUsd: { before: dateRangeBefore, after: usdDateRangeAfter }
     };
     this.crossCurrencyTolerancePercent = crossCurrencyTolerancePercent;
+    this.sameCurrencyUsdTolerance = sameCurrencyUsdTolerance;
   }
 
   /**
@@ -151,7 +164,8 @@ export class FacturaPagoMatcher {
         factura.fechaEmision,
         pago.importePagado,
         pago.moneda,
-        this.crossCurrencyTolerancePercent
+        this.crossCurrencyTolerancePercent,
+        this.sameCurrencyUsdTolerance
       );
 
       if (!crossCurrencyResult.matches) {
@@ -167,7 +181,9 @@ export class FacturaPagoMatcher {
       // Check date proximity against tiered ranges
       const isWithinHighRange = isWithinDays(facturaDate, pagoDate, this.dateRanges.high.before, this.dateRanges.high.after);
       const isWithinMediumRange = isWithinDays(facturaDate, pagoDate, this.dateRanges.medium.before, this.dateRanges.medium.after);
-      const isWithinLowRange = isWithinDays(facturaDate, pagoDate, this.dateRanges.low.before, this.dateRanges.low.after);
+      // USD invoices use a wider date range (lowUsd) to account for slower international payments
+      const lowRange = factura.moneda === 'USD' ? this.dateRanges.lowUsd : this.dateRanges.low;
+      const isWithinLowRange = isWithinDays(facturaDate, pagoDate, lowRange.before, lowRange.after);
 
       // Skip if not even within LOW range
       if (!isWithinLowRange) {
@@ -376,10 +392,12 @@ export class ReciboPagoMatcher {
    */
   constructor(dateRangeBefore: number = 10, dateRangeAfter: number = 60) {
     // Use provided values for LOW tier, keep HIGH and MEDIUM defaults
+    // ReciboPagoMatcher doesn't need a USD-specific range (recibos are ARS-only)
     this.dateRanges = {
       high: { ...DEFAULT_DATE_RANGES.high },
       medium: { ...DEFAULT_DATE_RANGES.medium },
-      low: { before: dateRangeBefore, after: dateRangeAfter }
+      low: { before: dateRangeBefore, after: dateRangeAfter },
+      lowUsd: { before: dateRangeBefore, after: dateRangeAfter }
     };
   }
 
