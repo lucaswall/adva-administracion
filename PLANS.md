@@ -41,7 +41,7 @@
 
 4. **Missing retencion matching:** `runMatching()` at `src/processing/matching/index.ts:29-193` has 4 matching steps but none for retenciones→facturas. Schema has columns N:O (matchedFacturaFileId, matchConfidence) but they're never populated.
 
-5. **No manual lock:** No mechanism exists to prevent automatic matching from overwriting user-confirmed matches.
+5. **No manual lock:** No mechanism exists to prevent automatic matching from overwriting user-confirmed matches. The `matchConfidence` column already exists on all matching sheets — adding a `MANUAL` value avoids schema changes.
 
 #### Related Code
 
@@ -68,15 +68,15 @@
 - `src/constants/spreadsheet-headers.ts:96-112` — `RETENCIONES_RECIBIDAS_HEADERS`: columns N (matchedFacturaFileId) and O (matchConfidence) at indices 13-14
 - `src/types/index.ts` — `Retencion` type: has `matchedFacturaFileId?` and `matchConfidence?` fields
 
-**Fix 5 (matchManual column):**
-- `src/constants/spreadsheet-headers.ts:7-134` — all 6 header arrays need new `matchManual` column appended
-- `src/processing/matching/factura-pago-matcher.ts:299-302` — read ranges need extending (+1 column)
-- `src/processing/matching/factura-pago-matcher.ts:390` — `unmatchedPagos` filter needs to exclude locked rows
-- `src/processing/matching/factura-pago-matcher.ts:448-520` — displacement logic must skip locked facturas
-- `src/processing/matching/factura-pago-matcher.ts:553-616` — update writes must include matchManual='NO'
-- `src/processing/matching/recibo-pago-matcher.ts` — same patterns as factura-pago
-- `src/processing/matching/nc-factura-matcher.ts` — same patterns
-- `src/services/folder-structure.ts` — startup migration: check header row length, append missing headers
+**Fix 5 (matchConfidence=MANUAL locking):**
+- `src/types/index.ts:69` — `MatchConfidence` type: add `'MANUAL'` to the union
+- `src/utils/validation.ts:383-388` — `validateMatchConfidence()`: add `'MANUAL'` to `validLevels` array
+- `src/matching/matcher.ts:54-86` — `compareMatchQuality()` and `confidenceOrder`: add `MANUAL: 4` (highest)
+- `src/matching/matcher.ts:250-287` — `findMatches()`: skip facturas where `matchConfidence === 'MANUAL'`
+- `src/processing/matching/factura-pago-matcher.ts:390` — `unmatchedPagos` filter: exclude `matchConfidence === 'MANUAL'`
+- `src/processing/matching/recibo-pago-matcher.ts:346` — same MANUAL skip pattern for recibos and pagos
+- `src/processing/matching/nc-factura-matcher.ts` — same MANUAL skip pattern for NCs and facturas
+- No schema changes needed — `matchConfidence` column already exists in all 6 sheets
 
 ### Impact
 - 4 out of 11 Pagos Recibidos in staging fail to match (36% miss rate)
@@ -178,51 +178,56 @@
 4. Update `src/processing/matching/index.ts` exports
    - Run `verifier` filtered — expect pass
 
-### Fix 5: Add matchManual column to all matching sheets
+### Fix 5: Use matchConfidence=MANUAL to lock manual matches
 **Linear Issue:** [ADV-131](https://linear.app/lw-claude/issue/ADV-131/add-matchmanual-column-to-all-matching-sheets-for-manual-match-locking)
 
-**Migration note:** This changes spreadsheet schema by adding a new column to 6 sheets across 2 spreadsheets (Control de Ingresos, Control de Egresos). Existing rows with empty matchManual = not locked (correct default). Startup migration must add headers to existing sheets.
+**No migration needed.** Reuses existing `matchConfidence` column in all 6 sheets. Users set `matchConfidence` to `MANUAL` in the spreadsheet to lock a match. No schema changes, no new columns.
 
-1. Write tests for matchManual behavior in `src/processing/matching/factura-pago-matcher.test.ts`:
-   - Test: pago with matchManual='SI' is excluded from unmatched pool
-   - Test: factura with matchManual='SI' is not displaced even if better match exists
-   - Test: new automatic match writes matchManual='NO' to both factura and pago rows
-   - Test: displacement clears matchManual on both sides
+**Semantics:**
+- Empty `matchConfidence` → unmatched (can be matched automatically)
+- `HIGH` / `MEDIUM` / `LOW` → automatic match (can be displaced by better match)
+- `MANUAL` → user-confirmed match (never displaced, never cleared by matchers)
+
+1. Write tests in `src/processing/matching/factura-pago-matcher.test.ts`:
+   - Test: pago with `matchConfidence='MANUAL'` is excluded from unmatched pool (treated as matched)
+   - Test: factura with `matchConfidence='MANUAL'` is never displaced even if a better automatic match exists
+   - Test: the displaced pago from a MANUAL factura is not "unmatched" (MANUAL factura's matchedPagoFileId is never cleared)
    - Run `verifier` filtered — expect fail
 
-2. Update header arrays in `src/constants/spreadsheet-headers.ts`:
-   - `FACTURA_EMITIDA_HEADERS`: append `'matchManual'` (new column T, index 19)
-   - `FACTURA_RECIBIDA_HEADERS`: append `'matchManual'` (new column U, index 20)
-   - `PAGO_RECIBIDO_HEADERS`: append `'matchManual'` (new column R, index 17)
-   - `PAGO_ENVIADO_HEADERS`: append `'matchManual'` (new column R, index 17)
-   - `RECIBO_HEADERS`: append `'matchManual'` (new column S, index 18)
-   - `RETENCIONES_RECIBIDAS_HEADERS`: append `'matchManual'` (new column P, index 15)
+2. Update `MatchConfidence` type in `src/types/index.ts:69`:
+   - Change from `'HIGH' | 'MEDIUM' | 'LOW'` to `'HIGH' | 'MEDIUM' | 'LOW' | 'MANUAL'`
 
-3. Add startup migration in `src/services/folder-structure.ts`:
-   - After validating sheet existence, check if the header row has fewer columns than the expected header array
-   - If so, append missing headers to the header row using `batchUpdate`
-   - This handles existing spreadsheets that don't have the new column yet
+3. Update `validateMatchConfidence()` in `src/utils/validation.ts:383-388`:
+   - Add `'MANUAL'` to the `validLevels` array
 
-4. Update `src/processing/matching/factura-pago-matcher.ts`:
-   - Extend read ranges: Facturas Emitidas `A:T` (was `A:S`), Facturas Recibidas `A:U` (was `A:T`), Pagos `A:R` (was `A:Q`)
-   - Parse `matchManual` from new column index during data loading (for both facturas and pagos)
-   - Add `matchManual?: string` field to the parsed factura and pago objects
-   - In unmatched filter (line 390): add `&& p.matchManual !== 'SI'`
-   - In displacement check: skip facturas with `matchManual === 'SI'` (don't consider them for displacement)
-   - In update writes: include matchManual='NO' in both factura and pago update ranges
-   - When clearing a match (displacement unmatch): write empty matchManual
+4. Update `compareMatchQuality()` in `src/matching/matcher.ts:54-86`:
+   - Add `MANUAL: 4` to the `confidenceOrder` map (highest priority)
+   - This ensures MANUAL matches are never considered "worse" than any automatic match
 
-5. Update `src/processing/matching/recibo-pago-matcher.ts`:
-   - Same pattern: extend read ranges, parse matchManual, skip locked rows, write 'NO' on match
+5. Update `FacturaPagoMatcher.findMatches()` in `src/matching/matcher.ts`:
+   - Skip facturas with `matchConfidence === 'MANUAL'` — do not generate candidates for them (they are locked)
+   - This is the key guard: MANUAL facturas are invisible to the matcher
 
-6. Update `src/processing/matching/nc-factura-matcher.ts`:
-   - Same pattern: extend read ranges, parse matchManual, skip locked rows, write 'NO' on match
+6. Update `src/processing/matching/factura-pago-matcher.ts`:
+   - In unmatched pago filter (line 390): add `&& p.matchConfidence !== 'MANUAL'` — pagos with MANUAL are already locked
+   - In displacement logic: already handled by step 5 (MANUAL facturas won't appear as candidates), but also guard against displacing a pago that has MANUAL on its side
 
-7. Update `src/processing/matching/retencion-factura-matcher.ts` (from Fix 4):
-   - Build with matchManual support from the start
+7. Write tests in `src/processing/matching/recibo-pago-matcher.test.ts`:
+   - Test: recibo with `matchConfidence='MANUAL'` is not re-matched
+   - Test: pago with `matchConfidence='MANUAL'` is excluded from unmatched pool
+   - Run `verifier` filtered — expect fail
 
-8. Update `SPREADSHEET_FORMAT.md` and `CLAUDE.md` with new column documentation
-   - Run `verifier` — expect pass
+8. Update `src/processing/matching/recibo-pago-matcher.ts`:
+   - Same MANUAL skip pattern: exclude MANUAL recibos and MANUAL pagos from matching
+
+9. Update `src/processing/matching/nc-factura-matcher.ts`:
+   - Same MANUAL skip pattern for NCs and facturas
+
+10. Update `src/processing/matching/retencion-factura-matcher.ts` (from Fix 4):
+    - Build with MANUAL support from the start — skip retenciones and facturas with MANUAL confidence
+
+11. Update `SPREADSHEET_FORMAT.md` and `CLAUDE.md` with MANUAL confidence documentation
+    - Run `verifier` — expect pass
 
 ## Post-Implementation Checklist
 1. Run `bug-hunter` agent - Review changes for bugs
@@ -238,15 +243,15 @@
 
 **Linear Issues:** ADV-127, ADV-128, ADV-129, ADV-130, ADV-131
 
-**Solution Approach:** Add $30 USD same-currency tolerance and 90-day LOW range for USD facturas. Strip punctuation in normalizeString for better name matching. Create new retencion-factura-matcher following the NC matcher pattern. Add matchManual column (SI/NO/empty) to all 6 matching sheets with startup migration for existing spreadsheets.
+**Solution Approach:** Add $30 USD same-currency tolerance and 90-day LOW range for USD facturas. Strip punctuation in normalizeString for better name matching. Create new retencion-factura-matcher following the NC matcher pattern. Use existing `matchConfidence` column with new `MANUAL` value to lock matches — no new columns or schema migration needed.
 
 **Scope:**
-- Files affected: ~15 (matchers, config, headers, types, folder-structure, exchange-rate, SPREADSHEET_FORMAT.md, CLAUDE.md)
+- Files affected: ~12 (matchers, config, types, validation, exchange-rate, SPREADSHEET_FORMAT.md, CLAUDE.md)
 - New tests: yes (all 5 fixes)
 - New file: `src/processing/matching/retencion-factura-matcher.ts` + test
-- Breaking changes: no — new columns are appended, existing data unaffected
+- Breaking changes: no — `MANUAL` is a new value in existing column, no schema changes
 
 **Risks/Considerations:**
-- matchManual column migration must handle both existing (empty) and new spreadsheets
 - Retencion matching for multi-factura cases (montoComprobante = sum of multiple facturas) is deferred — first implementation matches 1:1 only
 - USD tolerance of $30 could theoretically match wrong documents if two USD facturas have amounts within $30 of each other for the same client — mitigated by CUIT/name matching tiers
+- Users must manually type `MANUAL` in the matchConfidence column — consider documenting in OPERATION-MANUAL.es.md
