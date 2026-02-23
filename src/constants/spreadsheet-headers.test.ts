@@ -267,8 +267,8 @@ describe('Movimientos Bancario Sheet', () => {
         'saldo',
         'saldoCalculado',
         'matchedFileId',
-        'detalle',
         'matchedType',
+        'detalle',
       ]);
     });
 
@@ -276,12 +276,12 @@ describe('Movimientos Bancario Sheet', () => {
       expect(MOVIMIENTOS_BANCARIO_SHEET.headers[6]).toBe('matchedFileId');
     });
 
-    it('should have detalle as column H (index 7)', () => {
-      expect(MOVIMIENTOS_BANCARIO_SHEET.headers[7]).toBe('detalle');
+    it('should have matchedType as column H (index 7)', () => {
+      expect(MOVIMIENTOS_BANCARIO_SHEET.headers[7]).toBe('matchedType');
     });
 
-    it('should have matchedType as column I (index 8)', () => {
-      expect(MOVIMIENTOS_BANCARIO_SHEET.headers[8]).toBe('matchedType');
+    it('should have detalle as column I (index 8)', () => {
+      expect(MOVIMIENTOS_BANCARIO_SHEET.headers[8]).toBe('detalle');
     });
 
     it('should have saldoCalculado as column F (index 5)', () => {

@@ -73,8 +73,8 @@ function parseMovimientoRow(
     saldo: parseNumber(row[4]),
     saldoCalculado: parseNumber(row[5]),
     matchedFileId: String(row[6] || ''),
-    detalle: String(row[7] || ''),
-    matchedType: parseMatchedType(row[8]),
+    matchedType: parseMatchedType(row[7]),
+    detalle: String(row[8] || ''),
   };
 }
 

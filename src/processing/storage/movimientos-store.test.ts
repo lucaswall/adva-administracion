@@ -22,7 +22,7 @@ vi.mock('../../utils/logger.js', () => ({
 
 vi.mock('../../constants/spreadsheet-headers.js', () => ({
   MOVIMIENTOS_BANCARIO_SHEET: {
-    headers: ['fecha', 'concepto', 'debito', 'credito', 'saldo', 'saldoCalculado', 'matchedFileId', 'detalle', 'matchedType'],
+    headers: ['fecha', 'concepto', 'debito', 'credito', 'saldo', 'saldoCalculado', 'matchedFileId', 'matchedType', 'detalle'],
   },
   MOVIMIENTOS_TARJETA_SHEET: {
     headers: ['fecha', 'descripcion', 'nroCupon', 'pesos', 'dolares'],

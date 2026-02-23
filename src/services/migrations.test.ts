@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 vi.mock('./sheets.js', () => ({
   getValues: vi.fn(),
-  setValues: vi.fn(),
+  batchUpdate: vi.fn(),
   getSheetMetadata: vi.fn(),
 }));
 
@@ -17,51 +17,103 @@ vi.mock('../utils/logger.js', () => ({
   error: vi.fn(),
 }));
 
-import { migrateMovimientosMatchedType, runStartupMigrations } from './migrations.js';
-import { getValues, setValues, getSheetMetadata } from './sheets.js';
+import { migrateMovimientosColumns, runStartupMigrations } from './migrations.js';
+import { getValues, batchUpdate, getSheetMetadata } from './sheets.js';
 import { getCachedFolderStructure } from './folder-structure.js';
 
 beforeEach(() => {
   vi.clearAllMocks();
 });
 
-describe('migrateMovimientosMatchedType', () => {
-  it('should add matchedType header to sheets with only 8 columns', async () => {
+describe('migrateMovimientosColumns', () => {
+  it('should migrate 8-column sheet: move detalle from H to I, add matchedType at H', async () => {
     vi.mocked(getSheetMetadata).mockResolvedValue({
       ok: true,
       value: [{ title: '2025-01', sheetId: 1, index: 0 }],
     });
+    // G:I data — old layout: G=matchedFileId, H=detalle, I=empty
     vi.mocked(getValues).mockResolvedValue({
       ok: true,
-      value: [['fecha', 'concepto', 'debito', 'credito', 'saldo', 'saldoCalculado', 'matchedFileId', 'detalle']],
+      value: [
+        ['matchedFileId', 'detalle', ''],  // header row
+        ['file-1', 'Pago a proveedor', ''],  // data row
+        ['', '', ''],  // empty row
+      ],
     });
-    vi.mocked(setValues).mockResolvedValue({ ok: true, value: 1 });
+    vi.mocked(batchUpdate).mockResolvedValue({ ok: true, value: 6 });
 
-    const result = await migrateMovimientosMatchedType('spreadsheet-1', 'Test Bank');
+    const result = await migrateMovimientosColumns('spreadsheet-1', 'Test Bank');
 
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.value).toBe(1);
-    expect(setValues).toHaveBeenCalledWith('spreadsheet-1', "'2025-01'!I1", [['matchedType']]);
+
+    const calls = vi.mocked(batchUpdate).mock.calls[0];
+    const updates = calls[1];
+
+    // Header row: H=matchedType, I=detalle
+    expect(updates[0]).toEqual({
+      range: "'2025-01'!H1:I1",
+      values: [['matchedType', 'detalle']],
+    });
+
+    // Data row: H='' (no matchedType), I='Pago a proveedor' (moved from H)
+    expect(updates[1]).toEqual({
+      range: "'2025-01'!H2:I2",
+      values: [['', 'Pago a proveedor']],
+    });
   });
 
-  it('should skip sheets that already have matchedType header', async () => {
+  it('should skip sheets already in correct layout', async () => {
     vi.mocked(getSheetMetadata).mockResolvedValue({
       ok: true,
       value: [{ title: '2025-01', sheetId: 1, index: 0 }],
     });
+    // Already correct: G=matchedFileId, H=matchedType, I=detalle
     vi.mocked(getValues).mockResolvedValue({
       ok: true,
-      value: [['fecha', 'concepto', 'debito', 'credito', 'saldo', 'saldoCalculado', 'matchedFileId', 'detalle', 'matchedType']],
+      value: [
+        ['matchedFileId', 'matchedType', 'detalle'],
+        ['file-1', 'AUTO', 'Pago a proveedor'],
+      ],
     });
 
-    const result = await migrateMovimientosMatchedType('spreadsheet-1', 'Test Bank');
+    const result = await migrateMovimientosColumns('spreadsheet-1', 'Test Bank');
 
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.value).toBe(0);
-    expect(setValues).not.toHaveBeenCalled();
+    expect(batchUpdate).not.toHaveBeenCalled();
   });
 
-  it('should skip non-month sheets (e.g., Resumenes)', async () => {
+  it('should handle swapped layout: detalle at H, matchedType at I', async () => {
+    vi.mocked(getSheetMetadata).mockResolvedValue({
+      ok: true,
+      value: [{ title: '2025-01', sheetId: 1, index: 0 }],
+    });
+    // Wrong order from previous bad migration
+    vi.mocked(getValues).mockResolvedValue({
+      ok: true,
+      value: [
+        ['matchedFileId', 'detalle', 'matchedType'],
+        ['file-1', 'Pago a proveedor', 'AUTO'],
+      ],
+    });
+    vi.mocked(batchUpdate).mockResolvedValue({ ok: true, value: 4 });
+
+    const result = await migrateMovimientosColumns('spreadsheet-1', 'Test Bank');
+
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value).toBe(1);
+
+    const updates = vi.mocked(batchUpdate).mock.calls[0][1];
+
+    // Data row: swap values — H='AUTO' (was in I), I='Pago a proveedor' (was in H)
+    expect(updates[1]).toEqual({
+      range: "'2025-01'!H2:I2",
+      values: [['AUTO', 'Pago a proveedor']],
+    });
+  });
+
+  it('should skip non-month sheets', async () => {
     vi.mocked(getSheetMetadata).mockResolvedValue({
       ok: true,
       value: [
@@ -71,17 +123,16 @@ describe('migrateMovimientosMatchedType', () => {
     });
     vi.mocked(getValues).mockResolvedValue({
       ok: true,
-      value: [['fecha', 'concepto', 'debito', 'credito', 'saldo', 'saldoCalculado', 'matchedFileId', 'detalle']],
+      value: [['matchedFileId', 'detalle', '']],
     });
-    vi.mocked(setValues).mockResolvedValue({ ok: true, value: 1 });
+    vi.mocked(batchUpdate).mockResolvedValue({ ok: true, value: 2 });
 
-    const result = await migrateMovimientosMatchedType('spreadsheet-1', 'Test Bank');
+    const result = await migrateMovimientosColumns('spreadsheet-1', 'Test Bank');
 
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.value).toBe(1);
     // Only called for 2025-01, not Resumenes
     expect(getValues).toHaveBeenCalledTimes(1);
-    expect(setValues).toHaveBeenCalledTimes(1);
   });
 
   it('should migrate multiple sheets in the same spreadsheet', async () => {
@@ -90,21 +141,19 @@ describe('migrateMovimientosMatchedType', () => {
       value: [
         { title: '2025-01', sheetId: 1, index: 0 },
         { title: '2025-02', sheetId: 2, index: 1 },
-        { title: '2025-03', sheetId: 3, index: 2 },
       ],
     });
-    // All sheets have 8-column headers
     vi.mocked(getValues).mockResolvedValue({
       ok: true,
-      value: [['fecha', 'concepto', 'debito', 'credito', 'saldo', 'saldoCalculado', 'matchedFileId', 'detalle']],
+      value: [['matchedFileId', 'detalle', '']],
     });
-    vi.mocked(setValues).mockResolvedValue({ ok: true, value: 1 });
+    vi.mocked(batchUpdate).mockResolvedValue({ ok: true, value: 2 });
 
-    const result = await migrateMovimientosMatchedType('spreadsheet-1', 'Test Bank');
+    const result = await migrateMovimientosColumns('spreadsheet-1', 'Test Bank');
 
     expect(result.ok).toBe(true);
-    if (result.ok) expect(result.value).toBe(3);
-    expect(setValues).toHaveBeenCalledTimes(3);
+    if (result.ok) expect(result.value).toBe(2);
+    expect(batchUpdate).toHaveBeenCalledTimes(2);
   });
 
   it('should handle getSheetMetadata failure', async () => {
@@ -113,7 +162,7 @@ describe('migrateMovimientosMatchedType', () => {
       error: new Error('API error'),
     });
 
-    const result = await migrateMovimientosMatchedType('spreadsheet-1', 'Test Bank');
+    const result = await migrateMovimientosColumns('spreadsheet-1', 'Test Bank');
 
     expect(result.ok).toBe(false);
   });
@@ -130,14 +179,39 @@ describe('migrateMovimientosMatchedType', () => {
       .mockResolvedValueOnce({ ok: false, error: new Error('Read failed') })
       .mockResolvedValueOnce({
         ok: true,
-        value: [['fecha', 'concepto', 'debito', 'credito', 'saldo', 'saldoCalculado', 'matchedFileId', 'detalle']],
+        value: [['matchedFileId', 'detalle', '']],
       });
-    vi.mocked(setValues).mockResolvedValue({ ok: true, value: 1 });
+    vi.mocked(batchUpdate).mockResolvedValue({ ok: true, value: 2 });
 
-    const result = await migrateMovimientosMatchedType('spreadsheet-1', 'Test Bank');
+    const result = await migrateMovimientosColumns('spreadsheet-1', 'Test Bank');
 
     expect(result.ok).toBe(true);
-    if (result.ok) expect(result.value).toBe(1); // Only second sheet migrated
+    if (result.ok) expect(result.value).toBe(1);
+  });
+
+  it('should preserve existing matchedFileId data in column G', async () => {
+    vi.mocked(getSheetMetadata).mockResolvedValue({
+      ok: true,
+      value: [{ title: '2025-01', sheetId: 1, index: 0 }],
+    });
+    vi.mocked(getValues).mockResolvedValue({
+      ok: true,
+      value: [
+        ['matchedFileId', 'detalle', ''],
+        ['abc123', 'FC-A-0001-00001234 EMPRESA SA', ''],
+        ['def456', 'Gastos bancarios', ''],
+      ],
+    });
+    vi.mocked(batchUpdate).mockResolvedValue({ ok: true, value: 6 });
+
+    await migrateMovimientosColumns('spreadsheet-1', 'Test Bank');
+
+    const updates = vi.mocked(batchUpdate).mock.calls[0][1];
+    // Only updates H:I, not G — matchedFileId untouched
+    expect(updates[1].range).toBe("'2025-01'!H2:I2");
+    expect(updates[1].values).toEqual([['', 'FC-A-0001-00001234 EMPRESA SA']]);
+    expect(updates[2].range).toBe("'2025-01'!H3:I3");
+    expect(updates[2].values).toEqual([['', 'Gastos bancarios']]);
   });
 });
 
@@ -173,14 +247,14 @@ describe('runStartupMigrations', () => {
     });
     vi.mocked(getValues).mockResolvedValue({
       ok: true,
-      value: [['fecha', 'concepto', 'debito', 'credito', 'saldo', 'saldoCalculado', 'matchedFileId', 'detalle']],
+      value: [['matchedFileId', 'detalle', '']],
     });
-    vi.mocked(setValues).mockResolvedValue({ ok: true, value: 1 });
+    vi.mocked(batchUpdate).mockResolvedValue({ ok: true, value: 2 });
 
     await runStartupMigrations();
 
     expect(getSheetMetadata).toHaveBeenCalledTimes(2);
-    expect(setValues).toHaveBeenCalledTimes(2);
+    expect(batchUpdate).toHaveBeenCalledTimes(2);
   });
 
   it('should continue if one spreadsheet migration fails', async () => {
@@ -198,13 +272,13 @@ describe('runStartupMigrations', () => {
       });
     vi.mocked(getValues).mockResolvedValue({
       ok: true,
-      value: [['fecha', 'concepto', 'debito', 'credito', 'saldo', 'saldoCalculado', 'matchedFileId', 'detalle']],
+      value: [['matchedFileId', 'detalle', '']],
     });
-    vi.mocked(setValues).mockResolvedValue({ ok: true, value: 1 });
+    vi.mocked(batchUpdate).mockResolvedValue({ ok: true, value: 2 });
 
     await runStartupMigrations();
 
     // Second spreadsheet should still be processed
-    expect(setValues).toHaveBeenCalledTimes(1);
+    expect(batchUpdate).toHaveBeenCalledTimes(1);
   });
 });

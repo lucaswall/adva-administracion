@@ -159,9 +159,9 @@ describe('readMovimientosForPeriod', () => {
     vi.mocked(getValues).mockResolvedValue({
       ok: true,
       value: [
-        ['fecha', 'concepto', 'debito', 'credito', 'saldo', 'saldoCalculado', 'matchedFileId', 'detalle'],
-        ['2025-01-15', 'TRANSFERENCIA TEST SA', 1000, null, 9000, 9000, '', ''],
-        ['2025-01-16', 'DEPOSITO', null, 5000, 14000, 14000, 'file123', 'Cobro Factura'],
+        ['fecha', 'concepto', 'debito', 'credito', 'saldo', 'saldoCalculado', 'matchedFileId', 'matchedType', 'detalle'],
+        ['2025-01-15', 'TRANSFERENCIA TEST SA', 1000, null, 9000, 9000, '', '', ''],
+        ['2025-01-16', 'DEPOSITO', null, 5000, 14000, 14000, 'file123', '', 'Cobro Factura'],
       ],
     });
 
@@ -284,9 +284,9 @@ describe('readMovimientosForPeriod', () => {
     vi.mocked(getValues).mockResolvedValue({
       ok: true,
       value: [
-        ['fecha', 'concepto', 'debito', 'credito', 'saldo', 'saldoCalculado', 'matchedFileId', 'detalle'],
-        [45993, 'TRANSFERENCIA TEST SA', 1000, null, 9000, 9000, '', ''],
-        [45671, 'DEPOSITO', null, 5000, 14000, 14000, 'file123', 'Cobro'],
+        ['fecha', 'concepto', 'debito', 'credito', 'saldo', 'saldoCalculado', 'matchedFileId', 'matchedType', 'detalle'],
+        [45993, 'TRANSFERENCIA TEST SA', 1000, null, 9000, 9000, '', '', ''],
+        [45671, 'DEPOSITO', null, 5000, 14000, 14000, 'file123', '', 'Cobro'],
       ],
     });
 
@@ -323,9 +323,9 @@ describe('readMovimientosForPeriod', () => {
     vi.mocked(getValues).mockResolvedValue({
       ok: true,
       value: [
-        ['fecha', 'concepto', 'debito', 'credito', 'saldo', 'saldoCalculado', 'matchedFileId', 'detalle', 'matchedType'],
-        ['2025-01-15', 'TRANSFERENCIA TEST SA', 1000, null, 9000, 9000, 'file123', 'Pago Factura', 'AUTO'],
-        ['2025-01-16', 'DEPOSITO', null, 5000, 14000, 14000, 'file456', 'Cobro', 'MANUAL'],
+        ['fecha', 'concepto', 'debito', 'credito', 'saldo', 'saldoCalculado', 'matchedFileId', 'matchedType', 'detalle'],
+        ['2025-01-15', 'TRANSFERENCIA TEST SA', 1000, null, 9000, 9000, 'file123', 'AUTO', 'Pago Factura'],
+        ['2025-01-16', 'DEPOSITO', null, 5000, 14000, 14000, 'file456', 'MANUAL', 'Cobro'],
       ],
     });
 
@@ -361,11 +361,11 @@ describe('readMovimientosForPeriod', () => {
     vi.mocked(getValues).mockResolvedValue({
       ok: true,
       value: [
-        ['fecha', 'concepto', 'debito', 'credito', 'saldo', 'saldoCalculado', 'matchedFileId', 'detalle', 'matchedType'],
-        ['2025-01-15', 'TEST', 1000, null, 9000, 9000, 'file1', '', 'manual'],
-        ['2025-01-16', 'TEST', null, 5000, 14000, 14000, 'file2', '', 'auto'],
-        ['2025-01-17', 'TEST', 1000, null, 8000, 8000, 'file3', '', ' Manual '],
-        ['2025-01-18', 'TEST', null, 2000, 10000, 10000, '', '', 'invalid'],
+        ['fecha', 'concepto', 'debito', 'credito', 'saldo', 'saldoCalculado', 'matchedFileId', 'matchedType', 'detalle'],
+        ['2025-01-15', 'TEST', 1000, null, 9000, 9000, 'file1', 'manual', ''],
+        ['2025-01-16', 'TEST', null, 5000, 14000, 14000, 'file2', 'auto', ''],
+        ['2025-01-17', 'TEST', 1000, null, 8000, 8000, 'file3', ' Manual ', ''],
+        ['2025-01-18', 'TEST', null, 2000, 10000, 10000, '', 'invalid', ''],
       ],
     });
 

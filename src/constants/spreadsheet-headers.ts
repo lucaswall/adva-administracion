@@ -235,8 +235,8 @@ export const MOVIMIENTOS_BANCARIO_SHEET: SheetConfig = {
     'saldo',           // Parsed from PDF (for comparison)
     'saldoCalculado',  // Formula: running balance computed from transactions
     'matchedFileId',   // Google Drive fileId of matched document (for replacement logic)
-    'detalle',         // Human-readable match description
     'matchedType',     // 'AUTO' | 'MANUAL' | '' - how the match was made
+    'detalle',         // Human-readable match description (last column for user visibility)
   ],
   numberFormats: new Map([
     [0, { type: 'date' }],                    // fecha

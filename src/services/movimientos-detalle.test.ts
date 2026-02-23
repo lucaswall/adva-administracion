@@ -60,7 +60,7 @@ describe('updateDetalle', () => {
     expect(batchUpdate).toHaveBeenCalledWith('spreadsheet-id', [
       {
         range: "'2025-01'!G5:I5",
-        values: [['file123', 'Cobro Factura de TEST SA', 'AUTO']],
+        values: [['file123', 'AUTO', 'Cobro Factura de TEST SA']],
       },
     ]);
   });
@@ -82,9 +82,9 @@ describe('updateDetalle', () => {
     }
 
     expect(batchUpdate).toHaveBeenCalledWith('spreadsheet-id', [
-      { range: "'2025-01'!G5:I5", values: [['file1', 'Match 1', '']] },
-      { range: "'2025-01'!G10:I10", values: [['file2', 'Match 2', '']] },
-      { range: "'2025-02'!G3:I3", values: [['file3', 'Match 3', '']] },
+      { range: "'2025-01'!G5:I5", values: [['file1', '', 'Match 1']] },
+      { range: "'2025-01'!G10:I10", values: [['file2', '', 'Match 2']] },
+      { range: "'2025-02'!G3:I3", values: [['file3', '', 'Match 3']] },
     ]);
   });
 
@@ -242,7 +242,7 @@ describe('updateDetalle', () => {
     expect(batchUpdate).toHaveBeenCalledWith('spreadsheet-id', [
       {
         range: "'Sheet''Name'!G5:I5",
-        values: [['file123', 'Test', '']],
+        values: [['file123', '', 'Test']],
       },
     ]);
   });
@@ -266,7 +266,7 @@ describe('updateDetalle', () => {
     expect(batchUpdate).toHaveBeenCalledWith('spreadsheet-id', [
       {
         range: "'Sheet With Spaces'!G3:I3",
-        values: [['file456', 'Another Test', '']],
+        values: [['file456', '', 'Another Test']],
       },
     ]);
   });
@@ -290,7 +290,7 @@ describe('updateDetalle', () => {
     expect(batchUpdate).toHaveBeenCalledWith('spreadsheet-id', [
       {
         range: "'2024-01'!G2:I2",
-        values: [['file789', 'Normal Sheet', '']],
+        values: [['file789', '', 'Normal Sheet']],
       },
     ]);
   });
