@@ -264,3 +264,64 @@
 - Retencion matching for multi-factura cases (montoComprobante = sum of multiple facturas) is deferred — first implementation matches 1:1 only
 - USD tolerance of $30 could theoretically match wrong documents if two USD facturas have amounts within $30 of each other for the same client — mitigated by CUIT/name matching tiers
 - Users must manually type `MANUAL` in the matchConfidence column — consider documenting in OPERATION-MANUAL.es.md
+
+---
+
+## Iteration 1
+
+**Implemented:** 2026-02-23
+**Method:** Agent team (3 workers, worktree-isolated)
+
+### Tasks Completed This Iteration
+- Fix 1 (ADV-127): Add $30 same-currency USD tolerance — `sameCurrencyUsdTolerance` param in exchange-rate.ts, `USD_SAME_CURRENCY_TOLERANCE=30` constant (worker-1)
+- Fix 2 (ADV-128): Extend LOW date range to 90 days for USD — `usdMatchDaysAfter` config, `lowUsd` date range in matcher (worker-1)
+- Fix 3 (ADV-129): Punctuation stripping in normalizeString — commas, periods, hyphens, underscores, parens stripped (worker-1)
+- Fix 4 (ADV-130): Retencion→factura matcher — new `retencion-factura-matcher.ts` with CUIT + amount + date matching, added as step 5 in runMatching pipeline (worker-2)
+- Fix 5 (ADV-131): MANUAL match locking — `MANUAL` added to MatchConfidence type, all 6 matchers skip MANUAL rows, docs updated (worker-3 + worker-2 step 10)
+
+### Files Modified
+- `src/utils/exchange-rate.ts` — sameCurrencyUsdTolerance param
+- `src/utils/exchange-rate.test.ts` — USD tolerance tests
+- `src/config.ts` — USD_SAME_CURRENCY_TOLERANCE, usdMatchDaysAfter
+- `src/matching/matcher.ts` — lowUsd range, sameCurrencyUsdTolerance, punctuation stripping, MANUAL:4 in confidenceOrder, MANUAL guards
+- `src/matching/matcher.test.ts` — USD tolerance, date range, punctuation tests
+- `src/processing/matching/factura-pago-matcher.ts` — new matcher params, MANUAL guard
+- `src/processing/matching/factura-pago-matcher.test.ts` — MANUAL locking tests
+- `src/processing/matching/recibo-pago-matcher.ts` — MANUAL guard
+- `src/processing/matching/recibo-pago-matcher.test.ts` — MANUAL locking tests
+- `src/processing/matching/nc-factura-matcher.ts` — MANUAL guard
+- `src/processing/matching/nc-factura-matcher.test.ts` — MANUAL locking tests
+- `src/processing/matching/retencion-factura-matcher.ts` — NEW: retencion-factura matching with MANUAL support
+- `src/processing/matching/retencion-factura-matcher.test.ts` — NEW: 16 tests
+- `src/processing/matching/index.ts` — step 5: retencion matching
+- `src/bank/match-movimientos.ts` — MANUAL guard for movimientos
+- `src/bank/match-movimientos.test.ts` — MANUAL locking test
+- `src/types/index.ts` — MANUAL in MatchConfidence, matchConfidence in MovimientoRow
+- `src/utils/validation.ts` — MANUAL in validateMatchConfidence
+- `SPREADSHEET_FORMAT.md` — MANUAL confidence documentation
+- `CLAUDE.md` — MANUAL Confidence Lock section, MATCH_DAYS_AFTER_USD env var
+- `src/middleware/auth.test.ts`, `src/routes/scan.test.ts`, `src/routes/status.test.ts`, `src/server.test.ts` — Config mock updates
+
+### Linear Updates
+- ADV-127: Todo → In Progress → Review
+- ADV-128: Todo → In Progress → Review
+- ADV-129: Todo → In Progress → Review
+- ADV-130: Todo → In Progress → Review
+- ADV-131: Todo → In Progress → Review
+
+### Pre-commit Verification
+- bug-hunter: Found 4 issues (2 medium, 2 low) — all fixed before proceeding
+- verifier: All 1,792 tests pass, zero warnings
+
+### Work Partition
+- Worker 1: Fix 1, Fix 2, Fix 3 (matcher improvements — USD tolerance, date range, punctuation)
+- Worker 2: Fix 4, Fix 5 step 10 (retencion-factura matcher with MANUAL support)
+- Worker 3: Fix 5 steps 1-9, 11-13 (MANUAL locking across all existing matchers + docs)
+
+### Merge Summary
+- Worker 3: fast-forward (foundation — types, validation, all existing matcher guards)
+- Worker 2: auto-merge, 1 conflict in matcher.ts (duplicate MANUAL key — resolved, kept MANUAL:4)
+- Worker 1: auto-merge (no conflicts — orthogonal matcher improvements)
+
+### Continuation Status
+All tasks completed.

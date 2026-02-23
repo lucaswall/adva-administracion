@@ -434,6 +434,7 @@ npm run deploy:script # Build + deploy to Dashboard
 | MATCH_DAYS_BEFORE | No | 10 |
 | MATCH_DAYS_AFTER | No | 60 |
 | USD_ARS_TOLERANCE_PERCENT | No | 5 |
+| MATCH_DAYS_AFTER_USD | No | 90 |
 | DRIVE_ROOT_FOLDER_ID_PRODUCTION | No | - |
 | DRIVE_ROOT_FOLDER_ID_STAGING | No | - |
 

@@ -1739,6 +1739,31 @@ describe('FacturaPagoMatcher punctuation stripping in name matching (ADV-129)', 
     }
   });
 
+  it('"OIL-SERVICE SA" matches factura "OilService SA" (hyphens stripped)', () => {
+    const facturas: Array<Factura & { row: number }> = [
+      { ...baseFactura, razonSocialEmisor: 'OilService SA' }
+    ];
+
+    const pago: Pago = {
+      fileId: 'pago-punct-hyph',
+      fileName: 'pago-punct-hyph.pdf',
+      banco: 'BBVA',
+      fechaPago: '2024-01-07',
+      importePagado: 1000,
+      moneda: 'ARS',
+      nombreBeneficiario: 'OIL-SERVICE SA',
+      processedAt: '2024-01-07T10:00:00Z',
+      confidence: 1.0,
+      needsReview: false
+    };
+
+    const matches = matcher.findMatches(pago, facturas);
+    expect(matches.length).toBe(1);
+    if (matches.length > 0) {
+      expect(matches[0].reasons.some(r => r.includes('name match'))).toBe(true);
+    }
+  });
+
   it('"Empresa (Argentina)" matches factura "Empresa Argentina" (parens stripped)', () => {
     const facturas: Array<Factura & { row: number }> = [
       { ...baseFactura, razonSocialEmisor: 'Empresa Argentina' }

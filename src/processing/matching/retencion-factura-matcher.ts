@@ -141,9 +141,9 @@ export async function matchRetencionesWithFacturas(
   });
 
   // Read Retenciones Recibidas (A:O)
-  const retencionesMockResult = await getValues(spreadsheetId, 'Retenciones Recibidas!A:O');
-  if (!retencionesMockResult.ok) {
-    return { ok: false, error: retencionesMockResult.error };
+  const retencionesResult = await getValues(spreadsheetId, 'Retenciones Recibidas!A:O');
+  if (!retencionesResult.ok) {
+    return { ok: false, error: retencionesResult.error };
   }
 
   // Read Facturas Emitidas (A:S)
@@ -152,7 +152,7 @@ export async function matchRetencionesWithFacturas(
     return { ok: false, error: facturasResult.error };
   }
 
-  if (retencionesMockResult.value.length <= 1) {
+  if (retencionesResult.value.length <= 1) {
     debug('No retenciones to match', {
       module: 'retencion-factura-matcher',
       phase: 'start',
@@ -170,7 +170,7 @@ export async function matchRetencionesWithFacturas(
     return { ok: true, value: 0 };
   }
 
-  const retenciones = parseRetencionRows(retencionesMockResult.value as unknown[][]);
+  const retenciones = parseRetencionRows(retencionesResult.value as unknown[][]);
   const facturas = parseFacturaEmitidaRows(facturasResult.value as unknown[][]);
 
   debug('Found documents for retencion-factura matching', {
@@ -183,6 +183,9 @@ export async function matchRetencionesWithFacturas(
 
   let matchCount = 0;
 
+  // NOTE: Multiple retenciones CAN match the same factura — this is by design.
+  // Different tax types (IVA, Ganancias, IIBB) produce separate retention certificates
+  // for the same invoice. We do NOT track "claimed" facturas here.
   for (const retencion of retenciones) {
     // Skip already matched retenciones
     if (retencion.matchedFacturaFileId) {
