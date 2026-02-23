@@ -112,7 +112,7 @@ export async function updateDetalle(
 
     // Verify each sheet's updates
     for (const [sheetName, sheetUpdates] of updatesBySheet) {
-      // Read the full sheet to get current state (columns A:H)
+      // Read the full sheet to get current state (columns A:I)
       const range = `'${escapeSheetName(sheetName)}'!A:I`;
       const readResult = await getValues(spreadsheetId, range);
 

@@ -9,6 +9,7 @@ import { statusRoutes, setServerStartTime } from './routes/status.js';
 import { scanRoutes } from './routes/scan.js';
 import { webhookRoutes } from './routes/webhooks.js';
 import { discoverFolderStructure, getCachedFolderStructure } from './services/folder-structure.js';
+import { runStartupMigrations } from './services/migrations.js';
 import { initWatchManager, startWatching, shutdownWatchManager, updateLastScanTime } from './services/watch-manager.js';
 import { scanFolder } from './processing/scanner.js';
 import { updateStatusSheet } from './services/status-sheet.js';
@@ -338,6 +339,9 @@ async function start() {
 
     // Initialize folder structure after server is running
     await initializeFolderStructure();
+
+    // Run spreadsheet schema migrations (e.g., add missing column headers)
+    await runStartupMigrations();
 
     // Start real-time monitoring (if configured)
     await initializeRealTimeMonitoring();

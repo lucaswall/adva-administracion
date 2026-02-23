@@ -22,7 +22,7 @@ vi.mock('../../utils/logger.js', () => ({
 
 vi.mock('../../constants/spreadsheet-headers.js', () => ({
   MOVIMIENTOS_BANCARIO_SHEET: {
-    headers: ['fecha', 'concepto', 'debito', 'credito', 'saldo', 'saldoCalculado', 'matchedFileId', 'detalle'],
+    headers: ['fecha', 'concepto', 'debito', 'credito', 'saldo', 'saldoCalculado', 'matchedFileId', 'detalle', 'matchedType'],
   },
   MOVIMIENTOS_TARJETA_SHEET: {
     headers: ['fecha', 'descripcion', 'nroCupon', 'pesos', 'dolares'],
@@ -168,7 +168,7 @@ describe('storeMovimientosBancario', () => {
       expect.any(Array),
       undefined  // sheetOrderBatch is optional
     );
-    expect(formatEmptyMonthSheet).toHaveBeenCalledWith('spreadsheet-id', 123, 8);
+    expect(formatEmptyMonthSheet).toHaveBeenCalledWith('spreadsheet-id', 123, 9);
     expect(appendRowsWithLinks).not.toHaveBeenCalled();
   });
 
@@ -349,7 +349,7 @@ describe('storeMovimientosBancario', () => {
     expect(txRow[5]).toEqual({ type: 'formula', value: '=F2+D3-C3' });  // saldoCalculado (CellFormula)
   });
 
-  it('should use range A:H for 8-column sheet', async () => {
+  it('should use range A:I for 9-column sheet', async () => {
     const movimientos: MovimientoBancario[] = [
       createTestMovimientoBancario(),
     ];
@@ -367,10 +367,10 @@ describe('storeMovimientosBancario', () => {
     const appendCall = vi.mocked(appendRowsWithLinks).mock.calls[0];
     const range = appendCall[1];
 
-    expect(range).toBe('2025-01!A:H');
+    expect(range).toBe('2025-01!A:I');
   });
 
-  it('should store rows with 8 columns (includes empty matchedFileId and detalle)', async () => {
+  it('should store rows with 9 columns (includes empty matchedFileId, detalle, and matchedType)', async () => {
     const movimientos: MovimientoBancario[] = [
       createTestMovimientoBancario({ fecha: '2025-01-15', concepto: 'Test', saldo: 9000 }),
     ];
@@ -388,10 +388,10 @@ describe('storeMovimientosBancario', () => {
     const appendCall = vi.mocked(appendRowsWithLinks).mock.calls[0];
     const rows = appendCall[2] as any[];
 
-    // Each row should have 8 columns
-    expect(rows[0]).toHaveLength(8); // SALDO INICIAL
-    expect(rows[1]).toHaveLength(8); // Transaction
-    expect(rows[2]).toHaveLength(8); // SALDO FINAL
+    // Each row should have 9 columns
+    expect(rows[0]).toHaveLength(9); // SALDO INICIAL
+    expect(rows[1]).toHaveLength(9); // Transaction
+    expect(rows[2]).toHaveLength(9); // SALDO FINAL
   });
 
   it('should include empty matchedFileId (column G index 6) for new movimientos', async () => {

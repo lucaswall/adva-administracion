@@ -85,6 +85,7 @@ export async function storeMovimientosBancario(
       { type: 'number', value: initialRow[5] } as CellNumber,  // saldoInicial value (saldoCalculado)
       '',             // matchedFileId (empty for new rows)
       '',             // detalle (empty for new rows)
+      '',             // matchedType (empty for new rows)
     ]);
 
     // Rows 1..N (sheet rows 2..N+1): Transactions with formulas
@@ -104,6 +105,7 @@ export async function storeMovimientosBancario(
         { type: 'formula', value: txRow[5] } as CellFormula,  // saldoCalculado (formula)
         '',  // matchedFileId (empty for new rows)
         '',  // detalle (empty for new rows)
+        '',  // matchedType (empty for new rows)
       ]);
     });
 
@@ -120,10 +122,11 @@ export async function storeMovimientosBancario(
       { type: 'formula', value: finalRow[5] } as CellFormula,  // formula referencing last saldoCalculado
       '',  // matchedFileId (empty for new rows)
       '',  // detalle (empty for new rows)
+      '',  // matchedType (empty for new rows)
     ]);
 
-    // Append all rows to target month (A:H for 8 columns)
-    const range = `${targetMonth}!A:H`;
+    // Append all rows to target month (A:I for 9 columns)
+    const range = `${targetMonth}!A:I`;
     const appendResult = await appendRowsWithLinks(spreadsheetId, range, rows);
     if (!appendResult.ok) return { ok: false, error: appendResult.error };
 
