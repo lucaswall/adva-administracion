@@ -1,5 +1,6 @@
 # Implementation Plan
 
+**Status:** COMPLETE
 **Created:** 2026-02-23
 **Source:** Inline request: Create manual-match skill for Claude Code. Requires adding spreadsheet write + file move/rename capabilities to gdrive MCP server. Skill handles manual document matching in Control de Ingresos/Egresos, file moves/renames with confirmation, environment selection (staging/production), and scoped queries (by sheet, date, area).
 **Linear Issues:** [ADV-136](https://linear.app/lw-claude/issue/ADV-136/add-write-capabilities-to-gdrive-mcp-server-gsheets_update-move-rename), [ADV-137](https://linear.app/lw-claude/issue/ADV-137/create-manual-match-skill-for-document-matching-file-moves-and-renames), [ADV-138](https://linear.app/lw-claude/issue/ADV-138/update-claudemd-with-new-mcp-tools-and-manual-match-skill)
@@ -217,5 +218,35 @@ No TDD — this is a skill file (markdown instructions), not TypeScript code.
 - bug-hunter: Found 5 issues (1 HIGH, 3 MEDIUM, 1 LOW), all fixed before proceeding
 - verifier: All 1792 tests pass, zero warnings
 
+### Review Findings
+
+Files reviewed: 9
+Reviewers: security, reliability, quality (agent team)
+Checks applied: Security, Logic, Async, Resources, Type Safety, Conventions
+
+No issues found - all implementations are correct and follow project conventions.
+
+**Discarded findings (not bugs):**
+- [DISCARDED] SECURITY: Auth scope upgrade from readonly to read-write (`mcp-gdrive/auth.ts:9-12`) — Intentional design, necessary for write operations. Documented in plan. Write tools restricted to manual-match skill by policy (CLAUDE.md + allowed-tools).
+- [DISCARDED] SECURITY: Write MCP tools in global settings.json allow list (`.claude/settings.json:32-34`) — Necessary for skill execution without per-call approval. Policy restriction via CLAUDE.md + skill allowed-tools is the appropriate control for AI-agent-invoked tools.
+- [DISCARDED] EDGE CASE: Partial success detection in gsheets_update (`mcp-gdrive/tools/gsheets_update.ts:75`) — `responseCount !== args.updates.length` flagging partial success as error is correct behavior. Partial updates to match columns would leave data inconsistent; failing loudly is the right choice.
+- [DISCARDED] EDGE CASE: Parents array handling in gdrive_move_file (`mcp-gdrive/tools/gdrive_move_file.ts:37`) — `(file.data.parents || []).join(',')` correctly handles undefined/null/empty parents. The `!previousParents` check correctly catches all no-parent scenarios.
+- [DISCARDED] ASYNC: Sequential API calls in gdrive_rename_file (`mcp-gdrive/tools/gdrive_rename_file.ts:30-41`) — Two calls (get name then rename) without transaction. Google APIs don't support transactions; this is the standard pattern, consistent with existing tools. Failure at either step returns clear error.
+- [DISCARDED] TYPE: String type for update values (`mcp-gdrive/tools/types.ts:53`) — All manual-match values are strings (fileIds, "MANUAL", "SI", empty strings). USER_ENTERED valueInputOption handles any needed interpretation.
+- [DISCARDED] CONVENTION: Code style and patterns — All new tools follow existing patterns exactly (error handling, imports, schema structure, types).
+
+### Linear Updates
+- ADV-136: Review → Merge
+- ADV-137: Review → Merge
+- ADV-138: Review → Merge
+
+<!-- REVIEW COMPLETE -->
+
 ### Continuation Status
 All tasks completed.
+
+---
+
+## Status: COMPLETE
+
+All tasks implemented and reviewed successfully. All Linear issues moved to Merge.
