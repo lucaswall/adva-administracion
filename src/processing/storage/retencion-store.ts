@@ -5,8 +5,8 @@
 
 import type { Result, Retencion } from '../../types/index.js';
 import type { ScanContext } from '../scanner.js';
-import { appendRowsWithLinks, sortSheet, getSpreadsheetTimezone, getValues, type CellValueOrLink, type CellDate } from '../../services/sheets.js';
-import { formatUSCurrency, parseNumber } from '../../utils/numbers.js';
+import { appendRowsWithLinks, sortSheet, getSpreadsheetTimezone, getValues, type CellValueOrLink, type CellDate, type CellNumber } from '../../services/sheets.js';
+import { parseNumber } from '../../utils/numbers.js';
 import { normalizeSpreadsheetDate } from '../../utils/date.js';
 import { info, warn } from '../../utils/logger.js';
 import { getCorrelationId } from '../../utils/correlation.js';
@@ -119,8 +119,8 @@ export async function storeRetencion(
       retencion.razonSocialAgenteRetencion,      // F
       retencion.impuesto,                        // G
       retencion.regimen,                         // H
-      formatUSCurrency(retencion.montoComprobante), // I
-      formatUSCurrency(retencion.montoRetencion),   // J
+      { type: 'number', value: retencion.montoComprobante } as CellNumber, // I
+      { type: 'number', value: retencion.montoRetencion } as CellNumber,   // J
       retencion.processedAt,                     // K
       retencion.confidence,                      // L
       retencion.needsReview ? 'YES' : 'NO',      // M

@@ -6,12 +6,14 @@
 import type { Result, Pago, StoreResult } from '../../types/index.js';
 import type { ScanContext } from '../scanner.js';
 import { appendRowsWithLinks, sortSheet, getValues, batchUpdate, getSpreadsheetTimezone, type CellValueOrLink, type CellDate, type CellValue, type CellNumber } from '../../services/sheets.js';
-import { formatUSCurrency, parseNumber } from '../../utils/numbers.js';
+import { parseNumber } from '../../utils/numbers.js';
 import { generatePagoFileName } from '../../utils/file-naming.js';
 import { normalizeSpreadsheetDate } from '../../utils/date.js';
 import { info, warn } from '../../utils/logger.js';
 import { getCorrelationId } from '../../utils/correlation.js';
 import { withLock } from '../../utils/concurrency.js';
+import { createDriveHyperlink } from '../../utils/spreadsheet.js';
+import { formatTimestampInTimezone } from '../../services/status-sheet.js';
 
 /**
  * Builds a flat CellValue[] row for batchUpdate (reprocessing or replacement)
@@ -24,24 +26,29 @@ import { withLock } from '../../utils/concurrency.js';
 function buildPagoRow(
   pago: Pago,
   documentType: 'pago_enviado' | 'pago_recibido',
-  renamedFileName: string
+  renamedFileName: string,
+  timeZone?: string
 ): CellValue[] {
   const tipoDeCambioVal: CellValue = pago.tipoDeCambio ?? '';
   const importeEnPesosVal: CellValue = pago.importeEnPesos ?? '';
+  const fileNameCell = createDriveHyperlink(pago.fileId, renamedFileName) || renamedFileName;
+  const processedAtCell = timeZone
+    ? formatTimestampInTimezone(new Date(pago.processedAt), timeZone)
+    : pago.processedAt;
 
   if (documentType === 'pago_enviado') {
     return [
       pago.fechaPago,                                     // A - date string
       pago.fileId,                                        // B
-      renamedFileName,                                    // C - text only
+      fileNameCell,                                       // C - HYPERLINK formula
       pago.banco,                                         // D
-      formatUSCurrency(pago.importePagado),               // E
+      pago.importePagado,                                 // E - raw number (USER_ENTERED handles)
       pago.moneda || 'ARS',                               // F
       pago.referencia || '',                              // G
       pago.cuitBeneficiario || '',                        // H
       pago.nombreBeneficiario || '',                      // I
       pago.concepto || '',                                // J
-      pago.processedAt,                                   // K
+      processedAtCell,                                    // K
       pago.confidence,                                    // L
       pago.needsReview ? 'YES' : 'NO',                    // M
       pago.matchedFacturaFileId || '',                    // N
@@ -53,15 +60,15 @@ function buildPagoRow(
     return [
       pago.fechaPago,                                     // A - date string
       pago.fileId,                                        // B
-      renamedFileName,                                    // C - text only
+      fileNameCell,                                       // C - HYPERLINK formula
       pago.banco,                                         // D
-      formatUSCurrency(pago.importePagado),               // E
+      pago.importePagado,                                 // E - raw number (USER_ENTERED handles)
       pago.moneda || 'ARS',                               // F
       pago.referencia || '',                              // G
       pago.cuitPagador || '',                             // H
       pago.nombrePagador || '',                           // I
       pago.concepto || '',                                // J
-      pago.processedAt,                                   // K
+      processedAtCell,                                    // K
       pago.confidence,                                    // L
       pago.needsReview ? 'YES' : 'NO',                    // M
       pago.matchedFacturaFileId || '',                    // N
@@ -226,11 +233,15 @@ export async function storePago(
   const lockKey = `store:pago:${pago.fechaPago}:${pago.importePagado}:${counterpartyCuit}`;
 
   return withLock(lockKey, async () => {
+    // Get spreadsheet timezone early — used by both reprocessing and append paths
+    const timezoneResult = await getSpreadsheetTimezone(spreadsheetId);
+    const timeZone = timezoneResult.ok ? timezoneResult.value : undefined;
+
     // REPROCESSING CHECK: If same fileId already exists, update the row in place
     const fileIdCheck = await findRowByFileId(spreadsheetId, sheetName, pago.fileId);
     if (fileIdCheck.found) {
       const renamedFileName = generatePagoFileName(pago, documentType);
-      const updateRow = buildPagoRow(pago, documentType, renamedFileName);
+      const updateRow = buildPagoRow(pago, documentType, renamedFileName, timeZone);
       const updateResult = await batchUpdate(spreadsheetId, [{
         range: `${sheetName}!A${fileIdCheck.rowIndex}:Q${fileIdCheck.rowIndex}`,
         values: [updateRow],
@@ -287,7 +298,7 @@ export async function storePago(
         const quality = isQualityBetter(pago, dupeCheck.existingRowData, documentType);
         if (quality === 'better') {
           const renamedFileName = generatePagoFileName(pago, documentType);
-          const updateRow = buildPagoRow(pago, documentType, renamedFileName);
+          const updateRow = buildPagoRow(pago, documentType, renamedFileName, timeZone);
           const updateResult = await batchUpdate(spreadsheetId, [{
             range: `${sheetName}!A${dupeCheck.existingRowIndex}:Q${dupeCheck.existingRowIndex}`,
             values: [updateRow],
@@ -351,7 +362,7 @@ export async function storePago(
       pago.fileId,                         // B
       { text: renamedFileName, url: `https://drive.google.com/file/d/${pago.fileId}/view` }, // C
       pago.banco,                          // D
-      formatUSCurrency(pago.importePagado),// E
+      { type: 'number', value: pago.importePagado } as CellNumber,// E
       pago.moneda || 'ARS',                // F
       pago.referencia || '',               // G
       pago.cuitBeneficiario || '',         // H - counterparty
@@ -373,7 +384,7 @@ export async function storePago(
       pago.fileId,                         // B
       { text: renamedFileName, url: `https://drive.google.com/file/d/${pago.fileId}/view` }, // C
       pago.banco,                          // D
-      formatUSCurrency(pago.importePagado),// E
+      { type: 'number', value: pago.importePagado } as CellNumber,// E
       pago.moneda || 'ARS',                // F
       pago.referencia || '',               // G
       pago.cuitPagador || '',              // H - counterparty
@@ -389,10 +400,6 @@ export async function storePago(
     ];
     range = `${sheetName}!A:Q`;
   }
-
-  // Get spreadsheet timezone for proper timestamp formatting
-  const timezoneResult = await getSpreadsheetTimezone(spreadsheetId);
-  const timeZone = timezoneResult.ok ? timezoneResult.value : undefined;
 
     const result = await appendRowsWithLinks(spreadsheetId, range, [row], timeZone, context?.metadataCache);
     if (!result.ok) {

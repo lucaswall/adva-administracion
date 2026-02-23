@@ -6,12 +6,14 @@
 import type { Result, Factura, StoreResult } from '../../types/index.js';
 import type { ScanContext } from '../scanner.js';
 import { appendRowsWithLinks, sortSheet, getValues, batchUpdate, getSpreadsheetTimezone, type CellValueOrLink, type CellDate, type CellValue, type CellNumber } from '../../services/sheets.js';
-import { formatUSCurrency, parseNumber } from '../../utils/numbers.js';
+import { parseNumber } from '../../utils/numbers.js';
 import { generateFacturaFileName } from '../../utils/file-naming.js';
 import { normalizeSpreadsheetDate } from '../../utils/date.js';
 import { info, warn } from '../../utils/logger.js';
 import { getCorrelationId } from '../../utils/correlation.js';
 import { withLock } from '../../utils/concurrency.js';
+import { createDriveHyperlink } from '../../utils/spreadsheet.js';
+import { formatTimestampInTimezone } from '../../services/status-sheet.js';
 
 /**
  * Builds a flat CellValue[] row for batchUpdate (reprocessing)
@@ -25,25 +27,30 @@ import { withLock } from '../../utils/concurrency.js';
 function buildFacturaRow(
   factura: Factura,
   documentType: 'factura_emitida' | 'factura_recibida',
-  renamedFileName: string
+  renamedFileName: string,
+  timeZone?: string
 ): CellValue[] {
   const tipoDeCambioVal: CellValue = factura.tipoDeCambio ?? '';
+  const fileNameCell = createDriveHyperlink(factura.fileId, renamedFileName) || renamedFileName;
+  const processedAtCell = timeZone
+    ? formatTimestampInTimezone(new Date(factura.processedAt), timeZone)
+    : factura.processedAt;
 
   if (documentType === 'factura_emitida') {
     return [
       factura.fechaEmision,                               // A - date string (USER_ENTERED parses)
       factura.fileId,                                     // B
-      renamedFileName,                                    // C - text only (no link in batchUpdate)
+      fileNameCell,                                       // C - HYPERLINK formula
       factura.tipoComprobante,                            // D
       factura.nroFactura,                                 // E
       factura.cuitReceptor || '',                         // F
       factura.razonSocialReceptor || '',                  // G
-      formatUSCurrency(factura.importeNeto),              // H
-      formatUSCurrency(factura.importeIva),               // I
-      formatUSCurrency(factura.importeTotal),             // J
+      factura.importeNeto,                                // H - raw number (USER_ENTERED handles)
+      factura.importeIva,                                 // I
+      factura.importeTotal,                               // J
       factura.moneda,                                     // K
       factura.concepto || '',                             // L
-      factura.processedAt,                                // M
+      processedAtCell,                                    // M
       factura.confidence,                                 // N
       factura.needsReview ? 'YES' : 'NO',                 // O
       factura.matchedPagoFileId || '',                    // P
@@ -55,17 +62,17 @@ function buildFacturaRow(
     return [
       factura.fechaEmision,                               // A
       factura.fileId,                                     // B
-      renamedFileName,                                    // C
+      fileNameCell,                                       // C
       factura.tipoComprobante,                            // D
       factura.nroFactura,                                 // E
       factura.cuitEmisor || '',                           // F
       factura.razonSocialEmisor || '',                    // G
-      formatUSCurrency(factura.importeNeto),              // H
-      formatUSCurrency(factura.importeIva),               // I
-      formatUSCurrency(factura.importeTotal),             // J
+      factura.importeNeto,                                // H
+      factura.importeIva,                                 // I
+      factura.importeTotal,                               // J
       factura.moneda,                                     // K
       factura.concepto || '',                             // L
-      factura.processedAt,                                // M
+      processedAtCell,                                    // M
       factura.confidence,                                 // N
       factura.needsReview ? 'YES' : 'NO',                 // O
       factura.matchedPagoFileId || '',                    // P
@@ -180,11 +187,15 @@ export async function storeFactura(
   const lockKey = `store:factura:${factura.nroFactura}:${factura.fechaEmision}:${factura.importeTotal}:${counterpartyCuit}`;
 
   return withLock(lockKey, async () => {
+    // Get spreadsheet timezone early — used by both reprocessing and append paths
+    const timezoneResult = await getSpreadsheetTimezone(spreadsheetId);
+    const timeZone = timezoneResult.ok ? timezoneResult.value : undefined;
+
     // REPROCESSING CHECK: If the same fileId already exists in sheet, update it in place
     const fileIdCheck = await findRowByFileId(spreadsheetId, sheetName, factura.fileId);
     if (fileIdCheck.found) {
       const renamedFileName = generateFacturaFileName(factura, documentType);
-      const updateRow = buildFacturaRow(factura, documentType, renamedFileName);
+      const updateRow = buildFacturaRow(factura, documentType, renamedFileName, timeZone);
       const lastCol = documentType === 'factura_emitida' ? 'S' : 'T';
       const updateResult = await batchUpdate(spreadsheetId, [{
         range: `${sheetName}!A${fileIdCheck.rowIndex}:${lastCol}${fileIdCheck.rowIndex}`,
@@ -271,9 +282,9 @@ export async function storeFactura(
       factura.nroFactura,                   // E
       factura.cuitReceptor || '',           // F - counterparty
       factura.razonSocialReceptor || '',    // G - counterparty
-      formatUSCurrency(factura.importeNeto), // H
-      formatUSCurrency(factura.importeIva),  // I
-      formatUSCurrency(factura.importeTotal),// J
+      { type: 'number', value: factura.importeNeto } as CellNumber, // H
+      { type: 'number', value: factura.importeIva } as CellNumber,  // I
+      { type: 'number', value: factura.importeTotal } as CellNumber,// J
       factura.moneda,                       // K
       factura.concepto || '',               // L
       factura.processedAt,                  // M
@@ -295,9 +306,9 @@ export async function storeFactura(
       factura.nroFactura,                   // E
       factura.cuitEmisor || '',             // F - counterparty
       factura.razonSocialEmisor || '',      // G - counterparty
-      formatUSCurrency(factura.importeNeto), // H
-      formatUSCurrency(factura.importeIva),  // I
-      formatUSCurrency(factura.importeTotal),// J
+      { type: 'number', value: factura.importeNeto } as CellNumber, // H
+      { type: 'number', value: factura.importeIva } as CellNumber,  // I
+      { type: 'number', value: factura.importeTotal } as CellNumber,// J
       factura.moneda,                       // K
       factura.concepto || '',               // L
       factura.processedAt,                  // M
@@ -311,10 +322,6 @@ export async function storeFactura(
     ];
     range = `${sheetName}!A:T`;
   }
-
-  // Get spreadsheet timezone for proper timestamp formatting
-  const timezoneResult = await getSpreadsheetTimezone(spreadsheetId);
-  const timeZone = timezoneResult.ok ? timezoneResult.value : undefined;
 
     const result = await appendRowsWithLinks(spreadsheetId, range, [row], timeZone, context?.metadataCache);
     if (!result.ok) {

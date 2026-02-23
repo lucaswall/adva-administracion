@@ -50,6 +50,23 @@ describe('storeRetencion', () => {
     vi.clearAllMocks();
   });
 
+  describe('monetary fields use CellNumber in appendRowsWithLinks path', () => {
+    it('stores montoComprobante and montoRetencion as CellNumber', async () => {
+      vi.mocked(getValues).mockResolvedValue({ ok: true, value: [['Header']] });
+      vi.mocked(appendRowsWithLinks).mockResolvedValue({ ok: true, value: 1 });
+      vi.mocked(sortSheet).mockResolvedValue({ ok: true, value: undefined });
+
+      const retencion = createTestRetencion({ montoComprobante: 10000, montoRetencion: 500 });
+      await storeRetencion(retencion, 'spreadsheet-id');
+
+      const callArgs = vi.mocked(appendRowsWithLinks).mock.calls[0];
+      const row = callArgs[2][0];
+      // I=8, J=9
+      expect(row[8]).toEqual({ type: 'number', value: 10000 });
+      expect(row[9]).toEqual({ type: 'number', value: 500 });
+    });
+  });
+
   describe('duplicate detection', () => {
     it('returns { stored: true } when retencion is new', async () => {
       vi.mocked(getValues).mockResolvedValue({ ok: true, value: [['Header']] });

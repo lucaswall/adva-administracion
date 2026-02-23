@@ -26,6 +26,26 @@ vi.mock('../../utils/correlation.js', () => ({
   getCorrelationId: () => 'test-correlation-id',
 }));
 
+vi.mock('../../utils/spreadsheet.js', () => ({
+  createDriveHyperlink: vi.fn((fileId: string, displayText: string) =>
+    `=HYPERLINK("https://drive.google.com/file/d/${fileId}/view", "${displayText}")`
+  ),
+}));
+
+vi.mock('../../services/status-sheet.js', () => ({
+  formatTimestampInTimezone: vi.fn((date: Date, _timeZone: string) => {
+    const offset = -3 * 60 * 60 * 1000;
+    const local = new Date(date.getTime() + offset);
+    const y = local.getUTCFullYear();
+    const m = String(local.getUTCMonth() + 1).padStart(2, '0');
+    const d = String(local.getUTCDate()).padStart(2, '0');
+    const h = String(local.getUTCHours()).padStart(2, '0');
+    const min = String(local.getUTCMinutes()).padStart(2, '0');
+    const s = String(local.getUTCSeconds()).padStart(2, '0');
+    return `${y}-${m}-${d} ${h}:${min}:${s}`;
+  }),
+}));
+
 import { appendRowsWithLinks, sortSheet, getValues, batchUpdate } from '../../services/sheets.js';
 
 const createTestPago = (overrides: Partial<Pago> = {}): Pago => ({
@@ -274,6 +294,36 @@ describe('storePago', () => {
     });
   });
 
+  describe('monetary fields use CellNumber in appendRowsWithLinks path', () => {
+    it('pago_enviado stores importePagado as CellNumber', async () => {
+      vi.mocked(getValues).mockResolvedValue({ ok: true, value: [['Header']] });
+      vi.mocked(appendRowsWithLinks).mockResolvedValue({ ok: true, value: 1 });
+      vi.mocked(sortSheet).mockResolvedValue({ ok: true, value: undefined });
+
+      const pago = createTestPago({ importePagado: 5500 });
+      await storePago(pago, 'spreadsheet-id', 'Pagos Enviados', 'pago_enviado');
+
+      const callArgs = vi.mocked(appendRowsWithLinks).mock.calls[0];
+      const row = callArgs[2][0];
+      // E=4
+      expect(row[4]).toEqual({ type: 'number', value: 5500 });
+    });
+
+    it('pago_recibido stores importePagado as CellNumber', async () => {
+      vi.mocked(getValues).mockResolvedValue({ ok: true, value: [['Header']] });
+      vi.mocked(appendRowsWithLinks).mockResolvedValue({ ok: true, value: 1 });
+      vi.mocked(sortSheet).mockResolvedValue({ ok: true, value: undefined });
+
+      const pago = createTestPago({ importePagado: 3200.50 });
+      await storePago(pago, 'spreadsheet-id', 'Pagos Recibidos', 'pago_recibido');
+
+      const callArgs = vi.mocked(appendRowsWithLinks).mock.calls[0];
+      const row = callArgs[2][0];
+      // E=4
+      expect(row[4]).toEqual({ type: 'number', value: 3200.50 });
+    });
+  });
+
   describe('pago recibido vs enviado', () => {
     it('uses cuitPagador for pago_recibido duplicate check', async () => {
       vi.mocked(getValues).mockResolvedValue({
@@ -397,6 +447,62 @@ describe('storePago', () => {
         expect(result.value.stored).toBe(false);
         expect(result.value.existingFileId).toBe(existingFileId);
       }
+    });
+  });
+
+  describe('batchUpdate reprocessing path fixes (ADV-124)', () => {
+    it('uses raw numbers for monetary fields in buildPagoRow', async () => {
+      vi.mocked(getValues).mockResolvedValueOnce({
+        ok: true,
+        value: [['fileId'], ['test-file-id']],
+      });
+      vi.mocked(batchUpdate).mockResolvedValue({ ok: true, value: 15 });
+      vi.mocked(sortSheet).mockResolvedValue({ ok: true, value: undefined });
+
+      const pago = createTestPago({ importePagado: 5500 });
+      await storePago(pago, 'spreadsheet-id', 'Pagos Recibidos', 'pago_recibido');
+
+      const batchArgs = vi.mocked(batchUpdate).mock.calls[0];
+      const row = batchArgs[1][0].values[0];
+      // E=4 — should be raw number, not formatted string
+      expect(row[4]).toBe(5500);
+    });
+
+    it('uses HYPERLINK formula for fileName in buildPagoRow', async () => {
+      vi.mocked(getValues).mockResolvedValueOnce({
+        ok: true,
+        value: [['fileId'], ['test-file-id']],
+      });
+      vi.mocked(batchUpdate).mockResolvedValue({ ok: true, value: 15 });
+      vi.mocked(sortSheet).mockResolvedValue({ ok: true, value: undefined });
+
+      const pago = createTestPago();
+      await storePago(pago, 'spreadsheet-id', 'Pagos Recibidos', 'pago_recibido');
+
+      const batchArgs = vi.mocked(batchUpdate).mock.calls[0];
+      const row = batchArgs[1][0].values[0];
+      // C=2 — should be HYPERLINK formula, not plain text
+      expect(row[2]).toContain('=HYPERLINK(');
+      expect(row[2]).toContain('test-file-id');
+    });
+
+    it('formats processedAt as local time string in buildPagoRow', async () => {
+      vi.mocked(getValues).mockResolvedValueOnce({
+        ok: true,
+        value: [['fileId'], ['test-file-id']],
+      });
+      vi.mocked(batchUpdate).mockResolvedValue({ ok: true, value: 15 });
+      vi.mocked(sortSheet).mockResolvedValue({ ok: true, value: undefined });
+
+      const pago = createTestPago({ processedAt: '2025-01-15T10:00:00Z' });
+      await storePago(pago, 'spreadsheet-id', 'Pagos Recibidos', 'pago_recibido');
+
+      const batchArgs = vi.mocked(batchUpdate).mock.calls[0];
+      const row = batchArgs[1][0].values[0];
+      // K=10 — should NOT be raw ISO string
+      expect(row[10]).not.toContain('T');
+      expect(row[10]).not.toContain('Z');
+      expect(row[10]).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
     });
   });
 

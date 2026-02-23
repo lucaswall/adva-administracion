@@ -52,6 +52,28 @@ describe('storeRecibo', () => {
     vi.clearAllMocks();
   });
 
+  describe('monetary fields use CellNumber in appendRowsWithLinks path', () => {
+    it('stores subtotalRemuneraciones, subtotalDescuentos, totalNeto as CellNumber', async () => {
+      vi.mocked(getValues).mockResolvedValue({ ok: true, value: [['Header']] });
+      vi.mocked(appendRowsWithLinks).mockResolvedValue({ ok: true, value: 1 });
+      vi.mocked(sortSheet).mockResolvedValue({ ok: true, value: undefined });
+
+      const recibo = createTestRecibo({
+        subtotalRemuneraciones: 500000,
+        subtotalDescuentos: 100000,
+        totalNeto: 400000,
+      });
+      await storeRecibo(recibo, 'spreadsheet-id');
+
+      const callArgs = vi.mocked(appendRowsWithLinks).mock.calls[0];
+      const row = callArgs[2][0];
+      // K=10, L=11, M=12
+      expect(row[10]).toEqual({ type: 'number', value: 500000 });
+      expect(row[11]).toEqual({ type: 'number', value: 100000 });
+      expect(row[12]).toEqual({ type: 'number', value: 400000 });
+    });
+  });
+
   describe('duplicate detection', () => {
     it('returns { stored: true } when recibo is new', async () => {
       vi.mocked(getValues).mockResolvedValue({ ok: true, value: [['Header']] });

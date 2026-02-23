@@ -5,8 +5,8 @@
 
 import type { Result, Recibo } from '../../types/index.js';
 import type { ScanContext } from '../scanner.js';
-import { appendRowsWithLinks, sortSheet, getSpreadsheetTimezone, getValues, type CellValueOrLink, type CellDate } from '../../services/sheets.js';
-import { formatUSCurrency, parseNumber } from '../../utils/numbers.js';
+import { appendRowsWithLinks, sortSheet, getSpreadsheetTimezone, getValues, type CellValueOrLink, type CellDate, type CellNumber } from '../../services/sheets.js';
+import { parseNumber } from '../../utils/numbers.js';
 import { generateReciboFileName } from '../../utils/file-naming.js';
 import { info, warn } from '../../utils/logger.js';
 import { getCorrelationId } from '../../utils/correlation.js';
@@ -117,9 +117,9 @@ export async function storeRecibo(
       recibo.tareaDesempenada || '',
       recibo.cuitEmpleador,
       recibo.periodoAbonado,
-      formatUSCurrency(recibo.subtotalRemuneraciones),
-      formatUSCurrency(recibo.subtotalDescuentos),
-      formatUSCurrency(recibo.totalNeto),
+      { type: 'number', value: recibo.subtotalRemuneraciones } as CellNumber,
+      { type: 'number', value: recibo.subtotalDescuentos } as CellNumber,
+      { type: 'number', value: recibo.totalNeto } as CellNumber,
       recibo.processedAt,
       recibo.confidence,
       recibo.needsReview ? 'YES' : 'NO',

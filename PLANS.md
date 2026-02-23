@@ -118,6 +118,38 @@ For the `batchUpdate` path, additional issues exist: no hyperlink formula for fi
 
 ---
 
+## Iteration 1
+
+**Implemented:** 2026-02-23
+**Method:** Single-agent (1 work unit, effort 4 — no parallelism benefit)
+
+### Tasks Completed This Iteration
+- Fix 1 (ADV-123): Replace formatUSCurrency with CellNumber in appendRowsWithLinks path — replaced 13 `formatUSCurrency()` calls with `CellNumber` objects across 4 store files, cleaned up unused imports in recibo-store.ts and retencion-store.ts
+- Fix 2 (ADV-124): Fix batchUpdate reprocessing path — replaced formatted strings with raw numbers, added `createDriveHyperlink()` for fileName, added `formatTimestampInTimezone()` for processedAt, moved `getSpreadsheetTimezone()` to top of `withLock` callback for both paths
+
+### Files Modified
+- `src/processing/storage/factura-store.ts` — CellNumber for monetary fields, buildFacturaRow: raw numbers + hyperlink + timezone processedAt
+- `src/processing/storage/factura-store.test.ts` — Tests for CellNumber and batchUpdate path fixes
+- `src/processing/storage/pago-store.ts` — CellNumber for monetary fields, buildPagoRow: raw numbers + hyperlink + timezone processedAt
+- `src/processing/storage/pago-store.test.ts` — Tests for CellNumber and batchUpdate path fixes
+- `src/processing/storage/recibo-store.ts` — CellNumber for monetary fields, removed formatUSCurrency import
+- `src/processing/storage/recibo-store.test.ts` — Tests for CellNumber
+- `src/processing/storage/retencion-store.ts` — CellNumber for monetary fields, removed formatUSCurrency import
+- `src/processing/storage/retencion-store.test.ts` — Tests for CellNumber
+
+### Linear Updates
+- ADV-123: Todo → In Progress → Review
+- ADV-124: Todo → In Progress → Review
+
+### Pre-commit Verification
+- bug-hunter: Passed — no bugs found
+- verifier: All 1,745 tests pass, zero warnings
+
+### Continuation Status
+All tasks completed.
+
+---
+
 ## Plan Summary
 
 **Problem:** All monetary values in production spreadsheets are stored as text strings instead of numbers, caused by `formatUSCurrency()` returning formatted strings. Reprocessed rows additionally lose their fileName hyperlink and have unformatted timestamps.
