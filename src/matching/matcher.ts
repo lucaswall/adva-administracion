@@ -70,7 +70,8 @@ export function compareMatchQuality(a: MatchQuality, b: MatchQuality): number {
     MANUAL: 4,
     HIGH: 3,
     MEDIUM: 2,
-    LOW: 1
+    LOW: 1,
+    MANUAL: 0,
   };
 
   // 1. Compare confidence level
