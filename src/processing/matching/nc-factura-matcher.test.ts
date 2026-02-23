@@ -302,4 +302,48 @@ describe('matchNCsWithFacturas', () => {
     // Both factura and NC should be marked as paid
     expect(setValues).toHaveBeenCalledTimes(2);
   });
+
+  it('should skip NC with MANUAL matchConfidence — not match it to any factura (Fix 5 - ADV-131)', async () => {
+    // NC at row[16]='MANUAL' is locked — skip it even though it would otherwise match
+    const mockRows = [
+      ['fechaEmision', 'fileId', 'fileName', 'tipo', 'nro', 'cuit', 'razon', 'neto', 'iva', 'total', 'moneda', 'concepto', 'processed', 'conf', 'review', 'matchedPago', 'matchConf', 'cuitMatch', 'pagada'],
+      // Regular unpaid factura
+      ['2025-01-01', 'factura-1', 'factura.pdf', 'A', '0002-00003160', '20123456786', 'TEST SA', '1000', '210', '1210', 'ARS', 'Servicios', '2025-01-01', '0.95', 'NO', '', '', '', ''],
+      // NC with MANUAL matchConfidence — must be skipped
+      ['2025-01-15', 'nc-manual', 'nc.pdf', 'NC', '0002-00000001', '20123456786', 'TEST SA', '1000', '210', '1210', 'ARS', 'Nota de credito s/ Factura N° 2-3160', '2025-01-15', '0.95', 'NO', '', 'MANUAL', '', ''],
+    ];
+
+    vi.mocked(getValues).mockResolvedValue({ ok: true, value: mockRows });
+
+    const result = await matchNCsWithFacturas('test-spreadsheet-id');
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value).toBe(0);
+    }
+    // MANUAL NC must not trigger any setValues calls
+    expect(setValues).not.toHaveBeenCalled();
+  });
+
+  it('should skip factura with MANUAL matchConfidence as a match target (Fix 5 - ADV-131)', async () => {
+    // Factura at row[16]='MANUAL' is locked — cannot be targeted by any NC
+    const mockRows = [
+      ['fechaEmision', 'fileId', 'fileName', 'tipo', 'nro', 'cuit', 'razon', 'neto', 'iva', 'total', 'moneda', 'concepto', 'processed', 'conf', 'review', 'matchedPago', 'matchConf', 'cuitMatch', 'pagada'],
+      // Factura with MANUAL matchConfidence — must not be targeted
+      ['2025-01-01', 'factura-manual', 'factura.pdf', 'A', '0002-00003160', '20123456786', 'TEST SA', '1000', '210', '1210', 'ARS', 'Servicios', '2025-01-01', '0.95', 'NO', '', 'MANUAL', '', ''],
+      // NC that would match (same cuit, same amount, later date)
+      ['2025-01-15', 'nc-1', 'nc.pdf', 'NC', '0002-00000001', '20123456786', 'TEST SA', '1000', '210', '1210', 'ARS', 'Nota de credito s/ Factura N° 2-3160', '2025-01-15', '0.95', 'NO', '', '', '', ''],
+    ];
+
+    vi.mocked(getValues).mockResolvedValue({ ok: true, value: mockRows });
+
+    const result = await matchNCsWithFacturas('test-spreadsheet-id');
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value).toBe(0);
+    }
+    // MANUAL factura excluded — no setValues calls
+    expect(setValues).not.toHaveBeenCalled();
+  });
 });

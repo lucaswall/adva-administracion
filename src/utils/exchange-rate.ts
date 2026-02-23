@@ -314,6 +314,7 @@ export async function prefetchExchangeRates(dates: string[]): Promise<void> {
  * @param pagoAmount - Payment amount (in pagoMoneda currency)
  * @param pagoMoneda - Payment currency (ARS or USD)
  * @param tolerancePercent - Tolerance percentage for cross-currency match (e.g., 5 for 5%)
+ * @param sameCurrencyUsdTolerance - Absolute tolerance for USD/USD same-currency match (default 1)
  * @returns Match result with details
  */
 export function amountsMatchCrossCurrency(
@@ -322,12 +323,16 @@ export function amountsMatchCrossCurrency(
   facturaFecha: string,
   pagoAmount: number,
   pagoMoneda: Moneda,
-  tolerancePercent: number
+  tolerancePercent: number,
+  sameCurrencyUsdTolerance: number = 1
 ): CrossCurrencyMatchResult {
   // For same-currency matching (ARS/ARS or USD/USD), use exact match regardless of currency
   if (facturaMoneda === pagoMoneda) {
+    // USD/USD can use a wider absolute tolerance (e.g. $30 for rounding differences)
+    // ARS/ARS stays at default $1 tolerance
+    const tolerance = facturaMoneda === 'USD' ? sameCurrencyUsdTolerance : 1;
     return {
-      matches: amountsMatch(facturaAmount, pagoAmount),
+      matches: amountsMatch(facturaAmount, pagoAmount, tolerance),
       isCrossCurrency: false,
     };
   }

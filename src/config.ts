@@ -139,6 +139,11 @@ export const GEMINI_PRICING = {
 } as const;
 
 /**
+ * Absolute tolerance for USD/USD same-currency matching (e.g. $30 to absorb rounding)
+ */
+export const USD_SAME_CURRENCY_TOLERANCE = 30;
+
+/**
  * Application configuration loaded from environment
  */
 export interface Config {
@@ -164,6 +169,7 @@ export interface Config {
   // Matching
   matchDaysBefore: number;
   matchDaysAfter: number;
+  usdMatchDaysAfter: number;
   usdArsTolerancePercent: number;
 
   // Gemini API
@@ -266,6 +272,8 @@ export function loadConfig(): Config {
   validateNumericEnv('MATCH_DAYS_BEFORE', matchDaysBefore, 0);
   const matchDaysAfter = parseInt(process.env.MATCH_DAYS_AFTER || '60', 10);
   validateNumericEnv('MATCH_DAYS_AFTER', matchDaysAfter, 0);
+  const usdMatchDaysAfter = parseInt(process.env.MATCH_DAYS_AFTER_USD || '90', 10);
+  validateNumericEnv('MATCH_DAYS_AFTER_USD', usdMatchDaysAfter, 0);
   const usdArsTolerancePercent = parseFloat(process.env.USD_ARS_TOLERANCE_PERCENT || '5');
   validateNumericEnv('USD_ARS_TOLERANCE_PERCENT', usdArsTolerancePercent, 0);
 
@@ -285,6 +293,7 @@ export function loadConfig(): Config {
     webhookUrl,
     matchDaysBefore,
     matchDaysAfter,
+    usdMatchDaysAfter,
     usdArsTolerancePercent,
     geminiRpmLimit,
     environment,

@@ -2211,4 +2211,5 @@ describe('exchange rate prefetch', () => {
       expect.objectContaining({ module: 'match-movimientos' })
     );
   });
+
 });

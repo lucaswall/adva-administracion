@@ -383,7 +383,7 @@ export function validateTipoComprobante(value: unknown): TipoComprobante {
 export function validateMatchConfidence(value: unknown): MatchConfidence | undefined {
   if (typeof value !== 'string') return undefined;
 
-  const validLevels: MatchConfidence[] = ['HIGH', 'MEDIUM', 'LOW'];
+  const validLevels: MatchConfidence[] = ['HIGH', 'MEDIUM', 'LOW', 'MANUAL'];
   return validLevels.includes(value as MatchConfidence) ? (value as MatchConfidence) : undefined;
 }
 

@@ -5,7 +5,7 @@
 
 import type { Result, Factura, Pago } from '../../types/index.js';
 import { validateMoneda, validateMatchConfidence, validateTipoComprobante } from '../../utils/validation.js';
-import { getConfig, MAX_CASCADE_DEPTH, CASCADE_TIMEOUT_MS } from '../../config.js';
+import { getConfig, MAX_CASCADE_DEPTH, CASCADE_TIMEOUT_MS, USD_SAME_CURRENCY_TOLERANCE } from '../../config.js';
 import { getValues, batchUpdate } from '../../services/sheets.js';
 import { FacturaPagoMatcher, type MatchQuality } from '../../matching/matcher.js';
 import {
@@ -387,7 +387,8 @@ async function doMatchFacturasWithPagos(
   }
 
   // Find unmatched documents
-  const unmatchedPagos = pagos.filter(p => !p.matchedFacturaFileId);
+  // Exclude pagos with MANUAL matchConfidence — they are user-locked and must not be re-matched
+  const unmatchedPagos = pagos.filter(p => !p.matchedFacturaFileId && p.matchConfidence !== 'MANUAL');
 
   debug('Found unmatched documents', {
     module: 'matching',
@@ -405,7 +406,9 @@ async function doMatchFacturasWithPagos(
   const matcher = new FacturaPagoMatcher(
     config.matchDaysBefore,
     config.matchDaysAfter,
-    config.usdArsTolerancePercent
+    config.usdArsTolerancePercent,
+    USD_SAME_CURRENCY_TOLERANCE,
+    config.usdMatchDaysAfter
   );
 
   // Initialize cascade infrastructure

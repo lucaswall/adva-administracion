@@ -13,11 +13,13 @@ import { getCorrelationId } from '../../utils/correlation.js';
 export { matchFacturasWithPagos } from './factura-pago-matcher.js';
 export { matchRecibosWithPagos } from './recibo-pago-matcher.js';
 export { matchNCsWithFacturas } from './nc-factura-matcher.js';
+export { matchRetencionesWithFacturas } from './retencion-factura-matcher.js';
 
 // Import for internal use
 import { matchFacturasWithPagos } from './factura-pago-matcher.js';
 import { matchRecibosWithPagos } from './recibo-pago-matcher.js';
 import { matchNCsWithFacturas } from './nc-factura-matcher.js';
+import { matchRetencionesWithFacturas } from './retencion-factura-matcher.js';
 
 /**
  * Runs matching on unmatched documents across all spreadsheets
@@ -149,6 +151,33 @@ export async function runMatching(
       module: 'matching',
       phase: 'nc-match',
       matchesFound: ncMatches.value,
+      correlationId,
+    });
+  }
+
+  // Match Retenciones Recibidas with Facturas Emitidas (Ingresos)
+  debug('Matching Retenciones with Facturas Emitidas', {
+    module: 'matching',
+    phase: 'retencion-match',
+    correlationId,
+  });
+
+  const retencionMatches = await matchRetencionesWithFacturas(folderStructure.controlIngresosId);
+
+  if (!retencionMatches.ok) {
+    warn('Retencion-Factura matching failed', {
+      module: 'matching',
+      phase: 'retencion-match',
+      error: retencionMatches.error.message,
+      correlationId,
+    });
+    // Don't fail the entire matching process if retencion matching fails
+  } else {
+    totalMatches += retencionMatches.value;
+    debug('Retencion-Factura matches complete', {
+      module: 'matching',
+      phase: 'retencion-match',
+      matchesFound: retencionMatches.value,
       correlationId,
     });
   }

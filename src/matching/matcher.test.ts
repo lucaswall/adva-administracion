@@ -1524,6 +1524,272 @@ describe('FacturaPagoMatcher Ingresos scenario (receptor fields)', () => {
   });
 });
 
+describe('FacturaPagoMatcher same-currency USD tolerance (ADV-127)', () => {
+  beforeEach(() => {
+    clearExchangeRateCache();
+  });
+
+  const usdFactura1800: Factura & { row: number } = {
+    row: 2,
+    fileId: 'usd-file-1800',
+    fileName: 'factura-usd-1800.pdf',
+    tipoComprobante: 'A',
+    nroFactura: '00001-00000001',
+    fechaEmision: '2024-01-15',
+    cuitEmisor: '20111111119',
+    razonSocialEmisor: 'EMPRESA USD SA',
+    importeNeto: 1800,
+    importeIva: 0,
+    importeTotal: 1800, // USD $1800
+    moneda: 'USD',
+    processedAt: '2024-01-15T10:00:00Z',
+    confidence: 1.0,
+    needsReview: false
+  };
+
+  it('matches USD pago $1780 vs USD factura $1800 with sameCurrencyUsdTolerance=30', () => {
+    // Matcher with sameCurrencyUsdTolerance=30
+    const matcher = new FacturaPagoMatcher(10, 60, 5, 30);
+
+    const pago: Pago = {
+      fileId: 'pago-usd1',
+      fileName: 'pago-usd1.pdf',
+      banco: 'BBVA',
+      fechaPago: '2024-01-17', // 2 days after factura
+      importePagado: 1780, // $20 less than factura (within $30 tolerance)
+      moneda: 'USD',
+      processedAt: '2024-01-17T10:00:00Z',
+      confidence: 1.0,
+      needsReview: false
+    };
+
+    const matches = matcher.findMatches(pago, [usdFactura1800]);
+    expect(matches.length).toBe(1);
+  });
+
+  it('does NOT match USD pago $1780 vs USD factura $1800 with default tolerance=1', () => {
+    const matcher = new FacturaPagoMatcher(10, 60); // no sameCurrencyUsdTolerance (default=1)
+
+    const pago: Pago = {
+      fileId: 'pago-usd2',
+      fileName: 'pago-usd2.pdf',
+      banco: 'BBVA',
+      fechaPago: '2024-01-17',
+      importePagado: 1780, // $20 less, outside default $1 tolerance
+      moneda: 'USD',
+      processedAt: '2024-01-17T10:00:00Z',
+      confidence: 1.0,
+      needsReview: false
+    };
+
+    const matches = matcher.findMatches(pago, [usdFactura1800]);
+    expect(matches.length).toBe(0);
+  });
+});
+
+describe('FacturaPagoMatcher USD extended date range (ADV-128)', () => {
+  beforeEach(() => {
+    clearExchangeRateCache();
+  });
+
+  const usdFactura: Factura & { row: number } = {
+    row: 2,
+    fileId: 'usd-file-ext',
+    fileName: 'factura-usd-ext.pdf',
+    tipoComprobante: 'A',
+    nroFactura: '00001-00000001',
+    fechaEmision: '2024-01-01',
+    cuitEmisor: '20111111119',
+    razonSocialEmisor: 'EMPRESA USD SA',
+    importeNeto: 1000,
+    importeIva: 0,
+    importeTotal: 1000,
+    moneda: 'USD',
+    processedAt: '2024-01-01T10:00:00Z',
+    confidence: 1.0,
+    needsReview: false
+  };
+
+  const arsFactura: Factura & { row: number } = {
+    row: 3,
+    fileId: 'ars-file-ext',
+    fileName: 'factura-ars-ext.pdf',
+    tipoComprobante: 'A',
+    nroFactura: '00001-00000002',
+    fechaEmision: '2024-01-01',
+    cuitEmisor: '20222222228',
+    razonSocialEmisor: 'EMPRESA ARS SA',
+    importeNeto: 1000,
+    importeIva: 0,
+    importeTotal: 1000,
+    moneda: 'ARS',
+    processedAt: '2024-01-01T10:00:00Z',
+    confidence: 1.0,
+    needsReview: false
+  };
+
+  it('matches USD factura at 75 days with usdDaysAfter=90', () => {
+    // Matcher with usdDaysAfter=90
+    const matcher = new FacturaPagoMatcher(10, 60, 5, 1, 90);
+
+    const pago: Pago = {
+      fileId: 'pago-75d',
+      fileName: 'pago-75d.pdf',
+      banco: 'BBVA',
+      fechaPago: '2024-03-16', // 75 days after 2024-01-01
+      importePagado: 1000,
+      moneda: 'USD',
+      processedAt: '2024-03-16T10:00:00Z',
+      confidence: 1.0,
+      needsReview: false
+    };
+
+    const matches = matcher.findMatches(pago, [usdFactura]);
+    expect(matches.length).toBe(1);
+  });
+
+  it('does NOT match ARS factura at 75 days (keeps 60-day range)', () => {
+    const matcher = new FacturaPagoMatcher(10, 60, 5, 1, 90);
+
+    const pago: Pago = {
+      fileId: 'pago-ars-75d',
+      fileName: 'pago-ars-75d.pdf',
+      banco: 'BBVA',
+      fechaPago: '2024-03-16', // 75 days after 2024-01-01 → outside ARS 60-day range
+      importePagado: 1000,
+      moneda: 'ARS',
+      processedAt: '2024-03-16T10:00:00Z',
+      confidence: 1.0,
+      needsReview: false
+    };
+
+    const matches = matcher.findMatches(pago, [arsFactura]);
+    expect(matches.length).toBe(0);
+  });
+});
+
+describe('FacturaPagoMatcher punctuation stripping in name matching (ADV-129)', () => {
+  const baseFactura: Factura & { row: number } = {
+    row: 2,
+    fileId: 'file-punct',
+    fileName: 'factura-punct.pdf',
+    tipoComprobante: 'E',
+    nroFactura: '00001-00000001',
+    fechaEmision: '2024-01-05',
+    cuitEmisor: '',
+    razonSocialEmisor: '',
+    importeNeto: 1000,
+    importeIva: 0,
+    importeTotal: 1000,
+    moneda: 'ARS',
+    processedAt: '2024-01-05T10:00:00Z',
+    confidence: 1.0,
+    needsReview: false
+  };
+
+  const matcher = new FacturaPagoMatcher(10, 60);
+
+  it('"FRITO PLAY, LLC" matches factura "Frito Play LLC" (comma stripped)', () => {
+    const facturas: Array<Factura & { row: number }> = [
+      { ...baseFactura, razonSocialReceptor: 'Frito Play LLC' }
+    ];
+
+    const pago: Pago = {
+      fileId: 'pago-punct1',
+      fileName: 'pago-punct1.pdf',
+      banco: 'BBVA',
+      fechaPago: '2024-01-07',
+      importePagado: 1000,
+      moneda: 'ARS',
+      nombrePagador: 'FRITO PLAY, LLC',
+      processedAt: '2024-01-07T10:00:00Z',
+      confidence: 1.0,
+      needsReview: false
+    };
+
+    const matches = matcher.findMatches(pago, facturas);
+    expect(matches.length).toBe(1);
+    if (matches.length > 0) {
+      expect(matches[0].reasons.some(r => r.includes('name match'))).toBe(true);
+    }
+  });
+
+  it('"S.R.L." matches factura "SRL" (periods stripped)', () => {
+    const facturas: Array<Factura & { row: number }> = [
+      { ...baseFactura, razonSocialEmisor: 'EMPRESA SRL' }
+    ];
+
+    const pago: Pago = {
+      fileId: 'pago-punct2',
+      fileName: 'pago-punct2.pdf',
+      banco: 'BBVA',
+      fechaPago: '2024-01-07',
+      importePagado: 1000,
+      moneda: 'ARS',
+      nombreBeneficiario: 'EMPRESA S.R.L.',
+      processedAt: '2024-01-07T10:00:00Z',
+      confidence: 1.0,
+      needsReview: false
+    };
+
+    const matches = matcher.findMatches(pago, facturas);
+    expect(matches.length).toBe(1);
+    if (matches.length > 0) {
+      expect(matches[0].reasons.some(r => r.includes('name match'))).toBe(true);
+    }
+  });
+
+  it('"OIL-SERVICE SA" matches factura "OilService SA" (hyphens stripped)', () => {
+    const facturas: Array<Factura & { row: number }> = [
+      { ...baseFactura, razonSocialEmisor: 'OilService SA' }
+    ];
+
+    const pago: Pago = {
+      fileId: 'pago-punct-hyph',
+      fileName: 'pago-punct-hyph.pdf',
+      banco: 'BBVA',
+      fechaPago: '2024-01-07',
+      importePagado: 1000,
+      moneda: 'ARS',
+      nombreBeneficiario: 'OIL-SERVICE SA',
+      processedAt: '2024-01-07T10:00:00Z',
+      confidence: 1.0,
+      needsReview: false
+    };
+
+    const matches = matcher.findMatches(pago, facturas);
+    expect(matches.length).toBe(1);
+    if (matches.length > 0) {
+      expect(matches[0].reasons.some(r => r.includes('name match'))).toBe(true);
+    }
+  });
+
+  it('"Empresa (Argentina)" matches factura "Empresa Argentina" (parens stripped)', () => {
+    const facturas: Array<Factura & { row: number }> = [
+      { ...baseFactura, razonSocialEmisor: 'Empresa Argentina' }
+    ];
+
+    const pago: Pago = {
+      fileId: 'pago-punct3',
+      fileName: 'pago-punct3.pdf',
+      banco: 'BBVA',
+      fechaPago: '2024-01-07',
+      importePagado: 1000,
+      moneda: 'ARS',
+      nombreBeneficiario: 'Empresa (Argentina)',
+      processedAt: '2024-01-07T10:00:00Z',
+      confidence: 1.0,
+      needsReview: false
+    };
+
+    const matches = matcher.findMatches(pago, facturas);
+    expect(matches.length).toBe(1);
+    if (matches.length > 0) {
+      expect(matches[0].reasons.some(r => r.includes('name match'))).toBe(true);
+    }
+  });
+});
+
 describe('MatchQuality.compare - dateProximityDays=0 handling (bug #16)', () => {
   it('treats dateProximityDays=0 as perfect match, not as undefined', () => {
     // Bug: dateProximityDays || 999 treats 0 as falsy and replaces with 999

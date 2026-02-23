@@ -2,8 +2,29 @@
  * Tests for factura-pago matcher
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { DisplacementQueue } from '../../matching/cascade-matcher.js';
+import { FacturaPagoMatcher } from '../../matching/matcher.js';
+import type { Factura, Pago, MatchConfidence } from '../../types/index.js';
+
+// Mocks for end-to-end matchFacturasWithPagos tests (do not affect unit tests of FacturaPagoMatcher)
+vi.mock('../../services/sheets.js', () => ({
+  getValues: vi.fn(),
+  batchUpdate: vi.fn(),
+}));
+vi.mock('../../utils/concurrency.js', () => ({
+  withLock: vi.fn(),
+  withRetry: vi.fn(),
+}));
+vi.mock('../../utils/logger.js', () => ({
+  debug: vi.fn(),
+  info: vi.fn(),
+  warn: vi.fn(),
+  error: vi.fn(),
+}));
+vi.mock('../../utils/correlation.js', () => ({
+  getCorrelationId: () => 'test-correlation-id',
+}));
 
 describe('DisplacementQueue', () => {
   it('should return undefined when popping from empty queue (bug #14)', () => {
@@ -156,5 +177,124 @@ describe('Bug #9: Cascading displacement edge case', () => {
     expect(update?.pagoFileId).toBe(displacedPagoFileId);
     expect(update?.facturaFileId).toBe(''); // Empty = unmatch
     expect(update?.pagoRow).toBe(displacedPagoRow);
+  });
+});
+
+describe('MANUAL matchConfidence locking (Fix 5 - ADV-131)', () => {
+  const baseFactura: Factura & { row: number } = {
+    row: 2,
+    fileId: 'factura-1',
+    fileName: 'factura.pdf',
+    tipoComprobante: 'A',
+    nroFactura: '00001-00000001',
+    fechaEmision: '2025-01-10',
+    cuitEmisor: '20123456786',
+    razonSocialEmisor: 'EMPRESA UNO SA',
+    importeNeto: 826.45,
+    importeIva: 173.55,
+    importeTotal: 1000,
+    moneda: 'ARS',
+    processedAt: '2025-01-10T10:00:00.000Z',
+    confidence: 0.95,
+    needsReview: false,
+  };
+
+  const basePago: Pago = {
+    fileId: 'pago-1',
+    fileName: 'pago.pdf',
+    banco: 'BBVA',
+    fechaPago: '2025-01-15',
+    importePagado: 1000,
+    moneda: 'ARS',
+    processedAt: '2025-01-15T10:00:00.000Z',
+    confidence: 0.95,
+    needsReview: false,
+  };
+
+  it('findMatches should not return MANUAL-matched factura as candidate', () => {
+    const matcher = new FacturaPagoMatcher(10, 60);
+
+    const manualFactura: Factura & { row: number } = {
+      ...baseFactura,
+      matchConfidence: 'MANUAL' as MatchConfidence,
+      matchedPagoFileId: 'pago-existing',
+    };
+
+    // Even though amount and date match perfectly, MANUAL factura must be skipped
+    const matches = matcher.findMatches(basePago, [manualFactura], true);
+
+    expect(matches).toHaveLength(0);
+  });
+
+  it('findMatches should not displace pago matched to a MANUAL factura', () => {
+    const matcher = new FacturaPagoMatcher(10, 60);
+
+    const newPago: Pago = { ...basePago, fileId: 'pago-new' };
+
+    const manualFactura: Factura & { row: number } = {
+      ...baseFactura,
+      matchConfidence: 'MANUAL' as MatchConfidence,
+      matchedPagoFileId: 'pago-protected',
+    };
+
+    // With includeMatched=true, the MANUAL factura should still be invisible
+    const matches = matcher.findMatches(newPago, [manualFactura], true);
+
+    // pago-protected is never displaced because MANUAL factura is never a candidate
+    expect(matches).toHaveLength(0);
+  });
+
+  it('pago with MANUAL matchConfidence should be excluded from unmatched pool (end-to-end)', async () => {
+    // Import the production function and its mocked dependencies
+    const { matchFacturasWithPagos } = await import('./factura-pago-matcher.js');
+    const { getValues, batchUpdate } = await import('../../services/sheets.js');
+    const { withLock, withRetry } = await import('../../utils/concurrency.js');
+
+    // Mock withLock/withRetry to pass through
+    vi.mocked(withLock).mockImplementation(async (_key: string, fn: () => Promise<any>) => {
+      try { return { ok: true as const, value: await fn() }; }
+      catch (e) { return { ok: false as const, error: e instanceof Error ? e : new Error(String(e)) }; }
+    });
+    vi.mocked(withRetry).mockImplementation(async (fn: () => Promise<any>) => {
+      try { return { ok: true as const, value: await fn() }; }
+      catch (e) { return { ok: false as const, error: e instanceof Error ? e : new Error(String(e)) }; }
+    });
+
+    // Factura that would match the pago by CUIT and amount
+    const facturaHeader = ['fechaEmision', 'fileId', 'fileName', 'tipoComprobante', 'nroFactura', 'cuitReceptor', 'razonSocialReceptor', 'importeNeto', 'importeIva', 'importeTotal', 'moneda', 'concepto', 'processedAt', 'confidence', 'needsReview', 'matchedPagoFileId', 'matchConfidence', 'hasCuitMatch', 'tipoDeCambio'];
+    const facturaRow = ['2025-01-01', 'fact-1', 'factura.pdf', 'A', '00003-00001957', '20123456786', 'TEST SA', '8264.46', '1735.54', '10000', 'ARS', '', '2025-01-01T10:00:00Z', '0.95', 'NO', '', '', '', ''];
+
+    // Pago with MANUAL matchConfidence — should NOT be re-matched
+    const pagoHeader = ['fechaPago', 'fileId', 'fileName', 'banco', 'importePagado', 'moneda', 'referencia', 'cuitPagador', 'nombrePagador', 'concepto', 'processedAt', 'confidence', 'needsReview', 'matchedFacturaFileId', 'matchConfidence', 'tipoDeCambio', 'importeEnPesos'];
+    const pagoRow = ['2025-01-05', 'pago-manual', 'pago.pdf', 'BBVA', '10000', 'ARS', '', '20123456786', 'TEST SA', '', '2025-01-05T10:00:00Z', '0.95', 'NO', '', 'MANUAL', '', ''];
+
+    vi.mocked(getValues)
+      .mockResolvedValueOnce({ ok: true, value: [facturaHeader, facturaRow] })
+      .mockResolvedValueOnce({ ok: true, value: [pagoHeader, pagoRow] });
+
+    const config = {
+      matchDaysBefore: 10,
+      matchDaysAfter: 60,
+      usdArsTolerancePercent: 5,
+      usdMatchDaysAfter: 90,
+    };
+
+    const result = await matchFacturasWithPagos(
+      'test-spreadsheet',
+      'Facturas Emitidas',
+      'Pagos Recibidos',
+      'cuitReceptor',
+      'cuitPagador',
+      config as any,
+    );
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      // MANUAL pago filtered out → 0 unmatched → 0 matches
+      expect(result.value).toBe(0);
+    }
+
+    // batchUpdate should NOT have been called — MANUAL pago was excluded
+    expect(batchUpdate).not.toHaveBeenCalled();
   });
 });

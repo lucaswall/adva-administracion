@@ -6,6 +6,7 @@ import { describe, it, expect } from 'vitest';
 import { parseNumber } from '../../utils/numbers.js';
 import { normalizeSpreadsheetDate } from '../../utils/date.js';
 import { buildUnmatchUpdate } from '../../matching/cascade-matcher.js';
+import { ReciboPagoMatcher } from '../../matching/matcher.js';
 import type { Pago, Recibo, MatchConfidence } from '../../types/index.js';
 
 describe('recibo-pago-matcher', () => {
@@ -227,5 +228,86 @@ describe('recibo-pago-matcher', () => {
       expect(pagoUpdate?.pagoFileId).toBe(displacedPagoFileId);
       expect(pagoUpdate?.reciboFileId).toBe('');
     });
+  });
+});
+
+describe('MANUAL matchConfidence locking - recibo-pago (Fix 5 - ADV-131)', () => {
+  const baseRecibo: Recibo & { row: number } = {
+    row: 2,
+    fileId: 'recibo-1',
+    fileName: 'recibo.pdf',
+    tipoRecibo: 'sueldo',
+    nombreEmpleado: 'Juan Perez',
+    cuilEmpleado: '20123456786',
+    legajo: '001',
+    cuitEmpleador: '30709076783',
+    periodoAbonado: '2025-01',
+    fechaPago: '2025-01-14',
+    subtotalRemuneraciones: 100000,
+    subtotalDescuentos: 20000,
+    totalNeto: 80000,
+    processedAt: '2025-01-14T10:00:00.000Z',
+    confidence: 0.95,
+    needsReview: false,
+  };
+
+  const basePago: Pago = {
+    fileId: 'pago-1',
+    fileName: 'pago.pdf',
+    banco: 'BBVA',
+    fechaPago: '2025-01-15',
+    importePagado: 80000,
+    moneda: 'ARS',
+    processedAt: '2025-01-15T10:00:00.000Z',
+    confidence: 0.95,
+    needsReview: false,
+  };
+
+  it('findMatches should not return MANUAL-matched recibo as candidate', () => {
+    const matcher = new ReciboPagoMatcher(10, 60);
+
+    const manualRecibo: Recibo & { row: number } = {
+      ...baseRecibo,
+      matchConfidence: 'MANUAL' as MatchConfidence,
+      matchedPagoFileId: 'pago-existing',
+    };
+
+    // Even though amount and date match perfectly, MANUAL recibo must be skipped
+    const matches = matcher.findMatches(basePago, [manualRecibo], true);
+
+    expect(matches).toHaveLength(0);
+  });
+
+  it('findMatches should not displace pago matched to a MANUAL recibo', () => {
+    const matcher = new ReciboPagoMatcher(10, 60);
+
+    const newPago: Pago = { ...basePago, fileId: 'pago-new' };
+
+    const manualRecibo: Recibo & { row: number } = {
+      ...baseRecibo,
+      matchConfidence: 'MANUAL' as MatchConfidence,
+      matchedPagoFileId: 'pago-protected',
+    };
+
+    // With includeMatched=true, the MANUAL recibo should still be invisible
+    const matches = matcher.findMatches(newPago, [manualRecibo], true);
+
+    // pago-protected is never displaced because MANUAL recibo is never a candidate
+    expect(matches).toHaveLength(0);
+  });
+
+  it('pago with MANUAL matchConfidence should be excluded from unmatched pool', () => {
+    // Documents the expected filter in doMatchRecibosWithPagos():
+    // pagos.filter(p => !p.matchedFacturaFileId && p.matchConfidence !== 'MANUAL')
+    const allPagos: Array<Pago & { row: number }> = [
+      { ...basePago, row: 2, fileId: 'pago-auto' },
+      { ...basePago, row: 3, fileId: 'pago-manual', matchConfidence: 'MANUAL' as MatchConfidence },
+      { ...basePago, row: 4, fileId: 'pago-matched', matchedFacturaFileId: 'some-recibo' },
+    ];
+
+    const fixedFilter = allPagos.filter(p => !p.matchedFacturaFileId && p.matchConfidence !== 'MANUAL');
+
+    expect(fixedFilter).toHaveLength(1);
+    expect(fixedFilter[0].fileId).toBe('pago-auto');
   });
 });

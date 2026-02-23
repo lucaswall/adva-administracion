@@ -57,6 +57,7 @@ describe('Scan routes', () => {
     webhookUrl: 'http://localhost:3000/webhooks/drive',
     matchDaysBefore: 10,
     matchDaysAfter: 60,
+    usdMatchDaysAfter: 90,
     usdArsTolerancePercent: 5,
     geminiRpmLimit: 150,
     environment: 'staging' as const,

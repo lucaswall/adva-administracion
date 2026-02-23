@@ -66,7 +66,7 @@ export type ProcessStatus = 'processed' | 'error' | 'pending';
 /**
  * Match confidence levels
  */
-export type MatchConfidence = 'HIGH' | 'MEDIUM' | 'LOW';
+export type MatchConfidence = 'HIGH' | 'MEDIUM' | 'LOW' | 'MANUAL';
 
 /**
  * ARCA comprobante types

@@ -434,6 +434,7 @@ npm run deploy:script # Build + deploy to Dashboard
 | MATCH_DAYS_BEFORE | No | 10 |
 | MATCH_DAYS_AFTER | No | 60 |
 | USD_ARS_TOLERANCE_PERCENT | No | 5 |
+| MATCH_DAYS_AFTER_USD | No | 90 |
 | DRIVE_ROOT_FOLDER_ID_PRODUCTION | No | - |
 | DRIVE_ROOT_FOLDER_ID_STAGING | No | - |
 
@@ -588,6 +589,15 @@ Bank movements are matched against documents using a tier-based algorithm (lower
 
 ### Match Replacement
 Better matches replace existing ones. Quality comparison: tier → date proximity → exact amount.
+
+### MANUAL Confidence Lock
+`matchConfidence='MANUAL'` is a special value that permanently locks a match against automatic re-matching:
+
+- **Facturas/Recibos with MANUAL**: invisible to `FacturaPagoMatcher.findMatches()` and `ReciboPagoMatcher.findMatches()` — no pago can ever displace their existing match
+- **Pagos with MANUAL**: excluded from the unmatched pool — treated as already matched
+- **NC-Factura matching**: MANUAL NCs are skipped (not matched to facturas); MANUAL facturas are excluded from match targets
+- MANUAL always wins over force mode — even `?force=true` respects MANUAL locks
+- **Note:** Movimientos bancarios do NOT support MANUAL locking — their 8-column schema (A:H) has no matchConfidence column
 
 ### Date Windows
 - Pago: ±15 days from bank date
