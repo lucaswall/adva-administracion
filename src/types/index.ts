@@ -862,6 +862,8 @@ export interface MovimientoRow {
   matchedFileId: string;
   /** Human-readable match description */
   detalle: string;
+  /** Match type: 'AUTO' (algorithmic), 'MANUAL' (user-set), or '' (unmatched) */
+  matchedType: 'AUTO' | 'MANUAL' | '';
 }
 
 /**

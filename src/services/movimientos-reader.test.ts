@@ -319,6 +319,67 @@ describe('readMovimientosForPeriod', () => {
     }
   });
 
+  it('should parse matchedType from 9-column rows', async () => {
+    vi.mocked(getValues).mockResolvedValue({
+      ok: true,
+      value: [
+        ['fecha', 'concepto', 'debito', 'credito', 'saldo', 'saldoCalculado', 'matchedFileId', 'detalle', 'matchedType'],
+        ['2025-01-15', 'TRANSFERENCIA TEST SA', 1000, null, 9000, 9000, 'file123', 'Pago Factura', 'AUTO'],
+        ['2025-01-16', 'DEPOSITO', null, 5000, 14000, 14000, 'file456', 'Cobro', 'MANUAL'],
+      ],
+    });
+
+    const result = await readMovimientosForPeriod('spreadsheet-id', '2025-01');
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value).toHaveLength(2);
+      expect(result.value[0].matchedType).toBe('AUTO');
+      expect(result.value[1].matchedType).toBe('MANUAL');
+    }
+  });
+
+  it('should default matchedType to empty string for 8-column rows (backward compat)', async () => {
+    vi.mocked(getValues).mockResolvedValue({
+      ok: true,
+      value: [
+        ['fecha', 'concepto', 'debito', 'credito', 'saldo', 'saldoCalculado', 'matchedFileId', 'detalle'],
+        ['2025-01-15', 'TRANSFERENCIA TEST SA', 1000, null, 9000, 9000, '', ''],
+      ],
+    });
+
+    const result = await readMovimientosForPeriod('spreadsheet-id', '2025-01');
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value).toHaveLength(1);
+      expect(result.value[0].matchedType).toBe('');
+    }
+  });
+
+  it('should normalize matchedType case-insensitively', async () => {
+    vi.mocked(getValues).mockResolvedValue({
+      ok: true,
+      value: [
+        ['fecha', 'concepto', 'debito', 'credito', 'saldo', 'saldoCalculado', 'matchedFileId', 'detalle', 'matchedType'],
+        ['2025-01-15', 'TEST', 1000, null, 9000, 9000, 'file1', '', 'manual'],
+        ['2025-01-16', 'TEST', null, 5000, 14000, 14000, 'file2', '', 'auto'],
+        ['2025-01-17', 'TEST', 1000, null, 8000, 8000, 'file3', '', ' Manual '],
+        ['2025-01-18', 'TEST', null, 2000, 10000, 10000, '', '', 'invalid'],
+      ],
+    });
+
+    const result = await readMovimientosForPeriod('spreadsheet-id', '2025-01');
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value).toHaveLength(4);
+      expect(result.value[0].matchedType).toBe('MANUAL');
+      expect(result.value[1].matchedType).toBe('AUTO');
+      expect(result.value[2].matchedType).toBe('MANUAL');
+      expect(result.value[3].matchedType).toBe(''); // invalid values default to empty
+    }
+  });
+
   it('should use correct range format with quoted sheet name', async () => {
     vi.mocked(getValues).mockResolvedValue({
       ok: true,
@@ -327,7 +388,7 @@ describe('readMovimientosForPeriod', () => {
 
     await readMovimientosForPeriod('spreadsheet-id', '2025-01');
 
-    expect(getValues).toHaveBeenCalledWith('spreadsheet-id', "'2025-01'!A:H");
+    expect(getValues).toHaveBeenCalledWith('spreadsheet-id', "'2025-01'!A:I");
   });
 });
 

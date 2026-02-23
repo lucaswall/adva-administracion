@@ -34,6 +34,20 @@ export function isSpecialRow(concepto: string): boolean {
 }
 
 /**
+ * Normalizes a raw matchedType value from the spreadsheet.
+ * Handles case-insensitive input (e.g., 'manual' → 'MANUAL').
+ *
+ * @param raw - Raw cell value from the spreadsheet
+ * @returns Normalized matchedType: 'AUTO', 'MANUAL', or ''
+ */
+function parseMatchedType(raw: unknown): MovimientoRow['matchedType'] {
+  const s = String(raw || '').trim().toUpperCase();
+  if (s === 'AUTO') return 'AUTO';
+  if (s === 'MANUAL') return 'MANUAL';
+  return '';
+}
+
+/**
  * Parses a single row into a MovimientoRow object
  *
  * @param row - Raw cell values from the spreadsheet
@@ -60,6 +74,7 @@ function parseMovimientoRow(
     saldoCalculado: parseNumber(row[5]),
     matchedFileId: String(row[6] || ''),
     detalle: String(row[7] || ''),
+    matchedType: parseMatchedType(row[8]),
   };
 }
 
@@ -114,7 +129,7 @@ export async function readMovimientosForPeriod(
   sheetName: string
 ): Promise<Result<MovimientoRow[], Error>> {
   // Use quoted sheet name for A1 notation (handles special characters)
-  const range = `'${sheetName}'!A:H`;
+  const range = `'${sheetName}'!A:I`;
 
   const valuesResult = await getValues(spreadsheetId, range);
   if (!valuesResult.ok) return valuesResult;

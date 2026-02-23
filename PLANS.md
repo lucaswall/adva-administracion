@@ -1,157 +1,141 @@
-# Implementation Plan
+# Bug Fix Plan
 
 **Status:** COMPLETE
 **Created:** 2026-02-23
-**Source:** Inline request: Create manual-match skill for Claude Code. Requires adding spreadsheet write + file move/rename capabilities to gdrive MCP server. Skill handles manual document matching in Control de Ingresos/Egresos, file moves/renames with confirmation, environment selection (staging/production), and scoped queries (by sheet, date, area).
-**Linear Issues:** [ADV-136](https://linear.app/lw-claude/issue/ADV-136/add-write-capabilities-to-gdrive-mcp-server-gsheets_update-move-rename), [ADV-137](https://linear.app/lw-claude/issue/ADV-137/create-manual-match-skill-for-document-matching-file-moves-and-renames), [ADV-138](https://linear.app/lw-claude/issue/ADV-138/update-claudemd-with-new-mcp-tools-and-manual-match-skill)
+**Bug Report:** Movimientos matching has duplicate fileId assignments (same document matched to multiple movements), no matchedType column for MANUAL locking, and missing PAGOS AFIP bank fee pattern. Direct debit auto-labeling was reported but already resolved (dead code).
+**Category:** Matching
 
-## Context Gathered
+## Investigation
 
-### Codebase Analysis
+### Context Gathered
+- **MCPs used:** Google Drive MCP (read BBVA ARS movimientos + Control sheets), Linear MCP (checked existing issues)
+- **Files examined:** BBVA ARS Movimientos spreadsheet (staging), Control de Ingresos, Control de Egresos, match-movimientos.ts, matcher.ts, movimientos-reader.ts, movimientos-detalle.ts, types/index.ts, SPREADSHEET_FORMAT.md
 
-**MCP Server (`mcp-gdrive/`):**
-- Custom MCP server using `@modelcontextprotocol/sdk` with `googleapis`
-- Currently read-only: scopes are `drive.readonly` + `spreadsheets.readonly` (`mcp-gdrive/auth.ts`)
-- 5 tools: `gdrive_search`, `gdrive_read_file`, `gdrive_list_folder`, `gdrive_get_pdf`, `gsheets_read`
-- Tool pattern: schema export + handler function, registered in `tools/index.ts`
-- Types in `tools/types.ts`, each tool has its own input interface
+### Evidence
 
-**Spreadsheet Schema (matching-relevant columns):**
-- Facturas Emitidas (A:S): matchedPagoFileId=P, matchConfidence=Q
-- Pagos Recibidos (A:Q): matchedFacturaFileId=N, matchConfidence=O
-- Retenciones Recibidas (A:O): matchedFacturaFileId=N, matchConfidence=O
-- Facturas Recibidas (A:T): matchedPagoFileId=P, matchConfidence=Q, pagada=S
-- Pagos Enviados (A:Q): matchedFacturaFileId=N, matchConfidence=O
-- Recibos (A:R): matchedPagoFileId=Q, matchConfidence=R
+**Duplicate fileId matches found in BBVA ARS staging data:**
+- 126,000 ARS: 3 bank credits all matched to Gustavo del Gerbo, but Tomas Carceglia and Gabriel Rosa also have 126K facturas
+- 130,000 ARS: 2 bank credits all matched to Eclipse, but Perspectiva and Whiteboard Games also have 130K facturas
+- 58,500 ARS: 2 An Otter credits matched to same factura (00005-00000023), but An Otter has a second factura (00005-00000012)
+- 776,160 ARS: 2 same-day debits matched to LOPEZ pago, but COLS NICOLAS AGUSTIN has a separate 776K pago
 
-**Environment handling:**
-- `.env` has `DRIVE_ROOT_FOLDER_ID_PRODUCTION` and `DRIVE_ROOT_FOLDER_ID_STAGING`
-- Investigate skill pattern: read `.env`, ask user which environment, use corresponding root folder
-- Root folder contains `Control de Ingresos.gsheet` and `Control de Egresos.gsheet`
+**Root cause:** `matchBankMovimientos()` at `src/bank/match-movimientos.ts:794` processes each movement independently. Each call to `matcher.matchMovement()`/`matcher.matchCreditMovement()` sees the FULL pool of documents. No `usedFileIds` Set tracks which documents have already been assigned within a bank's matching pass.
 
-**Existing patterns:**
-- `investigate` skill in `.claude/skills/investigate/SKILL.md` — good model for environment selection + Drive MCP usage
-- All matching sheets use `MANUAL` value in `matchConfidence` to lock matches (ADV-131, already implemented)
+**MANUAL locking gap:** ADV-132 previously removed dead MANUAL lock code from movimientos because there was no `matchConfidence` column. User now wants a `matchedType` column (AUTO/MANUAL) with proper MANUAL semantics: user sets matchedFileId + MANUAL → system generates detalle + file excluded from pool.
 
-### MCP Context
-- Linear MCP verified: team "ADVA Administracion" exists
-- Google Drive MCP: `drive.files.update()` handles both move (addParents/removeParents) and rename (requestBody.name)
-- Sheets API: `sheets.spreadsheets.values.batchUpdate()` for multi-cell updates with `USER_ENTERED` mode
+**PAGOS AFIP:** Bank concept `PAGOS AFIP` appears in movimientos but is not recognized by `BANK_FEE_PATTERNS` at `src/bank/matcher.ts:227-244`. User confirmed these are bank fees (Gasto bancario).
 
-## Original Plan
+**Direct debit:** `isDirectDebit()` at `src/bank/matcher.ts:87` and `DIRECT_DEBIT_PATTERNS` at line 46 are dead code — never called from match-movimientos.ts. Direct debits already go through normal document matching. No fix needed.
 
-### Task 1: Add write capabilities to gdrive MCP server
-**Linear Issue:** [ADV-136](https://linear.app/lw-claude/issue/ADV-136/add-write-capabilities-to-gdrive-mcp-server-gsheets_update-move-rename)
+### Root Cause
 
-Adds three new MCP tools: `gsheets_update` (batch cell updates), `gdrive_move_file`, `gdrive_rename_file`. Upgrades auth scopes from read-only to read-write.
+The matching loop in `matchBankMovimientos()` has no mechanism to track which document fileIds have already been assigned to movements within a single bank pass. Each movement sees the entire document pool, causing the same high-quality match to be assigned repeatedly.
 
-No TDD — MCP tools are external integrations with no test infrastructure in `mcp-gdrive/`. Verified via manual testing after implementation.
+#### Related Code
+- `src/bank/match-movimientos.ts:754-934` — `matchBankMovimientos()` function: the main loop at line 794 iterates movements and calls `matcher.matchMovement()`/`matcher.matchCreditMovement()` without a `usedFileIds` set
+- `src/bank/match-movimientos.ts:90-128` — `VersionableRow` interface and `computeRowVersion()`: needs `matchedType` field for TOCTOU protection
+- `src/bank/matcher.ts:227-244` — `BANK_FEE_PATTERNS` array: missing PAGOS AFIP pattern
+- `src/bank/matcher.ts:46-51` — `DIRECT_DEBIT_PATTERNS` + `isDirectDebit()`: dead code, can be removed
+- `src/services/movimientos-reader.ts:44-64` — `parseMovimientoRow()`: reads columns A:H, needs A:I for matchedType
+- `src/services/movimientos-reader.ts:117` — Range `A:H` needs to be `A:I`
+- `src/services/movimientos-detalle.ts:17-32` — `DetalleUpdate` interface: needs `matchedType` field
+- `src/services/movimientos-detalle.ts:53-71` — `computeVersionFromRow()`: needs matchedType in hash
+- `src/services/movimientos-detalle.ts:170-172` — Write range `G:H` needs to be `G:I`, values need matchedType
+- `src/types/index.ts:844-865` — `MovimientoRow` interface: needs `matchedType` field
 
-**Subtasks:**
+### Impact
+- Duplicate matches cause incorrect financial reconciliation — one document appears matched to multiple bank movements
+- Without MANUAL locking, users cannot override algorithmic mistakes in movimientos
+- PAGOS AFIP debits remain unmatched instead of being auto-labeled as bank fees
 
-1. Upgrade auth scopes in `mcp-gdrive/auth.ts`:
-   - `drive.readonly` → `drive` (enables file move/rename)
-   - `spreadsheets.readonly` → `spreadsheets` (enables cell updates)
+## Fix Plan
 
-2. Add new input types in `mcp-gdrive/tools/types.ts`:
-   - `GSheetsUpdateInput`: `{ spreadsheetId, updates: Array<{ range, value }> }`
-   - `GDriveMoveFileInput`: `{ fileId, newParentFolderId }`
-   - `GDriveRenameFileInput`: `{ fileId, newName }`
+### Fix 1: Add matchedType column to movimientos schema
+**Linear Issue:** [ADV-139](https://linear.app/lw-claude/issue/ADV-139/add-matchedtype-column-i-to-movimientos-schema)
 
-3. Create `mcp-gdrive/tools/gsheets_update.ts`:
-   - Uses `sheets.spreadsheets.values.batchUpdate()` with `USER_ENTERED` valueInputOption
-   - Takes array of `{ range, value }` pairs (A1 notation, e.g., `"'Facturas Emitidas'!P5"`)
-   - Returns count of updated cells + confirmation
+Expand the movimientos spreadsheet schema from 8 columns (A:H) to 9 columns (A:I) with a new `matchedType` column after `detalle`.
 
-4. Create `mcp-gdrive/tools/gdrive_move_file.ts`:
-   - Uses `drive.files.get()` to get current parents
-   - Uses `drive.files.update()` with `addParents` + `removeParents`
-   - Returns new file location info
-   - Include `supportsAllDrives: true` per existing pattern
+**Migration note:** Schema change from 8→9 columns. Existing spreadsheets have no column I. The reader must handle rows with only 8 values gracefully (matchedType defaults to empty string). No startup migration needed — old rows parse correctly with the 9th value absent.
 
-5. Create `mcp-gdrive/tools/gdrive_rename_file.ts`:
-   - Uses `drive.files.update()` with `requestBody: { name }`
-   - Returns old name → new name confirmation
-   - Include `supportsAllDrives: true`
+1. Write test in `src/types/index.ts` — no test needed, just add `matchedType: string` field to `MovimientoRow` interface (values: `'AUTO'` | `'MANUAL'` | `''`)
 
-6. Register all 3 tools in `mcp-gdrive/tools/index.ts`
+2. Write test in `src/services/movimientos-reader.test.ts` for `parseMovimientoRow` handling 8-column (backward compat) and 9-column rows
+3. Run verifier (expect fail)
+4. Update `parseMovimientoRow` in `src/services/movimientos-reader.ts`:
+   - Read `row[8]` as matchedType (default `''` if absent — backward compat)
+   - Change range from `A:H` to `A:I` at line 117
+5. Run verifier (expect pass)
 
-7. Add permissions in `.claude/settings.json`:
-   - `mcp__gdrive__gsheets_update`
-   - `mcp__gdrive__gdrive_move_file`
-   - `mcp__gdrive__gdrive_rename_file`
+6. Write test in `src/services/movimientos-detalle.test.ts` for `DetalleUpdate` with matchedType, `computeVersionFromRow` including matchedType, and write range `G:I`
+7. Run verifier (expect fail)
+8. Update `src/services/movimientos-detalle.ts`:
+   - Add `matchedType` field to `DetalleUpdate` interface
+   - Include matchedType in `computeVersionFromRow` hash (index 8)
+   - Change write range from `G${row}:H${row}` to `G${row}:I${row}` at line 171
+   - Add matchedType to values array at line 172
+9. Run verifier (expect pass)
 
-### Task 2: Create manual-match skill
-**Linear Issue:** [ADV-137](https://linear.app/lw-claude/issue/ADV-137/create-manual-match-skill-for-document-matching-file-moves-and-renames)
+10. Update `src/bank/match-movimientos.ts`:
+    - Add `matchedType` to `VersionableRow` interface
+    - Include matchedType in `computeRowVersion` hash
+    - Add `matchedType: 'AUTO'` to all `updates.push()` calls (line 916-922)
+11. Run verifier (expect pass — existing tests should adapt)
 
-Create `.claude/skills/manual-match/SKILL.md` — a user-invocable skill for manually matching documents across Control de Ingresos and Control de Egresos spreadsheets.
+12. Update `SPREADSHEET_FORMAT.md` — add column I (matchedType) to Movimientos schema
+13. Update `CLAUDE.md` — remove note that movimientos don't support MANUAL locking
 
-No TDD — this is a skill file (markdown instructions), not TypeScript code.
+### Fix 2: Implement usedFileIds deduplication and MANUAL support
+**Linear Issue:** [ADV-140](https://linear.app/lw-claude/issue/ADV-140/implement-usedfileids-deduplication-and-manual-support-for-movimientos)
 
-**Skill frontmatter:**
-- `name: manual-match`
-- `description`: Triggers on "manual match", "fix match", "unmatch", "link factura", "link pago", "show unmatched", "review matches", "move file", "rename file", "fix document"
-- `disable-model-invocation: true` (has side effects — writes to spreadsheets, moves/renames files)
-- `allowed-tools`: Read, Glob, Grep, all `mcp__gdrive__*` tools (search, read, list, get_pdf, gsheets_read, gsheets_update, gdrive_move_file, gdrive_rename_file)
-- Does NOT include `mcp__gemini__*` — Claude reads/analyzes documents directly via `gdrive_read_file` or `gdrive_get_pdf` + Read tool
+Prevent the same document from being matched to multiple movements within a bank. Implement MANUAL lock semantics: MANUAL rows are never overwritten, their fileIds are excluded from the matching pool, and blank detalles on MANUAL rows get auto-generated.
 
-**Skill workflow (embedded in SKILL.md):**
+1. Write tests in `src/bank/match-movimientos.test.ts`:
+   - Test: MANUAL row is skipped (not overwritten) even with `force=true`
+   - Test: MANUAL row's fileId is excluded from the matching pool (other movements can't match it)
+   - Test: MANUAL row with blank detalle gets detalle auto-generated from matched document
+   - Test: Same fileId is not assigned to two different movements (usedFileIds dedup)
+   - Test: After a fileId is used by one movement, the next movement with same amount gets a different match
+2. Run verifier (expect fail)
 
-1. **Environment selection** — Read `.env` for `DRIVE_ROOT_FOLDER_ID_PRODUCTION` and `DRIVE_ROOT_FOLDER_ID_STAGING`. If both exist, ask user which environment. Use the selected root folder for all subsequent Drive queries.
+3. Implement in `src/bank/match-movimientos.ts` — `matchBankMovimientos()`:
+   - **Pre-processing phase** (before the main loop):
+     a. Scan all movimientos for rows with `matchedType === 'MANUAL'`
+     b. Collect their `matchedFileId` values into `usedFileIds: Set<string>`
+     c. For MANUAL rows with blank `detalle` and non-empty `matchedFileId`: look up the document in ingresosData/egresosData and generate a detalle description, push to updates with `matchedType: 'MANUAL'`
+   - **Main matching loop** (line 794):
+     a. Skip MANUAL rows entirely (never overwrite, even with force)
+     b. After a successful match, add `matchResult.matchedFileId` to `usedFileIds`
+     c. Pass `usedFileIds` to matcher methods so they exclude already-used documents
+   - **Matcher integration**: `BankMovementMatcher.matchMovement()` and `matchCreditMovement()` need an optional `excludeFileIds?: Set<string>` parameter. Filter candidates whose fileId is in the set before ranking.
 
-2. **Find spreadsheets** — Use `gdrive_list_folder` on root folder to locate `Control de Ingresos` and `Control de Egresos` spreadsheet IDs.
+4. Write tests in `src/bank/matcher.test.ts`:
+   - Test: `matchMovement` with `excludeFileIds` excludes specified fileIds from candidates
+   - Test: `matchCreditMovement` with `excludeFileIds` excludes specified fileIds from candidates
+5. Run verifier (expect fail)
 
-3. **Interpret user request** — Parse `$ARGUMENTS` to determine action:
-   - **Show unmatched**: Read relevant sheet(s), filter rows where matchedFileId is empty
-   - **Show low-confidence**: Filter rows where matchConfidence is MEDIUM or LOW
-   - **Show needs review**: Filter rows where needsReview is TRUE
-   - **Match documents**: User specifies two documents to link (by nroFactura, fileId, CUIT, name, row number)
-   - **Unmatch**: Clear match columns on both sides of a link
-   - **Move file**: Move a file to a different folder (requires explicit confirmation)
-   - **Rename file**: Rename a file (requires explicit confirmation)
-   - **Scoped queries**: Filter by sheet name, date range, CUIT, company name, amount range
+6. Implement in `src/bank/matcher.ts`:
+   - Add optional `excludeFileIds?: Set<string>` parameter to `matchMovement()` and `matchCreditMovement()`
+   - Filter candidates early (after collecting all tiered candidates, before selecting best) — remove any candidate whose fileId is in `excludeFileIds`
+7. Run verifier (expect pass)
 
-4. **Matching operations** — For each match type, update BOTH sides of the link and set `matchConfidence=MANUAL`:
+### Fix 3: Add PAGOS AFIP to bank fee patterns and clean up dead code
+**Linear Issue:** [ADV-141](https://linear.app/lw-claude/issue/ADV-141/add-pagos-afip-to-bank-fee-patterns-and-remove-dead-direct-debit-code)
 
-   **Ingresos — Factura Emitida ↔ Pago Recibido:**
-   - FE: col P = pago fileId, col Q = MANUAL
-   - PR: col N = factura fileId, col O = MANUAL
+Add PAGOS AFIP pattern to `BANK_FEE_PATTERNS`. Remove dead `DIRECT_DEBIT_PATTERNS` and `isDirectDebit()` code.
 
-   **Ingresos — Retencion Recibida → Factura Emitida:**
-   - RR: col N = factura fileId, col O = MANUAL
+1. Write test in `src/bank/matcher.test.ts`:
+   - Test: `isBankFee('PAGOS AFIP')` returns true
+   - Test: `isBankFee('D 500 PAGOS AFIP')` returns true (with bank origin prefix)
+2. Run verifier (expect fail)
 
-   **Egresos — Factura Recibida ↔ Pago Enviado:**
-   - FR: col P = pago fileId, col Q = MANUAL, col S = SI
-   - PE: col N = factura fileId, col O = MANUAL
+3. Implement in `src/bank/matcher.ts`:
+   - Add `/^PAGOS\s*AFIP/i` to `BANK_FEE_PATTERNS` array (line 227-244)
+4. Run verifier (expect pass)
 
-   **Egresos — Recibo ↔ Pago Enviado:**
-   - R: col Q = pago fileId, col R = MANUAL
-   - PE: col N = recibo fileId, col O = MANUAL
-
-5. **Unmatch** — Clear match columns (empty string) on both sides. For Factura Recibida, also clear `pagada` (col S).
-
-6. **File operations** — For move/rename:
-   - Show current file location/name and proposed change
-   - Require explicit user confirmation before executing
-   - Use `gdrive_move_file` or `gdrive_rename_file` MCP tools
-
-7. **Verification** — After any write operation, re-read the affected rows to confirm changes applied correctly. Report the before/after state.
-
-**Embedded schema reference** — The skill includes a condensed column mapping table so Claude can construct correct A1 notation ranges without needing to re-read SPREADSHEET_FORMAT.md each time.
-
-### Task 3: Update CLAUDE.md with new MCP tools and skill
-**Linear Issue:** [ADV-138](https://linear.app/lw-claude/issue/ADV-138/update-claudemd-with-new-mcp-tools-and-manual-match-skill)
-
-1. Add to MCP SERVERS → Google Drive section:
-   - `gsheets_update` — write to spreadsheet cells (used ONLY by `manual-match` skill)
-   - `gdrive_move_file` — move files between folders (used ONLY by `manual-match` skill)
-   - `gdrive_rename_file` — rename files (used ONLY by `manual-match` skill)
-   - Note: these write tools are restricted to the `manual-match` skill via `allowed-tools`
-
-2. Add `manual-match` to the SKILLS table:
-   - Description: Manually match documents, fix matches, move/rename files. Use when user says "manual match", "fix match", "unmatch", "show unmatched", "move file", "rename file".
-
-3. Add a note in the Google Drive MCP section that `manual-match` is the ONLY skill authorized to write to spreadsheets or move/rename files.
+5. Remove dead code in `src/bank/matcher.ts`:
+   - Remove `DIRECT_DEBIT_PATTERNS` (lines 46-51) and `isDirectDebit()` function (lines 82-92)
+   - Remove the export — check no imports exist (already verified: no callers)
+6. Run verifier (expect pass)
 
 ## Post-Implementation Checklist
 1. Run `bug-hunter` agent — Review changes for bugs
@@ -161,84 +145,89 @@ No TDD — this is a skill file (markdown instructions), not TypeScript code.
 
 ## Plan Summary
 
-**Objective:** Create a manual-match skill with spreadsheet write and file management capabilities
+**Problem:** Bank movimientos matching assigns the same document to multiple movements (duplicate fileId) and lacks MANUAL locking support and PAGOS AFIP bank fee recognition.
 
-**Request:** Create a skill for Claude Code to help with manual matching of documents in Control de Ingresos/Egresos, with environment selection (staging/production), scoped queries, and file move/rename with confirmation. Add write capabilities to the gdrive MCP server.
+**Root Cause:** `matchBankMovimientos()` processes movements independently without tracking used fileIds. No `matchedType` column exists for MANUAL locking. PAGOS AFIP is missing from `BANK_FEE_PATTERNS`.
 
-**Linear Issues:** ADV-136, ADV-137, ADV-138
+**Linear Issues:** [ADV-139](https://linear.app/lw-claude/issue/ADV-139/add-matchedtype-column-i-to-movimientos-schema), [ADV-140](https://linear.app/lw-claude/issue/ADV-140/implement-usedfileids-deduplication-and-manual-support-for-movimientos), [ADV-141](https://linear.app/lw-claude/issue/ADV-141/add-pagos-afip-to-bank-fee-patterns-and-remove-dead-direct-debit-code)
 
-**Approach:** Add three new MCP tools (gsheets_update, gdrive_move_file, gdrive_rename_file) to the existing custom gdrive MCP server by upgrading auth scopes and creating new tool files following the existing pattern. Create a manual-match skill that orchestrates reading spreadsheet data, identifying unmatched/low-confidence documents, and writing manual matches with MANUAL confidence locking.
+**Solution Approach:** Add a `matchedType` column (I) to the movimientos schema, implement `usedFileIds` tracking in the matching loop to prevent duplicates, add MANUAL pre-processing that excludes locked fileIds and auto-generates missing detalles, pass `excludeFileIds` to the matcher, add PAGOS AFIP pattern, and remove dead direct debit code.
 
 **Scope:**
-- Tasks: 3
-- Files affected: ~9 (3 new MCP tools + types + index + auth + settings.json + skill + CLAUDE.md)
-- New tests: no (MCP tools are external integrations; skill is markdown)
-
-**Key Decisions:**
-- Auth scopes upgraded to full drive + spreadsheets (necessary for write operations)
-- `gsheets_update` uses batch update with array of {range, value} pairs for atomic multi-cell updates
-- File move/rename require explicit user confirmation in the skill
-- Claude reads documents directly (no Gemini) when analysis is needed
-- Skill is the ONLY write-capable tool user, enforced via `allowed-tools` + CLAUDE.md documentation
+- Fixes: 3
+- Files affected: ~8 (types/index.ts, movimientos-reader.ts, movimientos-detalle.ts, match-movimientos.ts, matcher.ts, SPREADSHEET_FORMAT.md, CLAUDE.md, plus test files)
+- New tests: yes
+- Breaking changes: no — 9th column is additive, reader handles 8-column rows gracefully
 
 **Risks/Considerations:**
-- Scope upgrade from read-only to read-write on Drive and Sheets — mitigated by restricting write tools to `manual-match` skill only
-- Wrong cell updates could corrupt spreadsheet data — mitigated by verification step (re-read after write)
-- Moving files to wrong folder — mitigated by confirmation requirement in skill
+- Schema expansion from 8→9 columns — mitigated by backward-compatible parsing (missing 9th column defaults to empty)
+- `excludeFileIds` changes matcher method signatures — needs careful integration with existing tests
+- MANUAL detalle generation reuses existing document lookup logic from `findDocumentByFileId` — no new API calls needed
 
 ---
 
 ## Iteration 1
 
 **Implemented:** 2026-02-23
-**Method:** Single-agent (effort score 2 — no workers justified)
+**Method:** Single-agent (7 effort points across 2 units)
 
 ### Tasks Completed This Iteration
-- Task 1: Add write capabilities to gdrive MCP server (ADV-136) — Upgraded auth scopes, created gsheets_update/gdrive_move_file/gdrive_rename_file tools, registered in index, added permissions
-- Task 2: Create manual-match skill (ADV-137) — Created SKILL.md with environment selection, match/unmatch workflows, file operations, column reference, verification
-- Task 3: Update CLAUDE.md (ADV-138) — Added new MCP tools to Google Drive section with write restriction note, added manual-match to SKILLS table
+- Fix 1 (ADV-139): Add matchedType column (I) to movimientos schema — expanded from 8→9 columns with backward-compatible parsing
+- Fix 2 (ADV-140): Implement usedFileIds deduplication and MANUAL support — pre-seeds ALL existing matchedFileIds into excludeFileIds, MANUAL rows skipped from matching, blank MANUAL detalles auto-generated, temporary own-fileId removal for re-evaluation
+- Fix 3 (ADV-141): Add PAGOS AFIP to bank fee patterns and remove dead direct debit code
 
 ### Files Modified
-- `mcp-gdrive/auth.ts` — Upgraded scopes from readonly to read-write
-- `mcp-gdrive/tools/types.ts` — Added GSheetsUpdateInput, GDriveMoveFileInput, GDriveRenameFileInput
-- `mcp-gdrive/tools/gsheets_update.ts` — New: batch cell update tool
-- `mcp-gdrive/tools/gdrive_move_file.ts` — New: file move tool with parent validation
-- `mcp-gdrive/tools/gdrive_rename_file.ts` — New: file rename tool
-- `mcp-gdrive/tools/index.ts` — Registered 3 new tools
-- `.claude/settings.json` — Added 3 new MCP tool permissions
-- `.claude/skills/manual-match/SKILL.md` — New: manual-match skill
-- `CLAUDE.md` — Added write tools and manual-match skill documentation
+- `src/types/index.ts` — Added `matchedType: string` to `MovimientoRow` interface
+- `src/services/movimientos-reader.ts` — Range A:H→A:I, parse matchedType from row[8] with backward compat
+- `src/services/movimientos-reader.test.ts` — Tests for 9-column and 8-column compatibility
+- `src/services/movimientos-detalle.ts` — matchedType in DetalleUpdate, computeVersionFromRow hash, G:I write range, updated JSDoc
+- `src/services/movimientos-detalle.test.ts` — Updated ranges, values, hash inputs for 9-column schema
+- `src/bank/match-movimientos.ts` — Pre-seed excludeFileIds with all existing matchedFileIds, temporary own-fileId removal, MANUAL pre-processing with detalle generation, buildDetalleForDocument helper, zero-amount movement fileId restoration, removed dead recibo concepto branch
+- `src/bank/match-movimientos.test.ts` — 8 new tests (MANUAL skip, excludeFileIds pool, detalle generation, usedFileIds dedup, accumulation, AUTO pre-seeding, zero-amount restoration)
+- `src/bank/matcher.ts` — excludeFileIds parameter on matchMovement/matchCreditMovement, PAGOS AFIP pattern, removed DIRECT_DEBIT_PATTERNS and isDirectDebit
+- `src/bank/matcher.test.ts` — PAGOS AFIP tests, excludeFileIds tests
+- `SPREADSHEET_FORMAT.md` — 9 columns, matchedType column, MANUAL locking support
+- `CLAUDE.md` — Updated movimientos column count, MANUAL support note
 
 ### Linear Updates
-- ADV-136: Todo → In Progress → Review
-- ADV-137: Todo → In Progress → Review
-- ADV-138: Todo → In Progress → Review
+- ADV-139: Todo → In Progress → Review
+- ADV-140: Todo → In Progress → Review
+- ADV-141: Todo → In Progress → Review
 
 ### Pre-commit Verification
-- bug-hunter: Found 5 issues (1 HIGH, 3 MEDIUM, 1 LOW), all fixed before proceeding
-- verifier: All 1792 tests pass, zero warnings
+- bug-hunter: Found 3 bugs (1 HIGH, 2 MEDIUM), all fixed before commit
+  - HIGH: Zero-amount movements leaked ownFileId from excludeFileIds on continue
+  - MEDIUM: Stale JSDoc in computeVersionFromRow (A:H → A:I)
+  - MEDIUM: Dead concepto branch in buildDetalleForDocument for recibo type
+- verifier: All 1808 tests pass, zero warnings, clean build
 
 ### Review Findings
 
-Files reviewed: 9
-Reviewers: security, reliability, quality (agent team)
-Checks applied: Security, Logic, Async, Resources, Type Safety, Conventions
+Summary: 2 issue(s) found, fixed inline (Team: security, reliability, quality reviewers)
+- FIXED INLINE: 2 issue(s) — verified via TDD + bug-hunter
 
-No issues found - all implementations are correct and follow project conventions.
+**Issues fixed inline:**
+- [MEDIUM] BUG: `movimientosFilled: updates.length` over-counts by including MANUAL detalle fills (`src/bank/match-movimientos.ts:1077`) — changed to `debitsFilled + creditsFilled`
+- [LOW] TYPE: `matchedType: string` lacks type safety and case normalization (`src/types/index.ts:866`) — narrowed to union type, added `parseMatchedType()` normalizer
 
 **Discarded findings (not bugs):**
-- [DISCARDED] SECURITY: Auth scope upgrade from readonly to read-write (`mcp-gdrive/auth.ts:9-12`) — Intentional design, necessary for write operations. Documented in plan. Write tools restricted to manual-match skill by policy (CLAUDE.md + allowed-tools).
-- [DISCARDED] SECURITY: Write MCP tools in global settings.json allow list (`.claude/settings.json:32-34`) — Necessary for skill execution without per-call approval. Policy restriction via CLAUDE.md + skill allowed-tools is the appropriate control for AI-agent-invoked tools.
-- [DISCARDED] EDGE CASE: Partial success detection in gsheets_update (`mcp-gdrive/tools/gsheets_update.ts:75`) — `responseCount !== args.updates.length` flagging partial success as error is correct behavior. Partial updates to match columns would leave data inconsistent; failing loudly is the right choice.
-- [DISCARDED] EDGE CASE: Parents array handling in gdrive_move_file (`mcp-gdrive/tools/gdrive_move_file.ts:37`) — `(file.data.parents || []).join(',')` correctly handles undefined/null/empty parents. The `!previousParents` check correctly catches all no-parent scenarios.
-- [DISCARDED] ASYNC: Sequential API calls in gdrive_rename_file (`mcp-gdrive/tools/gdrive_rename_file.ts:30-41`) — Two calls (get name then rename) without transaction. Google APIs don't support transactions; this is the standard pattern, consistent with existing tools. Failure at either step returns clear error.
-- [DISCARDED] TYPE: String type for update values (`mcp-gdrive/tools/types.ts:53`) — All manual-match values are strings (fileIds, "MANUAL", "SI", empty strings). USER_ENTERED valueInputOption handles any needed interpretation.
-- [DISCARDED] CONVENTION: Code style and patterns — All new tools follow existing patterns exactly (error handling, imports, schema structure, types).
+- [DISCARDED] TYPE: `any` type for polymorphic document helpers — misdiagnosed: code works correctly with duck typing, properties match actual document shapes
+- [DISCARDED] BUG: Stale comment A:H vs A:I in movimientos-detalle.ts — style-only, zero correctness impact
+- [DISCARDED] CONVENTION: Missing `module` field in warn() calls (match-movimientos.ts:952, matcher.ts:401) — style-only convention not enforced as critical rule
+- [DISCARDED] CONVENTION: Lock result type cast (match-movimientos.ts:1214) — accepted intentional pattern with explanatory comment
+- [DISCARDED] CONVENTION: Unescaped sheet name in movimientos-reader.ts:118 — impossible in context: YYYY-MM format enforced by regex
+- [DISCARDED] EDGE CASE: All sheet reads failing returns ok:true in getMovimientosToFill — misdiagnosed: intentional graceful degradation, individual failures logged as warnings
 
 ### Linear Updates
-- ADV-136: Review → Merge
-- ADV-137: Review → Merge
-- ADV-138: Review → Merge
+- ADV-139: Review → Merge (original task)
+- ADV-140: Review → Merge (original task)
+- ADV-141: Review → Merge (original task)
+- ADV-142: Created in Merge (Fix: movimientosFilled over-count — fixed inline)
+- ADV-143: Created in Merge (Fix: matchedType type safety — fixed inline)
+
+### Inline Fix Verification
+- Unit tests: all 1810 pass
+- Bug-hunter: no blocking issues
 
 <!-- REVIEW COMPLETE -->
 

@@ -37,7 +37,7 @@ describe('updateDetalle', () => {
     expect(batchUpdate).not.toHaveBeenCalled();
   });
 
-  it('should update columns G and H for a single row', async () => {
+  it('should update columns G, H, and I for a single row', async () => {
     vi.mocked(batchUpdate).mockResolvedValue({ ok: true, value: 1 });
 
     const updates: DetalleUpdate[] = [
@@ -46,6 +46,7 @@ describe('updateDetalle', () => {
         rowNumber: 5,
         matchedFileId: 'file123',
         detalle: 'Cobro Factura de TEST SA',
+        matchedType: 'AUTO',
       },
     ];
 
@@ -58,8 +59,8 @@ describe('updateDetalle', () => {
 
     expect(batchUpdate).toHaveBeenCalledWith('spreadsheet-id', [
       {
-        range: "'2025-01'!G5:H5",
-        values: [['file123', 'Cobro Factura de TEST SA']],
+        range: "'2025-01'!G5:I5",
+        values: [['file123', 'Cobro Factura de TEST SA', 'AUTO']],
       },
     ]);
   });
@@ -81,9 +82,9 @@ describe('updateDetalle', () => {
     }
 
     expect(batchUpdate).toHaveBeenCalledWith('spreadsheet-id', [
-      { range: "'2025-01'!G5:H5", values: [['file1', 'Match 1']] },
-      { range: "'2025-01'!G10:H10", values: [['file2', 'Match 2']] },
-      { range: "'2025-02'!G3:H3", values: [['file3', 'Match 3']] },
+      { range: "'2025-01'!G5:I5", values: [['file1', 'Match 1', '']] },
+      { range: "'2025-01'!G10:I10", values: [['file2', 'Match 2', '']] },
+      { range: "'2025-02'!G3:I3", values: [['file3', 'Match 3', '']] },
     ]);
   });
 
@@ -201,7 +202,7 @@ describe('updateDetalle', () => {
 
     expect(result.ok).toBe(true);
     expect(batchUpdate).toHaveBeenCalledWith('spreadsheet-id', [
-      { range: "'2025-01'!G5:H5", values: [['', '']] },
+      { range: "'2025-01'!G5:I5", values: [['', '', '']] },
     ]);
   });
 
@@ -218,7 +219,7 @@ describe('updateDetalle', () => {
     const ranges = call[1].map((u: { range: string }) => u.range);
 
     // Sheet name should be quoted in A1 notation
-    expect(ranges[0]).toBe("'2025-01'!G5:H5");
+    expect(ranges[0]).toBe("'2025-01'!G5:I5");
   });
 
   it('should properly escape single quote in sheet name', async () => {
@@ -240,8 +241,8 @@ describe('updateDetalle', () => {
     // Verify the range was called with properly escaped sheet name
     expect(batchUpdate).toHaveBeenCalledWith('spreadsheet-id', [
       {
-        range: "'Sheet''Name'!G5:H5",
-        values: [['file123', 'Test']],
+        range: "'Sheet''Name'!G5:I5",
+        values: [['file123', 'Test', '']],
       },
     ]);
   });
@@ -264,8 +265,8 @@ describe('updateDetalle', () => {
 
     expect(batchUpdate).toHaveBeenCalledWith('spreadsheet-id', [
       {
-        range: "'Sheet With Spaces'!G3:H3",
-        values: [['file456', 'Another Test']],
+        range: "'Sheet With Spaces'!G3:I3",
+        values: [['file456', 'Another Test', '']],
       },
     ]);
   });
@@ -288,8 +289,8 @@ describe('updateDetalle', () => {
 
     expect(batchUpdate).toHaveBeenCalledWith('spreadsheet-id', [
       {
-        range: "'2024-01'!G2:H2",
-        values: [['file789', 'Normal Sheet']],
+        range: "'2024-01'!G2:I2",
+        values: [['file789', 'Normal Sheet', '']],
       },
     ]);
   });
@@ -299,10 +300,10 @@ describe('updateDetalle', () => {
     // version hash matches what computeRowVersion produces from the parsed
     // MovimientoRow (which gets fecha as a normalized date string).
     //
-    // Row data: [45993, 'TRANSFERENCIA', 1000, null, null, null, '', '']
+    // Row data: [45993, 'TRANSFERENCIA', 1000, null, null, null, '', '', '']
     // Serial 45993 => '2025-12-02'
-    // Expected hash input: '2025-12-02|TRANSFERENCIA|1000|||'
-    const expectedHashInput = '2025-12-02|TRANSFERENCIA|1000|||';
+    // Expected hash input: '2025-12-02|TRANSFERENCIA|1000||||'
+    const expectedHashInput = '2025-12-02|TRANSFERENCIA|1000||||';
     const expectedVersion = createHash('md5').update(expectedHashInput).digest('hex').slice(0, 16);
 
     // Mock getValues to return a row with a serial number date
@@ -321,6 +322,7 @@ describe('updateDetalle', () => {
         rowNumber: 2,
         matchedFileId: 'file-new',
         detalle: 'New match',
+        matchedType: 'AUTO',
         expectedVersion,
       },
     ];
@@ -339,11 +341,11 @@ describe('updateDetalle', () => {
   it('should reject version mismatch when serial number is not normalized', async () => {
     // If someone computes a version using the raw serial string "45993"
     // instead of the normalized date, it should NOT match
-    const wrongHashInput = '45993|TRANSFERENCIA|1000|||';
+    const wrongHashInput = '45993|TRANSFERENCIA|1000||||';
     const wrongVersion = createHash('md5').update(wrongHashInput).digest('hex').slice(0, 16);
 
     // The correct hash from normalized date
-    const correctHashInput = '2025-12-02|TRANSFERENCIA|1000|||';
+    const correctHashInput = '2025-12-02|TRANSFERENCIA|1000||||';
     const correctVersion = createHash('md5').update(correctHashInput).digest('hex').slice(0, 16);
 
     // Ensure the two versions are actually different
