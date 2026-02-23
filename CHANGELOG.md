@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-02-23
+
+### Added
+- Exchange rate (tipo de cambio) extraction from invoices and COMEX payments, stored in new spreadsheet columns with automatic schema migration
+- Reprocessing support: files moved back to Entrada are re-extracted and existing spreadsheet rows updated instead of being flagged as duplicates
+- Smarter duplicate detection for payments: newer documents with more data (e.g., exchange rate, signed status) replace lower-quality existing entries
+
+### Changed
+- Bank movement descriptions now include factura number and comprobante type (e.g., "Cobro Factura E 00003-00001957 de Cliente SA")
+- COMEX bank movement descriptions include the bank's exchange rate (tipo de cambio)
+- Cross-currency bank matching uses the payment's exact ARS amount when available, eliminating tolerance-based matching
+- Factura filenames now include the comprobante letter (e.g., "Factura C Emitida" instead of "Factura Emitida")
+
+### Fixed
+- Same-currency (USD-to-USD) matching incorrectly applied cross-currency conversion
+- Existing Tier 3/4 bank matches could be incorrectly replaced by weaker Tier 5 candidates
+- Exchange rate API failure during prefetch crashed the entire bank matching operation instead of falling back gracefully
+- Recibo bank matches were assigned HIGH confidence instead of the correct LOW for their tier
+
 ## [1.0.0] - 2026-02-22
 
 ### Added
@@ -38,5 +57,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Updated fastify to fix high-severity Content-Type body validation bypass and low-severity DoS vulnerability
 - Updated googleapis to v171, @google/clasp to v3, and resolved 6 npm audit vulnerabilities
 
-[Unreleased]: https://github.com/lucaswall/adva-administracion/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/lucaswall/adva-administracion/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/lucaswall/adva-administracion/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/lucaswall/adva-administracion/commits/v1.0.0
