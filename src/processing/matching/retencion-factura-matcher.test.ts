@@ -373,4 +373,45 @@ describe('matchRetencionesWithFacturas', () => {
       expect(result.value).toBe(1);
     }
   });
+
+  it('matches multiple retenciones with the same factura (different tax types)', async () => {
+    // Design rule: multiple retenciones CAN match the same factura — different tax types
+    // (IVA, Ganancias, IIBB) produce separate retention certificates for the same invoice
+    const retencionRows = [
+      makeRetencionRow({ fileId: 'ret-iva', cuitAgenteRetencion: '20123456786', montoComprobante: '10000' }),
+      makeRetencionRow({ fileId: 'ret-ganancias', cuitAgenteRetencion: '20123456786', montoComprobante: '10000' }),
+    ];
+    // Override impuesto for second retencion (index 6)
+    retencionRows[1][6] = 'IVA';
+
+    const facturaRows = [
+      makeFacturaRow({ fileId: 'fact-1', cuitReceptor: '20123456786', importeTotal: '10000' }),
+    ];
+
+    vi.mocked(getValues)
+      .mockResolvedValueOnce({ ok: true, value: [HEADER_RETENCION, ...retencionRows] })
+      .mockResolvedValueOnce({ ok: true, value: [HEADER_FACTURA, ...facturaRows] });
+    vi.mocked(setValues).mockResolvedValue({ ok: true, value: 1 });
+
+    const result = await matchRetencionesWithFacturas('test-spreadsheet-id');
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      // Both retenciones should match the same factura
+      expect(result.value).toBe(2);
+    }
+
+    // Both should write to the same factura fileId
+    expect(setValues).toHaveBeenCalledTimes(2);
+    expect(setValues).toHaveBeenCalledWith(
+      'test-spreadsheet-id',
+      'Retenciones Recibidas!N2:O2',
+      [['fact-1', 'HIGH']]
+    );
+    expect(setValues).toHaveBeenCalledWith(
+      'test-spreadsheet-id',
+      'Retenciones Recibidas!N3:O3',
+      [['fact-1', 'HIGH']]
+    );
+  });
 });

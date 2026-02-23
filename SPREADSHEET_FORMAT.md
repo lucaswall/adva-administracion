@@ -427,11 +427,11 @@ Documents classified by ADVA's role (CUIT: 30709076783):
 - **LOW**: amount match + date in LOW range only
 
 **MANUAL confidence semantics:**
-- Setting `matchConfidence=MANUAL` on a document (factura, pago, recibo) or a movimiento bancario row locks that match permanently
+- Setting `matchConfidence=MANUAL` on a document (factura, pago, recibo) locks that match permanently
 - Automatic matching will never displace or overwrite a MANUAL match
 - MANUAL facturas/recibos are invisible to `FacturaPagoMatcher.findMatches()` and `ReciboPagoMatcher.findMatches()` — no pago can displace them
 - MANUAL pagos are excluded from the unmatched pool — they are treated as already matched
-- MANUAL movimiento bancario rows are entirely skipped by `matchAllMovimientos()`
+- **Note:** Movimientos bancarios do NOT support MANUAL locking — their 8-column schema (A:H) has no matchConfidence column
 
 ### Cross-References
 

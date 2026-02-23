@@ -862,8 +862,6 @@ export interface MovimientoRow {
   matchedFileId: string;
   /** Human-readable match description */
   detalle: string;
-  /** Match confidence — 'MANUAL' means user-locked, must not be re-matched automatically */
-  matchConfidence?: MatchConfidence;
 }
 
 /**

@@ -2,10 +2,29 @@
  * Tests for factura-pago matcher
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { DisplacementQueue } from '../../matching/cascade-matcher.js';
 import { FacturaPagoMatcher } from '../../matching/matcher.js';
 import type { Factura, Pago, MatchConfidence } from '../../types/index.js';
+
+// Mocks for end-to-end matchFacturasWithPagos tests (do not affect unit tests of FacturaPagoMatcher)
+vi.mock('../../services/sheets.js', () => ({
+  getValues: vi.fn(),
+  batchUpdate: vi.fn(),
+}));
+vi.mock('../../utils/concurrency.js', () => ({
+  withLock: vi.fn(),
+  withRetry: vi.fn(),
+}));
+vi.mock('../../utils/logger.js', () => ({
+  debug: vi.fn(),
+  info: vi.fn(),
+  warn: vi.fn(),
+  error: vi.fn(),
+}));
+vi.mock('../../utils/correlation.js', () => ({
+  getCorrelationId: () => 'test-correlation-id',
+}));
 
 describe('DisplacementQueue', () => {
   it('should return undefined when popping from empty queue (bug #14)', () => {
@@ -225,24 +244,57 @@ describe('MANUAL matchConfidence locking (Fix 5 - ADV-131)', () => {
     expect(matches).toHaveLength(0);
   });
 
-  it('pago with MANUAL matchConfidence should be excluded from unmatched pool', () => {
-    // Documents the expected filter in doMatchFacturasWithPagos():
-    // pagos.filter(p => !p.matchedFacturaFileId && p.matchConfidence !== 'MANUAL')
-    const allPagos: Array<Pago & { row: number }> = [
-      { ...basePago, row: 2, fileId: 'pago-auto' },
-      { ...basePago, row: 3, fileId: 'pago-manual', matchConfidence: 'MANUAL' as MatchConfidence },
-      { ...basePago, row: 4, fileId: 'pago-matched', matchedFacturaFileId: 'some-factura' },
-    ];
+  it('pago with MANUAL matchConfidence should be excluded from unmatched pool (end-to-end)', async () => {
+    // Import the production function and its mocked dependencies
+    const { matchFacturasWithPagos } = await import('./factura-pago-matcher.js');
+    const { getValues, batchUpdate } = await import('../../services/sheets.js');
+    const { withLock, withRetry } = await import('../../utils/concurrency.js');
 
-    // Current implementation only checks matchedFacturaFileId, so MANUAL pago leaks through
-    const currentFilter = allPagos.filter(p => !p.matchedFacturaFileId);
-    // MANUAL pago should NOT be in unmatched pool - this will pass AFTER fix
-    const fixedFilter = allPagos.filter(p => !p.matchedFacturaFileId && p.matchConfidence !== 'MANUAL');
+    // Mock withLock/withRetry to pass through
+    vi.mocked(withLock).mockImplementation(async (_key: string, fn: () => Promise<any>) => {
+      try { return { ok: true as const, value: await fn() }; }
+      catch (e) { return { ok: false as const, error: e instanceof Error ? e : new Error(String(e)) }; }
+    });
+    vi.mocked(withRetry).mockImplementation(async (fn: () => Promise<any>) => {
+      try { return { ok: true as const, value: await fn() }; }
+      catch (e) { return { ok: false as const, error: e instanceof Error ? e : new Error(String(e)) }; }
+    });
 
-    // Before fix: MANUAL pago leaks into unmatched pool
-    expect(currentFilter).toHaveLength(2); // pago-auto + pago-manual
-    // After fix: MANUAL pago excluded
-    expect(fixedFilter).toHaveLength(1);
-    expect(fixedFilter[0].fileId).toBe('pago-auto');
+    // Factura that would match the pago by CUIT and amount
+    const facturaHeader = ['fechaEmision', 'fileId', 'fileName', 'tipoComprobante', 'nroFactura', 'cuitReceptor', 'razonSocialReceptor', 'importeNeto', 'importeIva', 'importeTotal', 'moneda', 'concepto', 'processedAt', 'confidence', 'needsReview', 'matchedPagoFileId', 'matchConfidence', 'hasCuitMatch', 'tipoDeCambio'];
+    const facturaRow = ['2025-01-01', 'fact-1', 'factura.pdf', 'A', '00003-00001957', '20123456786', 'TEST SA', '8264.46', '1735.54', '10000', 'ARS', '', '2025-01-01T10:00:00Z', '0.95', 'NO', '', '', '', ''];
+
+    // Pago with MANUAL matchConfidence — should NOT be re-matched
+    const pagoHeader = ['fechaPago', 'fileId', 'fileName', 'banco', 'importePagado', 'moneda', 'referencia', 'cuitPagador', 'nombrePagador', 'concepto', 'processedAt', 'confidence', 'needsReview', 'matchedFacturaFileId', 'matchConfidence', 'tipoDeCambio', 'importeEnPesos'];
+    const pagoRow = ['2025-01-05', 'pago-manual', 'pago.pdf', 'BBVA', '10000', 'ARS', '', '20123456786', 'TEST SA', '', '2025-01-05T10:00:00Z', '0.95', 'NO', '', 'MANUAL', '', ''];
+
+    vi.mocked(getValues)
+      .mockResolvedValueOnce({ ok: true, value: [facturaHeader, facturaRow] })
+      .mockResolvedValueOnce({ ok: true, value: [pagoHeader, pagoRow] });
+
+    const config = {
+      matchDaysBefore: 10,
+      matchDaysAfter: 60,
+      usdArsTolerancePercent: 5,
+      usdMatchDaysAfter: 90,
+    };
+
+    const result = await matchFacturasWithPagos(
+      'test-spreadsheet',
+      'Facturas Emitidas',
+      'Pagos Recibidos',
+      'cuitReceptor',
+      'cuitPagador',
+      config as any,
+    );
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      // MANUAL pago filtered out → 0 unmatched → 0 matches
+      expect(result.value).toBe(0);
+    }
+
+    // batchUpdate should NOT have been called — MANUAL pago was excluded
+    expect(batchUpdate).not.toHaveBeenCalled();
   });
 });

@@ -595,9 +595,9 @@ Better matches replace existing ones. Quality comparison: tier → date proximit
 
 - **Facturas/Recibos with MANUAL**: invisible to `FacturaPagoMatcher.findMatches()` and `ReciboPagoMatcher.findMatches()` — no pago can ever displace their existing match
 - **Pagos with MANUAL**: excluded from the unmatched pool — treated as already matched
-- **Movimiento bancario rows with MANUAL**: skipped entirely by `matchAllMovimientos()` — no new candidate is evaluated
 - **NC-Factura matching**: MANUAL NCs are skipped (not matched to facturas); MANUAL facturas are excluded from match targets
 - MANUAL always wins over force mode — even `?force=true` respects MANUAL locks
+- **Note:** Movimientos bancarios do NOT support MANUAL locking — their 8-column schema (A:H) has no matchConfidence column
 
 ### Date Windows
 - Pago: ±15 days from bank date
