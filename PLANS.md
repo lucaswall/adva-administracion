@@ -76,7 +76,8 @@
 - `src/processing/matching/factura-pago-matcher.ts:390` — `unmatchedPagos` filter: exclude `matchConfidence === 'MANUAL'`
 - `src/processing/matching/recibo-pago-matcher.ts:346` — same MANUAL skip pattern for recibos and pagos
 - `src/processing/matching/nc-factura-matcher.ts` — same MANUAL skip pattern for NCs and facturas
-- No schema changes needed — `matchConfidence` column already exists in all 6 sheets
+- `src/bank/match-movimientos.ts:870-910` — bank matching loop: skip movimientos with `matchConfidence === 'MANUAL'`
+- No schema changes needed — `matchConfidence` column already exists in all matching sheets (Ingresos, Egresos, Movimientos)
 
 ### Impact
 - 4 out of 11 Pagos Recibidos in staging fail to match (36% miss rate)
@@ -226,7 +227,15 @@
 10. Update `src/processing/matching/retencion-factura-matcher.ts` (from Fix 4):
     - Build with MANUAL support from the start — skip retenciones and facturas with MANUAL confidence
 
-11. Update `SPREADSHEET_FORMAT.md` and `CLAUDE.md` with MANUAL confidence documentation
+11. Write tests in `src/bank/match-movimientos.test.ts`:
+    - Test: movimiento row with `matchConfidence='MANUAL'` is not re-matched (skipped entirely)
+    - Run `verifier` filtered — expect fail
+
+12. Update `src/bank/match-movimientos.ts`:
+    - In the main matching loop (around line 870-910): when a movimiento already has a match and `matchConfidence === 'MANUAL'`, skip it entirely — do not evaluate candidates or call `isBetterMatch()`
+    - The `isBetterMatch()` function itself doesn't need changes — the guard is at the row level before it's called
+
+13. Update `SPREADSHEET_FORMAT.md` and `CLAUDE.md` with MANUAL confidence documentation
     - Run `verifier` — expect pass
 
 ## Post-Implementation Checklist
@@ -246,7 +255,7 @@
 **Solution Approach:** Add $30 USD same-currency tolerance and 90-day LOW range for USD facturas. Strip punctuation in normalizeString for better name matching. Create new retencion-factura-matcher following the NC matcher pattern. Use existing `matchConfidence` column with new `MANUAL` value to lock matches — no new columns or schema migration needed.
 
 **Scope:**
-- Files affected: ~12 (matchers, config, types, validation, exchange-rate, SPREADSHEET_FORMAT.md, CLAUDE.md)
+- Files affected: ~13 (matchers, bank matcher, config, types, validation, exchange-rate, SPREADSHEET_FORMAT.md, CLAUDE.md)
 - New tests: yes (all 5 fixes)
 - New file: `src/processing/matching/retencion-factura-matcher.ts` + test
 - Breaking changes: no — `MANUAL` is a new value in existing column, no schema changes
