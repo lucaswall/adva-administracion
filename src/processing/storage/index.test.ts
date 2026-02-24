@@ -10,6 +10,7 @@ vi.mock('../../services/sheets.js', () => ({
   appendRowsWithLinks: vi.fn(),
   getValues: vi.fn(),
   batchUpdate: vi.fn(),
+  updateRowsWithFormatting: vi.fn(),
   getSpreadsheetTimezone: vi.fn(() => Promise.resolve({ ok: true, value: 'America/Argentina/Buenos_Aires' })),
 }));
 
@@ -24,7 +25,7 @@ vi.mock('../../utils/correlation.js', () => ({
   getCorrelationId: () => 'test-correlation-id',
 }));
 
-import { appendRowsWithLinks, getValues, batchUpdate, getSpreadsheetTimezone } from '../../services/sheets.js';
+import { appendRowsWithLinks, getValues, batchUpdate, updateRowsWithFormatting, getSpreadsheetTimezone } from '../../services/sheets.js';
 
 describe('File Tracking Functions', () => {
   beforeEach(() => {
@@ -78,7 +79,7 @@ describe('File Tracking Functions', () => {
           ['test-file-id', 'test-document.pdf', '2025-01-15T10:00:00Z', 'factura_emitida', 'failed: Lock timeout', ''],
         ],
       });
-      vi.mocked(batchUpdate).mockResolvedValue({ ok: true, value: 1 });
+      vi.mocked(updateRowsWithFormatting).mockResolvedValue({ ok: true, value: undefined });
 
       const result = await markFileProcessing(
         'dashboard-id',
@@ -88,18 +89,21 @@ describe('File Tracking Functions', () => {
       );
 
       expect(result.ok).toBe(true);
-      // Should update existing row, not append
+      // Should update existing row using updateRowsWithFormatting for proper DATE_TIME formatting
       expect(appendRowsWithLinks).not.toHaveBeenCalled();
-      expect(batchUpdate).toHaveBeenCalledWith('dashboard-id', [
-        {
-          range: 'Archivos Procesados!C2:F2',
-          // ADV-105: processedAt stored as ISO string (not serial number) for stale detection compatibility
-          values: [[expect.any(String), 'factura_emitida', 'processing', '']],
-        },
-      ]);
+      expect(batchUpdate).not.toHaveBeenCalled();
+      expect(updateRowsWithFormatting).toHaveBeenCalledWith(
+        'dashboard-id',
+        expect.arrayContaining([
+          expect.objectContaining({
+            range: 'Archivos Procesados!C2:F2',
+          }),
+        ]),
+        'America/Argentina/Buenos_Aires'
+      );
     });
 
-    it('stores processedAt as ISO string for retry updates (not serial number)', async () => {
+    it('stores processedAt as ISO string for retry updates (converted to DATE_TIME by updateRowsWithFormatting)', async () => {
       // Mock existing failed entry for this file
       vi.mocked(getValues).mockResolvedValue({
         ok: true,
@@ -108,7 +112,7 @@ describe('File Tracking Functions', () => {
           ['test-file-id', 'test-document.pdf', '2025-01-15T10:00:00Z', 'factura_emitida', 'failed: Lock timeout', ''],
         ],
       });
-      vi.mocked(batchUpdate).mockResolvedValue({ ok: true, value: 1 });
+      vi.mocked(updateRowsWithFormatting).mockResolvedValue({ ok: true, value: undefined });
       vi.mocked(getSpreadsheetTimezone).mockResolvedValue({ ok: true, value: 'America/Argentina/Buenos_Aires' });
 
       await markFileProcessing(
@@ -118,13 +122,15 @@ describe('File Tracking Functions', () => {
         'factura_emitida'
       );
 
-      // Verify batchUpdate was called with an ISO string, not a serial number
-      // ADV-105: Serial numbers break getStaleProcessingFileIds which parses ISO strings
-      const batchUpdateCall = vi.mocked(batchUpdate).mock.calls[0];
-      const values = batchUpdateCall[1][0].values[0];
-      const processedAtValue = values[0];
-
-      // The processedAt value should be a string (ISO timestamp), not a number
+      // Verify updateRowsWithFormatting was called with an ISO string for processedAt
+      const calls = vi.mocked(updateRowsWithFormatting).mock.calls;
+      expect(calls.length).toBeGreaterThan(0);
+      const updates = calls[0][1];
+      const processedAtUpdate = updates.find(
+        (u: { range: string }) => u.range.includes('C2')
+      );
+      expect(processedAtUpdate).toBeDefined();
+      const processedAtValue = processedAtUpdate?.values?.[0]?.[0];
       expect(typeof processedAtValue).toBe('string');
       expect(processedAtValue).toMatch(/^\d{4}-\d{2}-\d{2}T/);
     });

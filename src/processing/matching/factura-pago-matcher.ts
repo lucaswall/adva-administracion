@@ -18,7 +18,7 @@ import {
   buildUnmatchUpdate,
 } from '../../matching/cascade-matcher.js';
 import { parseNumber } from '../../utils/numbers.js';
-import { normalizeSpreadsheetDate } from '../../utils/date.js';
+import { normalizeSpreadsheetDate, normalizeTimestamp } from '../../utils/date.js';
 import { debug, info, warn } from '../../utils/logger.js';
 import { getCorrelationId } from '../../utils/correlation.js';
 import { withLock, withRetry } from '../../utils/concurrency.js';
@@ -340,7 +340,7 @@ async function doMatchFacturasWithPagos(
         importeTotal: parseNumber(row[9]) || 0,
         moneda: validateMoneda(row[10]),
         concepto: row[11] ? String(row[11]) : undefined,
-        processedAt: String(row[12] || ''),
+        processedAt: normalizeTimestamp(row[12]),
         confidence: Number(row[13]) || 0,
         needsReview: row[14] === 'YES',
         matchedPagoFileId: row[15] ? String(row[15]) : undefined,
@@ -373,7 +373,7 @@ async function doMatchFacturasWithPagos(
         cuitBeneficiario: pagoCuitField === 'cuitBeneficiario' ? String(row[7] || '') : undefined,
         nombreBeneficiario: pagoCuitField === 'cuitBeneficiario' ? String(row[8] || '') : undefined,
         concepto: row[9] ? String(row[9]) : undefined,
-        processedAt: String(row[10] || ''),
+        processedAt: normalizeTimestamp(row[10]),
         confidence: Number(row[11]) || 0,
         needsReview: row[12] === 'YES',
         matchedFacturaFileId: row[13] ? String(row[13]) : undefined,
