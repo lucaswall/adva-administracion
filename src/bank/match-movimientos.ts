@@ -1061,9 +1061,24 @@ async function matchBankMovimientos(
         }
       }
     } else {
-      // No match found — re-add the old fileId back to excludeFileIds
-      if (ownFileId) {
-        excludeFileIds.add(ownFileId);
+      // No match found
+      if (options.force && ownFileId) {
+        // Force mode: clear the stale AUTO match and free the document for other movements
+        const expectedVersion = computeRowVersion(mov);
+        updates.push({
+          sheetName: mov.sheetName,
+          rowNumber: mov.rowNumber,
+          matchedFileId: '',
+          detalle: '',
+          matchedType: '',
+          expectedVersion,
+        });
+        // Do NOT re-add ownFileId — document is freed for other movements to use
+      } else {
+        // Non-force mode: preserve existing match, re-add fileId to excluded set
+        if (ownFileId) {
+          excludeFileIds.add(ownFileId);
+        }
       }
       noMatches++;
     }

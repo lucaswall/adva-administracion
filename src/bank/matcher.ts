@@ -363,11 +363,22 @@ export class BankMovementMatcher {
 
     // --- Pagos ---
     for (const pago of pagos) {
-      // Use importeEnPesos for USD pagos (bank debits ARS), otherwise direct match
-      const pagoAmountMatch = pago.importeEnPesos && pago.moneda === 'USD'
-        ? amountsMatch(pago.importeEnPesos, amount)
-        : amountsMatch(pago.importePagado, amount);
-      if (!pagoAmountMatch) continue;
+      // Use importeEnPesos for USD pagos when available (bank's actual ARS conversion),
+      // otherwise fall back to cross-currency matching via exchange rate
+      let pagoAmountOk: { matches: boolean; isCrossCurrency: boolean };
+      if (pago.importeEnPesos && pago.moneda === 'USD') {
+        // Direct ARS-to-ARS match using bank's actual conversion
+        const matches = amountsMatch(pago.importeEnPesos, amount);
+        pagoAmountOk = { matches, isCrossCurrency: false };
+      } else {
+        pagoAmountOk = amountsMatchCrossCurrency(
+          pago.importePagado, pago.moneda || 'ARS', pago.fechaPago,
+          amount, 'ARS', this.crossCurrencyTolerancePercent
+        );
+      }
+      if (!pagoAmountOk.matches) continue;
+      const isCrossCurrencyPago = pagoAmountOk.isCrossCurrency;
+
       const pagoDate = parseArgDate(pago.fechaPago);
       if (!pagoDate) continue;
       if (!isWithinDays(bankFecha, pagoDate, PAGO_DATE_RANGE, PAGO_DATE_RANGE)) continue;
@@ -377,6 +388,9 @@ export class BankMovementMatcher {
 
       const dateDiff = dateDiffDays(bankFecha, pagoDate);
       const reasons = [`Amount match: ${amount}`, `Date match: Pago ${pago.fechaPago}`];
+      if (isCrossCurrencyPago) {
+        reasons.push('Cross-currency match (USD→ARS)');
+      }
 
       // Check for linked factura (Tier 1)
       if (pago.matchedFacturaFileId) {
@@ -391,10 +405,10 @@ export class BankMovementMatcher {
             matchType: 'pago_factura',
             fileId: pago.fileId,
             description,
-            confidence: 'HIGH',
+            confidence: tierToConfidence(1, isCrossCurrencyPago),
             reasons: [...reasons, 'Pago linked to Factura'],
             dateDiff,
-            isExactAmount: true,
+            isExactAmount: !isCrossCurrencyPago,
           });
           continue;
         } else {
@@ -425,10 +439,10 @@ export class BankMovementMatcher {
         matchType: 'pago_only',
         fileId: pago.fileId,
         description,
-        confidence: tier <= 3 ? 'HIGH' : 'LOW',
+        confidence: tierToConfidence(tier, isCrossCurrencyPago),
         reasons: [...reasons, 'Pago without linked Factura'],
         dateDiff,
-        isExactAmount: true,
+        isExactAmount: !isCrossCurrencyPago,
       });
     }
 
@@ -694,19 +708,18 @@ export class BankMovementMatcher {
       const relatedRetenciones = this.findRelatedRetenciones(factura, facturaFecha, retenciones);
       const retencionSum = this.sumRetenciones(relatedRetenciones);
 
-      // Try direct amount match
+      // Try direct amount match using unified cross-currency function
+      // For ARS/ARS: uses $1 absolute tolerance (consistent with debit matching)
+      // For USD/ARS: uses exchange rate + percentage tolerance
       let amountMatches = false;
-      const isCrossCurrency = factura.moneda === 'USD';
+      let isCrossCurrency = false;
 
-      if (factura.moneda === 'ARS') {
-        amountMatches = amountsMatch(amount, factura.importeTotal, this.crossCurrencyTolerancePercent);
-      } else if (factura.moneda === 'USD') {
-        const matchResult = amountsMatchCrossCurrency(
-          factura.importeTotal, factura.moneda, factura.fechaEmision,
-          amount, 'ARS', this.crossCurrencyTolerancePercent
-        );
-        amountMatches = matchResult.matches;
-      }
+      const directResult = amountsMatchCrossCurrency(
+        factura.importeTotal, factura.moneda, factura.fechaEmision,
+        amount, 'ARS', this.crossCurrencyTolerancePercent
+      );
+      amountMatches = directResult.matches;
+      isCrossCurrency = directResult.isCrossCurrency;
 
       // Try with retencion tolerance
       let usedRetenciones: Array<Retencion & { row: number }> = [];
@@ -714,15 +727,12 @@ export class BankMovementMatcher {
 
       if (!amountMatches && retencionSum > 0) {
         const amountWithRetenciones = amount + retencionSum;
-        if (factura.moneda === 'ARS') {
-          amountMatches = amountsMatch(amountWithRetenciones, factura.importeTotal, this.crossCurrencyTolerancePercent);
-        } else if (factura.moneda === 'USD') {
-          const matchResult = amountsMatchCrossCurrency(
-            factura.importeTotal, factura.moneda, factura.fechaEmision,
-            amountWithRetenciones, 'ARS', this.crossCurrencyTolerancePercent
-          );
-          amountMatches = matchResult.matches;
-        }
+        const retencionResult = amountsMatchCrossCurrency(
+          factura.importeTotal, factura.moneda, factura.fechaEmision,
+          amountWithRetenciones, 'ARS', this.crossCurrencyTolerancePercent
+        );
+        amountMatches = retencionResult.matches;
+        isCrossCurrency = retencionResult.isCrossCurrency;
         if (amountMatches) {
           usedRetenciones = relatedRetenciones;
           matchType = 'with_retenciones';

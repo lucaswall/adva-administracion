@@ -2138,3 +2138,211 @@ describe('excludeFileIds parameter', () => {
     });
   });
 });
+
+describe('ARS credit matching uses $1 tolerance (ADV-145)', () => {
+  let matcher: BankMovementMatcher;
+
+  beforeEach(() => {
+    matcher = new BankMovementMatcher(5); // 5% cross-currency tolerance
+  });
+
+  it('does NOT match ARS factura when amount diff is $2 (exceeds $1 tolerance)', () => {
+    const arsFactura: Factura & { row: number } = {
+      fileId: 'factura1',
+      fileName: 'factura-001.pdf',
+      tipoComprobante: 'A',
+      nroFactura: '00001-00000123',
+      fechaEmision: '2024-01-10',
+      cuitEmisor: '30709076783',
+      razonSocialEmisor: 'ADVA',
+      cuitReceptor: '20123456786',
+      razonSocialReceptor: 'TEST SA',
+      importeNeto: 90000,
+      importeIva: 10000,
+      importeTotal: 100000,
+      moneda: 'ARS',
+      processedAt: '2024-01-10T10:00:00Z',
+      needsReview: false,
+      confidence: 0.95,
+      row: 2
+    };
+
+    // Amount differs by $2 — should fail with $1 tolerance but would pass with $5 tolerance
+    const movement = makeMovimiento({ fecha: '2024-01-15', concepto: 'TRANSFERENCIA DESDE TEST SA 20-12345678-6', debito: null, credito: 100002 });
+
+    const result = matcher.matchCreditMovement(movement, [arsFactura], [], []);
+
+    expect(result.matchType).toBe('no_match');
+  });
+
+  it('does NOT match ARS factura with retenciones when amount diff is $2 (exceeds $1 tolerance)', () => {
+    const arsFactura: Factura & { row: number } = {
+      fileId: 'factura1',
+      fileName: 'factura-001.pdf',
+      tipoComprobante: 'A',
+      nroFactura: '00001-00000123',
+      fechaEmision: '2024-01-10',
+      cuitEmisor: '30709076783',
+      razonSocialEmisor: 'ADVA',
+      cuitReceptor: '20123456786',
+      razonSocialReceptor: 'TEST SA',
+      importeNeto: 90000,
+      importeIva: 10000,
+      importeTotal: 100000,
+      moneda: 'ARS',
+      processedAt: '2024-01-10T10:00:00Z',
+      needsReview: false,
+      confidence: 0.95,
+      row: 2
+    };
+
+    const retencion: Retencion & { row: number } = {
+      fileId: 'ret1',
+      fileName: 'retencion-001.pdf',
+      fechaEmision: '2024-01-12',
+      nroCertificado: '001',
+      cuitAgenteRetencion: '20123456786',
+      razonSocialAgenteRetencion: 'TEST SA',
+      cuitSujetoRetenido: '30709076783',
+      impuesto: 'Ganancias',
+      regimen: '830',
+      montoComprobante: 100000,
+      montoRetencion: 5000,
+      processedAt: '2024-01-12T10:00:00Z',
+      confidence: 0.95,
+      needsReview: false,
+      row: 2
+    };
+
+    // Factura = 100000, retencion = 5000, so expected credito = 95000
+    // Movement credito = 95002 (diff of $2 > $1 tolerance)
+    const movement = makeMovimiento({ fecha: '2024-01-15', concepto: 'TRANSFERENCIA DESDE TEST SA 20-12345678-6', debito: null, credito: 95002 });
+
+    const result = matcher.matchCreditMovement(movement, [arsFactura], [], [retencion]);
+
+    expect(result.matchType).toBe('no_match');
+  });
+
+  it('DOES match ARS factura when amount diff is exactly $1 (at $1 tolerance boundary)', () => {
+    const arsFactura: Factura & { row: number } = {
+      fileId: 'factura1',
+      fileName: 'factura-001.pdf',
+      tipoComprobante: 'A',
+      nroFactura: '00001-00000123',
+      fechaEmision: '2024-01-10',
+      cuitEmisor: '30709076783',
+      razonSocialEmisor: 'ADVA',
+      cuitReceptor: '20123456786',
+      razonSocialReceptor: 'TEST SA',
+      importeNeto: 90000,
+      importeIva: 10000,
+      importeTotal: 100000,
+      moneda: 'ARS',
+      processedAt: '2024-01-10T10:00:00Z',
+      needsReview: false,
+      confidence: 0.95,
+      row: 2
+    };
+
+    // Amount differs by $1 — should pass $1 tolerance
+    const movement = makeMovimiento({ fecha: '2024-01-15', concepto: 'TRANSFERENCIA DESDE TEST SA 20-12345678-6', debito: null, credito: 100001 });
+
+    const result = matcher.matchCreditMovement(movement, [arsFactura], [], []);
+
+    expect(result.matchType).toBe('direct_factura');
+  });
+});
+
+describe('USD Pago Enviado cross-currency debit matching (ADV-146)', () => {
+  let matcher: BankMovementMatcher;
+
+  beforeEach(() => {
+    matcher = new BankMovementMatcher(5); // 5% cross-currency tolerance
+
+    // Exchange rate for testing: 100 USD * 850 venta = 85000 ARS
+    const testRate: ExchangeRate = {
+      fecha: '2024-01-15',
+      compra: 800,
+      venta: 850
+    };
+    setExchangeRateCache('2024-01-15', testRate);
+  });
+
+  it('matches USD Pago Enviado without importeEnPesos via exchange rate conversion', () => {
+    const usdPago: Pago & { row: number } = {
+      fileId: 'pago1',
+      fileName: 'pago-usd.pdf',
+      banco: 'BBVA',
+      fechaPago: '2024-01-15',
+      importePagado: 100, // USD
+      moneda: 'USD',
+      // NO importeEnPesos
+      cuitBeneficiario: '20123456786',
+      nombreBeneficiario: 'TEST SA',
+      processedAt: '2024-01-15T10:00:00Z',
+      needsReview: false,
+      confidence: 0.95,
+      row: 2
+    };
+
+    // 100 USD * 850 venta = 85000 ARS
+    const movement = makeMovimiento({ fecha: '2024-01-15', concepto: 'PAGO 20-12345678-6', debito: 85000, credito: null });
+
+    const result = matcher.matchMovement(movement, [], [], [usdPago]);
+
+    expect(result.matchType).not.toBe('no_match');
+    expect(result.matchedFileId).toBe('pago1');
+  });
+
+  it('caps confidence to MEDIUM for cross-currency USD Pago without importeEnPesos', () => {
+    const usdPago: Pago & { row: number } = {
+      fileId: 'pago1',
+      fileName: 'pago-usd.pdf',
+      banco: 'BBVA',
+      fechaPago: '2024-01-15',
+      importePagado: 100, // USD
+      moneda: 'USD',
+      // NO importeEnPesos
+      cuitBeneficiario: '20123456786',
+      nombreBeneficiario: 'TEST SA',
+      processedAt: '2024-01-15T10:00:00Z',
+      needsReview: false,
+      confidence: 0.95,
+      row: 2
+    };
+
+    // Concepto has CUIT for Tier 2
+    const movement = makeMovimiento({ fecha: '2024-01-15', concepto: 'PAGO 20-12345678-6', debito: 85000, credito: null });
+
+    const result = matcher.matchMovement(movement, [], [], [usdPago]);
+
+    // Confidence should be capped: Tier 2 cross-currency → MEDIUM (not HIGH)
+    expect(result.confidence).toBe('MEDIUM');
+  });
+
+  it('USD Pago WITH importeEnPesos still uses direct ARS match (no regression)', () => {
+    const usdPago: Pago & { row: number } = {
+      fileId: 'pago1',
+      fileName: 'pago-usd.pdf',
+      banco: 'BBVA',
+      fechaPago: '2024-01-15',
+      importePagado: 100, // USD
+      moneda: 'USD',
+      importeEnPesos: 85000, // Bank's actual ARS conversion
+      cuitBeneficiario: '20123456786',
+      nombreBeneficiario: 'TEST SA',
+      processedAt: '2024-01-15T10:00:00Z',
+      needsReview: false,
+      confidence: 0.95,
+      row: 2
+    };
+
+    const movement = makeMovimiento({ fecha: '2024-01-15', concepto: 'PAGO 20-12345678-6', debito: 85000, credito: null });
+
+    const result = matcher.matchMovement(movement, [], [], [usdPago]);
+
+    // Should still match using importeEnPesos directly
+    expect(result.matchType).not.toBe('no_match');
+    expect(result.matchedFileId).toBe('pago1');
+  });
+});
