@@ -2714,6 +2714,200 @@ describe('MANUAL matchedType and usedFileIds deduplication', () => {
     expect(thirdExclude.size).toBe(2);
   });
 
+  it('should clear stale AUTO match in force mode when no new match found (ADV-148)', async () => {
+    const mockFolderStructure = {
+      controlIngresosId: 'ingresos-id',
+      controlEgresosId: 'egresos-id',
+      bankSpreadsheets: new Map(),
+      movimientosSpreadsheets: new Map([['BBVA', 'bbva-id']]),
+    };
+
+    vi.mocked(withLock).mockImplementation(async (_id, fn) => {
+      const result = await fn();
+      return { ok: true, value: result };
+    });
+
+    vi.mocked(getCachedFolderStructure).mockReturnValue(mockFolderStructure as any);
+
+    vi.mocked(getValues).mockResolvedValue({
+      ok: true,
+      value: [['header']],
+    });
+
+    // Movement with existing AUTO match
+    vi.mocked(getMovimientosToFill).mockResolvedValue({
+      ok: true,
+      value: [
+        {
+          sheetName: '2025-01',
+          rowNumber: 2,
+          fecha: '2025-01-15',
+          concepto: 'PAGO TEST',
+          debito: 1000,
+          credito: null,
+          saldo: 9000,
+          saldoCalculado: 9000,
+          matchedFileId: 'old-auto-match',  // Has existing AUTO match
+          detalle: 'Old AUTO match',
+          matchedType: '',  // AUTO (empty means AUTO)
+        },
+      ],
+    });
+
+    // Matcher returns no match in force mode
+    mockMatchMovement.mockReturnValue({
+      matchType: 'no_match',
+      description: '',
+      matchedFileId: '',
+      confidence: 'LOW',
+    });
+
+    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: 1 });
+
+    const resultPromise = matchAllMovimientos({ force: true });
+    await vi.runAllTimersAsync();
+    const result = await resultPromise;
+
+    expect(result.ok).toBe(true);
+
+    // Should clear the stale AUTO match (matchedFileId='', detalle='', matchedType='')
+    expect(updateDetalle).toHaveBeenCalledWith('bbva-id', expect.arrayContaining([
+      expect.objectContaining({
+        sheetName: '2025-01',
+        rowNumber: 2,
+        matchedFileId: '',
+        detalle: '',
+        matchedType: '',
+      }),
+    ]));
+  });
+
+  it('should still update AUTO row normally when force mode finds a new match (ADV-148)', async () => {
+    const mockFolderStructure = {
+      controlIngresosId: 'ingresos-id',
+      controlEgresosId: 'egresos-id',
+      bankSpreadsheets: new Map(),
+      movimientosSpreadsheets: new Map([['BBVA', 'bbva-id']]),
+    };
+
+    vi.mocked(withLock).mockImplementation(async (_id, fn) => {
+      const result = await fn();
+      return { ok: true, value: result };
+    });
+
+    vi.mocked(getCachedFolderStructure).mockReturnValue(mockFolderStructure as any);
+
+    vi.mocked(getValues).mockResolvedValue({
+      ok: true,
+      value: [['header']],
+    });
+
+    // Movement with existing AUTO match
+    vi.mocked(getMovimientosToFill).mockResolvedValue({
+      ok: true,
+      value: [
+        {
+          sheetName: '2025-01',
+          rowNumber: 2,
+          fecha: '2025-01-15',
+          concepto: 'PAGO TEST',
+          debito: 1000,
+          credito: null,
+          saldo: 9000,
+          saldoCalculado: 9000,
+          matchedFileId: 'old-file',
+          detalle: 'Old match',
+          matchedType: '',
+        },
+      ],
+    });
+
+    // Matcher finds a new match in force mode
+    mockMatchMovement.mockReturnValue({
+      matchType: 'direct_factura',
+      description: 'New match',
+      matchedFileId: 'new-file',
+      confidence: 'HIGH',
+    });
+
+    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: 1 });
+
+    const resultPromise = matchAllMovimientos({ force: true });
+    await vi.runAllTimersAsync();
+    const result = await resultPromise;
+
+    expect(result.ok).toBe(true);
+
+    // Should update with the new match (not clear)
+    expect(updateDetalle).toHaveBeenCalledWith('bbva-id', expect.arrayContaining([
+      expect.objectContaining({
+        matchedFileId: 'new-file',
+        detalle: 'New match',
+        matchedType: 'AUTO',
+      }),
+    ]));
+  });
+
+  it('should NOT clear stale AUTO match in non-force mode when no new match found (ADV-148)', async () => {
+    const mockFolderStructure = {
+      controlIngresosId: 'ingresos-id',
+      controlEgresosId: 'egresos-id',
+      bankSpreadsheets: new Map(),
+      movimientosSpreadsheets: new Map([['BBVA', 'bbva-id']]),
+    };
+
+    vi.mocked(withLock).mockImplementation(async (_id, fn) => {
+      const result = await fn();
+      return { ok: true, value: result };
+    });
+
+    vi.mocked(getCachedFolderStructure).mockReturnValue(mockFolderStructure as any);
+
+    vi.mocked(getValues).mockResolvedValue({
+      ok: true,
+      value: [['header']],
+    });
+
+    // Movement with existing AUTO match
+    vi.mocked(getMovimientosToFill).mockResolvedValue({
+      ok: true,
+      value: [
+        {
+          sheetName: '2025-01',
+          rowNumber: 2,
+          fecha: '2025-01-15',
+          concepto: 'PAGO TEST',
+          debito: 1000,
+          credito: null,
+          saldo: 9000,
+          saldoCalculado: 9000,
+          matchedFileId: 'existing-match',  // Has existing match
+          detalle: 'Existing match description',
+          matchedType: '',
+        },
+      ],
+    });
+
+    // Matcher returns no match (non-force mode)
+    mockMatchMovement.mockReturnValue({
+      matchType: 'no_match',
+      description: '',
+      matchedFileId: '',
+      confidence: 'LOW',
+    });
+
+    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: 0 });
+
+    const resultPromise = matchAllMovimientos(); // no force
+    await vi.runAllTimersAsync();
+    const result = await resultPromise;
+
+    expect(result.ok).toBe(true);
+
+    // Should NOT update - existing match preserved
+    expect(updateDetalle).toHaveBeenCalledWith('bbva-id', []);
+  });
+
   it('should pre-seed excludeFileIds with existing AUTO matchedFileIds', async () => {
     const mockFolderStructure = {
       controlIngresosId: 'ingresos-id',
