@@ -564,7 +564,7 @@ describe('BankMovementMatcher - Credit Movement Matching', () => {
       const result = matcher.matchCreditMovement(movement, [], [pagoRecibido], []);
 
       expect(result.matchType).toBe('pago_only');
-      expect(result.confidence).toBe('MEDIUM');
+      expect(result.confidence).toBe('LOW');
       expect(result.description).toContain('REVISAR! Cobro de TEST SA');
       expect(result.matchedFileId).toBe('pago1');
     });
@@ -2344,5 +2344,69 @@ describe('USD Pago Enviado cross-currency debit matching (ADV-146)', () => {
     // Should still match using importeEnPesos directly
     expect(result.matchType).not.toBe('no_match');
     expect(result.matchedFileId).toBe('pago1');
+  });
+});
+
+describe('Credit pago_only confidence uses tierToConfidence (review fix)', () => {
+  let matcher: BankMovementMatcher;
+
+  beforeEach(() => {
+    matcher = new BankMovementMatcher(5);
+  });
+
+  it('credit pago_only with CUIT match (Tier 2) gets HIGH confidence, not MEDIUM', () => {
+    const pagoRecibido: Pago & { row: number } = {
+      fileId: 'pago1',
+      fileName: 'pago-001.pdf',
+      banco: 'BBVA',
+      fechaPago: '2024-01-15',
+      importePagado: 100000,
+      moneda: 'ARS',
+      cuitPagador: '20123456786',
+      nombrePagador: 'TEST SA',
+      cuitBeneficiario: '30709076783',
+      nombreBeneficiario: 'ADVA',
+      processedAt: '2024-01-15T10:00:00Z',
+      needsReview: false,
+      confidence: 0.95,
+      row: 2
+    };
+
+    // Concepto has CUIT → Tier 2
+    const movement = makeMovimiento({ fecha: '2024-01-15', concepto: 'TRANSFERENCIA 20-12345678-6', debito: null, credito: 100000 });
+
+    const result = matcher.matchCreditMovement(movement, [], [pagoRecibido], []);
+
+    expect(result.matchType).toBe('pago_only');
+    expect(result.tier).toBe(2);
+    expect(result.confidence).toBe('HIGH'); // Should use tierToConfidence, not hardcoded MEDIUM
+  });
+
+  it('credit pago_only at Tier 5 gets LOW confidence, not MEDIUM', () => {
+    const pagoRecibido: Pago & { row: number } = {
+      fileId: 'pago1',
+      fileName: 'pago-001.pdf',
+      banco: 'BBVA',
+      fechaPago: '2024-01-15',
+      importePagado: 100000,
+      moneda: 'ARS',
+      cuitPagador: '20123456786',
+      nombrePagador: 'TEST SA',
+      cuitBeneficiario: '30709076783',
+      nombreBeneficiario: 'ADVA',
+      processedAt: '2024-01-15T10:00:00Z',
+      needsReview: false,
+      confidence: 0.95,
+      row: 2
+    };
+
+    // No CUIT in concepto → Tier 5
+    const movement = makeMovimiento({ fecha: '2024-01-15', concepto: 'DEPOSITO GENERICO', debito: null, credito: 100000 });
+
+    const result = matcher.matchCreditMovement(movement, [], [pagoRecibido], []);
+
+    expect(result.matchType).toBe('pago_only');
+    expect(result.tier).toBe(5);
+    expect(result.confidence).toBe('LOW'); // Should use tierToConfidence, not hardcoded MEDIUM
   });
 });

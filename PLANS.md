@@ -1,6 +1,7 @@
 # Implementation Plan
 
 **Status:** COMPLETE
+
 **Branch:** feat/ADV-144-movimientos-matching-fixes
 **Issues:** ADV-144, ADV-145, ADV-146, ADV-147, ADV-148, ADV-149, ADV-150
 **Created:** 2026-02-24
@@ -362,3 +363,38 @@ Fix 4 bugs in bank movimientos matching (cross-bank deduplication, ARS tolerance
 
 ### Continuation Status
 All tasks completed.
+
+### Review Findings
+
+Summary: 1 issue found, fixed inline (single-agent review)
+- FIXED INLINE: 1 issue — verified via TDD + bug-hunter
+
+**Issues fixed inline:**
+- [LOW] BUG: Credit pago_only confidence hardcoded to 'MEDIUM' (`src/bank/matcher.ts:691`) — changed to `tierToConfidence(tier, amountOk.isCrossCurrency)` for consistency with debit matching + test
+
+**Discarded findings (not bugs):**
+- [DISCARDED] noMatches counter in force-mode clear path — intentionally not incremented per earlier bug-hunter fix that addressed overcounting
+- [DISCARDED] Global exclusion propagation for zero-amount rows — correct by design; cross-bank dedup should prevent document reuse across banks
+- [DISCARDED] Exhaustive type check in buildDetalleForDocument — style-only future-proofing, zero correctness impact today
+
+### Linear Updates
+- ADV-144: Review → Merge
+- ADV-145: Review → Merge
+- ADV-146: Review → Merge
+- ADV-147: Review → Merge
+- ADV-148: Review → Merge
+- ADV-149: Review → Merge
+- ADV-150: Review → Merge
+- ADV-151: Created in Merge (Fix: credit pago_only confidence — fixed inline)
+
+### Inline Fix Verification
+- Unit tests: all 1845 pass
+- Bug-hunter: no new issues in inline fix
+
+<!-- REVIEW COMPLETE -->
+
+---
+
+## Status: COMPLETE
+
+All tasks implemented and reviewed successfully. All Linear issues moved to Merge.

@@ -688,7 +688,7 @@ export class BankMovementMatcher {
         matchType: 'pago_only',
         fileId: pago.fileId,
         description,
-        confidence: 'MEDIUM',
+        confidence: tierToConfidence(tier, amountOk.isCrossCurrency),
         reasons: [...reasons, 'Pago without linked Factura'],
         dateDiff,
         isExactAmount: !amountOk.isCrossCurrency,
