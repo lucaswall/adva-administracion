@@ -12,6 +12,7 @@ vi.mock('../../services/sheets.js', () => ({
   sortSheet: vi.fn(),
   getValues: vi.fn(),
   batchUpdate: vi.fn(),
+  updateRowsWithFormatting: vi.fn(),
   getSpreadsheetTimezone: vi.fn(() => Promise.resolve({ ok: true, value: 'America/Argentina/Buenos_Aires' })),
 }));
 
@@ -47,7 +48,7 @@ vi.mock('../../services/status-sheet.js', () => ({
   }),
 }));
 
-import { appendRowsWithLinks, sortSheet, getValues, batchUpdate } from '../../services/sheets.js';
+import { appendRowsWithLinks, sortSheet, getValues, batchUpdate, updateRowsWithFormatting } from '../../services/sheets.js';
 
 const createTestFactura = (overrides: Partial<Factura> = {}): Factura => ({
   fileId: 'test-file-id',
@@ -397,7 +398,7 @@ describe('storeFactura', () => {
           ['test-file-id'], // matching fileId
         ],
       });
-      vi.mocked(batchUpdate).mockResolvedValue({ ok: true, value: 18 });
+      vi.mocked(updateRowsWithFormatting).mockResolvedValue({ ok: true, value: undefined });
       vi.mocked(sortSheet).mockResolvedValue({ ok: true, value: undefined });
 
       const factura = createTestFactura();
@@ -408,13 +409,16 @@ describe('storeFactura', () => {
         expect(result.value.stored).toBe(true);
         expect(result.value.updated).toBe(true);
       }
-      expect(batchUpdate).toHaveBeenCalledWith(
+      expect(updateRowsWithFormatting).toHaveBeenCalledWith(
         'spreadsheet-id',
         expect.arrayContaining([
           expect.objectContaining({ range: expect.stringContaining('Facturas Emitidas!A2') }),
-        ])
+        ]),
+        expect.anything(),
+        undefined
       );
       expect(appendRowsWithLinks).not.toHaveBeenCalled();
+      expect(batchUpdate).not.toHaveBeenCalled();
     });
 
     it('does normal insert when fileId is NOT in sheet and no business key match', async () => {
@@ -498,80 +502,93 @@ describe('storeFactura', () => {
     });
   });
 
-  describe('batchUpdate reprocessing path fixes (ADV-124)', () => {
-    it('uses raw numbers for monetary fields in buildFacturaRow (factura_emitida)', async () => {
+  describe('updateRowsWithFormatting reprocessing path (ADV-152)', () => {
+    it('uses CellNumber for monetary fields in reprocessing path (factura_emitida)', async () => {
       vi.mocked(getValues).mockResolvedValueOnce({
         ok: true,
         value: [['fileId'], ['test-file-id']],
       });
-      vi.mocked(batchUpdate).mockResolvedValue({ ok: true, value: 18 });
+      vi.mocked(updateRowsWithFormatting).mockResolvedValue({ ok: true, value: undefined });
       vi.mocked(sortSheet).mockResolvedValue({ ok: true, value: undefined });
 
       const factura = createTestFactura({ importeNeto: 1000, importeIva: 210, importeTotal: 1210 });
       await storeFactura(factura, 'spreadsheet-id', 'Facturas Emitidas', 'factura_emitida');
 
-      const batchArgs = vi.mocked(batchUpdate).mock.calls[0];
-      const row = batchArgs[1][0].values[0];
-      // H=7, I=8, J=9 — should be raw numbers, not formatted strings
-      expect(row[7]).toBe(1000);
-      expect(row[8]).toBe(210);
-      expect(row[9]).toBe(1210);
+      const callArgs = vi.mocked(updateRowsWithFormatting).mock.calls[0];
+      const row = callArgs[1][0].values;
+      // H=7, I=8, J=9 — should be CellNumber objects
+      expect(row[7]).toEqual({ type: 'number', value: 1000 });
+      expect(row[8]).toEqual({ type: 'number', value: 210 });
+      expect(row[9]).toEqual({ type: 'number', value: 1210 });
     });
 
-    it('uses raw numbers for monetary fields in buildFacturaRow (factura_recibida)', async () => {
+    it('uses CellNumber for monetary fields in reprocessing path (factura_recibida)', async () => {
       vi.mocked(getValues).mockResolvedValueOnce({
         ok: true,
         value: [['fileId'], ['test-file-id']],
       });
-      vi.mocked(batchUpdate).mockResolvedValue({ ok: true, value: 18 });
+      vi.mocked(updateRowsWithFormatting).mockResolvedValue({ ok: true, value: undefined });
       vi.mocked(sortSheet).mockResolvedValue({ ok: true, value: undefined });
 
       const factura = createTestFactura({ importeNeto: 5000, importeIva: 1050, importeTotal: 6050 });
       await storeFactura(factura, 'spreadsheet-id', 'Facturas Recibidas', 'factura_recibida');
 
-      const batchArgs = vi.mocked(batchUpdate).mock.calls[0];
-      const row = batchArgs[1][0].values[0];
-      expect(row[7]).toBe(5000);
-      expect(row[8]).toBe(1050);
-      expect(row[9]).toBe(6050);
+      const callArgs = vi.mocked(updateRowsWithFormatting).mock.calls[0];
+      const row = callArgs[1][0].values;
+      expect(row[7]).toEqual({ type: 'number', value: 5000 });
+      expect(row[8]).toEqual({ type: 'number', value: 1050 });
+      expect(row[9]).toEqual({ type: 'number', value: 6050 });
     });
 
-    it('uses HYPERLINK formula for fileName in buildFacturaRow', async () => {
+    it('uses CellLink for fileName in reprocessing path', async () => {
       vi.mocked(getValues).mockResolvedValueOnce({
         ok: true,
         value: [['fileId'], ['test-file-id']],
       });
-      vi.mocked(batchUpdate).mockResolvedValue({ ok: true, value: 18 });
+      vi.mocked(updateRowsWithFormatting).mockResolvedValue({ ok: true, value: undefined });
       vi.mocked(sortSheet).mockResolvedValue({ ok: true, value: undefined });
 
       const factura = createTestFactura();
       await storeFactura(factura, 'spreadsheet-id', 'Facturas Emitidas', 'factura_emitida');
 
-      const batchArgs = vi.mocked(batchUpdate).mock.calls[0];
-      const row = batchArgs[1][0].values[0];
-      // C=2 — should be HYPERLINK formula, not plain text
-      expect(row[2]).toContain('=HYPERLINK(');
-      expect(row[2]).toContain('test-file-id');
+      const callArgs = vi.mocked(updateRowsWithFormatting).mock.calls[0];
+      const row = callArgs[1][0].values;
+      // C=2 — should be CellLink object with text and url
+      expect(row[2]).toMatchObject({ text: expect.any(String), url: expect.stringContaining('test-file-id') });
     });
 
-    it('formats processedAt as local time string in buildFacturaRow', async () => {
+    it('passes raw ISO processedAt string in reprocessing path (timezone handled by updateRowsWithFormatting)', async () => {
       vi.mocked(getValues).mockResolvedValueOnce({
         ok: true,
         value: [['fileId'], ['test-file-id']],
       });
-      vi.mocked(batchUpdate).mockResolvedValue({ ok: true, value: 18 });
+      vi.mocked(updateRowsWithFormatting).mockResolvedValue({ ok: true, value: undefined });
       vi.mocked(sortSheet).mockResolvedValue({ ok: true, value: undefined });
 
       const factura = createTestFactura({ processedAt: '2025-01-15T10:00:00Z' });
       await storeFactura(factura, 'spreadsheet-id', 'Facturas Emitidas', 'factura_emitida');
 
-      const batchArgs = vi.mocked(batchUpdate).mock.calls[0];
-      const row = batchArgs[1][0].values[0];
-      // M=12 — should NOT be raw ISO string
-      expect(row[12]).not.toContain('T');
-      expect(row[12]).not.toContain('Z');
-      // Should be formatted like "2025-01-15 07:00:00" (Argentina = UTC-3)
-      expect(row[12]).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
+      const callArgs = vi.mocked(updateRowsWithFormatting).mock.calls[0];
+      const row = callArgs[1][0].values;
+      // M=12 — should be raw ISO string (convertToSheetsCellData handles timezone conversion)
+      expect(row[12]).toBe('2025-01-15T10:00:00Z');
+    });
+
+    it('uses CellDate for fechaEmision in reprocessing path', async () => {
+      vi.mocked(getValues).mockResolvedValueOnce({
+        ok: true,
+        value: [['fileId'], ['test-file-id']],
+      });
+      vi.mocked(updateRowsWithFormatting).mockResolvedValue({ ok: true, value: undefined });
+      vi.mocked(sortSheet).mockResolvedValue({ ok: true, value: undefined });
+
+      const factura = createTestFactura({ fechaEmision: '2025-01-15' });
+      await storeFactura(factura, 'spreadsheet-id', 'Facturas Emitidas', 'factura_emitida');
+
+      const callArgs = vi.mocked(updateRowsWithFormatting).mock.calls[0];
+      const row = callArgs[1][0].values;
+      // A=0 — should be CellDate object
+      expect(row[0]).toEqual({ type: 'date', value: '2025-01-15' });
     });
   });
 

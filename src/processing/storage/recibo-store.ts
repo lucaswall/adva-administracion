@@ -5,37 +5,30 @@
 
 import type { Result, Recibo, StoreResult } from '../../types/index.js';
 import type { ScanContext } from '../scanner.js';
-import { appendRowsWithLinks, sortSheet, getSpreadsheetTimezone, getValues, batchUpdate, type CellValueOrLink, type CellDate, type CellNumber, type CellValue } from '../../services/sheets.js';
+import { appendRowsWithLinks, sortSheet, getSpreadsheetTimezone, getValues, updateRowsWithFormatting, type CellValueOrLink, type CellDate, type CellNumber } from '../../services/sheets.js';
 import { parseNumber } from '../../utils/numbers.js';
 import { generateReciboFileName } from '../../utils/file-naming.js';
 import { info, warn } from '../../utils/logger.js';
 import { getCorrelationId } from '../../utils/correlation.js';
 import { withLock } from '../../utils/concurrency.js';
-import { createDriveHyperlink } from '../../utils/spreadsheet.js';
-import { formatTimestampInTimezone } from '../../services/status-sheet.js';
 
 /**
- * Builds a flat CellValue[] row for batchUpdate (reprocessing)
+ * Builds a CellValueOrLink[] row for updateRowsWithFormatting (reprocessing) and appendRowsWithLinks (insert)
  *
  * @param recibo - The recibo data
  * @param renamedFileName - The renamed filename
- * @param timeZone - Optional timezone for processedAt formatting
- * @returns Flat row values
+ * @returns Row with rich cell types
  */
-function buildReciboRow(
+function buildReciboRowFormatted(
   recibo: Recibo,
-  renamedFileName: string,
-  timeZone?: string
-): CellValue[] {
-  const fileNameCell = createDriveHyperlink(recibo.fileId, renamedFileName) || renamedFileName;
-  const processedAtCell = timeZone
-    ? formatTimestampInTimezone(new Date(recibo.processedAt), timeZone)
-    : recibo.processedAt;
+  renamedFileName: string
+): CellValueOrLink[] {
+  const fechaPagoDate: CellDate = { type: 'date', value: recibo.fechaPago };
 
   return [
-    recibo.fechaPago,                                     // A - date string (USER_ENTERED parses)
+    fechaPagoDate,                                        // A - proper date cell
     recibo.fileId,                                        // B
-    fileNameCell,                                         // C - HYPERLINK formula
+    { text: renamedFileName, url: `https://drive.google.com/file/d/${recibo.fileId}/view` }, // C
     recibo.tipoRecibo,                                    // D
     recibo.nombreEmpleado,                                // E
     recibo.cuilEmpleado,                                  // F
@@ -43,10 +36,10 @@ function buildReciboRow(
     recibo.tareaDesempenada || '',                         // H
     recibo.cuitEmpleador,                                 // I
     recibo.periodoAbonado,                                // J
-    recibo.subtotalRemuneraciones,                        // K - raw number (USER_ENTERED handles)
-    recibo.subtotalDescuentos,                            // L
-    recibo.totalNeto,                                     // M
-    processedAtCell,                                      // N
+    { type: 'number', value: recibo.subtotalRemuneraciones } as CellNumber, // K
+    { type: 'number', value: recibo.subtotalDescuentos } as CellNumber,     // L
+    { type: 'number', value: recibo.totalNeto } as CellNumber,              // M
+    recibo.processedAt,                                   // N
     recibo.confidence,                                    // O
     recibo.needsReview ? 'YES' : 'NO',                    // P
     recibo.matchedPagoFileId || '',                       // Q
@@ -148,11 +141,11 @@ export async function storeRecibo(
     const fileIdCheck = await findRowByFileId(spreadsheetId, sheetName, recibo.fileId);
     if (fileIdCheck.found) {
       const renamedFileName = generateReciboFileName(recibo);
-      const updateRow = buildReciboRow(recibo, renamedFileName, timeZone);
-      const updateResult = await batchUpdate(spreadsheetId, [{
+      const updateRow = buildReciboRowFormatted(recibo, renamedFileName);
+      const updateResult = await updateRowsWithFormatting(spreadsheetId, [{
         range: `${sheetName}!A${fileIdCheck.rowIndex}:R${fileIdCheck.rowIndex}`,
-        values: [updateRow],
-      }]);
+        values: updateRow,
+      }], timeZone, context?.metadataCache);
       if (!updateResult.ok) {
         throw updateResult.error;
       }
@@ -204,32 +197,7 @@ export async function storeRecibo(
     // Calculate the renamed filename that will be used when the file is moved
     const renamedFileName = generateReciboFileName(recibo);
 
-    // Create CellDate for proper date formatting
-    const fechaPagoDate: CellDate = { type: 'date', value: recibo.fechaPago };
-
-    const row: CellValueOrLink[] = [
-      fechaPagoDate,  // proper date cell
-      recibo.fileId,
-      {
-        text: renamedFileName,
-        url: `https://drive.google.com/file/d/${recibo.fileId}/view`,
-      },
-      recibo.tipoRecibo,
-      recibo.nombreEmpleado,
-      recibo.cuilEmpleado,
-      recibo.legajo,
-      recibo.tareaDesempenada || '',
-      recibo.cuitEmpleador,
-      recibo.periodoAbonado,
-      { type: 'number', value: recibo.subtotalRemuneraciones } as CellNumber,
-      { type: 'number', value: recibo.subtotalDescuentos } as CellNumber,
-      { type: 'number', value: recibo.totalNeto } as CellNumber,
-      recibo.processedAt,
-      recibo.confidence,
-      recibo.needsReview ? 'YES' : 'NO',
-      recibo.matchedPagoFileId || '',
-      recibo.matchConfidence || '',
-    ];
+    const row = buildReciboRowFormatted(recibo, renamedFileName);
 
     const result = await appendRowsWithLinks(spreadsheetId, `${sheetName}!A:R`, [row], timeZone, context?.metadataCache);
     if (!result.ok) {

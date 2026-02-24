@@ -1637,6 +1637,185 @@ export async function reorderMonthSheets(
 }
 
 /**
+ * Converts a column letter(s) to 1-based index.
+ * Reverse of columnIndexToLetter.
+ *
+ * @param letter - Column letter(s) (e.g., 'A', 'Z', 'AA')
+ * @returns 1-based column index
+ *
+ * @example
+ * columnLetterToIndex('A')  // 1
+ * columnLetterToIndex('Z')  // 26
+ * columnLetterToIndex('AA') // 27
+ * columnLetterToIndex('AZ') // 52
+ */
+export function columnLetterToIndex(letter: string): number {
+  let result = 0;
+  for (const char of letter.toUpperCase()) {
+    result = result * 26 + (char.charCodeAt(0) - 65 + 1);
+  }
+  return result;
+}
+
+/**
+ * Parses an A1 notation range string into 0-indexed inclusive grid coordinates.
+ * Handles quoted sheet names (single quotes, with '' as escaped single quote).
+ *
+ * Returns inclusive 0-based coordinates. When building a GridRange for the Sheets API,
+ * add +1 to endRow and endCol to make them exclusive.
+ *
+ * @param range - A1 notation range (e.g., 'Sheet1'!A5:S5 or Sheet1!A5)
+ * @returns Parsed coordinates with 0-indexed inclusive startRow, endRow, startCol, endCol
+ */
+export function parseA1Range(range: string): {
+  sheetName: string;
+  startCol: number;
+  endCol: number;
+  startRow: number;
+  endRow: number;
+} {
+  let sheetName: string;
+  let cellRange: string;
+
+  if (range.startsWith("'")) {
+    // Quoted sheet name — handle doubled-quote escapes ('')
+    let i = 1;
+    let name = '';
+    let closingFound = false;
+    while (i < range.length) {
+      if (range[i] === "'") {
+        if (i + 1 < range.length && range[i + 1] === "'") {
+          // Doubled quote = escaped single quote
+          name += "'";
+          i += 2;
+        } else {
+          // Closing quote — next char must be '!'
+          closingFound = true;
+          sheetName = name;
+          cellRange = range.slice(i + 2); // Skip closing ' and !
+          break;
+        }
+      } else {
+        name += range[i];
+        i++;
+      }
+    }
+    if (!closingFound) {
+      throw new Error(`Invalid quoted range (unclosed quote): ${range}`);
+    }
+  } else {
+    // Unquoted sheet name — split on first !
+    const bangIdx = range.indexOf('!');
+    if (bangIdx === -1) {
+      throw new Error(`Invalid A1 range (missing !): ${range}`);
+    }
+    sheetName = range.slice(0, bangIdx);
+    cellRange = range.slice(bangIdx + 1);
+  }
+
+  // Parse cell range (e.g., A5:S5 or A5)
+  const resolvedRange = cellRange!;
+  const colonIdx = resolvedRange.indexOf(':');
+  const startCellStr = colonIdx === -1 ? resolvedRange : resolvedRange.slice(0, colonIdx);
+  const endCellStr = colonIdx === -1 ? resolvedRange : resolvedRange.slice(colonIdx + 1);
+
+  function parseCellRef(ref: string): { col: number; row: number } {
+    const match = ref.match(/^([A-Za-z]+)(\d+)$/);
+    if (!match) {
+      throw new Error(`Invalid cell reference: ${ref}`);
+    }
+    return {
+      col: columnLetterToIndex(match[1]) - 1, // 0-indexed
+      row: parseInt(match[2], 10) - 1,         // 0-indexed
+    };
+  }
+
+  const start = parseCellRef(startCellStr);
+  const end = parseCellRef(endCellStr);
+
+  return {
+    sheetName: sheetName!,
+    startCol: start.col,
+    endCol: end.col,
+    startRow: start.row,
+    endRow: end.row,
+  };
+}
+
+/**
+ * Updates specific rows in a spreadsheet with rich cell formatting.
+ *
+ * Unlike batchUpdate (which uses USER_ENTERED values and loses rich types),
+ * this function preserves CellDate, CellNumber, and CellLink formatting during row updates.
+ *
+ * ISO timestamp strings are automatically converted to DATE_TIME cells in the
+ * spreadsheet's timezone when timeZone is provided.
+ *
+ * @param spreadsheetId - Spreadsheet ID
+ * @param updates - Array of { range, values } — each entry is a single row in A1 notation
+ * @param timeZone - Optional IANA timezone for ISO timestamp conversion
+ * @param metadataCache - Optional scan-scoped cache for sheet metadata
+ * @returns Success or error
+ *
+ * @example
+ * await updateRowsWithFormatting('abc123', [
+ *   { range: 'Sheet1!A5:S5', values: row },
+ * ], 'America/Argentina/Buenos_Aires', metadataCache);
+ */
+export async function updateRowsWithFormatting(
+  spreadsheetId: string,
+  updates: Array<{ range: string; values: CellValueOrLink[] }>,
+  timeZone?: string,
+  metadataCache?: import('../processing/caches/index.js').MetadataCache
+): Promise<Result<void, Error>> {
+  return withQuotaRetry(async () => {
+    // Get sheet metadata once (use cache if provided)
+    const metadataResult = metadataCache
+      ? await metadataCache.get(spreadsheetId)
+      : await getSheetMetadataInternal(spreadsheetId);
+    if (!metadataResult.ok) {
+      throw metadataResult.error;
+    }
+
+    const sheetsByTitle = new Map(metadataResult.value.map(s => [s.title, s]));
+
+    // Build one updateCells request per update entry
+    const requests: sheets_v4.Schema$Request[] = updates.map(({ range, values }) => {
+      const parsed = parseA1Range(range);
+      const sheet = sheetsByTitle.get(parsed.sheetName);
+      if (!sheet) {
+        throw new Error(`Sheet not found: ${parsed.sheetName}`);
+      }
+
+      const rowValues = values.map(value => convertToSheetsCellData(value, timeZone));
+
+      return {
+        updateCells: {
+          range: {
+            sheetId: sheet.sheetId,
+            startRowIndex: parsed.startRow,
+            endRowIndex: parsed.endRow + 1,     // GridRange end is exclusive
+            startColumnIndex: parsed.startCol,
+            endColumnIndex: parsed.endCol + 1,  // GridRange end is exclusive
+          },
+          rows: [{ values: rowValues }],
+          fields: 'userEnteredValue,userEnteredFormat,textFormatRuns',
+        },
+      };
+    });
+
+    const sheets = await getSheetsService();
+    await sheets.spreadsheets.batchUpdate({
+      spreadsheetId,
+      requestBody: { requests },
+    });
+  }).then(result => {
+    if (!result.ok) return { ok: false, error: result.error };
+    return { ok: true, value: undefined };
+  });
+}
+
+/**
  * Clears the cached Sheets service (for testing)
  */
 export function clearSheetsCache(): void {
