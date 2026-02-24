@@ -1,241 +1,315 @@
-# Bug Fix Plan
+# Implementation Plan
 
-**Status:** COMPLETE
-**Created:** 2026-02-23
-**Bug Report:** Movimientos matching has duplicate fileId assignments (same document matched to multiple movements), no matchedType column for MANUAL locking, and missing PAGOS AFIP bank fee pattern. Direct debit auto-labeling was reported but already resolved (dead code).
-**Category:** Matching
+**Status:** IN_PROGRESS
+**Branch:** feat/ADV-144-movimientos-matching-fixes
+**Issues:** ADV-144, ADV-145, ADV-146, ADV-147, ADV-148, ADV-149, ADV-150
+**Created:** 2026-02-24
+**Last Updated:** 2026-02-24
 
-## Investigation
+## Summary
 
-### Context Gathered
-- **MCPs used:** Google Drive MCP (read BBVA ARS movimientos + Control sheets), Linear MCP (checked existing issues)
-- **Files examined:** BBVA ARS Movimientos spreadsheet (staging), Control de Ingresos, Control de Egresos, match-movimientos.ts, matcher.ts, movimientos-reader.ts, movimientos-detalle.ts, types/index.ts, SPREADSHEET_FORMAT.md
+Fix 4 bugs in bank movimientos matching (cross-bank deduplication, ARS tolerance inconsistency, USD cross-currency debit matching, force mode stale match clearing), optimize document lookup from O(N) to O(1), improve type safety by replacing `any` types, and fix documentation column order.
 
-### Evidence
+## Issues
 
-**Duplicate fileId matches found in BBVA ARS staging data:**
-- 126,000 ARS: 3 bank credits all matched to Gustavo del Gerbo, but Tomas Carceglia and Gabriel Rosa also have 126K facturas
-- 130,000 ARS: 2 bank credits all matched to Eclipse, but Perspectiva and Whiteboard Games also have 130K facturas
-- 58,500 ARS: 2 An Otter credits matched to same factura (00005-00000023), but An Otter has a second factura (00005-00000012)
-- 776,160 ARS: 2 same-day debits matched to LOPEZ pago, but COLS NICOLAS AGUSTIN has a separate 776K pago
+### ADV-144: Cross-bank deduplication gap: same document matched to multiple bank movements
 
-**Root cause:** `matchBankMovimientos()` at `src/bank/match-movimientos.ts:794` processes each movement independently. Each call to `matcher.matchMovement()`/`matcher.matchCreditMovement()` sees the FULL pool of documents. No `usedFileIds` Set tracks which documents have already been assigned within a bank's matching pass.
+**Priority:** Medium
+**Labels:** Bug
+**Description:** `excludeFileIds` in `matchBankMovimientos` is built per-bank only. When processing multiple bank spreadsheets sequentially in `matchAllMovimientos`, there is no shared exclusion state — the same document can be matched to movements in different banks simultaneously.
 
-**MANUAL locking gap:** ADV-132 previously removed dead MANUAL lock code from movimientos because there was no `matchConfidence` column. User now wants a `matchedType` column (AUTO/MANUAL) with proper MANUAL semantics: user sets matchedFileId + MANUAL → system generates detalle + file excluded from pool.
+**Acceptance Criteria:**
+- [ ] `matchAllMovimientos` maintains a global `excludeFileIds` set shared across all bank spreadsheets
+- [ ] When a document is matched in Bank A, it's excluded from matching in Bank B
+- [ ] Existing tests pass; new tests verify cross-bank dedup
+- [ ] MANUAL matches contribute to the global exclusion set
 
-**PAGOS AFIP:** Bank concept `PAGOS AFIP` appears in movimientos but is not recognized by `BANK_FEE_PATTERNS` at `src/bank/matcher.ts:227-244`. User confirmed these are bank fees (Gasto bancario).
+### ADV-145: Inconsistent ARS tolerance in credit movement matching
 
-**Direct debit:** `isDirectDebit()` at `src/bank/matcher.ts:87` and `DIRECT_DEBIT_PATTERNS` at line 46 are dead code — never called from match-movimientos.ts. Direct debits already go through normal document matching. No fix needed.
+**Priority:** Medium
+**Labels:** Bug
+**Description:** In `matchCreditMovement`, ARS Facturas Emitidas are matched using `amountsMatch(amount, factura.importeTotal, this.crossCurrencyTolerancePercent)` which passes `5` as an absolute ARS tolerance ($5). Debit matching uses `amountsMatchCrossCurrency` which applies `$1` tolerance for ARS/ARS. The inconsistency means credit matching is more permissive than debit matching for the same currency.
 
-### Root Cause
+**Acceptance Criteria:**
+- [ ] Credit matching for ARS Facturas Emitidas uses consistent tolerance with debit matching ($1 ARS)
+- [ ] Both lines 702 and 718 in `matchCreditMovement` are fixed
+- [ ] Tests verify consistent tolerance across debit and credit matching
 
-The matching loop in `matchBankMovimientos()` has no mechanism to track which document fileIds have already been assigned to movements within a single bank pass. Each movement sees the entire document pool, causing the same high-quality match to be assigned repeatedly.
+### ADV-146: Missing cross-currency matching for USD Pagos Enviados without importeEnPesos in debit matching
 
-#### Related Code
-- `src/bank/match-movimientos.ts:754-934` — `matchBankMovimientos()` function: the main loop at line 794 iterates movements and calls `matcher.matchMovement()`/`matcher.matchCreditMovement()` without a `usedFileIds` set
-- `src/bank/match-movimientos.ts:90-128` — `VersionableRow` interface and `computeRowVersion()`: needs `matchedType` field for TOCTOU protection
-- `src/bank/matcher.ts:227-244` — `BANK_FEE_PATTERNS` array: missing PAGOS AFIP pattern
-- `src/bank/matcher.ts:46-51` — `DIRECT_DEBIT_PATTERNS` + `isDirectDebit()`: dead code, can be removed
-- `src/services/movimientos-reader.ts:44-64` — `parseMovimientoRow()`: reads columns A:H, needs A:I for matchedType
-- `src/services/movimientos-reader.ts:117` — Range `A:H` needs to be `A:I`
-- `src/services/movimientos-detalle.ts:17-32` — `DetalleUpdate` interface: needs `matchedType` field
-- `src/services/movimientos-detalle.ts:53-71` — `computeVersionFromRow()`: needs matchedType in hash
-- `src/services/movimientos-detalle.ts:170-172` — Write range `G:H` needs to be `G:I`, values need matchedType
-- `src/types/index.ts:844-865` — `MovimientoRow` interface: needs `matchedType` field
+**Priority:** Medium
+**Labels:** Bug
+**Description:** In `matchMovement` (debit matching), when a USD Pago Enviado lacks `importeEnPesos`, the code falls back to `amountsMatch(pago.importePagado, amount)` which compares USD directly against ARS — always fails. Credit matching correctly uses `amountsMatchCrossCurrency` for this case.
 
-### Impact
-- Duplicate matches cause incorrect financial reconciliation — one document appears matched to multiple bank movements
-- Without MANUAL locking, users cannot override algorithmic mistakes in movimientos
-- PAGOS AFIP debits remain unmatched instead of being auto-labeled as bank fees
+**Acceptance Criteria:**
+- [ ] Debit matching for USD Pagos Enviados uses `amountsMatchCrossCurrency` as fallback when `importeEnPesos` is not available
+- [ ] Confidence is appropriately reduced for cross-currency pago matches
+- [ ] Tests verify USD pagos without importeEnPesos can match ARS debit movements
 
-## Fix Plan
+### ADV-147: O(N) linear scan in findDocumentByFileId — use Map for O(1) lookup
 
-### Fix 1: Add matchedType column to movimientos schema
-**Linear Issue:** [ADV-139](https://linear.app/lw-claude/issue/ADV-139/add-matchedtype-column-i-to-movimientos-schema)
+**Priority:** Low
+**Labels:** Performance
+**Description:** `findDocumentByFileId` performs 5 sequential `.find()` calls across document arrays for each movement with an existing match. This is O(M*N) per bank. Replace with a pre-built `Map<string, {document, type}>` for O(1) lookups.
 
-Expand the movimientos spreadsheet schema from 8 columns (A:H) to 9 columns (A:I) with a new `matchedType` column after `detalle`.
+**Acceptance Criteria:**
+- [ ] Build a `Map<string, {document, type}>` from all document arrays once before the matching loop
+- [ ] Replace all `findDocumentByFileId` calls with Map.get()
+- [ ] Also replace `buildMatchQualityFromFileId` to use the Map
+- [ ] No change in matching behavior (pure performance optimization)
 
-**Migration note:** Schema change from 8→9 columns. Existing spreadsheets have no column I. The reader must handle rows with only 8 values gracefully (matchedType defaults to empty string). No startup migration needed — old rows parse correctly with the 9th value absent.
+### ADV-148: Force mode doesn't clear stale AUTO matches when re-matching finds no match
 
-1. Write test in `src/types/index.ts` — no test needed, just add `matchedType: string` field to `MovimientoRow` interface (values: `'AUTO'` | `'MANUAL'` | `''`)
+**Priority:** Low
+**Labels:** Bug
+**Description:** When `matchAllMovimientos` runs with `force=true` and a previously-matched AUTO row now has no match, the old `matchedFileId`, `matchedType`, and `detalle` persist in the spreadsheet. The no-match branch (line 1051) only restores `ownFileId` to `excludeFileIds` without writing a clearing update.
 
-2. Write test in `src/services/movimientos-reader.test.ts` for `parseMovimientoRow` handling 8-column (backward compat) and 9-column rows
-3. Run verifier (expect fail)
-4. Update `parseMovimientoRow` in `src/services/movimientos-reader.ts`:
-   - Read `row[8]` as matchedType (default `''` if absent — backward compat)
-   - Change range from `A:H` to `A:I` at line 117
-5. Run verifier (expect pass)
+**Acceptance Criteria:**
+- [ ] In force mode, when a previously-matched AUTO row has no new match, push an update clearing `matchedFileId`, `matchedType`, and `detalle`
+- [ ] MANUAL rows remain untouched (already skipped earlier in loop)
+- [ ] Test verifies force mode clears stale AUTO matches
 
-6. Write test in `src/services/movimientos-detalle.test.ts` for `DetalleUpdate` with matchedType, `computeVersionFromRow` including matchedType, and write range `G:I`
-7. Run verifier (expect fail)
-8. Update `src/services/movimientos-detalle.ts`:
-   - Add `matchedType` field to `DetalleUpdate` interface
-   - Include matchedType in `computeVersionFromRow` hash (index 8)
-   - Change write range from `G${row}:H${row}` to `G${row}:I${row}` at line 171
-   - Add matchedType to values array at line 172
-9. Run verifier (expect pass)
+### ADV-149: SPREADSHEET_FORMAT.md shows wrong column order for Movimientos H/I
 
-10. Update `src/bank/match-movimientos.ts`:
-    - Add `matchedType` to `VersionableRow` interface
-    - Include matchedType in `computeRowVersion` hash
-    - Add `matchedType: 'AUTO'` to all `updates.push()` calls (line 916-922)
-11. Run verifier (expect pass — existing tests should adapt)
+**Priority:** Low
+**Labels:** Technical Debt
+**Description:** SPREADSHEET_FORMAT.md line 266-267 shows H=detalle, I=matchedType. The actual code (`spreadsheet-headers.ts:238-239`, `movimientos-reader.ts:76-77`, `movimientos-detalle.ts:176`) consistently uses H=matchedType, I=detalle. CLAUDE.md also lists the wrong order.
 
-12. Update `SPREADSHEET_FORMAT.md` — add column I (matchedType) to Movimientos schema
-13. Update `CLAUDE.md` — remove note that movimientos don't support MANUAL locking
+**Acceptance Criteria:**
+- [ ] SPREADSHEET_FORMAT.md updated to show H=matchedType, I=detalle
+- [ ] CLAUDE.md updated to match the correct column order
 
-### Fix 2: Implement usedFileIds deduplication and MANUAL support
-**Linear Issue:** [ADV-140](https://linear.app/lw-claude/issue/ADV-140/implement-usedfileids-deduplication-and-manual-support-for-movimientos)
+### ADV-150: Type safety gap: `any` type in findDocumentByFileId and buildMatchQuality
 
-Prevent the same document from being matched to multiple movements within a bank. Implement MANUAL lock semantics: MANUAL rows are never overwritten, their fileIds are excluded from the matching pool, and blank detalles on MANUAL rows get auto-generated.
+**Priority:** Low
+**Labels:** Convention
+**Description:** `findDocumentByFileId` (line 661), `buildMatchQuality` (line 605), and `buildDetalleForDocument` (line 760) use `any` for document parameters. This bypasses TypeScript type checking for property access.
 
-1. Write tests in `src/bank/match-movimientos.test.ts`:
-   - Test: MANUAL row is skipped (not overwritten) even with `force=true`
-   - Test: MANUAL row's fileId is excluded from the matching pool (other movements can't match it)
-   - Test: MANUAL row with blank detalle gets detalle auto-generated from matched document
-   - Test: Same fileId is not assigned to two different movements (usedFileIds dedup)
-   - Test: After a fileId is used by one movement, the next movement with same amount gets a different match
-2. Run verifier (expect fail)
+**Acceptance Criteria:**
+- [ ] Replace `any` with a discriminated union type covering Factura, Pago, Recibo, Retencion (with `row` field)
+- [ ] Use type narrowing based on the `type` discriminator in each function
+- [ ] No runtime behavior changes
 
-3. Implement in `src/bank/match-movimientos.ts` — `matchBankMovimientos()`:
-   - **Pre-processing phase** (before the main loop):
-     a. Scan all movimientos for rows with `matchedType === 'MANUAL'`
-     b. Collect their `matchedFileId` values into `usedFileIds: Set<string>`
-     c. For MANUAL rows with blank `detalle` and non-empty `matchedFileId`: look up the document in ingresosData/egresosData and generate a detalle description, push to updates with `matchedType: 'MANUAL'`
-   - **Main matching loop** (line 794):
-     a. Skip MANUAL rows entirely (never overwrite, even with force)
-     b. After a successful match, add `matchResult.matchedFileId` to `usedFileIds`
-     c. Pass `usedFileIds` to matcher methods so they exclude already-used documents
-   - **Matcher integration**: `BankMovementMatcher.matchMovement()` and `matchCreditMovement()` need an optional `excludeFileIds?: Set<string>` parameter. Filter candidates whose fileId is in the set before ranking.
+## Prerequisites
 
-4. Write tests in `src/bank/matcher.test.ts`:
-   - Test: `matchMovement` with `excludeFileIds` excludes specified fileIds from candidates
-   - Test: `matchCreditMovement` with `excludeFileIds` excludes specified fileIds from candidates
-5. Run verifier (expect fail)
+- [ ] All existing tests pass (verified via pre-flight)
+- [ ] On `main` branch with clean working tree
 
-6. Implement in `src/bank/matcher.ts`:
-   - Add optional `excludeFileIds?: Set<string>` parameter to `matchMovement()` and `matchCreditMovement()`
-   - Filter candidates early (after collecting all tiered candidates, before selecting best) — remove any candidate whose fileId is in `excludeFileIds`
-7. Run verifier (expect pass)
+## Implementation Tasks
 
-### Fix 3: Add PAGOS AFIP to bank fee patterns and clean up dead code
-**Linear Issue:** [ADV-141](https://linear.app/lw-claude/issue/ADV-141/add-pagos-afip-to-bank-fee-patterns-and-remove-dead-direct-debit-code)
+### Task 1: Fix ARS tolerance inconsistency in credit matching
 
-Add PAGOS AFIP pattern to `BANK_FEE_PATTERNS`. Remove dead `DIRECT_DEBIT_PATTERNS` and `isDirectDebit()` code.
+**Issue:** ADV-145
+**Files:**
+- `src/bank/matcher.ts` (modify)
+- `src/bank/matcher.test.ts` (modify)
 
-1. Write test in `src/bank/matcher.test.ts`:
-   - Test: `isBankFee('PAGOS AFIP')` returns true
-   - Test: `isBankFee('D 500 PAGOS AFIP')` returns true (with bank origin prefix)
-2. Run verifier (expect fail)
+**TDD Steps:**
 
-3. Implement in `src/bank/matcher.ts`:
-   - Add `/^PAGOS\s*AFIP/i` to `BANK_FEE_PATTERNS` array (line 227-244)
-4. Run verifier (expect pass)
+1. **RED** — Write tests in `src/bank/matcher.test.ts`:
+   - Test: ARS factura matched via credit matching uses $1 tolerance (amount diff of $2 should NOT match)
+   - Test: ARS factura matched via credit matching with retenciones uses $1 tolerance
+   - Reference existing credit matching tests to follow patterns
+   - Run verifier with pattern "matcher" — expect fail
 
-5. Remove dead code in `src/bank/matcher.ts`:
-   - Remove `DIRECT_DEBIT_PATTERNS` (lines 46-51) and `isDirectDebit()` function (lines 82-92)
-   - Remove the export — check no imports exist (already verified: no callers)
-6. Run verifier (expect pass)
+2. **GREEN** — Fix `src/bank/matcher.ts`:
+   - Line 701-702: Replace `amountsMatch(amount, factura.importeTotal, this.crossCurrencyTolerancePercent)` with `amountsMatchCrossCurrency(factura.importeTotal, factura.moneda, factura.fechaEmision, amount, 'ARS', this.crossCurrencyTolerancePercent)` — this delegates to `amountsMatchCrossCurrency` which uses $1 for ARS/ARS (same pattern as debit matching at line 437-440)
+   - Line 717-718: Same fix for the retenciones branch
+   - Also update the `isCrossCurrency` variable logic: currently set before the match call (line 699), now the `amountsMatchCrossCurrency` result provides `isCrossCurrency`
+   - Run verifier with pattern "matcher" — expect pass
+
+**Notes:**
+- `amountsMatchCrossCurrency` for ARS/ARS returns `{ matches: amountsMatch(a, b, 1), isCrossCurrency: false }` — see `src/utils/exchange-rate.ts:330-337`
+- Debit matching already uses this unified pattern at line 437-440 — make credit matching consistent
+
+### Task 2: Add cross-currency fallback for USD Pagos Enviados in debit matching
+
+**Issue:** ADV-146
+**Files:**
+- `src/bank/matcher.ts` (modify)
+- `src/bank/matcher.test.ts` (modify)
+
+**TDD Steps:**
+
+1. **RED** — Write tests in `src/bank/matcher.test.ts`:
+   - Test: USD Pago Enviado without `importeEnPesos` matches ARS bank debit via exchange rate conversion
+   - Test: Confidence is reduced for cross-currency pago matches (consistent with credit matching behavior)
+   - Test: USD Pago Enviado WITH `importeEnPesos` still uses direct ARS match (no regression)
+   - Run verifier with pattern "matcher" — expect fail
+
+2. **GREEN** — Fix `src/bank/matcher.ts`:
+   - Lines 367-369: Replace the ternary with logic that mirrors credit matching (lines 599-610):
+     - When `pago.importeEnPesos && pago.moneda === 'USD'`: use `amountsMatch(pago.importeEnPesos, amount)` (existing behavior)
+     - When `pago.moneda === 'USD' && !pago.importeEnPesos`: use `amountsMatchCrossCurrency(pago.importePagado, pago.moneda, pago.fechaPago, amount, 'ARS', this.crossCurrencyTolerancePercent)`
+     - Otherwise: use `amountsMatch(pago.importePagado, amount)` (ARS/ARS, existing behavior)
+   - Track `isCrossCurrency` flag from the cross-currency result, and cap confidence for cross-currency pago matches (same caps as credit matching)
+   - Run verifier with pattern "matcher" — expect pass
+
+**Notes:**
+- Cross-currency confidence caps per CLAUDE.md: Tier 1-3 → MEDIUM, Tier 4 → LOW, Tier 5 → LOW
+- Follow the credit matching pattern at lines 599-610 as template
+- Must handle the async exchange rate lookup (uses cached rates from prefetch)
+
+### Task 3: Force mode clears stale AUTO matches
+
+**Issue:** ADV-148
+**Files:**
+- `src/bank/match-movimientos.ts` (modify)
+- `src/bank/match-movimientos.test.ts` (modify)
+
+**TDD Steps:**
+
+1. **RED** — Write tests in `src/bank/match-movimientos.test.ts`:
+   - Test: In force mode, a previously-matched AUTO row with no new match gets cleared (matchedFileId='', matchedType='', detalle='')
+   - Test: In force mode, a previously-matched AUTO row that finds a new match still updates normally (regression guard)
+   - Test: In non-force mode, a previously-matched row with no new match retains its existing match (no clearing)
+   - Follow existing test patterns (mock matcher, ingresosData, egresosData)
+   - Run verifier with pattern "match-movimientos" — expect fail
+
+2. **GREEN** — Fix `src/bank/match-movimientos.ts`:
+   - In the no-match else branch (around line 1051-1057): when `options.force` is true AND the movement had an existing match (`ownFileId` is set), push a clearing update with empty matchedFileId, matchedType, and detalle
+   - When clearing in force mode, do NOT re-add `ownFileId` to `excludeFileIds` (the document is freed for other movements)
+   - When NOT in force mode, keep existing behavior (re-add ownFileId to excludeFileIds)
+   - Run verifier with pattern "match-movimientos" — expect pass
+
+**Notes:**
+- MANUAL rows are already skipped at line 860 with `continue`, so by line 1051 the row is guaranteed non-MANUAL
+- `computeRowVersion(mov)` should be called for the expectedVersion of the clearing update
+
+### Task 4: Map-based document lookup (performance)
+
+**Issue:** ADV-147
+**Files:**
+- `src/bank/match-movimientos.ts` (modify)
+- `src/bank/match-movimientos.test.ts` (modify)
+
+**TDD Steps:**
+
+1. **RED** — Write tests in `src/bank/match-movimientos.test.ts`:
+   - Test: Document Map is built correctly from all 5 document arrays, keyed by fileId
+   - Test: Map lookup returns the same result as the old `findDocumentByFileId` linear scan
+   - Test: Documents with duplicate fileIds across arrays (edge case) — first match wins (maintain existing behavior)
+   - Run verifier with pattern "match-movimientos" — expect fail
+
+2. **GREEN** — Implement in `src/bank/match-movimientos.ts`:
+   - Create a `buildDocumentMap` function that takes the 5 document arrays and returns a `Map<string, { document: ..., type: string }>`
+   - Iterate each array once, adding entries keyed by fileId. First-found wins (matching current `.find()` order: facturasEmitidas, pagosRecibidos, facturasRecibidas, pagosEnviados, recibos)
+   - In `matchBankMovimientos`, call `buildDocumentMap` once before the loop
+   - Replace all `findDocumentByFileId` calls with `documentMap.get(fileId)` — lines 863, 961 (used via buildMatchQualityFromFileId), and 875
+   - Remove `findDocumentByFileId` function (or refactor it to delegate to the Map)
+   - Refactor `buildMatchQualityFromFileId` to accept the Map instead of calling `findDocumentByFileId`
+   - Run verifier with pattern "match-movimientos" — expect pass
+
+**Notes:**
+- Preserve the search order (facturasEmitidas first, recibos last) to maintain backward compatibility with which document type wins for a shared fileId
+- The Map is passed down to `matchBankMovimientos` — created once for all movements in a bank
+- For ADV-144 (Task 5), this Map becomes even more useful since the same Map is shared across banks
+
+### Task 5: Cross-bank deduplication
+
+**Issue:** ADV-144
+**Files:**
+- `src/bank/match-movimientos.ts` (modify)
+- `src/bank/match-movimientos.test.ts` (modify)
+
+**TDD Steps:**
+
+1. **RED** — Write tests in `src/bank/match-movimientos.test.ts`:
+   - Test: Document matched in Bank A is excluded from matching in Bank B (call matchBankMovimientos twice with shared exclusion state)
+   - Test: MANUAL matches from Bank A contribute to global exclusion for Bank B
+   - Test: Newly matched documents from Bank A's processing are added to global exclusion
+   - Run verifier with pattern "match-movimientos" — expect fail
+
+2. **GREEN** — Implement in `src/bank/match-movimientos.ts`:
+   - Add optional `globalExcludeFileIds?: Set<string>` parameter to `matchBankMovimientos`
+   - In `matchBankMovimientos`: seed `excludeFileIds` from BOTH the bank's own movements AND `globalExcludeFileIds` (if provided)
+   - After the matching loop (before returning), add all newly matched fileIds from this bank's `updates` to `globalExcludeFileIds`
+   - In `matchAllMovimientos` (line 1138-1169): create a `globalExcludeFileIds = new Set<string>()` before the bank loop, pass it to each `matchBankMovimientos` call
+   - Run verifier with pattern "match-movimientos" — expect pass
+
+**Notes:**
+- The global set grows across bank iterations: Bank A adds its matches, Bank B sees them + adds its own, Bank C sees all
+- MANUAL matches from each bank also contribute since they're pre-seeded into per-bank excludeFileIds, which then feeds back to globalExcludeFileIds
+- The document Map from Task 4 is shared across banks (same ingresosData/egresosData), so this is purely about the exclusion set
+
+### Task 6: Type safety for `any` types in document functions
+
+**Issue:** ADV-150
+**Files:**
+- `src/bank/match-movimientos.ts` (modify)
+- `src/bank/match-movimientos.test.ts` (modify — may need type adjustments)
+
+**TDD Steps:**
+
+1. **RED** — This is a pure type-level refactor with no runtime behavior changes. Start by defining the discriminated union type:
+   - In `src/bank/match-movimientos.ts`, define a type alias (e.g., `MatchedDocument`) as a union of the document types with `row: number` that are already used in practice
+   - The discriminator is the `type` field returned by `findDocumentByFileId` / document Map: `'factura_emitida' | 'pago_recibido' | 'factura_recibida' | 'pago_enviado' | 'recibo'`
+   - Run verifier — expect compile errors from the `any` → union type change
+
+2. **GREEN** — Update the functions:
+   - `buildMatchQuality` (line 605): change `document?: any` to `document?: MatchedDocument`, add type narrowing based on `type` parameter
+   - Document Map return type: change `{ document: any; type: ... }` to `{ document: MatchedDocument; type: ... }`
+   - `buildDetalleForDocument` (line 760): change `document: any` to `document: MatchedDocument`, use type narrowing for property access
+   - Run verifier — expect pass (all existing tests should still work since runtime behavior is unchanged)
+
+**Notes:**
+- The union type needs `& { row: number }` on each variant since document arrays are typed with `row` field
+- Follow the `MatchedDocument` approach from the issue description but use the actual types from `src/types/index.ts`
+- The type narrowing should use `if/switch` on the `type` discriminator string to access type-specific properties
+
+### Task 7: Fix documentation column order
+
+**Issue:** ADV-149
+**Files:**
+- `SPREADSHEET_FORMAT.md` (modify)
+- `CLAUDE.md` (modify)
+
+**Steps:**
+
+1. In `SPREADSHEET_FORMAT.md` line 266-267: swap H and I columns:
+   - H: `matchedType` — Match type: `AUTO` (algorithmic), `MANUAL` (user-set), or empty (unmatched)
+   - I: `detalle` — Human-readable match description
+
+2. In `CLAUDE.md`: find the Movimientos Bancario description and update column order to: `matchedFileId` (fileId of matched document), `matchedType` (AUTO/MANUAL/empty), `detalle` (human-readable match description)
+
+3. Run verifier — expect pass (no code changes)
+
+## MCP Usage During Implementation
+
+| MCP Server | Tool | Purpose |
+|------------|------|---------|
+| Linear | `update_issue` | Move issues to In Progress at task start, Review at completion |
+
+## Error Handling
+
+| Error Scenario | Expected Behavior | Test Coverage |
+|---------------|-------------------|---------------|
+| ARS credit match with $2 diff | Should NOT match (was matching before fix) | Unit test (Task 1) |
+| USD pago without importeEnPesos vs ARS debit | Should match via exchange rate | Unit test (Task 2) |
+| Force mode + no_match on existing AUTO | Should clear match cells | Unit test (Task 3) |
+| Same fileId in Bank A and Bank B | Should only match once (first bank wins) | Unit test (Task 5) |
+
+## Risks & Open Questions
+
+- [ ] Task 1 (ADV-145): Fixing ARS tolerance from $5 to $1 might cause some existing credit matches to break in production — they would need force re-matching. Low risk since $5 ARS is tiny ($0.005 USD).
+- [ ] Task 2 (ADV-146): Cross-currency pago matching depends on exchange rate cache being populated. The prefetch in matchAllMovimientos should cover this. Verify test mocking handles exchange rate correctly.
+- [ ] Task 5 (ADV-144): Cross-bank dedup means processing ORDER of banks matters — first bank gets priority. This is acceptable since it mirrors the existing behavior within a single bank.
+- [ ] Task 6 (ADV-150): The discriminated union must cover all document types that can appear in findDocumentByFileId. Missing a type would cause compile errors (which is the desired safety improvement).
+
+## Scope Boundaries
+
+**In Scope:**
+- 4 bug fixes in matcher.ts and match-movimientos.ts
+- 1 performance optimization (Map-based lookup)
+- 1 type safety improvement
+- 1 documentation fix
+
+**Out of Scope:**
+- Refactoring the matching algorithm itself
+- Adding new matching tiers or patterns
+- Changing the spreadsheet schema (no migration needed)
+- UI/Apps Script changes
 
 ## Post-Implementation Checklist
 1. Run `bug-hunter` agent — Review changes for bugs
 2. Run `verifier` agent — Verify all tests pass and zero warnings
-
----
-
-## Plan Summary
-
-**Problem:** Bank movimientos matching assigns the same document to multiple movements (duplicate fileId) and lacks MANUAL locking support and PAGOS AFIP bank fee recognition.
-
-**Root Cause:** `matchBankMovimientos()` processes movements independently without tracking used fileIds. No `matchedType` column exists for MANUAL locking. PAGOS AFIP is missing from `BANK_FEE_PATTERNS`.
-
-**Linear Issues:** [ADV-139](https://linear.app/lw-claude/issue/ADV-139/add-matchedtype-column-i-to-movimientos-schema), [ADV-140](https://linear.app/lw-claude/issue/ADV-140/implement-usedfileids-deduplication-and-manual-support-for-movimientos), [ADV-141](https://linear.app/lw-claude/issue/ADV-141/add-pagos-afip-to-bank-fee-patterns-and-remove-dead-direct-debit-code)
-
-**Solution Approach:** Add a `matchedType` column (I) to the movimientos schema, implement `usedFileIds` tracking in the matching loop to prevent duplicates, add MANUAL pre-processing that excludes locked fileIds and auto-generates missing detalles, pass `excludeFileIds` to the matcher, add PAGOS AFIP pattern, and remove dead direct debit code.
-
-**Scope:**
-- Fixes: 3
-- Files affected: ~8 (types/index.ts, movimientos-reader.ts, movimientos-detalle.ts, match-movimientos.ts, matcher.ts, SPREADSHEET_FORMAT.md, CLAUDE.md, plus test files)
-- New tests: yes
-- Breaking changes: no — 9th column is additive, reader handles 8-column rows gracefully
-
-**Risks/Considerations:**
-- Schema expansion from 8→9 columns — mitigated by backward-compatible parsing (missing 9th column defaults to empty)
-- `excludeFileIds` changes matcher method signatures — needs careful integration with existing tests
-- MANUAL detalle generation reuses existing document lookup logic from `findDocumentByFileId` — no new API calls needed
-
----
-
-## Iteration 1
-
-**Implemented:** 2026-02-23
-**Method:** Single-agent (7 effort points across 2 units)
-
-### Tasks Completed This Iteration
-- Fix 1 (ADV-139): Add matchedType column (I) to movimientos schema — expanded from 8→9 columns with backward-compatible parsing
-- Fix 2 (ADV-140): Implement usedFileIds deduplication and MANUAL support — pre-seeds ALL existing matchedFileIds into excludeFileIds, MANUAL rows skipped from matching, blank MANUAL detalles auto-generated, temporary own-fileId removal for re-evaluation
-- Fix 3 (ADV-141): Add PAGOS AFIP to bank fee patterns and remove dead direct debit code
-
-### Files Modified
-- `src/types/index.ts` — Added `matchedType: string` to `MovimientoRow` interface
-- `src/services/movimientos-reader.ts` — Range A:H→A:I, parse matchedType from row[8] with backward compat
-- `src/services/movimientos-reader.test.ts` — Tests for 9-column and 8-column compatibility
-- `src/services/movimientos-detalle.ts` — matchedType in DetalleUpdate, computeVersionFromRow hash, G:I write range, updated JSDoc
-- `src/services/movimientos-detalle.test.ts` — Updated ranges, values, hash inputs for 9-column schema
-- `src/bank/match-movimientos.ts` — Pre-seed excludeFileIds with all existing matchedFileIds, temporary own-fileId removal, MANUAL pre-processing with detalle generation, buildDetalleForDocument helper, zero-amount movement fileId restoration, removed dead recibo concepto branch
-- `src/bank/match-movimientos.test.ts` — 8 new tests (MANUAL skip, excludeFileIds pool, detalle generation, usedFileIds dedup, accumulation, AUTO pre-seeding, zero-amount restoration)
-- `src/bank/matcher.ts` — excludeFileIds parameter on matchMovement/matchCreditMovement, PAGOS AFIP pattern, removed DIRECT_DEBIT_PATTERNS and isDirectDebit
-- `src/bank/matcher.test.ts` — PAGOS AFIP tests, excludeFileIds tests
-- `SPREADSHEET_FORMAT.md` — 9 columns, matchedType column, MANUAL locking support
-- `CLAUDE.md` — Updated movimientos column count, MANUAL support note
-
-### Linear Updates
-- ADV-139: Todo → In Progress → Review
-- ADV-140: Todo → In Progress → Review
-- ADV-141: Todo → In Progress → Review
-
-### Pre-commit Verification
-- bug-hunter: Found 3 bugs (1 HIGH, 2 MEDIUM), all fixed before commit
-  - HIGH: Zero-amount movements leaked ownFileId from excludeFileIds on continue
-  - MEDIUM: Stale JSDoc in computeVersionFromRow (A:H → A:I)
-  - MEDIUM: Dead concepto branch in buildDetalleForDocument for recibo type
-- verifier: All 1808 tests pass, zero warnings, clean build
-
-### Review Findings
-
-Summary: 2 issue(s) found, fixed inline (Team: security, reliability, quality reviewers)
-- FIXED INLINE: 2 issue(s) — verified via TDD + bug-hunter
-
-**Issues fixed inline:**
-- [MEDIUM] BUG: `movimientosFilled: updates.length` over-counts by including MANUAL detalle fills (`src/bank/match-movimientos.ts:1077`) — changed to `debitsFilled + creditsFilled`
-- [LOW] TYPE: `matchedType: string` lacks type safety and case normalization (`src/types/index.ts:866`) — narrowed to union type, added `parseMatchedType()` normalizer
-
-**Discarded findings (not bugs):**
-- [DISCARDED] TYPE: `any` type for polymorphic document helpers — misdiagnosed: code works correctly with duck typing, properties match actual document shapes
-- [DISCARDED] BUG: Stale comment A:H vs A:I in movimientos-detalle.ts — style-only, zero correctness impact
-- [DISCARDED] CONVENTION: Missing `module` field in warn() calls (match-movimientos.ts:952, matcher.ts:401) — style-only convention not enforced as critical rule
-- [DISCARDED] CONVENTION: Lock result type cast (match-movimientos.ts:1214) — accepted intentional pattern with explanatory comment
-- [DISCARDED] CONVENTION: Unescaped sheet name in movimientos-reader.ts:118 — impossible in context: YYYY-MM format enforced by regex
-- [DISCARDED] EDGE CASE: All sheet reads failing returns ok:true in getMovimientosToFill — misdiagnosed: intentional graceful degradation, individual failures logged as warnings
-
-### Linear Updates
-- ADV-139: Review → Merge (original task)
-- ADV-140: Review → Merge (original task)
-- ADV-141: Review → Merge (original task)
-- ADV-142: Created in Merge (Fix: movimientosFilled over-count — fixed inline)
-- ADV-143: Created in Merge (Fix: matchedType type safety — fixed inline)
-
-### Inline Fix Verification
-- Unit tests: all 1810 pass
-- Bug-hunter: no blocking issues
-
-<!-- REVIEW COMPLETE -->
-
-### Continuation Status
-All tasks completed.
-
----
-
-## Status: COMPLETE
-
-All tasks implemented and reviewed successfully. All Linear issues moved to Merge.
