@@ -30,6 +30,53 @@ import { prefetchExchangeRates } from '../utils/exchange-rate.js';
 export type { MatchQuality };
 
 /**
+ * A matched document entry returned by buildDocumentMap.
+ * Discriminated union keyed by type for full type safety.
+ */
+export type MatchedDocument =
+  | { document: Factura & { row: number }; type: 'factura_emitida' }
+  | { document: Pago & { row: number }; type: 'pago_recibido' }
+  | { document: Factura & { row: number }; type: 'factura_recibida' }
+  | { document: Pago & { row: number }; type: 'pago_enviado' }
+  | { document: Recibo & { row: number }; type: 'recibo' };
+
+/**
+ * Builds a Map<fileId, MatchedDocument> from the 5 document arrays.
+ * Iteration order matches the old findDocumentByFileId search order:
+ * facturasEmitidas → pagosRecibidos → facturasRecibidas → pagosEnviados → recibos.
+ * First entry wins for duplicate fileIds across arrays.
+ *
+ * @returns Map keyed by fileId, created once and shared across all bank loops
+ */
+export function buildDocumentMap(
+  facturasEmitidas: Array<Factura & { row: number }>,
+  pagosRecibidos: Array<Pago & { row: number }>,
+  facturasRecibidas: Array<Factura & { row: number }>,
+  pagosEnviados: Array<Pago & { row: number }>,
+  recibos: Array<Recibo & { row: number }>
+): Map<string, MatchedDocument> {
+  const map = new Map<string, MatchedDocument>();
+
+  for (const doc of facturasEmitidas) {
+    if (!map.has(doc.fileId)) map.set(doc.fileId, { document: doc, type: 'factura_emitida' });
+  }
+  for (const doc of pagosRecibidos) {
+    if (!map.has(doc.fileId)) map.set(doc.fileId, { document: doc, type: 'pago_recibido' });
+  }
+  for (const doc of facturasRecibidas) {
+    if (!map.has(doc.fileId)) map.set(doc.fileId, { document: doc, type: 'factura_recibida' });
+  }
+  for (const doc of pagosEnviados) {
+    if (!map.has(doc.fileId)) map.set(doc.fileId, { document: doc, type: 'pago_enviado' });
+  }
+  for (const doc of recibos) {
+    if (!map.has(doc.fileId)) map.set(doc.fileId, { document: doc, type: 'recibo' });
+  }
+
+  return map;
+}
+
+/**
  * Extracts USD document dates for exchange rate prefetching.
  * Collects dates from Pagos Recibidos, Facturas Emitidas, and Facturas Recibidas.
  *
@@ -602,7 +649,7 @@ function buildMatchQuality(
   conceptoMovimiento: string,
   hasLinkedPago: boolean,
   isExactAmount: boolean,
-  document?: any
+  matched?: MatchedDocument
 ): MatchQuality {
   // Calculate date distance in days using parseArgDate for Argentine format support
   const docDate = parseArgDate(fechaDocumento);
@@ -622,18 +669,36 @@ function buildMatchQuality(
     tier = 1; // Pago with linked factura
   } else if (hasCuitMatch) {
     tier = 2; // CUIT match
-  } else if (document && document.referencia) {
+  } else if (matched && (matched.type === 'pago_recibido' || matched.type === 'pago_enviado') && matched.document.referencia) {
     // Tier 3: Check if concepto contains a referencia pattern matching the document's referencia
     const extractedRef = extractReferencia(conceptoMovimiento);
-    if (extractedRef && extractedRef === document.referencia) {
+    if (extractedRef && extractedRef === matched.document.referencia) {
       tier = 3;
     } else {
       tier = 5;
     }
-  } else if (document) {
+  } else if (matched) {
     // Tier 4: Check for keyword matches using available matching logic
-    const counterpartyName = document.razonSocialEmisor || document.razonSocialReceptor || document.nombreBeneficiario || document.nombrePagador || '';
-    const score = calculateKeywordMatchScore(conceptoMovimiento, counterpartyName, document.concepto || '');
+    let counterpartyName: string;
+    let concepto: string;
+    if (matched.type === 'factura_emitida') {
+      counterpartyName = matched.document.razonSocialReceptor || '';
+      concepto = matched.document.concepto || '';
+    } else if (matched.type === 'factura_recibida') {
+      counterpartyName = matched.document.razonSocialEmisor || '';
+      concepto = matched.document.concepto || '';
+    } else if (matched.type === 'pago_recibido') {
+      counterpartyName = matched.document.nombrePagador || '';
+      concepto = matched.document.concepto || '';
+    } else if (matched.type === 'pago_enviado') {
+      counterpartyName = matched.document.nombreBeneficiario || '';
+      concepto = matched.document.concepto || '';
+    } else {
+      // recibo — no obvious counterparty name for keyword matching
+      counterpartyName = '';
+      concepto = '';
+    }
+    const score = calculateKeywordMatchScore(conceptoMovimiento, counterpartyName, concepto);
     tier = score >= 2 ? 4 : 5;
   } else {
     tier = 5; // Amount + date only (can't determine keyword/referencia from existing data)
@@ -648,68 +713,15 @@ function buildMatchQuality(
 }
 
 /**
- * Finds a document by fileId in the provided arrays
- * Returns the document and its type for building MatchQuality
- */
-function findDocumentByFileId(
-  fileId: string,
-  facturasEmitidas: Array<Factura & { row: number }>,
-  pagosRecibidos: Array<Pago & { row: number }>,
-  facturasRecibidas: Array<Factura & { row: number }>,
-  pagosEnviados: Array<Pago & { row: number }>,
-  recibos: Array<Recibo & { row: number }>
-): { document: any; type: 'factura_emitida' | 'pago_recibido' | 'factura_recibida' | 'pago_enviado' | 'recibo' } | null {
-  // Search in facturas emitidas
-  const facturaEmitida = facturasEmitidas.find(f => f.fileId === fileId);
-  if (facturaEmitida) {
-    return { document: facturaEmitida, type: 'factura_emitida' };
-  }
-
-  // Search in pagos recibidos
-  const pagoRecibido = pagosRecibidos.find(p => p.fileId === fileId);
-  if (pagoRecibido) {
-    return { document: pagoRecibido, type: 'pago_recibido' };
-  }
-
-  // Search in facturas recibidas
-  const facturaRecibida = facturasRecibidas.find(f => f.fileId === fileId);
-  if (facturaRecibida) {
-    return { document: facturaRecibida, type: 'factura_recibida' };
-  }
-
-  // Search in pagos enviados
-  const pagoEnviado = pagosEnviados.find(p => p.fileId === fileId);
-  if (pagoEnviado) {
-    return { document: pagoEnviado, type: 'pago_enviado' };
-  }
-
-  // Search in recibos
-  const recibo = recibos.find(r => r.fileId === fileId);
-  if (recibo) {
-    return { document: recibo, type: 'recibo' };
-  }
-
-  return null;
-}
-
-/**
- * Builds MatchQuality for an existing match by looking up the document
+ * Builds MatchQuality for an existing match by looking up the document via Map
  */
 function buildMatchQualityFromFileId(
   fileId: string,
   fechaMovimiento: string,
   conceptoMovimiento: string,
-  ingresosData: IngresosData,
-  egresosData: EgresosData
+  documentMap: Map<string, MatchedDocument>
 ): MatchQuality | null {
-  const found = findDocumentByFileId(
-    fileId,
-    ingresosData.facturasEmitidas,
-    ingresosData.pagosRecibidos,
-    egresosData.facturasRecibidas,
-    egresosData.pagosEnviados,
-    egresosData.recibos
-  );
+  const found = documentMap.get(fileId);
 
   if (!found) {
     return null;
@@ -722,20 +734,27 @@ function buildMatchQualityFromFileId(
   let cuitDocumento: string;
   let hasLinkedPago = false;
 
-  if (type === 'factura_emitida' || type === 'factura_recibida') {
+  if (type === 'factura_emitida') {
     fechaDocumento = document.fechaEmision;
-    cuitDocumento = type === 'factura_emitida' ? document.cuitReceptor : document.cuitEmisor;
+    cuitDocumento = document.cuitReceptor || '';
     hasLinkedPago = !!document.matchedPagoFileId;
-  } else if (type === 'pago_recibido' || type === 'pago_enviado') {
+  } else if (type === 'factura_recibida') {
+    fechaDocumento = document.fechaEmision;
+    cuitDocumento = document.cuitEmisor;
+    hasLinkedPago = !!document.matchedPagoFileId;
+  } else if (type === 'pago_recibido') {
     fechaDocumento = document.fechaPago;
-    cuitDocumento = type === 'pago_recibido' ? document.cuitPagador : document.cuitBeneficiario;
+    cuitDocumento = document.cuitPagador || '';
     hasLinkedPago = !!document.matchedFacturaFileId;
-  } else if (type === 'recibo') {
+  } else if (type === 'pago_enviado') {
+    fechaDocumento = document.fechaPago;
+    cuitDocumento = document.cuitBeneficiario || '';
+    hasLinkedPago = !!document.matchedFacturaFileId;
+  } else {
+    // recibo
     fechaDocumento = document.fechaPago;
     cuitDocumento = document.cuilEmpleado;
     hasLinkedPago = false;
-  } else {
-    return null;
   }
 
   // For isExactAmount, we can't determine this without re-running the match
@@ -748,7 +767,7 @@ function buildMatchQualityFromFileId(
     conceptoMovimiento,
     hasLinkedPago,
     true,  // Set to true for both to ensure fair comparison on other dimensions
-    document
+    found
   );
 }
 
@@ -756,10 +775,8 @@ function buildMatchQualityFromFileId(
  * Builds a human-readable detalle string for a matched document
  * Used for auto-generating detalle for MANUAL rows with blank detalle
  */
-function buildDetalleForDocument(
-  document: any,
-  type: 'factura_emitida' | 'pago_recibido' | 'factura_recibida' | 'pago_enviado' | 'recibo'
-): string {
+function buildDetalleForDocument(matched: MatchedDocument): string {
+  const { document, type } = matched;
   if (type === 'factura_emitida') {
     const razonSocial = document.razonSocialReceptor || 'Cliente';
     const concepto = document.concepto || '';
@@ -794,11 +811,11 @@ function buildDetalleForDocument(
       return `Pago a ${nombreBeneficiario} - ${concepto}`;
     }
     return `Pago a ${nombreBeneficiario}`;
-  } else if (type === 'recibo') {
+  } else {
+    // recibo
     const nombreEmpleado = document.nombreEmpleado || 'Empleado';
     return `Recibo de ${nombreEmpleado}`;
   }
-  return '';
 }
 
 /**
@@ -811,7 +828,9 @@ async function matchBankMovimientos(
   ingresosData: IngresosData,
   egresosData: EgresosData,
   options: MatchOptions,
-  currentYear: number
+  currentYear: number,
+  documentMap: Map<string, MatchedDocument>,
+  globalExcludeFileIds?: Set<string>
 ): Promise<MatchMovimientosResult> {
   const startTime = Date.now();
 
@@ -847,10 +866,16 @@ async function matchBankMovimientos(
   // This prevents the same document from being assigned to multiple movements.
   // Each movement temporarily removes its own fileId before calling the matcher,
   // so it can still re-evaluate its current match.
+  // Also seed from globalExcludeFileIds to prevent cross-bank double-assignment.
   const excludeFileIds = new Set<string>();
   for (const mov of movimientos) {
     if (mov.matchedFileId) {
       excludeFileIds.add(mov.matchedFileId);
+    }
+  }
+  if (globalExcludeFileIds) {
+    for (const id of globalExcludeFileIds) {
+      excludeFileIds.add(id);
     }
   }
 
@@ -860,18 +885,10 @@ async function matchBankMovimientos(
     if (mov.matchedType === 'MANUAL') {
       // If MANUAL row has blank detalle, generate it from the matched document
       if (!mov.detalle && mov.matchedFileId) {
-        const matchedDoc = findDocumentByFileId(
-          mov.matchedFileId,
-          ingresosData.facturasEmitidas,
-          ingresosData.pagosRecibidos,
-          egresosData.facturasRecibidas,
-          egresosData.pagosEnviados,
-          egresosData.recibos
-        );
+        const matchedDoc = documentMap.get(mov.matchedFileId);
 
         if (matchedDoc) {
-          const { document, type } = matchedDoc;
-          const detalle = buildDetalleForDocument(document, type);
+          const detalle = buildDetalleForDocument(matchedDoc);
           const expectedVersion = computeRowVersion(mov);
 
           updates.push({
@@ -944,8 +961,7 @@ async function matchBankMovimientos(
           mov.matchedFileId,
           mov.fecha,
           mov.concepto,
-          ingresosData,
-          egresosData
+          documentMap
         );
 
         if (!existingQuality) {
@@ -956,40 +972,36 @@ async function matchBankMovimientos(
           );
           shouldUpdate = false;
         } else {
-          // Build candidate quality
-          // Note: matchResult doesn't provide all fields we need, so we need to look up the document
-          const candidateDoc = findDocumentByFileId(
-            matchResult.matchedFileId!,
-            ingresosData.facturasEmitidas,
-            ingresosData.pagosRecibidos,
-            egresosData.facturasRecibidas,
-            egresosData.pagosEnviados,
-            egresosData.recibos
-          );
+          // Build candidate quality via Map lookup
+          const candidateMatched = documentMap.get(matchResult.matchedFileId!);
 
-          if (candidateDoc) {
-            const { document, type } = candidateDoc;
+          if (candidateMatched) {
+            const { document, type } = candidateMatched;
             let fechaDocumento: string;
             let cuitDocumento: string;
             let hasLinkedPago = false;
 
-            if (type === 'factura_emitida' || type === 'factura_recibida') {
+            if (type === 'factura_emitida') {
               fechaDocumento = document.fechaEmision;
-              cuitDocumento = type === 'factura_emitida' ? document.cuitReceptor : document.cuitEmisor;
+              cuitDocumento = document.cuitReceptor || '';
               hasLinkedPago = !!document.matchedPagoFileId;
-            } else if (type === 'pago_recibido' || type === 'pago_enviado') {
+            } else if (type === 'factura_recibida') {
+              fechaDocumento = document.fechaEmision;
+              cuitDocumento = document.cuitEmisor;
+              hasLinkedPago = !!document.matchedPagoFileId;
+            } else if (type === 'pago_recibido') {
               fechaDocumento = document.fechaPago;
-              cuitDocumento = type === 'pago_recibido' ? document.cuitPagador : document.cuitBeneficiario;
+              cuitDocumento = document.cuitPagador || '';
               hasLinkedPago = !!document.matchedFacturaFileId;
-            } else if (type === 'recibo') {
+            } else if (type === 'pago_enviado') {
+              fechaDocumento = document.fechaPago;
+              cuitDocumento = document.cuitBeneficiario || '';
+              hasLinkedPago = !!document.matchedFacturaFileId;
+            } else {
+              // recibo
               fechaDocumento = document.fechaPago;
               cuitDocumento = document.cuilEmpleado;
               hasLinkedPago = false;
-            } else {
-              // Unknown type - replace with new match
-              shouldUpdate = true;
-              fechaDocumento = '';
-              cuitDocumento = '';
             }
 
             if (fechaDocumento) {
@@ -1004,7 +1016,7 @@ async function matchBankMovimientos(
                 mov.concepto,
                 hasLinkedPago,
                 true,  // Consistent with existing for fair comparison
-                document
+                candidateMatched
               );
 
               // Compare: replace if candidate is better
@@ -1054,6 +1066,14 @@ async function matchBankMovimientos(
         excludeFileIds.add(ownFileId);
       }
       noMatches++;
+    }
+  }
+
+  // Propagate this bank's final exclusion set to the global set so subsequent
+  // banks cannot claim the same documents.
+  if (globalExcludeFileIds) {
+    for (const id of excludeFileIds) {
+      globalExcludeFileIds.add(id);
     }
   }
 
@@ -1135,6 +1155,19 @@ export async function matchAllMovimientos(
       // Create matcher instance
       const matcher = new BankMovementMatcher();
 
+      // Build document Map once — O(N) lookup instead of O(N) per movement
+      const documentMap = buildDocumentMap(
+        ingresosResult.value.facturasEmitidas,
+        ingresosResult.value.pagosRecibidos,
+        egresosResult.value.facturasRecibidas,
+        egresosResult.value.pagosEnviados,
+        egresosResult.value.recibos
+      );
+
+      // Global exclusion set grows as banks are processed sequentially.
+      // Prevents the same document from being matched across different banks.
+      const globalExcludeFileIds = new Set<string>();
+
       // Process banks SEQUENTIALLY for memory efficiency
       const results: MatchMovimientosResult[] = [];
 
@@ -1154,7 +1187,9 @@ export async function matchAllMovimientos(
           ingresosResult.value,
           egresosResult.value,
           options,
-          currentYear
+          currentYear,
+          documentMap,
+          globalExcludeFileIds
         );
 
         results.push(result);

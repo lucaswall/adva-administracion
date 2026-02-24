@@ -11,6 +11,7 @@ import {
   parseFacturasEmitidas,
   parseFacturasRecibidas,
   parsePagos,
+  buildDocumentMap,
   type MatchQuality,
 } from './match-movimientos.js';
 
@@ -2829,5 +2830,362 @@ describe('MANUAL matchedType and usedFileIds deduplication', () => {
     // (restored after the continue), so the second movement sees it excluded
     const excludeIds = mockMatchMovement.mock.calls[0][4];
     expect(excludeIds.has('zero-file')).toBe(true);
+  });
+});
+
+// ---- Helper factories for Task 4 / 5 tests ----
+
+function makeTestFactura(fileId: string) {
+  return {
+    row: 2,
+    fileId,
+    fileName: 'test.pdf',
+    tipoComprobante: 'A' as const,
+    nroFactura: '00001-00000001',
+    fechaEmision: '2025-01-01',
+    cuitEmisor: '',
+    razonSocialEmisor: '',
+    cuitReceptor: '20123456786',
+    razonSocialReceptor: 'TEST SA',
+    importeNeto: 0,
+    importeIva: 0,
+    importeTotal: 1000,
+    moneda: 'ARS' as const,
+    processedAt: '',
+    confidence: 0.95,
+    needsReview: false,
+  };
+}
+
+function makeTestPago(fileId: string) {
+  return {
+    row: 2,
+    fileId,
+    fileName: 'test.pdf',
+    fechaPago: '2025-01-01',
+    banco: 'BBVA',
+    importePagado: 1000,
+    moneda: 'ARS' as const,
+    referencia: '',
+    cuitPagador: '',
+    nombrePagador: '',
+    cuitBeneficiario: '',
+    nombreBeneficiario: '',
+    concepto: '',
+    processedAt: '',
+    confidence: 0.95,
+    needsReview: false,
+  };
+}
+
+function makeTestRecibo(fileId: string) {
+  return {
+    row: 2,
+    fileId,
+    fileName: 'test.pdf',
+    tipoRecibo: 'sueldo' as const,
+    nombreEmpleado: 'Juan Perez',
+    cuilEmpleado: '20123456786',
+    legajo: '001',
+    cuitEmpleador: '30709076783',
+    periodoAbonado: 'enero/2025',
+    fechaPago: '2025-01-31',
+    subtotalRemuneraciones: 1000,
+    subtotalDescuentos: 100,
+    totalNeto: 900,
+    processedAt: '',
+    confidence: 0.95,
+    needsReview: false,
+  };
+}
+
+describe('buildDocumentMap', () => {
+  it('builds Map correctly from all 5 document arrays, keyed by fileId', () => {
+    const facturasEmitidas = [makeTestFactura('fe-1')];
+    const pagosRecibidos = [makeTestPago('pr-1')];
+    const facturasRecibidas = [makeTestFactura('fr-1')];
+    const pagosEnviados = [makeTestPago('pe-1')];
+    const recibos = [makeTestRecibo('rc-1')];
+
+    const map = buildDocumentMap(facturasEmitidas, pagosRecibidos, facturasRecibidas, pagosEnviados, recibos);
+
+    expect(map.size).toBe(5);
+    expect(map.get('fe-1')?.type).toBe('factura_emitida');
+    expect(map.get('pr-1')?.type).toBe('pago_recibido');
+    expect(map.get('fr-1')?.type).toBe('factura_recibida');
+    expect(map.get('pe-1')?.type).toBe('pago_enviado');
+    expect(map.get('rc-1')?.type).toBe('recibo');
+  });
+
+  it('Map lookup returns the same document object as linear scan would', () => {
+    const factura = makeTestFactura('fe-unique');
+    const map = buildDocumentMap([factura], [], [], [], []);
+    const found = map.get('fe-unique');
+
+    expect(found).not.toBeNull();
+    expect(found?.type).toBe('factura_emitida');
+    expect(found?.document).toBe(factura); // Same object reference
+    expect(found?.document.fileId).toBe('fe-unique');
+  });
+
+  it('returns undefined for fileId not in any array', () => {
+    const map = buildDocumentMap([makeTestFactura('fe-1')], [], [], [], []);
+    expect(map.get('nonexistent')).toBeUndefined();
+  });
+
+  it('first match wins for duplicate fileIds — facturasEmitidas wins over pagosRecibidos', () => {
+    const factura = makeTestFactura('shared-id');
+    const pago = makeTestPago('shared-id');
+
+    const map = buildDocumentMap([factura], [pago], [], [], []);
+    const found = map.get('shared-id');
+
+    // facturasEmitidas is iterated first, so it wins
+    expect(found?.type).toBe('factura_emitida');
+    expect(found?.document).toBe(factura);
+  });
+
+  it('first match wins — pagosRecibidos wins over facturasRecibidas when facturasEmitidas is empty', () => {
+    const pago = makeTestPago('shared-id');
+    const factura = makeTestFactura('shared-id');
+
+    const map = buildDocumentMap([], [pago], [factura], [], []);
+    const found = map.get('shared-id');
+
+    expect(found?.type).toBe('pago_recibido');
+    expect(found?.document).toBe(pago);
+  });
+
+  it('first match wins — recibos is last in search order', () => {
+    const recibo = makeTestRecibo('shared-id');
+    const pago = makeTestPago('shared-id');
+
+    const map = buildDocumentMap([], [], [], [pago], [recibo]);
+    const found = map.get('shared-id');
+
+    // pagosEnviados comes before recibos
+    expect(found?.type).toBe('pago_enviado');
+    expect(found?.document).toBe(pago);
+  });
+
+  it('returns empty Map when all arrays are empty', () => {
+    const map = buildDocumentMap([], [], [], [], []);
+    expect(map.size).toBe(0);
+  });
+
+  it('handles multiple documents per array with distinct fileIds', () => {
+    const facturasEmitidas = [makeTestFactura('fe-1'), makeTestFactura('fe-2'), makeTestFactura('fe-3')];
+    const map = buildDocumentMap(facturasEmitidas, [], [], [], []);
+
+    expect(map.size).toBe(3);
+    expect(map.get('fe-1')?.type).toBe('factura_emitida');
+    expect(map.get('fe-2')?.type).toBe('factura_emitida');
+    expect(map.get('fe-3')?.type).toBe('factura_emitida');
+  });
+});
+
+describe('cross-bank deduplication', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.useFakeTimers();
+    mockMatchMovement = vi.fn().mockReturnValue({
+      matchType: 'no_match',
+      description: '',
+      matchedFileId: '',
+      confidence: 'LOW',
+    });
+    mockMatchCreditMovement = vi.fn().mockReturnValue({
+      matchType: 'no_match',
+      description: '',
+      matchedFileId: '',
+      confidence: 'LOW',
+    });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('document matched in Bank A is excluded from matching in Bank B', async () => {
+    const mockFolderStructure = {
+      controlIngresosId: 'ingresos-id',
+      controlEgresosId: 'egresos-id',
+      bankSpreadsheets: new Map(),
+      movimientosSpreadsheets: new Map([
+        ['BBVA', 'bbva-id'],
+        ['SANTANDER', 'santander-id'],
+      ]),
+    };
+
+    vi.mocked(withLock).mockImplementation(async (_id, fn) => {
+      const result = await fn();
+      return { ok: true, value: result };
+    });
+
+    vi.mocked(getCachedFolderStructure).mockReturnValue(mockFolderStructure as any);
+    vi.mocked(getValues).mockResolvedValue({ ok: true, value: [['header']] });
+
+    // Bank A has one movement, Bank B has another movement
+    vi.mocked(getMovimientosToFill)
+      .mockResolvedValueOnce({
+        ok: true,
+        value: [{ sheetName: '2025-01', rowNumber: 2, fecha: '2025-01-15', concepto: 'TX BANK A', debito: 1000, credito: null, saldo: 9000, saldoCalculado: 9000, matchedFileId: '', detalle: '', matchedType: '' }],
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        value: [{ sheetName: '2025-01', rowNumber: 2, fecha: '2025-01-15', concepto: 'TX BANK B', debito: 1000, credito: null, saldo: 9000, saldoCalculado: 9000, matchedFileId: '', detalle: '', matchedType: '' }],
+      });
+
+    // If 'shared-doc-1' is in excludeFileIds → no match; otherwise → match
+    mockMatchMovement.mockImplementation((_mov: unknown, _f: unknown, _r: unknown, _p: unknown, excludeFileIds: Set<string>) => {
+      if (excludeFileIds.has('shared-doc-1')) {
+        return { matchType: 'no_match', description: '', matchedFileId: '', confidence: 'LOW' };
+      }
+      return { matchType: 'direct_factura', description: 'Shared doc match', matchedFileId: 'shared-doc-1', confidence: 'HIGH' };
+    });
+
+    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: 1 });
+
+    const resultPromise = matchAllMovimientos();
+    await vi.runAllTimersAsync();
+    const result = await resultPromise;
+
+    expect(result.ok).toBe(true);
+
+    // Bank A (first updateDetalle call) should have matched 'shared-doc-1'
+    const bankAUpdates = vi.mocked(updateDetalle).mock.calls[0][1] as any[];
+    expect(bankAUpdates).toHaveLength(1);
+    expect(bankAUpdates[0].matchedFileId).toBe('shared-doc-1');
+
+    // Bank B (second updateDetalle call) should have NO matches (doc was excluded)
+    const bankBUpdates = vi.mocked(updateDetalle).mock.calls[1][1] as any[];
+    expect(bankBUpdates).toHaveLength(0);
+  });
+
+  it('MANUAL matches from Bank A contribute to global exclusion for Bank B', async () => {
+    const mockFolderStructure = {
+      controlIngresosId: 'ingresos-id',
+      controlEgresosId: 'egresos-id',
+      bankSpreadsheets: new Map(),
+      movimientosSpreadsheets: new Map([
+        ['BBVA', 'bbva-id'],
+        ['SANTANDER', 'santander-id'],
+      ]),
+    };
+
+    vi.mocked(withLock).mockImplementation(async (_id, fn) => {
+      const result = await fn();
+      return { ok: true, value: result };
+    });
+
+    vi.mocked(getCachedFolderStructure).mockReturnValue(mockFolderStructure as any);
+
+    // Control data has one factura matching 'manual-doc-1'
+    vi.mocked(getValues).mockImplementation(async (_id, range) => {
+      if (range === 'Facturas Recibidas!A:T') {
+        return {
+          ok: true,
+          value: [
+            ['fechaemision', 'fileid', 'filename', 'tipocomprobante', 'nrofactura', 'cuitemisor', 'razonsocialemisor', 'importeneto', 'importeiva', 'importetotal', 'moneda', 'concepto', 'processedat', 'confidence', 'needsreview', 'matchedpagofileid', 'matchconfidence', 'hascuitmatch', 'pagada'],
+            ['2025-01-10', 'manual-doc-1', 'factura.pdf', 'B', '00001-00000001', '20123456786', 'PROVEEDOR SA', '', '', '1000', 'ARS', '', '', '0.95', 'NO', '', '', '', ''],
+          ],
+        };
+      }
+      return { ok: true, value: [['header']] };
+    });
+
+    // Bank A: MANUAL row with blank detalle (generates update, contributing to globalExcludeFileIds)
+    // Bank B: regular movement that would match 'manual-doc-1'
+    vi.mocked(getMovimientosToFill)
+      .mockResolvedValueOnce({
+        ok: true,
+        value: [{ sheetName: '2025-01', rowNumber: 2, fecha: '2025-01-15', concepto: 'TX MANUAL', debito: 1000, credito: null, saldo: 9000, saldoCalculado: 9000, matchedFileId: 'manual-doc-1', detalle: '', matchedType: 'MANUAL' }],
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        value: [{ sheetName: '2025-01', rowNumber: 2, fecha: '2025-01-15', concepto: 'TX B', debito: 1000, credito: null, saldo: 9000, saldoCalculado: 9000, matchedFileId: '', detalle: '', matchedType: '' }],
+      });
+
+    // Bank B matcher: returns 'manual-doc-1' unless excluded
+    mockMatchMovement.mockImplementation((_mov: unknown, _f: unknown, _r: unknown, _p: unknown, excludeFileIds: Set<string>) => {
+      if (excludeFileIds.has('manual-doc-1')) {
+        return { matchType: 'no_match', description: '', matchedFileId: '', confidence: 'LOW' };
+      }
+      return { matchType: 'direct_factura', description: 'Match', matchedFileId: 'manual-doc-1', confidence: 'HIGH' };
+    });
+
+    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: 1 });
+
+    const resultPromise = matchAllMovimientos();
+    await vi.runAllTimersAsync();
+    const result = await resultPromise;
+
+    expect(result.ok).toBe(true);
+
+    // Bank A: MANUAL detalle fill for 'manual-doc-1'
+    const bankAUpdates = vi.mocked(updateDetalle).mock.calls[0][1] as any[];
+    expect(bankAUpdates).toHaveLength(1);
+    expect(bankAUpdates[0].matchedFileId).toBe('manual-doc-1');
+    expect(bankAUpdates[0].matchedType).toBe('MANUAL');
+
+    // Bank B: 'manual-doc-1' excluded by global dedup — no match
+    const bankBUpdates = vi.mocked(updateDetalle).mock.calls[1][1] as any[];
+    expect(bankBUpdates).toHaveLength(0);
+  });
+
+  it('newly matched documents from Bank A processing are added to global exclusion for Bank C', async () => {
+    const mockFolderStructure = {
+      controlIngresosId: 'ingresos-id',
+      controlEgresosId: 'egresos-id',
+      bankSpreadsheets: new Map(),
+      movimientosSpreadsheets: new Map([
+        ['BBVA', 'bbva-id'],
+        ['SANTANDER', 'santander-id'],
+        ['GALICIA', 'galicia-id'],
+      ]),
+    };
+
+    vi.mocked(withLock).mockImplementation(async (_id, fn) => {
+      const result = await fn();
+      return { ok: true, value: result };
+    });
+
+    vi.mocked(getCachedFolderStructure).mockReturnValue(mockFolderStructure as any);
+    vi.mocked(getValues).mockResolvedValue({ ok: true, value: [['header']] });
+
+    // Three banks, each with one movement wanting 'doc-A'
+    vi.mocked(getMovimientosToFill)
+      .mockResolvedValueOnce({ ok: true, value: [{ sheetName: '2025-01', rowNumber: 2, fecha: '2025-01-15', concepto: 'TX A', debito: 1000, credito: null, saldo: 9000, saldoCalculado: 9000, matchedFileId: '', detalle: '', matchedType: '' }] })
+      .mockResolvedValueOnce({ ok: true, value: [{ sheetName: '2025-01', rowNumber: 2, fecha: '2025-01-15', concepto: 'TX B', debito: 1000, credito: null, saldo: 9000, saldoCalculado: 9000, matchedFileId: '', detalle: '', matchedType: '' }] })
+      .mockResolvedValueOnce({ ok: true, value: [{ sheetName: '2025-01', rowNumber: 2, fecha: '2025-01-15', concepto: 'TX C', debito: 1000, credito: null, saldo: 9000, saldoCalculado: 9000, matchedFileId: '', detalle: '', matchedType: '' }] });
+
+    // All three want to match 'doc-A', only Bank A succeeds (not excluded yet)
+    mockMatchMovement.mockImplementation((_mov: unknown, _f: unknown, _r: unknown, _p: unknown, excludeFileIds: Set<string>) => {
+      if (excludeFileIds.has('doc-A')) {
+        return { matchType: 'no_match', description: '', matchedFileId: '', confidence: 'LOW' };
+      }
+      return { matchType: 'direct_factura', description: 'Match doc-A', matchedFileId: 'doc-A', confidence: 'HIGH' };
+    });
+
+    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: 1 });
+
+    const resultPromise = matchAllMovimientos();
+    await vi.runAllTimersAsync();
+    const result = await resultPromise;
+
+    expect(result.ok).toBe(true);
+
+    // Bank A matches 'doc-A'
+    const bankAUpdates = vi.mocked(updateDetalle).mock.calls[0][1] as any[];
+    expect(bankAUpdates).toHaveLength(1);
+    expect(bankAUpdates[0].matchedFileId).toBe('doc-A');
+
+    // Bank B does NOT match 'doc-A' (excluded by Bank A)
+    const bankBUpdates = vi.mocked(updateDetalle).mock.calls[1][1] as any[];
+    expect(bankBUpdates).toHaveLength(0);
+
+    // Bank C also does NOT match 'doc-A' (still excluded)
+    const bankCUpdates = vi.mocked(updateDetalle).mock.calls[2][1] as any[];
+    expect(bankCUpdates).toHaveLength(0);
   });
 });
