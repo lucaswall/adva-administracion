@@ -263,8 +263,8 @@ Each bank/card/broker spreadsheet has per-month sheets named `YYYY-MM` containin
 | E | saldo | currency | Balance from PDF (parsed) |
 | F | saldoCalculado | formula | Running balance calculation |
 | G | matchedFileId | string | Google Drive fileId of matched document |
-| H | detalle | string | Human-readable match description |
-| I | matchedType | string | Match type: `AUTO` (algorithmic), `MANUAL` (user-set), or empty (unmatched) |
+| H | matchedType | string | Match type: `AUTO` (algorithmic), `MANUAL` (user-set), or empty (unmatched) |
+| I | detalle | string | Human-readable match description |
 
 **Special Rows:**
 - `SALDO INICIAL` - Opening balance row (skipped in matching)
@@ -272,7 +272,7 @@ Each bank/card/broker spreadsheet has per-month sheets named `YYYY-MM` containin
 
 **Matching Behavior:**
 
-The `detalle` column (H) is automatically filled by matching bank movements against Control de Ingresos/Egresos data:
+The `detalle` column (I) is automatically filled by matching bank movements against Control de Ingresos/Egresos data:
 
 **For DEBIT movements** (money OUT from ADVA):
 1. Bank fees auto-detection (patterns: "IMPUESTO LEY", "COMISION")
@@ -432,7 +432,7 @@ Documents classified by ADVA's role (CUIT: 30709076783):
 - Automatic matching will never displace or overwrite a MANUAL match
 - MANUAL facturas/recibos are invisible to `FacturaPagoMatcher.findMatches()` and `ReciboPagoMatcher.findMatches()` — no pago can displace them
 - MANUAL pagos are excluded from the unmatched pool — they are treated as already matched
-- **Movimientos bancarios:** MANUAL locking is supported via the `matchedType` column (I). Set `matchedType` to `MANUAL` and provide a `matchedFileId` — the system will auto-generate the `detalle` and exclude the document from automatic matching. MANUAL rows are never overwritten, even with `force=true`.
+- **Movimientos bancarios:** MANUAL locking is supported via the `matchedType` column (H). Set `matchedType` to `MANUAL` and provide a `matchedFileId` — the system will auto-generate the `detalle` and exclude the document from automatic matching. MANUAL rows are never overwritten, even with `force=true`.
 
 ### Cross-References
 

@@ -909,7 +909,7 @@ async function matchBankMovimientos(
     // Temporarily remove this movement's own fileId from excludeFileIds
     // so the matcher can re-evaluate it (it may find a better match or confirm the same one)
     const ownFileId = mov.matchedFileId;
-    if (ownFileId) {
+    if (ownFileId && !globalExcludeFileIds?.has(ownFileId)) {
       excludeFileIds.delete(ownFileId);
     }
 
@@ -1079,8 +1079,8 @@ async function matchBankMovimientos(
         if (ownFileId) {
           excludeFileIds.add(ownFileId);
         }
+        noMatches++;
       }
-      noMatches++;
     }
   }
 

@@ -1,6 +1,6 @@
 # Implementation Plan
 
-**Status:** IN_PROGRESS
+**Status:** COMPLETE
 **Branch:** feat/ADV-144-movimientos-matching-fixes
 **Issues:** ADV-144, ADV-145, ADV-146, ADV-147, ADV-148, ADV-149, ADV-150
 **Created:** 2026-02-24
@@ -313,3 +313,52 @@ Fix 4 bugs in bank movimientos matching (cross-bank deduplication, ARS tolerance
 ## Post-Implementation Checklist
 1. Run `bug-hunter` agent — Review changes for bugs
 2. Run `verifier` agent — Verify all tests pass and zero warnings
+
+---
+
+## Iteration 1
+
+**Implemented:** 2026-02-24
+**Method:** Agent team (2 workers, worktree-isolated)
+
+### Tasks Completed This Iteration
+- Task 1: Fix ARS tolerance inconsistency in credit matching — `matchCreditMovement` now uses `amountsMatchCrossCurrency` for consistent $1 ARS tolerance (worker-1)
+- Task 2: Add cross-currency fallback for USD Pagos Enviados in debit matching — mirrors credit matching pattern with confidence capping (worker-1)
+- Task 3: Force mode clears stale AUTO matches — pushes empty update when no new match found in force mode (worker-1)
+- Task 4: Map-based document lookup — `buildDocumentMap` replaces O(N) linear scans with O(1) Map lookups (worker-2)
+- Task 5: Cross-bank deduplication — `globalExcludeFileIds` shared across all bank spreadsheets (worker-2)
+- Task 6: Type safety for `any` types — `MatchedDocument` discriminated union replaces `any` in document functions (worker-2)
+- Task 7: Fix documentation column order — SPREADSHEET_FORMAT.md and CLAUDE.md corrected to H=matchedType, I=detalle (lead)
+
+### Files Modified
+- `src/bank/matcher.ts` — ARS tolerance fix, USD pago cross-currency fallback
+- `src/bank/matcher.test.ts` — Tests for Tasks 1 and 2
+- `src/bank/match-movimientos.ts` — Map lookup, cross-bank dedup, type safety, force mode clearing, bug-hunter fixes
+- `src/bank/match-movimientos.test.ts` — Tests for Tasks 3, 4, 5, 6
+- `SPREADSHEET_FORMAT.md` — Column order fix (H=matchedType, I=detalle)
+- `CLAUDE.md` — Column order fix
+
+### Linear Updates
+- ADV-144: Todo → In Progress → Review
+- ADV-145: Todo → Review
+- ADV-146: Todo → Review
+- ADV-147: Todo → In Progress → Review
+- ADV-148: Todo → Review
+- ADV-149: Todo → Review
+- ADV-150: Todo → Review
+
+### Pre-commit Verification
+- bug-hunter: Found 2 bugs (MEDIUM: cross-bank dedup bypass for pre-existing duplicates, LOW: noMatches overcounting in force mode), both fixed
+- verifier: All 1843 tests pass, zero warnings
+
+### Work Partition
+- Worker 1: Tasks 1, 2, 3 (bug fixes domain — matcher.ts, match-movimientos.ts force mode)
+- Worker 2: Tasks 4, 5, 6 (refactoring domain — Map lookup, dedup, type safety)
+- Lead: Task 7 (documentation fix)
+
+### Merge Summary
+- Worker 2: fast-forward (no conflicts)
+- Worker 1: auto-merged (no conflicts)
+
+### Continuation Status
+All tasks completed.
