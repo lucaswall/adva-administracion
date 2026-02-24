@@ -155,7 +155,7 @@ export async function storeRetencion(
       }
 
       info('Retencion reprocessed (existing row updated)', {
-        module: 'storage',
+        module: 'retencion-store',
         phase: 'retencion',
         fileId: retencion.fileId,
         rowIndex: fileIdCheck.rowIndex,

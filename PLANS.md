@@ -1,6 +1,7 @@
 # Implementation Plan
 
 **Created:** 2026-02-24
+**Status:** COMPLETE
 **Source:** Inline request: Fix A (updateRowsWithFormatting) + Fix C (normalizeTimestamp) + Dashboard processedAt startup migration
 **Linear Issues:** [ADV-152](https://linear.app/lw-claude/issue/ADV-152/add-updaterowswithformatting-to-sheetsts), [ADV-153](https://linear.app/lw-claude/issue/ADV-153/add-normalizetimestamp-utility-for-reading-processedat-from-sheets), [ADV-154](https://linear.app/lw-claude/issue/ADV-154/use-updaterowswithformatting-in-storage-reprocessing-paths), [ADV-155](https://linear.app/lw-claude/issue/ADV-155/fix-dashboard-processedat-and-pagos-pendientes-date-passthrough), [ADV-156](https://linear.app/lw-claude/issue/ADV-156/startup-migration-fix-existing-dashboard-processedat-format)
 
@@ -271,5 +272,43 @@
 - Worker 1: fast-forward (no conflicts)
 - Worker 2: auto-merge, 3 type mismatches in sheets.ts stub vs real signature (resolved: removed stub, fixed nested→flat values)
 
+### Review Findings
+
+Summary: 6 finding(s) found, 3 fixed inline (Team: security, reliability, quality reviewers)
+- FIXED INLINE: 3 issue(s) — verified via TDD + bug-hunter
+- DISCARDED: 3 finding(s) — false positives / style-only
+
+**Issues fixed inline:**
+- [MEDIUM] BUG: Sort uses `String()` instead of `normalizeSpreadsheetDate()` (`src/services/pagos-pendientes.ts:91-94`) — replaced with `normalizeSpreadsheetDate()` + added serial number sort test (ADV-157)
+- [LOW] CONVENTION: Reprocessing log uses wrong module name (`src/processing/storage/retencion-store.ts:157`) — changed `'storage'` to `'retencion-store'` (ADV-158)
+- [LOW] TEST: Sort test doesn't exercise serial number path (`src/services/pagos-pendientes.test.ts`) — added test with unsorted serial numbers (ADV-159)
+
+**Discarded findings (not bugs):**
+- [DISCARDED] sheets.ts:74-82 — Cache TTL resets on read (LRU behavior). Valid design choice; timezone changes are exceedingly rare. Misleading comment is style-only.
+- [DISCARDED] migrations.test.ts — `as any` casts in test mocks. Standard partial mock pattern with zero correctness impact.
+- [DISCARDED] factura-pago-matcher.test.ts:99-114 — Test tests Map API behavior, not matcher code. Unnecessary but not harmful.
+
+### Linear Updates
+- ADV-152: Review → Merge (original task)
+- ADV-153: Review → Merge (original task)
+- ADV-154: Review → Merge (original task)
+- ADV-155: Review → Merge (original task)
+- ADV-156: Review → Merge (original task)
+- ADV-157: Created in Merge (Fix: pagos-pendientes sort — fixed inline)
+- ADV-158: Created in Merge (Fix: retencion-store log module — fixed inline)
+- ADV-159: Created in Merge (Fix: pagos-pendientes sort test — fixed inline)
+
+### Inline Fix Verification
+- Unit tests: all 1875 pass
+- Bug-hunter: no new issues
+
+<!-- REVIEW COMPLETE -->
+
 ### Continuation Status
 All tasks completed.
+
+---
+
+## Status: COMPLETE
+
+All tasks implemented and reviewed successfully. All Linear issues moved to Merge.

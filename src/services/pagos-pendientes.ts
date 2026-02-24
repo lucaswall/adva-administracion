@@ -89,8 +89,8 @@ export async function syncPagosPendientes(
     // Sort unpaid facturas by fechaEmision ascending (oldest first)
     if (fechaEmisionIdx !== -1) {
       unpaidFacturas.sort((a, b) => {
-        const dateA = String(a[fechaEmisionIdx] || '');
-        const dateB = String(b[fechaEmisionIdx] || '');
+        const dateA = normalizeSpreadsheetDate(a[fechaEmisionIdx]);
+        const dateB = normalizeSpreadsheetDate(b[fechaEmisionIdx]);
         return dateA.localeCompare(dateB);
       });
     }
