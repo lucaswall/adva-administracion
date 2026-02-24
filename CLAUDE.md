@@ -553,7 +553,7 @@ See `SPREADSHEET_FORMAT.md` for complete schema.
   - `resumen_broker`: 9 cols (A:I) with `periodo` (YYYY-MM) as first column, `saldoARS` + `saldoUSD` (multi-currency)
   - `periodo` format matches Movimientos sheet names (YYYY-MM derived from fechaHasta)
   - Rows sorted by `periodo` ascending (oldest first)
-- **Movimientos Bancario**: 9 cols (A:I) with running balance formulas - `saldo` (parsed from PDF), `saldoCalculado` (computed formula), `matchedFileId` (fileId of matched document), `detalle` (human-readable match description), `matchedType` (AUTO/MANUAL/empty)
+- **Movimientos Bancario**: 9 cols (A:I) with running balance formulas - `saldo` (parsed from PDF), `saldoCalculado` (computed formula), `matchedFileId` (fileId of matched document), `matchedType` (AUTO/MANUAL/empty), `detalle` (human-readable match description)
 - **Dashboard**: Pagos Pendientes (10 cols), API Mensual (7 cols), Uso de API (12 cols)
 
 **Principles:**
@@ -600,7 +600,7 @@ Better matches replace existing ones. Quality comparison: tier → date proximit
 - **Pagos with MANUAL**: excluded from the unmatched pool — treated as already matched
 - **NC-Factura matching**: MANUAL NCs are skipped (not matched to facturas); MANUAL facturas are excluded from match targets
 - MANUAL always wins over force mode — even `?force=true` respects MANUAL locks
-- **Movimientos bancarios:** MANUAL locking supported via `matchedType` column (I). Set to `MANUAL` with a `matchedFileId` — system auto-generates `detalle` and excludes the document from the matching pool
+- **Movimientos bancarios:** MANUAL locking supported via `matchedType` column (H). Set to `MANUAL` with a `matchedFileId` — system auto-generates `detalle` and excludes the document from the matching pool
 
 ### Date Windows
 - Pago: ±15 days from bank date
