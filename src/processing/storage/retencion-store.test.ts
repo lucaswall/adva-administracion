@@ -12,6 +12,7 @@ vi.mock('../../services/sheets.js', () => ({
   sortSheet: vi.fn(),
   getValues: vi.fn(),
   batchUpdate: vi.fn(),
+  updateRowsWithFormatting: vi.fn(),
   getSpreadsheetTimezone: vi.fn(() => Promise.resolve({ ok: true, value: 'America/Argentina/Buenos_Aires' })),
 }));
 
@@ -58,7 +59,7 @@ vi.mock('../../utils/concurrency.js', () => ({
   }),
 }));
 
-import { appendRowsWithLinks, sortSheet, getValues, batchUpdate } from '../../services/sheets.js';
+import { appendRowsWithLinks, sortSheet, getValues, batchUpdate, updateRowsWithFormatting } from '../../services/sheets.js';
 
 const createTestRetencion = (overrides: Partial<Retencion> = {}): Retencion => ({
   fileId: 'test-file-id',
@@ -260,7 +261,7 @@ describe('storeRetencion', () => {
           ['test-file-id'], // matching fileId
         ],
       });
-      vi.mocked(batchUpdate).mockResolvedValue({ ok: true, value: 15 });
+      vi.mocked(updateRowsWithFormatting).mockResolvedValue({ ok: true, value: undefined });
       vi.mocked(sortSheet).mockResolvedValue({ ok: true, value: undefined });
 
       const retencion = createTestRetencion();
@@ -271,68 +272,68 @@ describe('storeRetencion', () => {
         expect(result.value.stored).toBe(true);
         expect(result.value.updated).toBe(true);
       }
-      expect(batchUpdate).toHaveBeenCalledWith(
+      expect(updateRowsWithFormatting).toHaveBeenCalledWith(
         'spreadsheet-id',
         expect.arrayContaining([
           expect.objectContaining({ range: expect.stringContaining('Retenciones Recibidas!A2') }),
-        ])
+        ]),
+        expect.anything(),
+        undefined
       );
       expect(appendRowsWithLinks).not.toHaveBeenCalled();
+      expect(batchUpdate).not.toHaveBeenCalled();
     });
 
-    it('uses raw numbers for monetary fields in reprocessing row', async () => {
+    it('uses CellNumber for monetary fields in reprocessing row', async () => {
       vi.mocked(getValues).mockResolvedValueOnce({
         ok: true,
         value: [['fileId'], ['test-file-id']],
       });
-      vi.mocked(batchUpdate).mockResolvedValue({ ok: true, value: 15 });
+      vi.mocked(updateRowsWithFormatting).mockResolvedValue({ ok: true, value: undefined });
       vi.mocked(sortSheet).mockResolvedValue({ ok: true, value: undefined });
 
       const retencion = createTestRetencion({ montoComprobante: 10000, montoRetencion: 500 });
       await storeRetencion(retencion, 'spreadsheet-id');
 
-      const batchArgs = vi.mocked(batchUpdate).mock.calls[0];
-      const row = batchArgs[1][0].values[0];
-      // I=8, J=9 — should be raw numbers
-      expect(row[8]).toBe(10000);
-      expect(row[9]).toBe(500);
+      const callArgs = vi.mocked(updateRowsWithFormatting).mock.calls[0];
+      const row = callArgs[1][0].values;
+      // I=8, J=9 — should be CellNumber objects
+      expect(row[8]).toEqual({ type: 'number', value: 10000 });
+      expect(row[9]).toEqual({ type: 'number', value: 500 });
     });
 
-    it('uses HYPERLINK formula for fileName in reprocessing row', async () => {
+    it('uses CellLink for fileName in reprocessing row', async () => {
       vi.mocked(getValues).mockResolvedValueOnce({
         ok: true,
         value: [['fileId'], ['test-file-id']],
       });
-      vi.mocked(batchUpdate).mockResolvedValue({ ok: true, value: 15 });
+      vi.mocked(updateRowsWithFormatting).mockResolvedValue({ ok: true, value: undefined });
       vi.mocked(sortSheet).mockResolvedValue({ ok: true, value: undefined });
 
       const retencion = createTestRetencion();
       await storeRetencion(retencion, 'spreadsheet-id');
 
-      const batchArgs = vi.mocked(batchUpdate).mock.calls[0];
-      const row = batchArgs[1][0].values[0];
-      // C=2 — should be HYPERLINK formula
-      expect(row[2]).toContain('=HYPERLINK(');
-      expect(row[2]).toContain('test-file-id');
+      const callArgs = vi.mocked(updateRowsWithFormatting).mock.calls[0];
+      const row = callArgs[1][0].values;
+      // C=2 — should be CellLink object
+      expect(row[2]).toMatchObject({ text: expect.any(String), url: expect.stringContaining('test-file-id') });
     });
 
-    it('uses timezone-formatted processedAt in reprocessing row', async () => {
+    it('passes raw ISO processedAt in reprocessing row', async () => {
       vi.mocked(getValues).mockResolvedValueOnce({
         ok: true,
         value: [['fileId'], ['test-file-id']],
       });
-      vi.mocked(batchUpdate).mockResolvedValue({ ok: true, value: 15 });
+      vi.mocked(updateRowsWithFormatting).mockResolvedValue({ ok: true, value: undefined });
       vi.mocked(sortSheet).mockResolvedValue({ ok: true, value: undefined });
 
       const retencion = createTestRetencion({ processedAt: '2025-01-15T15:00:00Z' });
       await storeRetencion(retencion, 'spreadsheet-id');
 
-      const batchArgs = vi.mocked(batchUpdate).mock.calls[0];
-      const row = batchArgs[1][0].values[0];
-      // K=10 — should be formatted, not raw ISO
-      expect(row[10]).not.toContain('T');
-      expect(row[10]).not.toContain('Z');
-      expect(row[10]).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
+      const callArgs = vi.mocked(updateRowsWithFormatting).mock.calls[0];
+      const row = callArgs[1][0].values;
+      // K=10 — should be raw ISO string
+      expect(row[10]).toBe('2025-01-15T15:00:00Z');
     });
 
     it('does normal insert when fileId is NOT in sheet', async () => {
@@ -358,6 +359,7 @@ describe('storeRetencion', () => {
         expect(result.value.updated).toBeUndefined();
       }
       expect(appendRowsWithLinks).toHaveBeenCalled();
+      expect(updateRowsWithFormatting).not.toHaveBeenCalled();
       expect(batchUpdate).not.toHaveBeenCalled();
     });
   });

@@ -7,6 +7,7 @@ import type { Result } from '../types/index.js';
 import { getValues, setValues, clearSheetData } from './sheets.js';
 import { info, warn } from '../utils/logger.js';
 import { getCorrelationId } from '../utils/correlation.js';
+import { normalizeSpreadsheetDate } from '../utils/date.js';
 
 /**
  * Gets the column index for a given header name
@@ -88,8 +89,8 @@ export async function syncPagosPendientes(
     // Sort unpaid facturas by fechaEmision ascending (oldest first)
     if (fechaEmisionIdx !== -1) {
       unpaidFacturas.sort((a, b) => {
-        const dateA = String(a[fechaEmisionIdx] || '');
-        const dateB = String(b[fechaEmisionIdx] || '');
+        const dateA = normalizeSpreadsheetDate(a[fechaEmisionIdx]);
+        const dateB = normalizeSpreadsheetDate(b[fechaEmisionIdx]);
         return dateA.localeCompare(dateB);
       });
     }
@@ -140,7 +141,7 @@ export async function syncPagosPendientes(
     // PAGOS_PENDIENTES_HEADERS: fechaEmision, fileId, fileName, tipoComprobante,
     //   nroFactura, cuitEmisor, razonSocialEmisor, importeTotal, moneda, concepto
     const pagosPendientesRows = unpaidFacturas.map((row) => [
-      row[fechaEmisionIdx] || '',
+      normalizeSpreadsheetDate(row[fechaEmisionIdx]) || '',
       row[fileIdIdx] || '',
       row[fileNameIdx] || '',
       row[tipoComprobanteIdx] || '',

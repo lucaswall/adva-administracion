@@ -5,76 +5,74 @@
 
 import type { Result, Pago, StoreResult } from '../../types/index.js';
 import type { ScanContext } from '../scanner.js';
-import { appendRowsWithLinks, sortSheet, getValues, batchUpdate, getSpreadsheetTimezone, type CellValueOrLink, type CellDate, type CellValue, type CellNumber } from '../../services/sheets.js';
+import { appendRowsWithLinks, sortSheet, getValues, updateRowsWithFormatting, getSpreadsheetTimezone, type CellValueOrLink, type CellDate, type CellValue, type CellNumber } from '../../services/sheets.js';
 import { parseNumber } from '../../utils/numbers.js';
 import { generatePagoFileName } from '../../utils/file-naming.js';
 import { normalizeSpreadsheetDate } from '../../utils/date.js';
 import { info, warn } from '../../utils/logger.js';
 import { getCorrelationId } from '../../utils/correlation.js';
 import { withLock } from '../../utils/concurrency.js';
-import { createDriveHyperlink } from '../../utils/spreadsheet.js';
-import { formatTimestampInTimezone } from '../../services/status-sheet.js';
 
 /**
- * Builds a flat CellValue[] row for batchUpdate (reprocessing or replacement)
+ * Builds a CellValueOrLink[] row for updateRowsWithFormatting (reprocessing/replacement) and appendRowsWithLinks (insert)
  *
  * @param pago - The pago data
  * @param documentType - The document type
  * @param renamedFileName - The renamed filename
- * @returns Flat row values
+ * @returns Row with rich cell types
  */
-function buildPagoRow(
+function buildPagoRowFormatted(
   pago: Pago,
   documentType: 'pago_enviado' | 'pago_recibido',
-  renamedFileName: string,
-  timeZone?: string
-): CellValue[] {
-  const tipoDeCambioVal: CellValue = pago.tipoDeCambio ?? '';
-  const importeEnPesosVal: CellValue = pago.importeEnPesos ?? '';
-  const fileNameCell = createDriveHyperlink(pago.fileId, renamedFileName) || renamedFileName;
-  const processedAtCell = timeZone
-    ? formatTimestampInTimezone(new Date(pago.processedAt), timeZone)
-    : pago.processedAt;
+  renamedFileName: string
+): CellValueOrLink[] {
+  const fechaPagoDate: CellDate = { type: 'date', value: pago.fechaPago };
+  const tipoDeCambioCell: CellNumber | '' = pago.tipoDeCambio
+    ? { type: 'number', value: pago.tipoDeCambio }
+    : '';
+  const importeEnPesosCell: CellNumber | '' = pago.importeEnPesos
+    ? { type: 'number', value: pago.importeEnPesos }
+    : '';
 
   if (documentType === 'pago_enviado') {
     return [
-      pago.fechaPago,                                     // A - date string
-      pago.fileId,                                        // B
-      fileNameCell,                                       // C - HYPERLINK formula
-      pago.banco,                                         // D
-      pago.importePagado,                                 // E - raw number (USER_ENTERED handles)
-      pago.moneda || 'ARS',                               // F
-      pago.referencia || '',                              // G
-      pago.cuitBeneficiario || '',                        // H
-      pago.nombreBeneficiario || '',                      // I
-      pago.concepto || '',                                // J
-      processedAtCell,                                    // K
-      pago.confidence,                                    // L
-      pago.needsReview ? 'YES' : 'NO',                    // M
-      pago.matchedFacturaFileId || '',                    // N
-      pago.matchConfidence || '',                         // O
-      tipoDeCambioVal,                                    // P
-      importeEnPesosVal,                                  // Q
+      fechaPagoDate,                       // A - proper date cell
+      pago.fileId,                         // B
+      { text: renamedFileName, url: `https://drive.google.com/file/d/${pago.fileId}/view` }, // C
+      pago.banco,                          // D
+      { type: 'number', value: pago.importePagado } as CellNumber, // E
+      pago.moneda || 'ARS',                // F
+      pago.referencia || '',               // G
+      pago.cuitBeneficiario || '',         // H
+      pago.nombreBeneficiario || '',       // I
+      pago.concepto || '',                 // J
+      pago.processedAt,                    // K
+      pago.confidence,                     // L
+      pago.needsReview ? 'YES' : 'NO',     // M
+      pago.matchedFacturaFileId || '',     // N
+      pago.matchConfidence || '',          // O
+      tipoDeCambioCell,                    // P
+      importeEnPesosCell,                  // Q
     ];
   } else {
     return [
-      pago.fechaPago,                                     // A - date string
-      pago.fileId,                                        // B
-      fileNameCell,                                       // C - HYPERLINK formula
-      pago.banco,                                         // D
-      pago.importePagado,                                 // E - raw number (USER_ENTERED handles)
-      pago.moneda || 'ARS',                               // F
-      pago.referencia || '',                              // G
-      pago.cuitPagador || '',                             // H
-      pago.nombrePagador || '',                           // I
-      pago.concepto || '',                                // J
-      processedAtCell,                                    // K
-      pago.confidence,                                    // L
-      pago.needsReview ? 'YES' : 'NO',                    // M
-      pago.matchedFacturaFileId || '',                    // N
-      pago.matchConfidence || '',                         // O
-      tipoDeCambioVal,                                    // P
-      importeEnPesosVal,                                  // Q
+      fechaPagoDate,                       // A - proper date cell
+      pago.fileId,                         // B
+      { text: renamedFileName, url: `https://drive.google.com/file/d/${pago.fileId}/view` }, // C
+      pago.banco,                          // D
+      { type: 'number', value: pago.importePagado } as CellNumber, // E
+      pago.moneda || 'ARS',                // F
+      pago.referencia || '',               // G
+      pago.cuitPagador || '',              // H
+      pago.nombrePagador || '',            // I
+      pago.concepto || '',                 // J
+      pago.processedAt,                    // K
+      pago.confidence,                     // L
+      pago.needsReview ? 'YES' : 'NO',     // M
+      pago.matchedFacturaFileId || '',     // N
+      pago.matchConfidence || '',          // O
+      tipoDeCambioCell,                    // P
+      importeEnPesosCell,                  // Q
     ];
   }
 }
@@ -241,11 +239,11 @@ export async function storePago(
     const fileIdCheck = await findRowByFileId(spreadsheetId, sheetName, pago.fileId);
     if (fileIdCheck.found) {
       const renamedFileName = generatePagoFileName(pago, documentType);
-      const updateRow = buildPagoRow(pago, documentType, renamedFileName, timeZone);
-      const updateResult = await batchUpdate(spreadsheetId, [{
+      const updateRow = buildPagoRowFormatted(pago, documentType, renamedFileName);
+      const updateResult = await updateRowsWithFormatting(spreadsheetId, [{
         range: `${sheetName}!A${fileIdCheck.rowIndex}:Q${fileIdCheck.rowIndex}`,
-        values: [updateRow],
-      }]);
+        values: updateRow,
+      }], timeZone, context?.metadataCache);
       if (!updateResult.ok) {
         throw updateResult.error;
       }
@@ -298,11 +296,11 @@ export async function storePago(
         const quality = isQualityBetter(pago, dupeCheck.existingRowData, documentType);
         if (quality === 'better') {
           const renamedFileName = generatePagoFileName(pago, documentType);
-          const updateRow = buildPagoRow(pago, documentType, renamedFileName, timeZone);
-          const updateResult = await batchUpdate(spreadsheetId, [{
+          const updateRow = buildPagoRowFormatted(pago, documentType, renamedFileName);
+          const updateResult = await updateRowsWithFormatting(spreadsheetId, [{
             range: `${sheetName}!A${dupeCheck.existingRowIndex}:Q${dupeCheck.existingRowIndex}`,
-            values: [updateRow],
-          }]);
+            values: updateRow,
+          }], timeZone, context?.metadataCache);
           if (!updateResult.ok) {
             throw updateResult.error;
           }
@@ -337,69 +335,12 @@ export async function storePago(
       return { stored: false, existingFileId: dupeCheck.existingFileId };
     }
 
-  // Calculate the renamed filename that will be used when the file is moved
-  const renamedFileName = generatePagoFileName(pago, documentType);
+    // Calculate the renamed filename that will be used when the file is moved
+    const renamedFileName = generatePagoFileName(pago, documentType);
 
-  // Build row based on document type - only include counterparty info
-  let row: CellValueOrLink[];
-  let range: string;
-
-  // Create CellDate for proper date formatting
-  const fechaPagoDate: CellDate = { type: 'date', value: pago.fechaPago };
-
-  // Validate tipoDeCambio and importeEnPesos as CellNumber or empty string
-  const tipoDeCambioCell: CellNumber | '' = pago.tipoDeCambio
-    ? { type: 'number', value: pago.tipoDeCambio }
-    : '';
-  const importeEnPesosCell: CellNumber | '' = pago.importeEnPesos
-    ? { type: 'number', value: pago.importeEnPesos }
-    : '';
-
-  if (documentType === 'pago_enviado') {
-    // Pagos Enviados: Only beneficiario info (columns A:Q)
-    row = [
-      fechaPagoDate,                       // A - proper date cell
-      pago.fileId,                         // B
-      { text: renamedFileName, url: `https://drive.google.com/file/d/${pago.fileId}/view` }, // C
-      pago.banco,                          // D
-      { type: 'number', value: pago.importePagado } as CellNumber,// E
-      pago.moneda || 'ARS',                // F
-      pago.referencia || '',               // G
-      pago.cuitBeneficiario || '',         // H - counterparty
-      pago.nombreBeneficiario || '',       // I - counterparty
-      pago.concepto || '',                 // J
-      pago.processedAt,                    // K
-      pago.confidence,                     // L
-      pago.needsReview ? 'YES' : 'NO',     // M
-      pago.matchedFacturaFileId || '',     // N
-      pago.matchConfidence || '',          // O
-      tipoDeCambioCell,                    // P
-      importeEnPesosCell,                  // Q
-    ];
-    range = `${sheetName}!A:Q`;
-  } else {
-    // Pagos Recibidos: Only pagador info (columns A:Q)
-    row = [
-      fechaPagoDate,                       // A - proper date cell
-      pago.fileId,                         // B
-      { text: renamedFileName, url: `https://drive.google.com/file/d/${pago.fileId}/view` }, // C
-      pago.banco,                          // D
-      { type: 'number', value: pago.importePagado } as CellNumber,// E
-      pago.moneda || 'ARS',                // F
-      pago.referencia || '',               // G
-      pago.cuitPagador || '',              // H - counterparty
-      pago.nombrePagador || '',            // I - counterparty
-      pago.concepto || '',                 // J
-      pago.processedAt,                    // K
-      pago.confidence,                     // L
-      pago.needsReview ? 'YES' : 'NO',     // M
-      pago.matchedFacturaFileId || '',     // N
-      pago.matchConfidence || '',          // O
-      tipoDeCambioCell,                    // P
-      importeEnPesosCell,                  // Q
-    ];
-    range = `${sheetName}!A:Q`;
-  }
+    // Build row based on document type - only include counterparty info
+    const row = buildPagoRowFormatted(pago, documentType, renamedFileName);
+    const range = `${sheetName}!A:Q`;
 
     const result = await appendRowsWithLinks(spreadsheetId, range, [row], timeZone, context?.metadataCache);
     if (!result.ok) {

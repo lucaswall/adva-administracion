@@ -30,6 +30,9 @@ import {
   getOrCreateMonthSheet,
   reorderMonthSheets,
   columnIndexToLetter,
+  columnLetterToIndex,
+  parseA1Range,
+  updateRowsWithFormatting,
 } from './sheets.js';
 
 // Mock googleapis
@@ -2385,6 +2388,208 @@ describe('Google Sheets API wrapper - quota retry tests', () => {
 
     it('should convert column 703 to AAA', () => {
       expect(columnIndexToLetter(703)).toBe('AAA');
+    });
+  });
+
+  describe('columnLetterToIndex', () => {
+    it('A → 1', () => {
+      expect(columnLetterToIndex('A')).toBe(1);
+    });
+
+    it('Z → 26', () => {
+      expect(columnLetterToIndex('Z')).toBe(26);
+    });
+
+    it('AA → 27', () => {
+      expect(columnLetterToIndex('AA')).toBe(27);
+    });
+
+    it('AZ → 52', () => {
+      expect(columnLetterToIndex('AZ')).toBe(52);
+    });
+  });
+
+  describe('parseA1Range', () => {
+    it("parses 'Sheet1'!A5:S5 into correct coordinates", () => {
+      expect(parseA1Range("'Sheet1'!A5:S5")).toEqual({
+        sheetName: 'Sheet1',
+        startCol: 0,
+        endCol: 18,
+        startRow: 4,
+        endRow: 4,
+      });
+    });
+
+    it("parses escaped sheet names: 'Sheet ''1'''!A5", () => {
+      expect(parseA1Range("'Sheet ''1'''!A5")).toEqual({
+        sheetName: "Sheet '1'",
+        startCol: 0,
+        endCol: 0,
+        startRow: 4,
+        endRow: 4,
+      });
+    });
+  });
+
+  describe('updateRowsWithFormatting', () => {
+    beforeEach(() => {
+      mockSheetsApi.spreadsheets.get.mockResolvedValue({
+        data: {
+          sheets: [{ properties: { title: 'Sheet1', sheetId: 42 } }],
+        },
+      });
+      mockSheetsApi.spreadsheets.batchUpdate.mockResolvedValue({ data: {} });
+    });
+
+    it('sends updateCells with numberValue + DATE format for CellDate', async () => {
+      const resultPromise = updateRowsWithFormatting('spreadsheet123', [
+        { range: 'Sheet1!A5:A5', values: [{ type: 'date', value: '2025-01-15' }] },
+      ]);
+      await vi.runAllTimersAsync();
+      const result = await resultPromise;
+
+      expect(result.ok).toBe(true);
+      expect(mockSheetsApi.spreadsheets.batchUpdate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          requestBody: expect.objectContaining({
+            requests: [
+              expect.objectContaining({
+                updateCells: expect.objectContaining({
+                  range: expect.objectContaining({
+                    sheetId: 42,
+                    startRowIndex: 4,
+                    endRowIndex: 5,
+                    startColumnIndex: 0,
+                    endColumnIndex: 1,
+                  }),
+                  rows: [{
+                    values: [{
+                      userEnteredValue: { numberValue: expect.any(Number) },
+                      userEnteredFormat: { numberFormat: { type: 'DATE', pattern: 'yyyy-mm-dd' } },
+                    }],
+                  }],
+                  fields: 'userEnteredValue,userEnteredFormat,textFormatRuns',
+                }),
+              }),
+            ],
+          }),
+        })
+      );
+    });
+
+    it('sends updateCells with numberValue + NUMBER format for CellNumber', async () => {
+      const resultPromise = updateRowsWithFormatting('spreadsheet123', [
+        { range: 'Sheet1!A5:A5', values: [{ type: 'number', value: 1234.56 }] },
+      ]);
+      await vi.runAllTimersAsync();
+      const result = await resultPromise;
+
+      expect(result.ok).toBe(true);
+      expect(mockSheetsApi.spreadsheets.batchUpdate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          requestBody: expect.objectContaining({
+            requests: [
+              expect.objectContaining({
+                updateCells: expect.objectContaining({
+                  rows: [{
+                    values: [{
+                      userEnteredValue: { numberValue: 1234.56 },
+                      userEnteredFormat: { numberFormat: { type: 'NUMBER', pattern: '#,##0.00' } },
+                    }],
+                  }],
+                  fields: 'userEnteredValue,userEnteredFormat,textFormatRuns',
+                }),
+              }),
+            ],
+          }),
+        })
+      );
+    });
+
+    it('converts ISO timestamp string to DATE_TIME serial with timezone', async () => {
+      const resultPromise = updateRowsWithFormatting(
+        'spreadsheet123',
+        [{ range: 'Sheet1!A5:A5', values: ['2026-01-24T18:30:00.000Z'] }],
+        'America/Argentina/Buenos_Aires'
+      );
+      await vi.runAllTimersAsync();
+      const result = await resultPromise;
+
+      expect(result.ok).toBe(true);
+      expect(mockSheetsApi.spreadsheets.batchUpdate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          requestBody: expect.objectContaining({
+            requests: [
+              expect.objectContaining({
+                updateCells: expect.objectContaining({
+                  rows: [{
+                    values: [{
+                      userEnteredValue: { numberValue: expect.any(Number) },
+                      userEnteredFormat: { numberFormat: { type: 'DATE_TIME', pattern: 'yyyy-mm-dd hh:mm:ss' } },
+                    }],
+                  }],
+                }),
+              }),
+            ],
+          }),
+        })
+      );
+    });
+
+    it('batches multiple updates in a single batchUpdate call', async () => {
+      mockSheetsApi.spreadsheets.get.mockResolvedValue({
+        data: {
+          sheets: [
+            { properties: { title: 'Sheet1', sheetId: 42 } },
+            { properties: { title: 'Sheet2', sheetId: 99 } },
+          ],
+        },
+      });
+
+      const resultPromise = updateRowsWithFormatting('spreadsheet123', [
+        { range: 'Sheet1!A5:A5', values: ['row1'] },
+        { range: 'Sheet2!A6:A6', values: ['row2'] },
+      ]);
+      await vi.runAllTimersAsync();
+      const result = await resultPromise;
+
+      expect(result.ok).toBe(true);
+      expect(mockSheetsApi.spreadsheets.batchUpdate).toHaveBeenCalledTimes(1);
+      const callArgs = mockSheetsApi.spreadsheets.batchUpdate.mock.calls[0][0];
+      expect(callArgs.requestBody.requests).toHaveLength(2);
+    });
+
+    it('uses metadata cache when provided (skips spreadsheets.get)', async () => {
+      const mockCache = {
+        get: vi.fn().mockResolvedValue({
+          ok: true,
+          value: [{ title: 'Sheet1', sheetId: 42, index: 0 }],
+        }),
+      };
+
+      const resultPromise = updateRowsWithFormatting(
+        'spreadsheet123',
+        [{ range: 'Sheet1!A5:A5', values: ['value'] }],
+        undefined,
+        mockCache as any
+      );
+      await vi.runAllTimersAsync();
+      const result = await resultPromise;
+
+      expect(result.ok).toBe(true);
+      expect(mockCache.get).toHaveBeenCalledWith('spreadsheet123');
+      expect(mockSheetsApi.spreadsheets.get).not.toHaveBeenCalled();
+    });
+
+    it('calls spreadsheets.get for metadata when no cache provided', async () => {
+      const resultPromise = updateRowsWithFormatting('spreadsheet123', [
+        { range: 'Sheet1!A5:A5', values: ['value'] },
+      ]);
+      await vi.runAllTimersAsync();
+      const result = await resultPromise;
+
+      expect(result.ok).toBe(true);
+      expect(mockSheetsApi.spreadsheets.get).toHaveBeenCalledTimes(1);
     });
   });
 });

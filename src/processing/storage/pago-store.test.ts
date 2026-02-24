@@ -12,6 +12,7 @@ vi.mock('../../services/sheets.js', () => ({
   sortSheet: vi.fn(),
   getValues: vi.fn(),
   batchUpdate: vi.fn(),
+  updateRowsWithFormatting: vi.fn(),
   getSpreadsheetTimezone: vi.fn(() => Promise.resolve({ ok: true, value: 'America/Argentina/Buenos_Aires' })),
 }));
 
@@ -58,7 +59,7 @@ vi.mock('../../utils/concurrency.js', () => ({
   }),
 }));
 
-import { appendRowsWithLinks, sortSheet, getValues, batchUpdate } from '../../services/sheets.js';
+import { appendRowsWithLinks, sortSheet, getValues, batchUpdate, updateRowsWithFormatting } from '../../services/sheets.js';
 
 const createTestPago = (overrides: Partial<Pago> = {}): Pago => ({
   fileId: 'test-file-id',
@@ -396,7 +397,7 @@ describe('storePago', () => {
           ['test-file-id'], // matching fileId
         ],
       });
-      vi.mocked(batchUpdate).mockResolvedValue({ ok: true, value: 15 });
+      vi.mocked(updateRowsWithFormatting).mockResolvedValue({ ok: true, value: undefined });
       vi.mocked(sortSheet).mockResolvedValue({ ok: true, value: undefined });
 
       const pago = createTestPago();
@@ -407,13 +408,16 @@ describe('storePago', () => {
         expect(result.value.stored).toBe(true);
         expect(result.value.updated).toBe(true);
       }
-      expect(batchUpdate).toHaveBeenCalledWith(
+      expect(updateRowsWithFormatting).toHaveBeenCalledWith(
         'spreadsheet-id',
         expect.arrayContaining([
           expect.objectContaining({ range: expect.stringContaining('Pagos Recibidos!A2') }),
-        ])
+        ]),
+        expect.anything(),
+        undefined
       );
       expect(appendRowsWithLinks).not.toHaveBeenCalled();
+      expect(batchUpdate).not.toHaveBeenCalled();
     });
 
     it('does normal insert when fileId is NOT in sheet and no business key match', async () => {
@@ -462,59 +466,56 @@ describe('storePago', () => {
     });
   });
 
-  describe('batchUpdate reprocessing path fixes (ADV-124)', () => {
-    it('uses raw numbers for monetary fields in buildPagoRow', async () => {
+  describe('updateRowsWithFormatting reprocessing path (ADV-152)', () => {
+    it('uses CellNumber for importePagado in reprocessing path', async () => {
       vi.mocked(getValues).mockResolvedValueOnce({
         ok: true,
         value: [['fileId'], ['test-file-id']],
       });
-      vi.mocked(batchUpdate).mockResolvedValue({ ok: true, value: 15 });
+      vi.mocked(updateRowsWithFormatting).mockResolvedValue({ ok: true, value: undefined });
       vi.mocked(sortSheet).mockResolvedValue({ ok: true, value: undefined });
 
       const pago = createTestPago({ importePagado: 5500 });
       await storePago(pago, 'spreadsheet-id', 'Pagos Recibidos', 'pago_recibido');
 
-      const batchArgs = vi.mocked(batchUpdate).mock.calls[0];
-      const row = batchArgs[1][0].values[0];
-      // E=4 — should be raw number, not formatted string
-      expect(row[4]).toBe(5500);
+      const callArgs = vi.mocked(updateRowsWithFormatting).mock.calls[0];
+      const row = callArgs[1][0].values;
+      // E=4 — should be CellNumber object
+      expect(row[4]).toEqual({ type: 'number', value: 5500 });
     });
 
-    it('uses HYPERLINK formula for fileName in buildPagoRow', async () => {
+    it('uses CellLink for fileName in reprocessing path', async () => {
       vi.mocked(getValues).mockResolvedValueOnce({
         ok: true,
         value: [['fileId'], ['test-file-id']],
       });
-      vi.mocked(batchUpdate).mockResolvedValue({ ok: true, value: 15 });
+      vi.mocked(updateRowsWithFormatting).mockResolvedValue({ ok: true, value: undefined });
       vi.mocked(sortSheet).mockResolvedValue({ ok: true, value: undefined });
 
       const pago = createTestPago();
       await storePago(pago, 'spreadsheet-id', 'Pagos Recibidos', 'pago_recibido');
 
-      const batchArgs = vi.mocked(batchUpdate).mock.calls[0];
-      const row = batchArgs[1][0].values[0];
-      // C=2 — should be HYPERLINK formula, not plain text
-      expect(row[2]).toContain('=HYPERLINK(');
-      expect(row[2]).toContain('test-file-id');
+      const callArgs = vi.mocked(updateRowsWithFormatting).mock.calls[0];
+      const row = callArgs[1][0].values;
+      // C=2 — should be CellLink object
+      expect(row[2]).toMatchObject({ text: expect.any(String), url: expect.stringContaining('test-file-id') });
     });
 
-    it('formats processedAt as local time string in buildPagoRow', async () => {
+    it('passes raw ISO processedAt in reprocessing path', async () => {
       vi.mocked(getValues).mockResolvedValueOnce({
         ok: true,
         value: [['fileId'], ['test-file-id']],
       });
-      vi.mocked(batchUpdate).mockResolvedValue({ ok: true, value: 15 });
+      vi.mocked(updateRowsWithFormatting).mockResolvedValue({ ok: true, value: undefined });
       vi.mocked(sortSheet).mockResolvedValue({ ok: true, value: undefined });
 
       const pago = createTestPago({ processedAt: '2025-01-15T10:00:00Z' });
       await storePago(pago, 'spreadsheet-id', 'Pagos Recibidos', 'pago_recibido');
 
-      const batchArgs = vi.mocked(batchUpdate).mock.calls[0];
-      const row = batchArgs[1][0].values[0];
-      // K=10 — should NOT be raw ISO string
-      expect(row[10]).not.toContain('T');
-      expect(row[10]).not.toContain('Z');
-      expect(row[10]).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
+      const callArgs = vi.mocked(updateRowsWithFormatting).mock.calls[0];
+      const row = callArgs[1][0].values;
+      // K=10 — should be raw ISO string
+      expect(row[10]).toBe('2025-01-15T10:00:00Z');
     });
   });
 
@@ -537,7 +538,7 @@ describe('storePago', () => {
           ['2025-01-15', existingFileId, 'file.pdf', 'BBVA', '1,210.00', 'ARS', 'REF-001', '27234567891', 'PAGADOR SA', 'etc', '2025-01-15T10:00:00Z', '0.70', 'NO', '', ''],
         ],
       });
-      vi.mocked(batchUpdate).mockResolvedValue({ ok: true, value: 15 });
+      vi.mocked(updateRowsWithFormatting).mockResolvedValue({ ok: true, value: undefined });
       vi.mocked(sortSheet).mockResolvedValue({ ok: true, value: undefined });
 
       const pago = createTestPago({
@@ -554,7 +555,8 @@ describe('storePago', () => {
         expect(result.value.stored).toBe(true);
         expect(result.value.replacedFileId).toBe(existingFileId);
       }
-      expect(batchUpdate).toHaveBeenCalled();
+      expect(updateRowsWithFormatting).toHaveBeenCalled();
+      expect(batchUpdate).not.toHaveBeenCalled();
     });
 
     it('keeps existing when existing pago has higher confidence than new', async () => {

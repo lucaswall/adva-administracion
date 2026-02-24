@@ -5,81 +5,76 @@
 
 import type { Result, Factura, StoreResult } from '../../types/index.js';
 import type { ScanContext } from '../scanner.js';
-import { appendRowsWithLinks, sortSheet, getValues, batchUpdate, getSpreadsheetTimezone, type CellValueOrLink, type CellDate, type CellValue, type CellNumber } from '../../services/sheets.js';
+import { appendRowsWithLinks, sortSheet, getValues, updateRowsWithFormatting, getSpreadsheetTimezone, type CellValueOrLink, type CellDate, type CellNumber } from '../../services/sheets.js';
 import { parseNumber } from '../../utils/numbers.js';
 import { generateFacturaFileName } from '../../utils/file-naming.js';
 import { normalizeSpreadsheetDate } from '../../utils/date.js';
 import { info, warn } from '../../utils/logger.js';
 import { getCorrelationId } from '../../utils/correlation.js';
 import { withLock } from '../../utils/concurrency.js';
-import { createDriveHyperlink } from '../../utils/spreadsheet.js';
-import { formatTimestampInTimezone } from '../../services/status-sheet.js';
 
 /**
- * Builds a flat CellValue[] row for batchUpdate (reprocessing)
- * Uses plain values (no rich cell types) since batchUpdate takes CellValue[][]
+ * Builds a CellValueOrLink[] row for updateRowsWithFormatting (reprocessing) and appendRowsWithLinks (insert)
  *
  * @param factura - The factura data
  * @param documentType - The document type
  * @param renamedFileName - The renamed filename
- * @returns Flat row values
+ * @returns Row with rich cell types
  */
-function buildFacturaRow(
+function buildFacturaRowFormatted(
   factura: Factura,
   documentType: 'factura_emitida' | 'factura_recibida',
-  renamedFileName: string,
-  timeZone?: string
-): CellValue[] {
-  const tipoDeCambioVal: CellValue = factura.tipoDeCambio ?? '';
-  const fileNameCell = createDriveHyperlink(factura.fileId, renamedFileName) || renamedFileName;
-  const processedAtCell = timeZone
-    ? formatTimestampInTimezone(new Date(factura.processedAt), timeZone)
-    : factura.processedAt;
+  renamedFileName: string
+): CellValueOrLink[] {
+  const fechaEmisionDate: CellDate = { type: 'date', value: factura.fechaEmision };
+  const tipoDeCambioCell: CellNumber | '' = factura.tipoDeCambio
+    ? { type: 'number', value: factura.tipoDeCambio }
+    : '';
 
   if (documentType === 'factura_emitida') {
     return [
-      factura.fechaEmision,                               // A - date string (USER_ENTERED parses)
-      factura.fileId,                                     // B
-      fileNameCell,                                       // C - HYPERLINK formula
-      factura.tipoComprobante,                            // D
-      factura.nroFactura,                                 // E
-      factura.cuitReceptor || '',                         // F
-      factura.razonSocialReceptor || '',                  // G
-      factura.importeNeto,                                // H - raw number (USER_ENTERED handles)
-      factura.importeIva,                                 // I
-      factura.importeTotal,                               // J
-      factura.moneda,                                     // K
-      factura.concepto || '',                             // L
-      processedAtCell,                                    // M
-      factura.confidence,                                 // N
-      factura.needsReview ? 'YES' : 'NO',                 // O
-      factura.matchedPagoFileId || '',                    // P
-      factura.matchConfidence || '',                      // Q
-      factura.hasCuitMatch ? 'YES' : 'NO',                // R
-      tipoDeCambioVal,                                    // S
+      fechaEmisionDate,                     // A - proper date cell
+      factura.fileId,                       // B
+      { text: renamedFileName, url: `https://drive.google.com/file/d/${factura.fileId}/view` }, // C
+      factura.tipoComprobante,              // D
+      factura.nroFactura,                   // E
+      factura.cuitReceptor || '',           // F
+      factura.razonSocialReceptor || '',    // G
+      { type: 'number', value: factura.importeNeto } as CellNumber, // H
+      { type: 'number', value: factura.importeIva } as CellNumber,  // I
+      { type: 'number', value: factura.importeTotal } as CellNumber,// J
+      factura.moneda,                       // K
+      factura.concepto || '',               // L
+      factura.processedAt,                  // M
+      factura.confidence,                   // N
+      factura.needsReview ? 'YES' : 'NO',   // O
+      factura.matchedPagoFileId || '',      // P
+      factura.matchConfidence || '',        // Q
+      factura.hasCuitMatch ? 'YES' : 'NO',  // R
+      tipoDeCambioCell,                     // S
     ];
   } else {
     return [
-      factura.fechaEmision,                               // A
-      factura.fileId,                                     // B
-      fileNameCell,                                       // C
-      factura.tipoComprobante,                            // D
-      factura.nroFactura,                                 // E
-      factura.cuitEmisor || '',                           // F
-      factura.razonSocialEmisor || '',                    // G
-      factura.importeNeto,                                // H
-      factura.importeIva,                                 // I
-      factura.importeTotal,                               // J
-      factura.moneda,                                     // K
-      factura.concepto || '',                             // L
-      processedAtCell,                                    // M
-      factura.confidence,                                 // N
-      factura.needsReview ? 'YES' : 'NO',                 // O
-      factura.matchedPagoFileId || '',                    // P
-      factura.matchConfidence || '',                      // Q
-      factura.hasCuitMatch ? 'YES' : 'NO',                // R
-      '',                                                 // S - pagada
-      tipoDeCambioVal,                                    // T
+      fechaEmisionDate,                     // A - proper date cell
+      factura.fileId,                       // B
+      { text: renamedFileName, url: `https://drive.google.com/file/d/${factura.fileId}/view` }, // C
+      factura.tipoComprobante,              // D
+      factura.nroFactura,                   // E
+      factura.cuitEmisor || '',             // F
+      factura.razonSocialEmisor || '',      // G
+      { type: 'number', value: factura.importeNeto } as CellNumber, // H
+      { type: 'number', value: factura.importeIva } as CellNumber,  // I
+      { type: 'number', value: factura.importeTotal } as CellNumber,// J
+      factura.moneda,                       // K
+      factura.concepto || '',               // L
+      factura.processedAt,                  // M
+      factura.confidence,                   // N
+      factura.needsReview ? 'YES' : 'NO',   // O
+      factura.matchedPagoFileId || '',      // P
+      factura.matchConfidence || '',        // Q
+      factura.hasCuitMatch ? 'YES' : 'NO',  // R
+      '',                                   // S - pagada (initially empty)
+      tipoDeCambioCell,                     // T
     ];
   }
 }
@@ -195,12 +190,12 @@ export async function storeFactura(
     const fileIdCheck = await findRowByFileId(spreadsheetId, sheetName, factura.fileId);
     if (fileIdCheck.found) {
       const renamedFileName = generateFacturaFileName(factura, documentType);
-      const updateRow = buildFacturaRow(factura, documentType, renamedFileName, timeZone);
+      const updateRow = buildFacturaRowFormatted(factura, documentType, renamedFileName);
       const lastCol = documentType === 'factura_emitida' ? 'S' : 'T';
-      const updateResult = await batchUpdate(spreadsheetId, [{
+      const updateResult = await updateRowsWithFormatting(spreadsheetId, [{
         range: `${sheetName}!A${fileIdCheck.rowIndex}:${lastCol}${fileIdCheck.rowIndex}`,
-        values: [updateRow],
-      }]);
+        values: updateRow,
+      }], timeZone, context?.metadataCache);
       if (!updateResult.ok) {
         throw updateResult.error;
       }
@@ -257,71 +252,12 @@ export async function storeFactura(
       return { stored: false, existingFileId: dupeCheck.existingFileId };
     }
 
-  // Calculate the renamed filename that will be used when the file is moved
-  const renamedFileName = generateFacturaFileName(factura, documentType);
+    // Calculate the renamed filename that will be used when the file is moved
+    const renamedFileName = generateFacturaFileName(factura, documentType);
 
-  // Build row based on document type - only include counterparty info
-  let row: CellValueOrLink[];
-  let range: string;
-
-  // Create CellDate for proper date formatting
-  const fechaEmisionDate: CellDate = { type: 'date', value: factura.fechaEmision };
-
-  // Validate tipoDeCambio as CellNumber or empty string
-  const tipoDeCambioCell: CellNumber | '' = factura.tipoDeCambio
-    ? { type: 'number', value: factura.tipoDeCambio }
-    : '';
-
-  if (documentType === 'factura_emitida') {
-    // Facturas Emitidas: Only receptor info (columns A:S)
-    row = [
-      fechaEmisionDate,                     // A - proper date cell
-      factura.fileId,                       // B
-      { text: renamedFileName, url: `https://drive.google.com/file/d/${factura.fileId}/view` }, // C
-      factura.tipoComprobante,              // D
-      factura.nroFactura,                   // E
-      factura.cuitReceptor || '',           // F - counterparty
-      factura.razonSocialReceptor || '',    // G - counterparty
-      { type: 'number', value: factura.importeNeto } as CellNumber, // H
-      { type: 'number', value: factura.importeIva } as CellNumber,  // I
-      { type: 'number', value: factura.importeTotal } as CellNumber,// J
-      factura.moneda,                       // K
-      factura.concepto || '',               // L
-      factura.processedAt,                  // M
-      factura.confidence,                   // N
-      factura.needsReview ? 'YES' : 'NO',   // O
-      factura.matchedPagoFileId || '',      // P
-      factura.matchConfidence || '',        // Q
-      factura.hasCuitMatch ? 'YES' : 'NO',  // R
-      tipoDeCambioCell,                     // S
-    ];
-    range = `${sheetName}!A:S`;
-  } else {
-    // Facturas Recibidas: Only emisor info (columns A:T)
-    row = [
-      fechaEmisionDate,                     // A - proper date cell
-      factura.fileId,                       // B
-      { text: renamedFileName, url: `https://drive.google.com/file/d/${factura.fileId}/view` }, // C
-      factura.tipoComprobante,              // D
-      factura.nroFactura,                   // E
-      factura.cuitEmisor || '',             // F - counterparty
-      factura.razonSocialEmisor || '',      // G - counterparty
-      { type: 'number', value: factura.importeNeto } as CellNumber, // H
-      { type: 'number', value: factura.importeIva } as CellNumber,  // I
-      { type: 'number', value: factura.importeTotal } as CellNumber,// J
-      factura.moneda,                       // K
-      factura.concepto || '',               // L
-      factura.processedAt,                  // M
-      factura.confidence,                   // N
-      factura.needsReview ? 'YES' : 'NO',   // O
-      factura.matchedPagoFileId || '',      // P
-      factura.matchConfidence || '',        // Q
-      factura.hasCuitMatch ? 'YES' : 'NO',  // R
-      '',                                   // S - pagada (initially empty)
-      tipoDeCambioCell,                     // T
-    ];
-    range = `${sheetName}!A:T`;
-  }
+    // Build row based on document type - only include counterparty info
+    const row = buildFacturaRowFormatted(factura, documentType, renamedFileName);
+    const range = documentType === 'factura_emitida' ? `${sheetName}!A:S` : `${sheetName}!A:T`;
 
     const result = await appendRowsWithLinks(spreadsheetId, range, [row], timeZone, context?.metadataCache);
     if (!result.ok) {

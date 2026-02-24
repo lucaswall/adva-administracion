@@ -4,6 +4,8 @@ vi.mock('./sheets.js', () => ({
   getValues: vi.fn(),
   batchUpdate: vi.fn(),
   getSheetMetadata: vi.fn(),
+  updateRowsWithFormatting: vi.fn(),
+  getSpreadsheetTimezone: vi.fn(() => Promise.resolve({ ok: true, value: 'America/Argentina/Buenos_Aires' })),
 }));
 
 vi.mock('./folder-structure.js', () => ({
@@ -17,8 +19,8 @@ vi.mock('../utils/logger.js', () => ({
   error: vi.fn(),
 }));
 
-import { migrateMovimientosColumns, runStartupMigrations } from './migrations.js';
-import { getValues, batchUpdate, getSheetMetadata } from './sheets.js';
+import { migrateMovimientosColumns, migrateDashboardProcessedAt, runStartupMigrations } from './migrations.js';
+import { getValues, batchUpdate, getSheetMetadata, updateRowsWithFormatting, getSpreadsheetTimezone } from './sheets.js';
 import { getCachedFolderStructure } from './folder-structure.js';
 
 beforeEach(() => {
@@ -215,6 +217,123 @@ describe('migrateMovimientosColumns', () => {
   });
 });
 
+describe('migrateDashboardProcessedAt', () => {
+  it('should re-write string processedAt values with updateRowsWithFormatting', async () => {
+    // ISO string processedAt rows — should be re-written to apply DATE_TIME format
+    vi.mocked(getValues).mockResolvedValue({
+      ok: true,
+      value: [
+        ['fileId', 'fileName', 'processedAt', 'documentType', 'status', 'originalFileId'],
+        ['file-1', 'a.pdf', '2025-12-01T10:00:00.000Z', 'factura_emitida', 'success', ''],
+        ['file-2', 'b.pdf', '2025-12-02T11:00:00.000Z', 'pago_recibido', 'processing', ''],
+        ['file-3', 'c.pdf', '', 'recibo', 'failed', ''], // empty — should be skipped
+      ],
+    });
+    vi.mocked(updateRowsWithFormatting).mockResolvedValue({ ok: true, value: undefined });
+
+    await migrateDashboardProcessedAt('dashboard-id');
+
+    // Should call updateRowsWithFormatting for rows with non-empty processedAt
+    expect(updateRowsWithFormatting).toHaveBeenCalledOnce();
+    const [calledId, calledUpdates, calledTimezone] = vi.mocked(updateRowsWithFormatting).mock.calls[0];
+    expect(calledId).toBe('dashboard-id');
+    expect(calledTimezone).toBe('America/Argentina/Buenos_Aires');
+
+    // Should include row 2 (file-1) and row 3 (file-2), skip row 4 (empty)
+    expect(calledUpdates).toHaveLength(2);
+    expect(calledUpdates[0].range).toBe('Archivos Procesados!C2');
+    expect(calledUpdates[0].values[0]).toBe('2025-12-01T10:00:00.000Z');
+    expect(calledUpdates[1].range).toBe('Archivos Procesados!C3');
+    expect(calledUpdates[1].values[0]).toBe('2025-12-02T11:00:00.000Z');
+  });
+
+  it('should convert serial number processedAt to ISO string before passing to updateRowsWithFormatting', async () => {
+    // Serial number processedAt (from old appendRowsWithLinks writes)
+    // 45993.5 = 2025-12-02 12:00:00 UTC
+    vi.mocked(getValues).mockResolvedValue({
+      ok: true,
+      value: [
+        ['fileId', 'fileName', 'processedAt', 'documentType', 'status', 'originalFileId'],
+        ['file-1', 'a.pdf', 45993.5, 'factura_emitida', 'success', ''],
+      ],
+    });
+    vi.mocked(updateRowsWithFormatting).mockResolvedValue({ ok: true, value: undefined });
+
+    await migrateDashboardProcessedAt('dashboard-id');
+
+    expect(updateRowsWithFormatting).toHaveBeenCalledOnce();
+    const calledUpdates = vi.mocked(updateRowsWithFormatting).mock.calls[0][1];
+    expect(calledUpdates).toHaveLength(1);
+    // Should convert serial to ISO string so updateRowsWithFormatting applies DATE_TIME format
+    const processedAtValue = calledUpdates[0].values[0];
+    expect(typeof processedAtValue).toBe('string');
+    expect(processedAtValue).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/);
+  });
+
+  it('should skip empty processedAt values', async () => {
+    vi.mocked(getValues).mockResolvedValue({
+      ok: true,
+      value: [
+        ['fileId', 'fileName', 'processedAt', 'documentType', 'status', 'originalFileId'],
+        ['file-1', 'a.pdf', '', 'factura_emitida', 'success', ''],
+        ['file-2', 'b.pdf', null, 'pago_recibido', 'processing', ''],
+      ],
+    });
+    vi.mocked(updateRowsWithFormatting).mockResolvedValue({ ok: true, value: undefined });
+
+    await migrateDashboardProcessedAt('dashboard-id');
+
+    // Nothing to migrate — should not call updateRowsWithFormatting
+    expect(updateRowsWithFormatting).not.toHaveBeenCalled();
+  });
+
+  it('should be idempotent — running twice produces the same result', async () => {
+    const rows = [
+      ['fileId', 'fileName', 'processedAt', 'documentType', 'status', 'originalFileId'],
+      ['file-1', 'a.pdf', '2025-12-01T10:00:00.000Z', 'factura_emitida', 'success', ''],
+    ];
+    vi.mocked(getValues).mockResolvedValue({ ok: true, value: rows });
+    vi.mocked(updateRowsWithFormatting).mockResolvedValue({ ok: true, value: undefined });
+
+    await migrateDashboardProcessedAt('dashboard-id');
+    vi.clearAllMocks();
+    vi.mocked(getValues).mockResolvedValue({ ok: true, value: rows });
+    vi.mocked(updateRowsWithFormatting).mockResolvedValue({ ok: true, value: undefined });
+    vi.mocked(getSpreadsheetTimezone).mockResolvedValue({ ok: true, value: 'America/Argentina/Buenos_Aires' });
+
+    await migrateDashboardProcessedAt('dashboard-id');
+
+    // Second run should still call updateRowsWithFormatting with same args (re-applies format)
+    expect(updateRowsWithFormatting).toHaveBeenCalledOnce();
+    const calledUpdates = vi.mocked(updateRowsWithFormatting).mock.calls[0][1];
+    expect(calledUpdates[0].values[0]).toBe('2025-12-01T10:00:00.000Z');
+  });
+
+  it('should handle only-header sheet gracefully', async () => {
+    vi.mocked(getValues).mockResolvedValue({
+      ok: true,
+      value: [
+        ['fileId', 'fileName', 'processedAt', 'documentType', 'status', 'originalFileId'],
+      ],
+    });
+
+    await migrateDashboardProcessedAt('dashboard-id');
+
+    expect(updateRowsWithFormatting).not.toHaveBeenCalled();
+  });
+
+  it('should handle getValues failure gracefully', async () => {
+    vi.mocked(getValues).mockResolvedValue({
+      ok: false,
+      error: new Error('API error'),
+    });
+
+    // Should not throw — just log and return
+    await expect(migrateDashboardProcessedAt('dashboard-id')).resolves.toBeUndefined();
+    expect(updateRowsWithFormatting).not.toHaveBeenCalled();
+  });
+});
+
 describe('runStartupMigrations', () => {
   it('should skip when folder structure is not initialized', async () => {
     vi.mocked(getCachedFolderStructure).mockReturnValue(null);
@@ -280,5 +399,26 @@ describe('runStartupMigrations', () => {
 
     // Second spreadsheet should still be processed
     expect(batchUpdate).toHaveBeenCalledTimes(1);
+  });
+
+  it('should call migrateDashboardProcessedAt when dashboardOperativoId is present', async () => {
+    vi.mocked(getCachedFolderStructure).mockReturnValue({
+      movimientosSpreadsheets: new Map(),
+      dashboardOperativoId: 'dashboard-id',
+    } as any);
+    // Mock for getValues called by migrateDashboardProcessedAt
+    vi.mocked(getValues).mockResolvedValue({
+      ok: true,
+      value: [
+        ['fileId', 'fileName', 'processedAt', 'documentType', 'status', 'originalFileId'],
+        ['file-1', 'a.pdf', '2025-12-01T10:00:00.000Z', 'factura_emitida', 'success', ''],
+      ],
+    });
+    vi.mocked(updateRowsWithFormatting).mockResolvedValue({ ok: true, value: undefined });
+
+    await runStartupMigrations();
+
+    // Should have called updateRowsWithFormatting for the dashboard migration
+    expect(updateRowsWithFormatting).toHaveBeenCalledOnce();
   });
 });

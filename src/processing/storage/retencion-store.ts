@@ -5,46 +5,39 @@
 
 import type { Result, Retencion, StoreResult } from '../../types/index.js';
 import type { ScanContext } from '../scanner.js';
-import { appendRowsWithLinks, sortSheet, getSpreadsheetTimezone, getValues, batchUpdate, type CellValueOrLink, type CellDate, type CellNumber, type CellValue } from '../../services/sheets.js';
+import { appendRowsWithLinks, sortSheet, getSpreadsheetTimezone, getValues, updateRowsWithFormatting, type CellValueOrLink, type CellDate, type CellNumber } from '../../services/sheets.js';
 import { parseNumber } from '../../utils/numbers.js';
 import { normalizeSpreadsheetDate } from '../../utils/date.js';
 import { generateRetencionFileName } from '../../utils/file-naming.js';
 import { info, warn } from '../../utils/logger.js';
 import { getCorrelationId } from '../../utils/correlation.js';
 import { withLock } from '../../utils/concurrency.js';
-import { createDriveHyperlink } from '../../utils/spreadsheet.js';
-import { formatTimestampInTimezone } from '../../services/status-sheet.js';
 
 /**
- * Builds a flat CellValue[] row for batchUpdate (reprocessing)
+ * Builds a CellValueOrLink[] row for updateRowsWithFormatting (reprocessing) and appendRowsWithLinks (insert)
  *
  * @param retencion - The retencion data
  * @param renamedFileName - The renamed filename
- * @param timeZone - Optional timezone for processedAt formatting
- * @returns Flat row values
+ * @returns Row with rich cell types
  */
-function buildRetencionRow(
+function buildRetencionRowFormatted(
   retencion: Retencion,
-  renamedFileName: string,
-  timeZone?: string
-): CellValue[] {
-  const fileNameCell = createDriveHyperlink(retencion.fileId, renamedFileName) || renamedFileName;
-  const processedAtCell = timeZone
-    ? formatTimestampInTimezone(new Date(retencion.processedAt), timeZone)
-    : retencion.processedAt;
+  renamedFileName: string
+): CellValueOrLink[] {
+  const fechaEmisionDate: CellDate = { type: 'date', value: retencion.fechaEmision };
 
   return [
-    retencion.fechaEmision,                               // A - date string (USER_ENTERED parses)
+    fechaEmisionDate,                                     // A - proper date cell
     retencion.fileId,                                     // B
-    fileNameCell,                                         // C - HYPERLINK formula
+    { text: renamedFileName, url: `https://drive.google.com/file/d/${retencion.fileId}/view` }, // C
     retencion.nroCertificado,                             // D
     retencion.cuitAgenteRetencion,                        // E
     retencion.razonSocialAgenteRetencion,                 // F
     retencion.impuesto,                                   // G
     retencion.regimen,                                    // H
-    retencion.montoComprobante,                           // I - raw number (USER_ENTERED handles)
-    retencion.montoRetencion,                             // J
-    processedAtCell,                                      // K
+    { type: 'number', value: retencion.montoComprobante } as CellNumber, // I
+    { type: 'number', value: retencion.montoRetencion } as CellNumber,   // J
+    retencion.processedAt,                                // K
     retencion.confidence,                                 // L
     retencion.needsReview ? 'YES' : 'NO',                  // M
     retencion.matchedFacturaFileId || '',                 // N
@@ -152,17 +145,17 @@ export async function storeRetencion(
     const fileIdCheck = await findRowByFileId(spreadsheetId, sheetName, retencion.fileId);
     if (fileIdCheck.found) {
       const renamedFileName = generateRetencionFileName(retencion);
-      const updateRow = buildRetencionRow(retencion, renamedFileName, timeZone);
-      const updateResult = await batchUpdate(spreadsheetId, [{
+      const updateRow = buildRetencionRowFormatted(retencion, renamedFileName);
+      const updateResult = await updateRowsWithFormatting(spreadsheetId, [{
         range: `${sheetName}!A${fileIdCheck.rowIndex}:O${fileIdCheck.rowIndex}`,
-        values: [updateRow],
-      }]);
+        values: updateRow,
+      }], timeZone, context?.metadataCache);
       if (!updateResult.ok) {
         throw updateResult.error;
       }
 
       info('Retencion reprocessed (existing row updated)', {
-        module: 'storage',
+        module: 'retencion-store',
         phase: 'retencion',
         fileId: retencion.fileId,
         rowIndex: fileIdCheck.rowIndex,
@@ -210,28 +203,8 @@ export async function storeRetencion(
     // Calculate the renamed filename that will be used when the file is moved
     const renamedFileName = generateRetencionFileName(retencion);
 
-    // Create CellDate for proper date formatting
-    const fechaEmisionDate: CellDate = { type: 'date', value: retencion.fechaEmision };
-
     // Build row (columns A:O)
-    const row: CellValueOrLink[] = [
-      fechaEmisionDate,                          // A - proper date cell
-      retencion.fileId,                          // B
-      { text: renamedFileName, url: `https://drive.google.com/file/d/${retencion.fileId}/view` }, // C
-      retencion.nroCertificado,                  // D
-      retencion.cuitAgenteRetencion,             // E
-      retencion.razonSocialAgenteRetencion,      // F
-      retencion.impuesto,                        // G
-      retencion.regimen,                         // H
-      { type: 'number', value: retencion.montoComprobante } as CellNumber, // I
-      { type: 'number', value: retencion.montoRetencion } as CellNumber,   // J
-      retencion.processedAt,                     // K
-      retencion.confidence,                      // L
-      retencion.needsReview ? 'YES' : 'NO',      // M
-      retencion.matchedFacturaFileId || '',      // N
-      retencion.matchConfidence || '',           // O
-    ];
-
+    const row = buildRetencionRowFormatted(retencion, renamedFileName);
     const range = `${sheetName}!A:O`;
 
     info('Storing retencion', {

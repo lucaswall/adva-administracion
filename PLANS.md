@@ -1,319 +1,221 @@
 # Implementation Plan
 
-**Status:** COMPLETE
-
-**Branch:** feat/ADV-144-movimientos-matching-fixes
-**Issues:** ADV-144, ADV-145, ADV-146, ADV-147, ADV-148, ADV-149, ADV-150
 **Created:** 2026-02-24
-**Last Updated:** 2026-02-24
+**Status:** COMPLETE
+**Source:** Inline request: Fix A (updateRowsWithFormatting) + Fix C (normalizeTimestamp) + Dashboard processedAt startup migration
+**Linear Issues:** [ADV-152](https://linear.app/lw-claude/issue/ADV-152/add-updaterowswithformatting-to-sheetsts), [ADV-153](https://linear.app/lw-claude/issue/ADV-153/add-normalizetimestamp-utility-for-reading-processedat-from-sheets), [ADV-154](https://linear.app/lw-claude/issue/ADV-154/use-updaterowswithformatting-in-storage-reprocessing-paths), [ADV-155](https://linear.app/lw-claude/issue/ADV-155/fix-dashboard-processedat-and-pagos-pendientes-date-passthrough), [ADV-156](https://linear.app/lw-claude/issue/ADV-156/startup-migration-fix-existing-dashboard-processedat-format)
 
-## Summary
+## Context Gathered
 
-Fix 4 bugs in bank movimientos matching (cross-bank deduplication, ARS tolerance inconsistency, USD cross-currency debit matching, force mode stale match clearing), optimize document lookup from O(N) to O(1), improve type safety by replacing `any` types, and fix documentation column order.
+### Codebase Analysis
 
-## Issues
+**Core write functions in sheets.ts:**
+- `appendRowsWithLinks` (line 1036) — uses `spreadsheets.batchUpdate` with `appendCells`, calls `convertToSheetsCellData` for rich formatting (CellDate, CellNumber, CellLink, ISO→serial conversion)
+- `batchUpdate` (line 284) — uses `spreadsheets.values.batchUpdate` with `USER_ENTERED`, flat `CellValue[]` only
+- `formatEmptyMonthSheet` (line 1523) — already uses `updateCells` pattern with grid coordinates (template for new function)
+- `convertToSheetsCellData` (line 909) — existing cell conversion logic to reuse
+- `columnIndexToLetter` (line 19) — exists, reverse `columnLetterToIndex` needed
 
-### ADV-144: Cross-bank deduplication gap: same document matched to multiple bank movements
+**Storage modules with dual write paths:**
+- `src/processing/storage/factura-store.ts` — `buildFacturaRow` (line 27) + `batchUpdate` (line 200) vs `appendRowsWithLinks` (line 326)
+- `src/processing/storage/pago-store.ts` — `buildPagoRow` (line 26) + `batchUpdate` (lines 245, 302) vs `appendRowsWithLinks` (line 404)
+- `src/processing/storage/recibo-store.ts` — `buildReciboRow` (line 25) + `batchUpdate` (line 152) vs `appendRowsWithLinks` (line 234)
+- `src/processing/storage/retencion-store.ts` — `buildRetencionRow` (line 26) + `batchUpdate` (line 156) vs `appendRowsWithLinks` (line 247)
+- `src/processing/storage/index.ts` — `batchUpdate` (line 97, ADV-105 workaround) vs `appendRowsWithLinks` (line 116)
 
-**Priority:** Medium
-**Labels:** Bug
-**Description:** `excludeFileIds` in `matchBankMovimientos` is built per-bank only. When processing multiple bank spreadsheets sequentially in `matchAllMovimientos`, there is no shared exclusion state — the same document can be matched to movements in different banks simultaneously.
+**Read-side processedAt sites using String():**
+- `src/processing/matching/factura-pago-matcher.ts:343,376`
+- `src/processing/matching/recibo-pago-matcher.ts:310,336`
 
-**Acceptance Criteria:**
-- [ ] `matchAllMovimientos` maintains a global `excludeFileIds` set shared across all bank spreadsheets
-- [ ] When a document is matched in Bank A, it's excluded from matching in Bank B
-- [ ] Existing tests pass; new tests verify cross-bank dedup
-- [ ] MANUAL matches contribute to the global exclusion set
+**Date utility patterns:**
+- `src/utils/date.ts` — `normalizeSpreadsheetDate` (line 199) handles serial→date string, `serialToDateString` (line 180) for date-only serial conversion
+- `src/processing/storage/index.ts:351-360` — `getStaleProcessingFileIds` handles both serial and string processedAt (reference implementation)
 
-### ADV-145: Inconsistent ARS tolerance in credit movement matching
+**Pagos-pendientes passthrough:**
+- `src/services/pagos-pendientes.ts:142-153` — reads serial numbers from getValues, passes raw to setValues
 
-**Priority:** Medium
-**Labels:** Bug
-**Description:** In `matchCreditMovement`, ARS Facturas Emitidas are matched using `amountsMatch(amount, factura.importeTotal, this.crossCurrencyTolerancePercent)` which passes `5` as an absolute ARS tolerance ($5). Debit matching uses `amountsMatchCrossCurrency` which applies `$1` tolerance for ARS/ARS. The inconsistency means credit matching is more permissive than debit matching for the same currency.
+**Existing migration pattern:**
+- `src/services/migrations.ts` — `migrateMovimientosColumns` reads sheet data, identifies rows needing migration, uses `batchUpdate` to fix. `runStartupMigrations` iterates spreadsheets from folder structure.
 
-**Acceptance Criteria:**
-- [ ] Credit matching for ARS Facturas Emitidas uses consistent tolerance with debit matching ($1 ARS)
-- [ ] Both lines 702 and 718 in `matchCreditMovement` are fixed
-- [ ] Tests verify consistent tolerance across debit and credit matching
+### Test Conventions
+- Colocated `*.test.ts` files
+- `vi.mock` for googleapis, google-auth
+- Mock `getSheetsService` returning mock API
+- Existing sheets.test.ts has patterns for all sheets functions
 
-### ADV-146: Missing cross-currency matching for USD Pagos Enviados without importeEnPesos in debit matching
+## Original Plan
 
-**Priority:** Medium
-**Labels:** Bug
-**Description:** In `matchMovement` (debit matching), when a USD Pago Enviado lacks `importeEnPesos`, the code falls back to `amountsMatch(pago.importePagado, amount)` which compares USD directly against ARS — always fails. Credit matching correctly uses `amountsMatchCrossCurrency` for this case.
+### Task 1: Add updateRowsWithFormatting to sheets.ts
+**Linear Issue:** [ADV-152](https://linear.app/lw-claude/issue/ADV-152/add-updaterowswithformatting-to-sheetsts)
 
-**Acceptance Criteria:**
-- [ ] Debit matching for USD Pagos Enviados uses `amountsMatchCrossCurrency` as fallback when `importeEnPesos` is not available
-- [ ] Confidence is appropriately reduced for cross-currency pago matches
-- [ ] Tests verify USD pagos without importeEnPesos can match ARS debit movements
-
-### ADV-147: O(N) linear scan in findDocumentByFileId — use Map for O(1) lookup
-
-**Priority:** Low
-**Labels:** Performance
-**Description:** `findDocumentByFileId` performs 5 sequential `.find()` calls across document arrays for each movement with an existing match. This is O(M*N) per bank. Replace with a pre-built `Map<string, {document, type}>` for O(1) lookups.
-
-**Acceptance Criteria:**
-- [ ] Build a `Map<string, {document, type}>` from all document arrays once before the matching loop
-- [ ] Replace all `findDocumentByFileId` calls with Map.get()
-- [ ] Also replace `buildMatchQualityFromFileId` to use the Map
-- [ ] No change in matching behavior (pure performance optimization)
-
-### ADV-148: Force mode doesn't clear stale AUTO matches when re-matching finds no match
-
-**Priority:** Low
-**Labels:** Bug
-**Description:** When `matchAllMovimientos` runs with `force=true` and a previously-matched AUTO row now has no match, the old `matchedFileId`, `matchedType`, and `detalle` persist in the spreadsheet. The no-match branch (line 1051) only restores `ownFileId` to `excludeFileIds` without writing a clearing update.
-
-**Acceptance Criteria:**
-- [ ] In force mode, when a previously-matched AUTO row has no new match, push an update clearing `matchedFileId`, `matchedType`, and `detalle`
-- [ ] MANUAL rows remain untouched (already skipped earlier in loop)
-- [ ] Test verifies force mode clears stale AUTO matches
-
-### ADV-149: SPREADSHEET_FORMAT.md shows wrong column order for Movimientos H/I
-
-**Priority:** Low
-**Labels:** Technical Debt
-**Description:** SPREADSHEET_FORMAT.md line 266-267 shows H=detalle, I=matchedType. The actual code (`spreadsheet-headers.ts:238-239`, `movimientos-reader.ts:76-77`, `movimientos-detalle.ts:176`) consistently uses H=matchedType, I=detalle. CLAUDE.md also lists the wrong order.
-
-**Acceptance Criteria:**
-- [ ] SPREADSHEET_FORMAT.md updated to show H=matchedType, I=detalle
-- [ ] CLAUDE.md updated to match the correct column order
-
-### ADV-150: Type safety gap: `any` type in findDocumentByFileId and buildMatchQuality
-
-**Priority:** Low
-**Labels:** Convention
-**Description:** `findDocumentByFileId` (line 661), `buildMatchQuality` (line 605), and `buildDetalleForDocument` (line 760) use `any` for document parameters. This bypasses TypeScript type checking for property access.
-
-**Acceptance Criteria:**
-- [ ] Replace `any` with a discriminated union type covering Factura, Pago, Recibo, Retencion (with `row` field)
-- [ ] Use type narrowing based on the `type` discriminator in each function
-- [ ] No runtime behavior changes
-
-## Prerequisites
-
-- [ ] All existing tests pass (verified via pre-flight)
-- [ ] On `main` branch with clean working tree
-
-## Implementation Tasks
-
-### Task 1: Fix ARS tolerance inconsistency in credit matching
-
-**Issue:** ADV-145
-**Files:**
-- `src/bank/matcher.ts` (modify)
-- `src/bank/matcher.test.ts` (modify)
-
-**TDD Steps:**
-
-1. **RED** — Write tests in `src/bank/matcher.test.ts`:
-   - Test: ARS factura matched via credit matching uses $1 tolerance (amount diff of $2 should NOT match)
-   - Test: ARS factura matched via credit matching with retenciones uses $1 tolerance
-   - Reference existing credit matching tests to follow patterns
-   - Run verifier with pattern "matcher" — expect fail
-
-2. **GREEN** — Fix `src/bank/matcher.ts`:
-   - Line 701-702: Replace `amountsMatch(amount, factura.importeTotal, this.crossCurrencyTolerancePercent)` with `amountsMatchCrossCurrency(factura.importeTotal, factura.moneda, factura.fechaEmision, amount, 'ARS', this.crossCurrencyTolerancePercent)` — this delegates to `amountsMatchCrossCurrency` which uses $1 for ARS/ARS (same pattern as debit matching at line 437-440)
-   - Line 717-718: Same fix for the retenciones branch
-   - Also update the `isCrossCurrency` variable logic: currently set before the match call (line 699), now the `amountsMatchCrossCurrency` result provides `isCrossCurrency`
-   - Run verifier with pattern "matcher" — expect pass
+1. Write tests in `src/services/sheets.test.ts`:
+   - Test `columnLetterToIndex`: A→1, Z→26, AA→27, AZ→52
+   - Test `parseA1Range`: `'Sheet1'!A5:S5` → `{ sheetName: 'Sheet1', startCol: 0, endCol: 18, startRow: 4, endRow: 4 }`
+   - Test `parseA1Range` with escaped sheet names: `'Sheet ''1'''!A5` → sheetName `Sheet '1'`
+   - Test `updateRowsWithFormatting` with a CellDate value → mock verifies `updateCells` request has `numberValue` + DATE format
+   - Test `updateRowsWithFormatting` with a CellNumber value → mock verifies `numberValue` + NUMBER `#,##0.00` format
+   - Test `updateRowsWithFormatting` with ISO timestamp string → mock verifies DATE_TIME serial conversion
+   - Test `updateRowsWithFormatting` with multiple rows → mock verifies multiple `updateCells` requests in single `batchUpdate` call
+   - Test metadata cache path (cache hit vs fresh lookup)
+2. Run verifier with pattern "sheets" (expect fail)
+3. Implement in `src/services/sheets.ts`:
+   - Add `columnLetterToIndex(letter: string): number` — reverse of `columnIndexToLetter`. Export it.
+   - Add internal `parseA1Range(range: string): { sheetName: string; startCol: number; endCol: number; startRow: number; endRow: number }` — parses A1 notation like `'Sheet Name'!A5:S5` into 0-indexed grid coordinates. Handle quoted sheet names (single quotes, doubled-quote escapes).
+   - Add exported `updateRowsWithFormatting(spreadsheetId, updates, timeZone?, metadataCache?)`:
+     - `updates`: `Array<{ range: string; values: CellValueOrLink[] }>` — each entry is a single row
+     - Group updates by sheet name for efficient metadata lookups
+     - For each group: resolve sheetName→sheetId via metadata (use cache if provided)
+     - Build `updateCells` requests using `convertToSheetsCellData` for each cell value
+     - Send all requests in a single `spreadsheets.batchUpdate` call
+     - Wrap in `withQuotaRetry`
+   - Follow the pattern of `formatEmptyMonthSheet` (line 1562-1576) for `updateCells` request structure
+   - The `fields` parameter should be `'userEnteredValue,userEnteredFormat,textFormatRuns'` to cover all cell data types (values, formats, and link formatting)
+4. Run verifier with pattern "sheets" (expect pass)
 
 **Notes:**
-- `amountsMatchCrossCurrency` for ARS/ARS returns `{ matches: amountsMatch(a, b, 1), isCrossCurrency: false }` — see `src/utils/exchange-rate.ts:330-337`
-- Debit matching already uses this unified pattern at line 437-440 — make credit matching consistent
+- `updateCells` requires 0-indexed `GridRange` with `sheetId`, `startRowIndex`, `endRowIndex`, `startColumnIndex`, `endColumnIndex`
+- A1 `A5:S5` → startRow=4, endRow=5, startCol=0, endCol=19 (endRow/endCol are exclusive in GridRange)
+- Multiple `updateCells` requests can be batched in a single API call (array of requests)
 
-### Task 2: Add cross-currency fallback for USD Pagos Enviados in debit matching
+### Task 2: Add normalizeTimestamp utility
+**Linear Issue:** [ADV-153](https://linear.app/lw-claude/issue/ADV-153/add-normalizetimestamp-utility-for-reading-processedat-from-sheets)
 
-**Issue:** ADV-146
-**Files:**
-- `src/bank/matcher.ts` (modify)
-- `src/bank/matcher.test.ts` (modify)
+1. Write tests in `src/utils/date.test.ts`:
+   - Test serial number input (e.g., `45993.604`) → returns `"2025-12-02 14:29:46"` (YYYY-MM-DD HH:MM:SS)
+   - Test integer serial (e.g., `45993`) → returns `"2025-12-02 00:00:00"`
+   - Test ISO string input → returned as-is
+   - Test formatted string input (e.g., `"2025-12-02 14:30:00"`) → returned as-is
+   - Test null/undefined → returns `''`
+   - Test empty string → returns `''`
+2. Run verifier with pattern "date" (expect fail)
+3. Implement `normalizeTimestamp(value: unknown): string` in `src/utils/date.ts`:
+   - If `typeof value === 'number'`: convert serial to datetime string using Sheets epoch (1899-12-30), extract hours/minutes/seconds from fractional part
+   - If `typeof value === 'string'`: return as-is
+   - Otherwise: return `''`
+   - Reference: `getStaleProcessingFileIds` in `storage/index.ts:354-357` for serial→timestamp conversion logic
+4. Replace `String(row[N])` with `normalizeTimestamp(row[N])` in:
+   - `src/processing/matching/factura-pago-matcher.ts:343` — `processedAt: normalizeTimestamp(row[12])`
+   - `src/processing/matching/factura-pago-matcher.ts:376` — `processedAt: normalizeTimestamp(row[10])`
+   - `src/processing/matching/recibo-pago-matcher.ts:310` — `processedAt: normalizeTimestamp(row[13])`
+   - `src/processing/matching/recibo-pago-matcher.ts:336` — `processedAt: normalizeTimestamp(row[10])`
+   - Add import of `normalizeTimestamp` from `../../utils/date.js` in both matcher files
+5. Run verifier with pattern "date" (expect pass)
 
-**TDD Steps:**
+### Task 3: Use updateRowsWithFormatting in storage reprocessing paths
+**Linear Issue:** [ADV-154](https://linear.app/lw-claude/issue/ADV-154/use-updaterowswithformatting-in-storage-reprocessing-paths)
 
-1. **RED** — Write tests in `src/bank/matcher.test.ts`:
-   - Test: USD Pago Enviado without `importeEnPesos` matches ARS bank debit via exchange rate conversion
-   - Test: Confidence is reduced for cross-currency pago matches (consistent with credit matching behavior)
-   - Test: USD Pago Enviado WITH `importeEnPesos` still uses direct ARS match (no regression)
-   - Run verifier with pattern "matcher" — expect fail
+**Depends on:** Task 1 (updateRowsWithFormatting must exist)
 
-2. **GREEN** — Fix `src/bank/matcher.ts`:
-   - Lines 367-369: Replace the ternary with logic that mirrors credit matching (lines 599-610):
-     - When `pago.importeEnPesos && pago.moneda === 'USD'`: use `amountsMatch(pago.importeEnPesos, amount)` (existing behavior)
-     - When `pago.moneda === 'USD' && !pago.importeEnPesos`: use `amountsMatchCrossCurrency(pago.importePagado, pago.moneda, pago.fechaPago, amount, 'ARS', this.crossCurrencyTolerancePercent)`
-     - Otherwise: use `amountsMatch(pago.importePagado, amount)` (ARS/ARS, existing behavior)
-   - Track `isCrossCurrency` flag from the cross-currency result, and cap confidence for cross-currency pago matches (same caps as credit matching)
-   - Run verifier with pattern "matcher" — expect pass
+1. Write tests in each storage module's test file:
+   - `src/processing/storage/factura-store.test.ts`: Test that reprocessing path (fileId already exists) calls `updateRowsWithFormatting` instead of `batchUpdate`. Verify the row passed contains CellDate for fechaEmision, CellNumber for monetary values, CellLink for fileName.
+   - `src/processing/storage/pago-store.test.ts`: Same pattern for pago reprocessing and quality replacement paths.
+   - `src/processing/storage/recibo-store.test.ts`: Same pattern for recibo reprocessing.
+   - `src/processing/storage/retencion-store.test.ts`: Same pattern for retencion reprocessing.
+2. Run verifier (expect fail — tests call updateRowsWithFormatting which reprocessing paths don't use yet)
+3. Implement per module — the pattern is the same for all four:
 
-**Notes:**
-- Cross-currency confidence caps per CLAUDE.md: Tier 1-3 → MEDIUM, Tier 4 → LOW, Tier 5 → LOW
-- Follow the credit matching pattern at lines 599-610 as template
-- Must handle the async exchange rate lookup (uses cached rates from prefetch)
+   **For each storage module (factura-store, pago-store, recibo-store, retencion-store):**
+   a. Extract the row-building code from the append path into a shared function (e.g., `buildFacturaRowFormatted`) that returns `CellValueOrLink[]`. This is the code that creates CellDate, CellNumber, CellLink objects. The shared function takes the same parameters as the current `buildRow` + the fields needed for rich types (timeZone for processedAt, fileId for CellLink URL).
+   b. Update the append path to call the shared builder, then pass the row to `appendRowsWithLinks` (same as before, just extracted).
+   c. Update the reprocessing path to call the shared builder, then pass the row to `updateRowsWithFormatting` instead of `batchUpdate`.
+   d. Remove the old `buildFacturaRow`/`buildPagoRow`/`buildReciboRow`/`buildRetencionRow` functions.
+   e. Add import of `updateRowsWithFormatting` from `../../services/sheets.js`.
 
-### Task 3: Force mode clears stale AUTO matches
+   **Key difference between append and reprocessing paths:**
+   - Append: `appendRowsWithLinks(spreadsheetId, range, [row], timeZone, metadataCache)`
+   - Reprocessing: `updateRowsWithFormatting(spreadsheetId, [{ range: `${sheetName}!A${rowIndex}:${lastCol}${rowIndex}`, values: row }], timeZone, metadataCache)`
 
-**Issue:** ADV-148
-**Files:**
-- `src/bank/match-movimientos.ts` (modify)
-- `src/bank/match-movimientos.test.ts` (modify)
-
-**TDD Steps:**
-
-1. **RED** — Write tests in `src/bank/match-movimientos.test.ts`:
-   - Test: In force mode, a previously-matched AUTO row with no new match gets cleared (matchedFileId='', matchedType='', detalle='')
-   - Test: In force mode, a previously-matched AUTO row that finds a new match still updates normally (regression guard)
-   - Test: In non-force mode, a previously-matched row with no new match retains its existing match (no clearing)
-   - Follow existing test patterns (mock matcher, ingresosData, egresosData)
-   - Run verifier with pattern "match-movimientos" — expect fail
-
-2. **GREEN** — Fix `src/bank/match-movimientos.ts`:
-   - In the no-match else branch (around line 1051-1057): when `options.force` is true AND the movement had an existing match (`ownFileId` is set), push a clearing update with empty matchedFileId, matchedType, and detalle
-   - When clearing in force mode, do NOT re-add `ownFileId` to `excludeFileIds` (the document is freed for other movements)
-   - When NOT in force mode, keep existing behavior (re-add ownFileId to excludeFileIds)
-   - Run verifier with pattern "match-movimientos" — expect pass
-
-**Notes:**
-- MANUAL rows are already skipped at line 860 with `continue`, so by line 1051 the row is guaranteed non-MANUAL
-- `computeRowVersion(mov)` should be called for the expectedVersion of the clearing update
-
-### Task 4: Map-based document lookup (performance)
-
-**Issue:** ADV-147
-**Files:**
-- `src/bank/match-movimientos.ts` (modify)
-- `src/bank/match-movimientos.test.ts` (modify)
-
-**TDD Steps:**
-
-1. **RED** — Write tests in `src/bank/match-movimientos.test.ts`:
-   - Test: Document Map is built correctly from all 5 document arrays, keyed by fileId
-   - Test: Map lookup returns the same result as the old `findDocumentByFileId` linear scan
-   - Test: Documents with duplicate fileIds across arrays (edge case) — first match wins (maintain existing behavior)
-   - Run verifier with pattern "match-movimientos" — expect fail
-
-2. **GREEN** — Implement in `src/bank/match-movimientos.ts`:
-   - Create a `buildDocumentMap` function that takes the 5 document arrays and returns a `Map<string, { document: ..., type: string }>`
-   - Iterate each array once, adding entries keyed by fileId. First-found wins (matching current `.find()` order: facturasEmitidas, pagosRecibidos, facturasRecibidas, pagosEnviados, recibos)
-   - In `matchBankMovimientos`, call `buildDocumentMap` once before the loop
-   - Replace all `findDocumentByFileId` calls with `documentMap.get(fileId)` — lines 863, 961 (used via buildMatchQualityFromFileId), and 875
-   - Remove `findDocumentByFileId` function (or refactor it to delegate to the Map)
-   - Refactor `buildMatchQualityFromFileId` to accept the Map instead of calling `findDocumentByFileId`
-   - Run verifier with pattern "match-movimientos" — expect pass
+4. Run verifier (expect pass)
 
 **Notes:**
-- Preserve the search order (facturasEmitidas first, recibos last) to maintain backward compatibility with which document type wins for a shared fileId
-- The Map is passed down to `matchBankMovimientos` — created once for all movements in a bank
-- For ADV-144 (Task 5), this Map becomes even more useful since the same Map is shared across banks
+- The `formatTimestampInTimezone` import in each storage module can be removed once `buildRow` functions are deleted (processedAt will be the raw ISO string, and `convertToSheetsCellData` in `updateRowsWithFormatting` will handle timezone conversion).
+- `createDriveHyperlink` usage in buildRow can be replaced with `CellLink` objects (same as append path).
 
-### Task 5: Cross-bank deduplication
+### Task 4: Fix Dashboard processedAt and pagos-pendientes
+**Linear Issue:** [ADV-155](https://linear.app/lw-claude/issue/ADV-155/fix-dashboard-processedat-and-pagos-pendientes-date-passthrough)
 
-**Issue:** ADV-144
-**Files:**
-- `src/bank/match-movimientos.ts` (modify)
-- `src/bank/match-movimientos.test.ts` (modify)
+**Depends on:** Task 1 (updateRowsWithFormatting)
 
-**TDD Steps:**
+1. Write tests:
+   - In `src/processing/storage/index.test.ts` (or relevant test file): Test `markFileProcessing` retry path produces a cell with DATE_TIME format (mock `updateRowsWithFormatting` and verify call args).
+   - In `src/services/pagos-pendientes.test.ts` (or create if needed): Test that serial number fechaEmision values from source sheet are converted to date strings before writing. Mock `getValues` to return serial numbers, verify `setValues` receives date strings.
+2. Run verifier (expect fail)
+3. Fix `src/processing/storage/index.ts`:
+   - In `markFileProcessing` retry path (line 97-98): Replace `batchUpdate` with `updateRowsWithFormatting` for the processedAt cell. Build the update with the ISO string as the value (convertToSheetsCellData will detect it and convert to DATE_TIME serial).
+   - Actually, the full row update at line 97-98 writes `[processedAt, documentType, 'processing', '']` to columns C:F. Only column C (processedAt) needs rich formatting. Simplest approach: use `updateRowsWithFormatting` for just the processedAt cell (column C), and keep `batchUpdate` for the other columns (D:F are plain strings). OR use `updateRowsWithFormatting` for all four columns — the non-date columns will just be strings passed through `convertToSheetsCellData` as `stringValue`.
+   - Remove the ADV-105 comment (lines 95-96).
+   - Add import of `updateRowsWithFormatting`.
+4. Fix `src/services/pagos-pendientes.ts`:
+   - In the mapping at line 142-153: for `row[fechaEmisionIdx]`, check if it's a number (serial) and convert using `normalizeSpreadsheetDate` from `utils/date.js`. This produces a YYYY-MM-DD string that `USER_ENTERED` in `setValues` will correctly parse as a date.
+   - Add import of `normalizeSpreadsheetDate` from `../utils/date.js`.
+5. Run verifier (expect pass)
 
-1. **RED** — Write tests in `src/bank/match-movimientos.test.ts`:
-   - Test: Document matched in Bank A is excluded from matching in Bank B (call matchBankMovimientos twice with shared exclusion state)
-   - Test: MANUAL matches from Bank A contribute to global exclusion for Bank B
-   - Test: Newly matched documents from Bank A's processing are added to global exclusion
-   - Run verifier with pattern "match-movimientos" — expect fail
+### Task 5: Startup migration for existing Dashboard processedAt
+**Linear Issue:** [ADV-156](https://linear.app/lw-claude/issue/ADV-156/startup-migration-fix-existing-dashboard-processedat-format)
 
-2. **GREEN** — Implement in `src/bank/match-movimientos.ts`:
-   - Add optional `globalExcludeFileIds?: Set<string>` parameter to `matchBankMovimientos`
-   - In `matchBankMovimientos`: seed `excludeFileIds` from BOTH the bank's own movements AND `globalExcludeFileIds` (if provided)
-   - After the matching loop (before returning), add all newly matched fileIds from this bank's `updates` to `globalExcludeFileIds`
-   - In `matchAllMovimientos` (line 1138-1169): create a `globalExcludeFileIds = new Set<string>()` before the bank loop, pass it to each `matchBankMovimientos` call
-   - Run verifier with pattern "match-movimientos" — expect pass
+**Depends on:** Task 1 (updateRowsWithFormatting)
+
+**Migration note:** Affects production Dashboard Operativo Contable spreadsheet (Archivos Procesados sheet, column C). Non-destructive and idempotent.
+
+1. Write tests in `src/services/migrations.test.ts` (create file if needed):
+   - Test `migrateDashboardProcessedAt`: mock `getValues` returning rows with mixed processedAt formats (some serial numbers, some ISO strings, some formatted strings, some empty). Verify `updateRowsWithFormatting` is called with the correct ISO string values for string rows, and that serial-number rows are also re-written (to re-apply DATE_TIME format). Empty rows should be skipped.
+   - Test idempotency: calling migration twice with same data should produce same result.
+   - Test no-op case: all processedAt values already properly formatted → no updates needed (or updates are harmless re-applications).
+2. Run verifier with pattern "migration" (expect fail)
+3. Implement `migrateDashboardProcessedAt` in `src/services/migrations.ts`:
+   - Takes `dashboardId: string` parameter
+   - Read `Archivos Procesados!A:F` via `getValues`
+   - Get spreadsheet timezone via `getSpreadsheetTimezone`
+   - For each data row (skip header):
+     - Column C (index 2) is processedAt
+     - If empty → skip
+     - If string (ISO or formatted) → include in update batch (will be converted to proper DATE_TIME serial by `convertToSheetsCellData`)
+     - If number (already serial) → include in update batch too (to ensure DATE_TIME format is applied, since some serials may lack format from direct API writes)
+   - Build updates array: `{ range: 'Archivos Procesados!C${rowNum}', values: [processedAtValue] }` for each row needing migration
+   - If any updates needed, call `updateRowsWithFormatting(dashboardId, updates, timeZone)`
+   - Log migration count
+4. Update `runStartupMigrations` in `src/services/migrations.ts`:
+   - Get Dashboard spreadsheet ID from `folderStructure.dashboardSpreadsheetId` (verify this field exists in `getCachedFolderStructure()` return type)
+   - Call `migrateDashboardProcessedAt(dashboardId)` after existing migrations
+5. Run verifier with pattern "migration" (expect pass)
 
 **Notes:**
-- The global set grows across bank iterations: Bank A adds its matches, Bank B sees them + adds its own, Bank C sees all
-- MANUAL matches from each bank also contribute since they're pre-seeded into per-bank excludeFileIds, which then feeds back to globalExcludeFileIds
-- The document Map from Task 4 is shared across banks (same ingresosData/egresosData), so this is purely about the exclusion set
-
-### Task 6: Type safety for `any` types in document functions
-
-**Issue:** ADV-150
-**Files:**
-- `src/bank/match-movimientos.ts` (modify)
-- `src/bank/match-movimientos.test.ts` (modify — may need type adjustments)
-
-**TDD Steps:**
-
-1. **RED** — This is a pure type-level refactor with no runtime behavior changes. Start by defining the discriminated union type:
-   - In `src/bank/match-movimientos.ts`, define a type alias (e.g., `MatchedDocument`) as a union of the document types with `row: number` that are already used in practice
-   - The discriminator is the `type` field returned by `findDocumentByFileId` / document Map: `'factura_emitida' | 'pago_recibido' | 'factura_recibida' | 'pago_enviado' | 'recibo'`
-   - Run verifier — expect compile errors from the `any` → union type change
-
-2. **GREEN** — Update the functions:
-   - `buildMatchQuality` (line 605): change `document?: any` to `document?: MatchedDocument`, add type narrowing based on `type` parameter
-   - Document Map return type: change `{ document: any; type: ... }` to `{ document: MatchedDocument; type: ... }`
-   - `buildDetalleForDocument` (line 760): change `document: any` to `document: MatchedDocument`, use type narrowing for property access
-   - Run verifier — expect pass (all existing tests should still work since runtime behavior is unchanged)
-
-**Notes:**
-- The union type needs `& { row: number }` on each variant since document arrays are typed with `row` field
-- Follow the `MatchedDocument` approach from the issue description but use the actual types from `src/types/index.ts`
-- The type narrowing should use `if/switch` on the `type` discriminator string to access type-specific properties
-
-### Task 7: Fix documentation column order
-
-**Issue:** ADV-149
-**Files:**
-- `SPREADSHEET_FORMAT.md` (modify)
-- `CLAUDE.md` (modify)
-
-**Steps:**
-
-1. In `SPREADSHEET_FORMAT.md` line 266-267: swap H and I columns:
-   - H: `matchedType` — Match type: `AUTO` (algorithmic), `MANUAL` (user-set), or empty (unmatched)
-   - I: `detalle` — Human-readable match description
-
-2. In `CLAUDE.md`: find the Movimientos Bancario description and update column order to: `matchedFileId` (fileId of matched document), `matchedType` (AUTO/MANUAL/empty), `detalle` (human-readable match description)
-
-3. Run verifier — expect pass (no code changes)
-
-## MCP Usage During Implementation
-
-| MCP Server | Tool | Purpose |
-|------------|------|---------|
-| Linear | `update_issue` | Move issues to In Progress at task start, Review at completion |
-
-## Error Handling
-
-| Error Scenario | Expected Behavior | Test Coverage |
-|---------------|-------------------|---------------|
-| ARS credit match with $2 diff | Should NOT match (was matching before fix) | Unit test (Task 1) |
-| USD pago without importeEnPesos vs ARS debit | Should match via exchange rate | Unit test (Task 2) |
-| Force mode + no_match on existing AUTO | Should clear match cells | Unit test (Task 3) |
-| Same fileId in Bank A and Bank B | Should only match once (first bank wins) | Unit test (Task 5) |
-
-## Risks & Open Questions
-
-- [ ] Task 1 (ADV-145): Fixing ARS tolerance from $5 to $1 might cause some existing credit matches to break in production — they would need force re-matching. Low risk since $5 ARS is tiny ($0.005 USD).
-- [ ] Task 2 (ADV-146): Cross-currency pago matching depends on exchange rate cache being populated. The prefetch in matchAllMovimientos should cover this. Verify test mocking handles exchange rate correctly.
-- [ ] Task 5 (ADV-144): Cross-bank dedup means processing ORDER of banks matters — first bank gets priority. This is acceptable since it mirrors the existing behavior within a single bank.
-- [ ] Task 6 (ADV-150): The discriminated union must cover all document types that can appear in findDocumentByFileId. Missing a type would cause compile errors (which is the desired safety improvement).
-
-## Scope Boundaries
-
-**In Scope:**
-- 4 bug fixes in matcher.ts and match-movimientos.ts
-- 1 performance optimization (Map-based lookup)
-- 1 type safety improvement
-- 1 documentation fix
-
-**Out of Scope:**
-- Refactoring the matching algorithm itself
-- Adding new matching tiers or patterns
-- Changing the spreadsheet schema (no migration needed)
-- UI/Apps Script changes
+- For string processedAt values: pass the raw string to `updateRowsWithFormatting`. The `isISOTimestamp` check in `convertToSheetsCellData` will convert ISO strings to DATE_TIME serials. Non-ISO formatted strings (e.g., "2025-01-15 11:30:00") won't match `isISOTimestamp` — for these, convert to ISO first using `new Date(value).toISOString()` before passing (if valid date).
+- For serial processedAt values: pass the number directly. `convertToSheetsCellData` for numbers just creates `numberValue` without format. To apply DATE_TIME format, wrap in a new `CellDateTime` type, OR handle specially in the migration. Simplest: convert serial back to ISO string using the epoch math, then pass the ISO string which `convertToSheetsCellData` will re-serialize with proper format.
+- The migration should chunk updates to avoid hitting Sheets API limits (use `SHEETS_BATCH_UPDATE_LIMIT` from config).
 
 ## Post-Implementation Checklist
 1. Run `bug-hunter` agent — Review changes for bugs
 2. Run `verifier` agent — Verify all tests pass and zero warnings
+
+---
+
+## Plan Summary
+
+**Objective:** Ensure all spreadsheet date/timestamp cells use proper DATE_TIME formatting via `updateRowsWithFormatting`, and all read paths handle serial numbers correctly.
+
+**Request:** Fix A (create `updateRowsWithFormatting` for updating existing rows with rich formatting) + Fix C (add `normalizeTimestamp` for reading processedAt) + Dashboard processedAt startup migration.
+
+**Linear Issues:** ADV-152, ADV-153, ADV-154, ADV-155, ADV-156
+
+**Approach:** Create a new `updateRowsWithFormatting` function in sheets.ts that mirrors `appendRowsWithLinks` but uses `updateCells` for existing rows. Replace all storage reprocessing paths that use `batchUpdate` with flat values. Add `normalizeTimestamp` utility for read-side serial number handling. Add startup migration to fix existing Dashboard data.
+
+**Scope:**
+- Tasks: 5
+- Files affected: ~15 (sheets.ts, date.ts, 4 storage modules, 2 matchers, index.ts, pagos-pendientes.ts, migrations.ts, + test files)
+- New tests: yes
+
+**Key Decisions:**
+- Use `updateCells` in `spreadsheets.batchUpdate` API (not `values.batchUpdate`) to get rich cell formatting
+- Reuse existing `convertToSheetsCellData` for consistent cell conversion
+- Extract shared row builders from append paths to serve both append and reprocessing paths
+- Migration re-writes ALL processedAt values (both string and serial) to ensure consistent DATE_TIME format
+
+**Risks/Considerations:**
+- `updateRowsWithFormatting` requires A1→grid coordinate parsing and sheet metadata lookup — adds one API call per unique sheet (cacheable)
+- Storage module refactoring touches 4 modules with similar patterns — risk of copy-paste errors across modules
+- Migration is idempotent but adds API calls at startup — should be efficient (batch all updates in single call per Dashboard)
+- Pagos-pendientes fix uses `normalizeSpreadsheetDate` which strips time info from dates — acceptable since fechaEmision is date-only
 
 ---
 
@@ -323,75 +225,87 @@ Fix 4 bugs in bank movimientos matching (cross-bank deduplication, ARS tolerance
 **Method:** Agent team (2 workers, worktree-isolated)
 
 ### Tasks Completed This Iteration
-- Task 1: Fix ARS tolerance inconsistency in credit matching — `matchCreditMovement` now uses `amountsMatchCrossCurrency` for consistent $1 ARS tolerance (worker-1)
-- Task 2: Add cross-currency fallback for USD Pagos Enviados in debit matching — mirrors credit matching pattern with confidence capping (worker-1)
-- Task 3: Force mode clears stale AUTO matches — pushes empty update when no new match found in force mode (worker-1)
-- Task 4: Map-based document lookup — `buildDocumentMap` replaces O(N) linear scans with O(1) Map lookups (worker-2)
-- Task 5: Cross-bank deduplication — `globalExcludeFileIds` shared across all bank spreadsheets (worker-2)
-- Task 6: Type safety for `any` types — `MatchedDocument` discriminated union replaces `any` in document functions (worker-2)
-- Task 7: Fix documentation column order — SPREADSHEET_FORMAT.md and CLAUDE.md corrected to H=matchedType, I=detalle (lead)
+- Task 1: Add updateRowsWithFormatting to sheets.ts - Added `columnLetterToIndex`, `parseA1Range`, `updateRowsWithFormatting` with full CellDate/CellNumber/CellLink support (worker-1)
+- Task 2: Add normalizeTimestamp utility - Converts serial numbers to YYYY-MM-DD HH:MM:SS, replaced String() in 4 matcher sites (worker-2)
+- Task 3: Use updateRowsWithFormatting in storage reprocessing paths - Refactored all 4 storage modules with shared `buildXxxRowFormatted` builders (worker-1)
+- Task 4: Fix Dashboard processedAt and pagos-pendientes - markFileProcessing uses updateRowsWithFormatting, pagos-pendientes converts serial fechaEmision (worker-2)
+- Task 5: Startup migration for Dashboard processedAt - migrateDashboardProcessedAt converts all processedAt to DATE_TIME format (worker-2)
 
 ### Files Modified
-- `src/bank/matcher.ts` — ARS tolerance fix, USD pago cross-currency fallback
-- `src/bank/matcher.test.ts` — Tests for Tasks 1 and 2
-- `src/bank/match-movimientos.ts` — Map lookup, cross-bank dedup, type safety, force mode clearing, bug-hunter fixes
-- `src/bank/match-movimientos.test.ts` — Tests for Tasks 3, 4, 5, 6
-- `SPREADSHEET_FORMAT.md` — Column order fix (H=matchedType, I=detalle)
-- `CLAUDE.md` — Column order fix
+- `src/services/sheets.ts` - Added columnLetterToIndex, parseA1Range, updateRowsWithFormatting
+- `src/services/sheets.test.ts` - 6 new tests for updateRowsWithFormatting + helpers
+- `src/utils/date.ts` - Added normalizeTimestamp
+- `src/utils/date.test.ts` - 8 new tests for normalizeTimestamp
+- `src/processing/storage/factura-store.ts` - Shared row builder, updateRowsWithFormatting in reprocessing
+- `src/processing/storage/factura-store.test.ts` - Updated for new reprocessing path
+- `src/processing/storage/pago-store.ts` - Same refactor pattern
+- `src/processing/storage/pago-store.test.ts` - Updated tests
+- `src/processing/storage/recibo-store.ts` - Same refactor pattern
+- `src/processing/storage/recibo-store.test.ts` - Updated tests
+- `src/processing/storage/retencion-store.ts` - Same refactor pattern
+- `src/processing/storage/retencion-store.test.ts` - Updated tests
+- `src/processing/matching/factura-pago-matcher.ts` - normalizeTimestamp for processedAt
+- `src/processing/matching/recibo-pago-matcher.ts` - normalizeTimestamp for processedAt
+- `src/processing/storage/index.ts` - updateRowsWithFormatting in retry path
+- `src/processing/storage/index.test.ts` - Updated retry path tests
+- `src/services/pagos-pendientes.ts` - normalizeSpreadsheetDate for fechaEmision
+- `src/services/pagos-pendientes.test.ts` - New test for serial fechaEmision
+- `src/services/migrations.ts` - migrateDashboardProcessedAt + runStartupMigrations update
+- `src/services/migrations.test.ts` - 7 new migration tests
 
 ### Linear Updates
-- ADV-144: Todo → In Progress → Review
-- ADV-145: Todo → Review
-- ADV-146: Todo → Review
-- ADV-147: Todo → In Progress → Review
-- ADV-148: Todo → Review
-- ADV-149: Todo → Review
-- ADV-150: Todo → Review
+- ADV-152: Todo → In Progress → Review
+- ADV-153: Todo → In Progress → Review
+- ADV-154: Todo → In Progress → Review
+- ADV-155: Todo → In Progress → Review
+- ADV-156: Todo → In Progress → Review
 
 ### Pre-commit Verification
-- bug-hunter: Found 2 bugs (MEDIUM: cross-bank dedup bypass for pre-existing duplicates, LOW: noMatches overcounting in force mode), both fixed
-- verifier: All 1843 tests pass, zero warnings
+- bug-hunter: Found 4 bugs (3 HIGH already fixed by merge integration, 1 MEDIUM partial-failure logging fixed)
+- verifier: All 1874 tests pass, zero warnings
 
 ### Work Partition
-- Worker 1: Tasks 1, 2, 3 (bug fixes domain — matcher.ts, match-movimientos.ts force mode)
-- Worker 2: Tasks 4, 5, 6 (refactoring domain — Map lookup, dedup, type safety)
-- Lead: Task 7 (documentation fix)
+- Worker 1: Tasks 1, 3 (sheets.ts foundation + storage reprocessing refactor)
+- Worker 2: Tasks 2, 4, 5 (date utilities + Dashboard fixes + migration)
 
 ### Merge Summary
-- Worker 2: fast-forward (no conflicts)
-- Worker 1: auto-merged (no conflicts)
-
-### Continuation Status
-All tasks completed.
+- Worker 1: fast-forward (no conflicts)
+- Worker 2: auto-merge, 3 type mismatches in sheets.ts stub vs real signature (resolved: removed stub, fixed nested→flat values)
 
 ### Review Findings
 
-Summary: 1 issue found, fixed inline (single-agent review)
-- FIXED INLINE: 1 issue — verified via TDD + bug-hunter
+Summary: 6 finding(s) found, 3 fixed inline (Team: security, reliability, quality reviewers)
+- FIXED INLINE: 3 issue(s) — verified via TDD + bug-hunter
+- DISCARDED: 3 finding(s) — false positives / style-only
 
 **Issues fixed inline:**
-- [LOW] BUG: Credit pago_only confidence hardcoded to 'MEDIUM' (`src/bank/matcher.ts:691`) — changed to `tierToConfidence(tier, amountOk.isCrossCurrency)` for consistency with debit matching + test
+- [MEDIUM] BUG: Sort uses `String()` instead of `normalizeSpreadsheetDate()` (`src/services/pagos-pendientes.ts:91-94`) — replaced with `normalizeSpreadsheetDate()` + added serial number sort test (ADV-157)
+- [LOW] CONVENTION: Reprocessing log uses wrong module name (`src/processing/storage/retencion-store.ts:157`) — changed `'storage'` to `'retencion-store'` (ADV-158)
+- [LOW] TEST: Sort test doesn't exercise serial number path (`src/services/pagos-pendientes.test.ts`) — added test with unsorted serial numbers (ADV-159)
 
 **Discarded findings (not bugs):**
-- [DISCARDED] noMatches counter in force-mode clear path — intentionally not incremented per earlier bug-hunter fix that addressed overcounting
-- [DISCARDED] Global exclusion propagation for zero-amount rows — correct by design; cross-bank dedup should prevent document reuse across banks
-- [DISCARDED] Exhaustive type check in buildDetalleForDocument — style-only future-proofing, zero correctness impact today
+- [DISCARDED] sheets.ts:74-82 — Cache TTL resets on read (LRU behavior). Valid design choice; timezone changes are exceedingly rare. Misleading comment is style-only.
+- [DISCARDED] migrations.test.ts — `as any` casts in test mocks. Standard partial mock pattern with zero correctness impact.
+- [DISCARDED] factura-pago-matcher.test.ts:99-114 — Test tests Map API behavior, not matcher code. Unnecessary but not harmful.
 
 ### Linear Updates
-- ADV-144: Review → Merge
-- ADV-145: Review → Merge
-- ADV-146: Review → Merge
-- ADV-147: Review → Merge
-- ADV-148: Review → Merge
-- ADV-149: Review → Merge
-- ADV-150: Review → Merge
-- ADV-151: Created in Merge (Fix: credit pago_only confidence — fixed inline)
+- ADV-152: Review → Merge (original task)
+- ADV-153: Review → Merge (original task)
+- ADV-154: Review → Merge (original task)
+- ADV-155: Review → Merge (original task)
+- ADV-156: Review → Merge (original task)
+- ADV-157: Created in Merge (Fix: pagos-pendientes sort — fixed inline)
+- ADV-158: Created in Merge (Fix: retencion-store log module — fixed inline)
+- ADV-159: Created in Merge (Fix: pagos-pendientes sort test — fixed inline)
 
 ### Inline Fix Verification
-- Unit tests: all 1845 pass
-- Bug-hunter: no new issues in inline fix
+- Unit tests: all 1875 pass
+- Bug-hunter: no new issues
 
 <!-- REVIEW COMPLETE -->
+
+### Continuation Status
+All tasks completed.
 
 ---
 

@@ -482,6 +482,105 @@ describe('syncPagosPendientes', () => {
     }
   });
 
+  it('should sort serial number fechaEmision values correctly', async () => {
+    // Serial numbers from getValues (UNFORMATTED_VALUE + SERIAL_NUMBER) should sort correctly
+    // Based on epoch: serial 45993 = 2025-12-02
+    // Serial 45598 = 2024-11-02, Serial 45628 = 2024-12-02, Serial 45659 = 2025-01-02
+    const facturasData = [
+      ['fechaEmision', 'fileId', 'fileName', 'tipoComprobante', 'nroFactura', 'cuitEmisor',
+       'razonSocialEmisor', 'importeNeto', 'importeIva', 'importeTotal', 'moneda', 'concepto',
+       'processedAt', 'confidence', 'needsReview', 'matchedPagoFileId', 'matchConfidence',
+       'hasCuitMatch', 'pagada'],
+      // Jan 2025 (newest — serial 45659)
+      [45659, 'file3', 'Factura-003.pdf', 'A', '00001-00000003', '20111111119',
+       'PROVEEDOR C', '500', '105', '605', 'ARS', 'Third',
+       '2025-01-03T10:00:00Z', '0.92', 'NO', '', '', 'NO', 'NO'],
+      // Nov 2024 (oldest — serial 45598)
+      [45598, 'file1', 'Factura-001.pdf', 'A', '00001-00000001', '20123456786',
+       'PROVEEDOR A', '1000', '210', '1210', 'ARS', 'First',
+       '2024-11-03T10:00:00Z', '0.95', 'NO', '', '', 'NO', 'NO'],
+      // Dec 2024 (middle — serial 45628)
+      [45628, 'file2', 'Factura-002.pdf', 'B', '00001-00000002', '27234567891',
+       'PROVEEDOR B', '2000', '420', '2420', 'ARS', 'Second',
+       '2024-12-03T10:00:00Z', '0.98', 'NO', '', '', 'NO', 'NO'],
+    ];
+
+    vi.mocked(sheets.getValues).mockResolvedValue({
+      ok: true,
+      value: facturasData,
+    });
+
+    vi.mocked(sheets.clearSheetData).mockResolvedValue({
+      ok: true,
+      value: undefined,
+    });
+
+    vi.mocked(sheets.setValues).mockResolvedValue({
+      ok: true,
+      value: 30,
+    });
+
+    const result = await syncPagosPendientes('egresos123', 'dashboard456');
+
+    expect(result.ok).toBe(true);
+
+    // Verify sorted by date ascending: Nov 2024, Dec 2024, Jan 2025
+    const setValuesCall = vi.mocked(sheets.setValues).mock.calls[0];
+    const writtenRows = setValuesCall[2];
+    expect(writtenRows[0][0]).toBe('2024-11-02'); // file1 — oldest
+    expect(writtenRows[1][0]).toBe('2024-12-02'); // file2 — middle
+    expect(writtenRows[2][0]).toBe('2025-01-02'); // file3 — newest
+  });
+
+  it('should convert serial number fechaEmision to date string before writing', async () => {
+    // When getValues returns SERIAL_NUMBER render option, CellDate fields come back as numbers
+    // Serial 45993 = 2025-12-02 (days from 1899-12-30 epoch)
+    const facturasData = [
+      ['fechaEmision', 'fileId', 'fileName', 'tipoComprobante', 'nroFactura', 'cuitEmisor',
+       'razonSocialEmisor', 'importeNeto', 'importeIva', 'importeTotal', 'moneda', 'concepto',
+       'processedAt', 'confidence', 'needsReview', 'matchedPagoFileId', 'matchConfidence',
+       'hasCuitMatch', 'pagada'],
+      // fechaEmision as serial number (as returned by Google Sheets API with SERIAL_NUMBER option)
+      [45993, 'file123', 'Factura-001.pdf', 'A', '00001-00000001', '20123456786',
+       'TEST SA', '1000', '210', '1210', 'ARS', 'Servicios',
+       '2025-12-02T10:00:00Z', '0.95', 'NO', '', '', 'NO', 'NO'],
+    ];
+
+    vi.mocked(sheets.getValues).mockResolvedValue({
+      ok: true,
+      value: facturasData,
+    });
+
+    vi.mocked(sheets.clearSheetData).mockResolvedValue({
+      ok: true,
+      value: undefined,
+    });
+
+    vi.mocked(sheets.setValues).mockResolvedValue({
+      ok: true,
+      value: 10,
+    });
+
+    const result = await syncPagosPendientes('egresos123', 'dashboard456');
+
+    expect(result.ok).toBe(true);
+
+    // Verify setValues was called with a date string (not a number)
+    expect(sheets.setValues).toHaveBeenCalledWith(
+      'dashboard456',
+      'Pagos Pendientes!A2:J',
+      expect.arrayContaining([
+        expect.arrayContaining(['2025-12-02']), // Serial 45993 converted to date string
+      ])
+    );
+
+    const setValuesCall = vi.mocked(sheets.setValues).mock.calls[0];
+    const writtenRow = setValuesCall[2][0];
+    const fechaEmisionWritten = writtenRow[0];
+    expect(typeof fechaEmisionWritten).toBe('string');
+    expect(fechaEmisionWritten).toBe('2025-12-02');
+  });
+
   describe('ADV-13: Data loss prevention', () => {
     it('should clear old data before writing new data', async () => {
       // Track order of operations

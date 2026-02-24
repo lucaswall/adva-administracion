@@ -18,7 +18,7 @@ import {
   buildUnmatchUpdate,
 } from '../../matching/cascade-matcher.js';
 import { parseNumber } from '../../utils/numbers.js';
-import { normalizeSpreadsheetDate } from '../../utils/date.js';
+import { normalizeSpreadsheetDate, normalizeTimestamp } from '../../utils/date.js';
 import { debug, info, warn } from '../../utils/logger.js';
 import { getCorrelationId } from '../../utils/correlation.js';
 import { withLock, withRetry } from '../../utils/concurrency.js';
@@ -307,7 +307,7 @@ async function doMatchRecibosWithPagos(
         subtotalRemuneraciones: parseNumber(row[10]) || 0,
         subtotalDescuentos: parseNumber(row[11]) || 0,
         totalNeto: parseNumber(row[12]) || 0,
-        processedAt: String(row[13] || ''),
+        processedAt: normalizeTimestamp(row[13]),
         confidence: Number(row[14]) || 0,
         needsReview: row[15] === 'YES',
         matchedPagoFileId: row[16] ? String(row[16]) : undefined,
@@ -333,7 +333,7 @@ async function doMatchRecibosWithPagos(
         cuitPagador: row[7] ? String(row[7]) : undefined,
         nombrePagador: row[8] ? String(row[8]) : undefined,
         concepto: row[9] ? String(row[9]) : undefined,
-        processedAt: String(row[10] || ''),
+        processedAt: normalizeTimestamp(row[10]),
         confidence: Number(row[11]) || 0,
         needsReview: row[12] === 'YES',
         matchedFacturaFileId: row[13] ? String(row[13]) : undefined,
