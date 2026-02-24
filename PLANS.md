@@ -1,314 +1,170 @@
 # Implementation Plan
 
 **Created:** 2026-02-24
-**Status:** COMPLETE
-**Source:** Inline request: Fix A (updateRowsWithFormatting) + Fix C (normalizeTimestamp) + Dashboard processedAt startup migration
-**Linear Issues:** [ADV-152](https://linear.app/lw-claude/issue/ADV-152/add-updaterowswithformatting-to-sheetsts), [ADV-153](https://linear.app/lw-claude/issue/ADV-153/add-normalizetimestamp-utility-for-reading-processedat-from-sheets), [ADV-154](https://linear.app/lw-claude/issue/ADV-154/use-updaterowswithformatting-in-storage-reprocessing-paths), [ADV-155](https://linear.app/lw-claude/issue/ADV-155/fix-dashboard-processedat-and-pagos-pendientes-date-passthrough), [ADV-156](https://linear.app/lw-claude/issue/ADV-156/startup-migration-fix-existing-dashboard-processedat-format)
+**Source:** Inline request: Add `.schema_version` file to Drive root for tracking schema migrations. Version-gate startup migrations to avoid redundant checks.
+**Linear Issues:** [ADV-160](https://linear.app/lw-claude/issue/ADV-160/add-drive-file-content-operations-createfilewithcontent), [ADV-161](https://linear.app/lw-claude/issue/ADV-161/create-schema-version-service-readwrite-schema_version-from-drive), [ADV-162](https://linear.app/lw-claude/issue/ADV-162/migration-registry-with-version-gated-execution), [ADV-163](https://linear.app/lw-claude/issue/ADV-163/remove-migration-calls-from-folder-structurets-discovery)
 
 ## Context Gathered
 
 ### Codebase Analysis
 
-**Core write functions in sheets.ts:**
-- `appendRowsWithLinks` (line 1036) — uses `spreadsheets.batchUpdate` with `appendCells`, calls `convertToSheetsCellData` for rich formatting (CellDate, CellNumber, CellLink, ISO→serial conversion)
-- `batchUpdate` (line 284) — uses `spreadsheets.values.batchUpdate` with `USER_ENTERED`, flat `CellValue[]` only
-- `formatEmptyMonthSheet` (line 1523) — already uses `updateCells` pattern with grid coordinates (template for new function)
-- `convertToSheetsCellData` (line 909) — existing cell conversion logic to reuse
-- `columnIndexToLetter` (line 19) — exists, reverse `columnLetterToIndex` needed
+**Current startup flow** (`src/server.ts:318-386`):
+1. `initializeFolderStructure()` — discovers Drive folders, creates spreadsheets, runs tipoDeCambio + ArchivosProcesados migrations inline
+2. `runStartupMigrations()` — runs Movimientos column reorder + Dashboard processedAt migrations
+3. `initializeRealTimeMonitoring()` → `updateStatusSheet()` → `performStartupScan()`
 
-**Storage modules with dual write paths:**
-- `src/processing/storage/factura-store.ts` — `buildFacturaRow` (line 27) + `batchUpdate` (line 200) vs `appendRowsWithLinks` (line 326)
-- `src/processing/storage/pago-store.ts` — `buildPagoRow` (line 26) + `batchUpdate` (lines 245, 302) vs `appendRowsWithLinks` (line 404)
-- `src/processing/storage/recibo-store.ts` — `buildReciboRow` (line 25) + `batchUpdate` (line 152) vs `appendRowsWithLinks` (line 234)
-- `src/processing/storage/retencion-store.ts` — `buildRetencionRow` (line 26) + `batchUpdate` (line 156) vs `appendRowsWithLinks` (line 247)
-- `src/processing/storage/index.ts` — `batchUpdate` (line 97, ADV-105 workaround) vs `appendRowsWithLinks` (line 116)
+**Current migrations (all idempotent, all already applied in production):**
+- `migrateTipoDeCambioHeaders` — 4 calls in `discoverFolderStructure()` (folder-structure.ts:826-845) for Facturas Emitidas, Pagos Recibidos, Facturas Recibidas, Pagos Enviados
+- `migrateArchivosProcesadosHeaders` — called inside `initializeDashboardOperativo()` (folder-structure.ts:428)
+- `migrateMovimientosColumns` — called in `runStartupMigrations()` (migrations.ts:284), iterates all movimientos spreadsheets
+- `migrateDashboardProcessedAt` — called in `runStartupMigrations()` (migrations.ts:313)
 
-**Read-side processedAt sites using String():**
-- `src/processing/matching/factura-pago-matcher.ts:343,376`
-- `src/processing/matching/recibo-pago-matcher.ts:310,336`
+**Existing dot-file pattern:** `.staging`/`.production` environment markers created via `createFile()` (drive.ts:572) which creates EMPTY `text/plain` files. `findByName()` (drive.ts:324) discovers them. This is the exact pattern to follow for `.schema_version`.
 
-**Date utility patterns:**
-- `src/utils/date.ts` — `normalizeSpreadsheetDate` (line 199) handles serial→date string, `serialToDateString` (line 180) for date-only serial conversion
-- `src/processing/storage/index.ts:351-360` — `getStaleProcessingFileIds` handles both serial and string processedAt (reference implementation)
+**Drive file operations available:**
+- `createFile(parentId, name)` — creates empty text/plain file (NO content support)
+- `downloadFile(fileId)` — returns Buffer (can parse text content)
+- `findByName(parentId, name)` — finds file by name in folder
+- No `updateFileContent` or `createFileWithContent` exists yet
 
-**Pagos-pendientes passthrough:**
-- `src/services/pagos-pendientes.ts:142-153` — reads serial numbers from getValues, passes raw to setValues
+**Folder structure type:** `FolderStructure` (types/index.ts:968-999) includes `rootId`, `controlIngresosId`, `controlEgresosId`, `dashboardOperativoId`, `movimientosSpreadsheets`
 
-**Existing migration pattern:**
-- `src/services/migrations.ts` — `migrateMovimientosColumns` reads sheet data, identifies rows needing migration, uses `batchUpdate` to fix. `runStartupMigrations` iterates spreadsheets from folder structure.
+**Test patterns:** `migrations.test.ts` mocks `sheets.js` and `folder-structure.js` via `vi.mock()`. `folder-structure.test.ts` mocks `drive.js` and `sheets.js`.
 
-### Test Conventions
-- Colocated `*.test.ts` files
-- `vi.mock` for googleapis, google-auth
-- Mock `getSheetsService` returning mock API
-- Existing sheets.test.ts has patterns for all sheets functions
+### Key Design Decisions
+
+1. **`.schema_version` text file** (not appProperties) — consistent with existing `.staging`/`.production` dot-file pattern, inspectable in Drive UI, debuggable
+2. **Plain integer content** — file contains just a number (e.g., `4`)
+3. **First-time initialization:** When no `.schema_version` exists, create it with `CURRENT_SCHEMA_VERSION` and skip all migrations. This works because:
+   - Existing environments already have all migrations applied
+   - New environments get correct schemas from `ensureSheetsExist()` (latest headers)
+4. **Consolidate all migrations** into a single registry in `migrations.ts` — removes migration calls from `discoverFolderStructure()` so folder discovery is purely discovery
+5. **Keep migrations idempotent** — version gating prevents re-running, but idempotency remains a safety net
 
 ## Original Plan
 
-### Task 1: Add updateRowsWithFormatting to sheets.ts
-**Linear Issue:** [ADV-152](https://linear.app/lw-claude/issue/ADV-152/add-updaterowswithformatting-to-sheetsts)
+### Task 1: Add Drive file content operations
+**Linear Issue:** [ADV-160](https://linear.app/lw-claude/issue/ADV-160/add-drive-file-content-operations-createfilewithcontent)
 
-1. Write tests in `src/services/sheets.test.ts`:
-   - Test `columnLetterToIndex`: A→1, Z→26, AA→27, AZ→52
-   - Test `parseA1Range`: `'Sheet1'!A5:S5` → `{ sheetName: 'Sheet1', startCol: 0, endCol: 18, startRow: 4, endRow: 4 }`
-   - Test `parseA1Range` with escaped sheet names: `'Sheet ''1'''!A5` → sheetName `Sheet '1'`
-   - Test `updateRowsWithFormatting` with a CellDate value → mock verifies `updateCells` request has `numberValue` + DATE format
-   - Test `updateRowsWithFormatting` with a CellNumber value → mock verifies `numberValue` + NUMBER `#,##0.00` format
-   - Test `updateRowsWithFormatting` with ISO timestamp string → mock verifies DATE_TIME serial conversion
-   - Test `updateRowsWithFormatting` with multiple rows → mock verifies multiple `updateCells` requests in single `batchUpdate` call
-   - Test metadata cache path (cache hit vs fresh lookup)
-2. Run verifier with pattern "sheets" (expect fail)
-3. Implement in `src/services/sheets.ts`:
-   - Add `columnLetterToIndex(letter: string): number` — reverse of `columnIndexToLetter`. Export it.
-   - Add internal `parseA1Range(range: string): { sheetName: string; startCol: number; endCol: number; startRow: number; endRow: number }` — parses A1 notation like `'Sheet Name'!A5:S5` into 0-indexed grid coordinates. Handle quoted sheet names (single quotes, doubled-quote escapes).
-   - Add exported `updateRowsWithFormatting(spreadsheetId, updates, timeZone?, metadataCache?)`:
-     - `updates`: `Array<{ range: string; values: CellValueOrLink[] }>` — each entry is a single row
-     - Group updates by sheet name for efficient metadata lookups
-     - For each group: resolve sheetName→sheetId via metadata (use cache if provided)
-     - Build `updateCells` requests using `convertToSheetsCellData` for each cell value
-     - Send all requests in a single `spreadsheets.batchUpdate` call
-     - Wrap in `withQuotaRetry`
-   - Follow the pattern of `formatEmptyMonthSheet` (line 1562-1576) for `updateCells` request structure
-   - The `fields` parameter should be `'userEnteredValue,userEnteredFormat,textFormatRuns'` to cover all cell data types (values, formats, and link formatting)
-4. Run verifier with pattern "sheets" (expect pass)
+1. Write tests in `src/services/drive.test.ts` (create if needed, follow folder-structure.test.ts mock patterns):
+   - Test `createFileWithContent(parentId, name, content)` — mock `drive.files.create` and verify `media` parameter includes content string with `mimeType: 'text/plain'`. Verify returned `DriveFileInfo`.
+   - Test `updateFileContent(fileId, content)` — mock `drive.files.update` and verify `media` parameter includes content string. Verify success result.
+   - Test error cases for both functions (API failure → Result error)
+2. Run verifier with pattern "drive" (expect fail)
+3. Implement in `src/services/drive.ts`:
+   - `createFileWithContent(parentId, name, content)` — extends `createFile` pattern (line 572) by adding `media: { mimeType: 'text/plain', body: content }` to the `drive.files.create` call. Returns `Result<DriveFileInfo, Error>`.
+   - `updateFileContent(fileId, content)` — uses `drive.files.update` with `media: { mimeType: 'text/plain', body: content }`. Returns `Result<void, Error>`. Wrap in `withQuotaRetry`.
+   - Both functions use Pino logger for debug logging, follow existing error handling patterns.
+4. Run verifier with pattern "drive" (expect pass)
 
-**Notes:**
-- `updateCells` requires 0-indexed `GridRange` with `sheetId`, `startRowIndex`, `endRowIndex`, `startColumnIndex`, `endColumnIndex`
-- A1 `A5:S5` → startRow=4, endRow=5, startCol=0, endCol=19 (endRow/endCol are exclusive in GridRange)
-- Multiple `updateCells` requests can be batched in a single API call (array of requests)
+### Task 2: Create schema version service
+**Linear Issue:** [ADV-161](https://linear.app/lw-claude/issue/ADV-161/create-schema-version-service-readwrite-schema_version-from-drive)
 
-### Task 2: Add normalizeTimestamp utility
-**Linear Issue:** [ADV-153](https://linear.app/lw-claude/issue/ADV-153/add-normalizetimestamp-utility-for-reading-processedat-from-sheets)
+**Depends on:** Task 1
 
-1. Write tests in `src/utils/date.test.ts`:
-   - Test serial number input (e.g., `45993.604`) → returns `"2025-12-02 14:29:46"` (YYYY-MM-DD HH:MM:SS)
-   - Test integer serial (e.g., `45993`) → returns `"2025-12-02 00:00:00"`
-   - Test ISO string input → returned as-is
-   - Test formatted string input (e.g., `"2025-12-02 14:30:00"`) → returned as-is
-   - Test null/undefined → returns `''`
-   - Test empty string → returns `''`
-2. Run verifier with pattern "date" (expect fail)
-3. Implement `normalizeTimestamp(value: unknown): string` in `src/utils/date.ts`:
-   - If `typeof value === 'number'`: convert serial to datetime string using Sheets epoch (1899-12-30), extract hours/minutes/seconds from fractional part
-   - If `typeof value === 'string'`: return as-is
-   - Otherwise: return `''`
-   - Reference: `getStaleProcessingFileIds` in `storage/index.ts:354-357` for serial→timestamp conversion logic
-4. Replace `String(row[N])` with `normalizeTimestamp(row[N])` in:
-   - `src/processing/matching/factura-pago-matcher.ts:343` — `processedAt: normalizeTimestamp(row[12])`
-   - `src/processing/matching/factura-pago-matcher.ts:376` — `processedAt: normalizeTimestamp(row[10])`
-   - `src/processing/matching/recibo-pago-matcher.ts:310` — `processedAt: normalizeTimestamp(row[13])`
-   - `src/processing/matching/recibo-pago-matcher.ts:336` — `processedAt: normalizeTimestamp(row[10])`
-   - Add import of `normalizeTimestamp` from `../../utils/date.js` in both matcher files
-5. Run verifier with pattern "date" (expect pass)
+1. Write tests in `src/services/schema-version.test.ts`:
+   - Test `readSchemaVersion` when file exists with content `"4"` → returns `{ ok: true, value: { version: 4, fileId: 'file-123' } }`
+   - Test `readSchemaVersion` when file not found → returns `{ ok: true, value: { version: 0, fileId: null } }`
+   - Test `readSchemaVersion` when file exists with non-numeric content → returns error
+   - Test `readSchemaVersion` when `findByName` fails → propagates error
+   - Test `writeSchemaVersion` with no existing fileId → calls `createFileWithContent` with `.schema_version` name and version string
+   - Test `writeSchemaVersion` with existing fileId → calls `updateFileContent` with version string
+   - Test `writeSchemaVersion` error propagation
+2. Run verifier with pattern "schema-version" (expect fail)
+3. Implement `src/services/schema-version.ts`:
+   - Constants: `SCHEMA_VERSION_FILE = '.schema_version'`
+   - Interface: `SchemaVersionInfo = { version: number; fileId: string | null }`
+   - `readSchemaVersion(rootId: string): Promise<Result<SchemaVersionInfo, Error>>`:
+     - Call `findByName(rootId, SCHEMA_VERSION_FILE)`
+     - If not found → return `{ version: 0, fileId: null }`
+     - If found → call `downloadFile(fileId)`, parse `Buffer.toString('utf-8').trim()` as integer
+     - If parse fails (NaN) → return error
+   - `writeSchemaVersion(rootId: string, version: number, existingFileId: string | null): Promise<Result<string, Error>>`:
+     - If `existingFileId` → call `updateFileContent(existingFileId, String(version))`, return fileId
+     - If not → call `createFileWithContent(rootId, SCHEMA_VERSION_FILE, String(version))`, return new fileId
+   - Use Pino logger (`info` for version read/write, `debug` for details)
+4. Run verifier with pattern "schema-version" (expect pass)
 
-### Task 3: Use updateRowsWithFormatting in storage reprocessing paths
-**Linear Issue:** [ADV-154](https://linear.app/lw-claude/issue/ADV-154/use-updaterowswithformatting-in-storage-reprocessing-paths)
+### Task 3: Migration registry with version-gated execution
+**Linear Issue:** [ADV-162](https://linear.app/lw-claude/issue/ADV-162/migration-registry-with-version-gated-execution)
 
-**Depends on:** Task 1 (updateRowsWithFormatting must exist)
+**Depends on:** Task 2
 
-1. Write tests in each storage module's test file:
-   - `src/processing/storage/factura-store.test.ts`: Test that reprocessing path (fileId already exists) calls `updateRowsWithFormatting` instead of `batchUpdate`. Verify the row passed contains CellDate for fechaEmision, CellNumber for monetary values, CellLink for fileName.
-   - `src/processing/storage/pago-store.test.ts`: Same pattern for pago reprocessing and quality replacement paths.
-   - `src/processing/storage/recibo-store.test.ts`: Same pattern for recibo reprocessing.
-   - `src/processing/storage/retencion-store.test.ts`: Same pattern for retencion reprocessing.
-2. Run verifier (expect fail — tests call updateRowsWithFormatting which reprocessing paths don't use yet)
-3. Implement per module — the pattern is the same for all four:
+1. Write tests in `src/services/migrations.test.ts` (extend existing file):
+   - Test `runStartupMigrations` when no `.schema_version` file (version 0): should create file with `CURRENT_SCHEMA_VERSION`, should NOT call any migration functions
+   - Test `runStartupMigrations` when version equals `CURRENT_SCHEMA_VERSION`: should skip all migrations, should NOT update version file
+   - Test `runStartupMigrations` when version is 2 and `CURRENT_SCHEMA_VERSION` is 4: should run migrations v3 and v4 only, should update version to 4
+   - Test `runStartupMigrations` when a migration fails: should stop, should NOT update version (so it retries next startup), should log error
+   - Test that existing `migrateMovimientosColumns` and `migrateDashboardProcessedAt` tests still pass
+   - Mock `readSchemaVersion` and `writeSchemaVersion` from `schema-version.js`
+2. Run verifier with pattern "migration" (expect fail)
+3. Implement in `src/services/migrations.ts`:
+   - Add import of `readSchemaVersion`, `writeSchemaVersion` from `./schema-version.js`
+   - Add import of `migrateTipoDeCambioHeaders`, `migrateArchivosProcesadosHeaders` from `./folder-structure.js`
+   - Define `CURRENT_SCHEMA_VERSION = 4` (exported)
+   - Define `Migration` interface: `{ version: number; name: string; migrate: (fs: FolderStructure) => Promise<void> }`
+   - Define `MIGRATIONS` array with 4 entries:
+     - v1 `tipoDeCambio-columns`: calls `migrateTipoDeCambioHeaders` 4 times (Facturas Emitidas 18→S, Pagos Recibidos 15→P, Facturas Recibidas 19→T, Pagos Enviados 15→P) using `fs.controlIngresosId` and `fs.controlEgresosId`
+     - v2 `archivos-procesados-column-f`: calls `migrateArchivosProcesadosHeaders(fs.dashboardOperativoId)`
+     - v3 `movimientos-column-reorder`: iterates `fs.movimientosSpreadsheets` calling `migrateMovimientosColumns` for each
+     - v4 `dashboard-processedAt-format`: calls `migrateDashboardProcessedAt(fs.dashboardOperativoId)`
+   - Refactor `runStartupMigrations()`:
+     - Get folder structure (existing check)
+     - Call `readSchemaVersion(folderStructure.rootId)`
+     - If version is 0 (no file): call `writeSchemaVersion(rootId, CURRENT_SCHEMA_VERSION, null)`, log "initialized schema version", return
+     - If version >= `CURRENT_SCHEMA_VERSION`: log "schema up to date", return
+     - Filter `MIGRATIONS` to those with `version > storedVersion`, sort by version
+     - Execute each pending migration sequentially, log each one
+     - If any migration fails: log error and return WITHOUT updating version (retry next startup)
+     - After all succeed: call `writeSchemaVersion(rootId, CURRENT_SCHEMA_VERSION, fileId)`
+4. Run verifier with pattern "migration" (expect pass)
 
-   **For each storage module (factura-store, pago-store, recibo-store, retencion-store):**
-   a. Extract the row-building code from the append path into a shared function (e.g., `buildFacturaRowFormatted`) that returns `CellValueOrLink[]`. This is the code that creates CellDate, CellNumber, CellLink objects. The shared function takes the same parameters as the current `buildRow` + the fields needed for rich types (timeZone for processedAt, fileId for CellLink URL).
-   b. Update the append path to call the shared builder, then pass the row to `appendRowsWithLinks` (same as before, just extracted).
-   c. Update the reprocessing path to call the shared builder, then pass the row to `updateRowsWithFormatting` instead of `batchUpdate`.
-   d. Remove the old `buildFacturaRow`/`buildPagoRow`/`buildReciboRow`/`buildRetencionRow` functions.
-   e. Add import of `updateRowsWithFormatting` from `../../services/sheets.js`.
+### Task 4: Remove migration calls from folder-structure.ts
+**Linear Issue:** [ADV-163](https://linear.app/lw-claude/issue/ADV-163/remove-migration-calls-from-folder-structurets-discovery)
 
-   **Key difference between append and reprocessing paths:**
-   - Append: `appendRowsWithLinks(spreadsheetId, range, [row], timeZone, metadataCache)`
-   - Reprocessing: `updateRowsWithFormatting(spreadsheetId, [{ range: `${sheetName}!A${rowIndex}:${lastCol}${rowIndex}`, values: row }], timeZone, metadataCache)`
+**Depends on:** Task 3
 
+1. Write/update tests in `src/services/folder-structure.test.ts`:
+   - Verify that `migrateTipoDeCambioHeaders` is no longer called during discovery (if there are existing tests for discovery flow that assert migration calls, update them)
+   - Verify that `migrateArchivosProcesadosHeaders` is no longer called during dashboard initialization
+   - Existing unit tests for `migrateTipoDeCambioHeaders` and `migrateArchivosProcesadosHeaders` functions should remain (functions still exist, just called from migrations.ts now)
+2. Run verifier (expect fail if tests assert migration calls during discovery)
+3. Implement in `src/services/folder-structure.ts`:
+   - In `discoverFolderStructure()`: remove the 4 `migrateTipoDeCambioHeaders` calls (lines ~826-845) and their error handling. Keep the `ensureSheetsExist` calls that precede them.
+   - In `initializeDashboardOperativo()`: remove the `migrateArchivosProcesadosHeaders` call (line ~428) and its error handling. Keep the `ensureSheetsExist` call.
+   - Keep function definitions of `migrateTipoDeCambioHeaders` and `migrateArchivosProcesadosHeaders` — they are now called by the migration registry.
+   - Verify exports: both functions must remain exported (used by migrations.ts).
 4. Run verifier (expect pass)
 
-**Notes:**
-- The `formatTimestampInTimezone` import in each storage module can be removed once `buildRow` functions are deleted (processedAt will be the raw ISO string, and `convertToSheetsCellData` in `updateRowsWithFormatting` will handle timezone conversion).
-- `createDriveHyperlink` usage in buildRow can be replaced with `CellLink` objects (same as append path).
-
-### Task 4: Fix Dashboard processedAt and pagos-pendientes
-**Linear Issue:** [ADV-155](https://linear.app/lw-claude/issue/ADV-155/fix-dashboard-processedat-and-pagos-pendientes-date-passthrough)
-
-**Depends on:** Task 1 (updateRowsWithFormatting)
-
-1. Write tests:
-   - In `src/processing/storage/index.test.ts` (or relevant test file): Test `markFileProcessing` retry path produces a cell with DATE_TIME format (mock `updateRowsWithFormatting` and verify call args).
-   - In `src/services/pagos-pendientes.test.ts` (or create if needed): Test that serial number fechaEmision values from source sheet are converted to date strings before writing. Mock `getValues` to return serial numbers, verify `setValues` receives date strings.
-2. Run verifier (expect fail)
-3. Fix `src/processing/storage/index.ts`:
-   - In `markFileProcessing` retry path (line 97-98): Replace `batchUpdate` with `updateRowsWithFormatting` for the processedAt cell. Build the update with the ISO string as the value (convertToSheetsCellData will detect it and convert to DATE_TIME serial).
-   - Actually, the full row update at line 97-98 writes `[processedAt, documentType, 'processing', '']` to columns C:F. Only column C (processedAt) needs rich formatting. Simplest approach: use `updateRowsWithFormatting` for just the processedAt cell (column C), and keep `batchUpdate` for the other columns (D:F are plain strings). OR use `updateRowsWithFormatting` for all four columns — the non-date columns will just be strings passed through `convertToSheetsCellData` as `stringValue`.
-   - Remove the ADV-105 comment (lines 95-96).
-   - Add import of `updateRowsWithFormatting`.
-4. Fix `src/services/pagos-pendientes.ts`:
-   - In the mapping at line 142-153: for `row[fechaEmisionIdx]`, check if it's a number (serial) and convert using `normalizeSpreadsheetDate` from `utils/date.js`. This produces a YYYY-MM-DD string that `USER_ENTERED` in `setValues` will correctly parse as a date.
-   - Add import of `normalizeSpreadsheetDate` from `../utils/date.js`.
-5. Run verifier (expect pass)
-
-### Task 5: Startup migration for existing Dashboard processedAt
-**Linear Issue:** [ADV-156](https://linear.app/lw-claude/issue/ADV-156/startup-migration-fix-existing-dashboard-processedat-format)
-
-**Depends on:** Task 1 (updateRowsWithFormatting)
-
-**Migration note:** Affects production Dashboard Operativo Contable spreadsheet (Archivos Procesados sheet, column C). Non-destructive and idempotent.
-
-1. Write tests in `src/services/migrations.test.ts` (create file if needed):
-   - Test `migrateDashboardProcessedAt`: mock `getValues` returning rows with mixed processedAt formats (some serial numbers, some ISO strings, some formatted strings, some empty). Verify `updateRowsWithFormatting` is called with the correct ISO string values for string rows, and that serial-number rows are also re-written (to re-apply DATE_TIME format). Empty rows should be skipped.
-   - Test idempotency: calling migration twice with same data should produce same result.
-   - Test no-op case: all processedAt values already properly formatted → no updates needed (or updates are harmless re-applications).
-2. Run verifier with pattern "migration" (expect fail)
-3. Implement `migrateDashboardProcessedAt` in `src/services/migrations.ts`:
-   - Takes `dashboardId: string` parameter
-   - Read `Archivos Procesados!A:F` via `getValues`
-   - Get spreadsheet timezone via `getSpreadsheetTimezone`
-   - For each data row (skip header):
-     - Column C (index 2) is processedAt
-     - If empty → skip
-     - If string (ISO or formatted) → include in update batch (will be converted to proper DATE_TIME serial by `convertToSheetsCellData`)
-     - If number (already serial) → include in update batch too (to ensure DATE_TIME format is applied, since some serials may lack format from direct API writes)
-   - Build updates array: `{ range: 'Archivos Procesados!C${rowNum}', values: [processedAtValue] }` for each row needing migration
-   - If any updates needed, call `updateRowsWithFormatting(dashboardId, updates, timeZone)`
-   - Log migration count
-4. Update `runStartupMigrations` in `src/services/migrations.ts`:
-   - Get Dashboard spreadsheet ID from `folderStructure.dashboardSpreadsheetId` (verify this field exists in `getCachedFolderStructure()` return type)
-   - Call `migrateDashboardProcessedAt(dashboardId)` after existing migrations
-5. Run verifier with pattern "migration" (expect pass)
-
-**Notes:**
-- For string processedAt values: pass the raw string to `updateRowsWithFormatting`. The `isISOTimestamp` check in `convertToSheetsCellData` will convert ISO strings to DATE_TIME serials. Non-ISO formatted strings (e.g., "2025-01-15 11:30:00") won't match `isISOTimestamp` — for these, convert to ISO first using `new Date(value).toISOString()` before passing (if valid date).
-- For serial processedAt values: pass the number directly. `convertToSheetsCellData` for numbers just creates `numberValue` without format. To apply DATE_TIME format, wrap in a new `CellDateTime` type, OR handle specially in the migration. Simplest: convert serial back to ISO string using the epoch math, then pass the ISO string which `convertToSheetsCellData` will re-serialize with proper format.
-- The migration should chunk updates to avoid hitting Sheets API limits (use `SHEETS_BATCH_UPDATE_LIMIT` from config).
-
 ## Post-Implementation Checklist
-1. Run `bug-hunter` agent — Review changes for bugs
-2. Run `verifier` agent — Verify all tests pass and zero warnings
+1. Run `bug-hunter` agent - Review changes for bugs
+2. Run `verifier` agent - Verify all tests pass and zero warnings
 
 ---
 
 ## Plan Summary
 
-**Objective:** Ensure all spreadsheet date/timestamp cells use proper DATE_TIME formatting via `updateRowsWithFormatting`, and all read paths handle serial numbers correctly.
+**Objective:** Add schema version tracking via `.schema_version` Drive file to gate startup migrations and avoid redundant spreadsheet checks.
 
-**Request:** Fix A (create `updateRowsWithFormatting` for updating existing rows with rich formatting) + Fix C (add `normalizeTimestamp` for reading processedAt) + Dashboard processedAt startup migration.
+**Request:** Track schema version in a `.schema_version` file in the root Drive folder. On startup, read version, run only new migrations, update version. Consolidate all migrations into a versioned registry.
 
-**Linear Issues:** ADV-152, ADV-153, ADV-154, ADV-155, ADV-156
+**Linear Issues:** ADV-160, ADV-161, ADV-162, ADV-163
 
-**Approach:** Create a new `updateRowsWithFormatting` function in sheets.ts that mirrors `appendRowsWithLinks` but uses `updateCells` for existing rows. Replace all storage reprocessing paths that use `batchUpdate` with flat values. Add `normalizeTimestamp` utility for read-side serial number handling. Add startup migration to fix existing Dashboard data.
+**Approach:** Add Drive file content read/write operations, create a schema version service, refactor migrations.ts into a versioned registry (v1-v4 for existing migrations), and remove migration calls from folder-structure discovery. First-time startup on existing environments creates `.schema_version` with version 4 (all current migrations already applied). Future migrations increment from v5+.
 
 **Scope:**
-- Tasks: 5
-- Files affected: ~15 (sheets.ts, date.ts, 4 storage modules, 2 matchers, index.ts, pagos-pendientes.ts, migrations.ts, + test files)
+- Tasks: 4
+- Files affected: ~6 (drive.ts, schema-version.ts [new], migrations.ts, folder-structure.ts, + test files)
 - New tests: yes
 
 **Key Decisions:**
-- Use `updateCells` in `spreadsheets.batchUpdate` API (not `values.batchUpdate`) to get rich cell formatting
-- Reuse existing `convertToSheetsCellData` for consistent cell conversion
-- Extract shared row builders from append paths to serve both append and reprocessing paths
-- Migration re-writes ALL processedAt values (both string and serial) to ensure consistent DATE_TIME format
+- `.schema_version` text file (not appProperties) — consistent with existing `.staging`/`.production` dot-file pattern
+- Plain integer content (e.g., `4`) — simplest possible format
+- Version 0 = no file found → initialize with CURRENT_SCHEMA_VERSION and skip all migrations
+- Migrations stay idempotent as safety net, but version gating prevents re-execution
+- Migration failure stops execution and does NOT update version → automatic retry next startup
 
 **Risks/Considerations:**
-- `updateRowsWithFormatting` requires A1→grid coordinate parsing and sheet metadata lookup — adds one API call per unique sheet (cacheable)
-- Storage module refactoring touches 4 modules with similar patterns — risk of copy-paste errors across modules
-- Migration is idempotent but adds API calls at startup — should be efficient (batch all updates in single call per Dashboard)
-- Pagos-pendientes fix uses `normalizeSpreadsheetDate` which strips time info from dates — acceptable since fechaEmision is date-only
-
----
-
-## Iteration 1
-
-**Implemented:** 2026-02-24
-**Method:** Agent team (2 workers, worktree-isolated)
-
-### Tasks Completed This Iteration
-- Task 1: Add updateRowsWithFormatting to sheets.ts - Added `columnLetterToIndex`, `parseA1Range`, `updateRowsWithFormatting` with full CellDate/CellNumber/CellLink support (worker-1)
-- Task 2: Add normalizeTimestamp utility - Converts serial numbers to YYYY-MM-DD HH:MM:SS, replaced String() in 4 matcher sites (worker-2)
-- Task 3: Use updateRowsWithFormatting in storage reprocessing paths - Refactored all 4 storage modules with shared `buildXxxRowFormatted` builders (worker-1)
-- Task 4: Fix Dashboard processedAt and pagos-pendientes - markFileProcessing uses updateRowsWithFormatting, pagos-pendientes converts serial fechaEmision (worker-2)
-- Task 5: Startup migration for Dashboard processedAt - migrateDashboardProcessedAt converts all processedAt to DATE_TIME format (worker-2)
-
-### Files Modified
-- `src/services/sheets.ts` - Added columnLetterToIndex, parseA1Range, updateRowsWithFormatting
-- `src/services/sheets.test.ts` - 6 new tests for updateRowsWithFormatting + helpers
-- `src/utils/date.ts` - Added normalizeTimestamp
-- `src/utils/date.test.ts` - 8 new tests for normalizeTimestamp
-- `src/processing/storage/factura-store.ts` - Shared row builder, updateRowsWithFormatting in reprocessing
-- `src/processing/storage/factura-store.test.ts` - Updated for new reprocessing path
-- `src/processing/storage/pago-store.ts` - Same refactor pattern
-- `src/processing/storage/pago-store.test.ts` - Updated tests
-- `src/processing/storage/recibo-store.ts` - Same refactor pattern
-- `src/processing/storage/recibo-store.test.ts` - Updated tests
-- `src/processing/storage/retencion-store.ts` - Same refactor pattern
-- `src/processing/storage/retencion-store.test.ts` - Updated tests
-- `src/processing/matching/factura-pago-matcher.ts` - normalizeTimestamp for processedAt
-- `src/processing/matching/recibo-pago-matcher.ts` - normalizeTimestamp for processedAt
-- `src/processing/storage/index.ts` - updateRowsWithFormatting in retry path
-- `src/processing/storage/index.test.ts` - Updated retry path tests
-- `src/services/pagos-pendientes.ts` - normalizeSpreadsheetDate for fechaEmision
-- `src/services/pagos-pendientes.test.ts` - New test for serial fechaEmision
-- `src/services/migrations.ts` - migrateDashboardProcessedAt + runStartupMigrations update
-- `src/services/migrations.test.ts` - 7 new migration tests
-
-### Linear Updates
-- ADV-152: Todo → In Progress → Review
-- ADV-153: Todo → In Progress → Review
-- ADV-154: Todo → In Progress → Review
-- ADV-155: Todo → In Progress → Review
-- ADV-156: Todo → In Progress → Review
-
-### Pre-commit Verification
-- bug-hunter: Found 4 bugs (3 HIGH already fixed by merge integration, 1 MEDIUM partial-failure logging fixed)
-- verifier: All 1874 tests pass, zero warnings
-
-### Work Partition
-- Worker 1: Tasks 1, 3 (sheets.ts foundation + storage reprocessing refactor)
-- Worker 2: Tasks 2, 4, 5 (date utilities + Dashboard fixes + migration)
-
-### Merge Summary
-- Worker 1: fast-forward (no conflicts)
-- Worker 2: auto-merge, 3 type mismatches in sheets.ts stub vs real signature (resolved: removed stub, fixed nested→flat values)
-
-### Review Findings
-
-Summary: 6 finding(s) found, 3 fixed inline (Team: security, reliability, quality reviewers)
-- FIXED INLINE: 3 issue(s) — verified via TDD + bug-hunter
-- DISCARDED: 3 finding(s) — false positives / style-only
-
-**Issues fixed inline:**
-- [MEDIUM] BUG: Sort uses `String()` instead of `normalizeSpreadsheetDate()` (`src/services/pagos-pendientes.ts:91-94`) — replaced with `normalizeSpreadsheetDate()` + added serial number sort test (ADV-157)
-- [LOW] CONVENTION: Reprocessing log uses wrong module name (`src/processing/storage/retencion-store.ts:157`) — changed `'storage'` to `'retencion-store'` (ADV-158)
-- [LOW] TEST: Sort test doesn't exercise serial number path (`src/services/pagos-pendientes.test.ts`) — added test with unsorted serial numbers (ADV-159)
-
-**Discarded findings (not bugs):**
-- [DISCARDED] sheets.ts:74-82 — Cache TTL resets on read (LRU behavior). Valid design choice; timezone changes are exceedingly rare. Misleading comment is style-only.
-- [DISCARDED] migrations.test.ts — `as any` casts in test mocks. Standard partial mock pattern with zero correctness impact.
-- [DISCARDED] factura-pago-matcher.test.ts:99-114 — Test tests Map API behavior, not matcher code. Unnecessary but not harmful.
-
-### Linear Updates
-- ADV-152: Review → Merge (original task)
-- ADV-153: Review → Merge (original task)
-- ADV-154: Review → Merge (original task)
-- ADV-155: Review → Merge (original task)
-- ADV-156: Review → Merge (original task)
-- ADV-157: Created in Merge (Fix: pagos-pendientes sort — fixed inline)
-- ADV-158: Created in Merge (Fix: retencion-store log module — fixed inline)
-- ADV-159: Created in Merge (Fix: pagos-pendientes sort test — fixed inline)
-
-### Inline Fix Verification
-- Unit tests: all 1875 pass
-- Bug-hunter: no new issues
-
-<!-- REVIEW COMPLETE -->
-
-### Continuation Status
-All tasks completed.
-
----
-
-## Status: COMPLETE
-
-All tasks implemented and reviewed successfully. All Linear issues moved to Merge.
+- Existing environments need a one-time `.schema_version` file creation (handled automatically: version 0 → write CURRENT_SCHEMA_VERSION)
+- Moving migrations out of `discoverFolderStructure()` changes execution order: migrations now run AFTER full discovery instead of inline. This is safe because `ensureSheetsExist()` creates new sheets with latest headers, and migrations only patch OLD schemas.
+- Dynamic bank account spreadsheets created after a migration are created with latest headers (no migration needed) — this already works correctly.
