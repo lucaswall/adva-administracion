@@ -7,6 +7,7 @@ import type { Result } from '../types/index.js';
 import { getValues, setValues, clearSheetData } from './sheets.js';
 import { info, warn } from '../utils/logger.js';
 import { getCorrelationId } from '../utils/correlation.js';
+import { normalizeSpreadsheetDate } from '../utils/date.js';
 
 /**
  * Gets the column index for a given header name
@@ -140,7 +141,7 @@ export async function syncPagosPendientes(
     // PAGOS_PENDIENTES_HEADERS: fechaEmision, fileId, fileName, tipoComprobante,
     //   nroFactura, cuitEmisor, razonSocialEmisor, importeTotal, moneda, concepto
     const pagosPendientesRows = unpaidFacturas.map((row) => [
-      row[fechaEmisionIdx] || '',
+      normalizeSpreadsheetDate(row[fechaEmisionIdx]) || '',
       row[fileIdIdx] || '',
       row[fileNameIdx] || '',
       row[tipoComprobanteIdx] || '',

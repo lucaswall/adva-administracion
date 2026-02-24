@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { serialToDateString, normalizeSpreadsheetDate, parseArgDate, formatISODate, isWithinDays, isValidISODate } from './date.js';
+import { serialToDateString, normalizeSpreadsheetDate, normalizeTimestamp, parseArgDate, formatISODate, isWithinDays, isValidISODate } from './date.js';
 
 describe('serialToDateString', () => {
   it('handles epoch date (serial 0)', () => {
@@ -282,5 +282,42 @@ describe('isValidISODate', () => {
 
   it('returns false for dates too far in the future', () => {
     expect(isValidISODate('2030-01-01')).toBe(false);
+  });
+});
+
+describe('normalizeTimestamp', () => {
+  it('converts integer serial to midnight datetime string', () => {
+    // Serial 45993 = 2025-12-02 00:00:00 UTC
+    expect(normalizeTimestamp(45993)).toBe('2025-12-02 00:00:00');
+  });
+
+  it('converts serial with 0.5 fraction to noon datetime string', () => {
+    // 0.5 * 86400 = 43200 seconds = exactly 12:00:00 UTC
+    expect(normalizeTimestamp(45993.5)).toBe('2025-12-02 12:00:00');
+  });
+
+  it('converts serial with 0.25 fraction to 06:00:00 datetime string', () => {
+    // 0.25 * 86400 = 21600 seconds = exactly 06:00:00 UTC
+    expect(normalizeTimestamp(45993.25)).toBe('2025-12-02 06:00:00');
+  });
+
+  it('returns ISO string as-is', () => {
+    expect(normalizeTimestamp('2025-12-02T14:29:46.000Z')).toBe('2025-12-02T14:29:46.000Z');
+  });
+
+  it('returns formatted string as-is', () => {
+    expect(normalizeTimestamp('2025-12-02 14:30:00')).toBe('2025-12-02 14:30:00');
+  });
+
+  it('returns empty string for null', () => {
+    expect(normalizeTimestamp(null)).toBe('');
+  });
+
+  it('returns empty string for undefined', () => {
+    expect(normalizeTimestamp(undefined)).toBe('');
+  });
+
+  it('returns empty string for empty string input', () => {
+    expect(normalizeTimestamp('')).toBe('');
   });
 });

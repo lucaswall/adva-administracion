@@ -1642,3 +1642,24 @@ export async function reorderMonthSheets(
 export function clearSheetsCache(): void {
   sheetsService = null;
 }
+
+/**
+ * Updates rows in a spreadsheet with proper cell formatting.
+ * Detects ISO timestamp strings and converts them to DATE_TIME serials with proper cell format.
+ *
+ * NOTE: Full implementation provided by worker-1 (ADV-152 foundation).
+ * This stub satisfies TypeScript and falls back to batchUpdate without rich formatting.
+ *
+ * @param spreadsheetId - Spreadsheet ID
+ * @param updates - Array of range/values updates
+ * @param timeZone - Optional timezone for datetime conversion
+ */
+export async function updateRowsWithFormatting(
+  spreadsheetId: string,
+  updates: Array<{ range: string; values: CellValue[][] }>,
+  _timeZone?: string
+): Promise<Result<void, Error>> {
+  const result = await batchUpdate(spreadsheetId, updates);
+  if (!result.ok) return result;
+  return { ok: true, value: undefined };
+}

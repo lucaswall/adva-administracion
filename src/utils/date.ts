@@ -187,6 +187,40 @@ export function serialToDateString(serial: number): string {
 }
 
 /**
+ * Normalizes a spreadsheet timestamp value to a datetime string
+ *
+ * Handles both serial numbers (from UNFORMATTED_VALUE reads of DATE_TIME cells)
+ * and existing strings. Use this for processedAt fields that may be stored
+ * as datetime serials (when written via appendRowsWithFormatting) or as plain
+ * strings (when written via batchUpdate).
+ *
+ * @param value - Cell value (serial number with fractional time, or string)
+ * @returns Datetime string (YYYY-MM-DD HH:MM:SS) or original string, or '' if null/undefined
+ *
+ * @example
+ * normalizeTimestamp(45993) // Returns '2025-12-02 00:00:00'
+ * normalizeTimestamp(45993.5) // Returns '2025-12-02 12:00:00'
+ * normalizeTimestamp('2025-12-02 14:30:00') // Returns '2025-12-02 14:30:00'
+ */
+export function normalizeTimestamp(value: unknown): string {
+  if (typeof value === 'number') {
+    const epoch = new Date(Date.UTC(1899, 11, 30)).getTime();
+    const date = new Date(epoch + value * 86400000);
+    const year = date.getUTCFullYear();
+    const month = String(date.getUTCMonth() + 1).padStart(2, '0');
+    const day = String(date.getUTCDate()).padStart(2, '0');
+    const hours = String(date.getUTCHours()).padStart(2, '0');
+    const minutes = String(date.getUTCMinutes()).padStart(2, '0');
+    const seconds = String(date.getUTCSeconds()).padStart(2, '0');
+    return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
+  }
+  if (typeof value === 'string') {
+    return value;
+  }
+  return '';
+}
+
+/**
  * Normalizes a spreadsheet date value to a date string
  *
  * Handles both serial numbers (from UNFORMATTED_VALUE reads) and

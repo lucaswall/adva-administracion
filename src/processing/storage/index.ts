@@ -2,7 +2,7 @@
  * Storage module index - exports all storage functions
  */
 
-import { getValues, appendRowsWithLinks, batchUpdate, getSpreadsheetTimezone } from '../../services/sheets.js';
+import { getValues, appendRowsWithLinks, batchUpdate, updateRowsWithFormatting, getSpreadsheetTimezone } from '../../services/sheets.js';
 import type { Result, DocumentType } from '../../types/index.js';
 import { info as logInfo, error as logError } from '../../utils/logger.js';
 import { getCorrelationId } from '../../utils/correlation.js';
@@ -92,11 +92,9 @@ export async function markFileProcessing(
           correlationId,
         });
 
-        // ADV-105: Store processedAt as ISO string (not serial number)
-        // getStaleProcessingFileIds parses this as new Date(String(value)) — serial numbers produce NaN
-        const updateResult = await batchUpdate(dashboardId, [
+        const updateResult = await updateRowsWithFormatting(dashboardId, [
           { range: `Archivos Procesados!C${existingRowIndex}:F${existingRowIndex}`, values: [[processedAt, documentType, 'processing', '']] },
-        ]);
+        ], timeZone);
 
         if (!updateResult.ok) {
           logError('Failed to update tracking row for retry', {

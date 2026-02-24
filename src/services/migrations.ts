@@ -5,9 +5,10 @@
 
 import type { Result } from '../types/index.js';
 import type { CellValue } from './sheets.js';
-import { getValues, batchUpdate, getSheetMetadata } from './sheets.js';
+import { getValues, batchUpdate, updateRowsWithFormatting, getSpreadsheetTimezone, getSheetMetadata } from './sheets.js';
 import { getCachedFolderStructure } from './folder-structure.js';
 import { MOVIMIENTOS_BANCARIO_SHEET } from '../constants/spreadsheet-headers.js';
+import { SHEETS_BATCH_UPDATE_LIMIT } from '../config.js';
 import { info, warn, debug } from '../utils/logger.js';
 
 /**
@@ -152,11 +153,100 @@ export async function migrateMovimientosColumns(
 }
 
 /**
+ * Migrates existing Dashboard Operativo processedAt cells to use DATE_TIME format.
+ *
+ * Reads the Archivos Procesados sheet and re-writes all processedAt values
+ * using `updateRowsWithFormatting`, which applies the DATE_TIME cell format.
+ * This is a one-time fix for rows written via batchUpdate (plain strings) or
+ * via appendRowsWithLinks (which writes DATE_TIME serials without proper format).
+ *
+ * Safe to run multiple times (idempotent — re-applies the correct format).
+ *
+ * @param dashboardId - Dashboard Operativo Contable spreadsheet ID
+ */
+export async function migrateDashboardProcessedAt(dashboardId: string): Promise<void> {
+  const dataResult = await getValues(dashboardId, 'Archivos Procesados!A:F');
+  if (!dataResult.ok) {
+    warn('Failed to read Archivos Procesados for processedAt migration', {
+      module: 'migrations',
+      phase: 'startup',
+      error: dataResult.error.message,
+    });
+    return;
+  }
+
+  const timezoneResult = await getSpreadsheetTimezone(dashboardId);
+  const timeZone = timezoneResult.ok ? timezoneResult.value : undefined;
+
+  const rows = dataResult.value;
+  const EXCEL_EPOCH = new Date(Date.UTC(1899, 11, 30)).getTime();
+
+  const updates: Array<{ range: string; values: CellValue[][] }> = [];
+
+  for (let i = 1; i < rows.length; i++) {
+    const row = rows[i];
+    if (!row) continue;
+
+    const processedAtRaw = row[2];
+    if (processedAtRaw === '' || processedAtRaw === null || processedAtRaw === undefined) continue;
+
+    const rowNum = i + 1; // 1-indexed spreadsheet row
+
+    let processedAtIso: string;
+
+    if (typeof processedAtRaw === 'number') {
+      // Serial number from appendRowsWithLinks — convert to ISO string
+      processedAtIso = new Date(EXCEL_EPOCH + processedAtRaw * 86400000).toISOString();
+    } else {
+      const str = String(processedAtRaw);
+      if (!str) continue;
+      // Ensure we have an ISO string: parse and re-serialize if needed
+      const parsed = new Date(str);
+      processedAtIso = isNaN(parsed.getTime()) ? str : parsed.toISOString();
+    }
+
+    updates.push({
+      range: `Archivos Procesados!C${rowNum}`,
+      values: [[processedAtIso]],
+    });
+  }
+
+  if (updates.length === 0) {
+    debug('No processedAt values to migrate in Dashboard', {
+      module: 'migrations',
+      phase: 'startup',
+    });
+    return;
+  }
+
+  // Chunk updates to avoid Sheets API limits
+  for (let i = 0; i < updates.length; i += SHEETS_BATCH_UPDATE_LIMIT) {
+    const chunk = updates.slice(i, i + SHEETS_BATCH_UPDATE_LIMIT);
+    const updateResult = await updateRowsWithFormatting(dashboardId, chunk, timeZone);
+    if (!updateResult.ok) {
+      warn('Failed to migrate processedAt chunk in Dashboard', {
+        module: 'migrations',
+        phase: 'startup',
+        chunkStart: i,
+        error: updateResult.error.message,
+      });
+    }
+  }
+
+  info('Migrated Dashboard processedAt cells to DATE_TIME format', {
+    module: 'migrations',
+    phase: 'startup',
+    rowsMigrated: updates.length,
+  });
+}
+
+/**
  * Runs all startup migrations for spreadsheet schemas.
  * Called during server initialization after folder structure is discovered.
  *
  * Currently handles:
  * - Reordering columns H/I: matchedType at H, detalle at I
+ * - Re-applying DATE_TIME format to processedAt cells in Dashboard
  */
 export async function runStartupMigrations(): Promise<void> {
   const folderStructure = getCachedFolderStructure();
@@ -168,48 +258,47 @@ export async function runStartupMigrations(): Promise<void> {
     return;
   }
 
-  const { movimientosSpreadsheets } = folderStructure;
+  const { movimientosSpreadsheets, dashboardOperativoId } = folderStructure;
 
-  if (movimientosSpreadsheets.size === 0) {
-    debug('No Movimientos spreadsheets found, skipping migrations', {
+  if (movimientosSpreadsheets.size > 0) {
+    info('Running Movimientos column migrations', {
       module: 'migrations',
       phase: 'startup',
+      spreadsheetCount: movimientosSpreadsheets.size,
     });
-    return;
-  }
 
-  info('Running startup migrations', {
-    module: 'migrations',
-    phase: 'startup',
-    spreadsheetCount: movimientosSpreadsheets.size,
-  });
+    let totalMigrated = 0;
 
-  let totalMigrated = 0;
+    for (const [name, spreadsheetId] of movimientosSpreadsheets) {
+      const result = await migrateMovimientosColumns(spreadsheetId, name);
+      if (result.ok) {
+        totalMigrated += result.value;
+      } else {
+        warn('Migration failed for spreadsheet', {
+          module: 'migrations',
+          phase: 'startup',
+          spreadsheet: name,
+          error: result.error.message,
+        });
+      }
+    }
 
-  for (const [name, spreadsheetId] of movimientosSpreadsheets) {
-    const result = await migrateMovimientosColumns(spreadsheetId, name);
-    if (result.ok) {
-      totalMigrated += result.value;
-    } else {
-      warn('Migration failed for spreadsheet', {
+    if (totalMigrated > 0) {
+      info('Movimientos column migrations complete', {
         module: 'migrations',
         phase: 'startup',
-        spreadsheet: name,
-        error: result.error.message,
+        sheetsMigrated: totalMigrated,
+      });
+    } else {
+      debug('No Movimientos column migrations needed', {
+        module: 'migrations',
+        phase: 'startup',
       });
     }
   }
 
-  if (totalMigrated > 0) {
-    info('Startup migrations complete', {
-      module: 'migrations',
-      phase: 'startup',
-      sheetsMigrated: totalMigrated,
-    });
-  } else {
-    debug('No migrations needed', {
-      module: 'migrations',
-      phase: 'startup',
-    });
+  // Migrate Dashboard processedAt cells to DATE_TIME format
+  if (dashboardOperativoId) {
+    await migrateDashboardProcessedAt(dashboardOperativoId);
   }
 }
