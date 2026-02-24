@@ -93,7 +93,7 @@ export async function markFileProcessing(
         });
 
         const updateResult = await updateRowsWithFormatting(dashboardId, [
-          { range: `Archivos Procesados!C${existingRowIndex}:F${existingRowIndex}`, values: [[processedAt, documentType, 'processing', '']] },
+          { range: `Archivos Procesados!C${existingRowIndex}:F${existingRowIndex}`, values: [processedAt, documentType, 'processing', ''] },
         ], timeZone);
 
         if (!updateResult.ok) {

@@ -130,7 +130,7 @@ describe('File Tracking Functions', () => {
         (u: { range: string }) => u.range.includes('C2')
       );
       expect(processedAtUpdate).toBeDefined();
-      const processedAtValue = processedAtUpdate?.values?.[0]?.[0];
+      const processedAtValue = processedAtUpdate?.values?.[0];
       expect(typeof processedAtValue).toBe('string');
       expect(processedAtValue).toMatch(/^\d{4}-\d{2}-\d{2}T/);
     });

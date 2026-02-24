@@ -4,7 +4,7 @@
  */
 
 import type { Result } from '../types/index.js';
-import type { CellValue } from './sheets.js';
+import type { CellValue, CellValueOrLink } from './sheets.js';
 import { getValues, batchUpdate, updateRowsWithFormatting, getSpreadsheetTimezone, getSheetMetadata } from './sheets.js';
 import { getCachedFolderStructure } from './folder-structure.js';
 import { MOVIMIENTOS_BANCARIO_SHEET } from '../constants/spreadsheet-headers.js';
@@ -181,7 +181,7 @@ export async function migrateDashboardProcessedAt(dashboardId: string): Promise<
   const rows = dataResult.value;
   const EXCEL_EPOCH = new Date(Date.UTC(1899, 11, 30)).getTime();
 
-  const updates: Array<{ range: string; values: CellValue[][] }> = [];
+  const updates: Array<{ range: string; values: CellValueOrLink[] }> = [];
 
   for (let i = 1; i < rows.length; i++) {
     const row = rows[i];
@@ -207,7 +207,7 @@ export async function migrateDashboardProcessedAt(dashboardId: string): Promise<
 
     updates.push({
       range: `Archivos Procesados!C${rowNum}`,
-      values: [[processedAtIso]],
+      values: [processedAtIso],
     });
   }
 
@@ -220,10 +220,12 @@ export async function migrateDashboardProcessedAt(dashboardId: string): Promise<
   }
 
   // Chunk updates to avoid Sheets API limits
+  let failedRows = 0;
   for (let i = 0; i < updates.length; i += SHEETS_BATCH_UPDATE_LIMIT) {
     const chunk = updates.slice(i, i + SHEETS_BATCH_UPDATE_LIMIT);
     const updateResult = await updateRowsWithFormatting(dashboardId, chunk, timeZone);
     if (!updateResult.ok) {
+      failedRows += chunk.length;
       warn('Failed to migrate processedAt chunk in Dashboard', {
         module: 'migrations',
         phase: 'startup',
@@ -233,11 +235,20 @@ export async function migrateDashboardProcessedAt(dashboardId: string): Promise<
     }
   }
 
-  info('Migrated Dashboard processedAt cells to DATE_TIME format', {
-    module: 'migrations',
-    phase: 'startup',
-    rowsMigrated: updates.length,
-  });
+  if (failedRows === 0) {
+    info('Migrated Dashboard processedAt cells to DATE_TIME format', {
+      module: 'migrations',
+      phase: 'startup',
+      rowsMigrated: updates.length,
+    });
+  } else {
+    warn('Partial failure migrating Dashboard processedAt cells', {
+      module: 'migrations',
+      phase: 'startup',
+      rowsMigrated: updates.length - failedRows,
+      failedRows,
+    });
+  }
 }
 
 /**

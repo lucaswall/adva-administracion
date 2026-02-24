@@ -215,3 +215,61 @@
 - Storage module refactoring touches 4 modules with similar patterns — risk of copy-paste errors across modules
 - Migration is idempotent but adds API calls at startup — should be efficient (batch all updates in single call per Dashboard)
 - Pagos-pendientes fix uses `normalizeSpreadsheetDate` which strips time info from dates — acceptable since fechaEmision is date-only
+
+---
+
+## Iteration 1
+
+**Implemented:** 2026-02-24
+**Method:** Agent team (2 workers, worktree-isolated)
+
+### Tasks Completed This Iteration
+- Task 1: Add updateRowsWithFormatting to sheets.ts - Added `columnLetterToIndex`, `parseA1Range`, `updateRowsWithFormatting` with full CellDate/CellNumber/CellLink support (worker-1)
+- Task 2: Add normalizeTimestamp utility - Converts serial numbers to YYYY-MM-DD HH:MM:SS, replaced String() in 4 matcher sites (worker-2)
+- Task 3: Use updateRowsWithFormatting in storage reprocessing paths - Refactored all 4 storage modules with shared `buildXxxRowFormatted` builders (worker-1)
+- Task 4: Fix Dashboard processedAt and pagos-pendientes - markFileProcessing uses updateRowsWithFormatting, pagos-pendientes converts serial fechaEmision (worker-2)
+- Task 5: Startup migration for Dashboard processedAt - migrateDashboardProcessedAt converts all processedAt to DATE_TIME format (worker-2)
+
+### Files Modified
+- `src/services/sheets.ts` - Added columnLetterToIndex, parseA1Range, updateRowsWithFormatting
+- `src/services/sheets.test.ts` - 6 new tests for updateRowsWithFormatting + helpers
+- `src/utils/date.ts` - Added normalizeTimestamp
+- `src/utils/date.test.ts` - 8 new tests for normalizeTimestamp
+- `src/processing/storage/factura-store.ts` - Shared row builder, updateRowsWithFormatting in reprocessing
+- `src/processing/storage/factura-store.test.ts` - Updated for new reprocessing path
+- `src/processing/storage/pago-store.ts` - Same refactor pattern
+- `src/processing/storage/pago-store.test.ts` - Updated tests
+- `src/processing/storage/recibo-store.ts` - Same refactor pattern
+- `src/processing/storage/recibo-store.test.ts` - Updated tests
+- `src/processing/storage/retencion-store.ts` - Same refactor pattern
+- `src/processing/storage/retencion-store.test.ts` - Updated tests
+- `src/processing/matching/factura-pago-matcher.ts` - normalizeTimestamp for processedAt
+- `src/processing/matching/recibo-pago-matcher.ts` - normalizeTimestamp for processedAt
+- `src/processing/storage/index.ts` - updateRowsWithFormatting in retry path
+- `src/processing/storage/index.test.ts` - Updated retry path tests
+- `src/services/pagos-pendientes.ts` - normalizeSpreadsheetDate for fechaEmision
+- `src/services/pagos-pendientes.test.ts` - New test for serial fechaEmision
+- `src/services/migrations.ts` - migrateDashboardProcessedAt + runStartupMigrations update
+- `src/services/migrations.test.ts` - 7 new migration tests
+
+### Linear Updates
+- ADV-152: Todo → In Progress → Review
+- ADV-153: Todo → In Progress → Review
+- ADV-154: Todo → In Progress → Review
+- ADV-155: Todo → In Progress → Review
+- ADV-156: Todo → In Progress → Review
+
+### Pre-commit Verification
+- bug-hunter: Found 4 bugs (3 HIGH already fixed by merge integration, 1 MEDIUM partial-failure logging fixed)
+- verifier: All 1874 tests pass, zero warnings
+
+### Work Partition
+- Worker 1: Tasks 1, 3 (sheets.ts foundation + storage reprocessing refactor)
+- Worker 2: Tasks 2, 4, 5 (date utilities + Dashboard fixes + migration)
+
+### Merge Summary
+- Worker 1: fast-forward (no conflicts)
+- Worker 2: auto-merge, 3 type mismatches in sheets.ts stub vs real signature (resolved: removed stub, fixed nested→flat values)
+
+### Continuation Status
+All tasks completed.

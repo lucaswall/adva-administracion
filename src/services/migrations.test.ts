@@ -242,9 +242,9 @@ describe('migrateDashboardProcessedAt', () => {
     // Should include row 2 (file-1) and row 3 (file-2), skip row 4 (empty)
     expect(calledUpdates).toHaveLength(2);
     expect(calledUpdates[0].range).toBe('Archivos Procesados!C2');
-    expect(calledUpdates[0].values[0][0]).toBe('2025-12-01T10:00:00.000Z');
+    expect(calledUpdates[0].values[0]).toBe('2025-12-01T10:00:00.000Z');
     expect(calledUpdates[1].range).toBe('Archivos Procesados!C3');
-    expect(calledUpdates[1].values[0][0]).toBe('2025-12-02T11:00:00.000Z');
+    expect(calledUpdates[1].values[0]).toBe('2025-12-02T11:00:00.000Z');
   });
 
   it('should convert serial number processedAt to ISO string before passing to updateRowsWithFormatting', async () => {
@@ -265,7 +265,7 @@ describe('migrateDashboardProcessedAt', () => {
     const calledUpdates = vi.mocked(updateRowsWithFormatting).mock.calls[0][1];
     expect(calledUpdates).toHaveLength(1);
     // Should convert serial to ISO string so updateRowsWithFormatting applies DATE_TIME format
-    const processedAtValue = calledUpdates[0].values[0][0];
+    const processedAtValue = calledUpdates[0].values[0];
     expect(typeof processedAtValue).toBe('string');
     expect(processedAtValue).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/);
   });
@@ -306,7 +306,7 @@ describe('migrateDashboardProcessedAt', () => {
     // Second run should still call updateRowsWithFormatting with same args (re-applies format)
     expect(updateRowsWithFormatting).toHaveBeenCalledOnce();
     const calledUpdates = vi.mocked(updateRowsWithFormatting).mock.calls[0][1];
-    expect(calledUpdates[0].values[0][0]).toBe('2025-12-01T10:00:00.000Z');
+    expect(calledUpdates[0].values[0]).toBe('2025-12-01T10:00:00.000Z');
   });
 
   it('should handle only-header sheet gracefully', async () => {
