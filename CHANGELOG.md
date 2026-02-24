@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-02-24
+
+### Added
+- Retencion-factura matching: retenciones are now automatically linked to their corresponding facturas
+- MANUAL match locking: documents and bank movements marked as MANUAL are permanently protected from automatic re-matching
+- Automatic spreadsheet schema migrations on server startup for seamless column additions
+- Match origin tracking (AUTO/MANUAL) visible in bank movements spreadsheet
+
+### Changed
+- Bank movement matching now prevents the same document from being matched across different bank accounts (cross-bank deduplication)
+
+### Fixed
+- Monetary values stored as text strings in spreadsheets instead of proper numbers, breaking formulas and sorting
+- ARS credit matching used incorrect tolerance (inconsistent with debit matching)
+- USD payments without explicit ARS amount couldn't match ARS bank debits
+- Force re-matching left stale match data when no new match was found
+
 ## [1.1.0] - 2026-02-23
 
 ### Added
@@ -57,6 +74,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Updated fastify to fix high-severity Content-Type body validation bypass and low-severity DoS vulnerability
 - Updated googleapis to v171, @google/clasp to v3, and resolved 6 npm audit vulnerabilities
 
-[Unreleased]: https://github.com/lucaswall/adva-administracion/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/lucaswall/adva-administracion/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/lucaswall/adva-administracion/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/lucaswall/adva-administracion/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/lucaswall/adva-administracion/commits/v1.0.0
