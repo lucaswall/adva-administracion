@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-02-25
+
+### Added
+- Schema version tracking: startup migrations are now version-gated via a `.schema_version` file, running only new migrations instead of checking all schemas on every startup
+
+### Fixed
+- Reprocessed document rows had inconsistent spreadsheet formatting compared to newly created rows (text strings instead of proper numbers, missing date formatting)
+- Dashboard processing timestamps displayed in inconsistent format for older entries
+- Pending payment dates displayed incorrectly when read back from spreadsheets
+
 ## [1.2.0] - 2026-02-24
 
 ### Added
@@ -74,7 +84,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Updated fastify to fix high-severity Content-Type body validation bypass and low-severity DoS vulnerability
 - Updated googleapis to v171, @google/clasp to v3, and resolved 6 npm audit vulnerabilities
 
-[Unreleased]: https://github.com/lucaswall/adva-administracion/compare/v1.2.0...HEAD
+[Unreleased]: https://github.com/lucaswall/adva-administracion/compare/v1.3.0...HEAD
+[1.3.0]: https://github.com/lucaswall/adva-administracion/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/lucaswall/adva-administracion/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/lucaswall/adva-administracion/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/lucaswall/adva-administracion/commits/v1.0.0
