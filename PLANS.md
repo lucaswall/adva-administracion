@@ -175,6 +175,76 @@
 ### Continuation Status
 All tasks completed.
 
+### Review Findings
+
+Summary: 4 issue(s) found (Team: security, reliability, quality reviewers)
+- FIX: 4 issue(s) — Linear issues created
+- DISCARDED: 5 finding(s) — false positives / not applicable
+
+**Issues requiring fix:**
+- [MEDIUM] BUG: Unbounded batchUpdate in migrateMovimientosColumns (`src/services/migrations.ts:196`) — no chunking, SHEETS_BATCH_UPDATE_LIMIT imported but unused
+- [MEDIUM] BUG: Unknown column layout proceeds to corrupt data (`src/services/migrations.ts:148`) — warns but doesn't skip sheet, falls through to overwrite columns H:I
+- [LOW] BUG: Silent subfolder error swallowing in listFilesInFolder (`src/services/drive.ts:103-108`) — pre-existing, errors discarded with no logging
+- [LOW] EDGE CASE: parseInt partial parse bypass in readSchemaVersion (`src/services/schema-version.ts:46`) — `"4abc"` silently parses as version 4
+
+**Discarded findings (not bugs):**
+- [DISCARDED] SECURITY: Inconsistent Drive query escaping (`drive.ts:333`) — parentId/mimeType are internal values from API responses, never user input
+- [DISCARDED] SECURITY: Raw file content in error message (`schema-version.ts:51`) — application-controlled file, Pino logs not exposed externally
+- [DISCARDED] TYPE: Non-null assertion `firstError!` (`migrations.ts:319`) — logically safe, failedRows > 0 guarantees firstError was set
+- [DISCARDED] TEST: Incomplete v4 coverage in partial-run test (`migrations.test.ts:401-428`) — v4 implicitly tested (runs to completion, writeSchemaVersion called)
+- [DISCARDED] TYPE: `as any` cast on mockFolderStructure (`migrations.test.ts:356`) — standard test mock pattern
+
+### Linear Updates
+- ADV-160: Review → Merge (original task)
+- ADV-161: Review → Merge (original task)
+- ADV-162: Review → Merge (original task)
+- ADV-163: Review → Merge (original task)
+- ADV-164: Created in Todo (Fix: unbounded batchUpdate)
+- ADV-165: Created in Todo (Fix: unknown column layout corruption)
+- ADV-166: Created in Todo (Fix: silent subfolder error swallowing)
+- ADV-167: Created in Todo (Fix: parseInt partial parse bypass)
+
+<!-- REVIEW COMPLETE -->
+
+---
+
+## Fix Plan
+
+**Source:** Review findings from Iteration 1
+**Linear Issues:** [ADV-164](https://linear.app/lw-claude/issue/ADV-164/fix-unbounded-batchupdate-in-migratemovimientoscolumns), [ADV-165](https://linear.app/lw-claude/issue/ADV-165/fix-unknown-column-layout-proceeds-to-corrupt-data-in), [ADV-166](https://linear.app/lw-claude/issue/ADV-166/fix-silent-subfolder-error-swallowing-in-listfilesinfolder), [ADV-167](https://linear.app/lw-claude/issue/ADV-167/fix-parseint-partial-parse-bypass-in-readschemaversion)
+
+### Fix 1: Unbounded batchUpdate in migrateMovimientosColumns
+**Linear Issue:** [ADV-164](https://linear.app/lw-claude/issue/ADV-164/fix-unbounded-batchupdate-in-migratemovimientoscolumns)
+
+1. Write test in `src/services/migrations.test.ts` for large sheet (>500 rows) migration — verify batchUpdate is called in chunks
+2. Run verifier with pattern "migration" (expect fail)
+3. Add chunking loop around `batchUpdate` call at `migrations.ts:196` using same pattern as `migrateDashboardProcessedAt` (lines 289-301)
+4. Run verifier with pattern "migration" (expect pass)
+
+### Fix 2: Unknown column layout proceeds to corrupt data
+**Linear Issue:** [ADV-165](https://linear.app/lw-claude/issue/ADV-165/fix-unknown-column-layout-proceeds-to-corrupt-data-in)
+
+1. Write test in `src/services/migrations.test.ts` for unknown column layout — verify sheet is skipped (no batchUpdate call)
+2. Run verifier with pattern "migration" (expect fail)
+3. Add `continue` after the warn block at `migrations.ts:157` to skip sheets with unrecognized layouts
+4. Run verifier with pattern "migration" (expect pass)
+
+### Fix 3: Silent subfolder error swallowing in listFilesInFolder
+**Linear Issue:** [ADV-166](https://linear.app/lw-claude/issue/ADV-166/fix-silent-subfolder-error-swallowing-in-listfilesinfolder)
+
+1. Write test in `src/services/drive.test.ts` for subfolder recursion failure — verify warn log is emitted
+2. Run verifier with pattern "drive" (expect fail)
+3. Add `warn()` log in `drive.ts:105` when `!subResult.ok` before `continue`
+4. Run verifier with pattern "drive" (expect pass)
+
+### Fix 4: parseInt partial parse bypass in readSchemaVersion
+**Linear Issue:** [ADV-167](https://linear.app/lw-claude/issue/ADV-167/fix-parseint-partial-parse-bypass-in-readschemaversion)
+
+1. Write test in `src/services/schema-version.test.ts` for partial numeric content (e.g., `"4abc"`) — verify error result
+2. Run verifier with pattern "schema-version" (expect fail)
+3. Add `/^\d+$/` regex validation before `parseInt` at `schema-version.ts:46`
+4. Run verifier with pattern "schema-version" (expect pass)
+
 ---
 
 ## Plan Summary
