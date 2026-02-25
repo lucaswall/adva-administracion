@@ -21,6 +21,14 @@ vi.mock('googleapis', () => ({
   },
 }));
 
+// Mock logger
+vi.mock('../utils/logger.js', () => ({
+  info: vi.fn(),
+  warn: vi.fn(),
+  debug: vi.fn(),
+  error: vi.fn(),
+}));
+
 // Mock google-auth
 vi.mock('./google-auth.js', () => ({
   getGoogleAuthAsync: vi.fn(async () => ({})),
@@ -54,6 +62,7 @@ vi.mock('../utils/concurrency.js', async () => {
 import {
   findByName,
   listByMimeType,
+  listFilesInFolder,
   createFolder,
   createFileWithContent,
   updateFileContent,
@@ -62,6 +71,7 @@ import {
   renameFile,
   clearDriveCache,
 } from './drive.js';
+import { warn } from '../utils/logger.js';
 
 describe('Drive folder operations', () => {
   let mockDriveFiles: {
@@ -492,6 +502,37 @@ describe('Drive folder operations', () => {
         expect(result.value).toEqual(['parent1']);
       }
       expect(mockDriveFiles.get).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  describe('listFilesInFolder subfolder error handling', () => {
+    it('should log warning when subfolder recursion fails', async () => {
+      // First call: parent folder contains a subfolder
+      mockDriveFiles.list
+        .mockResolvedValueOnce({
+          data: {
+            files: [
+              { id: 'subfolder-1', name: 'SubFolder', mimeType: 'application/vnd.google-apps.folder' },
+            ],
+          },
+        })
+        // Second call: subfolder listing fails (all 3 retries)
+        .mockRejectedValue(new Error('Subfolder access denied'));
+
+      const result = await listFilesInFolder('parent-folder');
+
+      // Should succeed with empty results (subfolder files skipped)
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value).toEqual([]);
+      }
+      // Should have logged a warning about the failed subfolder
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining('subfolder'),
+        expect.objectContaining({
+          module: 'drive',
+        }),
+      );
     });
   });
 

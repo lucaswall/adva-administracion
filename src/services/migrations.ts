@@ -145,15 +145,16 @@ export async function migrateMovimientosColumns(
     const isOldLayout = colH === 'detalle';
     const isSwapped = colH === 'detalle' && colI === 'matchedType';
 
-    if (!isOldLayout && headerRow && headerRow.length >= 2) {
-      // Unknown layout — warn but attempt migration anyway
-      warn('Unexpected column layout, migrating to new schema', {
+    if (!isOldLayout) {
+      // Unknown layout — skip this sheet to avoid data corruption
+      warn('Unexpected column layout, skipping sheet', {
         module: 'migrations',
         spreadsheet: spreadsheetName,
         sheet: sheet.title,
         colH,
         colI,
       });
+      continue;
     }
 
     // Build batch updates: for each row, set H=matchedType value, I=detalle value
@@ -193,15 +194,19 @@ export async function migrateMovimientosColumns(
       });
     }
 
-    const updateResult = await batchUpdate(spreadsheetId, updates);
-    if (!updateResult.ok) {
-      warn('Failed to migrate columns', {
-        module: 'migrations',
-        spreadsheet: spreadsheetName,
-        sheet: sheet.title,
-        error: updateResult.error.message,
-      });
-      return { ok: false as const, error: updateResult.error };
+    // Chunk updates to avoid Sheets API limits
+    for (let j = 0; j < updates.length; j += SHEETS_BATCH_UPDATE_LIMIT) {
+      const chunk = updates.slice(j, j + SHEETS_BATCH_UPDATE_LIMIT);
+      const updateResult = await batchUpdate(spreadsheetId, chunk);
+      if (!updateResult.ok) {
+        warn('Failed to migrate columns', {
+          module: 'migrations',
+          spreadsheet: spreadsheetName,
+          sheet: sheet.title,
+          error: updateResult.error.message,
+        });
+        return { ok: false as const, error: updateResult.error };
+      }
     }
 
     migratedCount++;

@@ -1,5 +1,6 @@
 # Implementation Plan
 
+**Status:** COMPLETE
 **Created:** 2026-02-24
 **Source:** Inline request: Add `.schema_version` file to Drive root for tracking schema migrations. Version-gate startup migrations to avoid redundant checks.
 **Linear Issues:** [ADV-160](https://linear.app/lw-claude/issue/ADV-160/add-drive-file-content-operations-createfilewithcontent), [ADV-161](https://linear.app/lw-claude/issue/ADV-161/create-schema-version-service-readwrite-schema_version-from-drive), [ADV-162](https://linear.app/lw-claude/issue/ADV-162/migration-registry-with-version-gated-execution), [ADV-163](https://linear.app/lw-claude/issue/ADV-163/remove-migration-calls-from-folder-structurets-discovery)
@@ -177,15 +178,14 @@ All tasks completed.
 
 ### Review Findings
 
-Summary: 4 issue(s) found (Team: security, reliability, quality reviewers)
-- FIX: 4 issue(s) — Linear issues created
-- DISCARDED: 5 finding(s) — false positives / not applicable
+Summary: 4 issue(s) found, fixed inline (Team: security, reliability, quality reviewers)
+- FIXED INLINE: 4 issue(s) — verified via TDD + bug-hunter
 
-**Issues requiring fix:**
-- [MEDIUM] BUG: Unbounded batchUpdate in migrateMovimientosColumns (`src/services/migrations.ts:196`) — no chunking, SHEETS_BATCH_UPDATE_LIMIT imported but unused
-- [MEDIUM] BUG: Unknown column layout proceeds to corrupt data (`src/services/migrations.ts:148`) — warns but doesn't skip sheet, falls through to overwrite columns H:I
-- [LOW] BUG: Silent subfolder error swallowing in listFilesInFolder (`src/services/drive.ts:103-108`) — pre-existing, errors discarded with no logging
-- [LOW] EDGE CASE: parseInt partial parse bypass in readSchemaVersion (`src/services/schema-version.ts:46`) — `"4abc"` silently parses as version 4
+**Issues fixed inline:**
+- [MEDIUM] BUG: Unbounded batchUpdate in migrateMovimientosColumns (`src/services/migrations.ts:196`) — added chunking loop using SHEETS_BATCH_UPDATE_LIMIT + test
+- [MEDIUM] BUG: Unknown column layout proceeds to corrupt data (`src/services/migrations.ts:148`) — simplified guard to `if (!isOldLayout)` + `continue` + test
+- [LOW] BUG: Silent subfolder error swallowing in listFilesInFolder (`src/services/drive.ts:103-108`) — added warn log + test
+- [LOW] EDGE CASE: parseInt partial parse bypass in readSchemaVersion (`src/services/schema-version.ts:46`) — added `/^\d+$/` regex validation + test
 
 **Discarded findings (not bugs):**
 - [DISCARDED] SECURITY: Inconsistent Drive query escaping (`drive.ts:333`) — parentId/mimeType are internal values from API responses, never user input
@@ -199,51 +199,16 @@ Summary: 4 issue(s) found (Team: security, reliability, quality reviewers)
 - ADV-161: Review → Merge (original task)
 - ADV-162: Review → Merge (original task)
 - ADV-163: Review → Merge (original task)
-- ADV-164: Created in Todo (Fix: unbounded batchUpdate)
-- ADV-165: Created in Todo (Fix: unknown column layout corruption)
-- ADV-166: Created in Todo (Fix: silent subfolder error swallowing)
-- ADV-167: Created in Todo (Fix: parseInt partial parse bypass)
+- ADV-164: Created in Merge (Fix: unbounded batchUpdate — fixed inline)
+- ADV-165: Created in Merge (Fix: unknown column layout corruption — fixed inline)
+- ADV-166: Created in Merge (Fix: silent subfolder error swallowing — fixed inline)
+- ADV-167: Created in Merge (Fix: parseInt partial parse bypass — fixed inline)
+
+### Inline Fix Verification
+- Unit tests: all 1896 pass
+- Bug-hunter: guard condition tightened (headerRow.length check removed), no remaining issues
 
 <!-- REVIEW COMPLETE -->
-
----
-
-## Fix Plan
-
-**Source:** Review findings from Iteration 1
-**Linear Issues:** [ADV-164](https://linear.app/lw-claude/issue/ADV-164/fix-unbounded-batchupdate-in-migratemovimientoscolumns), [ADV-165](https://linear.app/lw-claude/issue/ADV-165/fix-unknown-column-layout-proceeds-to-corrupt-data-in), [ADV-166](https://linear.app/lw-claude/issue/ADV-166/fix-silent-subfolder-error-swallowing-in-listfilesinfolder), [ADV-167](https://linear.app/lw-claude/issue/ADV-167/fix-parseint-partial-parse-bypass-in-readschemaversion)
-
-### Fix 1: Unbounded batchUpdate in migrateMovimientosColumns
-**Linear Issue:** [ADV-164](https://linear.app/lw-claude/issue/ADV-164/fix-unbounded-batchupdate-in-migratemovimientoscolumns)
-
-1. Write test in `src/services/migrations.test.ts` for large sheet (>500 rows) migration — verify batchUpdate is called in chunks
-2. Run verifier with pattern "migration" (expect fail)
-3. Add chunking loop around `batchUpdate` call at `migrations.ts:196` using same pattern as `migrateDashboardProcessedAt` (lines 289-301)
-4. Run verifier with pattern "migration" (expect pass)
-
-### Fix 2: Unknown column layout proceeds to corrupt data
-**Linear Issue:** [ADV-165](https://linear.app/lw-claude/issue/ADV-165/fix-unknown-column-layout-proceeds-to-corrupt-data-in)
-
-1. Write test in `src/services/migrations.test.ts` for unknown column layout — verify sheet is skipped (no batchUpdate call)
-2. Run verifier with pattern "migration" (expect fail)
-3. Add `continue` after the warn block at `migrations.ts:157` to skip sheets with unrecognized layouts
-4. Run verifier with pattern "migration" (expect pass)
-
-### Fix 3: Silent subfolder error swallowing in listFilesInFolder
-**Linear Issue:** [ADV-166](https://linear.app/lw-claude/issue/ADV-166/fix-silent-subfolder-error-swallowing-in-listfilesinfolder)
-
-1. Write test in `src/services/drive.test.ts` for subfolder recursion failure — verify warn log is emitted
-2. Run verifier with pattern "drive" (expect fail)
-3. Add `warn()` log in `drive.ts:105` when `!subResult.ok` before `continue`
-4. Run verifier with pattern "drive" (expect pass)
-
-### Fix 4: parseInt partial parse bypass in readSchemaVersion
-**Linear Issue:** [ADV-167](https://linear.app/lw-claude/issue/ADV-167/fix-parseint-partial-parse-bypass-in-readschemaversion)
-
-1. Write test in `src/services/schema-version.test.ts` for partial numeric content (e.g., `"4abc"`) — verify error result
-2. Run verifier with pattern "schema-version" (expect fail)
-3. Add `/^\d+$/` regex validation before `parseInt` at `schema-version.ts:46`
-4. Run verifier with pattern "schema-version" (expect pass)
 
 ---
 
@@ -273,3 +238,9 @@ Summary: 4 issue(s) found (Team: security, reliability, quality reviewers)
 - Existing environments need a one-time `.schema_version` file creation (handled automatically: version 0 → write CURRENT_SCHEMA_VERSION)
 - Moving migrations out of `discoverFolderStructure()` changes execution order: migrations now run AFTER full discovery instead of inline. This is safe because `ensureSheetsExist()` creates new sheets with latest headers, and migrations only patch OLD schemas.
 - Dynamic bank account spreadsheets created after a migration are created with latest headers (no migration needed) — this already works correctly.
+
+---
+
+## Status: COMPLETE
+
+All tasks implemented and reviewed successfully. All Linear issues moved to Merge.

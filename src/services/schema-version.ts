@@ -43,14 +43,15 @@ export async function readSchemaVersion(rootId: string): Promise<Result<SchemaVe
   if (!downloadResult.ok) return downloadResult;
 
   const content = downloadResult.value.toString('utf-8').trim();
-  const version = parseInt(content, 10);
 
-  if (isNaN(version)) {
+  if (!/^\d+$/.test(content)) {
     return {
       ok: false,
-      error: new Error(`Schema version file contains non-numeric content: "${content}"`),
+      error: new Error(`Schema version file contains non-numeric content: "${content.slice(0, 20)}"`),
     };
   }
+
+  const version = parseInt(content, 10);
 
   info('Read schema version', {
     module: 'schema-version',

@@ -199,6 +199,56 @@ describe('migrateMovimientosColumns', () => {
     if (result.ok) expect(result.value).toBe(1);
   });
 
+  it('should skip sheets with unknown column layout instead of corrupting data', async () => {
+    vi.mocked(getSheetMetadata).mockResolvedValue({
+      ok: true,
+      value: [{ title: '2025-01', sheetId: 1, index: 0 }],
+    });
+    // Unknown layout: H is neither 'detalle' nor 'matchedType'
+    vi.mocked(getValues).mockResolvedValue({
+      ok: true,
+      value: [
+        ['matchedFileId', 'someUnknownHeader', 'anotherHeader'],
+        ['file-1', 'value1', 'value2'],
+      ],
+    });
+
+    const result = await migrateMovimientosColumns('spreadsheet-1', 'Test Bank');
+
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value).toBe(0);
+    // Should NOT attempt to update — unknown layout should be skipped
+    expect(batchUpdate).not.toHaveBeenCalled();
+  });
+
+  it('should chunk batchUpdate calls when rows exceed SHEETS_BATCH_UPDATE_LIMIT', async () => {
+    vi.mocked(getSheetMetadata).mockResolvedValue({
+      ok: true,
+      value: [{ title: '2025-01', sheetId: 1, index: 0 }],
+    });
+    // Create 600 data rows + 1 header = 601 rows total → 601 updates (1 header + 600 data)
+    const rows: (string | number)[][] = [['matchedFileId', 'detalle', '']];
+    for (let i = 0; i < 600; i++) {
+      rows.push([`file-${i}`, `description ${i}`, '']);
+    }
+    vi.mocked(getValues).mockResolvedValue({
+      ok: true,
+      value: rows,
+    });
+    vi.mocked(batchUpdate).mockResolvedValue({ ok: true, value: 2 });
+
+    const result = await migrateMovimientosColumns('spreadsheet-1', 'Test Bank');
+
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value).toBe(1);
+    // 601 updates should be chunked: ceil(601/500) = 2 calls
+    expect(batchUpdate).toHaveBeenCalledTimes(2);
+    // First chunk: 500 updates
+    expect(vi.mocked(batchUpdate).mock.calls[0][1]).toHaveLength(500);
+    // Second chunk: 101 updates
+    expect(vi.mocked(batchUpdate).mock.calls[1][1]).toHaveLength(101);
+  });
+
   it('should preserve existing matchedFileId data in column G', async () => {
     vi.mocked(getSheetMetadata).mockResolvedValue({
       ok: true,

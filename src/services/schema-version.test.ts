@@ -106,6 +106,24 @@ describe('readSchemaVersion', () => {
     }
   });
 
+  it('returns error for partial numeric content like "4abc"', async () => {
+    vi.mocked(findByName).mockResolvedValue({
+      ok: true,
+      value: { id: 'file-123', name: '.schema_version', mimeType: 'text/plain' },
+    });
+    vi.mocked(downloadFile).mockResolvedValue({
+      ok: true,
+      value: Buffer.from('4abc'),
+    });
+
+    const result = await readSchemaVersion('root-id');
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.message).toContain('non-numeric');
+    }
+  });
+
   it('handles content with whitespace', async () => {
     vi.mocked(findByName).mockResolvedValue({
       ok: true,

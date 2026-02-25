@@ -104,6 +104,14 @@ export async function listFilesInFolder(
 
           if (subResult.ok) {
             files.push(...subResult.value);
+          } else {
+            warn('Failed to list subfolder contents', {
+              module: 'drive',
+              phase: 'list-files',
+              folderId: item.id,
+              folderName: item.name,
+              error: subResult.error.message,
+            });
           }
           continue;
         }
