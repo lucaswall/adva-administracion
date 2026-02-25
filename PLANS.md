@@ -142,6 +142,41 @@
 
 ---
 
+## Iteration 1
+
+**Implemented:** 2026-02-24
+**Method:** Single-agent (linear dependency chain, 1 work unit)
+
+### Tasks Completed This Iteration
+- Task 1: Add Drive file content operations (ADV-160) - Added `createFileWithContent` and `updateFileContent` to drive.ts
+- Task 2: Create schema version service (ADV-161) - New `schema-version.ts` with `readSchemaVersion`/`writeSchemaVersion`
+- Task 3: Migration registry with version-gated execution (ADV-162) - Refactored `runStartupMigrations` with `MIGRATIONS` array (v1-v4), `CURRENT_SCHEMA_VERSION`, version-gated execution
+- Task 4: Remove migration calls from folder-structure.ts (ADV-163) - Removed 4 `migrateTipoDeCambioHeaders` calls from `discoverFolderStructure` and `migrateArchivosProcesadosHeaders` call from `initializeDashboardOperativo`
+
+### Files Modified
+- `src/services/drive.ts` - Added `createFileWithContent`, `updateFileContent` functions
+- `src/services/drive.test.ts` - Added tests for new Drive functions
+- `src/services/schema-version.ts` - New file: schema version read/write service
+- `src/services/schema-version.test.ts` - New file: 10 tests for schema version service
+- `src/services/migrations.ts` - Refactored to version-gated migration registry, changed `migrateDashboardProcessedAt` to return `Result<void, Error>`
+- `src/services/migrations.test.ts` - Updated `runStartupMigrations` tests for version-gated behavior
+- `src/services/folder-structure.ts` - Removed inline migration calls from discovery/initialization
+
+### Linear Updates
+- ADV-160: Todo → In Progress → Review
+- ADV-161: Todo → In Progress → Review
+- ADV-162: Todo → In Progress → Review
+- ADV-163: Todo → In Progress → Review
+
+### Pre-commit Verification
+- bug-hunter: Found 2 HIGH bugs (migration functions silently swallowing errors), fixed before proceeding
+- verifier: All 1892 tests pass, zero warnings
+
+### Continuation Status
+All tasks completed.
+
+---
+
 ## Plan Summary
 
 **Objective:** Add schema version tracking via `.schema_version` Drive file to gate startup migrations and avoid redundant spreadsheet checks.

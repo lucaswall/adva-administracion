@@ -10,6 +10,13 @@ vi.mock('./sheets.js', () => ({
 
 vi.mock('./folder-structure.js', () => ({
   getCachedFolderStructure: vi.fn(),
+  migrateTipoDeCambioHeaders: vi.fn(),
+  migrateArchivosProcesadosHeaders: vi.fn(),
+}));
+
+vi.mock('./schema-version.js', () => ({
+  readSchemaVersion: vi.fn(),
+  writeSchemaVersion: vi.fn(),
 }));
 
 vi.mock('../utils/logger.js', () => ({
@@ -19,9 +26,10 @@ vi.mock('../utils/logger.js', () => ({
   error: vi.fn(),
 }));
 
-import { migrateMovimientosColumns, migrateDashboardProcessedAt, runStartupMigrations } from './migrations.js';
+import { migrateMovimientosColumns, migrateDashboardProcessedAt, runStartupMigrations, CURRENT_SCHEMA_VERSION } from './migrations.js';
 import { getValues, batchUpdate, getSheetMetadata, updateRowsWithFormatting, getSpreadsheetTimezone } from './sheets.js';
-import { getCachedFolderStructure } from './folder-structure.js';
+import { getCachedFolderStructure, migrateTipoDeCambioHeaders, migrateArchivosProcesadosHeaders } from './folder-structure.js';
+import { readSchemaVersion, writeSchemaVersion } from './schema-version.js';
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -322,103 +330,169 @@ describe('migrateDashboardProcessedAt', () => {
     expect(updateRowsWithFormatting).not.toHaveBeenCalled();
   });
 
-  it('should handle getValues failure gracefully', async () => {
+  it('should return error on getValues failure', async () => {
     vi.mocked(getValues).mockResolvedValue({
       ok: false,
       error: new Error('API error'),
     });
 
-    // Should not throw — just log and return
-    await expect(migrateDashboardProcessedAt('dashboard-id')).resolves.toBeUndefined();
+    const result = await migrateDashboardProcessedAt('dashboard-id');
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.message).toBe('API error');
+    }
     expect(updateRowsWithFormatting).not.toHaveBeenCalled();
   });
 });
 
 describe('runStartupMigrations', () => {
+  const mockFolderStructure = {
+    rootId: 'root-id',
+    controlIngresosId: 'ingresos-id',
+    controlEgresosId: 'egresos-id',
+    dashboardOperativoId: 'dashboard-id',
+    movimientosSpreadsheets: new Map([['2025:BBVA 123 ARS', 'ss-1']]),
+  } as any;
+
   it('should skip when folder structure is not initialized', async () => {
     vi.mocked(getCachedFolderStructure).mockReturnValue(null);
 
     await runStartupMigrations();
 
-    expect(getSheetMetadata).not.toHaveBeenCalled();
+    expect(readSchemaVersion).not.toHaveBeenCalled();
   });
 
-  it('should skip when no movimientos spreadsheets exist', async () => {
-    vi.mocked(getCachedFolderStructure).mockReturnValue({
-      movimientosSpreadsheets: new Map(),
-    } as any);
+  it('should create version file and skip migrations when no .schema_version exists (version 0)', async () => {
+    vi.mocked(getCachedFolderStructure).mockReturnValue(mockFolderStructure);
+    vi.mocked(readSchemaVersion).mockResolvedValue({
+      ok: true,
+      value: { version: 0, fileId: null },
+    });
+    vi.mocked(writeSchemaVersion).mockResolvedValue({
+      ok: true,
+      value: 'new-file-id',
+    });
 
     await runStartupMigrations();
 
+    expect(writeSchemaVersion).toHaveBeenCalledWith('root-id', CURRENT_SCHEMA_VERSION, null);
+    // Should NOT call any migration functions
+    expect(migrateTipoDeCambioHeaders).not.toHaveBeenCalled();
+    expect(migrateArchivosProcesadosHeaders).not.toHaveBeenCalled();
     expect(getSheetMetadata).not.toHaveBeenCalled();
+    expect(updateRowsWithFormatting).not.toHaveBeenCalled();
   });
 
-  it('should migrate all movimientos spreadsheets', async () => {
-    vi.mocked(getCachedFolderStructure).mockReturnValue({
-      movimientosSpreadsheets: new Map([
-        ['2025:BBVA 123 ARS', 'ss-1'],
-        ['2025:MACRO 456 ARS', 'ss-2'],
-      ]),
-    } as any);
+  it('should skip all migrations when version equals CURRENT_SCHEMA_VERSION', async () => {
+    vi.mocked(getCachedFolderStructure).mockReturnValue(mockFolderStructure);
+    vi.mocked(readSchemaVersion).mockResolvedValue({
+      ok: true,
+      value: { version: CURRENT_SCHEMA_VERSION, fileId: 'file-id' },
+    });
+
+    await runStartupMigrations();
+
+    expect(writeSchemaVersion).not.toHaveBeenCalled();
+    expect(migrateTipoDeCambioHeaders).not.toHaveBeenCalled();
+    expect(migrateArchivosProcesadosHeaders).not.toHaveBeenCalled();
+  });
+
+  it('should run only pending migrations when version is behind', async () => {
+    vi.mocked(getCachedFolderStructure).mockReturnValue(mockFolderStructure);
+    vi.mocked(readSchemaVersion).mockResolvedValue({
+      ok: true,
+      value: { version: 2, fileId: 'file-id' },
+    });
+    // Mock migration functions that v3 and v4 call
     vi.mocked(getSheetMetadata).mockResolvedValue({
       ok: true,
       value: [{ title: '2025-01', sheetId: 1, index: 0 }],
     });
     vi.mocked(getValues).mockResolvedValue({
       ok: true,
-      value: [['matchedFileId', 'detalle', '']],
-    });
-    vi.mocked(batchUpdate).mockResolvedValue({ ok: true, value: 2 });
-
-    await runStartupMigrations();
-
-    expect(getSheetMetadata).toHaveBeenCalledTimes(2);
-    expect(batchUpdate).toHaveBeenCalledTimes(2);
-  });
-
-  it('should continue if one spreadsheet migration fails', async () => {
-    vi.mocked(getCachedFolderStructure).mockReturnValue({
-      movimientosSpreadsheets: new Map([
-        ['2025:BBVA 123 ARS', 'ss-1'],
-        ['2025:MACRO 456 ARS', 'ss-2'],
-      ]),
-    } as any);
-    vi.mocked(getSheetMetadata)
-      .mockResolvedValueOnce({ ok: false, error: new Error('API error') })
-      .mockResolvedValueOnce({
-        ok: true,
-        value: [{ title: '2025-01', sheetId: 1, index: 0 }],
-      });
-    vi.mocked(getValues).mockResolvedValue({
-      ok: true,
-      value: [['matchedFileId', 'detalle', '']],
-    });
-    vi.mocked(batchUpdate).mockResolvedValue({ ok: true, value: 2 });
-
-    await runStartupMigrations();
-
-    // Second spreadsheet should still be processed
-    expect(batchUpdate).toHaveBeenCalledTimes(1);
-  });
-
-  it('should call migrateDashboardProcessedAt when dashboardOperativoId is present', async () => {
-    vi.mocked(getCachedFolderStructure).mockReturnValue({
-      movimientosSpreadsheets: new Map(),
-      dashboardOperativoId: 'dashboard-id',
-    } as any);
-    // Mock for getValues called by migrateDashboardProcessedAt
-    vi.mocked(getValues).mockResolvedValue({
-      ok: true,
-      value: [
-        ['fileId', 'fileName', 'processedAt', 'documentType', 'status', 'originalFileId'],
-        ['file-1', 'a.pdf', '2025-12-01T10:00:00.000Z', 'factura_emitida', 'success', ''],
-      ],
+      value: [['matchedFileId', 'matchedType', 'detalle']],
     });
     vi.mocked(updateRowsWithFormatting).mockResolvedValue({ ok: true, value: undefined });
+    vi.mocked(writeSchemaVersion).mockResolvedValue({ ok: true, value: 'file-id' });
 
     await runStartupMigrations();
 
-    // Should have called updateRowsWithFormatting for the dashboard migration
-    expect(updateRowsWithFormatting).toHaveBeenCalledOnce();
+    // Should NOT run v1 or v2 migrations
+    expect(migrateTipoDeCambioHeaders).not.toHaveBeenCalled();
+    expect(migrateArchivosProcesadosHeaders).not.toHaveBeenCalled();
+    // Should run v3 (movimientos) — getSheetMetadata is called by migrateMovimientosColumns
+    expect(getSheetMetadata).toHaveBeenCalled();
+    // Should update version to CURRENT
+    expect(writeSchemaVersion).toHaveBeenCalledWith('root-id', CURRENT_SCHEMA_VERSION, 'file-id');
+  });
+
+  it('should stop and not update version when a migration fails', async () => {
+    vi.mocked(getCachedFolderStructure).mockReturnValue(mockFolderStructure);
+    vi.mocked(readSchemaVersion).mockResolvedValue({
+      ok: true,
+      value: { version: 0, fileId: 'file-id' },
+    });
+    // v1 migration: migrateTipoDeCambioHeaders fails
+    vi.mocked(migrateTipoDeCambioHeaders).mockResolvedValue({
+      ok: false,
+      error: new Error('API error'),
+    });
+
+    await runStartupMigrations();
+
+    // Should NOT update version file (so it retries next startup)
+    expect(writeSchemaVersion).not.toHaveBeenCalled();
+    // Should NOT proceed to v2+
+    expect(migrateArchivosProcesadosHeaders).not.toHaveBeenCalled();
+  });
+
+  it('should run all 4 migrations when version is 0 and fileId exists (explicit run)', async () => {
+    vi.mocked(getCachedFolderStructure).mockReturnValue(mockFolderStructure);
+    vi.mocked(readSchemaVersion).mockResolvedValue({
+      ok: true,
+      value: { version: 0, fileId: 'file-id' },
+    });
+    // v1: tipoDeCambio
+    vi.mocked(migrateTipoDeCambioHeaders).mockResolvedValue({ ok: true, value: undefined });
+    // v2: archivos procesados
+    vi.mocked(migrateArchivosProcesadosHeaders).mockResolvedValue({ ok: true, value: undefined });
+    // v3: movimientos columns
+    vi.mocked(getSheetMetadata).mockResolvedValue({
+      ok: true,
+      value: [{ title: '2025-01', sheetId: 1, index: 0 }],
+    });
+    vi.mocked(getValues).mockResolvedValue({
+      ok: true,
+      value: [['matchedFileId', 'matchedType', 'detalle']],
+    });
+    // v4: dashboard processedAt
+    vi.mocked(updateRowsWithFormatting).mockResolvedValue({ ok: true, value: undefined });
+    vi.mocked(writeSchemaVersion).mockResolvedValue({ ok: true, value: 'file-id' });
+
+    await runStartupMigrations();
+
+    // v1: 4 calls to migrateTipoDeCambioHeaders
+    expect(migrateTipoDeCambioHeaders).toHaveBeenCalledTimes(4);
+    // v2: 1 call to migrateArchivosProcesadosHeaders
+    expect(migrateArchivosProcesadosHeaders).toHaveBeenCalledTimes(1);
+    // v3: movimientos migration runs
+    expect(getSheetMetadata).toHaveBeenCalled();
+    // Version updated
+    expect(writeSchemaVersion).toHaveBeenCalledWith('root-id', CURRENT_SCHEMA_VERSION, 'file-id');
+  });
+
+  it('should propagate readSchemaVersion error gracefully', async () => {
+    vi.mocked(getCachedFolderStructure).mockReturnValue(mockFolderStructure);
+    vi.mocked(readSchemaVersion).mockResolvedValue({
+      ok: false,
+      error: new Error('Drive error'),
+    });
+
+    // Should not throw
+    await runStartupMigrations();
+
+    expect(writeSchemaVersion).not.toHaveBeenCalled();
+    expect(migrateTipoDeCambioHeaders).not.toHaveBeenCalled();
   });
 });
