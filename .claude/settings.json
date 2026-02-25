@@ -30,6 +30,8 @@
       "mcp__gdrive__gdrive_get_pdf",
       "mcp__gdrive__gsheets_read",
       "mcp__gdrive__gsheets_update",
+      "mcp__gdrive__gsheets_delete_rows",
+      "mcp__gdrive__gsheets_append_rows",
       "mcp__gdrive__gdrive_move_file",
       "mcp__gdrive__gdrive_rename_file",
       "mcp__gemini__gemini_analyze_pdf",

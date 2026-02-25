@@ -4,6 +4,8 @@ import { schema as gdriveListFolderSchema, listFolder } from './gdrive_list_fold
 import { schema as gdriveGetPdfSchema, getPdf } from './gdrive_get_pdf.js';
 import { schema as gsheetsReadSchema, readSheet } from './gsheets_read.js';
 import { schema as gsheetsUpdateSchema, updateSheet } from './gsheets_update.js';
+import { schema as gsheetsDeleteRowsSchema, deleteRows } from './gsheets_delete_rows.js';
+import { schema as gsheetsAppendRowsSchema, appendRows } from './gsheets_append_rows.js';
 import { schema as gdriveMoveFileSchema, moveFile } from './gdrive_move_file.js';
 import { schema as gdriveRenameFileSchema, renameFile } from './gdrive_rename_file.js';
 import {
@@ -14,6 +16,8 @@ import {
   GDriveGetPdfInput,
   GSheetsReadInput,
   GSheetsUpdateInput,
+  GSheetsDeleteRowsInput,
+  GSheetsAppendRowsInput,
   GDriveMoveFileInput,
   GDriveRenameFileInput,
 } from './types.js';
@@ -25,6 +29,8 @@ export const tools: [
   Tool<GDriveGetPdfInput>,
   Tool<GSheetsReadInput>,
   Tool<GSheetsUpdateInput>,
+  Tool<GSheetsDeleteRowsInput>,
+  Tool<GSheetsAppendRowsInput>,
   Tool<GDriveMoveFileInput>,
   Tool<GDriveRenameFileInput>
 ] = [
@@ -51,6 +57,14 @@ export const tools: [
   {
     ...gsheetsUpdateSchema,
     handler: updateSheet,
+  },
+  {
+    ...gsheetsDeleteRowsSchema,
+    handler: deleteRows,
+  },
+  {
+    ...gsheetsAppendRowsSchema,
+    handler: appendRows,
   },
   {
     ...gdriveMoveFileSchema,

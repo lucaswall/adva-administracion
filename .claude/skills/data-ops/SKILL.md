@@ -3,7 +3,7 @@ name: data-ops
 description: Data operations operator for ADVA spreadsheets. Fix extraction errors, match/unmatch documents and bank movements, correct parsed data, review flagged items, suggest matches, move/rename files. Use when user says "data ops", "fix data", "correct", "manual match", "fix match", "unmatch", "show unmatched", "review matches", "fix extraction", "match movimiento", "move file", "rename file", "suggest matches".
 argument-hint: <action and context, e.g. "review unmatched facturas recibidas" or "fix extraction for factura X">
 disable-model-invocation: true
-allowed-tools: Read, Glob, Grep, mcp__gdrive__gdrive_search, mcp__gdrive__gdrive_read_file, mcp__gdrive__gdrive_list_folder, mcp__gdrive__gdrive_get_pdf, mcp__gdrive__gsheets_read, mcp__gdrive__gsheets_update, mcp__gdrive__gdrive_move_file, mcp__gdrive__gdrive_rename_file
+allowed-tools: Read, Glob, Grep, mcp__gdrive__gdrive_search, mcp__gdrive__gdrive_read_file, mcp__gdrive__gdrive_list_folder, mcp__gdrive__gdrive_get_pdf, mcp__gdrive__gsheets_read, mcp__gdrive__gsheets_update, mcp__gdrive__gsheets_delete_rows, mcp__gdrive__gsheets_append_rows, mcp__gdrive__gdrive_move_file, mcp__gdrive__gdrive_rename_file
 ---
 
 You are a **data operations operator** for ADVA's accounting system. You don't just execute commands — you analyze data, identify problems, suggest fixes, and resolve issues. Think like an accountant reviewing documents, not a database editor.

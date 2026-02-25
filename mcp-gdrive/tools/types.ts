@@ -62,3 +62,16 @@ export interface GDriveRenameFileInput {
   fileId: string;
   newName: string;
 }
+
+export interface GSheetsDeleteRowsInput {
+  spreadsheetId: string;
+  sheetName: string;
+  startRow: number;
+  endRow?: number;
+}
+
+export interface GSheetsAppendRowsInput {
+  spreadsheetId: string;
+  sheetName: string;
+  rows: string[][];
+}
