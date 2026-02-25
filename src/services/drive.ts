@@ -104,6 +104,14 @@ export async function listFilesInFolder(
 
           if (subResult.ok) {
             files.push(...subResult.value);
+          } else {
+            warn('Failed to list subfolder contents', {
+              module: 'drive',
+              phase: 'list-files',
+              folderId: item.id,
+              folderName: item.name,
+              error: subResult.error.message,
+            });
           }
           continue;
         }
@@ -627,6 +635,138 @@ export async function createFile(
       module: 'drive',
       phase: 'create-file',
       name,
+      error: error instanceof Error ? error.message : String(error)
+    });
+    return {
+      ok: false,
+      error: error instanceof Error ? error : new Error(String(error)),
+    };
+  }
+}
+
+/**
+ * Creates a plain-text file with content in a parent folder
+ * Extends createFile pattern by including media body with content
+ *
+ * @param parentId - Parent folder ID
+ * @param name - File name
+ * @param content - Text content to write
+ * @returns Created file info
+ */
+export async function createFileWithContent(
+  parentId: string,
+  name: string,
+  content: string
+): Promise<Result<DriveFileInfo, Error>> {
+  try {
+    const drive = await getDriveService();
+
+    debug('Creating file with content', {
+      module: 'drive',
+      phase: 'create-file',
+      name,
+      parentId
+    });
+
+    const createResult = await withQuotaRetry(async () =>
+      drive.files.create({
+        requestBody: {
+          name,
+          mimeType: 'text/plain',
+          parents: [parentId],
+        },
+        media: {
+          mimeType: 'text/plain',
+          body: content,
+        },
+        fields: 'id, name, mimeType',
+        supportsAllDrives: true,
+      })
+    );
+
+    if (!createResult.ok) {
+      return createResult;
+    }
+
+    const file = createResult.value.data;
+    if (!file.id) {
+      return {
+        ok: false,
+        error: new Error(`Failed to create file "${name}": no ID returned`),
+      };
+    }
+
+    debug('Successfully created file with content', {
+      module: 'drive',
+      phase: 'create-file',
+      name,
+      fileId: file.id
+    });
+
+    return {
+      ok: true,
+      value: {
+        id: file.id,
+        name: file.name || name,
+        mimeType: file.mimeType || 'text/plain',
+      },
+    };
+  } catch (error) {
+    logError('Error creating file with content', {
+      module: 'drive',
+      phase: 'create-file',
+      name,
+      error: error instanceof Error ? error.message : String(error)
+    });
+    return {
+      ok: false,
+      error: error instanceof Error ? error : new Error(String(error)),
+    };
+  }
+}
+
+/**
+ * Updates an existing file's content
+ *
+ * @param fileId - File ID to update
+ * @param content - New text content
+ * @returns Success or error
+ */
+export async function updateFileContent(
+  fileId: string,
+  content: string
+): Promise<Result<void, Error>> {
+  try {
+    const drive = await getDriveService();
+
+    debug('Updating file content', {
+      module: 'drive',
+      phase: 'update-file',
+      fileId
+    });
+
+    const updateResult = await withQuotaRetry(async () =>
+      drive.files.update({
+        fileId,
+        media: {
+          mimeType: 'text/plain',
+          body: content,
+        },
+        fields: 'id',
+        supportsAllDrives: true,
+      })
+    );
+
+    if (!updateResult.ok) {
+      return updateResult;
+    }
+
+    return { ok: true, value: undefined };
+  } catch (error) {
+    logError('Error updating file content', {
+      module: 'drive',
+      phase: 'update-file',
+      fileId,
       error: error instanceof Error ? error.message : String(error)
     });
     return {

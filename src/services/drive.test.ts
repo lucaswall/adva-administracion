@@ -21,6 +21,14 @@ vi.mock('googleapis', () => ({
   },
 }));
 
+// Mock logger
+vi.mock('../utils/logger.js', () => ({
+  info: vi.fn(),
+  warn: vi.fn(),
+  debug: vi.fn(),
+  error: vi.fn(),
+}));
+
 // Mock google-auth
 vi.mock('./google-auth.js', () => ({
   getGoogleAuthAsync: vi.fn(async () => ({})),
@@ -54,12 +62,16 @@ vi.mock('../utils/concurrency.js', async () => {
 import {
   findByName,
   listByMimeType,
+  listFilesInFolder,
   createFolder,
+  createFileWithContent,
+  updateFileContent,
   moveFile,
   getParents,
   renameFile,
   clearDriveCache,
 } from './drive.js';
+import { warn } from '../utils/logger.js';
 
 describe('Drive folder operations', () => {
   let mockDriveFiles: {
@@ -490,6 +502,131 @@ describe('Drive folder operations', () => {
         expect(result.value).toEqual(['parent1']);
       }
       expect(mockDriveFiles.get).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  describe('listFilesInFolder subfolder error handling', () => {
+    it('should log warning when subfolder recursion fails', async () => {
+      // First call: parent folder contains a subfolder
+      mockDriveFiles.list
+        .mockResolvedValueOnce({
+          data: {
+            files: [
+              { id: 'subfolder-1', name: 'SubFolder', mimeType: 'application/vnd.google-apps.folder' },
+            ],
+          },
+        })
+        // Second call: subfolder listing fails (all 3 retries)
+        .mockRejectedValue(new Error('Subfolder access denied'));
+
+      const result = await listFilesInFolder('parent-folder');
+
+      // Should succeed with empty results (subfolder files skipped)
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value).toEqual([]);
+      }
+      // Should have logged a warning about the failed subfolder
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining('subfolder'),
+        expect.objectContaining({
+          module: 'drive',
+        }),
+      );
+    });
+  });
+
+  describe('createFileWithContent', () => {
+    it('creates a text file with content', async () => {
+      mockDriveFiles.create.mockResolvedValue({
+        data: {
+          id: 'newFileId',
+          name: '.schema_version',
+          mimeType: 'text/plain',
+        },
+      });
+
+      const result = await createFileWithContent('parentId', '.schema_version', '4');
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value).toEqual({
+          id: 'newFileId',
+          name: '.schema_version',
+          mimeType: 'text/plain',
+        });
+      }
+
+      expect(mockDriveFiles.create).toHaveBeenCalledWith({
+        requestBody: {
+          name: '.schema_version',
+          mimeType: 'text/plain',
+          parents: ['parentId'],
+        },
+        media: {
+          mimeType: 'text/plain',
+          body: '4',
+        },
+        fields: 'id, name, mimeType',
+        supportsAllDrives: true,
+      });
+    });
+
+    it('returns error when API returns no ID', async () => {
+      mockDriveFiles.create.mockResolvedValue({
+        data: { name: '.schema_version' },
+      });
+
+      const result = await createFileWithContent('parentId', '.schema_version', '4');
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.error.message).toContain('Failed to create file');
+      }
+    });
+
+    it('returns error on API failure', async () => {
+      mockDriveFiles.create.mockRejectedValue(new Error('Create failed'));
+
+      const result = await createFileWithContent('parentId', '.schema_version', '4');
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.error.message).toBe('Create failed');
+      }
+    });
+  });
+
+  describe('updateFileContent', () => {
+    it('updates file content successfully', async () => {
+      mockDriveFiles.update.mockResolvedValue({
+        data: { id: 'fileId' },
+      });
+
+      const result = await updateFileContent('fileId', '5');
+
+      expect(result.ok).toBe(true);
+
+      expect(mockDriveFiles.update).toHaveBeenCalledWith({
+        fileId: 'fileId',
+        media: {
+          mimeType: 'text/plain',
+          body: '5',
+        },
+        fields: 'id',
+        supportsAllDrives: true,
+      });
+    });
+
+    it('returns error on API failure', async () => {
+      mockDriveFiles.update.mockRejectedValue(new Error('Update failed'));
+
+      const result = await updateFileContent('fileId', '5');
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.error.message).toBe('Update failed');
+      }
     });
   });
 

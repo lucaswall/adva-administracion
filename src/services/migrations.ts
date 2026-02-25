@@ -1,15 +1,79 @@
 /**
  * Spreadsheet schema migrations
  * Runs at startup to ensure existing spreadsheets match the current schema
+ * Uses version-gated execution via .schema_version file in Drive root
  */
 
-import type { Result } from '../types/index.js';
+import type { Result, FolderStructure } from '../types/index.js';
 import type { CellValue, CellValueOrLink } from './sheets.js';
 import { getValues, batchUpdate, updateRowsWithFormatting, getSpreadsheetTimezone, getSheetMetadata } from './sheets.js';
-import { getCachedFolderStructure } from './folder-structure.js';
+import { getCachedFolderStructure, migrateTipoDeCambioHeaders, migrateArchivosProcesadosHeaders } from './folder-structure.js';
+import { readSchemaVersion, writeSchemaVersion } from './schema-version.js';
 import { MOVIMIENTOS_BANCARIO_SHEET } from '../constants/spreadsheet-headers.js';
 import { SHEETS_BATCH_UPDATE_LIMIT } from '../config.js';
-import { info, warn, debug } from '../utils/logger.js';
+import { info, warn, debug, error as logError } from '../utils/logger.js';
+
+/**
+ * Current schema version — increment when adding new migrations
+ */
+export const CURRENT_SCHEMA_VERSION = 4;
+
+/**
+ * Migration definition
+ */
+interface Migration {
+  version: number;
+  name: string;
+  migrate: (fs: FolderStructure) => Promise<void>;
+}
+
+/**
+ * Ordered list of all schema migrations
+ * Each migration runs when stored version < migration.version
+ */
+const MIGRATIONS: Migration[] = [
+  {
+    version: 1,
+    name: 'tipoDeCambio-columns',
+    migrate: async (fs: FolderStructure) => {
+      const results = await Promise.all([
+        migrateTipoDeCambioHeaders(fs.controlIngresosId, 'Facturas Emitidas', 18, 'S', ['tipoDeCambio']),
+        migrateTipoDeCambioHeaders(fs.controlIngresosId, 'Pagos Recibidos', 15, 'P', ['tipoDeCambio', 'importeEnPesos']),
+        migrateTipoDeCambioHeaders(fs.controlEgresosId, 'Facturas Recibidas', 19, 'T', ['tipoDeCambio']),
+        migrateTipoDeCambioHeaders(fs.controlEgresosId, 'Pagos Enviados', 15, 'P', ['tipoDeCambio', 'importeEnPesos']),
+      ]);
+      for (const result of results) {
+        if (!result.ok) throw result.error;
+      }
+    },
+  },
+  {
+    version: 2,
+    name: 'archivos-procesados-column-f',
+    migrate: async (fs: FolderStructure) => {
+      const result = await migrateArchivosProcesadosHeaders(fs.dashboardOperativoId);
+      if (!result.ok) throw result.error;
+    },
+  },
+  {
+    version: 3,
+    name: 'movimientos-column-reorder',
+    migrate: async (fs: FolderStructure) => {
+      for (const [name, spreadsheetId] of fs.movimientosSpreadsheets) {
+        const result = await migrateMovimientosColumns(spreadsheetId, name);
+        if (!result.ok) throw result.error;
+      }
+    },
+  },
+  {
+    version: 4,
+    name: 'dashboard-processedAt-format',
+    migrate: async (fs: FolderStructure) => {
+      const result = await migrateDashboardProcessedAt(fs.dashboardOperativoId);
+      if (!result.ok) throw result.error;
+    },
+  },
+];
 
 /**
  * Expected column layout (A:I):
@@ -81,15 +145,16 @@ export async function migrateMovimientosColumns(
     const isOldLayout = colH === 'detalle';
     const isSwapped = colH === 'detalle' && colI === 'matchedType';
 
-    if (!isOldLayout && headerRow && headerRow.length >= 2) {
-      // Unknown layout — warn but attempt migration anyway
-      warn('Unexpected column layout, migrating to new schema', {
+    if (!isOldLayout) {
+      // Unknown layout — skip this sheet to avoid data corruption
+      warn('Unexpected column layout, skipping sheet', {
         module: 'migrations',
         spreadsheet: spreadsheetName,
         sheet: sheet.title,
         colH,
         colI,
       });
+      continue;
     }
 
     // Build batch updates: for each row, set H=matchedType value, I=detalle value
@@ -129,15 +194,19 @@ export async function migrateMovimientosColumns(
       });
     }
 
-    const updateResult = await batchUpdate(spreadsheetId, updates);
-    if (!updateResult.ok) {
-      warn('Failed to migrate columns', {
-        module: 'migrations',
-        spreadsheet: spreadsheetName,
-        sheet: sheet.title,
-        error: updateResult.error.message,
-      });
-      continue;
+    // Chunk updates to avoid Sheets API limits
+    for (let j = 0; j < updates.length; j += SHEETS_BATCH_UPDATE_LIMIT) {
+      const chunk = updates.slice(j, j + SHEETS_BATCH_UPDATE_LIMIT);
+      const updateResult = await batchUpdate(spreadsheetId, chunk);
+      if (!updateResult.ok) {
+        warn('Failed to migrate columns', {
+          module: 'migrations',
+          spreadsheet: spreadsheetName,
+          sheet: sheet.title,
+          error: updateResult.error.message,
+        });
+        return { ok: false as const, error: updateResult.error };
+      }
     }
 
     migratedCount++;
@@ -164,7 +233,7 @@ export async function migrateMovimientosColumns(
  *
  * @param dashboardId - Dashboard Operativo Contable spreadsheet ID
  */
-export async function migrateDashboardProcessedAt(dashboardId: string): Promise<void> {
+export async function migrateDashboardProcessedAt(dashboardId: string): Promise<Result<void, Error>> {
   const dataResult = await getValues(dashboardId, 'Archivos Procesados!A:F');
   if (!dataResult.ok) {
     warn('Failed to read Archivos Procesados for processedAt migration', {
@@ -172,7 +241,7 @@ export async function migrateDashboardProcessedAt(dashboardId: string): Promise<
       phase: 'startup',
       error: dataResult.error.message,
     });
-    return;
+    return dataResult;
   }
 
   const timezoneResult = await getSpreadsheetTimezone(dashboardId);
@@ -216,16 +285,18 @@ export async function migrateDashboardProcessedAt(dashboardId: string): Promise<
       module: 'migrations',
       phase: 'startup',
     });
-    return;
+    return { ok: true, value: undefined };
   }
 
   // Chunk updates to avoid Sheets API limits
   let failedRows = 0;
+  let firstError: Error | undefined;
   for (let i = 0; i < updates.length; i += SHEETS_BATCH_UPDATE_LIMIT) {
     const chunk = updates.slice(i, i + SHEETS_BATCH_UPDATE_LIMIT);
     const updateResult = await updateRowsWithFormatting(dashboardId, chunk, timeZone);
     if (!updateResult.ok) {
       failedRows += chunk.length;
+      if (!firstError) firstError = updateResult.error;
       warn('Failed to migrate processedAt chunk in Dashboard', {
         module: 'migrations',
         phase: 'startup',
@@ -241,23 +312,29 @@ export async function migrateDashboardProcessedAt(dashboardId: string): Promise<
       phase: 'startup',
       rowsMigrated: updates.length,
     });
-  } else {
-    warn('Partial failure migrating Dashboard processedAt cells', {
-      module: 'migrations',
-      phase: 'startup',
-      rowsMigrated: updates.length - failedRows,
-      failedRows,
-    });
+    return { ok: true, value: undefined };
   }
+
+  warn('Partial failure migrating Dashboard processedAt cells', {
+    module: 'migrations',
+    phase: 'startup',
+    rowsMigrated: updates.length - failedRows,
+    failedRows,
+  });
+  return { ok: false, error: firstError! };
 }
 
 /**
  * Runs all startup migrations for spreadsheet schemas.
  * Called during server initialization after folder structure is discovered.
  *
- * Currently handles:
- * - Reordering columns H/I: matchedType at H, detalle at I
- * - Re-applying DATE_TIME format to processedAt cells in Dashboard
+ * Uses .schema_version file in Drive root to track which migrations have been applied.
+ * - Version 0 (no file) with no fileId: first-time setup — write CURRENT_SCHEMA_VERSION, skip migrations
+ * - Version 0 with existing fileId: explicit run — execute all migrations from v1
+ * - Version < CURRENT: run only pending migrations (version > stored)
+ * - Version >= CURRENT: skip (already up to date)
+ *
+ * If a migration fails, execution stops and version is NOT updated (retry on next startup).
  */
 export async function runStartupMigrations(): Promise<void> {
   const folderStructure = getCachedFolderStructure();
@@ -269,47 +346,105 @@ export async function runStartupMigrations(): Promise<void> {
     return;
   }
 
-  const { movimientosSpreadsheets, dashboardOperativoId } = folderStructure;
+  const { rootId } = folderStructure;
 
-  if (movimientosSpreadsheets.size > 0) {
-    info('Running Movimientos column migrations', {
+  // Read current schema version
+  const versionResult = await readSchemaVersion(rootId);
+  if (!versionResult.ok) {
+    logError('Failed to read schema version, skipping migrations', {
       module: 'migrations',
       phase: 'startup',
-      spreadsheetCount: movimientosSpreadsheets.size,
+      error: versionResult.error.message,
     });
-
-    let totalMigrated = 0;
-
-    for (const [name, spreadsheetId] of movimientosSpreadsheets) {
-      const result = await migrateMovimientosColumns(spreadsheetId, name);
-      if (result.ok) {
-        totalMigrated += result.value;
-      } else {
-        warn('Migration failed for spreadsheet', {
-          module: 'migrations',
-          phase: 'startup',
-          spreadsheet: name,
-          error: result.error.message,
-        });
-      }
-    }
-
-    if (totalMigrated > 0) {
-      info('Movimientos column migrations complete', {
-        module: 'migrations',
-        phase: 'startup',
-        sheetsMigrated: totalMigrated,
-      });
-    } else {
-      debug('No Movimientos column migrations needed', {
-        module: 'migrations',
-        phase: 'startup',
-      });
-    }
+    return;
   }
 
-  // Migrate Dashboard processedAt cells to DATE_TIME format
-  if (dashboardOperativoId) {
-    await migrateDashboardProcessedAt(dashboardOperativoId);
+  const { version: storedVersion, fileId } = versionResult.value;
+
+  // First-time setup: no .schema_version file exists
+  if (storedVersion === 0 && !fileId) {
+    info('No schema version file found, initializing', {
+      module: 'migrations',
+      phase: 'startup',
+      version: CURRENT_SCHEMA_VERSION,
+    });
+    const writeResult = await writeSchemaVersion(rootId, CURRENT_SCHEMA_VERSION, null);
+    if (!writeResult.ok) {
+      logError('Failed to create schema version file', {
+        module: 'migrations',
+        phase: 'startup',
+        error: writeResult.error.message,
+      });
+    }
+    return;
+  }
+
+  // Already up to date
+  if (storedVersion >= CURRENT_SCHEMA_VERSION) {
+    debug('Schema up to date', {
+      module: 'migrations',
+      phase: 'startup',
+      version: storedVersion,
+    });
+    return;
+  }
+
+  // Run pending migrations
+  const pendingMigrations = MIGRATIONS
+    .filter(m => m.version > storedVersion)
+    .sort((a, b) => a.version - b.version);
+
+  info('Running pending migrations', {
+    module: 'migrations',
+    phase: 'startup',
+    storedVersion,
+    targetVersion: CURRENT_SCHEMA_VERSION,
+    migrationCount: pendingMigrations.length,
+  });
+
+  for (const migration of pendingMigrations) {
+    info(`Running migration v${migration.version}: ${migration.name}`, {
+      module: 'migrations',
+      phase: 'startup',
+      version: migration.version,
+      name: migration.name,
+    });
+
+    try {
+      await migration.migrate(folderStructure);
+    } catch (error) {
+      logError(`Migration v${migration.version} failed, stopping`, {
+        module: 'migrations',
+        phase: 'startup',
+        version: migration.version,
+        name: migration.name,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      // Do NOT update version — retry on next startup
+      return;
+    }
+
+    info(`Migration v${migration.version} complete`, {
+      module: 'migrations',
+      phase: 'startup',
+      version: migration.version,
+      name: migration.name,
+    });
+  }
+
+  // All migrations succeeded — update version
+  const writeResult = await writeSchemaVersion(rootId, CURRENT_SCHEMA_VERSION, fileId);
+  if (!writeResult.ok) {
+    logError('Failed to update schema version after migrations', {
+      module: 'migrations',
+      phase: 'startup',
+      error: writeResult.error.message,
+    });
+  } else {
+    info('All migrations complete, schema version updated', {
+      module: 'migrations',
+      phase: 'startup',
+      version: CURRENT_SCHEMA_VERSION,
+    });
   }
 }

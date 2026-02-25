@@ -424,10 +424,6 @@ async function initializeDashboardOperativo(
   const ensureSheetsResult = await ensureSheetsExist(spreadsheetId, DASHBOARD_OPERATIVO_SHEETS);
   if (!ensureSheetsResult.ok) return ensureSheetsResult;
 
-  // Migrate Archivos Procesados schema: add Column F (originalFileId) if missing
-  const migrateResult = await migrateArchivosProcesadosHeaders(spreadsheetId);
-  if (!migrateResult.ok) return migrateResult;
-
   // Move Pagos Pendientes to first position (leftmost tab)
   const moveResult = await moveSheetToFirst(spreadsheetId, 'Pagos Pendientes');
   if (!moveResult.ok) {
@@ -821,28 +817,6 @@ export async function discoverFolderStructure(): Promise<Result<FolderStructure,
 
   const ensureEgresosSheetsResult = await ensureSheetsExist(controlEgresosResult.value, CONTROL_EGRESOS_SHEETS);
   if (!ensureEgresosSheetsResult.ok) return ensureEgresosSheetsResult;
-
-  // Migrate tipoDeCambio columns in Ingresos sheets (ADV-110)
-  const migrateFacturasEmitidasResult = await migrateTipoDeCambioHeaders(
-    controlIngresosResult.value, 'Facturas Emitidas', 18, 'S', ['tipoDeCambio']
-  );
-  if (!migrateFacturasEmitidasResult.ok) return migrateFacturasEmitidasResult;
-
-  const migratePagosRecibidosResult = await migrateTipoDeCambioHeaders(
-    controlIngresosResult.value, 'Pagos Recibidos', 15, 'P', ['tipoDeCambio', 'importeEnPesos']
-  );
-  if (!migratePagosRecibidosResult.ok) return migratePagosRecibidosResult;
-
-  // Migrate tipoDeCambio columns in Egresos sheets (ADV-110)
-  const migrateFacturasRecibidasResult = await migrateTipoDeCambioHeaders(
-    controlEgresosResult.value, 'Facturas Recibidas', 19, 'T', ['tipoDeCambio']
-  );
-  if (!migrateFacturasRecibidasResult.ok) return migrateFacturasRecibidasResult;
-
-  const migratePagosEnviadosResult = await migrateTipoDeCambioHeaders(
-    controlEgresosResult.value, 'Pagos Enviados', 15, 'P', ['tipoDeCambio', 'importeEnPesos']
-  );
-  if (!migratePagosEnviadosResult.ok) return migratePagosEnviadosResult;
 
   // Initialize Dashboard Operativo Contable with sheets and data
   const initializeDashboardResult = await initializeDashboardOperativo(dashboardOperativoResult.value);
