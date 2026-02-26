@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-02-26
+
+### Added
+- Bank movement descriptions for Factura E (USD) credit matches now include exchange rate details: original rate from the invoice (TC orig) and effective liquidation rate calculated from the actual bank credit amount (TC liq)
+
 ## [1.3.0] - 2026-02-25
 
 ### Added
@@ -84,7 +89,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Updated fastify to fix high-severity Content-Type body validation bypass and low-severity DoS vulnerability
 - Updated googleapis to v171, @google/clasp to v3, and resolved 6 npm audit vulnerabilities
 
-[Unreleased]: https://github.com/lucaswall/adva-administracion/compare/v1.3.0...HEAD
+[Unreleased]: https://github.com/lucaswall/adva-administracion/compare/v1.4.0...HEAD
+[1.4.0]: https://github.com/lucaswall/adva-administracion/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/lucaswall/adva-administracion/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/lucaswall/adva-administracion/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/lucaswall/adva-administracion/compare/v1.0.0...v1.1.0
