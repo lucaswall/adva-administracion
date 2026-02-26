@@ -647,7 +647,14 @@ export class BankMovementMatcher {
           let description = concepto
             ? `Cobro Factura ${facturaId}de ${cliente} - ${concepto}`
             : `Cobro Factura ${facturaId}de ${cliente}`;
-          if (pago.tipoDeCambio) {
+          if (linkedFactura.tipoComprobante === 'E' && linkedFactura.moneda === 'USD' && linkedFactura.importeTotal > 0) {
+            const tcLiq = amount / linkedFactura.importeTotal;
+            if (linkedFactura.tipoDeCambio) {
+              description += ` - TC orig: ${linkedFactura.tipoDeCambio.toFixed(2)} / TC liq: ${tcLiq.toFixed(2)}`;
+            } else {
+              description += ` - TC liq: ${tcLiq.toFixed(2)}`;
+            }
+          } else if (pago.tipoDeCambio) {
             description += ` - tipo de cambio ${pago.tipoDeCambio.toFixed(2)}`;
           }
           const confidence = isCrossCurrency ? 'MEDIUM' : 'HIGH';
@@ -782,6 +789,17 @@ export class BankMovementMatcher {
         : `Cobro Factura ${facturaId}de ${cliente}`;
       if (usedRetenciones.length > 0) {
         description += ` (con retencion)`;
+      }
+      if (factura.tipoComprobante === 'E' && factura.moneda === 'USD' && factura.importeTotal > 0) {
+        const grossAmount = usedRetenciones.length > 0
+          ? amount + this.sumRetenciones(usedRetenciones)
+          : amount;
+        const tcLiq = grossAmount / factura.importeTotal;
+        if (factura.tipoDeCambio) {
+          description += ` - TC orig: ${factura.tipoDeCambio.toFixed(2)} / TC liq: ${tcLiq.toFixed(2)}`;
+        } else {
+          description += ` - TC liq: ${tcLiq.toFixed(2)}`;
+        }
       }
 
       // Confidence

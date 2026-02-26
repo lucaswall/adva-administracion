@@ -1655,7 +1655,8 @@ describe('Detalle description includes tipoDeCambio for COMEX (ADV-117)', () => 
       const result = matcher.matchCreditMovement(movement, [facturaEmitida], [pagoRecibido], []);
 
       expect(result.matchType).toBe('pago_factura');
-      expect(result.description).toBe('Cobro Factura E 00003-00001957 de CLIENTE SA - servicios - tipo de cambio 1234.56');
+      // Factura E USD: TC orig from factura.tipoDeCambio (absent here), TC liq = 123456 / 100
+      expect(result.description).toBe('Cobro Factura E 00003-00001957 de CLIENTE SA - servicios - TC liq: 1234.56');
     });
 
     it('does not append tipoDeCambio when pago lacks it', () => {
@@ -1812,6 +1813,284 @@ describe('Detalle description includes tipoDeCambio for COMEX (ADV-117)', () => 
 
       expect(result.matchType).toBe('direct_factura');
       expect(result.description).not.toContain('tipo de cambio');
+    });
+  });
+
+  describe('TC orig/liq for Factura E credit matches (ADV-168)', () => {
+    describe('Credit Tier 1 (pago+factura E)', () => {
+      it('appends TC orig and TC liq when factura E has tipoDeCambio', () => {
+        const facturaEmitida: Factura & { row: number } = {
+          fileId: 'factura1',
+          fileName: 'factura-001.pdf',
+          tipoComprobante: 'E',
+          nroFactura: '00003-00001957',
+          fechaEmision: '2024-01-10',
+          cuitEmisor: '30709076783',
+          razonSocialEmisor: 'ADVA',
+          cuitReceptor: '20123456786',
+          razonSocialReceptor: 'CLIENTE SA',
+          importeNeto: 900,
+          importeIva: 100,
+          importeTotal: 1000,
+          moneda: 'USD',
+          tipoDeCambio: 1200,
+          concepto: 'servicios',
+          processedAt: '2024-01-10T10:00:00Z',
+          needsReview: false,
+          confidence: 0.95,
+          row: 2
+        };
+
+        const pagoRecibido: Pago & { row: number } = {
+          fileId: 'pago1',
+          fileName: 'pago-001.pdf',
+          banco: 'BBVA',
+          fechaPago: '2024-01-15',
+          importePagado: 1000,
+          moneda: 'USD',
+          tipoDeCambio: 1050,
+          importeEnPesos: 1050000,
+          cuitPagador: '20123456786',
+          nombrePagador: 'CLIENTE SA',
+          cuitBeneficiario: '30709076783',
+          nombreBeneficiario: 'ADVA',
+          matchedFacturaFileId: 'factura1',
+          matchConfidence: 'HIGH',
+          processedAt: '2024-01-15T10:00:00Z',
+          needsReview: false,
+          confidence: 0.95,
+          row: 2
+        };
+
+        const movement = makeMovimiento({ fecha: '2024-01-15', concepto: 'ORDEN DE PAGO', debito: null, credito: 1050000 });
+        const result = matcher.matchCreditMovement(movement, [facturaEmitida], [pagoRecibido], []);
+
+        expect(result.matchType).toBe('pago_factura');
+        // TC orig = factura.tipoDeCambio = 1200, TC liq = 1050000 / 1000 = 1050
+        expect(result.description).toBe('Cobro Factura E 00003-00001957 de CLIENTE SA - servicios - TC orig: 1200.00 / TC liq: 1050.00');
+      });
+
+      it('appends only TC liq when factura E has no tipoDeCambio', () => {
+        const facturaEmitida: Factura & { row: number } = {
+          fileId: 'factura1',
+          fileName: 'factura-001.pdf',
+          tipoComprobante: 'E',
+          nroFactura: '00003-00001957',
+          fechaEmision: '2024-01-10',
+          cuitEmisor: '30709076783',
+          razonSocialEmisor: 'ADVA',
+          cuitReceptor: '20123456786',
+          razonSocialReceptor: 'CLIENTE SA',
+          importeNeto: 900,
+          importeIva: 100,
+          importeTotal: 1000,
+          moneda: 'USD',
+          concepto: 'servicios',
+          processedAt: '2024-01-10T10:00:00Z',
+          needsReview: false,
+          confidence: 0.95,
+          row: 2
+        };
+
+        const pagoRecibido: Pago & { row: number } = {
+          fileId: 'pago1',
+          fileName: 'pago-001.pdf',
+          banco: 'BBVA',
+          fechaPago: '2024-01-15',
+          importePagado: 1000,
+          moneda: 'USD',
+          importeEnPesos: 1050000,
+          cuitPagador: '20123456786',
+          nombrePagador: 'CLIENTE SA',
+          cuitBeneficiario: '30709076783',
+          nombreBeneficiario: 'ADVA',
+          matchedFacturaFileId: 'factura1',
+          matchConfidence: 'HIGH',
+          processedAt: '2024-01-15T10:00:00Z',
+          needsReview: false,
+          confidence: 0.95,
+          row: 2
+        };
+
+        const movement = makeMovimiento({ fecha: '2024-01-15', concepto: 'ORDEN DE PAGO', debito: null, credito: 1050000 });
+        const result = matcher.matchCreditMovement(movement, [facturaEmitida], [pagoRecibido], []);
+
+        expect(result.matchType).toBe('pago_factura');
+        // TC liq = 1050000 / 1000 = 1050
+        expect(result.description).toBe('Cobro Factura E 00003-00001957 de CLIENTE SA - servicios - TC liq: 1050.00');
+      });
+
+      it('preserves old tipo de cambio format for non-E factura with pago tipoDeCambio (regression)', () => {
+        const facturaEmitida: Factura & { row: number } = {
+          fileId: 'factura1',
+          fileName: 'factura-001.pdf',
+          tipoComprobante: 'A',
+          nroFactura: '00003-00001957',
+          fechaEmision: '2024-01-10',
+          cuitEmisor: '30709076783',
+          razonSocialEmisor: 'ADVA',
+          cuitReceptor: '20123456786',
+          razonSocialReceptor: 'CLIENTE SA',
+          importeNeto: 90000,
+          importeIva: 10000,
+          importeTotal: 100000,
+          moneda: 'ARS',
+          concepto: 'servicios',
+          processedAt: '2024-01-10T10:00:00Z',
+          needsReview: false,
+          confidence: 0.95,
+          row: 2
+        };
+
+        const pagoRecibido: Pago & { row: number } = {
+          fileId: 'pago1',
+          fileName: 'pago-001.pdf',
+          banco: 'BBVA',
+          fechaPago: '2024-01-15',
+          importePagado: 100000,
+          moneda: 'ARS',
+          tipoDeCambio: 1234.56,
+          cuitPagador: '20123456786',
+          nombrePagador: 'CLIENTE SA',
+          cuitBeneficiario: '30709076783',
+          nombreBeneficiario: 'ADVA',
+          matchedFacturaFileId: 'factura1',
+          matchConfidence: 'HIGH',
+          processedAt: '2024-01-15T10:00:00Z',
+          needsReview: false,
+          confidence: 0.95,
+          row: 2
+        };
+
+        const movement = makeMovimiento({ fecha: '2024-01-15', concepto: 'TRANSFERENCIA', debito: null, credito: 100000 });
+        const result = matcher.matchCreditMovement(movement, [facturaEmitida], [pagoRecibido], []);
+
+        expect(result.matchType).toBe('pago_factura');
+        // Non-E factura: old format preserved
+        expect(result.description).toContain('tipo de cambio 1234.56');
+        expect(result.description).not.toContain('TC orig');
+        expect(result.description).not.toContain('TC liq');
+      });
+    });
+
+    describe('Credit direct factura E', () => {
+      it('appends TC orig and TC liq when factura E has tipoDeCambio', () => {
+        const facturaEmitida: Factura & { row: number } = {
+          fileId: 'factura1',
+          fileName: 'factura-001.pdf',
+          tipoComprobante: 'E',
+          nroFactura: '00003-00001957',
+          fechaEmision: '2024-01-15',
+          cuitEmisor: '30709076783',
+          razonSocialEmisor: 'ADVA',
+          cuitReceptor: '20123456786',
+          razonSocialReceptor: 'CLIENTE SA',
+          importeNeto: 90,
+          importeIva: 10,
+          importeTotal: 100,
+          moneda: 'USD',
+          tipoDeCambio: 850,
+          concepto: 'servicios',
+          processedAt: '2024-01-15T10:00:00Z',
+          needsReview: false,
+          confidence: 0.95,
+          row: 2
+        };
+
+        // Bank credit at ~870 rate (within 5% of 850), cross-currency match
+        const movement = makeMovimiento({ fecha: '2024-01-15', concepto: 'TRANSFERENCIA 20-12345678-6', debito: null, credito: 87000 });
+        const result = matcher.matchCreditMovement(movement, [facturaEmitida], [], []);
+
+        expect(result.matchType).toBe('direct_factura');
+        // TC orig = 850, TC liq = 87000 / 100 = 870
+        expect(result.description).toBe('Cobro Factura E 00003-00001957 de CLIENTE SA - servicios - TC orig: 850.00 / TC liq: 870.00');
+      });
+
+      it('appends only TC liq when factura E has no tipoDeCambio', () => {
+        const facturaEmitida: Factura & { row: number } = {
+          fileId: 'factura1',
+          fileName: 'factura-001.pdf',
+          tipoComprobante: 'E',
+          nroFactura: '00003-00001957',
+          fechaEmision: '2024-01-15',
+          cuitEmisor: '30709076783',
+          razonSocialEmisor: 'ADVA',
+          cuitReceptor: '20123456786',
+          razonSocialReceptor: 'CLIENTE SA',
+          importeNeto: 90,
+          importeIva: 10,
+          importeTotal: 100,
+          moneda: 'USD',
+          concepto: 'servicios',
+          processedAt: '2024-01-15T10:00:00Z',
+          needsReview: false,
+          confidence: 0.95,
+          row: 2
+        };
+
+        const movement = makeMovimiento({ fecha: '2024-01-15', concepto: 'TRANSFERENCIA 20-12345678-6', debito: null, credito: 87000 });
+        const result = matcher.matchCreditMovement(movement, [facturaEmitida], [], []);
+
+        expect(result.matchType).toBe('direct_factura');
+        // TC liq = 87000 / 100 = 870
+        expect(result.description).toBe('Cobro Factura E 00003-00001957 de CLIENTE SA - servicios - TC liq: 870.00');
+      });
+    });
+
+    describe('Credit direct factura E with retencion', () => {
+      it('uses gross amount (credit + retencion) for TC liq calculation', () => {
+        const facturaEmitida: Factura & { row: number } = {
+          fileId: 'factura1',
+          fileName: 'factura-001.pdf',
+          tipoComprobante: 'E',
+          nroFactura: '00003-00001957',
+          fechaEmision: '2024-01-15',
+          cuitEmisor: '30709076783',
+          razonSocialEmisor: 'ADVA',
+          cuitReceptor: '20123456786',
+          razonSocialReceptor: 'CLIENTE SA',
+          importeNeto: 90,
+          importeIva: 10,
+          importeTotal: 100,
+          moneda: 'USD',
+          tipoDeCambio: 850,
+          concepto: 'servicios',
+          processedAt: '2024-01-15T10:00:00Z',
+          needsReview: false,
+          confidence: 0.95,
+          row: 2
+        };
+
+        // Retencion from same CUIT as factura receptor, within 90 days
+        const retencion: Retencion & { row: number } = {
+          fileId: 'ret1',
+          fileName: 'ret-001.pdf',
+          nroCertificado: '000000001',
+          fechaEmision: '2024-01-20',
+          cuitAgenteRetencion: '20123456786',
+          razonSocialAgenteRetencion: 'CLIENTE SA',
+          cuitSujetoRetenido: '30709076783',
+          impuesto: 'Ganancias',
+          regimen: 'Servicios',
+          montoComprobante: 85000,
+          montoRetencion: 7000,
+          processedAt: '2024-01-20T10:00:00Z',
+          confidence: 0.95,
+          needsReview: false,
+          row: 2
+        };
+
+        // Bank credit = 78000 (net after 7000 retencion). Gross = 78000 + 7000 = 85000
+        // 78000 alone is outside 5% tolerance of 85000 (80750-89250), so retencion path is used
+        // 85000 ARS / 100 USD = 850 rate, exact match
+        const movement = makeMovimiento({ fecha: '2024-01-15', concepto: 'TRANSFERENCIA 20-12345678-6', debito: null, credito: 78000 });
+        const result = matcher.matchCreditMovement(movement, [facturaEmitida], [], [retencion]);
+
+        expect(result.matchType).toBe('direct_factura');
+        // TC liq uses gross: (78000 + 7000) / 100 = 850
+        expect(result.description).toContain('con retencion');
+        expect(result.description).toBe('Cobro Factura E 00003-00001957 de CLIENTE SA - servicios (con retencion) - TC orig: 850.00 / TC liq: 850.00');
+      });
     });
   });
 });
