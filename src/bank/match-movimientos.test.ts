@@ -229,6 +229,42 @@ describe('parseFacturasEmitidas', () => {
     // Serial number 45671 => '2025-01-14'
     expect(result[0].fechaEmision).toBe('2025-01-14');
   });
+
+  it('excludes Notas de Crédito (NC) from matching pool', () => {
+    const data = [
+      ['fechaEmision', 'fileId', 'tipoComprobante', 'nroFactura', 'cuitReceptor', 'razonSocialReceptor', 'importeTotal', 'moneda'],
+      ['2025-01-15', 'file1', 'A', '00001-00000001', '20123456786', 'CLIENTE SA', '1000', 'ARS'],
+      ['2025-01-16', 'file2', 'NC C', '00003-00000157', '20123456786', 'CLIENTE SA', '500', 'ARS'],
+      ['2025-01-17', 'file3', 'NC', '00001-00000002', '27234567891', 'OTRO CLIENTE', '200', 'ARS'],
+      ['2025-01-18', 'file4', 'NC A', '00001-00000003', '20111111119', 'TERCER CLIENTE', '300', 'ARS'],
+      ['2025-01-19', 'file5', 'NC B', '00001-00000004', '20111111119', 'TERCER CLIENTE', '400', 'ARS'],
+      ['2025-01-20', 'file6', 'B', '00001-00000005', '27234567891', 'OTRO CLIENTE', '2000', 'ARS'],
+    ];
+
+    const result = parseFacturasEmitidas(data);
+
+    expect(result).toHaveLength(2);
+    expect(result[0].fileId).toBe('file1');
+    expect(result[1].fileId).toBe('file6');
+  });
+
+  it('excludes Notas de Débito (ND) from matching pool', () => {
+    const data = [
+      ['fechaEmision', 'fileId', 'tipoComprobante', 'nroFactura', 'cuitReceptor', 'razonSocialReceptor', 'importeTotal', 'moneda'],
+      ['2025-01-15', 'file1', 'A', '00001-00000001', '20123456786', 'CLIENTE SA', '1000', 'ARS'],
+      ['2025-01-16', 'file2', 'ND', '00001-00000002', '20123456786', 'CLIENTE SA', '500', 'ARS'],
+      ['2025-01-17', 'file3', 'ND A', '00001-00000003', '27234567891', 'OTRO CLIENTE', '200', 'ARS'],
+      ['2025-01-18', 'file4', 'ND B', '00001-00000004', '20111111119', 'TERCER CLIENTE', '300', 'ARS'],
+      ['2025-01-19', 'file5', 'ND C', '00001-00000005', '20111111119', 'TERCER CLIENTE', '400', 'ARS'],
+      ['2025-01-20', 'file6', 'C', '00001-00000006', '27234567891', 'OTRO CLIENTE', '2000', 'ARS'],
+    ];
+
+    const result = parseFacturasEmitidas(data);
+
+    expect(result).toHaveLength(2);
+    expect(result[0].fileId).toBe('file1');
+    expect(result[1].fileId).toBe('file6');
+  });
 });
 
 describe('parseFacturasRecibidas', () => {
@@ -329,6 +365,42 @@ describe('parseFacturasRecibidas', () => {
     expect(result).toHaveLength(1);
     // Serial number 45671 => '2025-01-14'
     expect(result[0].fechaEmision).toBe('2025-01-14');
+  });
+
+  it('excludes Notas de Crédito (NC) from matching pool', () => {
+    const data = [
+      ['fechaEmision', 'fileId', 'tipoComprobante', 'nroFactura', 'cuitEmisor', 'razonSocialEmisor', 'importeTotal', 'moneda'],
+      ['2025-01-15', 'file1', 'A', '00001-00000001', '20123456786', 'PROVEEDOR SA', '1000', 'ARS'],
+      ['2025-01-16', 'file2', 'NC C', '00003-00000157', '20123456786', 'PROVEEDOR SA', '500', 'ARS'],
+      ['2025-01-17', 'file3', 'NC', '00001-00000002', '27234567891', 'OTRO PROVEEDOR', '200', 'ARS'],
+      ['2025-01-18', 'file4', 'NC A', '00001-00000003', '20111111119', 'TERCER PROVEEDOR', '300', 'ARS'],
+      ['2025-01-19', 'file5', 'NC B', '00001-00000004', '20111111119', 'TERCER PROVEEDOR', '400', 'ARS'],
+      ['2025-01-20', 'file6', 'B', '00001-00000005', '27234567891', 'OTRO PROVEEDOR', '2000', 'ARS'],
+    ];
+
+    const result = parseFacturasRecibidas(data);
+
+    expect(result).toHaveLength(2);
+    expect(result[0].fileId).toBe('file1');
+    expect(result[1].fileId).toBe('file6');
+  });
+
+  it('excludes Notas de Débito (ND) from matching pool', () => {
+    const data = [
+      ['fechaEmision', 'fileId', 'tipoComprobante', 'nroFactura', 'cuitEmisor', 'razonSocialEmisor', 'importeTotal', 'moneda'],
+      ['2025-01-15', 'file1', 'A', '00001-00000001', '20123456786', 'PROVEEDOR SA', '1000', 'ARS'],
+      ['2025-01-16', 'file2', 'ND', '00001-00000002', '20123456786', 'PROVEEDOR SA', '500', 'ARS'],
+      ['2025-01-17', 'file3', 'ND A', '00001-00000003', '27234567891', 'OTRO PROVEEDOR', '200', 'ARS'],
+      ['2025-01-18', 'file4', 'ND B', '00001-00000004', '20111111119', 'TERCER PROVEEDOR', '300', 'ARS'],
+      ['2025-01-19', 'file5', 'ND C', '00001-00000005', '20111111119', 'TERCER PROVEEDOR', '400', 'ARS'],
+      ['2025-01-20', 'file6', 'C', '00001-00000006', '27234567891', 'OTRO PROVEEDOR', '2000', 'ARS'],
+    ];
+
+    const result = parseFacturasRecibidas(data);
+
+    expect(result).toHaveLength(2);
+    expect(result[0].fileId).toBe('file1');
+    expect(result[1].fileId).toBe('file6');
   });
 });
 

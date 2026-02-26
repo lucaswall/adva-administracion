@@ -297,12 +297,16 @@ export function parseFacturasEmitidas(data: CellValue[][]): Array<Factura & { ro
     const row = data[i];
     if (!row || !row[colIndex.fileId]) continue;
 
+    // Skip NCs and NDs — they have their own matching pipeline (nc-factura-matcher)
+    const tipo = validateTipoComprobante(row[colIndex.tipoComprobante]);
+    if (tipo === 'NC' || tipo.startsWith('NC ') || tipo === 'ND' || tipo.startsWith('ND ')) continue;
+
     facturas.push({
       row: i + 1,
       fechaEmision: normalizeSpreadsheetDate(row[colIndex.fechaEmision]),
       fileId: String(row[colIndex.fileId] || ''),
       fileName: String(row[colIndex.fileName] || ''),
-      tipoComprobante: validateTipoComprobante(row[colIndex.tipoComprobante]),
+      tipoComprobante: tipo,
       nroFactura: String(row[colIndex.nroFactura] || ''),
       // ADVA is emisor, so emisor fields are implicit (not stored)
       cuitEmisor: '',
@@ -368,12 +372,16 @@ export function parseFacturasRecibidas(data: CellValue[][]): Array<Factura & { r
     const row = data[i];
     if (!row || !row[colIndex.fileId]) continue;
 
+    // Skip NCs and NDs — they have their own matching pipeline (nc-factura-matcher)
+    const tipo = validateTipoComprobante(row[colIndex.tipoComprobante]);
+    if (tipo === 'NC' || tipo.startsWith('NC ') || tipo === 'ND' || tipo.startsWith('ND ')) continue;
+
     facturas.push({
       row: i + 1,
       fechaEmision: normalizeSpreadsheetDate(row[colIndex.fechaEmision]),
       fileId: String(row[colIndex.fileId] || ''),
       fileName: String(row[colIndex.fileName] || ''),
-      tipoComprobante: validateTipoComprobante(row[colIndex.tipoComprobante]),
+      tipoComprobante: tipo,
       nroFactura: String(row[colIndex.nroFactura] || ''),
       cuitEmisor: String(row[colIndex.cuitEmisor] || ''),
       razonSocialEmisor: String(row[colIndex.razonSocialEmisor] || ''),
