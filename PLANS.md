@@ -72,3 +72,27 @@
 
 **Risks/Considerations:**
 - Two existing tests need assertion updates (they currently test the old behavior for Factura E specifically)
+
+---
+
+## Iteration 1
+
+**Implemented:** 2026-02-26
+**Method:** Single-agent (1 task, 1 work unit, effort score 2)
+
+### Tasks Completed This Iteration
+- Task 1: Add TC orig/liq to detalle for Factura E credit matches (ADV-168) — Modified both credit matching paths (Tier 1 pago+factura and direct factura), added 6 new tests, updated 1 existing test
+
+### Files Modified
+- `src/bank/matcher.ts` - Added TC orig/liq logic to both credit matching paths, with division-by-zero guard and gross amount calculation for retencion cases
+- `src/bank/matcher.test.ts` - Updated Tier 1 credit test for new format, added 6 new tests covering: TC orig+liq, TC liq only, non-E regression guard, direct factura with/without tipoDeCambio, retencion+Factura E combination
+
+### Linear Updates
+- ADV-168: Todo → In Progress → Review
+
+### Pre-commit Verification
+- bug-hunter: Found 2 medium bugs (division by zero, retencion gross amount), both fixed
+- verifier: All 1,902 tests pass, zero warnings
+
+### Continuation Status
+All tasks completed.
