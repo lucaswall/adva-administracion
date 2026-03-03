@@ -20,9 +20,10 @@ import {
 } from './spreadsheet-headers.js';
 
 describe('tipoDeCambio headers', () => {
-  it('FACTURA_EMITIDA_HEADERS has 19 elements, last is tipoDeCambio', () => {
-    expect(FACTURA_EMITIDA_HEADERS).toHaveLength(19);
-    expect(FACTURA_EMITIDA_HEADERS[18]).toBe('tipoDeCambio');
+  it('FACTURA_EMITIDA_HEADERS has 20 elements, pagada at index 18 and tipoDeCambio at index 19 (ADV-169)', () => {
+    expect(FACTURA_EMITIDA_HEADERS).toHaveLength(20);
+    expect(FACTURA_EMITIDA_HEADERS[18]).toBe('pagada');
+    expect(FACTURA_EMITIDA_HEADERS[19]).toBe('tipoDeCambio');
   });
 
   it('FACTURA_RECIBIDA_HEADERS has 20 elements, last is tipoDeCambio', () => {

@@ -51,7 +51,8 @@ function buildFacturaRowFormatted(
       factura.matchedPagoFileId || '',      // P
       factura.matchConfidence || '',        // Q
       factura.hasCuitMatch ? 'YES' : 'NO',  // R
-      tipoDeCambioCell,                     // S
+      '',                                   // S - pagada (initially empty)
+      tipoDeCambioCell,                     // T
     ];
   } else {
     return [
@@ -191,7 +192,7 @@ export async function storeFactura(
     if (fileIdCheck.found) {
       const renamedFileName = generateFacturaFileName(factura, documentType);
       const updateRow = buildFacturaRowFormatted(factura, documentType, renamedFileName);
-      const lastCol = documentType === 'factura_emitida' ? 'S' : 'T';
+      const lastCol = documentType === 'factura_emitida' ? 'T' : 'T';
       const updateResult = await updateRowsWithFormatting(spreadsheetId, [{
         range: `${sheetName}!A${fileIdCheck.rowIndex}:${lastCol}${fileIdCheck.rowIndex}`,
         values: updateRow,
@@ -257,7 +258,7 @@ export async function storeFactura(
 
     // Build row based on document type - only include counterparty info
     const row = buildFacturaRowFormatted(factura, documentType, renamedFileName);
-    const range = documentType === 'factura_emitida' ? `${sheetName}!A:S` : `${sheetName}!A:T`;
+    const range = `${sheetName}!A:T`;
 
     const result = await appendRowsWithLinks(spreadsheetId, range, [row], timeZone, context?.metadataCache);
     if (!result.ok) {

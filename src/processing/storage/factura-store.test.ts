@@ -335,7 +335,7 @@ describe('storeFactura', () => {
   });
 
   describe('tipoDeCambio column', () => {
-    it('USD factura_emitida with tipoDeCambio stores CellNumber at index 18', async () => {
+    it('USD factura_emitida with tipoDeCambio stores CellNumber at index 19 (ADV-169)', async () => {
       vi.mocked(getValues).mockResolvedValue({ ok: true, value: [['Header']] });
       vi.mocked(appendRowsWithLinks).mockResolvedValue({ ok: true, value: 1 });
       vi.mocked(sortSheet).mockResolvedValue({ ok: true, value: undefined });
@@ -345,10 +345,10 @@ describe('storeFactura', () => {
 
       const callArgs = vi.mocked(appendRowsWithLinks).mock.calls[0];
       const row = callArgs[2][0]; // first row
-      expect(row[18]).toEqual({ type: 'number', value: 1429.5 });
+      expect(row[19]).toEqual({ type: 'number', value: 1429.5 });
     });
 
-    it('ARS factura_emitida without tipoDeCambio stores empty string at index 18', async () => {
+    it('ARS factura_emitida without tipoDeCambio stores empty string at index 19 (ADV-169)', async () => {
       vi.mocked(getValues).mockResolvedValue({ ok: true, value: [['Header']] });
       vi.mocked(appendRowsWithLinks).mockResolvedValue({ ok: true, value: 1 });
       vi.mocked(sortSheet).mockResolvedValue({ ok: true, value: undefined });
@@ -358,7 +358,34 @@ describe('storeFactura', () => {
 
       const callArgs = vi.mocked(appendRowsWithLinks).mock.calls[0];
       const row = callArgs[2][0];
-      expect(row[18]).toBe('');
+      expect(row[19]).toBe('');
+    });
+
+    it('factura_emitida produces 20 columns with pagada at index 18 (empty) and tipoDeCambio at index 19 (ADV-169)', async () => {
+      vi.mocked(getValues).mockResolvedValue({ ok: true, value: [['Header']] });
+      vi.mocked(appendRowsWithLinks).mockResolvedValue({ ok: true, value: 1 });
+      vi.mocked(sortSheet).mockResolvedValue({ ok: true, value: undefined });
+
+      const factura = createTestFactura({ moneda: 'USD', tipoDeCambio: 1429.5 });
+      await storeFactura(factura, 'spreadsheet-id', 'Facturas Emitidas', 'factura_emitida');
+
+      const callArgs = vi.mocked(appendRowsWithLinks).mock.calls[0];
+      const row = callArgs[2][0];
+      expect(row).toHaveLength(20);
+      expect(row[18]).toBe(''); // pagada: empty initially
+      expect(row[19]).toEqual({ type: 'number', value: 1429.5 }); // tipoDeCambio
+    });
+
+    it('storeFactura uses A:T range for factura_emitida (ADV-169)', async () => {
+      vi.mocked(getValues).mockResolvedValue({ ok: true, value: [['Header']] });
+      vi.mocked(appendRowsWithLinks).mockResolvedValue({ ok: true, value: 1 });
+      vi.mocked(sortSheet).mockResolvedValue({ ok: true, value: undefined });
+
+      const factura = createTestFactura();
+      await storeFactura(factura, 'spreadsheet-id', 'Facturas Emitidas', 'factura_emitida');
+
+      const callArgs = vi.mocked(appendRowsWithLinks).mock.calls[0];
+      expect(callArgs[1]).toBe('Facturas Emitidas!A:T');
     });
 
     it('USD factura_recibida with tipoDeCambio stores CellNumber at index 19', async () => {

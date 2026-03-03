@@ -3,7 +3,7 @@
  * These headers match the SPREADSHEET_FORMAT.md specification
  */
 
-/** Headers for Facturas Emitidas sheet - ADVA is emisor, only store receptor info (columns A:S) */
+/** Headers for Facturas Emitidas sheet - ADVA is emisor, only store receptor info (columns A:T) */
 export const FACTURA_EMITIDA_HEADERS = [
   'fechaEmision',
   'fileId',
@@ -23,6 +23,7 @@ export const FACTURA_EMITIDA_HEADERS = [
   'matchedPagoFileId',
   'matchConfidence',
   'hasCuitMatch',
+  'pagada',
   'tipoDeCambio',
 ];
 
@@ -328,7 +329,7 @@ export const CONTROL_INGRESOS_SHEETS: SheetConfig[] = [
       [7, { type: 'currency', decimals: 2 }],   // importeNeto
       [8, { type: 'currency', decimals: 2 }],   // importeIva
       [9, { type: 'currency', decimals: 2 }],   // importeTotal
-      [18, { type: 'number', decimals: 2 }],    // tipoDeCambio
+      [19, { type: 'number', decimals: 2 }],    // tipoDeCambio
     ]),
   },
   {

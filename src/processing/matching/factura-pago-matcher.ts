@@ -295,10 +295,8 @@ async function doMatchFacturasWithPagos(
   const correlationId = getCorrelationId();
 
   // Determine correct column ranges based on sheet type
-  // Facturas Recibidas has pagada column + tipoDeCambio (A:T), Facturas Emitidas has tipoDeCambio (A:S)
-  const facturasRange = facturasSheetName === 'Facturas Recibidas'
-    ? `${facturasSheetName}!A:T`
-    : `${facturasSheetName}!A:S`;
+  // Both Facturas Recibidas and Facturas Emitidas now have 20 columns (A:T) with pagada at S
+  const facturasRange = `${facturasSheetName}!A:T`;
   const pagosRange = `${pagosSheetName}!A:Q`; // Both pago sheets use A:Q (includes tipoDeCambio, importeEnPesos)
 
   // Get all facturas
@@ -568,28 +566,16 @@ async function doMatchFacturasWithPagos(
       matchesFound++;
 
       // Update factura with match info
-      // For Facturas Recibidas: columns P:S (includes pagada)
-      // For Facturas Emitidas: columns P:R (no pagada)
-      if (facturasSheetName === 'Facturas Recibidas') {
-        updates.push({
-          range: `'${facturasSheetName}'!P${update.facturaRow}:S${update.facturaRow}`,
-          values: [[
-            update.pagoFileId,
-            update.confidence,
-            update.hasCuitMatch ? 'YES' : 'NO',
-            update.pagada !== undefined ? (update.pagada ? 'SI' : 'NO') : '',
-          ]],
-        });
-      } else {
-        updates.push({
-          range: `'${facturasSheetName}'!P${update.facturaRow}:R${update.facturaRow}`,
-          values: [[
-            update.pagoFileId,
-            update.confidence,
-            update.hasCuitMatch ? 'YES' : 'NO',
-          ]],
-        });
-      }
+      // Both Facturas Recibidas and Facturas Emitidas: columns P:S (includes pagada)
+      updates.push({
+        range: `'${facturasSheetName}'!P${update.facturaRow}:S${update.facturaRow}`,
+        values: [[
+          update.pagoFileId,
+          update.confidence,
+          update.hasCuitMatch ? 'YES' : 'NO',
+          update.pagada !== undefined ? (update.pagada ? 'SI' : 'NO') : '',
+        ]],
+      });
 
       // Update pago with match info (columns N:O)
       const pago = pagosMap.get(update.pagoFileId);
@@ -603,18 +589,11 @@ async function doMatchFacturasWithPagos(
         });
       }
     } else if (update.facturaFileId && update.facturaRow && !update.pagoFileId) {
-      // Factura unmatch update
-      if (facturasSheetName === 'Facturas Recibidas') {
-        updates.push({
-          range: `'${facturasSheetName}'!P${update.facturaRow}:S${update.facturaRow}`,
-          values: [['', '', '', '']],
-        });
-      } else {
-        updates.push({
-          range: `'${facturasSheetName}'!P${update.facturaRow}:R${update.facturaRow}`,
-          values: [['', '', '']],
-        });
-      }
+      // Factura unmatch update — P:S for both Facturas Recibidas and Facturas Emitidas (4 columns)
+      updates.push({
+        range: `'${facturasSheetName}'!P${update.facturaRow}:S${update.facturaRow}`,
+        values: [['', '', '', '']],
+      });
     }
   }
 

@@ -325,6 +325,73 @@ describe('matchNCsWithFacturas', () => {
     expect(setValues).not.toHaveBeenCalled();
   });
 
+  it('matches NC Emitida with Factura Emitida by cuitReceptor, sets pagada=SI (ADV-171)', async () => {
+    // A:T range with 20 columns — pagada at index 18 (column S), tipoDeCambio at index 19 (column T)
+    const mockRows = [
+      ['fechaEmision', 'fileId', 'fileName', 'tipo', 'nro', 'cuit', 'razon', 'neto', 'iva', 'total', 'moneda', 'concepto', 'processed', 'conf', 'review', 'matchedPago', 'matchConf', 'cuitMatch', 'pagada', 'tipoDeCambio'],
+      // Factura Emitida - row 2 — cuitReceptor='20123456786' at column F (index 5)
+      ['2025-01-01', 'fact-emit-1', 'factura.pdf', 'A', '0002-00003160', '20123456786', 'TEST SA', '1000', '210', '1210', 'ARS', 'Servicios', '2025-01-01', '0.95', 'NO', '', '', '', '', ''],
+      // NC Emitida - row 3 — same cuitReceptor
+      ['2025-01-15', 'nc-emit-1', 'nc.pdf', 'NC', '0002-00000001', '20123456786', 'TEST SA', '1000', '210', '1210', 'ARS', 'Nota de credito s/ Factura N° 2-3160', '2025-01-15', '0.95', 'NO', '', '', '', '', ''],
+    ];
+
+    vi.mocked(getValues).mockResolvedValue({ ok: true, value: mockRows });
+    vi.mocked(setValues).mockResolvedValue({ ok: true, value: 1 });
+
+    const result = await matchNCsWithFacturas('test-spreadsheet-id', 'Facturas Emitidas', 'cuitReceptor', 'A:T', 'S');
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value).toBe(1);
+    }
+
+    expect(setValues).toHaveBeenCalledTimes(2);
+    // Factura Emitida at row 2 → Facturas Emitidas!S2
+    expect(setValues).toHaveBeenCalledWith('test-spreadsheet-id', 'Facturas Emitidas!S2', [['SI']]);
+    // NC at row 3 → Facturas Emitidas!S3
+    expect(setValues).toHaveBeenCalledWith('test-spreadsheet-id', 'Facturas Emitidas!S3', [['SI']]);
+  });
+
+  it('skips MANUAL NC in Facturas Emitidas (ADV-171)', async () => {
+    const mockRows = [
+      ['fechaEmision', 'fileId', 'fileName', 'tipo', 'nro', 'cuit', 'razon', 'neto', 'iva', 'total', 'moneda', 'concepto', 'processed', 'conf', 'review', 'matchedPago', 'matchConf', 'cuitMatch', 'pagada', 'tipoDeCambio'],
+      // Regular factura emitida
+      ['2025-01-01', 'fact-emit-1', 'factura.pdf', 'A', '0002-00003160', '20123456786', 'TEST SA', '1000', '210', '1210', 'ARS', 'Servicios', '2025-01-01', '0.95', 'NO', '', '', '', '', ''],
+      // NC Emitida with MANUAL — must be skipped
+      ['2025-01-15', 'nc-emit-manual', 'nc.pdf', 'NC', '0002-00000001', '20123456786', 'TEST SA', '1000', '210', '1210', 'ARS', 'Nota de credito s/ Factura N° 2-3160', '2025-01-15', '0.95', 'NO', '', 'MANUAL', '', '', ''],
+    ];
+
+    vi.mocked(getValues).mockResolvedValue({ ok: true, value: mockRows });
+
+    const result = await matchNCsWithFacturas('test-spreadsheet-id', 'Facturas Emitidas', 'cuitReceptor', 'A:T', 'S');
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value).toBe(0);
+    }
+    expect(setValues).not.toHaveBeenCalled();
+  });
+
+  it('excludes MANUAL Facturas Emitidas from NC matching (ADV-171)', async () => {
+    const mockRows = [
+      ['fechaEmision', 'fileId', 'fileName', 'tipo', 'nro', 'cuit', 'razon', 'neto', 'iva', 'total', 'moneda', 'concepto', 'processed', 'conf', 'review', 'matchedPago', 'matchConf', 'cuitMatch', 'pagada', 'tipoDeCambio'],
+      // Factura Emitida with MANUAL — excluded from match targets
+      ['2025-01-01', 'fact-emit-manual', 'factura.pdf', 'A', '0002-00003160', '20123456786', 'TEST SA', '1000', '210', '1210', 'ARS', 'Servicios', '2025-01-01', '0.95', 'NO', '', 'MANUAL', '', '', ''],
+      // NC Emitida that would match
+      ['2025-01-15', 'nc-emit-1', 'nc.pdf', 'NC', '0002-00000001', '20123456786', 'TEST SA', '1000', '210', '1210', 'ARS', 'Nota de credito s/ Factura N° 2-3160', '2025-01-15', '0.95', 'NO', '', '', '', '', ''],
+    ];
+
+    vi.mocked(getValues).mockResolvedValue({ ok: true, value: mockRows });
+
+    const result = await matchNCsWithFacturas('test-spreadsheet-id', 'Facturas Emitidas', 'cuitReceptor', 'A:T', 'S');
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value).toBe(0);
+    }
+    expect(setValues).not.toHaveBeenCalled();
+  });
+
   it('should skip factura with MANUAL matchConfidence as a match target (Fix 5 - ADV-131)', async () => {
     // Factura at row[16]='MANUAL' is locked — cannot be targeted by any NC
     const mockRows = [

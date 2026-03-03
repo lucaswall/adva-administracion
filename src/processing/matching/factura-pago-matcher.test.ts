@@ -2,7 +2,7 @@
  * Tests for factura-pago matcher
  */
 
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { DisplacementQueue } from '../../matching/cascade-matcher.js';
 import { FacturaPagoMatcher } from '../../matching/matcher.js';
 import type { Factura, Pago, MatchConfidence } from '../../types/index.js';
@@ -25,6 +25,11 @@ vi.mock('../../utils/logger.js', () => ({
 vi.mock('../../utils/correlation.js', () => ({
   getCorrelationId: () => 'test-correlation-id',
 }));
+
+// Clear all mocks before each test to prevent state leakage between tests
+beforeEach(() => {
+  vi.clearAllMocks();
+});
 
 describe('DisplacementQueue', () => {
   it('should return undefined when popping from empty queue (bug #14)', () => {
@@ -177,6 +182,107 @@ describe('Bug #9: Cascading displacement edge case', () => {
     expect(update?.pagoFileId).toBe(displacedPagoFileId);
     expect(update?.facturaFileId).toBe(''); // Empty = unmatch
     expect(update?.pagoRow).toBe(displacedPagoRow);
+  });
+});
+
+describe('Facturas Emitidas pagada column handling (ADV-170)', () => {
+  async function setupE2E() {
+    const { matchFacturasWithPagos } = await import('./factura-pago-matcher.js');
+    const { getValues, batchUpdate } = await import('../../services/sheets.js');
+    const { withLock, withRetry } = await import('../../utils/concurrency.js');
+
+    vi.mocked(withLock).mockImplementation(async (_key: string, fn: () => Promise<any>) => {
+      try { return { ok: true as const, value: await fn() }; }
+      catch (e) { return { ok: false as const, error: e instanceof Error ? e : new Error(String(e)) }; }
+    });
+    vi.mocked(withRetry).mockImplementation(async (fn: () => Promise<any>) => {
+      try { return { ok: true as const, value: await fn() }; }
+      catch (e) { return { ok: false as const, error: e instanceof Error ? e : new Error(String(e)) }; }
+    });
+    return { matchFacturasWithPagos, getValues, batchUpdate };
+  }
+
+  const config = { matchDaysBefore: 10, matchDaysAfter: 60, usdArsTolerancePercent: 5, usdMatchDaysAfter: 90 };
+
+  it('matching Facturas Emitidas writes columns P:S (4 columns including pagada) (ADV-170)', async () => {
+    const { matchFacturasWithPagos, getValues, batchUpdate } = await setupE2E();
+
+    // Factura Emitida: 20 columns (A:T after ADV-169), cuitReceptor='20123456786' at F
+    const facturaHeader = ['fechaEmision', 'fileId', 'fileName', 'tipoComprobante', 'nroFactura', 'cuitReceptor', 'razonSocialReceptor', 'importeNeto', 'importeIva', 'importeTotal', 'moneda', 'concepto', 'processedAt', 'confidence', 'needsReview', 'matchedPagoFileId', 'matchConfidence', 'hasCuitMatch', 'pagada', 'tipoDeCambio'];
+    const facturaRow = ['2025-01-01', 'fact-1', 'factura.pdf', 'A', '00001-00000001', '20123456786', 'TEST SA', '8264.46', '1735.54', '10000', 'ARS', '', '2025-01-01T10:00:00Z', '0.95', 'NO', '', '', 'NO', '', ''];
+
+    // Pago Recibido: cuitPagador='20123456786' in concepto triggers HIGH confidence (CUIT match)
+    const pagoHeader = ['fechaPago', 'fileId', 'fileName', 'banco', 'importePagado', 'moneda', 'referencia', 'cuitPagador', 'nombrePagador', 'concepto', 'processedAt', 'confidence', 'needsReview', 'matchedFacturaFileId', 'matchConfidence', 'tipoDeCambio', 'importeEnPesos'];
+    const pagoRow = ['2025-01-05', 'pago-1', 'pago.pdf', 'BBVA', '10000', 'ARS', '', '20123456786', 'TEST SA', 'Pago servicios 20123456786', '2025-01-05T10:00:00Z', '0.95', 'NO', '', '', '', ''];
+
+    vi.mocked(getValues)
+      .mockResolvedValueOnce({ ok: true, value: [facturaHeader, facturaRow] })
+      .mockResolvedValueOnce({ ok: true, value: [pagoHeader, pagoRow] });
+    vi.mocked(batchUpdate).mockResolvedValue({ ok: true, value: 0 });
+
+    const result = await matchFacturasWithPagos(
+      'test-spreadsheet',
+      'Facturas Emitidas',
+      'Pagos Recibidos',
+      'cuitReceptor',
+      'cuitPagador',
+      config as any,
+    );
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value).toBe(1);
+    }
+
+    // Verify batchUpdate called with P:S (4 columns: matchedPagoFileId, matchConfidence, hasCuitMatch, pagada)
+    expect(batchUpdate).toHaveBeenCalled();
+    const calls = vi.mocked(batchUpdate).mock.calls[0][1];
+    const facturaUpdate = calls.find((u: any) => u.range.includes("'Facturas Emitidas'!P"));
+    expect(facturaUpdate).toBeDefined();
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+    expect(facturaUpdate!.range).toBe("'Facturas Emitidas'!P2:S2");
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+    expect(facturaUpdate!.values[0]).toHaveLength(4); // 4 columns including pagada
+  });
+
+  it('unmatching Facturas Emitidas clears columns P:S (4 empty values) (ADV-170)', async () => {
+    const { matchFacturasWithPagos, getValues, batchUpdate } = await setupE2E();
+
+    // Factura Emitida at row 2 already matched to pago-a (lower confidence), no CUIT
+    const facturaHeader = ['fechaEmision', 'fileId', 'fileName', 'tipoComprobante', 'nroFactura', 'cuitReceptor', 'razonSocialReceptor', 'importeNeto', 'importeIva', 'importeTotal', 'moneda', 'concepto', 'processedAt', 'confidence', 'needsReview', 'matchedPagoFileId', 'matchConfidence', 'hasCuitMatch', 'pagada', 'tipoDeCambio'];
+    const facturaRow = ['2025-01-01', 'fact-1', 'factura.pdf', 'A', '00001-00000001', '20123456786', 'TEST SA', '8264.46', '1735.54', '10000', 'ARS', '', '2025-01-01T10:00:00Z', '0.95', 'NO', 'pago-a', 'LOW', 'NO', 'NO', ''];
+
+    // Pago A: already matched (excluded from unmatched pool) — in sheet so it appears in pagosMap
+    // Pago B: unmatched, CUIT in concepto → HIGH confidence → displaces pago-a
+    const pagoHeader = ['fechaPago', 'fileId', 'fileName', 'banco', 'importePagado', 'moneda', 'referencia', 'cuitPagador', 'nombrePagador', 'concepto', 'processedAt', 'confidence', 'needsReview', 'matchedFacturaFileId', 'matchConfidence', 'tipoDeCambio', 'importeEnPesos'];
+    const pagoRowA = ['2025-01-05', 'pago-a', 'pagoA.pdf', 'BBVA', '10000', 'ARS', '', '27234567891', 'OTRO SA', '', '2025-01-05T10:00:00Z', '0.95', 'NO', 'fact-1', 'LOW', '', ''];
+    const pagoRowB = ['2025-01-05', 'pago-b', 'pagoB.pdf', 'BBVA', '10000', 'ARS', '', '20123456786', 'TEST SA', 'Pago servicios 20123456786', '2025-01-05T10:00:00Z', '0.95', 'NO', '', '', '', ''];
+
+    vi.mocked(getValues)
+      .mockResolvedValueOnce({ ok: true, value: [facturaHeader, facturaRow] })
+      .mockResolvedValueOnce({ ok: true, value: [pagoHeader, pagoRowA, pagoRowB] });
+    vi.mocked(batchUpdate).mockResolvedValue({ ok: true, value: 0 });
+
+    const result = await matchFacturasWithPagos(
+      'test-spreadsheet',
+      'Facturas Emitidas',
+      'Pagos Recibidos',
+      'cuitReceptor',
+      'cuitPagador',
+      config as any,
+    );
+
+    expect(result.ok).toBe(true);
+
+    // Verify the factura update uses P:S (4 columns)
+    expect(batchUpdate).toHaveBeenCalled();
+    const calls = vi.mocked(batchUpdate).mock.calls[0][1];
+    const facturaUpdate = calls.find((u: any) => u.range.includes("'Facturas Emitidas'!P"));
+    expect(facturaUpdate).toBeDefined();
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+    expect(facturaUpdate!.range).toBe("'Facturas Emitidas'!P2:S2");
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+    expect(facturaUpdate!.values[0]).toHaveLength(4);
   });
 });
 

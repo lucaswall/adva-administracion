@@ -155,6 +155,39 @@ export async function runMatching(
     });
   }
 
+  // Match NC (Nota de Credito) with Facturas Emitidas (Ingresos)
+  debug('Matching NCs with Facturas Emitidas', {
+    module: 'matching',
+    phase: 'nc-match',
+    correlationId,
+  });
+
+  const ncIngresosMatches = await matchNCsWithFacturas(
+    folderStructure.controlIngresosId,
+    'Facturas Emitidas',
+    'cuitReceptor',
+    'A:T',
+    'S'
+  );
+
+  if (!ncIngresosMatches.ok) {
+    warn('NC matching failed for Facturas Emitidas', {
+      module: 'matching',
+      phase: 'nc-match',
+      error: ncIngresosMatches.error.message,
+      correlationId,
+    });
+    // Don't fail the entire matching process if NC matching fails
+  } else {
+    totalMatches += ncIngresosMatches.value;
+    debug('NC Emitidas matches complete', {
+      module: 'matching',
+      phase: 'nc-match',
+      matchesFound: ncIngresosMatches.value,
+      correlationId,
+    });
+  }
+
   // Match Retenciones Recibidas with Facturas Emitidas (Ingresos)
   debug('Matching Retenciones with Facturas Emitidas', {
     module: 'matching',
