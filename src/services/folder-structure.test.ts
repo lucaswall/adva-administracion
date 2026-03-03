@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { validateYear, clearFolderStructureCache, getCachedFolderStructure, checkEnvironmentMarker, migrateArchivosProcesadosHeaders, migrateTipoDeCambioHeaders } from './folder-structure.js';
+import { validateYear, clearFolderStructureCache, getCachedFolderStructure, checkEnvironmentMarker, migrateArchivosProcesadosHeaders, migrateTipoDeCambioHeaders, migrateFacturasEmitidasPagadaColumn } from './folder-structure.js';
 
 // Mock drive.js for environment marker tests
 vi.mock('./drive.js', () => ({
@@ -34,9 +34,10 @@ vi.mock('./sheets.js', () => ({
   moveSheetToFirst: vi.fn(),
   applyConditionalFormat: vi.fn(),
   batchUpdate: vi.fn(),
+  insertColumn: vi.fn(),
 }));
 
-import { getValues, setValues } from './sheets.js';
+import { getValues, setValues, getSheetMetadata, insertColumn } from './sheets.js';
 
 describe('validateYear', () => {
   it('returns ok for valid years in range 2000-current+1', () => {
@@ -536,5 +537,126 @@ describe('migrateTipoDeCambioHeaders', () => {
       expect(result.ok).toBe(true);
       expect(setValues).toHaveBeenCalledWith('ingresos-id', 'Pagos Recibidos!P1', [['tipoDeCambio', 'importeEnPesos']]);
     });
+  });
+});
+
+describe('migrateFacturasEmitidasPagadaColumn', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('inserts pagada column at S when Facturas Emitidas has 19 columns (tipoDeCambio present, pagada missing)', async () => {
+    const headers19 = Array.from({ length: 19 }, (_, i) => `col${i}`);
+    vi.mocked(getValues).mockResolvedValue({ ok: true, value: [headers19] });
+    vi.mocked(getSheetMetadata).mockResolvedValue({
+      ok: true,
+      value: [{ title: 'Facturas Emitidas', sheetId: 42, index: 0 }],
+    });
+    vi.mocked(insertColumn).mockResolvedValue({ ok: true, value: undefined });
+    vi.mocked(setValues).mockResolvedValue({ ok: true, value: 1 });
+
+    const result = await migrateFacturasEmitidasPagadaColumn('ingresos-id');
+
+    expect(result.ok).toBe(true);
+    expect(insertColumn).toHaveBeenCalledWith('ingresos-id', 42, 18);
+    expect(setValues).toHaveBeenCalledWith('ingresos-id', 'Facturas Emitidas!S1', [['pagada']]);
+  });
+
+  it('skips when already 20 columns (idempotent — pagada already migrated)', async () => {
+    const headers20 = Array.from({ length: 20 }, (_, i) => `col${i}`);
+    vi.mocked(getValues).mockResolvedValue({ ok: true, value: [headers20] });
+
+    const result = await migrateFacturasEmitidasPagadaColumn('ingresos-id');
+
+    expect(result.ok).toBe(true);
+    expect(insertColumn).not.toHaveBeenCalled();
+    expect(setValues).not.toHaveBeenCalled();
+  });
+
+  it('skips when pagada header exists at index 18', async () => {
+    const headers = Array.from({ length: 20 }, (_, i) => `col${i}`);
+    headers[18] = 'pagada';
+    vi.mocked(getValues).mockResolvedValue({ ok: true, value: [headers] });
+
+    const result = await migrateFacturasEmitidasPagadaColumn('ingresos-id');
+
+    expect(result.ok).toBe(true);
+    expect(insertColumn).not.toHaveBeenCalled();
+    expect(setValues).not.toHaveBeenCalled();
+  });
+
+  it('skips when sheet is empty', async () => {
+    vi.mocked(getValues).mockResolvedValue({ ok: true, value: [] });
+
+    const result = await migrateFacturasEmitidasPagadaColumn('ingresos-id');
+
+    expect(result.ok).toBe(true);
+    expect(insertColumn).not.toHaveBeenCalled();
+    expect(setValues).not.toHaveBeenCalled();
+  });
+
+  it('returns error when getValues fails', async () => {
+    vi.mocked(getValues).mockResolvedValue({ ok: false, error: new Error('API error') });
+
+    const result = await migrateFacturasEmitidasPagadaColumn('ingresos-id');
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.message).toBe('API error');
+  });
+
+  it('returns error when getSheetMetadata fails', async () => {
+    const headers19 = Array.from({ length: 19 }, (_, i) => `col${i}`);
+    vi.mocked(getValues).mockResolvedValue({ ok: true, value: [headers19] });
+    vi.mocked(getSheetMetadata).mockResolvedValue({ ok: false, error: new Error('Metadata error') });
+
+    const result = await migrateFacturasEmitidasPagadaColumn('ingresos-id');
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.message).toBe('Metadata error');
+  });
+
+  it('returns error when Facturas Emitidas sheet not found in metadata', async () => {
+    const headers19 = Array.from({ length: 19 }, (_, i) => `col${i}`);
+    vi.mocked(getValues).mockResolvedValue({ ok: true, value: [headers19] });
+    vi.mocked(getSheetMetadata).mockResolvedValue({
+      ok: true,
+      value: [{ title: 'Other Sheet', sheetId: 1, index: 0 }],
+    });
+
+    const result = await migrateFacturasEmitidasPagadaColumn('ingresos-id');
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.message).toContain('not found');
+  });
+
+  it('returns error when insertColumn fails', async () => {
+    const headers19 = Array.from({ length: 19 }, (_, i) => `col${i}`);
+    vi.mocked(getValues).mockResolvedValue({ ok: true, value: [headers19] });
+    vi.mocked(getSheetMetadata).mockResolvedValue({
+      ok: true,
+      value: [{ title: 'Facturas Emitidas', sheetId: 42, index: 0 }],
+    });
+    vi.mocked(insertColumn).mockResolvedValue({ ok: false, error: new Error('Insert failed') });
+
+    const result = await migrateFacturasEmitidasPagadaColumn('ingresos-id');
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.message).toBe('Insert failed');
+  });
+
+  it('returns error when setValues fails after column insert', async () => {
+    const headers19 = Array.from({ length: 19 }, (_, i) => `col${i}`);
+    vi.mocked(getValues).mockResolvedValue({ ok: true, value: [headers19] });
+    vi.mocked(getSheetMetadata).mockResolvedValue({
+      ok: true,
+      value: [{ title: 'Facturas Emitidas', sheetId: 42, index: 0 }],
+    });
+    vi.mocked(insertColumn).mockResolvedValue({ ok: true, value: undefined });
+    vi.mocked(setValues).mockResolvedValue({ ok: false, error: new Error('Write failed') });
+
+    const result = await migrateFacturasEmitidasPagadaColumn('ingresos-id');
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.message).toBe('Write failed');
   });
 });
