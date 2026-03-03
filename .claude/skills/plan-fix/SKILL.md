@@ -2,7 +2,7 @@
 name: plan-fix
 description: Investigates bugs AND creates actionable TDD fix plans. Creates Linear issues in Todo state. Use when you know you want to fix something - user reports extraction errors, deployment failures, wrong data, missing matches, or prompt issues. Can be chained from investigate skill. Discovers MCPs from CLAUDE.md for debugging (logs, files, prompts).
 argument-hint: <bug description>
-allowed-tools: Read, Edit, Write, Glob, Grep, Task, Bash, mcp__linear__list_teams, mcp__linear__list_issues, mcp__linear__get_issue, mcp__linear__create_issue, mcp__linear__update_issue, mcp__linear__list_issue_labels, mcp__linear__list_issue_statuses
+allowed-tools: Read, Edit, Write, Glob, Grep, Task, Bash, mcp__linear__list_teams, mcp__linear__list_issues, mcp__linear__get_issue, mcp__linear__create_issue, mcp__linear__update_issue, mcp__linear__list_issue_labels, mcp__linear__list_issue_statuses, mcp__sentry__find_organizations, mcp__sentry__find_projects, mcp__sentry__search_issues, mcp__sentry__get_issue_details, mcp__sentry__analyze_issue_with_seer, mcp__sentry__search_events, mcp__sentry__search_issue_events, mcp__sentry__get_issue_tag_values
 disable-model-invocation: true
 ---
 
@@ -43,6 +43,8 @@ Read `CLAUDE.md` at the project root (if it exists) to understand:
 - Testing conventions
 - Any project-specific debugging notes
 
+**Discover team name:** Look for LINEAR INTEGRATION section in CLAUDE.md. If not found, use `mcp__linear__list_teams` to discover the team name dynamically. Store the discovered team name for use throughout the skill.
+
 ## 5. Classify Bug Type
 
 Categorize the reported issue into one of these types:
@@ -62,7 +64,7 @@ Categorize the reported issue into one of these types:
 
 ### 6.1 Codebase Investigation
 
-Search the codebase for relevant code:
+Search the codebase for relevant code using dedicated tools (NOT Bash):
 
 Use Glob and Grep tools to:
 - Find the files involved in the bug
@@ -93,7 +95,22 @@ Search Linear for related issues:
 - Check if there are related issues that provide context
 - Look for previously attempted fixes
 
-### 6.5 Reproduce the Issue
+### 6.5 Sentry Context
+
+If the bug involves production crashes, errors, or runtime issues, search Sentry for related issues. Use ToolSearch to load Sentry tools before calling them.
+
+1. **Find the org/project** — Use `mcp__sentry__find_organizations` then `mcp__sentry__find_projects` to get slugs
+2. **Search for issues** — Use `mcp__sentry__search_issues` with natural language (e.g., "unresolved crashes from last week")
+3. **Get issue details** — Use `mcp__sentry__get_issue_details` for full stack traces and metadata
+4. **Analyze root cause** — Use `mcp__sentry__analyze_issue_with_seer` for AI-powered analysis
+5. **Check distributions** — Use `mcp__sentry__get_issue_tag_values` for environment/release breakdown
+
+If Sentry issues are found:
+- Document the Sentry issue ID and URL in the PLANS.md `**Sentry:**` field
+- Note frequency, affected users, and releases in Evidence section
+- Include the Sentry issue reference in the Linear issue description (see Section 8)
+
+### 6.6 Reproduce the Issue
 
 When possible, try to reproduce:
 
@@ -110,84 +127,23 @@ npm run lint 2>&1 | tail -50
 
 ## 7. Document Findings in PLANS.md
 
-Write or append to `PLANS.md` at the project root with this structure:
+Read `references/plans-template.md` for the complete template.
 
-```markdown
-# Bug Fix Plan
+**Source field:** `Bug report: [Summary of $ARGUMENTS]`
 
-**Created:** YYYY-MM-DD
-**Bug Report:** [Summary from $ARGUMENTS]
-**Category:** [Extraction | Deployment | Matching | Storage | Prompt | API Error | Data Issue | Frontend Bug]
-**Linear Issues:** [ADVA-123](https://linear.app/...), [ADVA-124](https://linear.app/...)
+Include: Context Gathered (Codebase Analysis + MCP Context + Investigation), Tasks, Post-Implementation Checklist, Plan Summary.
+Omit: Triage Results subsection.
 
-## Investigation
-
-### Context Gathered
-- **MCPs used:** [list which MCPs were used and why]
-- **Files examined:** [list files checked - Drive files, spreadsheets, code files, logs]
-
-### Evidence
-[Detailed findings from investigation with specific data points]
-
-### Root Cause
-[Clear explanation of why the bug occurs]
-
-#### Related Code
-- `path/to/file.ts:lineNumber` — [describe what this code does and why it's problematic]
-- `path/to/other-file.ts:lineNumber` — [describe the related code]
-(Reference files and line numbers. Do NOT paste code blocks — the implementer will read the files.)
-
-### Impact
-- [What breaks because of this bug]
-- [Who is affected]
-- [Any data implications]
-
-## Fix Plan
-
-### Fix 1: [Title matching the issue]
-**Linear Issue:** [ADVA-123](https://linear.app/...)
-
-1. Write test in [file].test.ts for [scenario that reproduces the bug]
-2. Implement fix in [file].ts
-
-### Fix 2: [Title]
-**Linear Issue:** [ADVA-124](https://linear.app/...)
-...
-
-## Post-Implementation Checklist
-1. Run `bug-hunter` agent - Review changes for bugs
-2. Run `verifier` agent - Verify all tests pass and zero warnings
-
----
-
-## Plan Summary
-
-**Problem:** [One sentence describing the bug/issue]
-
-**Root Cause:** [One sentence explaining why it happens]
-
-**Linear Issues:** [ADVA-123, ADVA-124, ...]
-
-**Solution Approach:** [2-3 sentences describing the fix strategy at a high level]
-
-**Scope:**
-- Files affected: [count]
-- New tests: [yes/no]
-- Breaking changes: [yes/no — if yes, describe migration path]
-
-**Risks/Considerations:**
-- [Key risk or consideration 1]
-- [Key risk or consideration 2, if any]
-```
+The Investigation subsection under Context Gathered must include: bug report, classification (type/severity/affected area), root cause, evidence (file paths with line numbers -- no code blocks), and impact.
 
 ## 8. Create Linear Issue
 
 Create a Linear issue for each fix:
 
 1. Use `mcp__linear__create_issue` with:
-   - `team`: "ADVA Administracion"
+   - `team`: [Discovered team name from CLAUDE.md or `mcp__linear__list_teams`]
    - `title`: Fix description
-   - `description`: Root cause and fix details
+   - `description`: Root cause and fix details. If the bug originated from Sentry, include a "Sentry Issue" section with the URL, event count, user count, and release. Add "Resolve this Sentry issue after fix is merged and released."
    - `state`: "Todo"
    - `labels`: Bug (or Security if security-related)
 
@@ -274,50 +230,10 @@ This skill is NOT for:
 - General investigation without a fix intent (use investigate)
 - Refactoring (create a separate task)
 
-## 12. Termination and Git Workflow
+## 12. Termination
 
-When investigation and planning are complete:
+Follow the termination procedure in `references/plans-template.md`: output the Plan Summary, then create branch, commit (no `Co-Authored-By` tags), and push.
 
-1. **Output the plan summary:**
-
-```
-✓ Plan created in PLANS.md
-✓ Linear issues created in Todo: ADVA-123, ADVA-124, ...
-
-## Plan Summary
-
-**Problem:** [Copy from PLANS.md summary]
-
-**Root Cause:** [Copy from PLANS.md summary]
-
-**Linear Issues:** [Copy from PLANS.md summary]
-
-**Solution Approach:** [Copy from PLANS.md summary]
-
-**Scope:**
-- Files affected: [count]
-- New tests: [yes/no]
-- Breaking changes: [yes/no — if yes, describe migration path]
-
-**Risks/Considerations:**
-- [List from PLANS.md summary]
-
----
-
-Create a feature branch and commit the plan.
-```
-
-2. **Create branch, commit (no `Co-Authored-By` tags), and push:**
-   ```bash
-   git checkout -b fix/<bug-description> && git add PLANS.md && git commit -m "plan: <bug-description>" && git push -u origin fix/<bug-description>
-   ```
-
-3. **Suggest next steps:**
-   - "Run `/plan-implement` to implement the fix plan"
-   - If critical: "This is a critical issue - recommend implementing immediately"
-
-4. **If chained from investigate skill:**
-   - Reference the investigation findings
-   - Note any additional evidence found during the fix planning phase
+If chained from investigate skill, reference the investigation findings and note any additional evidence found during planning.
 
 Do not ask follow-up questions. Do not offer to implement. Output the summary and stop.

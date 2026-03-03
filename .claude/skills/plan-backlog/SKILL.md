@@ -64,6 +64,16 @@ Call `mcp__linear__list_teams`. If unavailable, **STOP** and tell the user: "Lin
 
 Use the Linear MCP to find the requested issues.
 
+**First, discover the team name:**
+
+Read CLAUDE.md and look for LINEAR INTEGRATION section. Extract the team name from patterns like:
+- "Team: 'ProjectName'"
+- "Team: ProjectName"
+
+If CLAUDE.md doesn't have a LINEAR INTEGRATION section, call `mcp__linear__list_teams` to discover the team name dynamically.
+
+Store the discovered team name in a variable for use throughout the skill.
+
 **If user specified a specific issue (e.g., "ADVA-123"):**
 
 ```
@@ -77,14 +87,14 @@ Verify the issue exists and is in the "Backlog" state. If not in Backlog, warn t
 First, get the team's issue statuses and labels:
 
 ```
-mcp__linear__list_issue_statuses(team: "ADVA Administracion")
-mcp__linear__list_issue_labels(team: "ADVA Administracion")
+mcp__linear__list_issue_statuses(team: [discovered team name])
+mcp__linear__list_issue_labels(team: [discovered team name])
 ```
 
 Then query for Backlog issues:
 
 ```
-mcp__linear__list_issues(team: "ADVA Administracion", state: "Backlog", includeArchived: false)
+mcp__linear__list_issues(team: [discovered team name], state: "Backlog", includeArchived: false)
 ```
 
 Filter the results based on the user's criteria (label, title keywords, etc.).
@@ -92,7 +102,7 @@ Filter the results based on the user's criteria (label, title keywords, etc.).
 **If user said "plan all", "work on backlog", or provided no arguments:**
 
 ```
-mcp__linear__list_issues(team: "ADVA Administracion", state: "Backlog", includeArchived: false)
+mcp__linear__list_issues(team: [discovered team name], state: "Backlog", includeArchived: false)
 ```
 
 Plan ALL returned Backlog issues. No confirmation needed — the triage phase (Phase 3) will filter out invalid ones.
@@ -109,7 +119,7 @@ This is critical for generating plans that align with the project's patterns.
 
 #### 2.3 Explore the Codebase
 
-Explore the codebase to understand existing patterns:
+Explore the codebase to understand existing patterns using dedicated tools (NOT Bash):
 
 Use Glob and Grep to find:
 - Existing components similar to what the issues require
@@ -131,6 +141,10 @@ Query relevant MCPs to gather context that will inform the plan. For example:
 - Check Drive for document formats relevant to the issues
 - Check Railway for existing services and environment variables
 - Check Linear for related issues or dependencies
+
+#### 2.5 Preserve Sentry References
+
+When planning issues that contain Sentry references in their Linear description (look for `**Sentry Issue:**` sections), carry those Sentry issue URLs into the PLANS.md `**Sentry Issues:**` header field. This ensures the downstream `plan-review-implementation` skill can resolve them when the plan is complete.
 
 ---
 
@@ -180,7 +194,7 @@ The reason should be specific, e.g.:
 **CRITICAL: Linear MCP same-type state bug.** "Duplicate" and "Canceled" are both `type: canceled` in Linear. Passing `state: "Canceled"` by name silently no-ops if the issue is already in another canceled-type state. To reliably cancel issues, first fetch the team's statuses to get the Canceled state UUID:
 
 ```
-mcp__linear__list_issue_statuses(team: "ADVA Administracion")
+mcp__linear__list_issue_statuses(team: [discovered team name])
 ```
 
 Find the status with `name: "Canceled"` and use its `id` (UUID) in the update call:
@@ -242,130 +256,46 @@ For each issue:
 
 Write the plan to `PLANS.md` at the project root using the structure template below.
 
+#### 4.4 Validate Plan Against CLAUDE.md
+
+After writing the plan but before moving issues to Todo, re-read CLAUDE.md and cross-check each task for missing defensive specs:
+
+| Check | What to look for | Example violation |
+|-------|-----------------|-------------------|
+| **Error handling** | Each task touching Gemini, Google APIs, or Drive has error handling specs | Plan says "call Gemini" with no catch or error behavior spec |
+| **Timeouts** | Any Gemini or Google API call has a timeout value specified | Plan says "read from Drive" with no timeout spec |
+| **Rate limits** | Google API calls note rate limit handling (exponential backoff, retry budget) | Plan adds new Sheets writes with no rate limit consideration |
+| **Edge cases** | Empty input, null values, partial results, and missing documents are addressed | Plan has no test for empty Drive folder or null Gemini response |
+| **Conventions** | Result<T,E> pattern, Pino logging, ESM imports, and naming match CLAUDE.md | Plan uses `console.log` instead of Pino logger |
+| **Spreadsheet writes** | Any write to spreadsheets specifies behavior on partial failure | Plan adds rows without specifying what happens if write fails mid-batch |
+
+Fix any violations found before proceeding. This step prevents the plan from introducing gaps that become bugs at implementation time.
+
+#### 4.5 Cross-Cutting Requirements Sweep
+
+After writing all tasks, scan the entire plan for these patterns. If a pattern is detected in any task, verify the corresponding specification exists in that task's steps. If missing, add it before finalizing the plan.
+
+| Pattern Detected in Plan | Required Specification |
+|--------------------------|----------------------|
+| Gemini API calls or external HTTP requests | Timeout value and error handling behavior (including JSON parse errors and transient failures) |
+| Google API calls (Drive, Sheets) | Timeout value and rate limit handling |
+| Error messages exposed in API responses | Sanitization — generic message in response body, raw error logged with Pino only |
+| Async operations triggered by HTTP requests | Concurrency guard — lock acquisition or queue check before starting |
+| Write operations to spreadsheets or Drive | Atomicity semantics — what happens if the write fails mid-way |
+| Repeated scan or match triggers | Idempotency check or deduplication guard |
+
 ---
 
-## PLANS.md Structure Template
+## PLANS.md Structure
 
-```markdown
-# Implementation Plan
+Read `references/plans-template.md` for the complete template.
 
-**Status:** IN_PROGRESS
-**Branch:** feat/ADVA-123-short-description
-**Issues:** ADVA-123, ADVA-456
-**Created:** YYYY-MM-DD
-**Last Updated:** YYYY-MM-DD
+**Source field:** `Backlog: ADVA-123, ADVA-456` (list the issue keys being planned)
 
-## Summary
+Include: Context Gathered (Codebase Analysis + MCP Context + Triage Results), Tasks, Post-Implementation Checklist, Plan Summary.
+Omit: Investigation subsection.
 
-Brief description of what this plan implements and why.
-
-## Issues
-
-### ADVA-123: Issue Title
-
-**Priority:** High/Medium/Low
-**Labels:** Bug, Feature, etc.
-**Description:** Copy or summarize the issue description from Linear.
-
-**Acceptance Criteria:**
-- [ ] Criterion 1
-- [ ] Criterion 2
-- [ ] Criterion 3
-
-### ADVA-456: Issue Title
-
-(Same structure for additional issues)
-
-## Prerequisites
-
-List anything that must be true before starting implementation:
-- [ ] Database migrations are up to date
-- [ ] Environment variables are configured
-- [ ] Dependencies are installed
-
-## Implementation Tasks
-
-### Task 1: [Short description]
-
-**Issue:** ADVA-123
-**Files:**
-- `src/lib/some-module.ts` (create)
-- `src/lib/__tests__/some-module.test.ts` (create)
-
-**TDD Steps:**
-
-1. **RED** - Write failing test:
-   - Create `src/lib/__tests__/some-module.test.ts`
-   - Test that [specific behavior]
-   - Run: `npm test -- some-module`
-   - Verify: Test fails with [expected error]
-
-2. **GREEN** - Make it pass:
-   - Create `src/lib/some-module.ts`
-   - Implement [specific logic]
-   - Run: `npm test -- some-module`
-   - Verify: Test passes
-
-3. **REFACTOR** - Clean up:
-   - Extract [shared logic] if needed
-   - Ensure naming follows project conventions
-
-**Notes:**
-- Use [specific pattern] from existing codebase
-- Reference: `src/lib/existing-example.ts`
-
-### Task 2: [Short description]
-
-(Same structure for each task)
-
-### Task N: Integration & Verification
-
-**Issue:** ADVA-123, ADVA-456
-**Files:**
-- Various files from previous tasks
-
-**Steps:**
-
-1. Run full test suite: `npm test`
-2. Run linter: `npm run lint`
-3. Run type checker: `npx tsc --noEmit`
-4. Manual verification steps:
-   - [ ] Step 1
-   - [ ] Step 2
-5. Build check: `npm run build`
-
-## MCP Usage During Implementation
-
-Document which MCP tools the implementer should use:
-
-| MCP Server | Tool | Purpose |
-|------------|------|---------|
-| Linear | `update_issue` | Move issues to "In Progress" when starting, "Done" when complete |
-| Railway | `list_services` | Check deployment configuration if needed |
-| Google Drive | `gsheets_read` | Verify spreadsheet format if relevant |
-
-## Error Handling
-
-| Error Scenario | Expected Behavior | Test Coverage |
-|---------------|-------------------|---------------|
-| Invalid input | Return validation error | Unit test |
-| Network failure | Retry with backoff | Integration test |
-| Auth failure | Redirect to login | E2E test |
-
-## Risks & Open Questions
-
-- [ ] Risk/Question 1: Description and mitigation
-- [ ] Risk/Question 2: Description and mitigation
-
-## Scope Boundaries
-
-**In Scope:**
-- Items explicitly mentioned in the issues
-
-**Out of Scope:**
-- Items NOT part of the current issues
-- Future enhancements mentioned but not planned
-```
+Weave each issue's acceptance criteria into the relevant task steps — do not create a separate Issues section.
 
 ---
 
@@ -484,58 +414,8 @@ If the user asks to also implement the plan, tell them to use the `plan-implemen
 
 ---
 
-## Termination: Git Workflow
+## Termination
 
-After writing `PLANS.md` and moving issues to Todo in Linear, complete the session:
-
-1. **Output the plan summary:**
-
-```
-✓ Plan created in PLANS.md
-✓ Linear issues moved to Todo: ADVA-123, ADVA-456, ...
-
-## Plan Summary
-
-**Objective:** [One sentence describing what this plan accomplishes]
-
-**Linear Issues:** [ADVA-123, ADVA-456, ...]
-
-**Approach:** [2-3 sentences describing the implementation strategy at a high level]
-
-**Scope:**
-- Tasks: [count]
-- Files affected: [estimated count]
-- New tests: [yes/no]
-
-**Key Decisions:**
-- [List from PLANS.md]
-
-**Dependencies/Prerequisites:**
-- [List from PLANS.md]
-
----
-
-Create a feature branch and commit the plan.
-```
-
-2. **Create a feature branch:**
-   ```bash
-   git checkout -b feat/ADVA-123-short-description
-   ```
-   Use the primary issue key in the branch name. If multiple issues, use the first one.
-
-3. **Stage and commit the plan** (no `Co-Authored-By` tags):
-   ```bash
-   git add PLANS.md
-   git commit -m "plan(ADVA-123): add implementation plan for [short description]
-
-   Issues: ADVA-123, ADVA-456
-   Status: Todo in Linear"
-   ```
-
-4. **Push the branch:**
-   ```bash
-   git push -u origin feat/ADVA-123-short-description
-   ```
+Follow the termination procedure in `references/plans-template.md`: output the Plan Summary, then create branch, commit (no `Co-Authored-By` tags), and push.
 
 Do not ask follow-up questions. Do not offer to implement. Output the summary and stop.

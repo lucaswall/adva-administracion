@@ -32,6 +32,7 @@ $ARGUMENTS should describe what to investigate:
 **IMPORTANT: Do NOT hardcode MCP names or folder paths.** Always read CLAUDE.md to discover:
 
 1. **Available MCP servers** - Look for "MCP SERVERS" section to find:
+   - Error tracking MCPs for crash/error investigation (use ToolSearch to load tools before calling them)
    - File/storage MCPs for accessing documents and data (Google Drive)
    - Deployment MCPs for logs and service status (Railway)
    - AI/LLM MCPs for prompt testing (Gemini)
@@ -222,7 +223,7 @@ When you finish investigating, output the investigation report.
 Investigation complete. Issues found that may need fixing.
 
 Would you like me to create a fix plan? Say 'yes' or run `/plan-fix` with the context above.
-(Fix plans will create Linear issues in Todo state)
+(Fix plans will create Linear issues with your project's issue prefix in Todo state)
 ```
 
 **If nothing wrong was found or no fix needed**, end with:

@@ -12,6 +12,7 @@ Refine vague Backlog issues into well-specified, actionable items through intera
 
 1. **Verify Linear MCP** — Call `mcp__linear__list_teams`. If unavailable, STOP and tell the user: "Linear MCP is not connected. Run `/mcp` to reconnect, then re-run this skill."
 2. **Read CLAUDE.md** — Load project conventions for context.
+3. **Discover team name** — Look for LINEAR INTEGRATION section in CLAUDE.md. If not found, use `mcp__linear__list_teams` to discover the team name dynamically. Store the discovered team name for use throughout the skill.
 
 ## Input Handling
 
@@ -24,7 +25,7 @@ Parse issue identifiers from `$ARGUMENTS` (e.g., `ADVA-123`, `ADVA-124`).
 ### Mode 2: No Arguments (picker mode)
 
 If `$ARGUMENTS` is empty or doesn't contain issue identifiers:
-1. Fetch all Backlog issues: `mcp__linear__list_issues` with `team: "ADVA Administracion"`, `state: "Backlog"`, `includeArchived: false`
+1. Fetch all Backlog issues: `mcp__linear__list_issues` with `team: [discovered team name]`, `state: "Backlog"`, `includeArchived: false`
 2. Score each issue's refinement readiness (see Refinement Score below)
 3. Assess each issue's drop likelihood (see Drop Assessment below)
 4. Display a markdown table with columns: #, Issue, Title, Priority, Labels, Score, Drop?
@@ -206,7 +207,7 @@ When the user confirms they're done refining:
 
 2. **Apply updates immediately:**
    - Use `mcp__linear__update_issue` for each updated issue (title, description, priority, labels)
-   - Use `mcp__linear__create_issue` for each new split issue with `team: "ADVA Administracion"`, `state: "Backlog"`, and proper labels/priority
+   - Use `mcp__linear__create_issue` for each new split issue with `team: [discovered team name]`, `state: "Backlog"`, and proper labels/priority
    - For canceled issues, follow the Cancellation Procedure below
    - For kept issues when other issues in the same session were canceled, follow the Vetted Marker below
 
@@ -230,7 +231,7 @@ The reason should be specific, e.g.:
 **CRITICAL: Linear MCP same-type state bug.** "Duplicate" and "Canceled" are both `type: canceled` in Linear. Passing `state: "Canceled"` by name silently no-ops if the issue is already in another canceled-type state. To reliably cancel issues, first fetch the team's statuses to get the Canceled state UUID:
 
 ```
-mcp__linear__list_issue_statuses(team: "ADVA Administracion")
+mcp__linear__list_issue_statuses(team: [discovered team name])
 ```
 
 Find the status with `name: "Canceled"` and use its `id` (UUID) in the update call:

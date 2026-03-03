@@ -41,6 +41,15 @@ User references findings from `investigate` skill:
 /add-to-backlog add the issues found by investigate
 ```
 
+### Mode 4: From Sentry
+User references Sentry crash/error reports:
+```
+/add-to-backlog the Sentry issues we found
+/add-to-backlog track the Sentry crash
+```
+
+When creating issues from Sentry findings, include the Sentry issue URL in the description under a `**Sentry Issue:**` section so downstream planning skills can track it.
+
 ## Pre-flight
 
 **Verify Linear MCP:** Call `mcp__linear__list_teams`. If unavailable, **STOP** and tell the user: "Linear MCP is not connected. Run `/mcp` to reconnect, then re-run this skill."
@@ -67,6 +76,9 @@ Structure:
 ```
 **Problem:**
 [What is wrong or missing - 1-2 sentences]
+
+**Sentry Issue:** (include only if originating from Sentry)
+[Sentry issue URL] — [event count] events, [user count] users, release [version]
 
 **Context:**
 [Where this occurs, affected files/areas - brief]
@@ -135,7 +147,7 @@ When user mentions investigation findings:
 ## Duplicate Detection
 
 Before creating, check existing Backlog:
-1. Query `mcp__linear__list_issues` with `team=ADVA Administracion, state=Backlog, includeArchived=false`
+1. Query `mcp__linear__list_issues` with `team=[discovered team name], state=Backlog, includeArchived=false`
 2. Compare proposed issues against existing titles/descriptions
 3. If similar issue exists:
    - Skip the duplicate automatically
@@ -145,7 +157,7 @@ Before creating, check existing Backlog:
 Use `mcp__linear__create_issue` for each issue (skip duplicates automatically):
 
 ```
-team: "ADVA Administracion"
+team: [Discovered team name from CLAUDE.md or mcp__linear__list_teams]
 state: "Backlog"
 title: "[Issue title]"
 description: "**Problem:**\n[description]\n\n**Context:**\n[context]\n\n**Impact:**\n[impact]\n\n**Implementation Hints:**\n[hints]"
@@ -212,7 +224,7 @@ Add CUIT validation. Create a function that takes a CUIT string and validates it
 After creating issues, output:
 
 ```
-✓ Created X issues in Linear Backlog:
+Created X issues in Linear Backlog:
 
 - ADVA-123: [Title] (Label, Priority)
 - ADVA-124: [Title] (Label, Priority)

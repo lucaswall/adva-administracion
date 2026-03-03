@@ -3,7 +3,7 @@ name: pr-creator
 description: GitHub PR creator that handles the full workflow - creates branch, commits changes, pushes, and creates PR. Use only when explicitly requested by the user. Analyzes ALL branch commits (not just local changes) for comprehensive PR descriptions.
 tools: Bash
 model: sonnet
-permissionMode: default
+permissionMode: bypassPermissions
 ---
 
 Create a complete PR: analyze branch → commit local changes → push → PR.

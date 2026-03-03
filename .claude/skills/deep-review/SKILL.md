@@ -14,8 +14,8 @@ ultrathink
 
 1. **Validate argument** — `$ARGUMENTS` is REQUIRED. If empty, STOP: "Please specify a target area to review. Example: `/deep-review matching`"
 2. **Verify Linear MCP** — Call `mcp__linear__list_teams`. If unavailable, STOP: "Linear MCP is not connected. Run `/mcp` to reconnect, then re-run."
-3. **Read CLAUDE.md** — Load project rules, conventions, and accepted patterns.
-4. **Query existing Backlog issues** — `mcp__linear__list_issues` with team "ADVA Administracion", state "Backlog". Record titles and file paths to avoid creating duplicates.
+3. **Read CLAUDE.md** — Load project rules, conventions, and accepted patterns. **Discover team name:** Look for LINEAR INTEGRATION section in CLAUDE.md. If not found, use `mcp__linear__list_teams` to discover the team name dynamically.
+4. **Query existing Backlog issues** — `mcp__linear__list_issues` with team [discovered team name], state "Backlog". Record titles and file paths to avoid creating duplicates.
 
 ## Scope Discovery
 
@@ -47,7 +47,7 @@ Read each entry point. For every import:
 
 Follow imports recursively until the full dependency tree is mapped.
 
-### Step 3: Map API endpoints
+### Step 3: Map data flows
 
 For any route handlers that invoke the target feature:
 - Extract the route path and HTTP method
@@ -117,7 +117,7 @@ For each finding, check against existing Backlog issues. Skip if a matching issu
 Use `mcp__linear__create_issue`:
 
 ```
-team: "ADVA Administracion"
+team: [discovered team name]
 state: "Backlog"
 title: "[Brief description]"
 priority: [1-4] (critical=1, high=2, medium=3, low=4)

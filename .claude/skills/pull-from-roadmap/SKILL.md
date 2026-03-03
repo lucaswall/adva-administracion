@@ -110,7 +110,7 @@ When the user decides on an action:
 ### If adding to backlog:
 
 1. Verify Linear MCP: call `mcp__linear__list_teams`. If unavailable, STOP: "Linear MCP not connected. Run `/mcp` to reconnect."
-2. Create Backlog issues in team "ADVA Administracion" following the add-to-backlog patterns (problem-focused descriptions, proper labels and priority)
+2. Create Backlog issues in the discovered team following the add-to-backlog patterns (problem-focused descriptions, proper labels and priority)
 3. After creation, ask: **"Remove this feature from the roadmap file?"**
 4. If confirmed -> run roadmap cleanup procedure
 
@@ -135,7 +135,7 @@ When the user decides on an action:
 
 When removing a feature from the roadmap:
 1. Read the roadmap file to get current content
-2. Delete the entire feature section (from heading through the separator after it)
+2. Delete the entire feature section (from `## Heading` through the `---` separator after it)
 3. Remove the feature's row from the Contents table at the top (if one exists)
 4. Check remaining features for cross-references to the removed feature — update or remove them
 5. Verify file structure is clean (no orphaned separators, no broken links)

@@ -102,7 +102,18 @@ Example arguments:
    - Existing issues → Check Linear for related issues or context
 6. **Generate plan** - Create TDD tasks with test-first approach
 7. **Write PLANS.md** - Overwrite with new plan
-8. **Create Linear issues** - Create issues in Todo state for each task
+8. **Validate plan against CLAUDE.md** - Re-read CLAUDE.md and cross-check each task for missing defensive specs: error handling on external calls, timeout values for Gemini and Google API calls, rate limit handling, edge cases (empty input, null values, partial results). Verify Result<T,E> pattern is used for all fallible operations. Fix any gaps before proceeding.
+9. **Cross-cutting requirements sweep** - Scan the entire plan for the patterns below. If a pattern appears in any task, verify the corresponding specification exists in that task's steps. If missing, add it before finalizing the plan.
+
+   | Pattern Detected in Plan | Required Specification |
+   |--------------------------|----------------------|
+   | Gemini API calls or external HTTP requests | Timeout value and error handling behavior (including JSON parse errors and transient failures) |
+   | Google API calls (Drive, Sheets) | Timeout value and rate limit handling |
+   | Error messages exposed in API responses | Sanitization — generic message in response body, raw error logged with Pino only |
+   | Async operations triggered by HTTP requests | Concurrency guard — lock acquisition or queue check before starting |
+   | Write operations to spreadsheets or Drive | Atomicity semantics — what happens if the write fails mid-way |
+   | Repeated scan or match triggers | Idempotency check or deduplication guard |
+10. **Create Linear issues** - Create issues in Todo state for each task
 
 ## Codebase Exploration Guidelines
 
@@ -124,77 +135,31 @@ Example arguments:
 
 ## PLANS.md Structure
 
-```markdown
-# Implementation Plan
+Read `references/plans-template.md` for the complete template.
 
-**Created:** YYYY-MM-DD
-**Source:** Inline request: [Summary of $ARGUMENTS]
-**Linear Issues:** [ADVA-123](https://linear.app/...), [ADVA-124](https://linear.app/...)
+**Source field:** `Inline request: [Summary of $ARGUMENTS]`
 
-## Context Gathered
+Include: Context Gathered (Codebase Analysis + MCP Context), Tasks, Post-Implementation Checklist, Plan Summary.
+Omit: Investigation subsection, Triage Results subsection.
 
-### Codebase Analysis
-- **Related files:** [files found through exploration]
-- **Existing patterns:** [patterns to follow]
-- **Test conventions:** [how tests are structured in this area]
+## Discovering Team Context
 
-### MCP Context (if applicable)
-- **MCPs used:** [which MCPs were consulted]
-- **Findings:** [relevant information discovered]
+Read CLAUDE.md to find the LINEAR INTEGRATION section. Look for:
+- **Team name** (e.g., "Team: 'ProjectName'")
+- **Issue prefix** (e.g., "Prefix: PROJ-xxx")
+- **State workflow** (e.g., "States: Backlog → Todo → In Progress → Review → Done")
+- **Project-specific URLs** (Linear workspace URL, etc.)
 
-## Original Plan
+If CLAUDE.md doesn't have a LINEAR INTEGRATION section, call `mcp__linear__list_teams` to discover the team name dynamically.
 
-### Task 1: [Name]
-**Linear Issue:** [ADVA-123](https://linear.app/...)
-
-1. Write test in [file].test.ts for [function/scenario]
-2. Run verifier (expect fail)
-3. Implement [function] in [file].ts
-4. Run verifier (expect pass)
-
-### Task 2: [Name]
-**Linear Issue:** [ADVA-124](https://linear.app/...)
-
-1. Write test...
-2. Run verifier...
-3. Implement...
-4. Run verifier...
-
-## Post-Implementation Checklist
-1. Run `bug-hunter` agent - Review changes for bugs
-2. Run `verifier` agent - Verify all tests pass and zero warnings
-
----
-
-## Plan Summary
-
-**Objective:** [One sentence describing what this plan accomplishes]
-
-**Request:** [Brief paraphrase of the original $ARGUMENTS]
-
-**Linear Issues:** [ADVA-123, ADVA-124, ...]
-
-**Approach:** [2-3 sentences describing the implementation strategy at a high level]
-
-**Scope:**
-- Tasks: [count]
-- Files affected: [estimated count]
-- New tests: [yes/no]
-
-**Key Decisions:**
-- [Important architectural or design decision 1]
-- [Important decision 2, if any]
-
-**Risks/Considerations:**
-- [Any risks or things to watch out for]
-```
+Store the discovered team name in a variable for use throughout the skill.
 
 ## Linear Issue Creation
 
 After writing PLANS.md, create a Linear issue for each task:
 
 1. Use `mcp__linear__create_issue` with:
-   - `team`: "ADVA Administracion"
+   - `team`: [Discovered team name from CLAUDE.md or `mcp__linear__list_teams`]
    - `title`: Task name
    - `description`: Task details from PLANS.md
    - `state`: "Todo"
@@ -295,50 +260,6 @@ If CLAUDE.md doesn't list MCPs, skip MCP context gathering.
 
 ## Termination
 
-When you finish writing PLANS.md (and creating Linear issues), output the plan summary followed by the completion message:
-
-```
-✓ Plan created in PLANS.md
-✓ Linear issues created in Todo: ADVA-123, ADVA-124, ...
-
-## Plan Summary
-
-**Objective:** [Copy from PLANS.md summary]
-
-**Request:** [Copy from PLANS.md summary]
-
-**Linear Issues:** [Copy from PLANS.md summary]
-
-**Approach:** [Copy from PLANS.md summary]
-
-**Scope:**
-- Tasks: [count]
-- Files affected: [estimated count]
-- New tests: [yes/no]
-
-**Key Decisions:**
-- [List from PLANS.md summary]
-
-**Risks/Considerations:**
-- [List from PLANS.md summary]
-
----
-
-Create a feature branch and commit the plan.
-```
-
-**Then execute git workflow:**
-
-1. Create a feature branch with proper naming:
-   - Use `feat/` prefix for new features
-   - Use `fix/` prefix for bug fixes
-   - Use `refactor/` prefix for refactoring
-   - Branch name should be kebab-case, derived from the plan objective
-   - Example: `feat/validate-cuit-modulo11`, `refactor/extract-common-parser-utils`
-
-2. Stage, commit (no `Co-Authored-By` tags), and push:
-```bash
-git checkout -b <type>/<task-description> && git add PLANS.md && git commit -m "plan: <task-description>" && git push -u origin <type>/<task-description>
-```
+Follow the termination procedure in `references/plans-template.md`: output the Plan Summary, then create branch, commit (no `Co-Authored-By` tags), and push.
 
 Do not ask follow-up questions. Do not offer to implement. Output the summary and stop.

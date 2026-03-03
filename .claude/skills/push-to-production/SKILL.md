@@ -192,19 +192,19 @@ Create a GitHub Release from the tag pushed in Phase 3.2. The release notes come
 First, write the release notes to a temporary file to avoid multi-line Bash command issues:
 
 ```
-Use the Write tool to create /tmp/release-notes.md with the extracted changelog content
+Use the Write tool to create release-notes.md with the extracted changelog content
 ```
 
 Then create the release using `--notes-file` (avoids multi-line `--notes` strings that break Bash permission patterns):
 
 ```bash
-gh release create "v<version>" --title "v<version>" --notes-file /tmp/release-notes.md --verify-tag
+gh release create "v<version>" --title "v<version>" --notes-file release-notes.md --verify-tag
 ```
 
 Clean up the temp file after:
 
 ```bash
-rm -f /tmp/release-notes.md
+rm -f release-notes.md
 ```
 
 **Flags reference:**
@@ -217,7 +217,7 @@ rm -f /tmp/release-notes.md
 **Error handling:** If `gh release create` fails, **do NOT stop the release**. Log a warning in the Phase 6 report:
 ```
 **Warning:** GitHub Release creation failed: [error message]. Create manually with:
-gh release create "v<version>" --title "v<version>" --notes-file /tmp/release-notes.md --verify-tag
+gh release create "v<version>" --title "v<version>" --notes-file release-notes.md --verify-tag
 ```
 
 The git tag and deploy already succeeded — the GitHub Release is cosmetic and can be created manually later.
