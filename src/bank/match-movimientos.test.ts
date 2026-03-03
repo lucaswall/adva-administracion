@@ -2186,12 +2186,12 @@ describe('exchange rate prefetch', () => {
           ],
         };
       }
-      if (range === 'Facturas Emitidas!A:S') {
+      if (range === 'Facturas Emitidas!A:T') {
         return {
           ok: true,
           value: [
-            ['fechaEmision', 'fileId', 'fileName', 'tipoComprobante', 'nroFactura', 'cuitReceptor', 'razonSocialReceptor', 'importeNeto', 'importeIva', 'importeTotal', 'moneda', 'concepto', 'processedAt', 'confidence', 'needsReview', 'matchedPagoFileId', 'matchConfidence', 'hasCuitMatch'],
-            ['2025-10-10', 'fact1', 'fact1.pdf', 'E', '00001-00000001', '20123456786', 'FRITO PLAY', '', '', '6750', 'USD', '', '2025-10-10T10:00:00Z', '0.95', 'NO', '', '', ''],
+            ['fechaEmision', 'fileId', 'fileName', 'tipoComprobante', 'nroFactura', 'cuitReceptor', 'razonSocialReceptor', 'importeNeto', 'importeIva', 'importeTotal', 'moneda', 'concepto', 'processedAt', 'confidence', 'needsReview', 'matchedPagoFileId', 'matchConfidence', 'hasCuitMatch', 'pagada', 'tipoDeCambio'],
+            ['2025-10-10', 'fact1', 'fact1.pdf', 'E', '00001-00000001', '20123456786', 'FRITO PLAY', '', '', '6750', 'USD', '', '2025-10-10T10:00:00Z', '0.95', 'NO', '', '', '', '', ''],
           ],
         };
       }
@@ -3481,7 +3481,7 @@ describe('pagada updates from movimientos matching', () => {
   });
 
   const FAC_REC_HEADERS = ['fechaemision', 'fileid', 'filename', 'tipocomprobante', 'nrofactura', 'cuitemisor', 'razonsocialemisor', 'importeneto', 'importeiva', 'importetotal', 'moneda', 'concepto', 'processedat', 'confidence', 'needsreview', 'matchedpagofileid', 'matchconfidence', 'hascuitmatch', 'pagada'];
-  const FAC_EMIT_HEADERS = ['fechaemision', 'fileid', 'filename', 'tipocomprobante', 'nrofactura', 'cuitreceptor', 'razonsocialreceptor', 'importeneto', 'importeiva', 'importetotal', 'moneda', 'concepto', 'processedat', 'confidence', 'needsreview', 'matchedpagofileid', 'matchconfidence', 'hascuitmatch', 'pagada'];
+  const FAC_EMIT_HEADERS = ['fechaemision', 'fileid', 'filename', 'tipocomprobante', 'nrofactura', 'cuitreceptor', 'razonsocialreceptor', 'importeneto', 'importeiva', 'importetotal', 'moneda', 'concepto', 'processedat', 'confidence', 'needsreview', 'matchedpagofileid', 'matchconfidence', 'hascuitmatch', 'pagada', 'tipodecambio'];
 
   function setupBase() {
     const mockFolderStructure = {
@@ -3546,12 +3546,12 @@ describe('pagada updates from movimientos matching', () => {
     setupBase();
 
     vi.mocked(getValues).mockImplementation(async (_id, range) => {
-      if (range === 'Facturas Emitidas!A:S') {
+      if (range === 'Facturas Emitidas!A:T') {
         return {
           ok: true,
           value: [
             FAC_EMIT_HEADERS,
-            ['2025-01-10', 'fac-emit-1', 'factura.pdf', 'B', '00001-00000001', '20123456786', 'CLIENTE SA', '', '', '1000', 'ARS', '', '', '0.95', 'NO', '', '', '', ''],
+            ['2025-01-10', 'fac-emit-1', 'factura.pdf', 'B', '00001-00000001', '20123456786', 'CLIENTE SA', '', '', '1000', 'ARS', '', '', '0.95', 'NO', '', '', '', '', ''],
           ],
         };
       }

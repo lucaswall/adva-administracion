@@ -600,7 +600,7 @@ function parseRetenciones(data: CellValue[][]): Array<Retencion & { row: number 
 async function loadControlIngresos(spreadsheetId: string): Promise<Result<IngresosData, Error>> {
   try {
     const [facturasResult, pagosResult, retencionesResult] = await Promise.all([
-      getValues(spreadsheetId, 'Facturas Emitidas!A:S'),
+      getValues(spreadsheetId, 'Facturas Emitidas!A:T'),
       getValues(spreadsheetId, 'Pagos Recibidos!A:Q'),
       getValues(spreadsheetId, 'Retenciones Recibidas!A:O'),
     ]);

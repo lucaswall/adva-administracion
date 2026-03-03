@@ -192,7 +192,7 @@ export async function storeFactura(
     if (fileIdCheck.found) {
       const renamedFileName = generateFacturaFileName(factura, documentType);
       const updateRow = buildFacturaRowFormatted(factura, documentType, renamedFileName);
-      const lastCol = documentType === 'factura_emitida' ? 'T' : 'T';
+      const lastCol = 'T';
       const updateResult = await updateRowsWithFormatting(spreadsheetId, [{
         range: `${sheetName}!A${fileIdCheck.rowIndex}:${lastCol}${fileIdCheck.rowIndex}`,
         values: updateRow,

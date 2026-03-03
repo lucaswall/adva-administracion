@@ -218,3 +218,69 @@
 - Spreadsheet column shift migration must handle production data correctly — insertDimension is the safe approach
 - Movimientos pagada sync adds cross-sheet writes — needs error handling that doesn't fail the main matching flow
 - Multiple banks could set pagada='SI' on the same factura — idempotent so no conflict
+
+---
+
+## Iteration 1
+
+**Implemented:** 2026-03-03
+**Method:** Agent team (4 workers, worktree-isolated)
+
+### Tasks Completed This Iteration
+- Task 1: Add pagada column to Facturas Emitidas schema and storage (ADV-169) — `FACTURA_EMITIDA_HEADERS` expanded to 20 cols, `pagada` at S, `tipoDeCambio` at T (worker-1)
+- Task 2: Add pagada handling to factura-pago matcher for Ingresos (ADV-170) — unified P:S range for match/unmatch in both sheet types (worker-1)
+- Task 3: Add NC matching for Facturas Emitidas (ADV-171) — `matchNCsWithFacturas` generalized with sheetName, cuitField, readRange, pagadaColumnLetter params; second call in matching orchestrator (worker-1)
+- Task 4: Add Cobros Pendientes dashboard sheet and sync service (ADV-172) — `COBROS_PENDIENTES_HEADERS` (10 cols), `syncCobrosPendientes` function, integrated after `syncPagosPendientes` (worker-2)
+- Task 5: Mark facturas as pagada from movimientos matching (ADV-173) — `PagadaUpdate` interface, batch-write pagada='SI' after detalle updates, MANUAL guard, controlIngresosId/controlEgresosId params added (worker-3)
+- Task 6: Startup migration for Facturas Emitidas pagada column (ADV-174) — `migrateFacturasEmitidasPagadaColumn` using insertDimension API, schema v5, `insertColumn` in sheets.ts (worker-4)
+- Task 7: Update documentation (ADV-175) — SPREADSHEET_FORMAT.md and CLAUDE.md updated with pagada, Cobros Pendientes, movimientos→pagada sync (worker-4)
+
+### Files Modified
+- `src/constants/spreadsheet-headers.ts` — pagada in FACTURA_EMITIDA_HEADERS, COBROS_PENDIENTES_HEADERS, DASHBOARD_OPERATIVO_SHEETS config
+- `src/constants/spreadsheet-headers.test.ts` — updated header count test
+- `src/processing/storage/factura-store.ts` — 20-col row for factura_emitida, A:T range
+- `src/processing/storage/factura-store.test.ts` — 4 new tests
+- `src/processing/matching/factura-pago-matcher.ts` — unified P:S match/unmatch for both sheets
+- `src/processing/matching/factura-pago-matcher.test.ts` — 2 new tests
+- `src/processing/matching/nc-factura-matcher.ts` — generalized with config params
+- `src/processing/matching/nc-factura-matcher.test.ts` — 3 new tests
+- `src/processing/matching/index.ts` — NC matching for Ingresos, syncCobrosPendientes call
+- `src/services/pagos-pendientes.ts` — syncCobrosPendientes function
+- `src/services/pagos-pendientes.test.ts` — 11 new tests
+- `src/bank/match-movimientos.ts` — PagadaUpdate collection, batch-write, A:T range fix
+- `src/bank/match-movimientos.test.ts` — 8 new tests, updated mocks for A:T range
+- `src/services/sheets.ts` — insertColumn function
+- `src/services/folder-structure.ts` — migrateFacturasEmitidasPagadaColumn
+- `src/services/folder-structure.test.ts` — 9 new tests
+- `src/services/migrations.ts` — v5 migration
+- `src/services/migrations.test.ts` — 2 new tests
+- `SPREADSHEET_FORMAT.md` — schema updates
+- `CLAUDE.md` — documentation updates
+
+### Linear Updates
+- ADV-169: Todo → In Progress → Review
+- ADV-170: Todo → In Progress → Review
+- ADV-171: Todo → In Progress → Review
+- ADV-172: Todo → In Progress → Review
+- ADV-173: Todo → In Progress → Review
+- ADV-174: Todo → Review
+- ADV-175: Todo → Review
+
+### Pre-commit Verification
+- bug-hunter: Found 1 HIGH bug (loadControlIngresos A:S→A:T range), 2 MEDIUM (dead ternary, case-sensitive headers). Fixed HIGH and dead code before proceeding.
+- verifier: All 1942 tests pass, zero warnings
+
+### Work Partition
+- Worker 1: Tasks 1, 2, 3 (schema + matching domain — headers, factura-store, factura-pago-matcher, nc-factura-matcher)
+- Worker 2: Task 4 (dashboard/sync domain — Cobros Pendientes service)
+- Worker 3: Task 5 (movimientos domain — pagada sync from bank movements)
+- Worker 4: Tasks 6, 7 (migration + docs domain — folder-structure, SPREADSHEET_FORMAT.md, CLAUDE.md)
+
+### Merge Summary
+- Worker 1: fast-forward (no conflicts)
+- Worker 4: merged cleanly (no conflicts, typecheck passed)
+- Worker 2: merged cleanly (auto-merged spreadsheet-headers.ts and index.ts, typecheck passed)
+- Worker 3: merged cleanly (no conflicts, typecheck passed)
+
+### Continuation Status
+All tasks completed.
