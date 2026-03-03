@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-03-03
+
+### Added
+- Payment tracking for issued invoices (Facturas Emitidas): a new `pagada` column marks invoices as paid when matched by a payment or bank movement
+- Cobros Pendientes dashboard: a new sheet listing unpaid issued invoices, mirroring the existing Pagos Pendientes sheet for received invoices
+- Bank movement matching now marks facturas as paid (`pagada='SI'`) in both Ingresos and Egresos when a movement is matched
+- NC/ND matching extended to Facturas Emitidas — credit/debit notes now cancel issued invoices the same way they already did for received invoices
+
+### Fixed
+- Pago displacement no longer clears a factura's paid status that was set by a Nota de Crédito
+- NC matching partial-write failure no longer leaves the NC permanently unmatched on subsequent runs
+
 ## [1.4.1] - 2026-02-26
 
 ### Fixed
@@ -94,7 +106,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Updated fastify to fix high-severity Content-Type body validation bypass and low-severity DoS vulnerability
 - Updated googleapis to v171, @google/clasp to v3, and resolved 6 npm audit vulnerabilities
 
-[Unreleased]: https://github.com/lucaswall/adva-administracion/compare/v1.4.1...HEAD
+[Unreleased]: https://github.com/lucaswall/adva-administracion/compare/v1.5.0...HEAD
+[1.5.0]: https://github.com/lucaswall/adva-administracion/compare/v1.4.1...v1.5.0
 [1.4.1]: https://github.com/lucaswall/adva-administracion/compare/v1.4.0...v1.4.1
 [1.4.0]: https://github.com/lucaswall/adva-administracion/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/lucaswall/adva-administracion/compare/v1.2.0...v1.3.0
