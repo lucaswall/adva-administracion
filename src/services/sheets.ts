@@ -843,6 +843,46 @@ export async function deleteSheet(
 }
 
 /**
+ * Inserts an empty column at the specified index, shifting existing columns right.
+ * Uses the Sheets API insertDimension request.
+ *
+ * @param spreadsheetId - Spreadsheet ID
+ * @param sheetId - Numeric sheet ID (from getSheetMetadata)
+ * @param columnIndex - 0-based column index where the new column will be inserted
+ * @returns Success or error
+ */
+export async function insertColumn(
+  spreadsheetId: string,
+  sheetId: number,
+  columnIndex: number
+): Promise<Result<void, Error>> {
+  return withQuotaRetry(async () => {
+    const sheets = await getSheetsService();
+    await sheets.spreadsheets.batchUpdate({
+      spreadsheetId,
+      requestBody: {
+        requests: [
+          {
+            insertDimension: {
+              range: {
+                sheetId,
+                dimension: 'COLUMNS',
+                startIndex: columnIndex,
+                endIndex: columnIndex + 1,
+              },
+              inheritFromBefore: false,
+            },
+          },
+        ],
+      },
+    });
+  }).then(result => {
+    if (!result.ok) return { ok: false, error: result.error };
+    return { ok: true, value: undefined };
+  });
+}
+
+/**
  * Helper to check if a value is a CellLink
  */
 function isCellLink(value: CellValueOrLink): value is CellLink {

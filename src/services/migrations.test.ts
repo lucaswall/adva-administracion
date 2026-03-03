@@ -12,6 +12,7 @@ vi.mock('./folder-structure.js', () => ({
   getCachedFolderStructure: vi.fn(),
   migrateTipoDeCambioHeaders: vi.fn(),
   migrateArchivosProcesadosHeaders: vi.fn(),
+  migrateFacturasEmitidasPagadaColumn: vi.fn(),
 }));
 
 vi.mock('./schema-version.js', () => ({
@@ -28,7 +29,7 @@ vi.mock('../utils/logger.js', () => ({
 
 import { migrateMovimientosColumns, migrateDashboardProcessedAt, runStartupMigrations, CURRENT_SCHEMA_VERSION } from './migrations.js';
 import { getValues, batchUpdate, getSheetMetadata, updateRowsWithFormatting, getSpreadsheetTimezone } from './sheets.js';
-import { getCachedFolderStructure, migrateTipoDeCambioHeaders, migrateArchivosProcesadosHeaders } from './folder-structure.js';
+import { getCachedFolderStructure, migrateTipoDeCambioHeaders, migrateArchivosProcesadosHeaders, migrateFacturasEmitidasPagadaColumn } from './folder-structure.js';
 import { readSchemaVersion, writeSchemaVersion } from './schema-version.js';
 
 beforeEach(() => {
@@ -464,6 +465,8 @@ describe('runStartupMigrations', () => {
       value: [['matchedFileId', 'matchedType', 'detalle']],
     });
     vi.mocked(updateRowsWithFormatting).mockResolvedValue({ ok: true, value: undefined });
+    // v5: pagada column migration
+    vi.mocked(migrateFacturasEmitidasPagadaColumn).mockResolvedValue({ ok: true, value: undefined });
     vi.mocked(writeSchemaVersion).mockResolvedValue({ ok: true, value: 'file-id' });
 
     await runStartupMigrations();
@@ -497,7 +500,7 @@ describe('runStartupMigrations', () => {
     expect(migrateArchivosProcesadosHeaders).not.toHaveBeenCalled();
   });
 
-  it('should run all 4 migrations when version is 0 and fileId exists (explicit run)', async () => {
+  it('should run all 5 migrations when version is 0 and fileId exists (explicit run)', async () => {
     vi.mocked(getCachedFolderStructure).mockReturnValue(mockFolderStructure);
     vi.mocked(readSchemaVersion).mockResolvedValue({
       ok: true,
@@ -518,6 +521,8 @@ describe('runStartupMigrations', () => {
     });
     // v4: dashboard processedAt
     vi.mocked(updateRowsWithFormatting).mockResolvedValue({ ok: true, value: undefined });
+    // v5: facturas emitidas pagada column
+    vi.mocked(migrateFacturasEmitidasPagadaColumn).mockResolvedValue({ ok: true, value: undefined });
     vi.mocked(writeSchemaVersion).mockResolvedValue({ ok: true, value: 'file-id' });
 
     await runStartupMigrations();
@@ -528,7 +533,26 @@ describe('runStartupMigrations', () => {
     expect(migrateArchivosProcesadosHeaders).toHaveBeenCalledTimes(1);
     // v3: movimientos migration runs
     expect(getSheetMetadata).toHaveBeenCalled();
+    // v5: pagada column migration
+    expect(migrateFacturasEmitidasPagadaColumn).toHaveBeenCalledWith('ingresos-id');
     // Version updated
+    expect(writeSchemaVersion).toHaveBeenCalledWith('root-id', CURRENT_SCHEMA_VERSION, 'file-id');
+  });
+
+  it('should run only v5 migration when version is 4', async () => {
+    vi.mocked(getCachedFolderStructure).mockReturnValue(mockFolderStructure);
+    vi.mocked(readSchemaVersion).mockResolvedValue({
+      ok: true,
+      value: { version: 4, fileId: 'file-id' },
+    });
+    vi.mocked(migrateFacturasEmitidasPagadaColumn).mockResolvedValue({ ok: true, value: undefined });
+    vi.mocked(writeSchemaVersion).mockResolvedValue({ ok: true, value: 'file-id' });
+
+    await runStartupMigrations();
+
+    expect(migrateTipoDeCambioHeaders).not.toHaveBeenCalled();
+    expect(migrateArchivosProcesadosHeaders).not.toHaveBeenCalled();
+    expect(migrateFacturasEmitidasPagadaColumn).toHaveBeenCalledWith('ingresos-id');
     expect(writeSchemaVersion).toHaveBeenCalledWith('root-id', CURRENT_SCHEMA_VERSION, 'file-id');
   });
 

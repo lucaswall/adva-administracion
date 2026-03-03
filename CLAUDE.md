@@ -546,7 +546,7 @@ ROOT/
 
 See `SPREADSHEET_FORMAT.md` for complete schema.
 
-- **Control de Ingresos**: Facturas Emitidas (19 cols), Pagos Recibidos (17 cols), Retenciones Recibidas (15 cols)
+- **Control de Ingresos**: Facturas Emitidas (20 cols, A:T), Pagos Recibidos (17 cols), Retenciones Recibidas (15 cols)
 - **Control de Egresos**: Facturas Recibidas (20 cols), Pagos Enviados (17 cols), Recibos (18 cols)
 - **Control de Resumenes**: 3 distinct schemas based on document type:
   - `resumen_bancario`: 12 cols (A:L) with `periodo` (YYYY-MM) as first column, `moneda` (ARS/USD), includes `balanceOk` and `balanceDiff` columns for validation
@@ -555,7 +555,7 @@ See `SPREADSHEET_FORMAT.md` for complete schema.
   - `periodo` format matches Movimientos sheet names (YYYY-MM derived from fechaHasta)
   - Rows sorted by `periodo` ascending (oldest first)
 - **Movimientos Bancario**: 9 cols (A:I) with running balance formulas - `saldo` (parsed from PDF), `saldoCalculado` (computed formula), `matchedFileId` (fileId of matched document), `matchedType` (AUTO/MANUAL/empty), `detalle` (human-readable match description)
-- **Dashboard**: Pagos Pendientes (10 cols), API Mensual (7 cols), Uso de API (12 cols)
+- **Dashboard**: Pagos Pendientes (10 cols), Cobros Pendientes (10 cols), API Mensual (7 cols), Uso de API (12 cols)
 
 **Principles:**
 - Store counterparty info only, ADVA's role is implicit
@@ -609,3 +609,10 @@ Better matches replace existing ones. Quality comparison: tier → date proximit
 
 ### Cross-Currency (USD→ARS)
 Exchange rates from ArgentinaDatos API, ±5% tolerance. Cross-currency caps: Tier 1-3 → MEDIUM, Tier 4 → LOW, Tier 5 → LOW.
+
+### Movimientos → Pagada Sync
+After matching bank movements, facturas (both emitidas and recibidas) matched from movimientos data are marked `pagada='SI'` in their Control sheets:
+- **Facturas Emitidas** matched via movimientos → `pagada = "SI"` in Control de Ingresos
+- **Facturas Recibidas** matched via movimientos → `pagada = "SI"` in Control de Egresos
+
+This sync runs as part of `matchAllMovimientos`. Cobros Pendientes and Pagos Pendientes are re-synced immediately after the update.
