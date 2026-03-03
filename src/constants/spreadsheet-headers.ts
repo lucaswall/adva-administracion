@@ -469,6 +469,20 @@ export const PAGOS_PENDIENTES_HEADERS = [
   'concepto',
 ];
 
+/** Headers for Cobros Pendientes sheet - uncollected invoices from Control de Ingresos */
+export const COBROS_PENDIENTES_HEADERS = [
+  'fechaEmision',
+  'fileId',
+  'fileName',
+  'tipoComprobante',
+  'nroFactura',
+  'cuitReceptor',
+  'razonSocialReceptor',
+  'importeTotal',
+  'moneda',
+  'concepto',
+];
+
 /**
  * Required sheets for Dashboard Operativo Contable spreadsheet
  * Tracks Gemini API token usage, costs, and pending payments
@@ -477,6 +491,14 @@ export const DASHBOARD_OPERATIVO_SHEETS: SheetConfig[] = [
   {
     title: 'Pagos Pendientes',
     headers: PAGOS_PENDIENTES_HEADERS,
+    numberFormats: new Map([
+      [0, { type: 'date' }],                    // fechaEmision
+      [7, { type: 'currency', decimals: 2 }],   // importeTotal
+    ]),
+  },
+  {
+    title: 'Cobros Pendientes',
+    headers: COBROS_PENDIENTES_HEADERS,
     numberFormats: new Map([
       [0, { type: 'date' }],                    // fechaEmision
       [7, { type: 'currency', decimals: 2 }],   // importeTotal
