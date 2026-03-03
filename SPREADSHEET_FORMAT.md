@@ -16,7 +16,7 @@ Dual control spreadsheets based on money flow direction:
 
 Located at root: `Control de Ingresos.gsheet`
 
-### Facturas Emitidas (19 columns, A:S)
+### Facturas Emitidas (20 columns, A:T)
 
 Invoices FROM ADVA (ADVA is emisor). ADVA info is implicit; only receptor (counterparty) stored.
 
@@ -40,9 +40,12 @@ Invoices FROM ADVA (ADVA is emisor). ADVA info is implicit; only receptor (count
 | P | matchedPagoFileId | string | Linked Pago Recibido fileId |
 | Q | matchConfidence | enum | HIGH\|MEDIUM\|LOW\|MANUAL |
 | R | hasCuitMatch | boolean | Match based on CUIT |
-| S | tipoDeCambio | number | Exchange rate for USD invoices (optional) |
+| S | pagada | enum | SI\|NO - Payment received status |
+| T | tipoDeCambio | number | Exchange rate for USD invoices (optional) |
 
 Rows sorted by `fechaEmision` descending after insert.
+
+**Schema migration:** Column S (`pagada`) was added in ADV-167, shifting `tipoDeCambio` from S to T. The startup migration (`migrateFacturasEmitidasPagadaColumn`) inserts the column automatically using the Sheets API `insertDimension` to preserve existing `tipoDeCambio` values.
 
 ### Pagos Recibidos (17 columns, A:Q)
 
@@ -303,6 +306,14 @@ When a new potential match is found for a movimiento that already has a match:
 3. Replace if new candidate is strictly better
 4. Keep existing if equal or worse quality (no unnecessary churn)
 
+**Pagada Sync:**
+
+After matching bank movements, facturas that are matched from movimientos data are automatically marked as paid in their Control sheets:
+- **Facturas Emitidas** matched via movimientos → `pagada = "SI"` written to Control de Ingresos
+- **Facturas Recibidas** matched via movimientos → `pagada = "SI"` written to Control de Egresos
+
+This sync runs as part of `matchAllMovimientos` (triggered after every scan and via `/api/match-movimientos`). Only `AUTO`/`MANUAL` matched facturas in the movimientos `matchedFileId` column are considered. The Cobros Pendientes and Pagos Pendientes dashboard sheets are re-synced immediately after the pagada update.
+
 **Date Filtering:**
 - Only processes movements from current year and previous year
 - Month sheet names in YYYY-MM format
@@ -339,6 +350,25 @@ Unpaid invoices from Control de Egresos. Automatically synced after matching.
 | J | concepto | string | Brief description (optional) |
 
 Auto-synced from Facturas Recibidas where `pagada != "SI"`.
+
+### Cobros Pendientes (10 columns, A:J)
+
+Uncollected invoices from Control de Ingresos. Automatically synced after matching.
+
+| Column | Field | Type | Description |
+|--------|-------|------|-------------|
+| A | fechaEmision | date | Issue date (YYYY-MM-DD) |
+| B | fileId | string | Google Drive file ID |
+| C | fileName | string | File name |
+| D | tipoComprobante | enum | A\|B\|C\|E\|NC\|ND |
+| E | nroFactura | string | Full invoice number |
+| F | cuitReceptor | string | Client CUIT (11 digits) |
+| G | razonSocialReceptor | string | Client business name |
+| H | importeTotal | currency | Total amount |
+| I | moneda | enum | ARS\|USD |
+| J | concepto | string | Brief description (optional) |
+
+Auto-synced from Facturas Emitidas where `pagada != "SI"`.
 
 ### API Mensual (8 columns, A:H)
 

@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { syncPagosPendientes } from './pagos-pendientes.js';
+import { syncPagosPendientes, syncCobrosPendientes } from './pagos-pendientes.js';
 import * as sheets from './sheets.js';
 
 // Mock the sheets service
@@ -581,7 +581,7 @@ describe('syncPagosPendientes', () => {
     expect(fechaEmisionWritten).toBe('2025-12-02');
   });
 
-  describe('ADV-13: Data loss prevention', () => {
+  describe('ADV-13: Data loss prevention (pagos)', () => {
     it('should clear old data before writing new data', async () => {
       // Track order of operations
       const operationOrder: string[] = [];
@@ -700,6 +700,340 @@ describe('syncPagosPendientes', () => {
         'egresos123',
         'Facturas Recibidas!A:S'
       );
+    });
+  });
+});
+
+// Facturas Emitidas header row (after pagada column added by worker-1)
+const FACTURAS_EMITIDAS_HEADERS = [
+  'fechaEmision', 'fileId', 'fileName', 'tipoComprobante', 'nroFactura',
+  'cuitReceptor', 'razonSocialReceptor', 'importeNeto', 'importeIva',
+  'importeTotal', 'moneda', 'concepto', 'processedAt', 'confidence',
+  'needsReview', 'matchedPagoFileId', 'matchConfidence', 'hasCuitMatch',
+  'pagada', 'tipoDeCambio',
+];
+
+describe('syncCobrosPendientes', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('should sync unpaid facturas emitidas to Cobros Pendientes', async () => {
+    const facturasData = [
+      FACTURAS_EMITIDAS_HEADERS,
+      // Unpaid factura A (pagada = NO)
+      ['2024-01-15', 'file123', 'Factura-001.pdf', 'FA', '00001-00000001', '20123456786',
+       'TEST SA', '1000', '210', '1210', 'ARS', 'Servicios',
+       '2024-01-16T10:00:00Z', '0.95', 'NO', '', '', 'NO', 'NO', ''],
+      // Paid factura (pagada = SI) — should be excluded
+      ['2024-01-20', 'file456', 'Factura-002.pdf', 'FA', '00001-00000002', '27234567891',
+       'EMPRESA UNO SA', '2000', '420', '2420', 'USD', 'Productos',
+       '2024-01-21T10:00:00Z', '0.98', 'NO', 'pago123', 'HIGH', 'YES', 'SI', ''],
+      // Unpaid factura B (pagada = empty)
+      ['2024-01-25', 'file789', 'Factura-003.pdf', 'FA', '00001-00000003', '20111111119',
+       'Juan Perez', '500', '105', '605', 'ARS', 'Consultoría',
+       '2024-01-26T10:00:00Z', '0.92', 'YES', '', '', 'NO', '', ''],
+    ];
+
+    vi.mocked(sheets.getValues).mockResolvedValue({ ok: true, value: facturasData });
+    vi.mocked(sheets.clearSheetData).mockResolvedValue({ ok: true, value: undefined });
+    vi.mocked(sheets.setValues).mockResolvedValue({ ok: true, value: 20 });
+
+    const result = await syncCobrosPendientes('ingresos123', 'dashboard456');
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value).toBe(2); // 2 unpaid facturas
+    }
+
+    // Should read from Facturas Emitidas (Ingresos) with range A:T (20 cols)
+    expect(sheets.getValues).toHaveBeenCalledWith('ingresos123', 'Facturas Emitidas!A:T');
+
+    // Should clear Cobros Pendientes sheet
+    expect(sheets.clearSheetData).toHaveBeenCalledWith('dashboard456', 'Cobros Pendientes');
+
+    // Should write to Cobros Pendientes
+    expect(sheets.setValues).toHaveBeenCalledWith(
+      'dashboard456',
+      'Cobros Pendientes!A2:J',
+      [
+        ['2024-01-15', 'file123', 'Factura-001.pdf', 'FA', '00001-00000001',
+         '20123456786', 'TEST SA', '1210', 'ARS', 'Servicios'],
+        ['2024-01-25', 'file789', 'Factura-003.pdf', 'FA', '00001-00000003',
+         '20111111119', 'Juan Perez', '605', 'ARS', 'Consultoría'],
+      ]
+    );
+  });
+
+  it('should use cuitReceptor and razonSocialReceptor (not Emisor)', async () => {
+    const facturasData = [
+      FACTURAS_EMITIDAS_HEADERS,
+      ['2024-01-15', 'file123', 'Factura-001.pdf', 'FA', '00001-00000001',
+       '20123456786', 'TEST SA', '1000', '210', '1210', 'ARS', 'Servicios',
+       '2024-01-16T10:00:00Z', '0.95', 'NO', '', '', 'NO', 'NO', ''],
+    ];
+
+    vi.mocked(sheets.getValues).mockResolvedValue({ ok: true, value: facturasData });
+    vi.mocked(sheets.clearSheetData).mockResolvedValue({ ok: true, value: undefined });
+    vi.mocked(sheets.setValues).mockResolvedValue({ ok: true, value: 10 });
+
+    await syncCobrosPendientes('ingresos123', 'dashboard456');
+
+    // Column F = cuitReceptor, column G = razonSocialReceptor
+    expect(sheets.setValues).toHaveBeenCalledWith(
+      'dashboard456',
+      'Cobros Pendientes!A2:J',
+      [
+        [
+          '2024-01-15',       // fechaEmision
+          'file123',          // fileId
+          'Factura-001.pdf',  // fileName
+          'FA',               // tipoComprobante
+          '00001-00000001',   // nroFactura
+          '20123456786',      // cuitReceptor (not cuitEmisor)
+          'TEST SA',          // razonSocialReceptor (not razonSocialEmisor)
+          '1210',             // importeTotal
+          'ARS',              // moneda
+          'Servicios',        // concepto
+        ],
+      ]
+    );
+  });
+
+  it('should exclude facturas with pagada=SI', async () => {
+    const facturasData = [
+      FACTURAS_EMITIDAS_HEADERS,
+      // All paid
+      ['2024-01-20', 'file456', 'Factura-002.pdf', 'FA', '00001-00000002', '27234567891',
+       'EMPRESA UNO SA', '2000', '420', '2420', 'USD', 'Productos',
+       '2024-01-21T10:00:00Z', '0.98', 'NO', 'pago123', 'HIGH', 'YES', 'SI', ''],
+    ];
+
+    vi.mocked(sheets.getValues).mockResolvedValue({ ok: true, value: facturasData });
+    vi.mocked(sheets.clearSheetData).mockResolvedValue({ ok: true, value: undefined });
+
+    const result = await syncCobrosPendientes('ingresos123', 'dashboard456');
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value).toBe(0);
+    }
+
+    expect(sheets.clearSheetData).toHaveBeenCalledWith('dashboard456', 'Cobros Pendientes');
+    expect(sheets.setValues).not.toHaveBeenCalled();
+  });
+
+  it('should exclude NC and ND tipoComprobante', async () => {
+    const facturasData = [
+      FACTURAS_EMITIDAS_HEADERS,
+      // Valid unpaid factura — should be included
+      ['2024-01-10', 'file001', 'Factura-FA.pdf', 'FA', '00001-00000001', '20123456786',
+       'TEST SA', '1000', '210', '1210', 'ARS', 'Servicios',
+       '2024-01-11T10:00:00Z', '0.95', 'NO', '', '', 'NO', 'NO', ''],
+      // NC A — should be excluded even if unpaid
+      ['2024-01-12', 'file002', 'NC-A.pdf', 'NC A', '00001-00000002', '20123456786',
+       'TEST SA', '-100', '-21', '-121', 'ARS', 'Nota crédito',
+       '2024-01-13T10:00:00Z', '0.95', 'NO', '', '', 'NO', 'NO', ''],
+      // NC B — should be excluded
+      ['2024-01-13', 'file003', 'NC-B.pdf', 'NC B', '00001-00000003', '20123456786',
+       'TEST SA', '-200', '-42', '-242', 'ARS', 'Nota crédito',
+       '2024-01-14T10:00:00Z', '0.95', 'NO', '', '', 'NO', 'NO', ''],
+      // ND A — should be excluded
+      ['2024-01-14', 'file004', 'ND-A.pdf', 'ND A', '00001-00000004', '20123456786',
+       'TEST SA', '50', '10.5', '60.5', 'ARS', 'Nota débito',
+       '2024-01-15T10:00:00Z', '0.95', 'NO', '', '', 'NO', 'NO', ''],
+      // FB (factura B) unpaid — should be included
+      ['2024-01-15', 'file005', 'Factura-FB.pdf', 'FB', '00001-00000005', '27234567891',
+       'EMPRESA UNO SA', '500', '0', '500', 'ARS', 'Honorarios',
+       '2024-01-16T10:00:00Z', '0.97', 'NO', '', '', 'NO', 'NO', ''],
+    ];
+
+    vi.mocked(sheets.getValues).mockResolvedValue({ ok: true, value: facturasData });
+    vi.mocked(sheets.clearSheetData).mockResolvedValue({ ok: true, value: undefined });
+    vi.mocked(sheets.setValues).mockResolvedValue({ ok: true, value: 20 });
+
+    const result = await syncCobrosPendientes('ingresos123', 'dashboard456');
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value).toBe(2); // Only FA and FB, not NC A, NC B, ND A
+    }
+
+    const setValuesCall = vi.mocked(sheets.setValues).mock.calls[0];
+    const writtenRows = setValuesCall[2];
+    // Verify only FA and FB were written (not NC or ND)
+    expect(writtenRows).toHaveLength(2);
+    expect(writtenRows[0][3]).toBe('FA');
+    expect(writtenRows[1][3]).toBe('FB');
+  });
+
+  it('should sort unpaid facturas emitidas by fechaEmision ascending', async () => {
+    const facturasData = [
+      FACTURAS_EMITIDAS_HEADERS,
+      // Jan 25 (newest — added first)
+      ['2024-01-25', 'file789', 'Factura-003.pdf', 'FA', '00001-00000003', '20111111119',
+       'CLIENTE C', '500', '105', '605', 'ARS', 'Third',
+       '2024-01-26T10:00:00Z', '0.92', 'NO', '', '', 'NO', 'NO', ''],
+      // Jan 10 (oldest — added second)
+      ['2024-01-10', 'file123', 'Factura-001.pdf', 'FA', '00001-00000001', '20123456786',
+       'CLIENTE A', '1000', '210', '1210', 'ARS', 'First',
+       '2024-01-11T10:00:00Z', '0.95', 'NO', '', '', 'NO', 'NO', ''],
+      // Jan 18 (middle — added third)
+      ['2024-01-18', 'file456', 'Factura-002.pdf', 'FB', '00001-00000002', '27234567891',
+       'CLIENTE B', '2000', '420', '2420', 'ARS', 'Second',
+       '2024-01-19T10:00:00Z', '0.98', 'NO', '', '', 'NO', 'NO', ''],
+    ];
+
+    vi.mocked(sheets.getValues).mockResolvedValue({ ok: true, value: facturasData });
+    vi.mocked(sheets.clearSheetData).mockResolvedValue({ ok: true, value: undefined });
+    vi.mocked(sheets.setValues).mockResolvedValue({ ok: true, value: 30 });
+
+    const result = await syncCobrosPendientes('ingresos123', 'dashboard456');
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value).toBe(3);
+    }
+
+    expect(sheets.setValues).toHaveBeenCalledWith(
+      'dashboard456',
+      'Cobros Pendientes!A2:J',
+      [
+        // Jan 10 (oldest first)
+        ['2024-01-10', 'file123', 'Factura-001.pdf', 'FA', '00001-00000001',
+         '20123456786', 'CLIENTE A', '1210', 'ARS', 'First'],
+        // Jan 18 (middle)
+        ['2024-01-18', 'file456', 'Factura-002.pdf', 'FB', '00001-00000002',
+         '27234567891', 'CLIENTE B', '2420', 'ARS', 'Second'],
+        // Jan 25 (newest last)
+        ['2024-01-25', 'file789', 'Factura-003.pdf', 'FA', '00001-00000003',
+         '20111111119', 'CLIENTE C', '605', 'ARS', 'Third'],
+      ]
+    );
+  });
+
+  it('should handle empty facturas emitidas (only header row)', async () => {
+    vi.mocked(sheets.getValues).mockResolvedValue({
+      ok: true,
+      value: [FACTURAS_EMITIDAS_HEADERS],
+    });
+
+    const result = await syncCobrosPendientes('ingresos123', 'dashboard456');
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value).toBe(0);
+    }
+
+    expect(sheets.clearSheetData).not.toHaveBeenCalled();
+    expect(sheets.setValues).not.toHaveBeenCalled();
+  });
+
+  it('should return error when pagada column is missing', async () => {
+    // Header without pagada column
+    const facturasData = [
+      ['fechaEmision', 'fileId', 'fileName', 'tipoComprobante', 'nroFactura',
+       'cuitReceptor', 'razonSocialReceptor', 'importeNeto', 'importeIva', 'importeTotal',
+       'moneda', 'concepto'],
+      ['2024-01-15', 'file123', 'Factura-001.pdf', 'FA', '00001-00000001',
+       '20123456786', 'TEST SA', '1000', '210', '1210', 'ARS', 'Servicios'],
+    ];
+
+    vi.mocked(sheets.getValues).mockResolvedValue({ ok: true, value: facturasData });
+
+    const result = await syncCobrosPendientes('ingresos123', 'dashboard456');
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.message).toContain('pagada');
+    }
+  });
+
+  it('should handle errors when reading facturas emitidas', async () => {
+    vi.mocked(sheets.getValues).mockResolvedValue({
+      ok: false,
+      error: new Error('Failed to read sheet'),
+    });
+
+    const result = await syncCobrosPendientes('ingresos123', 'dashboard456');
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.message).toBe('Failed to read sheet');
+    }
+  });
+
+  it('should handle errors when clearing Cobros Pendientes sheet', async () => {
+    const facturasData = [
+      FACTURAS_EMITIDAS_HEADERS,
+      ['2024-01-15', 'file123', 'Factura-001.pdf', 'FA', '00001-00000001', '20123456786',
+       'TEST SA', '1000', '210', '1210', 'ARS', 'Servicios',
+       '2024-01-16T10:00:00Z', '0.95', 'NO', '', '', 'NO', 'NO', ''],
+    ];
+
+    vi.mocked(sheets.getValues).mockResolvedValue({ ok: true, value: facturasData });
+    vi.mocked(sheets.clearSheetData).mockResolvedValue({
+      ok: false,
+      error: new Error('Failed to clear sheet'),
+    });
+
+    const result = await syncCobrosPendientes('ingresos123', 'dashboard456');
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.message).toBe('Failed to clear sheet');
+    }
+  });
+
+  it('should handle errors when setting values', async () => {
+    const facturasData = [
+      FACTURAS_EMITIDAS_HEADERS,
+      ['2024-01-15', 'file123', 'Factura-001.pdf', 'FA', '00001-00000001', '20123456786',
+       'TEST SA', '1000', '210', '1210', 'ARS', 'Servicios',
+       '2024-01-16T10:00:00Z', '0.95', 'NO', '', '', 'NO', 'NO', ''],
+    ];
+
+    vi.mocked(sheets.getValues).mockResolvedValue({ ok: true, value: facturasData });
+    vi.mocked(sheets.clearSheetData).mockResolvedValue({ ok: true, value: undefined });
+    vi.mocked(sheets.setValues).mockResolvedValue({
+      ok: false,
+      error: new Error('Failed to set values'),
+    });
+
+    const result = await syncCobrosPendientes('ingresos123', 'dashboard456');
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.message).toBe('Failed to set values');
+    }
+  });
+
+  describe('ADV-13: Data loss prevention (cobros)', () => {
+    it('should clear old data before writing new data', async () => {
+      const operationOrder: string[] = [];
+
+      const facturasData = [
+        FACTURAS_EMITIDAS_HEADERS,
+        ['2024-01-15', 'file123', 'Factura-001.pdf', 'FA', '00001-00000001', '20123456786',
+         'TEST SA', '1000', '210', '1210', 'ARS', 'Servicios',
+         '2024-01-16T10:00:00Z', '0.95', 'NO', '', '', 'NO', 'NO', ''],
+      ];
+
+      vi.mocked(sheets.getValues).mockResolvedValue({ ok: true, value: facturasData });
+
+      vi.mocked(sheets.clearSheetData).mockImplementation(async () => {
+        operationOrder.push('clear');
+        return { ok: true, value: undefined };
+      });
+
+      vi.mocked(sheets.setValues).mockImplementation(async () => {
+        operationOrder.push('setValues');
+        return { ok: true, value: 10 };
+      });
+
+      await syncCobrosPendientes('ingresos123', 'dashboard456');
+
+      expect(operationOrder).toEqual(['clear', 'setValues']);
     });
   });
 });

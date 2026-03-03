@@ -11,7 +11,7 @@ import { debug, info, warn } from '../../utils/logger.js';
 import { getCorrelationId } from '../../utils/correlation.js';
 
 /**
- * Represents a row from Facturas Recibidas sheet
+ * Represents a row from Facturas Recibidas or Facturas Emitidas sheet
  */
 interface FacturaRow {
   /** Row number (1-indexed, including header) */
@@ -24,8 +24,8 @@ interface FacturaRow {
   tipoComprobante: string;
   /** Invoice number (e.g., "0002-00003160") */
   nroFactura: string;
-  /** CUIT of emisor (supplier) */
-  cuitEmisor: string;
+  /** CUIT of counterparty — cuitEmisor for Recibidas, cuitReceptor for Emitidas (both at column F/index 5) */
+  cuit: string;
   /** Total amount */
   importeTotal: number;
   /** Concepto/description */
@@ -102,28 +102,37 @@ export function extractReferencedFacturaNumber(concepto: string): string | null 
  * Matches NC documents with their original facturas
  * When an NC fully cancels a factura (same CUIT, same amount), marks both as paid
  *
- * @param spreadsheetId - Control de Egresos spreadsheet ID
+ * @param spreadsheetId - Spreadsheet ID (Control de Egresos or Control de Ingresos)
+ * @param sheetName - Sheet to match against ('Facturas Recibidas' or 'Facturas Emitidas')
+ * @param _cuitField - CUIT field label ('cuitEmisor' for Recibidas, 'cuitReceptor' for Emitidas) — documentation only, both sheets store counterparty CUIT at column F/index 5
+ * @param readRange - Column range to read ('A:S' for Recibidas with pagada last, 'A:T' for Emitidas with tipoDeCambio after pagada)
+ * @param pagadaColumnLetter - Spreadsheet column letter for pagada ('S' for both sheet types)
  * @returns Number of NC-Factura pairs matched
  */
 export async function matchNCsWithFacturas(
-  spreadsheetId: string
+  spreadsheetId: string,
+  sheetName: 'Facturas Recibidas' | 'Facturas Emitidas' = 'Facturas Recibidas',
+  _cuitField: 'cuitEmisor' | 'cuitReceptor' = 'cuitEmisor',
+  readRange: string = 'A:S',
+  pagadaColumnLetter: string = 'S'
 ): Promise<Result<number, Error>> {
   const correlationId = getCorrelationId();
-  const sheetName = 'Facturas Recibidas';
 
   debug('Starting NC-Factura matching', {
     module: 'nc-matcher',
     phase: 'start',
     spreadsheetId,
+    sheetName,
     correlationId,
   });
 
-  // Read all rows from Facturas Recibidas
+  // Read all rows from the sheet
   // Columns: A=fechaEmision, B=fileId, C=fileName, D=tipoComprobante, E=nroFactura,
-  //          F=cuitEmisor, G=razonSocial, H=importeNeto, I=importeIva, J=importeTotal,
-  //          K=moneda, L=concepto, M=processedAt, N=confidence, O=needsReview,
-  //          P=matchedPagoFileId, Q=matchConfidence, R=hasCuitMatch, S=pagada
-  const rowsResult = await getValues(spreadsheetId, `${sheetName}!A:S`);
+  //          F=cuit (cuitEmisor for Recibidas, cuitReceptor for Emitidas), G=razonSocial,
+  //          H=importeNeto, I=importeIva, J=importeTotal, K=moneda, L=concepto,
+  //          M=processedAt, N=confidence, O=needsReview, P=matchedPagoFileId,
+  //          Q=matchConfidence, R=hasCuitMatch, S=pagada (+ T=tipoDeCambio for Emitidas)
+  const rowsResult = await getValues(spreadsheetId, `${sheetName}!${readRange}`);
   if (!rowsResult.ok) {
     return { ok: false, error: rowsResult.error };
   }
@@ -149,7 +158,7 @@ export async function matchNCsWithFacturas(
       fileId: String(row[1] || ''),
       tipoComprobante: String(row[3] || '').toUpperCase(),
       nroFactura: String(row[4] || ''),
-      cuitEmisor: String(row[5] || ''),
+      cuit: String(row[5] || ''),
       importeTotal: parseNumber(String(row[9] || '0')) ?? 0,
       concepto: String(row[11] || ''),
       matchConfidence: row[16] ? String(row[16]).toUpperCase() : undefined,
@@ -204,8 +213,13 @@ export async function matchNCsWithFacturas(
 
     // Find matching factura: same CUIT + same amount (or referenced number if available)
     for (const factura of regularFacturas) {
+      // Skip facturas already matched by a previous NC in this run
+      if (factura.pagada === 'SI') {
+        continue;
+      }
+
       // Must be same supplier (CUIT)
-      if (nc.cuitEmisor !== factura.cuitEmisor) {
+      if (nc.cuit !== factura.cuit) {
         continue;
       }
 
@@ -235,7 +249,7 @@ export async function matchNCsWithFacturas(
         ncNro: nc.nroFactura,
         facturaFileId: factura.fileId,
         facturaNro: factura.nroFactura,
-        cuitEmisor: nc.cuitEmisor,
+        cuit: nc.cuit,
         importeTotal: nc.importeTotal,
         correlationId,
       });
@@ -243,7 +257,7 @@ export async function matchNCsWithFacturas(
       // Update factura pagada = 'SI'
       const updateFacturaResult = await setValues(
         spreadsheetId,
-        `${sheetName}!S${factura.rowNumber}`,
+        `${sheetName}!${pagadaColumnLetter}${factura.rowNumber}`,
         [['SI']]
       );
       if (!updateFacturaResult.ok) {
@@ -257,10 +271,14 @@ export async function matchNCsWithFacturas(
         continue;
       }
 
+      // Mark factura as matched in memory immediately after successful spreadsheet write
+      // This prevents double-matching if the NC write below fails
+      factura.pagada = 'SI';
+
       // Update NC pagada = 'SI'
       const updateNCResult = await setValues(
         spreadsheetId,
-        `${sheetName}!S${nc.rowNumber}`,
+        `${sheetName}!${pagadaColumnLetter}${nc.rowNumber}`,
         [['SI']]
       );
       if (!updateNCResult.ok) {
@@ -271,13 +289,10 @@ export async function matchNCsWithFacturas(
           error: updateNCResult.error.message,
           correlationId,
         });
-        continue;
+        break; // NC consumed its match (factura write succeeded) — stop searching
       }
 
       matchCount++;
-
-      // Mark factura as matched so it won't be matched again
-      factura.pagada = 'SI';
 
       // Break inner loop - this NC is now matched
       break;

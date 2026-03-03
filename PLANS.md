@@ -1,115 +1,438 @@
 # Implementation Plan
 
 **Status:** COMPLETE
-**Created:** 2026-02-26
-**Source:** Inline request: Add TC orig/liq exchange rate info to movimientos detalle when matching Factura Emitida E
-**Linear Issues:** [ADV-168](https://linear.app/lw-claude/issue/ADV-168/add-tc-origliq-to-detalle-for-factura-e-credit-matches)
+**Created:** 2026-03-03
+**Source:** Inline request: Add pagada column to Facturas Emitidas, Cobros Pendientes dashboard, and movimientos→pagada sync
+**Linear Issues:** [ADV-169](https://linear.app/lw-claude/issue/ADV-169/add-pagada-column-to-facturas-emitidas-schema-and-storage), [ADV-170](https://linear.app/lw-claude/issue/ADV-170/add-pagada-handling-to-factura-pago-matcher-for-ingresos), [ADV-171](https://linear.app/lw-claude/issue/ADV-171/add-nc-matching-for-facturas-emitidas-ingresos), [ADV-172](https://linear.app/lw-claude/issue/ADV-172/add-cobros-pendientes-dashboard-sheet-and-sync-service), [ADV-173](https://linear.app/lw-claude/issue/ADV-173/mark-facturas-as-pagada-from-movimientos-matching), [ADV-174](https://linear.app/lw-claude/issue/ADV-174/startup-migration-for-facturas-emitidas-pagada-column), [ADV-175](https://linear.app/lw-claude/issue/ADV-175/update-documentation-for-pagada-ingresos-and-cobros-pendientes)
+**Branch:** feat/pagada-ingresos-cobros-pendientes
 
 ## Context Gathered
 
 ### Codebase Analysis
 
-- **Matcher code:** `src/bank/matcher.ts` — `matchCreditMovement()` (lines 574-835) handles CREDIT bank movement matching
-- **Two code paths build detalle for Factura Emitida matches:**
-  - **Tier 1 (pago linked to factura):** Lines 637-670 — currently appends `pago.tipoDeCambio` as `- tipo de cambio X` (lines 650-652)
-  - **Direct factura match:** Lines 774-785 — currently does NOT append any exchange rate info
-- **Factura data available:** `tipoComprobante`, `moneda`, `importeTotal`, `tipoDeCambio` (column S) are all parsed and available in the `Factura` object
-- **Bank credit amount:** Available as `amount` variable (extracted from `movement.credito`)
-- **Cross-currency detection:** `amountsMatchCrossCurrency()` returns `isCrossCurrency` flag; for Tier 1 with `importeEnPesos`, `isCrossCurrency` is `false` even though the underlying factura is USD
-- **Existing tests:** `src/bank/matcher.test.ts` has comprehensive tests including a `Detalle description includes tipoDeCambio for COMEX (ADV-117)` describe block (line 1596) that tests current behavior. An existing test at line 1788 asserts direct factura match does NOT contain `tipo de cambio` — this will need updating.
+- **Existing pagada pattern (Egresos):** Facturas Recibidas has `pagada` column at index S (19th col). Set to 'SI'/'NO'/empty. Written by `factura-pago-matcher.ts:580` (match creates → 'SI', unmatch → 'NO') and `nc-factura-matcher.ts:243` (NC cancellation → 'SI'). Initial value is empty string (`factura-store.ts:76`).
+- **Facturas Emitidas layout (Ingresos):** Currently 19 columns A:S. `tipoDeCambio` is at S (index 18). Adding `pagada` at S shifts `tipoDeCambio` to T, making it 20 columns A:T — identical layout to Facturas Recibidas.
+- **Pagos Pendientes service:** `src/services/pagos-pendientes.ts` reads Facturas Recibidas, filters `pagada !== 'SI'`, writes to Dashboard "Pagos Pendientes" sheet. Called from `src/processing/matching/index.ts:192` after all matching completes.
+- **NC matcher:** `src/processing/matching/nc-factura-matcher.ts` currently hardcoded to Facturas Recibidas only (sheet name, column S for pagada at index 18). Needs to also handle Facturas Emitidas with same logic.
+- **Movimientos matching:** `src/bank/match-movimientos.ts` reads both Control sheets, matches bank movements to documents, writes only to movimientos rows (columns G-I). Does NOT write back `pagada` to Control sheets. The `matchBankMovimientos` function processes all banks sequentially and produces `DetalleUpdate[]` for each bank.
+- **Factura-Pago matcher:** `src/processing/matching/factura-pago-matcher.ts:573-592` writes match updates. For Facturas Recibidas: writes P:S (includes pagada). For Facturas Emitidas: writes P:R (no pagada). Needs to write P:S for Emitidas too.
+- **Cascade matcher:** `src/matching/cascade-matcher.ts:78-95` defines `MatchUpdate` interface with `pagada?: boolean`. `buildFacturaMatchUpdate` at line 162 defaults `pagada: true`.
+- **Spreadsheet headers:** `src/constants/spreadsheet-headers.ts` — `FACTURA_EMITIDA_HEADERS` needs `pagada` inserted before `tipoDeCambio`.
+- **Number format configs:** `CONTROL_INGRESOS_SHEETS[0].numberFormats` maps index 18 to tipoDeCambio format. After inserting pagada, tipoDeCambio moves to index 19.
+- **Column ranges in match-movimientos.ts:** `loadControlIngresos` reads `Facturas Emitidas!A:S` — needs to become `A:T` after adding pagada column.
+- **Test files:** `src/services/pagos-pendientes.test.ts`, `src/processing/matching/factura-pago-matcher.test.ts`, `src/processing/matching/nc-factura-matcher.test.ts`, `src/bank/match-movimientos.test.ts`, `src/processing/storage/factura-store.test.ts`.
 
 ### Key Design Decisions
 
-1. **Condition:** `factura.tipoComprobante === 'E' && factura.moneda === 'USD'` — not based on `isCrossCurrency` flag, because Tier 1 matches via `importeEnPesos` set `isCrossCurrency=false` even though the economic reality is cross-currency
-2. **For Tier 1 (pago+factura):** When factura is E/USD, the new TC format replaces the old `pago.tipoDeCambio` format. For non-E facturas, the old `pago.tipoDeCambio` behavior is preserved unchanged.
-3. **TC liq uses bank movement amount:** `credit_ARS / factura.importeTotal_USD` — represents the actual effective exchange rate, as requested by the user ("the actual exchange rate with respect to the original value of the Factura and the bank movement")
+1. **pagada column position:** Insert at S in Facturas Emitidas (same position as Facturas Recibidas). `tipoDeCambio` moves from S→T.
+2. **NC matching for Ingresos:** Generalize `matchNCsWithFacturas` to accept spreadsheetId + sheet config, or create a second call in `runMatching` for Control de Ingresos. The NC matcher needs to know column positions, so passing the sheet name and pagada column index is cleanest.
+3. **Movimientos → pagada sync:** After `matchBankMovimientos` produces its updates, collect matched facturas (both emitidas and recibidas) and batch-write `pagada='SI'` to the Control sheets. This runs as a post-processing step within `matchAllMovimientos`, using the control spreadsheet IDs already available.
+4. **Cobros Pendientes:** Mirror of Pagos Pendientes. Same 10-column schema but with Receptor counterparty fields instead of Emisor. New sheet in Dashboard, new sync function, new headers constant.
+5. **Migration:** Existing Facturas Emitidas rows have 19 columns. Startup migration adds `pagada` header and shifts data. Pattern follows existing `migrateArchivosProcesadosHeaders`.
 
-## Original Plan
+## Tasks
 
-### Task 1: Add TC orig/liq to detalle for Factura E credit matches
-**Linear Issue:** [ADV-168](https://linear.app/lw-claude/issue/ADV-168/add-tc-origliq-to-detalle-for-factura-e-credit-matches)
+### Task 1: Add pagada column to Facturas Emitidas schema and storage
+**Linear Issue:** [ADV-169](https://linear.app/lw-claude/issue/ADV-169/add-pagada-column-to-facturas-emitidas-schema-and-storage)
+**Files:**
+- `src/constants/spreadsheet-headers.ts` (modify)
+- `src/processing/storage/factura-store.ts` (modify)
+- `src/processing/storage/factura-store.test.ts` (modify)
 
-1. Write/update tests in `src/bank/matcher.test.ts`:
-   - **New tests** (add to existing `Detalle description includes tipoDeCambio for COMEX (ADV-117)` describe block or create a sibling):
-     - Credit Tier 1 (pago+factura E): Factura E USD with `tipoDeCambio=1200`, bank credit 1050000 ARS, factura total 1000 USD → detalle ends with `- TC orig: 1200.00 / TC liq: 1050.00`
-     - Credit Tier 1 (pago+factura E): Factura E USD without `tipoDeCambio`, bank credit 1050000 ARS, factura total 1000 USD → detalle ends with `- TC liq: 1050.00`
-     - Credit direct factura E: Factura E USD with `tipoDeCambio=850`, bank credit 92000 ARS (via cross-currency match at ~850 rate), factura total 100 USD → detalle ends with `- TC orig: 850.00 / TC liq: 920.00`
-     - Credit direct factura E: Factura E USD without `tipoDeCambio`, same amounts → detalle ends with `- TC liq: 920.00`
-     - Credit Tier 1 with non-E USD factura + pago with `tipoDeCambio` → old format preserved: `- tipo de cambio X` (regression guard)
-   - **Update existing test** at line 1788 (`does not append tipoDeCambio for direct factura match (no pago available)`) — this test uses Factura E with USD and will now contain TC info. Update assertion to expect TC liq in detalle.
-   - **Update existing test** at line 1611 (`appends tipoDeCambio when pago has it`) — this test uses Factura E. Update assertion to expect TC orig/liq format instead of old `tipo de cambio` format.
-2. Run verifier with pattern "matcher" (expect fail)
-3. Implement in `src/bank/matcher.ts`:
-   - **Tier 1 path (lines 650-652):** Replace the `if (pago.tipoDeCambio)` block with: if `linkedFactura.tipoComprobante === 'E' && linkedFactura.moneda === 'USD'`, calculate `tcLiq = amount / linkedFactura.importeTotal` and append TC orig/liq format (using `linkedFactura.tipoDeCambio` for TC orig if present). Else keep existing `pago.tipoDeCambio` behavior.
-   - **Direct factura path (after line 782):** After building the base description, if `factura.tipoComprobante === 'E' && factura.moneda === 'USD'`, calculate `tcLiq = amount / factura.importeTotal` and append TC orig/liq format (using `factura.tipoDeCambio` for TC orig if present).
-   - Format: `.toFixed(2)` for both TC values
-4. Run verifier with pattern "matcher" (expect pass)
+**Steps:**
+1. Write tests in `src/processing/storage/factura-store.test.ts`:
+   - Test that `buildFacturaRowFormatted` for `factura_emitida` produces 20 columns (A:T) with `pagada` at S (empty initially) and `tipoDeCambio` at T
+   - Test that `storeFactura` uses range `A:T` for factura_emitida (not `A:S`)
+2. Run verifier with pattern "factura-store" (expect fail)
+3. Implement changes:
+   - In `spreadsheet-headers.ts`: Insert `'pagada'` before `'tipoDeCambio'` in `FACTURA_EMITIDA_HEADERS` (making it 20 items)
+   - In `spreadsheet-headers.ts`: Update `CONTROL_INGRESOS_SHEETS[0].numberFormats` — tipoDeCambio moves from index 18 to index 19
+   - In `factura-store.ts`: Update `buildFacturaRowFormatted` for `factura_emitida` branch — add `''` (empty string) for pagada at S position, before tipoDeCambioCell
+   - In `factura-store.ts`: Update `lastCol` for factura_emitida from `'S'` to `'T'` (reprocessing path)
+   - In `factura-store.ts`: Update append range from `A:S` to `A:T` for factura_emitida
+4. Run verifier with pattern "factura-store" (expect pass)
+
+**Migration note:** Existing Facturas Emitidas rows have 19 columns (A:S) without `pagada`. Need startup migration to insert the header and shift existing data. See Task 6.
+
+### Task 2: Add pagada handling to factura-pago matcher for Ingresos
+**Linear Issue:** [ADV-170](https://linear.app/lw-claude/issue/ADV-170/add-pagada-handling-to-factura-pago-matcher-for-ingresos)
+**Files:**
+- `src/processing/matching/factura-pago-matcher.ts` (modify)
+- `src/processing/matching/factura-pago-matcher.test.ts` (modify)
+
+**Steps:**
+1. Write tests in `factura-pago-matcher.test.ts`:
+   - Test that matching Facturas Emitidas writes columns P:S (4 columns: matchedPagoFileId, matchConfidence, hasCuitMatch, pagada) — same as Facturas Recibidas
+   - Test that unmatching Facturas Emitidas clears columns P:S (4 empty values)
+   - Test that displacement on Facturas Emitidas sets pagada='NO' on displaced factura
+2. Run verifier with pattern "factura-pago-matcher" (expect fail)
+3. Implement in `factura-pago-matcher.ts`:
+   - In `doMatchFacturasWithPagos`: Update `facturasRange` for Facturas Emitidas from `A:S` to `A:T`
+   - In the batch update section (lines 583-592): Change the Facturas Emitidas branch to write P:S (include pagada) instead of P:R, mirroring the Facturas Recibidas branch
+   - In the unmatch section (lines 613-617): Change the Facturas Emitidas branch to clear P:S (4 empty values) instead of P:R (3 empty values)
+4. Run verifier with pattern "factura-pago-matcher" (expect pass)
+
+### Task 3: Add NC matching for Facturas Emitidas (Ingresos)
+**Linear Issue:** [ADV-171](https://linear.app/lw-claude/issue/ADV-171/add-nc-matching-for-facturas-emitidas-ingresos)
+**Files:**
+- `src/processing/matching/nc-factura-matcher.ts` (modify)
+- `src/processing/matching/nc-factura-matcher.test.ts` (modify)
+- `src/processing/matching/index.ts` (modify)
+
+**Steps:**
+1. Write tests in `nc-factura-matcher.test.ts`:
+   - Test that `matchNCsWithFacturas` works with Facturas Emitidas — matches NC Emitida with Factura Emitida by `cuitReceptor`, sets pagada='SI'
+   - Test that MANUAL NCs in Facturas Emitidas are skipped
+   - Test that MANUAL Facturas Emitidas are excluded from matching
+   - Test that pagada column is read/written at the correct index for Facturas Emitidas (S = index 18, same position but different total column count)
+2. Run verifier with pattern "nc-factura-matcher" (expect fail)
+3. Implement:
+   - Generalize `matchNCsWithFacturas` to accept sheet name and column configuration. The function currently hardcodes `'Facturas Recibidas'`, column indices, and `cuitEmisor` as the CUIT field. Refactor to accept parameters: `sheetName` ('Facturas Recibidas' | 'Facturas Emitidas'), `cuitField` ('cuitEmisor' | 'cuitReceptor'), `readRange` ('A:S' for Recibidas which has pagada at S/18, 'A:T' for Emitidas which has pagada at S/18), `pagadaColumnLetter` ('S' for both)
+   - In `src/processing/matching/index.ts`: Add a second call to `matchNCsWithFacturas` for Control de Ingresos after the existing Egresos call. Pass `controlIngresosId`, `'Facturas Emitidas'`, `'cuitReceptor'` and appropriate range
+4. Run verifier with pattern "nc-factura-matcher" (expect pass)
+
+**Notes:**
+- The pagada column is at index S in both Facturas Recibidas and Facturas Emitidas (after Task 1 adds it). The CUIT field to match differs: `cuitEmisor` for Recibidas (same supplier), `cuitReceptor` for Emitidas (same client).
+- The read range differs: Recibidas uses A:S (pagada is last at index 18), Emitidas uses A:T (pagada at index 18, tipoDeCambio at index 19).
+
+### Task 4: Add Cobros Pendientes dashboard sheet and sync service
+**Linear Issue:** [ADV-172](https://linear.app/lw-claude/issue/ADV-172/add-cobros-pendientes-dashboard-sheet-and-sync-service)
+**Files:**
+- `src/constants/spreadsheet-headers.ts` (modify)
+- `src/services/pagos-pendientes.ts` (modify — rename or extend)
+- `src/services/pagos-pendientes.test.ts` (modify)
+- `src/processing/matching/index.ts` (modify)
+
+**Steps:**
+1. Write tests in `pagos-pendientes.test.ts`:
+   - Test `syncCobrosPendientes`: reads Facturas Emitidas, filters `pagada !== 'SI'`, writes to Dashboard "Cobros Pendientes" sheet
+   - Test column mapping: fechaEmision, fileId, fileName, tipoComprobante, nroFactura, cuitReceptor, razonSocialReceptor, importeTotal, moneda, concepto (10 columns — same structure as Pagos Pendientes but with Receptor counterparty)
+   - Test that facturas with pagada='SI' are excluded
+   - Test that NCs/NDs are excluded from Cobros Pendientes
+   - Test sort order: ascending by fechaEmision (oldest first)
+   - Test empty sheet handling
+   - Test missing column handling
+2. Run verifier with pattern "pagos-pendientes" (expect fail)
+3. Implement:
+   - In `spreadsheet-headers.ts`: Add `COBROS_PENDIENTES_HEADERS` constant — same 10 fields but with `cuitReceptor` and `razonSocialReceptor` instead of `cuitEmisor`/`razonSocialEmisor`
+   - Add "Cobros Pendientes" sheet config to `DASHBOARD_OPERATIVO_SHEETS` array
+   - In `pagos-pendientes.ts`: Add `syncCobrosPendientes(controlIngresosId, dashboardId)` function — follows same pattern as `syncPagosPendientes` but reads from Facturas Emitidas (A:T range), uses `cuitReceptor`/`razonSocialReceptor` columns, filters pagada !== 'SI' AND excludes NC/ND tipoComprobante, writes to "Cobros Pendientes" sheet
+   - In `index.ts` (matching orchestrator): After calling `syncPagosPendientes`, also call `syncCobrosPendientes(controlIngresosId, dashboardId)`
+4. Run verifier with pattern "pagos-pendientes" (expect pass)
+
+**Migration note:** Dashboard Operativo needs a new "Cobros Pendientes" sheet. Startup migration should detect missing sheet and create it with headers. Follow the existing `ensureSheetExists` pattern used during folder structure setup.
+
+### Task 5: Mark facturas as pagada from movimientos matching
+**Linear Issue:** [ADV-173](https://linear.app/lw-claude/issue/ADV-173/mark-facturas-as-pagada-from-movimientos-matching)
+**Files:**
+- `src/bank/match-movimientos.ts` (modify)
+- `src/bank/match-movimientos.test.ts` (modify)
+- `src/services/sheets.ts` (verify `setValues` or `batchUpdate` is available)
+
+**Steps:**
+1. Write tests in `match-movimientos.test.ts`:
+   - Test that when a DEBIT movimiento matches a Factura Recibida, `pagada='SI'` is written to Control de Egresos at the correct cell (column S, factura's row)
+   - Test that when a CREDIT movimiento matches a Factura Emitida, `pagada='SI'` is written to Control de Ingresos at the correct cell (column S, factura's row)
+   - Test that when a movimiento matches a Pago (not a factura directly), no pagada update is made (pagos don't have pagada column)
+   - Test that MANUAL factura matches (matchConfidence='MANUAL') are not overwritten — the pagada update is skipped when matchConfidence is already MANUAL
+   - Test that bank fee and credit card payment auto-labels do not trigger pagada updates
+   - Test that pagada updates use `batchUpdate` for efficiency (single API call for all pagada updates per bank)
+   - Test that pagada is only set to 'SI', never to 'NO' or empty (write-only-SI from movimientos context)
+2. Run verifier with pattern "match-movimientos" (expect fail)
+3. Implement in `match-movimientos.ts`:
+   - Add a new interface `PagadaUpdate` with fields: `spreadsheetId`, `sheetName`, `rowNumber`, `columnLetter` (always 'S')
+   - In `matchBankMovimientos`: After processing all movimientos and collecting `DetalleUpdate[]`, also collect `PagadaUpdate[]` — when `shouldUpdate` is true and the matched document is a factura (emitida or recibida), add a pagada update. Use the `documentMap` to look up the matched document and determine its type and row. Only update if the factura's matchConfidence is not 'MANUAL'.
+   - After writing detalle updates, batch-write all pagada updates using `batchUpdate` to the appropriate Control spreadsheet (controlIngresosId for factura_emitida, controlEgresosId for factura_recibida). The spreadsheet IDs must be passed down to `matchBankMovimientos` — currently it only receives data arrays, not IDs. Add `controlIngresosId` and `controlEgresosId` as parameters.
+   - Guard: Only set `pagada='SI'`, never clear it. The movimientos context only confirms payment (bank movement = money moved), never negates it.
+4. Run verifier with pattern "match-movimientos" (expect pass)
+
+**Notes:**
+- The movimientos matcher already has access to the parsed factura data (including row numbers) via `ingresosData` and `egresosData`. The `documentMap` lookup gives both the row and the type.
+- Pagada updates from movimientos are independent of the detalle updates — they go to different spreadsheets (Control sheets vs bank Movimientos sheets).
+- A single factura could match multiple bank movements across different banks. The update is idempotent (always 'SI'), so duplicates are harmless.
+
+### Task 6: Startup migration for Facturas Emitidas pagada column
+**Linear Issue:** [ADV-174](https://linear.app/lw-claude/issue/ADV-174/startup-migration-for-facturas-emitidas-pagada-column)
+**Files:**
+- `src/services/folder-structure.ts` (modify)
+- `src/services/folder-structure.test.ts` or new test file (modify)
+
+**Steps:**
+1. Write tests:
+   - Test that migration detects old 19-column Facturas Emitidas (no `pagada` header) and adds it at position S, shifting tipoDeCambio to T
+   - Test that migration is idempotent — running on already-migrated sheet does nothing
+   - Test that existing data in tipoDeCambio column is preserved after shift
+2. Run verifier (expect fail)
+3. Implement migration function `migrateFacturasEmitidasHeaders`:
+   - Read header row of "Facturas Emitidas" from Control de Ingresos
+   - Check if `pagada` header exists. If yes, skip (already migrated)
+   - If `pagada` is missing: insert column at position S (shift tipoDeCambio right), set header to `pagada`. Use Google Sheets API `insertDimension` + header write, or use the batch approach to read all data, insert column, write back.
+   - Follow pattern of existing `migrateArchivosProcesadosHeaders` in folder-structure.ts
+   - Call this migration during startup folder structure setup, after ensuring sheets exist
+4. Run verifier (expect pass)
+
+**Migration note:** Production Facturas Emitidas has existing rows with 19 columns. The migration must insert a column (not append) so existing tipoDeCambio values are preserved. Google Sheets `insertDimension` API shifts existing columns right automatically.
+
+### Task 7: Update documentation
+**Linear Issue:** [ADV-175](https://linear.app/lw-claude/issue/ADV-175/update-documentation-for-pagada-ingresos-and-cobros-pendientes)
+**Files:**
+- `SPREADSHEET_FORMAT.md` (modify)
+- `CLAUDE.md` (modify)
+
+**Steps:**
+1. Update `SPREADSHEET_FORMAT.md`:
+   - Facturas Emitidas: Add `pagada` at column S, shift `tipoDeCambio` to T, update column count from 19 to 20 (A:T)
+   - Dashboard: Add "Cobros Pendientes" section with schema (10 columns, same as Pagos Pendientes but with Receptor fields)
+   - Movimientos: Document that matching now sets `pagada='SI'` on matched facturas in both Control sheets
+2. Update `CLAUDE.md`:
+   - Structure section: Update Facturas Emitidas column count
+   - Spreadsheets section: Add Cobros Pendientes reference
+   - Matching section: Document movimientos→pagada sync behavior
+3. No test needed for documentation changes.
 
 ## Post-Implementation Checklist
-1. Run `bug-hunter` agent - Review changes for bugs
-2. Run `verifier` agent - Verify all tests pass and zero warnings
+1. Run `bug-hunter` agent — Review changes for bugs
+2. Run `verifier` agent — Verify all tests pass and zero warnings
 
 ---
 
 ## Plan Summary
 
-**Objective:** Add exchange rate information (TC orig / TC liq) to movimientos detalle when matching Factura Emitida E
+**Objective:** Add payment tracking to Control de Ingresos (Facturas Emitidas) and create a Cobros Pendientes dashboard, mirroring the existing Egresos/Pagos Pendientes pattern. Additionally, mark facturas as paid when bank movements match them.
 
-**Request:** When matching a Factura E in movimientos, include tipo de cambio original (from the Factura) and tipo de cambio liquidado (calculated from bank movement amount / factura USD total)
+**Linear Issues:** ADV-169, ADV-170, ADV-171, ADV-172, ADV-173, ADV-174, ADV-175
 
-**Linear Issues:** ADV-168
-
-**Approach:** Modify the two credit matching paths in `src/bank/matcher.ts` (Tier 1 pago+factura and direct factura) to append TC orig/liq info to the detalle string when the matched factura is type E and USD. TC orig comes from the factura's extracted `tipoDeCambio` field, TC liq is calculated as `credit_ARS / factura_total_USD`. Existing behavior for non-E facturas is preserved.
+**Approach:** Add `pagada` column to Facturas Emitidas (same position S as Facturas Recibidas), extend factura-pago matching and NC matching to write pagada for the Ingresos direction, create Cobros Pendientes dashboard sheet with sync service mirroring Pagos Pendientes, and add a post-processing step to movimientos matching that writes `pagada='SI'` back to Control sheets when facturas are matched from bank data.
 
 **Scope:**
-- Tasks: 1
-- Files affected: 2 (matcher.ts, matcher.test.ts)
-- New tests: yes
+- Tasks: 7
+- Files affected: ~14 (source + tests + docs)
+- New tests: yes (all tasks include TDD)
 
 **Key Decisions:**
-- Condition based on `tipoComprobante === 'E' && moneda === 'USD'` rather than `isCrossCurrency` flag, to handle Tier 1 matches via `importeEnPesos` correctly
-- TC liq uses actual bank credit amount (not pago.importeEnPesos) for accuracy
-- For Tier 1 with Factura E, the new TC format replaces the old `pago.tipoDeCambio` format
+- pagada column at S in both Facturas sheets (consistent position)
+- Movimientos only set pagada='SI', never clear it (bank evidence is additive)
+- NC matching generalized to work with both Ingresos and Egresos
+- Startup migration uses insertDimension to preserve existing tipoDeCambio data
 
 **Risks/Considerations:**
-- Two existing tests need assertion updates (they currently test the old behavior for Factura E specifically)
+- Spreadsheet column shift migration must handle production data correctly — insertDimension is the safe approach
+- Movimientos pagada sync adds cross-sheet writes — needs error handling that doesn't fail the main matching flow
+- Multiple banks could set pagada='SI' on the same factura — idempotent so no conflict
 
 ---
 
 ## Iteration 1
 
-**Implemented:** 2026-02-26
-**Method:** Single-agent (1 task, 1 work unit, effort score 2)
+**Implemented:** 2026-03-03
+**Method:** Agent team (4 workers, worktree-isolated)
 
 ### Tasks Completed This Iteration
-- Task 1: Add TC orig/liq to detalle for Factura E credit matches (ADV-168) — Modified both credit matching paths (Tier 1 pago+factura and direct factura), added 6 new tests, updated 1 existing test
+- Task 1: Add pagada column to Facturas Emitidas schema and storage (ADV-169) — `FACTURA_EMITIDA_HEADERS` expanded to 20 cols, `pagada` at S, `tipoDeCambio` at T (worker-1)
+- Task 2: Add pagada handling to factura-pago matcher for Ingresos (ADV-170) — unified P:S range for match/unmatch in both sheet types (worker-1)
+- Task 3: Add NC matching for Facturas Emitidas (ADV-171) — `matchNCsWithFacturas` generalized with sheetName, cuitField, readRange, pagadaColumnLetter params; second call in matching orchestrator (worker-1)
+- Task 4: Add Cobros Pendientes dashboard sheet and sync service (ADV-172) — `COBROS_PENDIENTES_HEADERS` (10 cols), `syncCobrosPendientes` function, integrated after `syncPagosPendientes` (worker-2)
+- Task 5: Mark facturas as pagada from movimientos matching (ADV-173) — `PagadaUpdate` interface, batch-write pagada='SI' after detalle updates, MANUAL guard, controlIngresosId/controlEgresosId params added (worker-3)
+- Task 6: Startup migration for Facturas Emitidas pagada column (ADV-174) — `migrateFacturasEmitidasPagadaColumn` using insertDimension API, schema v5, `insertColumn` in sheets.ts (worker-4)
+- Task 7: Update documentation (ADV-175) — SPREADSHEET_FORMAT.md and CLAUDE.md updated with pagada, Cobros Pendientes, movimientos→pagada sync (worker-4)
 
 ### Files Modified
-- `src/bank/matcher.ts` - Added TC orig/liq logic to both credit matching paths, with division-by-zero guard and gross amount calculation for retencion cases
-- `src/bank/matcher.test.ts` - Updated Tier 1 credit test for new format, added 6 new tests covering: TC orig+liq, TC liq only, non-E regression guard, direct factura with/without tipoDeCambio, retencion+Factura E combination
+- `src/constants/spreadsheet-headers.ts` — pagada in FACTURA_EMITIDA_HEADERS, COBROS_PENDIENTES_HEADERS, DASHBOARD_OPERATIVO_SHEETS config
+- `src/constants/spreadsheet-headers.test.ts` — updated header count test
+- `src/processing/storage/factura-store.ts` — 20-col row for factura_emitida, A:T range
+- `src/processing/storage/factura-store.test.ts` — 4 new tests
+- `src/processing/matching/factura-pago-matcher.ts` — unified P:S match/unmatch for both sheets
+- `src/processing/matching/factura-pago-matcher.test.ts` — 2 new tests
+- `src/processing/matching/nc-factura-matcher.ts` — generalized with config params
+- `src/processing/matching/nc-factura-matcher.test.ts` — 3 new tests
+- `src/processing/matching/index.ts` — NC matching for Ingresos, syncCobrosPendientes call
+- `src/services/pagos-pendientes.ts` — syncCobrosPendientes function
+- `src/services/pagos-pendientes.test.ts` — 11 new tests
+- `src/bank/match-movimientos.ts` — PagadaUpdate collection, batch-write, A:T range fix
+- `src/bank/match-movimientos.test.ts` — 8 new tests, updated mocks for A:T range
+- `src/services/sheets.ts` — insertColumn function
+- `src/services/folder-structure.ts` — migrateFacturasEmitidasPagadaColumn
+- `src/services/folder-structure.test.ts` — 9 new tests
+- `src/services/migrations.ts` — v5 migration
+- `src/services/migrations.test.ts` — 2 new tests
+- `SPREADSHEET_FORMAT.md` — schema updates
+- `CLAUDE.md` — documentation updates
 
 ### Linear Updates
-- ADV-168: Todo → In Progress → Review
+- ADV-169: Todo → In Progress → Review
+- ADV-170: Todo → In Progress → Review
+- ADV-171: Todo → In Progress → Review
+- ADV-172: Todo → In Progress → Review
+- ADV-173: Todo → In Progress → Review
+- ADV-174: Todo → Review
+- ADV-175: Todo → Review
 
 ### Pre-commit Verification
-- bug-hunter: Found 2 medium bugs (division by zero, retencion gross amount), both fixed
-- verifier: All 1,902 tests pass, zero warnings
+- bug-hunter: Found 1 HIGH bug (loadControlIngresos A:S→A:T range), 2 MEDIUM (dead ternary, case-sensitive headers). Fixed HIGH and dead code before proceeding.
+- verifier: All 1942 tests pass, zero warnings
+
+### Work Partition
+- Worker 1: Tasks 1, 2, 3 (schema + matching domain — headers, factura-store, factura-pago-matcher, nc-factura-matcher)
+- Worker 2: Task 4 (dashboard/sync domain — Cobros Pendientes service)
+- Worker 3: Task 5 (movimientos domain — pagada sync from bank movements)
+- Worker 4: Tasks 6, 7 (migration + docs domain — folder-structure, SPREADSHEET_FORMAT.md, CLAUDE.md)
+
+### Merge Summary
+- Worker 1: fast-forward (no conflicts)
+- Worker 4: merged cleanly (no conflicts, typecheck passed)
+- Worker 2: merged cleanly (auto-merged spreadsheet-headers.ts and index.ts, typecheck passed)
+- Worker 3: merged cleanly (no conflicts, typecheck passed)
+
+### Continuation Status
+All tasks completed.
 
 ### Review Findings
 
-Files reviewed: 2 (matcher.ts, matcher.test.ts)
-Reviewer: single-agent (2 files)
+Summary: 5 issue(s) found, creating Fix Plan (Team: security, reliability, quality reviewers)
+- FIX: 5 issue(s) — Linear issues created in Todo
+- DISCARDED: 7 finding(s) — false positives / not applicable
+
+**Issues requiring fix:**
+- [HIGH] BUG: Missing Cobros/Pagos Pendientes sync after movimientos pagada writes (`src/bank/match-movimientos.ts` — `matchAllMovimientos` writes pagada='SI' but never syncs dashboard)
+- [HIGH] BUG: Pago unmatch clears pagada column, overwriting NC-set 'SI' (`src/processing/matching/factura-pago-matcher.ts:591-596` — unmatch writes `['', '', '', '']` to P:S, clearing NC-set pagada)
+- [MEDIUM] BUG: NC partial-write failure leaves NC permanently unmatched + double-match risk (`src/processing/matching/nc-factura-matcher.ts:252-293` — if NC write fails after factura write, in-memory state not updated)
+- [MEDIUM] TEST: E2E test uses 19-column facturaHeader instead of 20 (`src/processing/matching/factura-pago-matcher.test.ts:370` — missing pagada in mock data)
+- [MEDIUM] CONVENTION: warn() in catch blocks should be error() per CLAUDE.md (`src/services/pagos-pendientes.ts:211,422`)
+
+**Discarded findings (not bugs):**
+- [DISCARDED] SECURITY: Spreadsheet IDs logged at INFO level — standard practice, OAuth-protected resources
+- [DISCARDED] SECURITY: pagadaColumnLetter parameter not validated — only receives static string literals at all call sites
+- [DISCARDED] SECURITY: PagadaUpdate.columnLetter type not constrained — same as above, defensive typing preference
+- [DISCARDED] TYPE: `as any` in factura-pago-matcher tests — style-only in test mocks, zero correctness impact
+- [DISCARDED] TYPE: `as any` + double cast in match-movimientos tests — style-only in test mocks, zero correctness impact
+- [DISCARDED] CONVENTION: Missing `phase` field in migrations.ts warn logs — not enforced by CLAUDE.md, consistency preference
+- [DISCARDED] TYPE: `buildUnmatchUpdate` sets `pagada: false` (value never used in unmatch path, which writes empty strings) — cosmetic; real bug is the P:S range, covered by ADV-177
+
+### Linear Updates
+- ADV-169: Review → Merge (original task)
+- ADV-170: Review → Merge (original task)
+- ADV-171: Review → Merge (original task)
+- ADV-172: Review → Merge (original task)
+- ADV-173: Review → Merge (original task)
+- ADV-174: Review → Merge (original task)
+- ADV-175: Review → Merge (original task)
+- ADV-176: Created in Todo (Fix: Missing Cobros/Pagos Pendientes sync)
+- ADV-177: Created in Todo (Fix: Pago unmatch clears pagada)
+- ADV-178: Created in Todo (Fix: NC partial-write failure)
+- ADV-179: Created in Todo (Fix: E2E test 19-col header)
+- ADV-180: Created in Todo (Fix: warn→error in catch blocks)
+
+<!-- REVIEW COMPLETE -->
+
+---
+
+## Fix Plan
+
+**Source:** Review findings from Iteration 1
+**Linear Issues:** [ADV-176](https://linear.app/lw-claude/issue/ADV-176/fix-missing-cobrospagos-pendientes-sync-after-movimientos-pagada), [ADV-177](https://linear.app/lw-claude/issue/ADV-177/fix-pago-unmatch-clears-pagada-column-overwriting-nc-set-si), [ADV-178](https://linear.app/lw-claude/issue/ADV-178/fix-nc-partial-write-failure-leaves-nc-permanently-unmatched), [ADV-179](https://linear.app/lw-claude/issue/ADV-179/fix-e2e-test-uses-19-column-facturaheader-instead-of-20), [ADV-180](https://linear.app/lw-claude/issue/ADV-180/fix-warn-in-catch-blocks-should-be-error-per-claudemd)
+
+### Fix 1: Missing Cobros/Pagos Pendientes sync after movimientos pagada writes
+**Linear Issue:** [ADV-176](https://linear.app/lw-claude/issue/ADV-176/fix-missing-cobrospagos-pendientes-sync-after-movimientos-pagada)
+
+1. Write test in `src/bank/match-movimientos.test.ts`: verify `syncPagosPendientes` and `syncCobrosPendientes` are called after pagada writes complete in `matchAllMovimientos`
+2. Run verifier with pattern "match-movimientos" (expect fail)
+3. In `src/bank/match-movimientos.ts`: import `syncPagosPendientes` and `syncCobrosPendientes` from `../../services/pagos-pendientes.js`. After all banks are processed (after the results loop ~line 1278), call both sync functions using `controlEgresosId`, `controlIngresosId`, and `folderStructure.dashboardOperativoId`
+4. Run verifier with pattern "match-movimientos" (expect pass)
+
+### Fix 2: Pago unmatch clears pagada column, overwriting NC-set 'SI'
+**Linear Issue:** [ADV-177](https://linear.app/lw-claude/issue/ADV-177/fix-pago-unmatch-clears-pagada-column-overwriting-nc-set-si)
+
+1. Write test in `src/processing/matching/factura-pago-matcher.test.ts`: verify that when a pago displacement unmatch occurs on a factura with pagada='SI' (set by NC), the pagada column is preserved (not cleared)
+2. Run verifier with pattern "factura-pago-matcher" (expect fail)
+3. In `src/processing/matching/factura-pago-matcher.ts:591-596`: change unmatch range from `P${row}:S${row}` to `P${row}:R${row}` with 3 empty values `['', '', '']` (matchedPagoFileId, matchConfidence, hasCuitMatch). Column S (pagada) is left untouched.
+4. In `src/matching/cascade-matcher.ts:208`: remove `pagada: false` from `buildUnmatchUpdate` return (dead code but misleading)
+5. Run verifier with pattern "factura-pago-matcher" (expect pass)
+
+### Fix 3: NC partial-write failure leaves NC permanently unmatched
+**Linear Issue:** [ADV-178](https://linear.app/lw-claude/issue/ADV-178/fix-nc-partial-write-failure-leaves-nc-permanently-unmatched)
+
+1. Write test in `src/processing/matching/nc-factura-matcher.test.ts`: verify that when factura pagada write succeeds but NC write fails, `factura.pagada` is still updated in memory (preventing double-match)
+2. Run verifier with pattern "nc-factura-matcher" (expect fail)
+3. In `src/processing/matching/nc-factura-matcher.ts`: move `factura.pagada = 'SI'` from line 289 to immediately after the successful factura write (after line 257, before the NC write attempt). This ensures in-memory state reflects the spreadsheet state regardless of NC write outcome.
+4. Run verifier with pattern "nc-factura-matcher" (expect pass)
+
+### Fix 4: E2E test uses 19-column facturaHeader instead of 20
+**Linear Issue:** [ADV-179](https://linear.app/lw-claude/issue/ADV-179/fix-e2e-test-uses-19-column-facturaheader-instead-of-20)
+
+1. In `src/processing/matching/factura-pago-matcher.test.ts:370`: add `'pagada'` to facturaHeader before `'tipoDeCambio'` and add corresponding `''` to facturaRow. Search for other test fixtures in the same file with 19-column Facturas Emitidas headers and fix them too.
+2. Run verifier with pattern "factura-pago-matcher" (expect pass — existing tests should still work with corrected data)
+
+### Fix 5: warn() in catch blocks should be error()
+**Linear Issue:** [ADV-180](https://linear.app/lw-claude/issue/ADV-180/fix-warn-in-catch-blocks-should-be-error-per-claudemd)
+
+1. In `src/services/pagos-pendientes.ts:211`: change `warn('Pagos Pendientes sync failed', ...)` to `error('Pagos Pendientes sync failed', ...)`
+2. In `src/services/pagos-pendientes.ts:422`: change `warn('Cobros Pendientes sync failed', ...)` to `error('Cobros Pendientes sync failed', ...)`
+3. Update import if `error` is not already imported (check alias — likely `logError` per convention)
+4. Run verifier with pattern "pagos-pendientes" (expect pass)
+
+## Post-Implementation Checklist
+1. Run `bug-hunter` agent — Review changes for bugs
+2. Run `verifier` agent — Verify all tests pass and zero warnings
+
+---
+
+## Iteration 2
+
+**Implemented:** 2026-03-03
+**Method:** Single-agent (effort score 5, all S-sized fixes)
+
+### Tasks Completed This Iteration
+- Fix 1: Missing Cobros/Pagos Pendientes sync after movimientos pagada writes (ADV-176) — imported and called `syncPagosPendientes`/`syncCobrosPendientes` after all banks processed in `matchAllMovimientos`
+- Fix 2: Pago unmatch clears pagada column, overwriting NC-set 'SI' (ADV-177) — changed unmatch range from P:S to P:R (3 columns), removed dead `pagada: false` from `buildUnmatchUpdate` and cascade pago unmatch
+- Fix 3: NC partial-write failure leaves NC permanently unmatched (ADV-178) — moved `factura.pagada = 'SI'` before NC write, added runtime `pagada === 'SI'` check in inner loop, changed `continue` to `break` after NC write failure
+- Fix 4: E2E test uses 19-column facturaHeader instead of 20 (ADV-179) — added missing `pagada` column to MANUAL pago exclusion test fixture
+- Fix 5: warn() in catch blocks should be error() (ADV-180) — changed `warn` to `logError` in catch blocks of `syncPagosPendientes` and `syncCobrosPendientes`
+
+### Files Modified
+- `src/bank/match-movimientos.ts` — import and call sync functions after pagada writes
+- `src/bank/match-movimientos.test.ts` — mock pagos-pendientes, test sync calls after processing
+- `src/processing/matching/factura-pago-matcher.ts` — unmatch range P:R (3 cols), removed dead `pagada: false`
+- `src/processing/matching/factura-pago-matcher.test.ts` — ADV-177 test, fixed 19→20 col fixture, removed `pagada: false` from test data
+- `src/processing/matching/nc-factura-matcher.ts` — moved `factura.pagada='SI'` before NC write, added pagada check in inner loop, `continue`→`break`
+- `src/processing/matching/nc-factura-matcher.test.ts` — ADV-178 double-match prevention test, second-factura search prevention test
+- `src/matching/cascade-matcher.ts` — removed `pagada: false` from `buildUnmatchUpdate`
+- `src/services/pagos-pendientes.ts` — `warn`→`logError` in catch blocks
+
+### Linear Updates
+- ADV-176: Todo → In Progress → Review
+- ADV-177: Todo → In Progress → Review
+- ADV-178: Todo → In Progress → Review
+- ADV-179: Todo → In Progress → Review
+- ADV-180: Todo → In Progress → Review
+
+### Pre-commit Verification
+- bug-hunter: Found 1 HIGH bug (NC `continue`→`break` after partial write failure), 1 MEDIUM (missing test). Fixed both.
+- verifier: All 1946 tests pass, zero warnings
+
+### Continuation Status
+All fix plan tasks completed.
+
+### Review Findings
+
+Files reviewed: 8
+Reviewers: security, reliability, quality (agent team)
 Checks applied: Security, Logic, Async, Resources, Type Safety, Conventions, Test Quality
 
 No issues found - all implementations are correct and follow project conventions.
 
+**Discarded findings (not bugs):**
+- [DISCARDED] CONVENTION: Discarded Result values from sync calls (`src/bank/match-movimientos.ts:1284-1285`) — sync functions have full internal try/catch, log errors via logError, never throw. Dashboard is a derived view, source data unaffected. Duplicate logging would occur if checked at call site.
+- [DISCARDED] TEST: Missing test for sync when dashboardOperativoId absent (`src/bank/match-movimientos.test.ts:3843-3877`) — 3-line guard with simple if check for non-critical derived view. Not a bug.
+- [DISCARDED] TEST: ADV-177 test missing positive assertion (`src/processing/matching/factura-pago-matcher.test.ts:287-327`) — test purpose is specifically to verify unmatch does NOT clear pagada. Positive match behavior covered by existing tests.
+
 ### Linear Updates
-- ADV-168: Review → Merge
+- ADV-176: Review → Merge
+- ADV-177: Review → Merge
+- ADV-178: Review → Merge
+- ADV-179: Review → Merge
+- ADV-180: Review → Merge
 
 <!-- REVIEW COMPLETE -->
-
-### Continuation Status
-All tasks completed.
 
 ---
 

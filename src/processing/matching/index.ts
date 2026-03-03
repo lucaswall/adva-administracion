@@ -5,7 +5,7 @@
 import type { Result } from '../../types/index.js';
 import { getConfig } from '../../config.js';
 import { getCachedFolderStructure } from '../../services/folder-structure.js';
-import { syncPagosPendientes } from '../../services/pagos-pendientes.js';
+import { syncPagosPendientes, syncCobrosPendientes } from '../../services/pagos-pendientes.js';
 import { debug, info, warn } from '../../utils/logger.js';
 import { getCorrelationId } from '../../utils/correlation.js';
 
@@ -155,6 +155,39 @@ export async function runMatching(
     });
   }
 
+  // Match NC (Nota de Credito) with Facturas Emitidas (Ingresos)
+  debug('Matching NCs with Facturas Emitidas', {
+    module: 'matching',
+    phase: 'nc-match',
+    correlationId,
+  });
+
+  const ncIngresosMatches = await matchNCsWithFacturas(
+    folderStructure.controlIngresosId,
+    'Facturas Emitidas',
+    'cuitReceptor',
+    'A:T',
+    'S'
+  );
+
+  if (!ncIngresosMatches.ok) {
+    warn('NC matching failed for Facturas Emitidas', {
+      module: 'matching',
+      phase: 'nc-match',
+      error: ncIngresosMatches.error.message,
+      correlationId,
+    });
+    // Don't fail the entire matching process if NC matching fails
+  } else {
+    totalMatches += ncIngresosMatches.value;
+    debug('NC Emitidas matches complete', {
+      module: 'matching',
+      phase: 'nc-match',
+      matchesFound: ncIngresosMatches.value,
+      correlationId,
+    });
+  }
+
   // Match Retenciones Recibidas with Facturas Emitidas (Ingresos)
   debug('Matching Retenciones with Facturas Emitidas', {
     module: 'matching',
@@ -207,6 +240,35 @@ export async function runMatching(
       module: 'matching',
       phase: 'pagos-pendientes',
       pendingPayments: syncResult.value,
+      correlationId,
+    });
+  }
+
+  // Sync uncollected facturas to Dashboard's Cobros Pendientes sheet
+  debug('Syncing Cobros Pendientes', {
+    module: 'matching',
+    phase: 'cobros-pendientes',
+    correlationId,
+  });
+
+  const cobrosSyncResult = await syncCobrosPendientes(
+    folderStructure.controlIngresosId,
+    folderStructure.dashboardOperativoId
+  );
+
+  if (!cobrosSyncResult.ok) {
+    warn('Failed to sync Cobros Pendientes', {
+      module: 'matching',
+      phase: 'cobros-pendientes',
+      error: cobrosSyncResult.error.message,
+      correlationId,
+    });
+    // Don't fail matching if sync fails - this is not critical
+  } else {
+    debug('Cobros Pendientes sync complete', {
+      module: 'matching',
+      phase: 'cobros-pendientes',
+      pendingCobros: cobrosSyncResult.value,
       correlationId,
     });
   }

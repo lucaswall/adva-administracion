@@ -5,7 +5,7 @@
 
 import { getConfig, SPREADSHEET_LOCK_TIMEOUT_MS } from '../config.js';
 import { findByName, listByMimeType, createFolder, createSpreadsheet, createFile } from './drive.js';
-import { getSheetMetadata, createSheet, setValues, getValues, formatSheet, formatStatusSheet, deleteSheet, moveSheetToFirst, applyConditionalFormat } from './sheets.js';
+import { getSheetMetadata, createSheet, setValues, getValues, formatSheet, formatStatusSheet, deleteSheet, moveSheetToFirst, applyConditionalFormat, insertColumn } from './sheets.js';
 import { formatMonthFolder } from '../utils/spanish-date.js';
 import { CONTROL_INGRESOS_SHEETS, CONTROL_EGRESOS_SHEETS, DASHBOARD_OPERATIVO_SHEETS, CONTROL_RESUMENES_BANCARIO_SHEET, CONTROL_RESUMENES_TARJETA_SHEET, CONTROL_RESUMENES_BROKER_SHEET, type SheetConfig } from '../constants/spreadsheet-headers.js';
 import type { FolderStructure, Result, SortDestination } from '../types/index.js';
@@ -404,6 +404,61 @@ export async function migrateArchivosProcesadosHeaders(
     module: 'folder-structure',
     phase: 'migration',
     dashboardId,
+  });
+
+  return { ok: true, value: undefined };
+}
+
+/**
+ * Migrates Facturas Emitidas sheet to insert `pagada` column at position S (index 18),
+ * shifting `tipoDeCambio` to position T (index 19).
+ *
+ * Production sheets created before ADV-167 have 19 columns (tipoDeCambio at S).
+ * This migration inserts an empty column at S so tipoDeCambio shifts to T,
+ * then writes the `pagada` header to S1.
+ *
+ * Idempotent: skips if sheet already has 20+ columns or `pagada` is at index 18.
+ *
+ * @param controlIngresosId - Control de Ingresos spreadsheet ID
+ * @returns Success or error
+ */
+export async function migrateFacturasEmitidasPagadaColumn(
+  controlIngresosId: string
+): Promise<Result<void, Error>> {
+  const headersResult = await getValues(controlIngresosId, 'Facturas Emitidas!A1:T1');
+  if (!headersResult.ok) return headersResult;
+
+  const headerRow = headersResult.value[0] ?? [];
+
+  if (headerRow.length === 0) {
+    // Empty sheet — ensureSheetsExist will write full headers
+    return { ok: true, value: undefined };
+  }
+
+  if (headerRow.length >= 20 || headerRow[18] === 'pagada') {
+    // Already migrated — skip
+    return { ok: true, value: undefined };
+  }
+
+  // 19-column schema detected — insert pagada at column S (0-based index 18)
+  const metadataResult = await getSheetMetadata(controlIngresosId);
+  if (!metadataResult.ok) return metadataResult;
+
+  const facturasSheet = metadataResult.value.find(s => s.title === 'Facturas Emitidas');
+  if (!facturasSheet) {
+    return { ok: false, error: new Error('Facturas Emitidas sheet not found in Control de Ingresos') };
+  }
+
+  const insertResult = await insertColumn(controlIngresosId, facturasSheet.sheetId, 18);
+  if (!insertResult.ok) return insertResult;
+
+  const setResult = await setValues(controlIngresosId, 'Facturas Emitidas!S1', [['pagada']]);
+  if (!setResult.ok) return setResult;
+
+  info('Migrated Facturas Emitidas: inserted pagada column at S, tipoDeCambio shifted to T', {
+    module: 'folder-structure',
+    phase: 'migration',
+    controlIngresosId,
   });
 
   return { ok: true, value: undefined };

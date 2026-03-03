@@ -16,7 +16,7 @@ import { PROCESSING_LOCK_ID, PROCESSING_LOCK_TIMEOUT_MS, ADVA_CUITS } from '../c
 import { withLock } from '../utils/concurrency.js';
 import { info, warn, debug } from '../utils/logger.js';
 import { getCachedFolderStructure } from '../services/folder-structure.js';
-import { getValues, type CellValue } from '../services/sheets.js';
+import { getValues, batchUpdate, type CellValue } from '../services/sheets.js';
 import { parseNumber } from '../utils/numbers.js';
 import { parseArgDate, normalizeSpreadsheetDate } from '../utils/date.js';
 import { validateMoneda, validateMatchConfidence, validateTipoComprobante } from '../utils/validation.js';
@@ -25,6 +25,7 @@ import { getMovimientosToFill } from '../services/movimientos-reader.js';
 import { updateDetalle, type DetalleUpdate } from '../services/movimientos-detalle.js';
 
 import { prefetchExchangeRates } from '../utils/exchange-rate.js';
+import { syncPagosPendientes, syncCobrosPendientes } from '../services/pagos-pendientes.js';
 
 // Re-export MatchQuality for test compatibility
 export type { MatchQuality };
@@ -39,6 +40,17 @@ export type MatchedDocument =
   | { document: Factura & { row: number }; type: 'factura_recibida' }
   | { document: Pago & { row: number }; type: 'pago_enviado' }
   | { document: Recibo & { row: number }; type: 'recibo' };
+
+/**
+ * A pending pagada='SI' write to a Control factura row.
+ * Collected during movimientos processing and batch-written after detalle updates.
+ */
+export interface PagadaUpdate {
+  spreadsheetId: string;
+  sheetName: string;
+  rowNumber: number;
+  columnLetter: string;
+}
 
 /**
  * Builds a Map<fileId, MatchedDocument> from the 5 document arrays.
@@ -589,7 +601,7 @@ function parseRetenciones(data: CellValue[][]): Array<Retencion & { row: number 
 async function loadControlIngresos(spreadsheetId: string): Promise<Result<IngresosData, Error>> {
   try {
     const [facturasResult, pagosResult, retencionesResult] = await Promise.all([
-      getValues(spreadsheetId, 'Facturas Emitidas!A:S'),
+      getValues(spreadsheetId, 'Facturas Emitidas!A:T'),
       getValues(spreadsheetId, 'Pagos Recibidos!A:Q'),
       getValues(spreadsheetId, 'Retenciones Recibidas!A:O'),
     ]);
@@ -838,6 +850,8 @@ async function matchBankMovimientos(
   options: MatchOptions,
   currentYear: number,
   documentMap: Map<string, MatchedDocument>,
+  controlIngresosId: string,
+  controlEgresosId: string,
   globalExcludeFileIds?: Set<string>
 ): Promise<MatchMovimientosResult> {
   const startTime = Date.now();
@@ -866,6 +880,7 @@ async function matchBankMovimientos(
 
   const movimientos = movimientosResult.value;
   const updates: DetalleUpdate[] = [];
+  const pagadaUpdates: PagadaUpdate[] = [];
   let debitsFilled = 0;
   let creditsFilled = 0;
   let noMatches = 0;
@@ -1058,6 +1073,18 @@ async function matchBankMovimientos(
           creditsFilled++;
         }
 
+        // Collect pagada=SI update for matched facturas (not auto-labels, not MANUAL)
+        if (isFileIdMatch && matchResult.matchedFileId) {
+          const matchedDoc = documentMap.get(matchResult.matchedFileId);
+          if (matchedDoc && (matchedDoc.type === 'factura_emitida' || matchedDoc.type === 'factura_recibida')) {
+            if (matchedDoc.document.matchConfidence !== 'MANUAL') {
+              const ssId = matchedDoc.type === 'factura_emitida' ? controlIngresosId : controlEgresosId;
+              const sheetName = matchedDoc.type === 'factura_emitida' ? 'Facturas Emitidas' : 'Facturas Recibidas';
+              pagadaUpdates.push({ spreadsheetId: ssId, sheetName, rowNumber: matchedDoc.document.row, columnLetter: 'S' });
+            }
+          }
+        }
+
         // Add new matched fileId to excludeFileIds (old one stays removed = freed up)
         if (isFileIdMatch && matchResult.matchedFileId) {
           excludeFileIds.add(matchResult.matchedFileId);
@@ -1108,6 +1135,29 @@ async function matchBankMovimientos(
       bankName,
       error: updateResult.error.message,
     });
+  }
+
+  // Write pagada=SI for matched facturas, batched by spreadsheet
+  // Only if detalle updates succeeded — keeps movimiento match and pagada flag in sync
+  if (updateResult.ok && pagadaUpdates.length > 0) {
+    const bySpreadsheet = new Map<string, Array<{ range: string; values: CellValue[][] }>>();
+    for (const update of pagadaUpdates) {
+      const range = `${update.sheetName}!${update.columnLetter}${update.rowNumber}`;
+      if (!bySpreadsheet.has(update.spreadsheetId)) {
+        bySpreadsheet.set(update.spreadsheetId, []);
+      }
+      bySpreadsheet.get(update.spreadsheetId)!.push({ range, values: [['SI']] });
+    }
+    for (const [ssId, cellUpdates] of bySpreadsheet) {
+      const pagadaResult = await batchUpdate(ssId, cellUpdates);
+      if (!pagadaResult.ok) {
+        warn('Failed to write pagada updates', {
+          module: 'match-movimientos',
+          bankName,
+          error: pagadaResult.error.message,
+        });
+      }
+    }
   }
 
   // Get unique sheets processed
@@ -1212,6 +1262,8 @@ export async function matchAllMovimientos(
           options,
           currentYear,
           documentMap,
+          controlIngresosId,
+          controlEgresosId,
           globalExcludeFileIds
         );
 
@@ -1224,6 +1276,13 @@ export async function matchAllMovimientos(
           noMatches: result.noMatches,
           duration: result.duration,
         });
+      }
+
+      // Sync Pagos Pendientes and Cobros Pendientes dashboards after pagada writes
+      const { dashboardOperativoId } = folderStructure;
+      if (dashboardOperativoId) {
+        await syncPagosPendientes(controlEgresosId, dashboardOperativoId);
+        await syncCobrosPendientes(controlIngresosId, dashboardOperativoId);
       }
 
       // Calculate totals

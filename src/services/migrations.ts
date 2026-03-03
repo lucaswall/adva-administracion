@@ -7,7 +7,7 @@
 import type { Result, FolderStructure } from '../types/index.js';
 import type { CellValue, CellValueOrLink } from './sheets.js';
 import { getValues, batchUpdate, updateRowsWithFormatting, getSpreadsheetTimezone, getSheetMetadata } from './sheets.js';
-import { getCachedFolderStructure, migrateTipoDeCambioHeaders, migrateArchivosProcesadosHeaders } from './folder-structure.js';
+import { getCachedFolderStructure, migrateTipoDeCambioHeaders, migrateArchivosProcesadosHeaders, migrateFacturasEmitidasPagadaColumn } from './folder-structure.js';
 import { readSchemaVersion, writeSchemaVersion } from './schema-version.js';
 import { MOVIMIENTOS_BANCARIO_SHEET } from '../constants/spreadsheet-headers.js';
 import { SHEETS_BATCH_UPDATE_LIMIT } from '../config.js';
@@ -16,7 +16,7 @@ import { info, warn, debug, error as logError } from '../utils/logger.js';
 /**
  * Current schema version — increment when adding new migrations
  */
-export const CURRENT_SCHEMA_VERSION = 4;
+export const CURRENT_SCHEMA_VERSION = 5;
 
 /**
  * Migration definition
@@ -70,6 +70,14 @@ const MIGRATIONS: Migration[] = [
     name: 'dashboard-processedAt-format',
     migrate: async (fs: FolderStructure) => {
       const result = await migrateDashboardProcessedAt(fs.dashboardOperativoId);
+      if (!result.ok) throw result.error;
+    },
+  },
+  {
+    version: 5,
+    name: 'facturas-emitidas-pagada-column',
+    migrate: async (fs: FolderStructure) => {
+      const result = await migrateFacturasEmitidasPagadaColumn(fs.controlIngresosId);
       if (!result.ok) throw result.error;
     },
   },
