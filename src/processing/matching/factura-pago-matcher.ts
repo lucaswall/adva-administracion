@@ -208,7 +208,6 @@ async function processCascadingFacturaDisplacements(
           facturaRow: 0,
           confidence: 'LOW',
           hasCuitMatch: false,
-          pagada: false,
         }
       );
 
@@ -589,10 +588,11 @@ async function doMatchFacturasWithPagos(
         });
       }
     } else if (update.facturaFileId && update.facturaRow && !update.pagoFileId) {
-      // Factura unmatch update — P:S for both Facturas Recibidas and Facturas Emitidas (4 columns)
+      // Factura unmatch update — P:R only (3 columns: matchedPagoFileId, matchConfidence, hasCuitMatch)
+      // Column S (pagada) is intentionally left untouched to preserve NC-set 'SI'
       updates.push({
-        range: `'${facturasSheetName}'!P${update.facturaRow}:S${update.facturaRow}`,
-        values: [['', '', '', '']],
+        range: `'${facturasSheetName}'!P${update.facturaRow}:R${update.facturaRow}`,
+        values: [['', '', '']],
       });
     }
   }

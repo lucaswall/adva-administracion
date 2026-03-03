@@ -25,6 +25,7 @@ import { getMovimientosToFill } from '../services/movimientos-reader.js';
 import { updateDetalle, type DetalleUpdate } from '../services/movimientos-detalle.js';
 
 import { prefetchExchangeRates } from '../utils/exchange-rate.js';
+import { syncPagosPendientes, syncCobrosPendientes } from '../services/pagos-pendientes.js';
 
 // Re-export MatchQuality for test compatibility
 export type { MatchQuality };
@@ -1275,6 +1276,13 @@ export async function matchAllMovimientos(
           noMatches: result.noMatches,
           duration: result.duration,
         });
+      }
+
+      // Sync Pagos Pendientes and Cobros Pendientes dashboards after pagada writes
+      const { dashboardOperativoId } = folderStructure;
+      if (dashboardOperativoId) {
+        await syncPagosPendientes(controlEgresosId, dashboardOperativoId);
+        await syncCobrosPendientes(controlIngresosId, dashboardOperativoId);
       }
 
       // Calculate totals

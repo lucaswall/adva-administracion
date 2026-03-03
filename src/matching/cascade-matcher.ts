@@ -205,7 +205,6 @@ export function buildUnmatchUpdate(
       pagoFileId: '',
       confidence: 'LOW',
       hasCuitMatch: false,
-      pagada: false,
     };
   } else {
     return {

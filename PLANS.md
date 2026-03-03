@@ -372,3 +372,41 @@ Summary: 5 issue(s) found, creating Fix Plan (Team: security, reliability, quali
 ## Post-Implementation Checklist
 1. Run `bug-hunter` agent — Review changes for bugs
 2. Run `verifier` agent — Verify all tests pass and zero warnings
+
+---
+
+## Iteration 2
+
+**Implemented:** 2026-03-03
+**Method:** Single-agent (effort score 5, all S-sized fixes)
+
+### Tasks Completed This Iteration
+- Fix 1: Missing Cobros/Pagos Pendientes sync after movimientos pagada writes (ADV-176) — imported and called `syncPagosPendientes`/`syncCobrosPendientes` after all banks processed in `matchAllMovimientos`
+- Fix 2: Pago unmatch clears pagada column, overwriting NC-set 'SI' (ADV-177) — changed unmatch range from P:S to P:R (3 columns), removed dead `pagada: false` from `buildUnmatchUpdate` and cascade pago unmatch
+- Fix 3: NC partial-write failure leaves NC permanently unmatched (ADV-178) — moved `factura.pagada = 'SI'` before NC write, added runtime `pagada === 'SI'` check in inner loop, changed `continue` to `break` after NC write failure
+- Fix 4: E2E test uses 19-column facturaHeader instead of 20 (ADV-179) — added missing `pagada` column to MANUAL pago exclusion test fixture
+- Fix 5: warn() in catch blocks should be error() (ADV-180) — changed `warn` to `logError` in catch blocks of `syncPagosPendientes` and `syncCobrosPendientes`
+
+### Files Modified
+- `src/bank/match-movimientos.ts` — import and call sync functions after pagada writes
+- `src/bank/match-movimientos.test.ts` — mock pagos-pendientes, test sync calls after processing
+- `src/processing/matching/factura-pago-matcher.ts` — unmatch range P:R (3 cols), removed dead `pagada: false`
+- `src/processing/matching/factura-pago-matcher.test.ts` — ADV-177 test, fixed 19→20 col fixture, removed `pagada: false` from test data
+- `src/processing/matching/nc-factura-matcher.ts` — moved `factura.pagada='SI'` before NC write, added pagada check in inner loop, `continue`→`break`
+- `src/processing/matching/nc-factura-matcher.test.ts` — ADV-178 double-match prevention test, second-factura search prevention test
+- `src/matching/cascade-matcher.ts` — removed `pagada: false` from `buildUnmatchUpdate`
+- `src/services/pagos-pendientes.ts` — `warn`→`logError` in catch blocks
+
+### Linear Updates
+- ADV-176: Todo → In Progress → Review
+- ADV-177: Todo → In Progress → Review
+- ADV-178: Todo → In Progress → Review
+- ADV-179: Todo → In Progress → Review
+- ADV-180: Todo → In Progress → Review
+
+### Pre-commit Verification
+- bug-hunter: Found 1 HIGH bug (NC `continue`→`break` after partial write failure), 1 MEDIUM (missing test). Fixed both.
+- verifier: All 1946 tests pass, zero warnings
+
+### Continuation Status
+All fix plan tasks completed.

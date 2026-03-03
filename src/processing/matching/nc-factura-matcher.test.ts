@@ -413,4 +413,65 @@ describe('matchNCsWithFacturas', () => {
     // MANUAL factura excluded — no setValues calls
     expect(setValues).not.toHaveBeenCalled();
   });
+
+  it('should update factura.pagada in memory even when NC write fails, preventing double-match (ADV-178)', async () => {
+    // Two NCs with same CUIT and amount as the factura — second NC should NOT match same factura
+    const mockRows = [
+      ['fechaEmision', 'fileId', 'fileName', 'tipo', 'nro', 'cuit', 'razon', 'neto', 'iva', 'total', 'moneda', 'concepto', 'processed', 'conf', 'review', 'matchedPago', 'matchConf', 'cuitMatch', 'pagada'],
+      // Factura: unpaid, no match
+      ['2025-01-01', 'factura-1', 'factura.pdf', 'A', '0002-00003160', '20123456786', 'TEST SA', '1000', '210', '1210', 'ARS', 'Servicios', '2025-01-01', '0.95', 'NO', '', '', '', ''],
+      // NC1: matches factura by CUIT and amount
+      ['2025-01-15', 'nc-1', 'nc1.pdf', 'NC', '0002-00000001', '20123456786', 'TEST SA', '1000', '210', '1210', 'ARS', '', '2025-01-15', '0.95', 'NO', '', '', '', ''],
+      // NC2: same CUIT and amount — would match factura-1 if it weren't already matched
+      ['2025-01-20', 'nc-2', 'nc2.pdf', 'NC', '0002-00000002', '20123456786', 'TEST SA', '1000', '210', '1210', 'ARS', '', '2025-01-20', '0.95', 'NO', '', '', '', ''],
+    ];
+
+    vi.mocked(getValues).mockResolvedValue({ ok: true, value: mockRows });
+
+    // Factura write succeeds, NC1 write FAILS
+    // If the bug is present, NC2 will try to match the same factura (calls 3 & 4)
+    vi.mocked(setValues)
+      .mockResolvedValueOnce({ ok: true, value: 0 })   // factura pagada=SI (success) for NC1
+      .mockResolvedValueOnce({ ok: false, error: new Error('API Error') })  // NC1 pagada=SI (fail)
+      .mockResolvedValueOnce({ ok: true, value: 0 })   // factura pagada=SI for NC2 (bug path)
+      .mockResolvedValueOnce({ ok: true, value: 0 })   // NC2 pagada=SI (bug path)
+    ;
+
+    const result = await matchNCsWithFacturas('test-spreadsheet-id');
+
+    expect(result.ok).toBe(true);
+    // Only NC1's factura write should happen — NC2 should NOT match the same factura
+    // because factura.pagada was updated in memory after the factura write
+    // setValues called exactly 2 times: factura pagada=SI (success) + NC1 pagada=SI (fail)
+    expect(setValues).toHaveBeenCalledTimes(2);
+  });
+
+  it('should not search for second factura after NC write failure (ADV-178)', async () => {
+    // NC1 matches factura-1, but NC write fails. NC1 must NOT then try factura-2.
+    const mockRows = [
+      ['fechaEmision', 'fileId', 'fileName', 'tipo', 'nro', 'cuit', 'razon', 'neto', 'iva', 'total', 'moneda', 'concepto', 'processed', 'conf', 'review', 'matchedPago', 'matchConf', 'cuitMatch', 'pagada'],
+      // factura-1: unpaid, same CUIT and amount as NC
+      ['2025-01-01', 'factura-1', 'factura1.pdf', 'A', '0002-00003160', '20123456786', 'TEST SA', '1000', '210', '1210', 'ARS', 'Servicios', '2025-01-01', '0.95', 'NO', '', '', '', ''],
+      // factura-2: unpaid, same CUIT and amount — would match NC if it kept searching
+      ['2025-01-02', 'factura-2', 'factura2.pdf', 'A', '0002-00003161', '20123456786', 'TEST SA', '1000', '210', '1210', 'ARS', 'Servicios', '2025-01-02', '0.95', 'NO', '', '', '', ''],
+      // NC: matches both facturas by CUIT and amount
+      ['2025-01-15', 'nc-1', 'nc1.pdf', 'NC', '0002-00000001', '20123456786', 'TEST SA', '1000', '210', '1210', 'ARS', '', '2025-01-15', '0.95', 'NO', '', '', '', ''],
+    ];
+
+    vi.mocked(getValues).mockResolvedValue({ ok: true, value: mockRows });
+
+    // factura-1 write succeeds, NC write fails
+    vi.mocked(setValues)
+      .mockResolvedValueOnce({ ok: true, value: 0 })   // factura-1 pagada=SI (success)
+      .mockResolvedValueOnce({ ok: false, error: new Error('API Error') })  // NC pagada=SI (fail)
+      .mockResolvedValueOnce({ ok: true, value: 0 })   // factura-2 (should NOT be called)
+      .mockResolvedValueOnce({ ok: true, value: 0 })   // NC (should NOT be called)
+    ;
+
+    const result = await matchNCsWithFacturas('test-spreadsheet-id');
+
+    expect(result.ok).toBe(true);
+    // NC consumed its match with factura-1 — must NOT try factura-2
+    expect(setValues).toHaveBeenCalledTimes(2);
+  });
 });

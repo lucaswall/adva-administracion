@@ -213,6 +213,11 @@ export async function matchNCsWithFacturas(
 
     // Find matching factura: same CUIT + same amount (or referenced number if available)
     for (const factura of regularFacturas) {
+      // Skip facturas already matched by a previous NC in this run
+      if (factura.pagada === 'SI') {
+        continue;
+      }
+
       // Must be same supplier (CUIT)
       if (nc.cuit !== factura.cuit) {
         continue;
@@ -266,6 +271,10 @@ export async function matchNCsWithFacturas(
         continue;
       }
 
+      // Mark factura as matched in memory immediately after successful spreadsheet write
+      // This prevents double-matching if the NC write below fails
+      factura.pagada = 'SI';
+
       // Update NC pagada = 'SI'
       const updateNCResult = await setValues(
         spreadsheetId,
@@ -280,13 +289,10 @@ export async function matchNCsWithFacturas(
           error: updateNCResult.error.message,
           correlationId,
         });
-        continue;
+        break; // NC consumed its match (factura write succeeded) — stop searching
       }
 
       matchCount++;
-
-      // Mark factura as matched so it won't be matched again
-      factura.pagada = 'SI';
 
       // Break inner loop - this NC is now matched
       break;

@@ -5,7 +5,7 @@
 
 import type { Result } from '../types/index.js';
 import { getValues, setValues, clearSheetData } from './sheets.js';
-import { info, warn } from '../utils/logger.js';
+import { info, warn, error as logError } from '../utils/logger.js';
 import { getCorrelationId } from '../utils/correlation.js';
 import { normalizeSpreadsheetDate } from '../utils/date.js';
 
@@ -207,17 +207,17 @@ export async function syncPagosPendientes(
     });
 
     return { ok: true, value: unpaidFacturas.length };
-  } catch (error) {
-    warn('Pagos Pendientes sync failed', {
+  } catch (err) {
+    logError('Pagos Pendientes sync failed', {
       module: 'pagos-pendientes',
       phase: 'sync',
-      error: error instanceof Error ? error.message : String(error),
+      error: err instanceof Error ? err.message : String(err),
       correlationId,
     });
 
     return {
       ok: false,
-      error: error instanceof Error ? error : new Error(String(error)),
+      error: err instanceof Error ? err : new Error(String(err)),
     };
   }
 }
@@ -418,17 +418,17 @@ export async function syncCobrosPendientes(
     });
 
     return { ok: true, value: unpaidCobros.length };
-  } catch (error) {
-    warn('Cobros Pendientes sync failed', {
+  } catch (err) {
+    logError('Cobros Pendientes sync failed', {
       module: 'pagos-pendientes',
       phase: 'sync',
-      error: error instanceof Error ? error.message : String(error),
+      error: err instanceof Error ? err.message : String(err),
       correlationId,
     });
 
     return {
       ok: false,
-      error: error instanceof Error ? error : new Error(String(error)),
+      error: err instanceof Error ? err : new Error(String(err)),
     };
   }
 }

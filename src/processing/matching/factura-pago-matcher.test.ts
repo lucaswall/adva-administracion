@@ -172,7 +172,6 @@ describe('Bug #9: Cascading displacement edge case', () => {
         facturaRow: 0,
         confidence: 'LOW',
         hasCuitMatch: false,
-        pagada: false,
       }
     );
 
@@ -284,6 +283,48 @@ describe('Facturas Emitidas pagada column handling (ADV-170)', () => {
     // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
     expect(facturaUpdate!.values[0]).toHaveLength(4);
   });
+
+  it('unmatch preserves pagada column when NC previously set it to SI (ADV-177)', async () => {
+    const { matchFacturasWithPagos, getValues, batchUpdate } = await setupE2E();
+
+    // Factura Emitida at row 2 — pagada='SI' (set by NC matcher), matched to pago-a LOW
+    const facturaHeader = ['fechaEmision', 'fileId', 'fileName', 'tipoComprobante', 'nroFactura', 'cuitReceptor', 'razonSocialReceptor', 'importeNeto', 'importeIva', 'importeTotal', 'moneda', 'concepto', 'processedAt', 'confidence', 'needsReview', 'matchedPagoFileId', 'matchConfidence', 'hasCuitMatch', 'pagada', 'tipoDeCambio'];
+    const facturaRow = ['2025-01-01', 'fact-1', 'factura.pdf', 'A', '00001-00000001', '20123456786', 'TEST SA', '8264.46', '1735.54', '10000', 'ARS', '', '2025-01-01T10:00:00Z', '0.95', 'NO', 'pago-a', 'LOW', 'NO', 'SI', ''];
+
+    // Pago B displaces pago-a → pago-a has no remaining match → factura gets unmatched
+    // The unmatch should NOT clear pagada='SI' at column S
+    const pagoHeader = ['fechaPago', 'fileId', 'fileName', 'banco', 'importePagado', 'moneda', 'referencia', 'cuitPagador', 'nombrePagador', 'concepto', 'processedAt', 'confidence', 'needsReview', 'matchedFacturaFileId', 'matchConfidence', 'tipoDeCambio', 'importeEnPesos'];
+    const pagoRowA = ['2025-01-05', 'pago-a', 'pagoA.pdf', 'BBVA', '10000', 'ARS', '', '27234567891', 'OTRO SA', '', '2025-01-05T10:00:00Z', '0.95', 'NO', 'fact-1', 'LOW', '', ''];
+    const pagoRowB = ['2025-01-05', 'pago-b', 'pagoB.pdf', 'BBVA', '10000', 'ARS', '', '20123456786', 'TEST SA', 'Pago servicios 20123456786', '2025-01-05T10:00:00Z', '0.95', 'NO', '', '', '', ''];
+
+    vi.mocked(getValues)
+      .mockResolvedValueOnce({ ok: true, value: [facturaHeader, facturaRow] })
+      .mockResolvedValueOnce({ ok: true, value: [pagoHeader, pagoRowA, pagoRowB] });
+    vi.mocked(batchUpdate).mockResolvedValue({ ok: true, value: 0 });
+
+    const result = await matchFacturasWithPagos(
+      'test-spreadsheet',
+      'Facturas Emitidas',
+      'Pagos Recibidos',
+      'cuitReceptor',
+      'cuitPagador',
+      config as any,
+    );
+
+    expect(result.ok).toBe(true);
+
+    // Find the unmatch update for pago-a (clears pago's N:O columns)
+    const calls = vi.mocked(batchUpdate).mock.calls[0][1] as any[];
+    const pagoUnmatch = calls.find((u: any) => u.range.includes("'Pagos Recibidos'!N3:O3"));
+    expect(pagoUnmatch).toBeDefined();
+
+    // Verify NO update touches column S of the factura (pagada should be preserved)
+    const facturaUnmatch = calls.find((u: any) =>
+      u.range.includes("'Facturas Emitidas'") && u.values[0].length === 4 && u.values[0].every((v: string) => v === '')
+    );
+    // After fix: there should be no 4-column empty unmatch (P:S); only 3-column (P:R) if any
+    expect(facturaUnmatch).toBeUndefined();
+  });
 });
 
 describe('MANUAL matchConfidence locking (Fix 5 - ADV-131)', () => {
@@ -367,8 +408,8 @@ describe('MANUAL matchConfidence locking (Fix 5 - ADV-131)', () => {
     });
 
     // Factura that would match the pago by CUIT and amount
-    const facturaHeader = ['fechaEmision', 'fileId', 'fileName', 'tipoComprobante', 'nroFactura', 'cuitReceptor', 'razonSocialReceptor', 'importeNeto', 'importeIva', 'importeTotal', 'moneda', 'concepto', 'processedAt', 'confidence', 'needsReview', 'matchedPagoFileId', 'matchConfidence', 'hasCuitMatch', 'tipoDeCambio'];
-    const facturaRow = ['2025-01-01', 'fact-1', 'factura.pdf', 'A', '00003-00001957', '20123456786', 'TEST SA', '8264.46', '1735.54', '10000', 'ARS', '', '2025-01-01T10:00:00Z', '0.95', 'NO', '', '', '', ''];
+    const facturaHeader = ['fechaEmision', 'fileId', 'fileName', 'tipoComprobante', 'nroFactura', 'cuitReceptor', 'razonSocialReceptor', 'importeNeto', 'importeIva', 'importeTotal', 'moneda', 'concepto', 'processedAt', 'confidence', 'needsReview', 'matchedPagoFileId', 'matchConfidence', 'hasCuitMatch', 'pagada', 'tipoDeCambio'];
+    const facturaRow = ['2025-01-01', 'fact-1', 'factura.pdf', 'A', '00003-00001957', '20123456786', 'TEST SA', '8264.46', '1735.54', '10000', 'ARS', '', '2025-01-01T10:00:00Z', '0.95', 'NO', '', '', '', '', ''];
 
     // Pago with MANUAL matchConfidence — should NOT be re-matched
     const pagoHeader = ['fechaPago', 'fileId', 'fileName', 'banco', 'importePagado', 'moneda', 'referencia', 'cuitPagador', 'nombrePagador', 'concepto', 'processedAt', 'confidence', 'needsReview', 'matchedFacturaFileId', 'matchConfidence', 'tipoDeCambio', 'importeEnPesos'];

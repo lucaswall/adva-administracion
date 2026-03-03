@@ -50,6 +50,11 @@ vi.mock('../utils/exchange-rate.js', () => ({
   prefetchExchangeRates: vi.fn().mockResolvedValue(undefined),
 }));
 
+vi.mock('../services/pagos-pendientes.js', () => ({
+  syncPagosPendientes: vi.fn().mockResolvedValue({ ok: true, value: 0 }),
+  syncCobrosPendientes: vi.fn().mockResolvedValue({ ok: true, value: 0 }),
+}));
+
 // Create mockable matcher methods
 let mockMatchMovement = vi.fn();
 let mockMatchCreditMovement = vi.fn();
@@ -88,6 +93,7 @@ import { getMovimientosToFill } from '../services/movimientos-reader.js';
 import { updateDetalle } from '../services/movimientos-detalle.js';
 import { warn } from '../utils/logger.js';
 import { prefetchExchangeRates } from '../utils/exchange-rate.js';
+import { syncPagosPendientes, syncCobrosPendientes } from '../services/pagos-pendientes.js';
 
 describe('getRequiredColumnIndex', () => {
   it('returns correct index when header exists', () => {
@@ -3809,5 +3815,64 @@ describe('pagada updates from movimientos matching', () => {
     const updates = calls[0][1] as Array<{ range: string; values: string[][] }>;
     expect(updates).toHaveLength(1);
     expect(updates[0].values).toEqual([['SI']]);
+  });
+});
+
+describe('syncPagosPendientes and syncCobrosPendientes called after pagada writes (ADV-176)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.useFakeTimers();
+    mockMatchMovement = vi.fn().mockReturnValue({
+      matchType: 'no_match',
+      description: '',
+      matchedFileId: '',
+      confidence: 'LOW',
+    });
+    mockMatchCreditMovement = vi.fn().mockReturnValue({
+      matchType: 'no_match',
+      description: '',
+      matchedFileId: '',
+      confidence: 'LOW',
+    });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('should call syncPagosPendientes and syncCobrosPendientes after all banks are processed', async () => {
+    const mockFolderStructure = {
+      controlIngresosId: 'ingresos-id',
+      controlEgresosId: 'egresos-id',
+      dashboardOperativoId: 'dashboard-id',
+      bankSpreadsheets: new Map(),
+      movimientosSpreadsheets: new Map([['BBVA', 'bbva-id']]),
+    };
+
+    vi.mocked(withLock).mockImplementation(async (_id, fn) => {
+      const result = await fn();
+      return { ok: true, value: result };
+    });
+
+    vi.mocked(getCachedFolderStructure).mockReturnValue(mockFolderStructure as any);
+
+    vi.mocked(getValues).mockResolvedValue({
+      ok: true,
+      value: [['header']],
+    });
+
+    vi.mocked(getMovimientosToFill).mockResolvedValue({
+      ok: true,
+      value: [],
+    });
+
+    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: 0 });
+
+    const resultPromise = matchAllMovimientos();
+    await vi.runAllTimersAsync();
+    await resultPromise;
+
+    expect(syncPagosPendientes).toHaveBeenCalledWith('egresos-id', 'dashboard-id');
+    expect(syncCobrosPendientes).toHaveBeenCalledWith('ingresos-id', 'dashboard-id');
   });
 });
