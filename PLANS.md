@@ -284,3 +284,91 @@
 
 ### Continuation Status
 All tasks completed.
+
+### Review Findings
+
+Summary: 5 issue(s) found, creating Fix Plan (Team: security, reliability, quality reviewers)
+- FIX: 5 issue(s) — Linear issues created in Todo
+- DISCARDED: 7 finding(s) — false positives / not applicable
+
+**Issues requiring fix:**
+- [HIGH] BUG: Missing Cobros/Pagos Pendientes sync after movimientos pagada writes (`src/bank/match-movimientos.ts` — `matchAllMovimientos` writes pagada='SI' but never syncs dashboard)
+- [HIGH] BUG: Pago unmatch clears pagada column, overwriting NC-set 'SI' (`src/processing/matching/factura-pago-matcher.ts:591-596` — unmatch writes `['', '', '', '']` to P:S, clearing NC-set pagada)
+- [MEDIUM] BUG: NC partial-write failure leaves NC permanently unmatched + double-match risk (`src/processing/matching/nc-factura-matcher.ts:252-293` — if NC write fails after factura write, in-memory state not updated)
+- [MEDIUM] TEST: E2E test uses 19-column facturaHeader instead of 20 (`src/processing/matching/factura-pago-matcher.test.ts:370` — missing pagada in mock data)
+- [MEDIUM] CONVENTION: warn() in catch blocks should be error() per CLAUDE.md (`src/services/pagos-pendientes.ts:211,422`)
+
+**Discarded findings (not bugs):**
+- [DISCARDED] SECURITY: Spreadsheet IDs logged at INFO level — standard practice, OAuth-protected resources
+- [DISCARDED] SECURITY: pagadaColumnLetter parameter not validated — only receives static string literals at all call sites
+- [DISCARDED] SECURITY: PagadaUpdate.columnLetter type not constrained — same as above, defensive typing preference
+- [DISCARDED] TYPE: `as any` in factura-pago-matcher tests — style-only in test mocks, zero correctness impact
+- [DISCARDED] TYPE: `as any` + double cast in match-movimientos tests — style-only in test mocks, zero correctness impact
+- [DISCARDED] CONVENTION: Missing `phase` field in migrations.ts warn logs — not enforced by CLAUDE.md, consistency preference
+- [DISCARDED] TYPE: `buildUnmatchUpdate` sets `pagada: false` (value never used in unmatch path, which writes empty strings) — cosmetic; real bug is the P:S range, covered by ADV-177
+
+### Linear Updates
+- ADV-169: Review → Merge (original task)
+- ADV-170: Review → Merge (original task)
+- ADV-171: Review → Merge (original task)
+- ADV-172: Review → Merge (original task)
+- ADV-173: Review → Merge (original task)
+- ADV-174: Review → Merge (original task)
+- ADV-175: Review → Merge (original task)
+- ADV-176: Created in Todo (Fix: Missing Cobros/Pagos Pendientes sync)
+- ADV-177: Created in Todo (Fix: Pago unmatch clears pagada)
+- ADV-178: Created in Todo (Fix: NC partial-write failure)
+- ADV-179: Created in Todo (Fix: E2E test 19-col header)
+- ADV-180: Created in Todo (Fix: warn→error in catch blocks)
+
+<!-- REVIEW COMPLETE -->
+
+---
+
+## Fix Plan
+
+**Source:** Review findings from Iteration 1
+**Linear Issues:** [ADV-176](https://linear.app/lw-claude/issue/ADV-176/fix-missing-cobrospagos-pendientes-sync-after-movimientos-pagada), [ADV-177](https://linear.app/lw-claude/issue/ADV-177/fix-pago-unmatch-clears-pagada-column-overwriting-nc-set-si), [ADV-178](https://linear.app/lw-claude/issue/ADV-178/fix-nc-partial-write-failure-leaves-nc-permanently-unmatched), [ADV-179](https://linear.app/lw-claude/issue/ADV-179/fix-e2e-test-uses-19-column-facturaheader-instead-of-20), [ADV-180](https://linear.app/lw-claude/issue/ADV-180/fix-warn-in-catch-blocks-should-be-error-per-claudemd)
+
+### Fix 1: Missing Cobros/Pagos Pendientes sync after movimientos pagada writes
+**Linear Issue:** [ADV-176](https://linear.app/lw-claude/issue/ADV-176/fix-missing-cobrospagos-pendientes-sync-after-movimientos-pagada)
+
+1. Write test in `src/bank/match-movimientos.test.ts`: verify `syncPagosPendientes` and `syncCobrosPendientes` are called after pagada writes complete in `matchAllMovimientos`
+2. Run verifier with pattern "match-movimientos" (expect fail)
+3. In `src/bank/match-movimientos.ts`: import `syncPagosPendientes` and `syncCobrosPendientes` from `../../services/pagos-pendientes.js`. After all banks are processed (after the results loop ~line 1278), call both sync functions using `controlEgresosId`, `controlIngresosId`, and `folderStructure.dashboardOperativoId`
+4. Run verifier with pattern "match-movimientos" (expect pass)
+
+### Fix 2: Pago unmatch clears pagada column, overwriting NC-set 'SI'
+**Linear Issue:** [ADV-177](https://linear.app/lw-claude/issue/ADV-177/fix-pago-unmatch-clears-pagada-column-overwriting-nc-set-si)
+
+1. Write test in `src/processing/matching/factura-pago-matcher.test.ts`: verify that when a pago displacement unmatch occurs on a factura with pagada='SI' (set by NC), the pagada column is preserved (not cleared)
+2. Run verifier with pattern "factura-pago-matcher" (expect fail)
+3. In `src/processing/matching/factura-pago-matcher.ts:591-596`: change unmatch range from `P${row}:S${row}` to `P${row}:R${row}` with 3 empty values `['', '', '']` (matchedPagoFileId, matchConfidence, hasCuitMatch). Column S (pagada) is left untouched.
+4. In `src/matching/cascade-matcher.ts:208`: remove `pagada: false` from `buildUnmatchUpdate` return (dead code but misleading)
+5. Run verifier with pattern "factura-pago-matcher" (expect pass)
+
+### Fix 3: NC partial-write failure leaves NC permanently unmatched
+**Linear Issue:** [ADV-178](https://linear.app/lw-claude/issue/ADV-178/fix-nc-partial-write-failure-leaves-nc-permanently-unmatched)
+
+1. Write test in `src/processing/matching/nc-factura-matcher.test.ts`: verify that when factura pagada write succeeds but NC write fails, `factura.pagada` is still updated in memory (preventing double-match)
+2. Run verifier with pattern "nc-factura-matcher" (expect fail)
+3. In `src/processing/matching/nc-factura-matcher.ts`: move `factura.pagada = 'SI'` from line 289 to immediately after the successful factura write (after line 257, before the NC write attempt). This ensures in-memory state reflects the spreadsheet state regardless of NC write outcome.
+4. Run verifier with pattern "nc-factura-matcher" (expect pass)
+
+### Fix 4: E2E test uses 19-column facturaHeader instead of 20
+**Linear Issue:** [ADV-179](https://linear.app/lw-claude/issue/ADV-179/fix-e2e-test-uses-19-column-facturaheader-instead-of-20)
+
+1. In `src/processing/matching/factura-pago-matcher.test.ts:370`: add `'pagada'` to facturaHeader before `'tipoDeCambio'` and add corresponding `''` to facturaRow. Search for other test fixtures in the same file with 19-column Facturas Emitidas headers and fix them too.
+2. Run verifier with pattern "factura-pago-matcher" (expect pass — existing tests should still work with corrected data)
+
+### Fix 5: warn() in catch blocks should be error()
+**Linear Issue:** [ADV-180](https://linear.app/lw-claude/issue/ADV-180/fix-warn-in-catch-blocks-should-be-error-per-claudemd)
+
+1. In `src/services/pagos-pendientes.ts:211`: change `warn('Pagos Pendientes sync failed', ...)` to `error('Pagos Pendientes sync failed', ...)`
+2. In `src/services/pagos-pendientes.ts:422`: change `warn('Cobros Pendientes sync failed', ...)` to `error('Cobros Pendientes sync failed', ...)`
+3. Update import if `error` is not already imported (check alias — likely `logError` per convention)
+4. Run verifier with pattern "pagos-pendientes" (expect pass)
+
+## Post-Implementation Checklist
+1. Run `bug-hunter` agent — Review changes for bugs
+2. Run `verifier` agent — Verify all tests pass and zero warnings
