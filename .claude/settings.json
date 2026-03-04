@@ -37,6 +37,7 @@
       "mcp__gdrive__gdrive_copy_file",
       "mcp__gdrive__gdrive_get_file_info",
       "mcp__gdrive__gsheets_metadata",
+      "mcp__gdrive__gsheets_query",
       "mcp__gemini__gemini_analyze_pdf",
       "mcp__linear__list_comments",
       "mcp__linear__create_comment",

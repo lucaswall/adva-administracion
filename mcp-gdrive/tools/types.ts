@@ -46,6 +46,22 @@ export interface GSheetsReadInput {
   spreadsheetId: string;
   ranges?: string[];
   sheetId?: number;
+  offset?: number;
+  limit?: number;
+  columns?: string[];
+}
+
+export interface GSheetsQueryInput {
+  spreadsheetId: string;
+  sheetName: string;
+  columns?: string[];
+  where?: Array<{
+    column: string;
+    operator: 'eq' | 'neq' | 'gt' | 'lt' | 'gte' | 'lte' | 'contains' | 'empty' | 'not_empty';
+    value?: string;
+  }>;
+  limit?: number;
+  offset?: number;
 }
 
 export interface GSheetsUpdateInput {

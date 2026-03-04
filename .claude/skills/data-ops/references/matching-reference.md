@@ -104,13 +104,13 @@ For full column schemas of all sheets, refer to `SPREADSHEET_FORMAT.md` in the p
 
 ### Quick Field Index (for data correction)
 
-**Facturas Emitidas (A:S):** fechaEmision(A), fileId(B), fileName(C), tipoComprobante(D), nroFactura(E), cuitReceptor(F), razonSocialReceptor(G), importeNeto(H), importeIva(I), importeTotal(J), moneda(K), concepto(L), processedAt(M), confidence(N), needsReview(O)
+**Facturas Emitidas (A:T):** fechaEmision(A), fileId(B), fileName(C), tipoComprobante(D), nroFactura(E), cuitReceptor(F), razonSocialReceptor(G), importeNeto(H), importeIva(I), importeTotal(J), moneda(K), concepto(L), processedAt(M), confidence(N), needsReview(O), matchedPagoFileId(P), matchConfidence(Q), hasCuitMatch(R), pagada(S), tipoDeCambio(T)
 
 **Pagos Recibidos (A:Q):** fechaPago(A), fileId(B), fileName(C), banco(D), importePagado(E), moneda(F), referencia(G), cuitPagador(H), nombrePagador(I), concepto(J), processedAt(K), confidence(L), needsReview(M)
 
 **Retenciones Recibidas (A:O):** fechaEmision(A), fileId(B), fileName(C), nroCertificado(D), cuitAgenteRetencion(E), razonSocialAgenteRetencion(F), impuesto(G), regimen(H), montoComprobante(I), montoRetencion(J), processedAt(K), confidence(L), needsReview(M)
 
-**Facturas Recibidas (A:T):** fechaEmision(A), fileId(B), fileName(C), tipoComprobante(D), nroFactura(E), cuitEmisor(F), razonSocialEmisor(G), importeNeto(H), importeIva(I), importeTotal(J), moneda(K), concepto(L), processedAt(M), confidence(N), needsReview(O)
+**Facturas Recibidas (A:T):** fechaEmision(A), fileId(B), fileName(C), tipoComprobante(D), nroFactura(E), cuitEmisor(F), razonSocialEmisor(G), importeNeto(H), importeIva(I), importeTotal(J), moneda(K), concepto(L), processedAt(M), confidence(N), needsReview(O), matchedPagoFileId(P), matchConfidence(Q), hasCuitMatch(R), pagada(S), tipoDeCambio(T)
 
 **Pagos Enviados (A:Q):** fechaPago(A), fileId(B), fileName(C), banco(D), importePagado(E), moneda(F), referencia(G), cuitBeneficiario(H), nombreBeneficiario(I), concepto(J), processedAt(K), confidence(L), needsReview(M)
 

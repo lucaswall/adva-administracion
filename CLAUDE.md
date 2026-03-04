@@ -118,7 +118,7 @@ Allowed: `get-logs`, `list-deployments`, `list-services`, `list-variables`, `che
 - `generate-domain`
 
 ### Google Drive MCP
-`gdrive_search`, `gdrive_read_file`, `gdrive_list_folder`, `gdrive_get_pdf`, `gdrive_get_file_info`, `gsheets_read`, `gsheets_metadata`, `gsheets_update`, `gdrive_move_file`, `gdrive_rename_file`, `gdrive_copy_file`
+`gdrive_search`, `gdrive_read_file`, `gdrive_list_folder`, `gdrive_get_pdf`, `gdrive_get_file_info`, `gsheets_read`, `gsheets_query`, `gsheets_metadata`, `gsheets_update`, `gdrive_move_file`, `gdrive_rename_file`, `gdrive_copy_file`
 
 **Write tools** (`gsheets_update`, `gdrive_move_file`, `gdrive_rename_file`, `gdrive_copy_file`) are restricted to the `data-ops` skill via `allowed-tools`. Do not use them outside that skill.
 
