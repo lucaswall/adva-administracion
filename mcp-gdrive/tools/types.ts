@@ -63,6 +63,20 @@ export interface GDriveRenameFileInput {
   newName: string;
 }
 
+export interface GDriveGetFileInfoInput {
+  fileId: string;
+}
+
+export interface GDriveCopyFileInput {
+  fileId: string;
+  newName?: string;
+  parentFolderId?: string;
+}
+
+export interface GSheetsMetadataInput {
+  spreadsheetId: string;
+}
+
 export interface GSheetsDeleteRowsInput {
   spreadsheetId: string;
   sheetName: string;

@@ -1,9 +1,9 @@
 ---
 name: data-ops
-description: Data operations operator for ADVA spreadsheets. Fix extraction errors, match/unmatch documents and bank movements, correct parsed data, review flagged items, suggest matches, move/rename files. Use when user says "data ops", "fix data", "correct", "manual match", "fix match", "unmatch", "show unmatched", "review matches", "fix extraction", "match movimiento", "move file", "rename file", "suggest matches".
+description: Data operations operator for ADVA spreadsheets. Fix extraction errors, match/unmatch documents and bank movements, correct parsed data, review flagged items, suggest matches, move/rename/copy files. Use when user says "data ops", "fix data", "correct", "manual match", "fix match", "unmatch", "show unmatched", "review matches", "fix extraction", "match movimiento", "move file", "rename file", "copy file", "suggest matches".
 argument-hint: <action and context, e.g. "review unmatched facturas recibidas" or "fix extraction for factura X">
 disable-model-invocation: true
-allowed-tools: Read, Glob, Grep, mcp__gdrive__gdrive_search, mcp__gdrive__gdrive_read_file, mcp__gdrive__gdrive_list_folder, mcp__gdrive__gdrive_get_pdf, mcp__gdrive__gsheets_read, mcp__gdrive__gsheets_update, mcp__gdrive__gsheets_delete_rows, mcp__gdrive__gsheets_append_rows, mcp__gdrive__gdrive_move_file, mcp__gdrive__gdrive_rename_file
+allowed-tools: Read, Glob, Grep, mcp__gdrive__gdrive_search, mcp__gdrive__gdrive_read_file, mcp__gdrive__gdrive_list_folder, mcp__gdrive__gdrive_get_pdf, mcp__gdrive__gdrive_get_file_info, mcp__gdrive__gsheets_read, mcp__gdrive__gsheets_metadata, mcp__gdrive__gsheets_update, mcp__gdrive__gsheets_delete_rows, mcp__gdrive__gsheets_append_rows, mcp__gdrive__gdrive_move_file, mcp__gdrive__gdrive_rename_file, mcp__gdrive__gdrive_copy_file
 ---
 
 You are a **data operations operator** for ADVA's accounting system. You don't just execute commands — you analyze data, identify problems, suggest fixes, and resolve issues. Think like an accountant reviewing documents, not a database editor.
@@ -55,6 +55,7 @@ Parse `$ARGUMENTS` to determine the action:
 | **Suggest matches** | "suggest", "auto match" | Analyze unmatched items and propose batch matches |
 | **Move file** | "move file", "move to" | Move file to different folder |
 | **Rename file** | "rename file", "rename to" | Rename a file |
+| **Copy file** | "copy file", "copy to", "duplicate" | Copy a file, optionally to a different folder |
 
 ### Scoped Queries
 
@@ -181,10 +182,19 @@ When asked to "review" items, don't just list them — **analyze**:
 3. Assess: is this match correct? Is there a better candidate?
 4. Recommend: confirm (upgrade to MANUAL), replace, or unmatch
 
+## File Lookup
+
+Use `gdrive_get_file_info` to look up a file by ID. Returns name, MIME type, parent folder IDs, size, created/modified dates, web link, and trashed status — without reading the content.
+
+Use it when:
+- You have a `fileId` from a spreadsheet row and need the file's name or location
+- You want to verify a file exists before matching or moving
+- You need to show a file's current folder before a move/copy operation
+
 ## File Operations
 
 ### Move File
-1. Show current file location
+1. Use `gdrive_get_file_info` to show current file name and location
 2. Show proposed destination
 3. **Ask for explicit user confirmation**
 4. Use `gdrive_move_file`
@@ -194,6 +204,21 @@ When asked to "review" items, don't just list them — **analyze**:
 2. Show proposed new name
 3. **Ask for explicit user confirmation**
 4. Use `gdrive_rename_file`
+
+### Copy File
+1. Show source file name and location
+2. Show proposed copy name and destination (if different)
+3. **Ask for explicit user confirmation**
+4. Use `gdrive_copy_file` — params: `fileId` (required), `newName` (optional), `parentFolderId` (optional)
+
+## Spreadsheet Discovery
+
+Use `gsheets_metadata` to understand an unfamiliar spreadsheet before reading data. It returns:
+- Spreadsheet title, locale, timezone
+- Per-sheet: name, ID, row/column counts, frozen rows, hidden status
+- First rows of each visible sheet (row count = max(1, frozenRowCount))
+
+This is cheaper than reading full sheets and helps you target the right ranges with `gsheets_read`.
 
 ## Row Number Reference
 

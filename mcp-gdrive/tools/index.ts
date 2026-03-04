@@ -8,6 +8,9 @@ import { schema as gsheetsDeleteRowsSchema, deleteRows } from './gsheets_delete_
 import { schema as gsheetsAppendRowsSchema, appendRows } from './gsheets_append_rows.js';
 import { schema as gdriveMoveFileSchema, moveFile } from './gdrive_move_file.js';
 import { schema as gdriveRenameFileSchema, renameFile } from './gdrive_rename_file.js';
+import { schema as gdriveCopyFileSchema, copyFile } from './gdrive_copy_file.js';
+import { schema as gdriveGetFileInfoSchema, getFileInfo } from './gdrive_get_file_info.js';
+import { schema as gsheetsMetadataSchema, getMetadata } from './gsheets_metadata.js';
 import {
   Tool,
   GDriveSearchInput,
@@ -20,6 +23,9 @@ import {
   GSheetsAppendRowsInput,
   GDriveMoveFileInput,
   GDriveRenameFileInput,
+  GDriveCopyFileInput,
+  GDriveGetFileInfoInput,
+  GSheetsMetadataInput,
 } from './types.js';
 
 export const tools: [
@@ -27,12 +33,15 @@ export const tools: [
   Tool<GDriveReadFileInput>,
   Tool<GDriveListFolderInput>,
   Tool<GDriveGetPdfInput>,
+  Tool<GDriveGetFileInfoInput>,
   Tool<GSheetsReadInput>,
   Tool<GSheetsUpdateInput>,
   Tool<GSheetsDeleteRowsInput>,
   Tool<GSheetsAppendRowsInput>,
   Tool<GDriveMoveFileInput>,
-  Tool<GDriveRenameFileInput>
+  Tool<GDriveRenameFileInput>,
+  Tool<GDriveCopyFileInput>,
+  Tool<GSheetsMetadataInput>
 ] = [
   {
     ...gdriveSearchSchema,
@@ -49,6 +58,10 @@ export const tools: [
   {
     ...gdriveGetPdfSchema,
     handler: getPdf,
+  },
+  {
+    ...gdriveGetFileInfoSchema,
+    handler: getFileInfo,
   },
   {
     ...gsheetsReadSchema,
@@ -73,5 +86,13 @@ export const tools: [
   {
     ...gdriveRenameFileSchema,
     handler: renameFile,
+  },
+  {
+    ...gdriveCopyFileSchema,
+    handler: copyFile,
+  },
+  {
+    ...gsheetsMetadataSchema,
+    handler: getMetadata,
   },
 ];

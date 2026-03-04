@@ -86,7 +86,7 @@ Skills are specialized workflows in `.claude/skills/`. Descriptions drive automa
 | `plan-implement` | Execute the pending plan in PLANS.md using an agent team for parallel implementation. Spawns workers in isolated git worktrees. Updates Linear issues: Todo→In Progress→Review. Falls back to single-agent mode if teams unavailable. |
 | `plan-review-implementation` | QA review using an agent team with 3 domain-specialized reviewers (security, reliability, quality). Moves issues Review→Merge. Creates new issues in Todo for bugs found. Falls back to single-agent mode if teams unavailable. |
 | `code-audit` | Audit codebase using an agent team with 3 domain-specialized reviewers. Creates Linear issues in Backlog. Falls back to single-agent mode if teams unavailable. |
-| `data-ops` | Data operations operator. Fix extraction errors, match/unmatch documents and bank movements, correct parsed data, review flagged items, suggest matches, move/rename files. Use when user says "data ops", "fix data", "correct", "manual match", "fix match", "unmatch", "show unmatched", "review matches", "fix extraction", "match movimiento", "move file", "rename file", "suggest matches". |
+| `data-ops` | Data operations operator. Fix extraction errors, match/unmatch documents and bank movements, correct parsed data, review flagged items, suggest matches, move/rename/copy files. Use when user says "data ops", "fix data", "correct", "manual match", "fix match", "unmatch", "show unmatched", "review matches", "fix extraction", "match movimiento", "move file", "rename file", "copy file", "suggest matches". |
 | `deep-review` | Deep, focused analysis of a single feature or service area. Combines code correctness, security, data integrity, and performance in one unified Opus pass. Use when user says "deep review X". |
 | `pull-from-roadmap` | Deep research and discussion of a roadmap feature or new idea. Gathers context from codebase, web, APIs, MCPs, then presents analysis for discussion. |
 | `push-to-roadmap` | Deep research and discussion of a new idea to evaluate whether it belongs on the roadmap. Gathers context, presents analysis, discusses, then writes a complete feature spec to the roadmap file. Use when user says "push to roadmap", "add to roadmap", "roadmap this idea". |
@@ -118,9 +118,9 @@ Allowed: `get-logs`, `list-deployments`, `list-services`, `list-variables`, `che
 - `generate-domain`
 
 ### Google Drive MCP
-`gdrive_search`, `gdrive_read_file`, `gdrive_list_folder`, `gdrive_get_pdf`, `gsheets_read`, `gsheets_update`, `gdrive_move_file`, `gdrive_rename_file`
+`gdrive_search`, `gdrive_read_file`, `gdrive_list_folder`, `gdrive_get_pdf`, `gdrive_get_file_info`, `gsheets_read`, `gsheets_metadata`, `gsheets_update`, `gdrive_move_file`, `gdrive_rename_file`, `gdrive_copy_file`
 
-**Write tools** (`gsheets_update`, `gdrive_move_file`, `gdrive_rename_file`) are restricted to the `data-ops` skill via `allowed-tools`. Do not use them outside that skill.
+**Write tools** (`gsheets_update`, `gdrive_move_file`, `gdrive_rename_file`, `gdrive_copy_file`) are restricted to the `data-ops` skill via `allowed-tools`. Do not use them outside that skill.
 
 ### Gemini MCP (PROMPT TESTING ONLY)
 `gemini_analyze_pdf` - **NOT for document analysis.** The agent can read PDFs directly using the Read tool.
