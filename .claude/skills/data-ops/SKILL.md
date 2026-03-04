@@ -128,10 +128,16 @@ Bank movement sheets live inside bank/card/broker spreadsheets under `{YYYY}/Ban
 
 1. **Find the movement** — by date, amount, concepto, or row number in the YYYY-MM sheet
 2. **Find the document** — in Control de Ingresos or Egresos (by fileId, invoice number, etc.)
-3. **Build detalle** — human-readable description of the match:
-   - For facturas: `"Factura {tipoComprobante} {nroFactura} de {razonSocial}"`
-   - For pagos: `"Pago de {nombre}" or "Pago a {nombre}"`
-   - For recibos: `"Recibo {nombreEmpleado} {periodoAbonado}"`
+3. **Build detalle** — must match the format in the codebase. Read `src/bank/matcher.ts` (method `formatDebitFacturaDescription` and `formatCreditDescription`) and `src/bank/match-movimientos.ts` (function `buildDetalleForDocument`) to get the exact format strings before writing. Key patterns:
+   - Debit matching a factura: `"Pago Factura {tipo} {nro} a {razonSocial} - {concepto}"`
+   - Debit matching a pago_enviado: `"Pago a {nombreBeneficiario} - {concepto}"`
+   - Credit matching a factura_emitida: `"Factura Emitida {tipo} {nro} a {razonSocial} - {concepto}"`
+   - Credit matching a pago_recibido: `"Pago de {nombrePagador} - {concepto}"`
+   - Credit matching a factura_recibida: `"Factura Recibida {tipo} {nro} de {razonSocial} - {concepto}"`
+   - Recibo: `"Recibo de {nombreEmpleado}"`
+   - Bank fees: `"Gastos bancarios"`
+   - Credit card payments: `"Pago de tarjeta de credito"`
+   - The `- {concepto}` suffix is omitted when concepto is empty
 4. **Write** via `gsheets_update`:
    - Column G (`matchedFileId`) = document fileId
    - Column H (`matchedType`) = `MANUAL`
