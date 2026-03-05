@@ -57,6 +57,7 @@ Use Task with `subagent_type=Explore` or direct tool calls. Check project state:
 - Launch independent streams in parallel for speed
 - Each stream should return specific, evidence-based findings
 - Include any relevant MCP context (Railway deployment state, Google Drive structure, Gemini API usage) if they inform feasibility
+- If the feature involves UI, examine existing component patterns and relevant pages
 
 ## Phase 3: Analysis Report
 

@@ -368,7 +368,7 @@ If there were no findings at all (clean review), a brief "No issues found" summa
   2. Inform user: "Review complete. Changes committed and pushed. Run `/plan-implement` to continue implementation."
 
 - **If all tasks complete and no fix plans needed** (includes iterations where all bugs were fixed inline) → Run E2E tests, update header status, append final status, then create PR:
-  1. **Run E2E tests** using the verifier agent in E2E mode:
+  1. **Run E2E tests** using the verifier agent in E2E mode (as a standalone subagent, NOT a teammate — do NOT pass `team_name`):
      ```
      Use Agent tool with subagent_type "verifier" with prompt "e2e"
      ```

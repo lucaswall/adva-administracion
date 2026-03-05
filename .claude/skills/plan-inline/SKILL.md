@@ -92,7 +92,7 @@ Example arguments:
 
 0. **Git pre-flight check** - Ensure on clean main branch (see Git Pre-flight Check section)
 1. **Read PLANS.md** - Pre-flight check
-2. **Read CLAUDE.md** - Understand TDD workflow, agents, project rules, available MCPs
+2. **Read CLAUDE.md** - Understand TDD workflow, agents, project rules, available MCPs, discover team name
 3. **Parse $ARGUMENTS** - Understand what needs to be implemented
 4. **Explore codebase** - Use Glob/Grep/Task to find relevant files and understand patterns
 5. **Gather MCP context** - If the task relates to:

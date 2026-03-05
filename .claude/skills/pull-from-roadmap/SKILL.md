@@ -24,7 +24,7 @@ ultrathink
 
 3. **Extract the feature spec** — If existing item, extract the full section (Problem, Goal, Design, Architecture, Edge Cases, Implementation Order). If new idea, use $ARGUMENTS as the raw description.
 
-4. **Read CLAUDE.md** — Load project context, tech stack, conventions.
+4. **Read CLAUDE.md** — Load project context, tech stack, conventions. Extract the team name from the LINEAR INTEGRATION section if it exists.
 
 ## Phase 2: Deep Research
 

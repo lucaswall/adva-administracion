@@ -1,7 +1,7 @@
 ---
 name: push-to-production
 description: Release to production by pushing to main and release branches, verifying Railway auto-deploy, creating a GitHub Release, and transitioning Linear issues. Use when user says "push to production", "release", "deploy to production", or "ship it". Bumps version, updates changelog, pushes to main + release, verifies Railway deployment, creates GitHub Release, and moves Linear issues to Released.
-allowed-tools: Read, Edit, Write, Glob, Grep, Bash, Task, mcp__linear__list_issues, mcp__linear__update_issue, mcp__linear__get_issue, mcp__linear__list_issue_statuses, mcp__Railway__get-logs, mcp__Railway__list-deployments
+allowed-tools: Read, Edit, Write, Glob, Grep, Bash, Task, mcp__linear__list_teams, mcp__linear__list_issues, mcp__linear__update_issue, mcp__linear__get_issue, mcp__linear__list_issue_statuses, mcp__Railway__get-logs, mcp__Railway__list-deployments
 argument-hint: [version]
 disable-model-invocation: true
 ---

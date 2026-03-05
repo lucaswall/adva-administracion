@@ -280,7 +280,8 @@ git -C _workers/worker-N status --short
 
 If a worker has uncommitted changes (files listed by `status --short`), salvage them:
 ```bash
-cd _workers/worker-N && git add -A && git commit -m "lead: salvage worker-N uncommitted progress" && cd -
+git -C _workers/worker-N add -A -- ':!node_modules' ':!.env' ':!.env.local'
+git -C _workers/worker-N commit -m "lead: salvage worker-N uncommitted progress"
 ```
 
 ### 2. Verify All Workers Shut Down and Team Deleted

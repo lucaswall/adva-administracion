@@ -138,16 +138,54 @@ The Investigation subsection under Context Gathered must include: bug report, cl
 
 ## 8. Create Linear Issue
 
-Create a Linear issue for each fix:
+Create a Linear issue in the discovered team with status "Todo":
 
-1. Use `mcp__linear__create_issue` with:
-   - `team`: [Discovered team name from CLAUDE.md or `mcp__linear__list_teams`]
-   - `title`: Fix description
-   - `description`: Root cause and fix details. If the bug originated from Sentry, include a "Sentry Issue" section with the URL, event count, user count, and release. Add "Resolve this Sentry issue after fix is merged and released."
-   - `state`: "Todo"
-   - `labels`: Bug (or Security if security-related)
+1. First, get the team statuses to find the "Todo" state ID:
+   ```
+   mcp__linear__list_issue_statuses for team [discovered team name]
+   ```
 
-2. Update PLANS.md to add `**Linear Issue:** [ADVA-N](url)` to each fix task
+2. Get available labels:
+   ```
+   mcp__linear__list_issue_labels for team [discovered team name]
+   ```
+
+3. Create the issue:
+   ```
+   mcp__linear__create_issue with:
+   - team: [Discovered team name]
+   - title: "[Bug Type] Brief description of the fix needed"
+   - description: |
+     ## Bug Report
+     [Summary of the issue]
+
+     ## Sentry Issue (if applicable)
+     [Sentry issue URL] — [event count] events, [user count] users, release [version]
+     **Action:** Resolve this Sentry issue after fix is merged and released.
+
+     ## Root Cause
+     [What was found during investigation]
+
+     ## Fix Plan
+     See PLANS.md for detailed TDD fix plan.
+
+     ## Files Affected
+     - `path/to/file.ts`
+     - `path/to/another-file.ts`
+
+     ## Acceptance Criteria
+     - [ ] Failing test written and passes after fix
+     - [ ] All existing tests pass
+     - [ ] No TypeScript errors
+     - [ ] Deployed successfully
+     - [ ] Sentry issue resolved (if applicable)
+   - status: "Todo"
+   - Apply relevant labels (bug, etc.)
+   ```
+
+   Omit the "Sentry Issue" section if the bug did not originate from Sentry.
+
+4. Update PLANS.md with the created issue key (ADVA-xxx).
 
 ## Prompt/AI Testing Guidelines
 

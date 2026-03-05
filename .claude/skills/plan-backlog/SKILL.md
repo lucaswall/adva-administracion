@@ -311,6 +311,14 @@ When writing tasks in the plan:
 6. **Include file paths**: Always specify the full file path for every file created or modified.
 7. **Include commands**: Provide the exact terminal commands to run tests, linters, etc.
 8. **Note dependencies**: If a task depends on a previous task, say so explicitly.
+9. **Specify defensive requirements**: For each task, think about what can go wrong and include it in the TDD steps. Specifically:
+   - **Error paths**: What exceptions can the code throw? Specify how they should be caught, logged, or propagated. Include error-path tests in the RED phase.
+   - **Edge cases**: Empty data, null values, concurrent access, partial results. Include edge-case tests.
+   - **Timeouts**: Any external call (Gemini API, Google Drive, Google Sheets, network) MUST specify a timeout value and what happens on timeout.
+   - **Permission/auth checks**: Any operation that requires authentication (Bearer token, Google service account) must check credentials first and handle denial.
+   - **Cancellation**: Async operations that can be triggered multiple times (e.g., scan requests, webhook handlers) must specify cancellation or deduplication of in-flight work.
+   - **State consistency**: If an operation can fail mid-way (e.g., partial spreadsheet write, interrupted scan), specify how the state is cleaned up or rolled back.
+10. **Cross-check CLAUDE.md constraints**: Before including any pattern in a task, verify CLAUDE.md allows it. Verify `Result<T,E>` pattern is used for fallible operations. Verify all logging uses Pino (`utils/logger.ts`), never `console.log`. Verify ESM imports use `.js` extensions.
 
 Good task example:
 ```markdown
@@ -338,7 +346,7 @@ Bad task example:
 
 Every implementation task MUST follow the Red-Green-Refactor cycle:
 
-- **RED**: Write a failing test first. Specify what the test asserts and what error message is expected.
+- **RED**: Write a failing test first. Specify what the test asserts and what error message is expected. **Include at least one error-path or edge-case test** for any task that touches external APIs, async operations, or state management.
 - **GREEN**: Write the minimum code to make the test pass. Do not over-engineer.
 - **REFACTOR**: Clean up the code while keeping tests green. Extract shared logic, improve naming, etc.
 

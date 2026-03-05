@@ -138,7 +138,6 @@ Lint passed.
 BUILD WARNINGS: [N]
 
 src/file.ts:42:5 - warning TS6133: 'unusedVar' is declared but never used.
-src/other.ts:17:1 - warning TS2345: Argument type mismatch...
 
 ---
 Repro: npm run build
