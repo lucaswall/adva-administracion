@@ -397,10 +397,6 @@ Required fields:
 
 CRITICAL DATE EXTRACTION RULES:
 
-// ADV-184: Credicoop statements returned narrow 2-7 day windows because Gemini was
-// anchoring on footer/saldo dates instead of the statement-period header.
-// Always prefer the period header at the top of the statement as the authoritative range.
-
 PRIORITY 1 — STATEMENT PERIOD HEADER (check this first):
 Look for a period header near the top of the document, typically labeled:
 - "Del DD/MM/YYYY al DD/MM/YYYY" (e.g., "Del 01/01/2026 al 31/01/2026")

@@ -1,6 +1,7 @@
 # Implementation Plan
 
 **Created:** 2026-05-06
+**Status:** COMPLETE
 **Source:** Inline request: Fix all findings in REVIEW.md (production audit before Q1 closing) + sync Node 24 enforcement with adva-facturador (Railway pinning, .nvmrc) + update all dependencies to latest.
 **Linear Issues:** [ADV-181](https://linear.app/lw-claude/issue/ADV-181), [ADV-182](https://linear.app/lw-claude/issue/ADV-182), [ADV-183](https://linear.app/lw-claude/issue/ADV-183), [ADV-184](https://linear.app/lw-claude/issue/ADV-184), [ADV-185](https://linear.app/lw-claude/issue/ADV-185), [ADV-186](https://linear.app/lw-claude/issue/ADV-186), [ADV-187](https://linear.app/lw-claude/issue/ADV-187), [ADV-188](https://linear.app/lw-claude/issue/ADV-188)
 **Branch:** fix/q1-cleanup
@@ -308,3 +309,40 @@
 
 ### Continuation Status
 All tasks completed.
+
+### Review Findings
+
+**Reviewed:** 2026-05-06
+**Method:** Agent team (3 domain reviewers — security, reliability, quality)
+**Files reviewed:** 14 (13 source/test + 3 toolchain configs)
+
+**Issues found and fixed inline (1):**
+1. [HIGH][convention] `src/gemini/prompts.ts:400-402` — Three TypeScript-style `// ADV-184:` comments were embedded INSIDE the template literal returned by `getResumenBancarioPrompt`, sending them verbatim to the Gemini API as part of the prompt body. Fixed inline (S-size, ≤3 fixes threshold met). Tracked as ADV-190 in Merge state.
+
+**Discarded findings (5):**
+1. [MEDIUM][test] `src/gemini/parser.test.ts:~1914` — Test name says "2-day window" but dates produce 1-day span. **Discard reason:** Style-only — cosmetic test naming, no correctness impact (the assertion correctly verifies 1 day < 14 flags).
+2. [LOW][type] `src/processing/matching/recibo-pago-matcher.ts:107,413` — `hasCuitMatch` not persisted to Recibos sheet; sheet-loaded recibos fall back to `existingMatchConfidence === 'HIGH'` proxy. **Discard reason:** Already tracked as ADV-189 (Backlog) — explicitly created during this iteration's bug-hunter pass as a known follow-up. Not a missed bug.
+3. [LOW][resource] `src/utils/exchange-rate.ts:61` — `memoryCache` Map has no maximum size cap. **Discard reason:** Reviewer themselves notes "in practice this is bounded by the date range of processed documents (a few thousand entries, ~KB range)". Theoretical concern, not a real resource leak. Pre-existing for positive entries; this PR adds negative entries to the same already-bounded Map.
+4. [LOW][edge-case] `src/gemini/parser.ts:1182` — Inverted date range (`fechaHasta < fechaDesde`) doesn't trigger `needsReview`. **Discard reason:** Misdiagnosed — the narrow-window flag was intentionally scoped to positive narrow windows, the documented Credicoop failure mode (Jan/Mar/Apr 2026 production evidence all show positive narrow windows). Inverted ranges are speculative; the `diffDays > 0` guard intentionally excludes the documented SIN MOVIMIENTOS same-day case. Detection scope expansion is feature work, not a missed bug.
+5. [LOW][convention] `src/gemini/parser.test.ts:~1870` — Test name says "28 days" but Feb statement actually spans 27 days. **Discard reason:** Style-only — cosmetic test naming, the assertion correctly verifies 27 days does NOT flag.
+
+**Security review:** No findings. New transitive deps (Rolldown bundler backend) verified legitimate. No SSRF, no leaked secrets.
+**Reliability review:** All iteration-specific concerns checked (negative-cache race guard, three-subtype duplicate routing, `??` semantics for `hasCuitMatch`, narrow-window threshold). All passed.
+
+### Linear Updates
+- ADV-181, ADV-182, ADV-183, ADV-184, ADV-185, ADV-186, ADV-187, ADV-188: Review → Merge
+- ADV-190 (new, Merge): Strip TS-style comments from getResumenBancarioPrompt template literal — created from inline fix for traceability
+
+### Inline Fix Verification
+- vitest: 1979 tests passing, including new regression test `'should not leak TypeScript-style source comments into the prompt body'`
+- typecheck: clean
+- build: clean, zero warnings
+- bug-hunter: no issues found in the inline fix
+
+<!-- REVIEW COMPLETE -->
+
+---
+
+## Status: COMPLETE
+
+All tasks implemented and reviewed successfully. All Linear issues moved to Merge.
