@@ -99,10 +99,10 @@ async function processCascadingReciboDisplacements(
 
       if (bestMatch.isUpgrade && bestMatch.existingPagoFileId) {
         // This match would displace another pago - check if it's strictly better
-        // hasCuitMatch for existing match: HIGH confidence implies CUIT match was present
+        // hasCuitMatch for existing match: read from the recibo's stored flag (mirrors factura-pago pattern)
         const existingQuality: MatchQuality = {
           confidence: bestMatch.existingMatchConfidence || 'LOW',
-          hasCuitMatch: bestMatch.existingMatchConfidence === 'HIGH',
+          hasCuitMatch: bestMatch.recibo.hasCuitMatch || false,
           dateProximityDays: bestMatch.existingDateProximityDays ?? 999
         };
         const newQuality: MatchQuality = {
@@ -403,10 +403,10 @@ async function doMatchRecibosWithPagos(
       if (bestMatch.confidence === 'HIGH' || matches.length === 1) {
         // Check if this is an upgrade (recibo already matched)
         if (bestMatch.isUpgrade && bestMatch.existingPagoFileId) {
-          // hasCuitMatch for existing match: HIGH confidence implies CUIT match was present
+          // hasCuitMatch for existing match: read from the recibo's stored flag (mirrors factura-pago pattern)
           const existingQuality: MatchQuality = {
             confidence: bestMatch.existingMatchConfidence || 'LOW',
-            hasCuitMatch: bestMatch.existingMatchConfidence === 'HIGH',
+            hasCuitMatch: bestMatch.recibo.hasCuitMatch || false,
             dateProximityDays: bestMatch.existingDateProximityDays ?? 999
           };
           const newQuality: MatchQuality = {

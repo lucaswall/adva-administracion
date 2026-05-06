@@ -1513,4 +1513,215 @@ describe('scanner', () => {
       }
     });
   });
+
+  describe('resumen duplicate routing (ADV-182)', () => {
+    const mockResumenFile = {
+      id: 'resumen-file-id',
+      name: 'resumen.pdf',
+      mimeType: 'application/pdf',
+      parents: ['entrada'],
+    };
+
+    beforeEach(() => {
+      mockListFiles.mockResolvedValue({ ok: true, value: [mockResumenFile] });
+    });
+
+    it('should record duplicate status when storeResumenBancario returns stored=false', async () => {
+      const { storeResumenBancario, updateFileStatus } = await import('./storage/index.js');
+      const {
+        getOrCreateBankAccountFolder,
+        getOrCreateBankAccountSpreadsheet,
+      } = await import('../services/folder-structure.js');
+      const { moveToDuplicadoFolder } = await import('../services/document-sorter.js');
+
+      mockProcessFile.mockResolvedValue({
+        ok: true,
+        value: {
+          documentType: 'resumen_bancario',
+          document: {
+            fileId: 'resumen-file-id',
+            fileName: 'resumen.pdf',
+            banco: 'Santander',
+            numeroCuenta: '1234567890',
+            moneda: 'ARS',
+            fechaDesde: '2024-01-01',
+            fechaHasta: '2024-01-31',
+            saldoInicial: 10000,
+            saldoFinal: 15000,
+            processedAt: '2025-01-15T10:00:00Z',
+            confidence: 0.95,
+            needsReview: false,
+          },
+        },
+      });
+
+      vi.mocked(getOrCreateBankAccountFolder).mockResolvedValue({ ok: true, value: 'bank-folder' });
+      vi.mocked(getOrCreateBankAccountSpreadsheet).mockResolvedValue({ ok: true, value: 'bank-sheet' });
+      vi.mocked(storeResumenBancario).mockResolvedValue({
+        ok: true,
+        value: { stored: false, existingFileId: 'existing-bancario-id' },
+      });
+      vi.mocked(moveToDuplicadoFolder).mockResolvedValue({
+        ok: true,
+        value: { success: true, targetPath: 'Duplicado/resumen.pdf' },
+      });
+
+      await scanFolder('entrada');
+
+      expect(vi.mocked(updateFileStatus)).toHaveBeenCalledWith(
+        'dashboard',
+        'resumen-file-id',
+        'duplicate',
+        undefined,
+        'existing-bancario-id'
+      );
+    });
+
+    it('should record success status when storeResumenBancario returns stored=true (regression guard)', async () => {
+      const { storeResumenBancario, updateFileStatus } = await import('./storage/index.js');
+      const {
+        getOrCreateBankAccountFolder,
+        getOrCreateBankAccountSpreadsheet,
+        getOrCreateMovimientosSpreadsheet,
+      } = await import('../services/folder-structure.js');
+
+      mockProcessFile.mockResolvedValue({
+        ok: true,
+        value: {
+          documentType: 'resumen_bancario',
+          document: {
+            fileId: 'resumen-file-id',
+            fileName: 'resumen.pdf',
+            banco: 'Santander',
+            numeroCuenta: '1234567890',
+            moneda: 'ARS',
+            fechaDesde: '2024-01-01',
+            fechaHasta: '2024-01-31',
+            saldoInicial: 10000,
+            saldoFinal: 15000,
+            processedAt: '2025-01-15T10:00:00Z',
+            confidence: 0.95,
+            needsReview: false,
+          },
+        },
+      });
+
+      vi.mocked(getOrCreateBankAccountFolder).mockResolvedValue({ ok: true, value: 'bank-folder' });
+      vi.mocked(getOrCreateBankAccountSpreadsheet).mockResolvedValue({ ok: true, value: 'bank-sheet' });
+      vi.mocked(getOrCreateMovimientosSpreadsheet).mockResolvedValue({ ok: true, value: 'mov-sheet' });
+      vi.mocked(storeResumenBancario).mockResolvedValue({
+        ok: true,
+        value: { stored: true },
+      });
+
+      await scanFolder('entrada');
+
+      expect(vi.mocked(updateFileStatus)).toHaveBeenCalledWith(
+        'dashboard',
+        'resumen-file-id',
+        'success'
+      );
+    });
+
+    it('should record duplicate status when storeResumenTarjeta returns stored=false', async () => {
+      const { storeResumenTarjeta, updateFileStatus } = await import('./storage/index.js');
+      const {
+        getOrCreateCreditCardFolder,
+        getOrCreateCreditCardSpreadsheet,
+      } = await import('../services/folder-structure.js');
+      const { moveToDuplicadoFolder } = await import('../services/document-sorter.js');
+
+      mockProcessFile.mockResolvedValue({
+        ok: true,
+        value: {
+          documentType: 'resumen_tarjeta',
+          document: {
+            fileId: 'resumen-file-id',
+            fileName: 'resumen.pdf',
+            banco: 'BBVA',
+            tipoTarjeta: 'Visa',
+            numeroCuenta: '4563',
+            fechaDesde: '2024-01-01',
+            fechaHasta: '2024-01-31',
+            pagoMinimo: 5000,
+            saldoActual: 50000,
+            processedAt: '2025-01-15T10:00:00Z',
+            confidence: 0.95,
+            needsReview: false,
+          },
+        },
+      });
+
+      vi.mocked(getOrCreateCreditCardFolder).mockResolvedValue({ ok: true, value: 'card-folder' });
+      vi.mocked(getOrCreateCreditCardSpreadsheet).mockResolvedValue({ ok: true, value: 'card-sheet' });
+      vi.mocked(storeResumenTarjeta).mockResolvedValue({
+        ok: true,
+        value: { stored: false, existingFileId: 'existing-tarjeta-id' },
+      });
+      vi.mocked(moveToDuplicadoFolder).mockResolvedValue({
+        ok: true,
+        value: { success: true, targetPath: 'Duplicado/resumen.pdf' },
+      });
+
+      await scanFolder('entrada');
+
+      expect(vi.mocked(updateFileStatus)).toHaveBeenCalledWith(
+        'dashboard',
+        'resumen-file-id',
+        'duplicate',
+        undefined,
+        'existing-tarjeta-id'
+      );
+    });
+
+    it('should record duplicate status when storeResumenBroker returns stored=false', async () => {
+      const { storeResumenBroker, updateFileStatus } = await import('./storage/index.js');
+      const {
+        getOrCreateBrokerFolder,
+        getOrCreateBrokerSpreadsheet,
+      } = await import('../services/folder-structure.js');
+      const { moveToDuplicadoFolder } = await import('../services/document-sorter.js');
+
+      mockProcessFile.mockResolvedValue({
+        ok: true,
+        value: {
+          documentType: 'resumen_broker',
+          document: {
+            fileId: 'resumen-file-id',
+            fileName: 'resumen.pdf',
+            broker: 'BALANZ CAPITAL VALORES SAU',
+            numeroCuenta: '123456',
+            fechaDesde: '2024-01-01',
+            fechaHasta: '2024-01-31',
+            saldoARS: 100000,
+            saldoUSD: 500,
+            processedAt: '2025-01-15T10:00:00Z',
+            confidence: 0.95,
+            needsReview: false,
+          },
+        },
+      });
+
+      vi.mocked(getOrCreateBrokerFolder).mockResolvedValue({ ok: true, value: 'broker-folder' });
+      vi.mocked(getOrCreateBrokerSpreadsheet).mockResolvedValue({ ok: true, value: 'broker-sheet' });
+      vi.mocked(storeResumenBroker).mockResolvedValue({
+        ok: true,
+        value: { stored: false, existingFileId: 'existing-broker-id' },
+      });
+      vi.mocked(moveToDuplicadoFolder).mockResolvedValue({
+        ok: true,
+        value: { success: true, targetPath: 'Duplicado/resumen.pdf' },
+      });
+
+      await scanFolder('entrada');
+
+      expect(vi.mocked(updateFileStatus)).toHaveBeenCalledWith(
+        'dashboard',
+        'resumen-file-id',
+        'duplicate',
+        undefined,
+        'existing-broker-id'
+      );
+    });
+  });
 });

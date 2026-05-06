@@ -3,8 +3,8 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { storeResumenBancario } from './resumen-store.js';
-import type { ResumenBancario } from '../../types/index.js';
+import { storeResumenBancario, storeResumenTarjeta, storeResumenBroker } from './resumen-store.js';
+import type { ResumenBancario, ResumenTarjeta, ResumenBroker } from '../../types/index.js';
 
 // Mock dependencies
 vi.mock('../../services/sheets.js', () => ({
@@ -34,9 +34,16 @@ vi.mock('../../utils/file-naming.js', () => ({
   generateResumenFileName: vi.fn((resumen: ResumenBancario) =>
     `${resumen.fechaHasta.substring(0, 7)} - Resumen - ${resumen.banco} - ${resumen.numeroCuenta} ${resumen.moneda}.pdf`
   ),
+  generateResumenTarjetaFileName: vi.fn((resumen: ResumenTarjeta) =>
+    `${resumen.fechaHasta.substring(0, 7)} - Resumen - ${resumen.banco} - ${resumen.tipoTarjeta} ${resumen.numeroCuenta}.pdf`
+  ),
+  generateResumenBrokerFileName: vi.fn((resumen: ResumenBroker) =>
+    `${resumen.fechaHasta.substring(0, 7)} - Resumen - ${resumen.broker} - ${resumen.numeroCuenta}.pdf`
+  ),
 }));
 
 import { appendRowsWithLinks, sortSheet, getValues } from '../../services/sheets.js';
+import { info, warn } from '../../utils/logger.js';
 
 const createTestResumen = (overrides: Partial<ResumenBancario> = {}): ResumenBancario => ({
   fileId: 'test-file-id',
@@ -503,5 +510,203 @@ describe('storeResumenBancario (bank accounts)', () => {
         expect(result.value.stored).toBe(true);
       }
     });
+  });
+
+  describe('duplicate log level (ADV-182)', () => {
+    it('logs at info level (not warn) when duplicate is detected', async () => {
+      const existingFileId = 'existing-file-id';
+      vi.mocked(getValues).mockResolvedValue({
+        ok: true,
+        value: [
+          ['periodo', 'fechaDesde', 'fechaHasta', 'fileId', 'fileName', 'banco', 'numeroCuenta', 'moneda'],
+          ['2024-01', '2024-01-01', '2024-01-31', existingFileId, 'existing.pdf', 'Santander', '1234567890', 'ARS'],
+        ],
+      });
+
+      const resumen = createTestResumen({ fileId: 'new-file-id' });
+      await storeResumenBancario(resumen, 'spreadsheet-id');
+
+      // Must log at info level (not warn) with both existingFileId and newFileId
+      expect(vi.mocked(info)).toHaveBeenCalledWith(
+        expect.stringContaining('Duplicate'),
+        expect.objectContaining({
+          existingFileId,
+          newFileId: 'new-file-id',
+        })
+      );
+      expect(vi.mocked(warn)).not.toHaveBeenCalledWith(
+        expect.stringContaining('Duplicate'),
+        expect.anything()
+      );
+    });
+  });
+});
+
+// ─── storeResumenTarjeta ───────────────────────────────────────────────────────
+
+const createTestResumenTarjeta = (overrides: Partial<ResumenTarjeta> = {}): ResumenTarjeta => ({
+  fileId: 'tarjeta-file-id',
+  fileName: 'tarjeta-resumen.pdf',
+  banco: 'BBVA',
+  tipoTarjeta: 'Visa',
+  numeroCuenta: '4563',
+  fechaDesde: '2024-01-01',
+  fechaHasta: '2024-01-31',
+  pagoMinimo: 5000,
+  saldoActual: 50000,
+  cantidadMovimientos: 0,
+  processedAt: '2025-01-15T10:00:00Z',
+  confidence: 0.95,
+  needsReview: false,
+  ...overrides,
+});
+
+describe('storeResumenTarjeta (credit cards)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('returns { stored: true } when resumen tarjeta is successfully stored', async () => {
+    vi.mocked(getValues).mockResolvedValue({ ok: true, value: [['Header']] });
+    vi.mocked(appendRowsWithLinks).mockResolvedValue({ ok: true, value: 10 });
+    vi.mocked(sortSheet).mockResolvedValue({ ok: true, value: undefined });
+
+    const result = await storeResumenTarjeta(createTestResumenTarjeta(), 'spreadsheet-id');
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.stored).toBe(true);
+      expect(result.value.existingFileId).toBeUndefined();
+    }
+  });
+
+  it('returns { stored: false, existingFileId } when duplicate is detected', async () => {
+    const existingFileId = 'existing-tarjeta-id';
+    vi.mocked(getValues).mockResolvedValue({
+      ok: true,
+      value: [
+        ['periodo', 'fechaDesde', 'fechaHasta', 'fileId', 'fileName', 'banco', 'numeroCuenta', 'tipoTarjeta'],
+        ['2024-01', '2024-01-01', '2024-01-31', existingFileId, 'old.pdf', 'BBVA', '4563', 'Visa'],
+      ],
+    });
+
+    const result = await storeResumenTarjeta(createTestResumenTarjeta(), 'spreadsheet-id');
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.stored).toBe(false);
+      expect(result.value.existingFileId).toBe(existingFileId);
+    }
+    expect(vi.mocked(appendRowsWithLinks)).not.toHaveBeenCalled();
+  });
+
+  it('logs at info level (not warn) when duplicate tarjeta is detected', async () => {
+    const existingFileId = 'existing-tarjeta-id';
+    vi.mocked(getValues).mockResolvedValue({
+      ok: true,
+      value: [
+        ['periodo', 'fechaDesde', 'fechaHasta', 'fileId', 'fileName', 'banco', 'numeroCuenta', 'tipoTarjeta'],
+        ['2024-01', '2024-01-01', '2024-01-31', existingFileId, 'old.pdf', 'BBVA', '4563', 'Visa'],
+      ],
+    });
+
+    const resumen = createTestResumenTarjeta({ fileId: 'new-tarjeta-id' });
+    await storeResumenTarjeta(resumen, 'spreadsheet-id');
+
+    expect(vi.mocked(info)).toHaveBeenCalledWith(
+      expect.stringContaining('Duplicate'),
+      expect.objectContaining({
+        existingFileId,
+        newFileId: 'new-tarjeta-id',
+      })
+    );
+    expect(vi.mocked(warn)).not.toHaveBeenCalledWith(
+      expect.stringContaining('Duplicate'),
+      expect.anything()
+    );
+  });
+});
+
+// ─── storeResumenBroker ────────────────────────────────────────────────────────
+
+const createTestResumenBroker = (overrides: Partial<ResumenBroker> = {}): ResumenBroker => ({
+  fileId: 'broker-file-id',
+  fileName: 'broker-resumen.pdf',
+  broker: 'BALANZ CAPITAL VALORES SAU',
+  numeroCuenta: '123456',
+  fechaDesde: '2024-01-01',
+  fechaHasta: '2024-01-31',
+  saldoARS: 100000,
+  saldoUSD: 500,
+  cantidadMovimientos: 0,
+  processedAt: '2025-01-15T10:00:00Z',
+  confidence: 0.95,
+  needsReview: false,
+  ...overrides,
+});
+
+describe('storeResumenBroker (brokers)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('returns { stored: true } when resumen broker is successfully stored', async () => {
+    vi.mocked(getValues).mockResolvedValue({ ok: true, value: [['Header']] });
+    vi.mocked(appendRowsWithLinks).mockResolvedValue({ ok: true, value: 9 });
+    vi.mocked(sortSheet).mockResolvedValue({ ok: true, value: undefined });
+
+    const result = await storeResumenBroker(createTestResumenBroker(), 'spreadsheet-id');
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.stored).toBe(true);
+      expect(result.value.existingFileId).toBeUndefined();
+    }
+  });
+
+  it('returns { stored: false, existingFileId } when duplicate is detected', async () => {
+    const existingFileId = 'existing-broker-id';
+    vi.mocked(getValues).mockResolvedValue({
+      ok: true,
+      value: [
+        ['periodo', 'fechaDesde', 'fechaHasta', 'fileId', 'fileName', 'broker', 'numeroCuenta'],
+        ['2024-01', '2024-01-01', '2024-01-31', existingFileId, 'old.pdf', 'BALANZ CAPITAL VALORES SAU', '123456'],
+      ],
+    });
+
+    const result = await storeResumenBroker(createTestResumenBroker(), 'spreadsheet-id');
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.stored).toBe(false);
+      expect(result.value.existingFileId).toBe(existingFileId);
+    }
+    expect(vi.mocked(appendRowsWithLinks)).not.toHaveBeenCalled();
+  });
+
+  it('logs at info level (not warn) when duplicate broker is detected', async () => {
+    const existingFileId = 'existing-broker-id';
+    vi.mocked(getValues).mockResolvedValue({
+      ok: true,
+      value: [
+        ['periodo', 'fechaDesde', 'fechaHasta', 'fileId', 'fileName', 'broker', 'numeroCuenta'],
+        ['2024-01', '2024-01-01', '2024-01-31', existingFileId, 'old.pdf', 'BALANZ CAPITAL VALORES SAU', '123456'],
+      ],
+    });
+
+    const resumen = createTestResumenBroker({ fileId: 'new-broker-id' });
+    await storeResumenBroker(resumen, 'spreadsheet-id');
+
+    expect(vi.mocked(info)).toHaveBeenCalledWith(
+      expect.stringContaining('Duplicate'),
+      expect.objectContaining({
+        existingFileId,
+        newFileId: 'new-broker-id',
+      })
+    );
+    expect(vi.mocked(warn)).not.toHaveBeenCalledWith(
+      expect.stringContaining('Duplicate'),
+      expect.anything()
+    );
   });
 });

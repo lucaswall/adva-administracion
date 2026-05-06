@@ -5,8 +5,8 @@
 import { describe, it, expect } from 'vitest';
 import { parseNumber } from '../../utils/numbers.js';
 import { normalizeSpreadsheetDate } from '../../utils/date.js';
-import { buildUnmatchUpdate } from '../../matching/cascade-matcher.js';
-import { ReciboPagoMatcher } from '../../matching/matcher.js';
+import { buildUnmatchUpdate, isBetterMatch } from '../../matching/cascade-matcher.js';
+import { ReciboPagoMatcher, type MatchQuality } from '../../matching/matcher.js';
 import type { Pago, Recibo, MatchConfidence } from '../../types/index.js';
 
 describe('recibo-pago-matcher', () => {
@@ -309,5 +309,124 @@ describe('MANUAL matchConfidence locking - recibo-pago (Fix 5 - ADV-131)', () =>
 
     expect(fixedFilter).toHaveLength(1);
     expect(fixedFilter[0].fileId).toBe('pago-auto');
+  });
+});
+
+describe('hasCuitMatch asymmetry fix (ADV-183)', () => {
+  // The bug: recibo-pago-matcher.ts used `bestMatch.existingMatchConfidence === 'HIGH'`
+  // as a proxy for whether the existing match had a CUIT/CUIL match.
+  // This is wrong for any non-HIGH confidence (e.g., MANUAL, MEDIUM, LOW):
+  //   - MANUAL: confidence is set manually and doesn't imply no-CUIL
+  //   - MEDIUM: a MEDIUM-confidence match CAN include a CUIL match (e.g., outside HIGH date range)
+  //
+  // Fix: read hasCuitMatch directly from recibo.hasCuitMatch flag (mirrors factura-pago-matcher).
+  // This requires adding hasCuitMatch?: boolean to the Recibo type.
+
+  const baseRecibo: Recibo & { row: number } = {
+    row: 2,
+    fileId: 'recibo-1',
+    fileName: 'recibo.pdf',
+    tipoRecibo: 'sueldo',
+    nombreEmpleado: 'Juan Perez',
+    cuilEmpleado: '20123456786',
+    legajo: '001',
+    cuitEmpleador: '30709076783',
+    periodoAbonado: '2025-01',
+    fechaPago: '2025-01-14',
+    subtotalRemuneraciones: 100000,
+    subtotalDescuentos: 20000,
+    totalNeto: 80000,
+    processedAt: '2025-01-14T10:00:00.000Z',
+    confidence: 0.95,
+    needsReview: false,
+  };
+
+  it('MANUAL-locked recibo with hasCuitMatch=true: existingQuality reads flag, not confidence proxy', () => {
+    // Simulate an existing recibo match locked as MANUAL that originally had a CUIL match.
+    // Before fix: existingMatchConfidence === 'HIGH' → false (bug: MANUAL !== HIGH)
+    // After fix:  recibo.hasCuitMatch || false → true (correct: reads stored flag)
+    const manualReciboWithCuil: Recibo & { row: number } = {
+      ...baseRecibo,
+      matchedPagoFileId: 'pago-existing',
+      matchConfidence: 'MANUAL' as MatchConfidence,
+      hasCuitMatch: true, // Requires hasCuitMatch field on Recibo type (ADV-183)
+    };
+
+    // Verify the flag is accessible on the recibo object
+    expect(manualReciboWithCuil.hasCuitMatch).toBe(true);
+
+    // Buggy formula (current code): proxy via confidence level
+    const buggyHasCuitMatch = (manualReciboWithCuil.matchConfidence === 'HIGH');
+    expect(buggyHasCuitMatch).toBe(false); // Bug: wrongly reports no CUIT for MANUAL
+
+    // Fixed formula: read directly from the stored flag
+    const fixedHasCuitMatch = manualReciboWithCuil.hasCuitMatch || false;
+    expect(fixedHasCuitMatch).toBe(true); // Correct: CUIL match is preserved
+
+    // Behavioral consequence: displacement quality comparison
+    // New candidate: MANUAL confidence, no CUIL, closer date
+    const newQuality: MatchQuality = { confidence: 'MANUAL', hasCuitMatch: false, dateProximityDays: 1 };
+
+    // With buggy formula: existing looks like no-CUIL → new wins on date proximity (wrong!)
+    const existingQualityBuggy: MatchQuality = {
+      confidence: 'MANUAL',
+      hasCuitMatch: buggyHasCuitMatch,
+      dateProximityDays: 5,
+    };
+    expect(isBetterMatch(newQuality, existingQualityBuggy)).toBe(true); // Bug: incorrect displacement
+
+    // With fixed formula: existing correctly has CUIL → no displacement (correct)
+    const existingQualityFixed: MatchQuality = {
+      confidence: 'MANUAL',
+      hasCuitMatch: fixedHasCuitMatch,
+      dateProximityDays: 5,
+    };
+    expect(isBetterMatch(newQuality, existingQualityFixed)).toBe(false); // Fix: existing protected
+  });
+
+  it('findMatches correctly propagates recibo.hasCuitMatch to candidate for non-MANUAL recibos', () => {
+    const matcher = new ReciboPagoMatcher(10, 60);
+
+    // Recibo already matched (non-MANUAL so findMatches can return it) with hasCuitMatch=true
+    const matchedRecibo: Recibo & { row: number } = {
+      ...baseRecibo,
+      matchedPagoFileId: 'pago-existing',
+      matchConfidence: 'HIGH' as MatchConfidence,
+      hasCuitMatch: true, // Requires hasCuitMatch field on Recibo type
+    };
+
+    // Pago that attempts to match (amount and date match)
+    const newPago: Pago = {
+      fileId: 'pago-new',
+      fileName: 'pago.pdf',
+      banco: 'BBVA',
+      fechaPago: '2025-01-15',
+      importePagado: 80000,
+      moneda: 'ARS',
+      processedAt: '2025-01-15T10:00:00.000Z',
+      confidence: 0.95,
+      needsReview: false,
+      cuitBeneficiario: '20123456786', // CUIL match for MEDIUM/HIGH confidence
+    };
+
+    const pagosMap = new Map([['pago-existing', { ...newPago, row: 3, fileId: 'pago-existing' }]]);
+    const matches = matcher.findMatches(newPago, [matchedRecibo], true, pagosMap);
+
+    expect(matches).toHaveLength(1);
+    const bestMatch = matches[0];
+
+    // The recibo's hasCuitMatch flag should be accessible in bestMatch.recibo
+    expect(bestMatch.recibo.hasCuitMatch).toBe(true);
+    expect(bestMatch.existingMatchConfidence).toBe('HIGH');
+
+    // Key asymmetry: buggy proxy gives same result as flag for HIGH, but not for other confidences
+    // For HIGH: both give true (no observable bug for this case)
+    // For non-HIGH (e.g. MEDIUM with hasCuitMatch=true): buggy gives false, fixed gives true
+    const existingQualityFixed: MatchQuality = {
+      confidence: bestMatch.existingMatchConfidence || 'LOW',
+      hasCuitMatch: bestMatch.recibo.hasCuitMatch || false, // Fixed formula
+      dateProximityDays: bestMatch.existingDateProximityDays ?? 999,
+    };
+    expect(existingQualityFixed.hasCuitMatch).toBe(true);
   });
 });
