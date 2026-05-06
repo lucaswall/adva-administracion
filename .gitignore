@@ -48,3 +48,4 @@ apps-script/src/config.ts
 # Claude Code local settings (personal overrides)
 .claude/settings.local.json
 .claude/agent-memory/
+.claude/scheduled_tasks.lock

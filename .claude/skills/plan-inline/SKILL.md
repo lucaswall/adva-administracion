@@ -3,6 +3,7 @@ name: plan-inline
 description: Create TDD implementation plans from direct feature requests. Use when user provides a task description like "add X feature", "create Y function", or "implement Z". Creates Linear issues in Todo state. Faster than plan-backlog for ad-hoc requests that don't need backlog tracking.
 argument-hint: <task description>
 allowed-tools: Read, Edit, Write, Glob, Grep, Task, Bash, mcp__linear__list_teams, mcp__linear__list_issues, mcp__linear__get_issue, mcp__linear__create_issue, mcp__linear__update_issue, mcp__linear__list_issue_labels, mcp__linear__list_issue_statuses
+effort: high
 disable-model-invocation: true
 ---
 
@@ -53,6 +54,18 @@ Use `plan-backlog` instead when:
 If PLANS.md is empty or has "Status: COMPLETE" → proceed with planning.
 
 **Verify Linear MCP:** Call `mcp__linear__list_teams`. If unavailable, **STOP** and tell the user: "Linear MCP is not connected. Run `/mcp` to reconnect, then re-run this skill."
+
+## Discovering Team Context
+
+Read CLAUDE.md to find the LINEAR INTEGRATION section. Look for:
+- **Team name** (e.g., "Team: 'ProjectName'")
+- **Issue prefix** (e.g., "Prefix: PROJ-xxx")
+- **State workflow** (e.g., "States: Backlog → Todo → In Progress → Review → Done")
+- **Project-specific URLs** (Linear workspace URL, etc.)
+
+If CLAUDE.md doesn't have a LINEAR INTEGRATION section, call `mcp__linear__list_teams` to discover the team name dynamically.
+
+Store the discovered team name in a variable for use throughout the skill.
 
 ## Arguments
 
@@ -141,18 +154,6 @@ Read `references/plans-template.md` for the complete template.
 
 Include: Context Gathered (Codebase Analysis + MCP Context), Tasks, Post-Implementation Checklist, Plan Summary.
 Omit: Investigation subsection, Triage Results subsection.
-
-## Discovering Team Context
-
-Read CLAUDE.md to find the LINEAR INTEGRATION section. Look for:
-- **Team name** (e.g., "Team: 'ProjectName'")
-- **Issue prefix** (e.g., "Prefix: PROJ-xxx")
-- **State workflow** (e.g., "States: Backlog → Todo → In Progress → Review → Done")
-- **Project-specific URLs** (Linear workspace URL, etc.)
-
-If CLAUDE.md doesn't have a LINEAR INTEGRATION section, call `mcp__linear__list_teams` to discover the team name dynamically.
-
-Store the discovered team name in a variable for use throughout the skill.
 
 ## Linear Issue Creation
 
