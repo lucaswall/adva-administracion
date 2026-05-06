@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.6.0] - 2026-05-06
+
+### Added
+- Apps Script bundle is now built and pushed to the bound script project automatically on Railway boot, removing the manual clasp deploy step
+
+### Changed
+- Negative exchange-rate API responses are cached so missing rates no longer spam the production logs on every match attempt
+- Resumen duplicates are now visibly recorded as `duplicate` in the Dashboard tracking sheet instead of silently being marked as `success`
+- Credicoop bank statement extraction now anchors on the statement period header, fixing the 2-7 day window that was being returned for monthly summaries
+- Recibo-pago cascade reads `hasCuitMatch` directly from the document instead of inferring it from match confidence, fixing displacement decisions for MANUAL-locked recibos
+- Node 24 is now explicitly pinned on Railway via nixpacks.toml and `.nvmrc`; `@types/node` synced to the Node 24 line; all other dependencies bumped to latest
+- Build now installs dev dependencies during `npm ci` so TypeScript is available at build time on Railway
+
 ## [1.5.0] - 2026-03-03
 
 ### Added
@@ -106,7 +119,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Updated fastify to fix high-severity Content-Type body validation bypass and low-severity DoS vulnerability
 - Updated googleapis to v171, @google/clasp to v3, and resolved 6 npm audit vulnerabilities
 
-[Unreleased]: https://github.com/lucaswall/adva-administracion/compare/v1.5.0...HEAD
+[Unreleased]: https://github.com/lucaswall/adva-administracion/compare/v1.6.0...HEAD
+[1.6.0]: https://github.com/lucaswall/adva-administracion/compare/v1.5.0...v1.6.0
 [1.5.0]: https://github.com/lucaswall/adva-administracion/compare/v1.4.1...v1.5.0
 [1.4.1]: https://github.com/lucaswall/adva-administracion/compare/v1.4.0...v1.4.1
 [1.4.0]: https://github.com/lucaswall/adva-administracion/compare/v1.3.0...v1.4.0
