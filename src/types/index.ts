@@ -259,6 +259,8 @@ export interface Recibo {
   matchedPagoFileId?: string;
   /** Match confidence level */
   matchConfidence?: MatchConfidence;
+  /** Whether the match was based on CUIL match (mirrors Factura.hasCuitMatch) */
+  hasCuitMatch?: boolean;
 }
 
 /**

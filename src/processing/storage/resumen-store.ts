@@ -158,7 +158,7 @@ export async function storeResumenBancario(
     const dupeCheck = await isDuplicateResumenBancario(spreadsheetId, resumen);
 
     if (dupeCheck.isDuplicate) {
-      warn('Duplicate bank account resumen detected, skipping', {
+      info('Duplicate bank account resumen detected, skipping', {
         module: 'storage',
         phase: 'resumen-bancario',
         banco: resumen.banco,
@@ -287,7 +287,7 @@ export async function storeResumenTarjeta(
     const dupeCheck = await isDuplicateResumenTarjeta(spreadsheetId, resumen);
 
     if (dupeCheck.isDuplicate) {
-      warn('Duplicate credit card resumen detected, skipping', {
+      info('Duplicate credit card resumen detected, skipping', {
         module: 'storage',
         phase: 'resumen-tarjeta',
         banco: resumen.banco,
@@ -406,7 +406,7 @@ export async function storeResumenBroker(
     const dupeCheck = await isDuplicateResumenBroker(spreadsheetId, resumen);
 
     if (dupeCheck.isDuplicate) {
-      warn('Duplicate broker resumen detected, skipping', {
+      info('Duplicate broker resumen detected, skipping', {
         module: 'storage',
         phase: 'resumen-broker',
         broker: resumen.broker,
