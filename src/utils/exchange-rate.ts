@@ -346,8 +346,12 @@ export async function prefetchExchangeRates(dates: string[]): Promise<void> {
             error: result.error.message,
             correlationId: getCorrelationId(),
           });
-          // Write a negative cache entry so subsequent prefetch calls skip this date
-          setCachedNegative(cacheKey);
+          // Write a negative cache entry so subsequent prefetch calls skip this date.
+          // Re-check positive cache first: a concurrent prefetch may have just succeeded
+          // for the same date — never overwrite a valid rate with a negative entry.
+          if (!getCachedValue(cacheKey)) {
+            setCachedNegative(cacheKey);
+          }
         }
         return result;
       }

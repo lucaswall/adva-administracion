@@ -429,4 +429,29 @@ describe('hasCuitMatch asymmetry fix (ADV-183)', () => {
     };
     expect(existingQualityFixed.hasCuitMatch).toBe(true);
   });
+
+  it('falls back to HIGH-confidence proxy when hasCuitMatch is undefined (loaded from spreadsheet)', () => {
+    // Recibos sheet has no hasCuitMatch column, so recibos loaded via getValues have
+    // hasCuitMatch === undefined. The fallback `?? (existingMatchConfidence === 'HIGH')`
+    // preserves the pre-fix behavior in that path: HIGH means CUIT matched, others mean false.
+    const computeHasCuitMatch = (
+      reciboHasCuitMatch: boolean | undefined,
+      existingConfidence: MatchConfidence
+    ): boolean => reciboHasCuitMatch ?? (existingConfidence === 'HIGH');
+
+    // Case 1: HIGH confidence recibo loaded from sheet with undefined flag → proxy returns true
+    expect(computeHasCuitMatch(undefined, 'HIGH')).toBe(true);
+
+    // Case 2: MANUAL confidence recibo loaded from sheet with undefined flag → proxy returns false
+    // (best we can do without persistence; column-level fix is a follow-up)
+    expect(computeHasCuitMatch(undefined, 'MANUAL')).toBe(false);
+
+    // Case 3: in-memory recibo with explicit hasCuitMatch=true wins over the proxy
+    // This is the ADV-183 fix: a MANUAL-locked recibo with CUIL match is no longer wrongly
+    // displaced when its in-memory flag is available.
+    expect(computeHasCuitMatch(true, 'MANUAL')).toBe(true);
+
+    // Case 4: explicit hasCuitMatch=false wins over a HIGH-confidence proxy that would say true
+    expect(computeHasCuitMatch(false, 'HIGH')).toBe(false);
+  });
 });

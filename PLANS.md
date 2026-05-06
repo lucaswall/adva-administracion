@@ -248,3 +248,63 @@
 - Task 7 (bulk dep update) may introduce TS 6 / library breakage that requires fix-up commits. Mitigation: incremental commits, single-package rollback on stubborn breakage.
 - Task 5 (Node pinning) changes the runtime version on Railway. Mitigation: ship to staging first, smoke-test before promoting to release.
 - Task 4 (Credicoop prompt) is the highest-judgment task — Gemini MCP iteration may surface that the prompt fix interacts with other resumen formats. Mitigation: regression-test against all currently-stored Credicoop / BBVA / Banco Ciudad statements.
+
+---
+
+## Iteration 1
+
+**Implemented:** 2026-05-06
+**Method:** Agent team (4 workers, worktree-isolated)
+
+### Tasks Completed This Iteration
+- Task 1 (ADV-181): Negative-cache exchange rate API misses + demote per-attempt warn (worker-1)
+- Task 2 (ADV-182): Resumen storage observability — info logs + scanner records 'duplicate' status (worker-2)
+- Task 3 (ADV-183): Fix recibo-pago cascade hasCuitMatch asymmetry (worker-2)
+- Task 4 (ADV-184): Credicoop resumen_bancario prompt anchor + parser narrow-window flag (worker-3)
+- Task 5 (ADV-185): Pin Node 24 on Railway via nixpacks.toml + add .nvmrc (worker-4)
+- Task 6 (ADV-186): Sync @types/node to Node 24 major (worker-4)
+- Task 7 (ADV-187): Bulk dependency update incl. TypeScript 6 (worker-4)
+- Task 8 (ADV-188): USD same-currency tolerance audit — no caller bug found, regression test added (worker-1)
+
+### Files Modified
+- `.nvmrc` (new) — content `24`
+- `nixpacks.toml` — `[phases.setup]` with `nodejs_24` + `nixpkgsArchive` matching adva-facturador
+- `package.json`, `package-lock.json` — TypeScript 6, vitest 4.1.5, @types/node 24, fastify 5.8.5, googleapis 171.4, p-queue 9.2, pino 10.3.1, esbuild 0.28, tsx 4.21, dotenv 17.4.2, @google/clasp 3.3, @vitest/coverage-v8 4.1.5
+- `src/utils/exchange-rate.ts` — negative-cache helpers (`isNegativelyCached`, `setCachedNegative`), 1h TTL for negative entries (vs 24h positive), `prefetchExchangeRates` writes negative entries on failure with race-safe positive-cache check, `amountsMatchCrossCurrency` warn→debug for per-attempt cache miss
+- `src/utils/exchange-rate.test.ts` — 10 new tests (negative cache, USD tolerance regression)
+- `src/processing/storage/resumen-store.ts` — 3 warn→info for duplicate detection
+- `src/processing/storage/resumen-store.test.ts` — 7 new tests
+- `src/processing/scanner.test.ts` (new) — 4 regression tests for duplicate routing
+- `src/processing/matching/recibo-pago-matcher.ts` — `bestMatch.recibo.hasCuitMatch ?? (existingMatchConfidence === 'HIGH')` at 2 sites (in-memory flag wins; HIGH proxy fallback for sheet-loaded recibos pending ADV-189)
+- `src/processing/matching/recibo-pago-matcher.test.ts` — 3 new tests
+- `src/types/index.ts` — `hasCuitMatch?: boolean` added to `Recibo` interface
+- `src/gemini/prompts.ts` — strengthened `getResumenBancarioPrompt` with explicit period-header anchor and footer/saldo rejection
+- `src/gemini/parser.ts` — narrow-window flag (`needsReview=true` when `0 < diffDays < 14`)
+- `src/gemini/parser.test.ts` — 8 new tests covering Credicoop bug cases and threshold boundaries
+
+### Linear Updates
+- ADV-181, ADV-182, ADV-183, ADV-184, ADV-185, ADV-186, ADV-187, ADV-188: Todo → In Progress → Review
+- ADV-189 (new, Backlog): Persist recibo `hasCuitMatch` to Recibos sheet (column S) — created from bug-hunter finding
+
+### Pre-commit Verification
+- bug-hunter: Found 4 issues (1 HIGH, 2 MEDIUM, 1 LOW). HIGH (recibo hasCuitMatch persistence gap) and one MEDIUM (negative-cache race) fixed in lead's post-merge pass; remaining MEDIUM (narrow-window false-positive on legitimate short-period statements) accepted per bug-hunter's own assessment as soft-flag-only; LOW (TypeScript 6 ^ range) left as-is — verifier passed clean.
+- verifier: 1978 tests pass across 63 files, typecheck clean, build clean, zero warnings.
+
+### Work Partition
+- Worker 1: Tasks 1, 8 (utils — exchange rate)
+- Worker 2: Tasks 2, 3 (services + matching — resumen storage, recibo cascade, types)
+- Worker 3: Task 4 (gemini layer — prompts + parser)
+- Worker 4: Tasks 5, 6, 7 (toolchain + deps — Node 24, dep upgrades)
+
+### Merge Summary
+- Worker 4 (toolchain): fast-forward
+- Worker 2 (types + services): merged with `ort` strategy, no conflicts
+- Worker 1 (utils): merged with `ort` strategy, no conflicts
+- Worker 3 (gemini): merged with `ort` strategy, no conflicts
+
+### Lead Post-merge Fixes
+- `recibo-pago-matcher.ts:105/411` — added HIGH-confidence proxy fallback for `bestMatch.recibo.hasCuitMatch` to avoid regressing periodic re-match (Recibos sheet has no `hasCuitMatch` column; full persistence tracked in ADV-189).
+- `exchange-rate.ts:350` — wrapped `setCachedNegative` in `if (!getCachedValue(cacheKey))` to prevent a concurrent failed prefetch from clobbering a positive entry.
+
+### Continuation Status
+All tasks completed.
