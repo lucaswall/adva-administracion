@@ -99,10 +99,12 @@ async function processCascadingReciboDisplacements(
 
       if (bestMatch.isUpgrade && bestMatch.existingPagoFileId) {
         // This match would displace another pago - check if it's strictly better
-        // hasCuitMatch for existing match: HIGH confidence implies CUIT match was present
+        // hasCuitMatch for existing match: prefer the recibo's actual flag when available
+        // (in-memory matching path), fall back to the HIGH-confidence proxy when the recibo
+        // was loaded from the spreadsheet (Recibos sheet has no hasCuitMatch column).
         const existingQuality: MatchQuality = {
           confidence: bestMatch.existingMatchConfidence || 'LOW',
-          hasCuitMatch: bestMatch.existingMatchConfidence === 'HIGH',
+          hasCuitMatch: bestMatch.recibo.hasCuitMatch ?? (bestMatch.existingMatchConfidence === 'HIGH'),
           dateProximityDays: bestMatch.existingDateProximityDays ?? 999
         };
         const newQuality: MatchQuality = {
@@ -403,10 +405,12 @@ async function doMatchRecibosWithPagos(
       if (bestMatch.confidence === 'HIGH' || matches.length === 1) {
         // Check if this is an upgrade (recibo already matched)
         if (bestMatch.isUpgrade && bestMatch.existingPagoFileId) {
-          // hasCuitMatch for existing match: HIGH confidence implies CUIT match was present
+          // hasCuitMatch for existing match: prefer the recibo's actual flag when available
+          // (in-memory matching path), fall back to the HIGH-confidence proxy when the recibo
+          // was loaded from the spreadsheet (Recibos sheet has no hasCuitMatch column).
           const existingQuality: MatchQuality = {
             confidence: bestMatch.existingMatchConfidence || 'LOW',
-            hasCuitMatch: bestMatch.existingMatchConfidence === 'HIGH',
+            hasCuitMatch: bestMatch.recibo.hasCuitMatch ?? (bestMatch.existingMatchConfidence === 'HIGH'),
             dateProximityDays: bestMatch.existingDateProximityDays ?? 999
           };
           const newQuality: MatchQuality = {

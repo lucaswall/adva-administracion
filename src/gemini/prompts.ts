@@ -397,6 +397,21 @@ Required fields:
 
 CRITICAL DATE EXTRACTION RULES:
 
+PRIORITY 1 — STATEMENT PERIOD HEADER (check this first):
+Look for a period header near the top of the document, typically labeled:
+- "Del DD/MM/YYYY al DD/MM/YYYY" (e.g., "Del 01/01/2026 al 31/01/2026")
+- "Período: DD/MM/YYYY - DD/MM/YYYY" or "Período: DD/MM/YYYY al DD/MM/YYYY"
+- "Resumen del período: DD/MM/YYYY al DD/MM/YYYY"
+- "Período de liquidación: DD/MM/YYYY a DD/MM/YYYY"
+If you find any such header: use its start date as fechaDesde and its end date as fechaHasta.
+These headers span the full calendar month (e.g., 01/01/2026 to 31/01/2026).
+
+DO NOT use these as the period:
+- "Fecha del saldo:" or similar balance-summary footer dates
+- Short date ranges (< 14 days apart) appearing in the balance summary box
+- Individual transaction dates near month-end that happen to match a saldo entry
+
+PRIORITY 2 — TRANSACTION TABLE + SALDO AL (fallback when no period header found):
 1. fechaDesde = Date of the FIRST transaction in the movement table
    - Look at the FECHA column in "Movimientos en cuentas" section
    - Find the very first date listed AFTER "SALDO ANTERIOR"

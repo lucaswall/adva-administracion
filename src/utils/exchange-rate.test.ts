@@ -696,6 +696,165 @@ describe('exchange-rate', () => {
     });
   });
 
+  describe('negative cache (ADV-181)', () => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('records a negative cache entry when prefetch fails — second call does not re-fetch', async () => {
+      global.fetch = vi.fn().mockResolvedValue({ ok: false, status: 404 });
+
+      await prefetchExchangeRates(['2024-01-15']);
+      expect(global.fetch).toHaveBeenCalledTimes(1);
+
+      // Second prefetch for same failed date should not trigger another fetch
+      await prefetchExchangeRates(['2024-01-15']);
+      expect(global.fetch).toHaveBeenCalledTimes(1);
+    });
+
+    it('getExchangeRateSync returns { ok: false, cacheMiss: true } for negatively cached date — no extra fetch', async () => {
+      global.fetch = vi.fn().mockResolvedValue({ ok: false, status: 404 });
+
+      await prefetchExchangeRates(['2024-01-15']);
+      expect(global.fetch).toHaveBeenCalledTimes(1);
+
+      const result = getExchangeRateSync('2024-01-15');
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.cacheMiss).toBe(true);
+      }
+      // getExchangeRateSync must not trigger a new fetch
+      expect(global.fetch).toHaveBeenCalledTimes(1);
+    });
+
+    it('negative cache entries expire after 1 hour; prefetch retries after expiry', async () => {
+      vi.useFakeTimers();
+      global.fetch = vi.fn().mockResolvedValue({ ok: false, status: 404 });
+
+      await prefetchExchangeRates(['2024-01-15']);
+      expect(global.fetch).toHaveBeenCalledTimes(1);
+
+      // Still within negative TTL (1 hour) — should not re-fetch
+      await vi.advanceTimersByTimeAsync(30 * 60 * 1000);
+      await prefetchExchangeRates(['2024-01-15']);
+      expect(global.fetch).toHaveBeenCalledTimes(1);
+
+      // Past negative TTL — should re-fetch
+      await vi.advanceTimersByTimeAsync(31 * 60 * 1000); // total >1 hour elapsed
+      await prefetchExchangeRates(['2024-01-15']);
+      expect(global.fetch).toHaveBeenCalledTimes(2);
+    });
+
+    it('positive cache entries are NOT expired by the 1-hour negative TTL', async () => {
+      vi.useFakeTimers();
+      const mockRate = { fecha: '2024-01-15', compra: 800, venta: 850 };
+      global.fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => mockRate });
+
+      await prefetchExchangeRates(['2024-01-15']);
+      expect(global.fetch).toHaveBeenCalledTimes(1);
+
+      // Advance 1 hour — positive cache (24h TTL) should still be valid
+      await vi.advanceTimersByTimeAsync(60 * 60 * 1000 + 1);
+      await prefetchExchangeRates(['2024-01-15']);
+      expect(global.fetch).toHaveBeenCalledTimes(1); // no re-fetch
+    });
+
+    it('prefetchExchangeRates emits exactly one warn per failed date', async () => {
+      const loggerModule = await import('../utils/logger.js');
+      const warnSpy = vi.spyOn(loggerModule, 'warn');
+
+      global.fetch = vi.fn().mockResolvedValue({ ok: false, status: 404 });
+      await prefetchExchangeRates(['2024-01-15']);
+
+      const failWarnCalls = warnSpy.mock.calls.filter(
+        ([msg]) => typeof msg === 'string' && msg.includes('Failed to prefetch')
+      );
+      expect(failWarnCalls).toHaveLength(1);
+
+      warnSpy.mockRestore();
+    });
+
+    it('amountsMatchCrossCurrency emits debug (not warn) on cache miss', async () => {
+      const loggerModule = await import('../utils/logger.js');
+      const warnSpy = vi.spyOn(loggerModule, 'warn');
+      const debugSpy = vi.spyOn(loggerModule, 'debug');
+
+      // No rate pre-fetched → cache miss
+      const result = amountsMatchCrossCurrency(100, 'USD', '2024-01-15', 85000, 'ARS', 5);
+
+      expect(result.cacheMiss).toBe(true);
+
+      const cacheMissWarnCalls = warnSpy.mock.calls.filter(
+        ([msg]) => typeof msg === 'string' && msg.toLowerCase().includes('cache miss')
+      );
+      expect(cacheMissWarnCalls).toHaveLength(0);
+
+      const cacheMissDebugCalls = debugSpy.mock.calls.filter(
+        ([msg]) => typeof msg === 'string' && msg.toLowerCase().includes('cache miss')
+      );
+      expect(cacheMissDebugCalls).toHaveLength(1);
+
+      warnSpy.mockRestore();
+      debugSpy.mockRestore();
+    });
+
+    it('network error during prefetch also records a negative cache entry', async () => {
+      global.fetch = vi.fn().mockRejectedValue(new Error('Network error'));
+
+      await prefetchExchangeRates(['2024-01-15']);
+      expect(global.fetch).toHaveBeenCalledTimes(1);
+
+      // Second call should not re-fetch
+      await prefetchExchangeRates(['2024-01-15']);
+      expect(global.fetch).toHaveBeenCalledTimes(1);
+
+      const result = getExchangeRateSync('2024-01-15');
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.cacheMiss).toBe(true);
+      }
+    });
+  });
+
+  describe('USD same-currency tolerance audit (ADV-188)', () => {
+    it('USD/USD within USD_SAME_CURRENCY_TOLERANCE=30 (but > 1) matches correctly', () => {
+      // Verifies that when callers explicitly pass USD_SAME_CURRENCY_TOLERANCE=30,
+      // amounts within $30 still match.
+      // $1800 - $1782 = $18 diff, within $30 tolerance → match
+      const result = amountsMatchCrossCurrency(1800, 'USD', '2024-01-15', 1782, 'USD', 5, 30);
+      expect(result.matches).toBe(true);
+      expect(result.isCrossCurrency).toBe(false);
+    });
+
+    it('USD/USD with default tolerance=1 does NOT match a $18 difference', () => {
+      // bank/matcher.ts callers do not pass sameCurrencyUsdTolerance, but they always
+      // pass 'ARS' as pagoMoneda so this branch is never reached in practice.
+      // This test confirms the default is 1 (defensive).
+      const result = amountsMatchCrossCurrency(1800, 'USD', '2024-01-15', 1782, 'USD', 5);
+      expect(result.matches).toBe(false);
+      expect(result.isCrossCurrency).toBe(false);
+    });
+
+    it('bank/matcher.ts callers: USD pago vs ARS movement is cross-currency (not same-currency USD)', async () => {
+      const { setExchangeRateCache: setCache } = await import('./exchange-rate.js');
+      setCache('2024-01-15', { fecha: '2024-01-15', compra: 800, venta: 850 });
+
+      // Simulates bank/matcher.ts call: pago.moneda='USD', amount='ARS'
+      // This goes through the cross-currency path, NOT the same-currency USD path
+      const result = amountsMatchCrossCurrency(
+        100,    // pago.importePagado (USD)
+        'USD',  // pago.moneda
+        '2024-01-15',
+        85000,  // bank movement amount (ARS)
+        'ARS',  // always 'ARS' in bank/matcher.ts
+        5       // crossCurrencyTolerancePercent (no 7th arg — irrelevant here)
+      );
+      // Cross-currency path used: no sameCurrencyUsdTolerance applies
+      expect(result.isCrossCurrency).toBe(true);
+      expect(result.matches).toBe(true); // 100 USD * 850 venta = 85000 ARS ±5%
+    });
+  });
+
   describe('getExchangeRate logging', () => {
     beforeEach(() => {
       clearExchangeRateCache();

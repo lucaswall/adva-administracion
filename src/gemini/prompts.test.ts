@@ -73,6 +73,12 @@ describe('getResumenBancarioPrompt', () => {
     expect(prompt).toContain('Barcode contains');
   });
 
+  it('should not leak TypeScript-style source comments into the prompt body', () => {
+    const prompt = getResumenBancarioPrompt();
+    expect(prompt).not.toMatch(/^\s*\/\/ ADV-/m);
+    expect(prompt).not.toContain('// ADV-184');
+  });
+
   it('should handle SIN MOVIMIENTOS case', () => {
     const prompt = getResumenBancarioPrompt();
     expect(prompt).toContain('SIN MOVIMIENTOS');

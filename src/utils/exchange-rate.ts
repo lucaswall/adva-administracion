@@ -36,16 +36,26 @@ export interface CrossCurrencyMatchResult {
 }
 
 /**
- * Cache TTL: 24 hours in milliseconds
+ * Cache TTL: 24 hours in milliseconds (for successful exchange rate fetches)
  */
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 
 /**
- * In-memory cache for exchange rates
+ * Negative cache TTL: 1 hour in milliseconds
+ * Negative entries are written when the API returns no data for a date.
+ * Shorter TTL than positive entries to allow retry after transient API failures.
+ */
+const NEGATIVE_CACHE_TTL_MS = 60 * 60 * 1000;
+
+/**
+ * In-memory cache for exchange rates.
+ * Entries may be positive (rate available) or negative (API returned no data).
  */
 interface CacheEntry {
-  rate: ExchangeRate;
+  rate?: ExchangeRate;
   timestamp: number;
+  /** true when the API returned an error/invalid response for this date */
+  negative?: boolean;
 }
 
 const memoryCache = new Map<string, CacheEntry>();
@@ -73,27 +83,60 @@ export function setExchangeRateCache(date: string, rate: ExchangeRate): void {
 }
 
 /**
- * Gets cached value if valid (not expired)
+ * Gets cached exchange rate value if valid (not expired).
+ * Returns null for both cache misses AND negative entries.
+ * Use isNegativelyCached() to distinguish between the two.
  */
 function getCachedValue(key: string): ExchangeRate | null {
   const entry = memoryCache.get(key);
   if (!entry) return null;
 
   const now = Date.now();
-  if (now - entry.timestamp > CACHE_TTL_MS) {
+  const ttl = entry.negative ? NEGATIVE_CACHE_TTL_MS : CACHE_TTL_MS;
+
+  if (now - entry.timestamp > ttl) {
     memoryCache.delete(key);
     return null;
   }
 
-  return entry.rate;
+  if (entry.negative) return null; // negative entry — caller must use isNegativelyCached()
+  return entry.rate ?? null;
 }
 
 /**
- * Sets cached value with current timestamp
+ * Returns true if key has a valid (non-expired) negative cache entry.
+ * Negative entries record that the API returned no data for a date.
+ */
+function isNegativelyCached(key: string): boolean {
+  const entry = memoryCache.get(key);
+  if (!entry || !entry.negative) return false;
+
+  const now = Date.now();
+  if (now - entry.timestamp > NEGATIVE_CACHE_TTL_MS) {
+    memoryCache.delete(key);
+    return false;
+  }
+
+  return true;
+}
+
+/**
+ * Sets a positive cached value with current timestamp
  */
 function setCachedValue(key: string, rate: ExchangeRate): void {
   memoryCache.set(key, {
     rate,
+    timestamp: Date.now()
+  });
+}
+
+/**
+ * Records a negative cache entry for key (API returned no data for this date).
+ * Expires after NEGATIVE_CACHE_TTL_MS (1 hour).
+ */
+function setCachedNegative(key: string): void {
+  memoryCache.set(key, {
+    negative: true,
     timestamp: Date.now()
   });
 }
@@ -216,10 +259,23 @@ export async function getExchangeRate(date: string): Promise<Result<ExchangeRate
 }
 
 /**
- * Synchronous version that returns cached value or indicates cache miss
- * For use in synchronous matching code - should pre-fetch rates before matching
+ * Return type for getExchangeRateSync.
+ * The failure branch carries an optional cacheMiss flag to distinguish between
+ * "not prefetched" and "API returned no data" (negative cache hit).
  */
-export function getExchangeRateSync(date: string): Result<ExchangeRate, Error> {
+export type ExchangeRateSyncResult =
+  | { ok: true; value: ExchangeRate }
+  | { ok: false; error: Error; cacheMiss?: boolean };
+
+/**
+ * Synchronous version that returns cached value or indicates cache miss.
+ * For use in synchronous matching code — call prefetchExchangeRates() first.
+ *
+ * Returns { ok: false, cacheMiss: true } both for un-prefetched dates and for
+ * dates whose API fetch previously failed (negative cache). The caller can use
+ * cacheMiss to decide whether to skip or log the miss.
+ */
+export function getExchangeRateSync(date: string): ExchangeRateSyncResult {
   const isoDate = normalizeDateToIso(date);
   if (!isoDate) {
     return {
@@ -235,8 +291,17 @@ export function getExchangeRateSync(date: string): Result<ExchangeRate, Error> {
     return { ok: true, value: cachedValue };
   }
 
+  if (isNegativelyCached(cacheKey)) {
+    return {
+      ok: false,
+      cacheMiss: true,
+      error: new Error(`Exchange rate not available for ${isoDate} (API returned no data)`),
+    };
+  }
+
   return {
     ok: false,
+    cacheMiss: true,
     error: new Error(`Exchange rate not cached for ${isoDate}. Call prefetchExchangeRates first.`),
   };
 }
@@ -270,19 +335,27 @@ export async function prefetchExchangeRates(dates: string[]): Promise<void> {
   const results = await Promise.allSettled(
     uniqueDates.map(async (date) => {
       const cacheKey = `exchange_rate_oficial_${date}`;
-      if (!getCachedValue(cacheKey)) {
+      // Skip if already positively cached OR negatively cached (avoids redundant API calls)
+      if (!getCachedValue(cacheKey) && !isNegativelyCached(cacheKey)) {
         const result = await getExchangeRate(date);
         if (!result.ok) {
+          // Emit exactly one warn per failed date (not per matching attempt)
           warn('Failed to prefetch exchange rate', {
             module: 'exchange-rate',
             date,
             error: result.error.message,
             correlationId: getCorrelationId(),
           });
+          // Write a negative cache entry so subsequent prefetch calls skip this date.
+          // Re-check positive cache first: a concurrent prefetch may have just succeeded
+          // for the same date — never overwrite a valid rate with a negative entry.
+          if (!getCachedValue(cacheKey)) {
+            setCachedNegative(cacheKey);
+          }
         }
         return result;
       }
-      return undefined; // Already cached
+      return undefined; // Already cached (positive or negative)
     })
   );
 
@@ -341,9 +414,9 @@ export function amountsMatchCrossCurrency(
   const rateResult = getExchangeRateSync(facturaFecha);
 
   if (!rateResult.ok) {
-    // Cache miss - cannot determine match
-    // Log warning so this is visible and can be debugged
-    warn('Exchange rate cache miss - USD invoice cannot be matched', {
+    // Cache miss — demoted to debug to avoid log spam when called per-pago in a matching loop.
+    // prefetchExchangeRates already emits one warn per failed date, which is the right signal.
+    debug('Exchange rate cache miss - USD invoice cannot be matched', {
       module: 'exchange-rate',
       phase: 'cross-currency-match',
       facturaFecha,
