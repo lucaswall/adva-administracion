@@ -7,7 +7,7 @@ nixPkgs = ["nodejs_24"]
 nixpkgsArchive = "ac62194c3917d5f474c1a844b6fd6da2db95077d"
 
 [phases.install]
-cmds = ["npm ci"]
+cmds = ["npm ci --include=dev"]
 
 [phases.build]
 cmds = ["npm run build", "npm prune --omit=dev"]
