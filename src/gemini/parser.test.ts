@@ -1859,6 +1859,183 @@ describe('Confidence calculation without artificial floor', () => {
   });
 });
 
+describe('parseResumenBancarioResponse - narrow date window detection (ADV-184)', () => {
+  it('accepts full-month period (28 days) without flagging', () => {
+    // Feb 2026: full month - valid Credicoop statement
+    const response = JSON.stringify({
+      banco: 'Credicoop',
+      numeroCuenta: '191.001.066458.4',
+      fechaDesde: '2026-02-01',
+      fechaHasta: '2026-02-28',
+      saldoInicial: 100000,
+      saldoFinal: 150000,
+      moneda: 'ARS',
+      cantidadMovimientos: 15,
+    });
+
+    const result = parseResumenBancarioResponse(response);
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      // 27-day span is a full month - should NOT flag for review
+      expect(result.value.needsReview).not.toBe(true);
+    }
+  });
+
+  it('accepts full-month period (31 days) without flagging', () => {
+    // Jan 2026: full month
+    const response = JSON.stringify({
+      banco: 'Credicoop',
+      numeroCuenta: '191.001.066458.4',
+      fechaDesde: '2026-01-01',
+      fechaHasta: '2026-01-31',
+      saldoInicial: 50000,
+      saldoFinal: 80000,
+      moneda: 'ARS',
+      cantidadMovimientos: 20,
+    });
+
+    const result = parseResumenBancarioResponse(response);
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      // 30-day span is a full month - should NOT flag for review
+      expect(result.value.needsReview).not.toBe(true);
+    }
+  });
+
+  it('flags 2-day window (Credicoop Jan 2026 buggy case) as needsReview', () => {
+    // Production evidence: Jan 2026 → 2026-01-30 to 2026-01-31 (2-day window)
+    const response = JSON.stringify({
+      banco: 'Credicoop',
+      numeroCuenta: '191.001.066458.4',
+      fechaDesde: '2026-01-30',
+      fechaHasta: '2026-01-31',
+      saldoInicial: 100000,
+      saldoFinal: 105000,
+      moneda: 'ARS',
+      cantidadMovimientos: 2,
+    });
+
+    const result = parseResumenBancarioResponse(response);
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      // 1-day span (< 14 days) is a narrow window - Gemini anchored on footer date
+      expect(result.value.needsReview).toBe(true);
+    }
+  });
+
+  it('flags 5-day window (Credicoop Mar 2026 buggy case) as needsReview', () => {
+    // Production evidence: Mar 2026 → 2026-03-27 to 2026-03-31 (5-day window)
+    const response = JSON.stringify({
+      banco: 'Credicoop',
+      numeroCuenta: '191.001.066458.4',
+      fechaDesde: '2026-03-27',
+      fechaHasta: '2026-03-31',
+      saldoInicial: 200000,
+      saldoFinal: 190000,
+      moneda: 'ARS',
+      cantidadMovimientos: 5,
+    });
+
+    const result = parseResumenBancarioResponse(response);
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      // 4-day span (< 14 days) is a narrow window - flag for review
+      expect(result.value.needsReview).toBe(true);
+    }
+  });
+
+  it('flags 7-day window (Credicoop Apr 2026 buggy case) as needsReview', () => {
+    // Production evidence: Apr 2026 → 2026-04-24 to 2026-04-30 (7-day window)
+    const response = JSON.stringify({
+      banco: 'Credicoop',
+      numeroCuenta: '191.001.066458.4',
+      fechaDesde: '2026-04-24',
+      fechaHasta: '2026-04-30',
+      saldoInicial: 300000,
+      saldoFinal: 280000,
+      moneda: 'ARS',
+      cantidadMovimientos: 7,
+    });
+
+    const result = parseResumenBancarioResponse(response);
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      // 6-day span (< 14 days) is a narrow window - flag for review
+      expect(result.value.needsReview).toBe(true);
+    }
+  });
+
+  it('flags 13-day window (just under threshold) as needsReview', () => {
+    // 13 days: fechaHasta - fechaDesde = 13, which is < 14
+    const response = JSON.stringify({
+      banco: 'BBVA',
+      numeroCuenta: '007-009364/1',
+      fechaDesde: '2026-01-01',
+      fechaHasta: '2026-01-14',
+      saldoInicial: 100000,
+      saldoFinal: 120000,
+      moneda: 'ARS',
+      cantidadMovimientos: 5,
+    });
+
+    const result = parseResumenBancarioResponse(response);
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      // 13-day span is just under threshold (< 14) - flag for review
+      expect(result.value.needsReview).toBe(true);
+    }
+  });
+
+  it('does not flag 14-day window (at or above threshold)', () => {
+    // 14 days: fechaHasta - fechaDesde = 14, which is NOT < 14
+    const response = JSON.stringify({
+      banco: 'BBVA',
+      numeroCuenta: '007-009364/1',
+      fechaDesde: '2026-01-01',
+      fechaHasta: '2026-01-15',
+      saldoInicial: 100000,
+      saldoFinal: 120000,
+      moneda: 'ARS',
+      cantidadMovimientos: 5,
+    });
+
+    const result = parseResumenBancarioResponse(response);
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      // 14-day span meets threshold - should NOT flag for narrow window
+      expect(result.value.needsReview).not.toBe(true);
+    }
+  });
+
+  it('does not flag narrow window check when fechaDesde or fechaHasta is missing', () => {
+    // Missing fechaDesde - narrow window check should be skipped gracefully
+    const response = JSON.stringify({
+      banco: 'BBVA',
+      numeroCuenta: '007-009364/1',
+      fechaHasta: '2026-01-31',
+      saldoInicial: 100000,
+      saldoFinal: 120000,
+      moneda: 'ARS',
+      cantidadMovimientos: 5,
+    });
+
+    const result = parseResumenBancarioResponse(response);
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      // Missing fechaDesde means missingFields flags review, but NOT from narrow window check
+      expect(result.value.missingFields).toContain('fechaDesde');
+    }
+  });
+});
+
 describe('parseFacturaResponse - tipoComprobante letter variants', () => {
   const validFacturaBase = {
     issuerName: 'ADVA',

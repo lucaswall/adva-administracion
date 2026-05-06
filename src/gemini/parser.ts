@@ -1155,6 +1155,33 @@ export function parseResumenBancarioResponse(response: string): Result<ParseResu
       }
     }
 
+    // ADV-184: Detect narrow date windows (< 14 days) in bank statements.
+    // Bank statements typically cover a full calendar month (28-31 days).
+    // Narrow windows suggest Gemini anchored on a footer/saldo block instead of
+    // the statement-period header (e.g., "Del 01/01/2026 al 31/01/2026").
+    // Production evidence: Credicoop 2026 statements extracted 2-7 day ranges.
+    if (
+      data.fechaDesde && data.fechaHasta &&
+      isValidDateFormat(data.fechaDesde) && isValidDateFormat(data.fechaHasta)
+    ) {
+      const desde = new Date(data.fechaDesde + 'T00:00:00.000Z');
+      const hasta = new Date(data.fechaHasta + 'T00:00:00.000Z');
+      const diffDays = Math.round((hasta.getTime() - desde.getTime()) / (1000 * 60 * 60 * 24));
+
+      // diffDays must be > 0 to exclude valid SIN MOVIMIENTOS same-day statements.
+      // The Credicoop production bug cases all have spans of 1-7 days.
+      if (diffDays > 0 && diffDays < 14) {
+        needsReview = true;
+        warn('Suspicious narrow date window in resumen bancario — possible footer/saldo date extraction instead of period header', {
+          module: 'gemini-parser',
+          phase: 'resumen-bancario-parse',
+          fechaDesde: data.fechaDesde,
+          fechaHasta: data.fechaHasta,
+          diffDays,
+        });
+      }
+    }
+
     return {
       ok: true,
       value: {
