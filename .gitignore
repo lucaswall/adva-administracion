@@ -40,9 +40,7 @@ service-account.json
 *-service-account.json
 *.pem
 
-# Apps Script (contains project-specific IDs and generated files)
-apps-script/.clasp.json
-apps-script/dist/
+# Apps Script generated files (config.ts is regenerated from config.template.ts on every build)
 apps-script/src/config.ts
 
 # Claude Code local settings (personal overrides)

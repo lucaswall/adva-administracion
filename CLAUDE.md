@@ -334,9 +334,10 @@ apps-script/              # Dashboard ADVA menu (bound script)
 ├── src/
 │   ├── main.ts
 │   └── config.template.ts
-├── build.js              # Injects API_BASE_URL + API_SECRET from .env
-└── dist/                 # Compiled output (clasp pushes from here)
+└── build.js              # Bundles + injects API_BASE_URL/API_SECRET into dist/apps-script/Code.js + appsscript.json
 ```
+
+The bundle is pushed to the target Apps Script project at server boot by `src/bootstrap/apps-script-sync.ts` (Railway-only, fail-closed). No manual deploy.
 
 **Test files:** Colocated with source as `*.test.ts`:
 - `src/services/document-sorter.test.ts`
@@ -410,17 +411,17 @@ server.post('/api/new', { onRequest: authMiddleware }, handler);
 
 **Webhook endpoint:** `/webhooks/drive` is public (no auth) - Google Drive cannot send custom headers. Security via channel ID validation.
 
-**Secret rotation:** Update `.env`, run `npm run deploy:script`, restart server.
+**Secret rotation:** Update `API_SECRET` in Railway, redeploy. The boot sync rebuilds and re-pushes the Apps Script bundle automatically.
 
 ## COMMANDS
 
 ```bash
-npm run dev           # Dev with watch
-npm test              # Vitest (use verifier agent)
-npm run build         # Compile (use verifier agent)
-npm run build:script  # Build Apps Script (requires API_BASE_URL, API_SECRET)
-npm run deploy:script # Build + deploy to Dashboard
+npm run dev    # Dev with watch
+npm test       # Vitest (use verifier agent)
+npm run build  # Compile server (tsc) + bundle Apps Script (use verifier agent)
 ```
+
+The Apps Script bundle is produced into `dist/apps-script/{Code.js,appsscript.json}` and pushed to the target script project at server boot on Railway (`src/bootstrap/apps-script-sync.ts`). Required Railway env vars: `APPS_SCRIPT_SA_KEY`, `APPS_SCRIPT_TARGET_ID`, `APPS_SCRIPT_IMPERSONATE_SUBJECT`. The push is gated on `RAILWAY_ENVIRONMENT_ID` so local boots never push.
 
 ## ENV VARS
 

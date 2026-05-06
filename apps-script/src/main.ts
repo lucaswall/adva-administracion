@@ -39,11 +39,11 @@ interface ErrorResponse {
 export function createMenu(): void {
   const ui = SpreadsheetApp.getUi();
   ui.createMenu('ADVA')
-    .addItem('🔄 Trigger Scan', 'triggerScan')
-    .addItem('🔗 Trigger Re-match', 'triggerRematch')
-    .addItem('📝 Completar Detalles Movimientos', 'triggerMatchMovimientos')
+    .addItem('🔄 Procesar Entrada', 'triggerScan')
+    .addItem('🔗 Volver a Vincular Documentos', 'triggerRematch')
+    .addItem('📝 Completar Detalles de Movimientos', 'triggerMatchMovimientos')
     .addSeparator()
-    .addItem('ℹ️ About', 'showAbout')
+    .addItem('ℹ️ Acerca de', 'showAbout')
     .addToUi();
 }
 
@@ -52,7 +52,7 @@ export function createMenu(): void {
  */
 export function triggerScan(): void {
   const url = getApiUrl('/api/scan');
-  makeApiCall(url, 'post', null, 'Scan triggered successfully!');
+  makeApiCall(url, 'post', null, 'Procesamiento iniciado correctamente.');
 }
 
 /**
@@ -60,7 +60,7 @@ export function triggerScan(): void {
  */
 export function triggerRematch(): void {
   const url = getApiUrl('/api/rematch');
-  makeApiCall(url, 'post', null, 'Re-match triggered successfully!');
+  makeApiCall(url, 'post', null, 'Vinculación de documentos iniciada correctamente.');
 }
 
 /**
@@ -69,7 +69,7 @@ export function triggerRematch(): void {
  */
 export function triggerMatchMovimientos(): void {
   const url = getApiUrl('/api/match-movimientos');
-  makeApiCall(url, 'post', null, 'Match movimientos triggered successfully!');
+  makeApiCall(url, 'post', null, 'Completado de detalles iniciado correctamente.');
 }
 
 /**
@@ -78,12 +78,12 @@ export function triggerMatchMovimientos(): void {
 function validateConfig(): void {
   // Check if API_BASE_URL was properly injected during build
   if (!API_BASE_URL || API_BASE_URL.includes('{{') || API_BASE_URL.includes('}}')) {
-    throw new Error('API_BASE_URL not configured. Please rebuild the script with API_BASE_URL environment variable set.');
+    throw new Error('API_BASE_URL no está configurada. Reconstruí el script con la variable de entorno API_BASE_URL definida.');
   }
 
   // Check if API_SECRET was properly injected during build
   if (!API_SECRET || API_SECRET.includes('{{') || API_SECRET.includes('}}')) {
-    throw new Error('API_SECRET not configured. Please rebuild the script with API_SECRET environment variable set.');
+    throw new Error('API_SECRET no está configurada. Reconstruí el script con la variable de entorno API_SECRET definida.');
   }
 }
 
@@ -150,9 +150,9 @@ function makeApiCall(
       } catch (e) {
         // Response is not JSON, use default message
       }
-      ui.alert('✅ Success', message, ui.ButtonSet.OK);
+      ui.alert('✅ Listo', message, ui.ButtonSet.OK);
     } else {
-      let errorMsg = `Server returned status ${statusCode}`;
+      let errorMsg = `El servidor devolvió el estado ${statusCode}`;
       try {
         const errorData = JSON.parse(responseText) as ErrorResponse;
         if (errorData.error) {
@@ -167,24 +167,24 @@ function makeApiCall(
           errorMsg += `\n\n${responseText}`;
         }
       }
-      ui.alert('⚠️ API Error', errorMsg, ui.ButtonSet.OK);
+      ui.alert('⚠️ Error de la API', errorMsg, ui.ButtonSet.OK);
     }
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : String(err);
-    let userMessage = 'Failed to connect to API server.\n\n';
+    let userMessage = 'No se pudo conectar con el servidor.\n\n';
 
     // Provide more helpful error messages
     if (errorMessage.includes('DNS')) {
-      userMessage += 'DNS resolution failed. Please check the API domain configuration.';
+      userMessage += 'Falló la resolución DNS. Revisá la configuración del dominio de la API.';
     } else if (errorMessage.includes('timeout')) {
-      userMessage += 'Request timed out. The server may be down or unresponsive.';
+      userMessage += 'La solicitud agotó el tiempo de espera. El servidor puede estar caído o no responder.';
     } else if (errorMessage.includes('SSL') || errorMessage.includes('certificate')) {
-      userMessage += 'SSL certificate error. Please check the server configuration.';
+      userMessage += 'Error de certificado SSL. Revisá la configuración del servidor.';
     } else {
       userMessage += `Error: ${errorMessage}`;
     }
 
-    ui.alert('❌ Connection Error', userMessage, ui.ButtonSet.OK);
+    ui.alert('❌ Error de conexión', userMessage, ui.ButtonSet.OK);
   }
 }
 
@@ -238,35 +238,35 @@ function formatDateTime(isoString: string): string {
 export function showAbout(): void {
   const ui = SpreadsheetApp.getUi();
 
-  let message = 'ADVA Administration Menu\n\n';
+  let message = 'Menú de Administración ADVA\n\n';
 
   // Test API connectivity
-  message += `API URL: ${API_BASE_URL}\n\n`;
+  message += `URL de la API: ${API_BASE_URL}\n\n`;
 
   const status = fetchServerStatus();
 
   if (status) {
-    message += `✅ Server Status: Online\n\n`;
+    message += `✅ Estado del servidor: En línea\n\n`;
 
     // Version and Environment
-    message += `Version: ${status.version}\n`;
-    message += `Environment: ${status.environment}\n\n`;
+    message += `Versión: ${status.version}\n`;
+    message += `Entorno: ${status.environment}\n\n`;
 
     // Uptime Information
-    message += `Uptime: ${status.uptime}\n`;
-    message += `Started: ${formatDateTime(status.startTime)}\n\n`;
+    message += `Tiempo activo: ${status.uptime}\n`;
+    message += `Iniciado: ${formatDateTime(status.startTime)}\n\n`;
 
     // Queue Statistics
-    message += `━━ Queue Status ━━\n`;
-    message += `Running: ${status.queue.running}\n`;
-    message += `Pending: ${status.queue.pending}\n`;
-    message += `Completed: ${status.queue.completed}\n`;
-    message += `Failed: ${status.queue.failed}`;
+    message += `━━ Estado de la cola ━━\n`;
+    message += `En ejecución: ${status.queue.running}\n`;
+    message += `Pendientes: ${status.queue.pending}\n`;
+    message += `Completados: ${status.queue.completed}\n`;
+    message += `Fallidos: ${status.queue.failed}`;
   } else {
-    message += '⚠️ Server Status: Offline\n\n';
-    message += 'Unable to connect to the server.\n';
-    message += 'The server may be down or the API URL may be incorrect.';
+    message += '⚠️ Estado del servidor: Fuera de línea\n\n';
+    message += 'No se pudo conectar con el servidor.\n';
+    message += 'Puede estar caído o la URL de la API puede ser incorrecta.';
   }
 
-  ui.alert('About ADVA Menu', message, ui.ButtonSet.OK);
+  ui.alert('Acerca del menú ADVA', message, ui.ButtonSet.OK);
 }

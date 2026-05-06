@@ -7,7 +7,6 @@
       "Bash(npm *)",
       "Bash(npx *)",
       "Bash(node *)",
-      "Bash(clasp *)",
       "Bash(git *)",
       "Bash(gh *)",
       "Bash(tsc *)",

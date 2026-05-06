@@ -5,7 +5,7 @@
   "description": "ADVA invoice and payment processing server with Gemini AI",
   "main": "dist/server.js",
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && node apps-script/build.js",
     "start": "node dist/server.js",
     "dev": "tsx watch --env-file=.env src/server.ts",
     "test": "vitest run",
@@ -13,8 +13,6 @@
     "test:coverage": "vitest run --coverage",
     "typecheck": "tsc --noEmit",
     "lint": "tsc --noEmit",
-    "build:script": "node apps-script/build.js",
-    "deploy:script": "npm run build:script && cd apps-script && clasp push",
     "upload:samples": "node --env-file=.env support/upload-samples.js"
   },
   "keywords": [
@@ -31,13 +29,13 @@
   "dependencies": {
     "dotenv": "^17.4.2",
     "fastify": "^5.8.5",
+    "google-auth-library": "^9.15.1",
     "googleapis": "^171.4.0",
     "node-cron": "^4.2.1",
     "p-queue": "^9.2.0",
     "pino": "^10.3.1"
   },
   "devDependencies": {
-    "@google/clasp": "^3.3.0",
     "@types/google-apps-script": "^2.0.8",
     "@types/node": "^24.12.2",
     "@types/node-cron": "^3.0.11",

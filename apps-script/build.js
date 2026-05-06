@@ -1,14 +1,17 @@
 #!/usr/bin/env node
 /**
- * Build script for ADVA Apps Script
+ * Build the bound Apps Script bundle.
  *
- * This script:
- * 1. Reads API_BASE_URL and API_SECRET from .env file
- * 2. Injects them into config.template.ts → config.ts
- * 3. Bundles TypeScript with esbuild (IIFE format for Apps Script)
- * 4. Copies appsscript.json to dist/
+ * Reads API_BASE_URL and API_SECRET from process.env (Railway provides them at
+ * build time during nixpacks build phase) with a fallback to a `.env` file at
+ * the project root for local development.
  *
- * Usage: node build.js
+ * Outputs:
+ *   dist/apps-script/Code.js          IIFE bundle + top-level function stubs
+ *   dist/apps-script/appsscript.json  Manifest copy
+ *
+ * The server's bootstrap reads from those paths and pushes them to the target
+ * Apps Script project on Railway boot. See src/bootstrap/apps-script-sync.ts.
  */
 
 import * as fs from 'fs';
@@ -18,226 +21,186 @@ import * as esbuild from 'esbuild';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const PROJECT_ROOT = path.resolve(__dirname, '..');
+const APPS_SCRIPT_DIR = __dirname;
+const OUT_DIR = path.resolve(PROJECT_ROOT, 'dist', 'apps-script');
 
-/**
- * ANSI color codes for terminal output
- */
 const colors = {
   reset: '\x1b[0m',
   red: '\x1b[31m',
   green: '\x1b[32m',
   yellow: '\x1b[33m',
-  blue: '\x1b[34m'
+  blue: '\x1b[34m',
 };
-
-/**
- * Log functions with color
- */
 const log = {
   info: (msg) => console.log(`${colors.blue}ℹ${colors.reset} ${msg}`),
   success: (msg) => console.log(`${colors.green}✓${colors.reset} ${msg}`),
   error: (msg) => console.error(`${colors.red}✗${colors.reset} ${msg}`),
-  warn: (msg) => console.warn(`${colors.yellow}⚠${colors.reset} ${msg}`)
+  warn: (msg) => console.warn(`${colors.yellow}⚠${colors.reset} ${msg}`),
 };
 
 /**
- * Reads .env file and returns key-value pairs
- * @param {string} envPath - Path to .env file
- * @returns {Record<string, string>} Environment variables
+ * Loads .env into a plain object. Returns {} if the file does not exist.
  */
-function readEnvFile(envPath) {
-  if (!fs.existsSync(envPath)) {
-    log.error(`.env file not found at: ${envPath}`);
-    log.error('Please create a .env file in the project root with API_BASE_URL and API_SECRET set.');
-    process.exit(1);
-  }
-
-  const envContent = fs.readFileSync(envPath, 'utf-8');
-  const envVars = {};
-
-  for (const line of envContent.split('\n')) {
+function loadDotEnv(envPath) {
+  if (!fs.existsSync(envPath)) return {};
+  const out = {};
+  for (const line of fs.readFileSync(envPath, 'utf-8').split('\n')) {
     const trimmed = line.trim();
-    // Skip comments and empty lines
     if (!trimmed || trimmed.startsWith('#')) continue;
-
-    const match = trimmed.match(/^([A-Z_][A-Z0-9_]*)=(.*)$/);
-    if (match) {
-      const [, key, value] = match;
-      envVars[key] = value;
+    const m = trimmed.match(/^([A-Z_][A-Z0-9_]*)=(.*)$/);
+    if (!m) continue;
+    let value = m[2];
+    // Strip a matching pair of surrounding single or double quotes — the most
+    // common .env quoting habit. Other parsers handle this implicitly.
+    if (
+      value.length >= 2 &&
+      ((value.startsWith('"') && value.endsWith('"')) ||
+        (value.startsWith("'") && value.endsWith("'")))
+    ) {
+      value = value.slice(1, -1);
     }
+    out[m[1]] = value;
   }
-
-  return envVars;
+  return out;
 }
 
 /**
- * Escapes a string value for safe injection into single-quoted TypeScript template
- * Prevents syntax injection from values containing single quotes or backslashes
- *
- * @param {string} value - Raw value to escape
- * @returns {string} Escaped value safe for single-quoted string injection
+ * Resolves a build-time variable. process.env wins (Railway), .env is a
+ * developer-machine fallback.
+ */
+function resolveVar(name, processEnv, dotEnv) {
+  const fromProcess = processEnv[name];
+  if (fromProcess !== undefined && fromProcess !== '') return fromProcess;
+  const fromFile = dotEnv[name];
+  if (fromFile !== undefined && fromFile !== '') return fromFile;
+  return undefined;
+}
+
+/**
+ * Escapes a value for safe injection into a single-quoted TypeScript string.
+ * Backslashes first, then single quotes — order matters.
  */
 export function escapeTemplateValue(value) {
   return value.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
 }
 
 /**
- * Main build function
+ * Normalises API_BASE_URL: prepends https:// if no scheme is present, strips
+ * any trailing slash. Throws on syntactically invalid URLs.
  */
+function normaliseApiBaseUrl(raw) {
+  let url = raw;
+  if (!url.startsWith('http://') && !url.startsWith('https://')) {
+    url = `https://${url}`;
+  }
+  // Will throw if invalid.
+  // eslint-disable-next-line no-new
+  new URL(url);
+  return url.replace(/\/$/, '');
+}
+
 async function build() {
   log.info('Building ADVA Apps Script...\n');
 
-  // Step 1: Read environment variables
-  const envPath = path.resolve(__dirname, '..', '.env');
-  log.info(`Reading environment from: ${envPath}`);
-  const envVars = readEnvFile(envPath);
+  const dotEnv = loadDotEnv(path.resolve(PROJECT_ROOT, '.env'));
+  const apiBaseUrlRaw = resolveVar('API_BASE_URL', process.env, dotEnv);
+  const apiSecret = resolveVar('API_SECRET', process.env, dotEnv);
 
-  // Step 2: Validate and process API_BASE_URL
-  let apiBaseUrl = envVars.API_BASE_URL;
-  if (!apiBaseUrl || apiBaseUrl === 'your_domain_here') {
-    log.error('API_BASE_URL is not set in .env file!');
-    log.error('');
-    log.error('Please add API_BASE_URL to your .env file:');
-    log.error('  API_BASE_URL=https://your-domain.railway.app');
-    log.error('');
-    log.error('(Full URL with protocol, e.g., https://example.com)');
+  if (!apiBaseUrlRaw) {
+    log.error('API_BASE_URL is not set (checked process.env and .env).');
     process.exit(1);
   }
-
-  // Validate URL format and ensure it has a protocol
-  let fullUrl = apiBaseUrl;
-  if (!apiBaseUrl.startsWith('http://') && !apiBaseUrl.startsWith('https://')) {
-    // Add https:// if no protocol specified
-    fullUrl = `https://${apiBaseUrl}`;
-    log.warn(`No protocol specified, using: ${fullUrl}`);
-  } else {
-    // Validate URL format
-    try {
-      new URL(apiBaseUrl);
-    } catch (error) {
-      log.error(`Invalid API_BASE_URL format: ${apiBaseUrl}`);
-      log.error('Please use a valid URL (e.g., https://your-domain.railway.app)');
-      process.exit(1);
-    }
-  }
-
-  log.success(`API_BASE_URL: ${fullUrl}`);
-
-  // Step 2.5: Validate API_SECRET
-  const apiSecret = envVars.API_SECRET;
   if (!apiSecret) {
-    log.error('API_SECRET is not set in .env file!');
-    log.error('');
-    log.error('Please add API_SECRET to your .env file:');
-    log.error('  API_SECRET=your-secret-token');
-    log.error('');
-    log.error('This secret is used to authenticate API requests.');
+    log.error('API_SECRET is not set (checked process.env and .env).');
     process.exit(1);
   }
 
-  log.success(`API_SECRET: ${'*'.repeat(apiSecret.length)} (${apiSecret.length} characters)`);
+  let apiBaseUrl;
+  try {
+    apiBaseUrl = normaliseApiBaseUrl(apiBaseUrlRaw);
+  } catch {
+    log.error(`Invalid API_BASE_URL: ${apiBaseUrlRaw}`);
+    process.exit(1);
+  }
+  log.success(`API_BASE_URL: ${apiBaseUrl}`);
+  log.success(`API_SECRET: ${'*'.repeat(apiSecret.length)} (${apiSecret.length} chars)`);
 
-  // Step 3: Inject API_BASE_URL and API_SECRET into config.ts
-  const templatePath = path.resolve(__dirname, 'src', 'config.template.ts');
-  const configPath = path.resolve(__dirname, 'src', 'config.ts');
-
-  log.info('Injecting API_BASE_URL and API_SECRET into config.ts...');
-
+  // Generate config.ts from config.template.ts
+  const templatePath = path.resolve(APPS_SCRIPT_DIR, 'src', 'config.template.ts');
+  const configPath = path.resolve(APPS_SCRIPT_DIR, 'src', 'config.ts');
   if (!fs.existsSync(templatePath)) {
-    log.error(`Template file not found: ${templatePath}`);
+    log.error(`Template missing: ${templatePath}`);
     process.exit(1);
   }
-
-  const templateContent = fs.readFileSync(templatePath, 'utf-8');
-  // Inject full URL with protocol for Apps Script (escape for single-quoted strings)
-  let configContent = templateContent.replace('{{API_BASE_URL}}', escapeTemplateValue(fullUrl));
-  configContent = configContent.replace('{{API_SECRET}}', escapeTemplateValue(apiSecret));
-  fs.writeFileSync(configPath, configContent, 'utf-8');
-
+  const tpl = fs.readFileSync(templatePath, 'utf-8');
+  const configTs = tpl
+    .replace('{{API_BASE_URL}}', escapeTemplateValue(apiBaseUrl))
+    .replace('{{API_SECRET}}', escapeTemplateValue(apiSecret));
+  fs.writeFileSync(configPath, configTs, 'utf-8');
   log.success('config.ts generated');
 
-  // Step 4: Bundle with esbuild
-  log.info('Bundling with esbuild...');
+  fs.mkdirSync(OUT_DIR, { recursive: true });
 
-  const entryPoint = path.resolve(__dirname, 'src', 'main.ts');
-  const outfile = path.resolve(__dirname, 'dist', 'main.js');
+  const entryPoint = path.resolve(APPS_SCRIPT_DIR, 'src', 'main.ts');
+  const outFile = path.resolve(OUT_DIR, 'Code.js');
+
+  // Apps Script dispatches by name to top-level function declarations only —
+  // assignments to globalThis are not enough. esbuild produces an IIFE that
+  // exposes every export on `ADVA`; we then append thin top-level stubs that
+  // forward into it. Keep this list in sync with src/main.ts.
+  const STUBS = [
+    { exposed: 'createMenu', topLevel: 'onOpen' },
+    { exposed: 'triggerScan', topLevel: 'triggerScan' },
+    { exposed: 'triggerRematch', topLevel: 'triggerRematch' },
+    { exposed: 'triggerMatchMovimientos', topLevel: 'triggerMatchMovimientos' },
+    { exposed: 'showAbout', topLevel: 'showAbout' },
+  ];
+  const stubBlock = STUBS.map(
+    ({ exposed, topLevel }) => `function ${topLevel}() { return ADVA.${exposed}(); }`,
+  ).join('\n');
 
   try {
     await esbuild.build({
       entryPoints: [entryPoint],
       bundle: true,
-      outfile: outfile,
+      outfile: outFile,
       format: 'iife',
       globalName: 'ADVA',
       target: 'es2019',
       platform: 'browser',
-      minify: true,
+      // Don't fully minify — keep names readable in the Apps Script editor.
+      minifyWhitespace: true,
+      minifySyntax: true,
       sourcemap: false,
-      footer: {
-        js: `
-// Expose functions to global scope for Apps Script
-function onOpen() {
-  return ADVA.createMenu();
-}
-
-function triggerScan() {
-  return ADVA.triggerScan();
-}
-
-function triggerRematch() {
-  return ADVA.triggerRematch();
-}
-
-function showAbout() {
-  return ADVA.showAbout();
-}
-`
-      }
+      footer: { js: `\n// Top-level stubs for Apps Script triggers/menu items\n${stubBlock}\n` },
+      logLevel: 'info',
     });
-    log.success('TypeScript bundled successfully');
-  } catch (error) {
-    log.error('Bundling failed!');
-    log.error(error.message);
+    log.success(`bundled → ${path.relative(PROJECT_ROOT, outFile)}`);
+  } catch (err) {
+    log.error(`bundling failed: ${err.message}`);
     process.exit(1);
   }
 
-  // Step 5: Copy appsscript.json to dist/
-  const manifestSrc = path.resolve(__dirname, 'appsscript.json');
-  const manifestDest = path.resolve(__dirname, 'dist', 'appsscript.json');
-
-  log.info('Copying appsscript.json to dist/...');
-
+  const manifestSrc = path.resolve(APPS_SCRIPT_DIR, 'appsscript.json');
+  const manifestDst = path.resolve(OUT_DIR, 'appsscript.json');
   if (!fs.existsSync(manifestSrc)) {
-    log.error(`Manifest file not found: ${manifestSrc}`);
+    log.error(`Manifest missing: ${manifestSrc}`);
     process.exit(1);
   }
+  fs.copyFileSync(manifestSrc, manifestDst);
+  log.success(`copied   → ${path.relative(PROJECT_ROOT, manifestDst)}`);
 
-  // Ensure dist directory exists
-  const distDir = path.resolve(__dirname, 'dist');
-  if (!fs.existsSync(distDir)) {
-    fs.mkdirSync(distDir, { recursive: true });
-  }
-
-  fs.copyFileSync(manifestSrc, manifestDest);
-  log.success('appsscript.json copied to dist/');
-
-  // Build complete
-  log.success('\n✓ Build complete! Script is ready in apps-script/dist/');
-  log.info('\nNext steps:');
-  log.info('  1. Run: npm run deploy:script');
-  log.info('  2. Or manually: cd apps-script && clasp push');
-  log.info('  3. Deploy once after Dashboard is created');
+  log.success('\n✓ Apps Script bundle ready');
 }
 
-// Run build only when executed directly (not imported by tests)
-const isDirectExecution = process.argv[1] &&
-  fileURLToPath(import.meta.url) === process.argv[1];
-
+const isDirectExecution =
+  process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];
 if (isDirectExecution) {
   try {
     await build();
-  } catch (error) {
-    log.error(`Build failed: ${error.message}`);
+  } catch (err) {
+    log.error(`Build failed: ${err.message}`);
     process.exit(1);
   }
 }

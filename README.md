@@ -379,62 +379,33 @@ The **Dashboard Operativo Contable** spreadsheet includes a custom **ADVA** menu
 
 ### Architecture
 
-- **Bound script** (`apps-script/` folder): TypeScript-based script attached to Dashboard Operativo Contable
-- **Build process**: Injects `API_BASE_URL` and `API_SECRET` from environment → compiles TypeScript → outputs to `dist/`
-- **Deployment**: One-time manual deployment to Dashboard spreadsheet after server creates it
-- **Control spreadsheets**: Created fresh by server (no script, no template)
+- **Bound script** (`apps-script/` folder): TypeScript source bundled with esbuild into a single IIFE plus top-level function stubs.
+- **Build process**: Injects `API_BASE_URL` and `API_SECRET` from `process.env` (with `.env` fallback) → compiles to `dist/apps-script/Code.js` + `dist/apps-script/appsscript.json`.
+- **Deployment**: Pushed automatically at server boot on Railway via the Apps Script REST API. See `src/bootstrap/apps-script-sync.ts`. No manual step.
+- **Control spreadsheets**: Created fresh by server (no script, no template).
 
-### One-Time Setup
+### Required Railway env vars
 
-#### 1. Configure API Settings
+| Variable | Description |
+|----------|-------------|
+| `APPS_SCRIPT_SA_KEY` | Base64-encoded service account JSON. The SA must have Workspace domain-wide delegation with the `script.projects` and `drive.file` OAuth scopes. |
+| `APPS_SCRIPT_TARGET_ID` | `scriptId` of the bound Apps Script project on the Dashboard Operativo Contable spreadsheet (different per environment). |
+| `APPS_SCRIPT_IMPERSONATE_SUBJECT` | Workspace user email the SA impersonates. Must have Edit access to the Dashboard. |
+| `API_BASE_URL`, `API_SECRET` | Baked into the Apps Script bundle at build time so the menu can call this server. |
 
-Add your Railway domain and API secret to `.env` (full URL with protocol):
+The push is gated on `RAILWAY_ENVIRONMENT_ID` — local `npm start` builds the bundle but never pushes it. If the push fails on Railway, the server refuses to listen.
 
-```bash
-API_BASE_URL=https://your-app.up.railway.app
-API_SECRET=your_secret_token_here
-```
+### Binding a new target
 
-**Important:** The build process requires both variables and will fail if not set. The domain will be automatically extracted for Apps Script.
+When setting up a new environment for the first time:
 
-#### 2. Create Dashboard Script Project
+1. Open Dashboard Operativo Contable in Google Sheets.
+2. **Extensions → Apps Script** (creates a bound project on first open).
+3. Capture the `scriptId` from the URL: `https://script.google.com/home/projects/<scriptId>/edit`.
+4. Set `APPS_SCRIPT_TARGET_ID` to that value in the relevant Railway environment.
+5. Trigger a redeploy. The boot sync pushes the current bundle.
 
-The server will create the Dashboard Operativo Contable spreadsheet automatically. After it's created:
-
-**Option A - Using clasp:**
-```bash
-cd apps-script
-clasp create --title "ADVA Dashboard Menu" --parentId YOUR_DASHBOARD_SPREADSHEET_ID
-# This creates .clasp.json with the new Script ID
-```
-
-**Option B - Manually:**
-1. Open Dashboard Operativo Contable spreadsheet
-2. Go to **Extensions → Apps Script**
-3. Copy Script ID from the project settings
-4. Create `.clasp.json` in `apps-script/` folder:
-   ```json
-   {
-     "scriptId": "YOUR_SCRIPT_ID_HERE",
-     "rootDir": "./dist"
-   }
-   ```
-
-Note: `rootDir` must be `./dist` as that's where compiled code is output.
-
-#### 3. Build and Deploy Script
-
-```bash
-# Build TypeScript and inject API_BASE_URL and API_SECRET
-npm run build:script
-
-# Deploy to Dashboard spreadsheet
-npm run deploy:script
-```
-
-The deploy command builds and pushes in one step. This uploads the compiled JavaScript from `apps-script/dist/` to the Dashboard's bound script.
-
-**Note:** Deploy once after Dashboard is created. No need to redeploy unless menu changes.
+The service account must already have domain-wide delegation configured, and `APPS_SCRIPT_IMPERSONATE_SUBJECT` must have Edit access to the spreadsheet before the first deploy.
 
 ### Menu Functions
 
@@ -442,40 +413,23 @@ When you open the Dashboard Operativo Contable spreadsheet, the **ADVA** menu ap
 
 | Menu Item | API Endpoint | Description |
 |-----------|--------------|-------------|
-| 🔄 Trigger Scan | POST /api/scan | Manually trigger document scan |
-| 🔗 Trigger Re-match | POST /api/rematch | Re-run matching on unmatched docs |
-| 📝 Completar Detalles Movimientos | POST /api/match-movimientos | Match bank movements to documents |
-| ℹ️ About | GET /api/status | Show server info, test connectivity, display uptime and queue status |
-
-**Note:** API URL and secret are configured at build time via environment variables. No per-spreadsheet configuration needed.
-
-### Updating Menu Logic
-
-After modifying script code in `apps-script/src/main.ts`:
-
-```bash
-npm run deploy:script
-```
-
-This rebuilds (with current `API_BASE_URL` and `API_SECRET` from `.env`) and deploys to the Dashboard.
+| 🔄 Procesar Entrada | POST /api/scan | Manually trigger document scan |
+| 🔗 Volver a Vincular Documentos | POST /api/rematch | Re-run matching on unmatched docs |
+| 📝 Completar Detalles de Movimientos | POST /api/match-movimientos | Match bank movements to documents |
+| ℹ️ Acerca de | GET /api/status | Show server info, test connectivity, display uptime and queue status |
 
 ### Secret Rotation
 
-After changing `API_SECRET`:
-
-1. Update `API_SECRET` in `.env`
-2. Rebuild and redeploy: `npm run deploy:script`
-3. Restart server (picks up new secret from env)
-
-Only Dashboard has the menu, so only needs one-time redeployment.
+After changing `API_SECRET` in Railway, trigger a redeploy. The boot push picks up the new value, bakes it into the bundle, and pushes to the Apps Script project automatically.
 
 ### Troubleshooting
 
 | Issue | Solution |
 |-------|----------|
-| Menu doesn't appear | Refresh spreadsheet. Check Extensions → Apps Script for errors. Ensure script is deployed. |
-| API calls fail | Check "About" menu to test connectivity. Verify `API_BASE_URL` and `API_SECRET` were set correctly when script was built. Rebuild and redeploy if either changed. Check server is running and accessible. |
-| Build fails | Ensure both `API_BASE_URL` and `API_SECRET` are set in `.env` file. Use full URL with protocol (e.g., `https://example.com`). |
+| Menu doesn't appear | Refresh spreadsheet. Check Extensions → Apps Script for errors. Verify the boot sync logged a successful push for this environment. |
+| API calls fail | Check the "Acerca de" menu entry to test connectivity. If `API_SECRET` changed, redeploy so the bundle is rebuilt and re-pushed. |
+| Build fails | Ensure both `API_BASE_URL` and `API_SECRET` are set in Railway (or `.env` for local builds). Use full URL with protocol (e.g., `https://example.com`). |
+| Boot fails on Railway with `apps-script sync` error | Verify `APPS_SCRIPT_SA_KEY`, `APPS_SCRIPT_TARGET_ID`, `APPS_SCRIPT_IMPERSONATE_SUBJECT` are set. Confirm the impersonated user has Edit on the Dashboard. |
 
 ---
 

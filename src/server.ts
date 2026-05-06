@@ -13,6 +13,7 @@ import { runStartupMigrations } from './services/migrations.js';
 import { initWatchManager, startWatching, shutdownWatchManager, updateLastScanTime } from './services/watch-manager.js';
 import { scanFolder } from './processing/scanner.js';
 import { updateStatusSheet } from './services/status-sheet.js';
+import { syncAppsScript } from './bootstrap/apps-script-sync.js';
 import { info, warn, error as logError } from './utils/logger.js';
 import type { Result } from './types/index.js';
 
@@ -320,6 +321,11 @@ async function start() {
 
   try {
     const server = await buildServer();
+
+    // Push the Apps Script bundle to its target project before accepting
+    // traffic. Fail-closed on Railway: if the push fails, refuse to listen.
+    // No-op locally (gated on RAILWAY_ENVIRONMENT_ID).
+    await syncAppsScript(process.env);
 
     await server.listen({
       port: config.port,
