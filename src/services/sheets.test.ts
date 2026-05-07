@@ -5,6 +5,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { google } from 'googleapis';
 import type { sheets_v4 } from 'googleapis';
+import { debug } from '../utils/logger.js';
 import {
   getValues,
   setValues,
@@ -46,6 +47,14 @@ vi.mock('googleapis', () => ({
 vi.mock('./google-auth.js', () => ({
   getGoogleAuthAsync: vi.fn(async () => ({})),
   getDefaultScopes: vi.fn(() => []),
+}));
+
+// Mock logger
+vi.mock('../utils/logger.js', () => ({
+  debug: vi.fn(),
+  info: vi.fn(),
+  warn: vi.fn(),
+  error: vi.fn(),
 }));
 
 describe('Google Sheets API wrapper - quota retry tests', () => {
@@ -2591,5 +2600,60 @@ describe('Google Sheets API wrapper - quota retry tests', () => {
       expect(result.ok).toBe(true);
       expect(mockSheetsApi.spreadsheets.get).toHaveBeenCalledTimes(1);
     });
+  });
+});
+
+describe('Sheets API timing (ADV-216)', () => {
+  let mockSheetsApi: {
+    spreadsheets: {
+      values: { get: ReturnType<typeof vi.fn>; update: ReturnType<typeof vi.fn>; append: ReturnType<typeof vi.fn>; batchUpdate: ReturnType<typeof vi.fn>; clear: ReturnType<typeof vi.fn> };
+      get: ReturnType<typeof vi.fn>;
+      batchUpdate: ReturnType<typeof vi.fn>;
+    };
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.useFakeTimers();
+    clearSheetsCache();
+    clearTimezoneCache();
+
+    mockSheetsApi = {
+      spreadsheets: {
+        values: { get: vi.fn(), update: vi.fn(), append: vi.fn(), batchUpdate: vi.fn(), clear: vi.fn() },
+        get: vi.fn(),
+        batchUpdate: vi.fn(),
+      },
+    };
+    vi.mocked(google.sheets).mockReturnValue(mockSheetsApi as unknown as sheets_v4.Sheets);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('appendRowsWithLinks emits a debug record with durationMs', async () => {
+    mockSheetsApi.spreadsheets.get.mockResolvedValue({
+      data: { sheets: [{ properties: { title: 'Sheet1', sheetId: 0 } }] },
+    });
+    mockSheetsApi.spreadsheets.batchUpdate.mockResolvedValue({ data: {} });
+
+    const resultPromise = appendRowsWithLinks(
+      'spreadsheet123',
+      'Sheet1!A:C',
+      [['value1', 'value2', 'value3']]
+    );
+    await vi.runAllTimersAsync();
+    const result = await resultPromise;
+
+    expect(result.ok).toBe(true);
+    expect(debug).toHaveBeenCalledWith(
+      expect.stringContaining('appendRowsWithLinks'),
+      expect.objectContaining({
+        module: 'sheets',
+        phase: 'api-call',
+        durationMs: expect.any(Number),
+      })
+    );
   });
 });

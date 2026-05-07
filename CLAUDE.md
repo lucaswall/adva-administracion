@@ -413,6 +413,14 @@ server.post('/api/new', { onRequest: authMiddleware }, handler);
 
 **Secret rotation:** Update `API_SECRET` in Railway, redeploy. The boot sync rebuilds and re-pushes the Apps Script bundle automatically.
 
+**Google Drive scope:** The service account uses the full `https://www.googleapis.com/auth/drive` scope (not `drive.file`). The app must read pre-existing folders it did not create — Entrada, yearly archives, and banking subfolders — so `drive.file` (which only grants access to files the app itself created) is unworkable. The SA is domain-delegated to a Workspace user who owns **only** the ADVA folder hierarchy, limiting blast radius to that folder tree.
+
+**GEMINI_API_KEY GCP restriction (CWE-1390 mitigation):** The `GEMINI_API_KEY` MUST be restricted in the GCP console to the *Generative Language API* (`generativelanguage.googleapis.com`) targets only. An unrestricted key can be used against any GCP API if it is ever leaked. To verify the restriction is in place:
+```bash
+gcloud alpha services api-keys describe <key-id> --project=<project-id> | grep targets
+```
+The output must list `generativelanguage.googleapis.com`. If `targets` is empty, the key is unrestricted and must be updated immediately.
+
 ## COMMANDS
 
 ```bash
@@ -428,7 +436,7 @@ The Apps Script bundle is produced into `dist/apps-script/{Code.js,appsscript.js
 | Var | Required | Default |
 |-----|----------|---------|
 | GOOGLE_SERVICE_ACCOUNT_KEY | Yes | - |
-| GEMINI_API_KEY | Yes | - |
+| GEMINI_API_KEY | Yes — must be GCP-restricted (see SECURITY) | - |
 | DRIVE_ROOT_FOLDER_ID | Yes | - |
 | API_SECRET | Yes | - |
 | ENVIRONMENT | Yes (production only) | - |
@@ -544,10 +552,12 @@ ROOT/
 
 ## SPREADSHEETS
 
+**Note:** authoritative column counts live in `src/constants/spreadsheet-headers.ts` and `SPREADSHEET_FORMAT.md`. The summaries below are illustrative.
+
 See `SPREADSHEET_FORMAT.md` for complete schema.
 
 - **Control de Ingresos**: Facturas Emitidas (20 cols, A:T), Pagos Recibidos (17 cols), Retenciones Recibidas (15 cols)
-- **Control de Egresos**: Facturas Recibidas (20 cols), Pagos Enviados (17 cols), Recibos (18 cols)
+- **Control de Egresos**: Facturas Recibidas (20 cols), Pagos Enviados (17 cols), Recibos (19 cols)
 - **Control de Resumenes**: 3 distinct schemas based on document type:
   - `resumen_bancario`: 12 cols (A:L) with `periodo` (YYYY-MM) as first column, `moneda` (ARS/USD), includes `balanceOk` and `balanceDiff` columns for validation
   - `resumen_tarjeta`: 10 cols (A:J) with `periodo` (YYYY-MM) as first column, `tipoTarjeta` (Visa/Mastercard/etc)
@@ -555,7 +565,7 @@ See `SPREADSHEET_FORMAT.md` for complete schema.
   - `periodo` format matches Movimientos sheet names (YYYY-MM derived from fechaHasta)
   - Rows sorted by `periodo` ascending (oldest first)
 - **Movimientos Bancario**: 9 cols (A:I) with running balance formulas - `saldo` (parsed from PDF), `saldoCalculado` (computed formula), `matchedFileId` (fileId of matched document), `matchedType` (AUTO/MANUAL/empty), `detalle` (human-readable match description)
-- **Dashboard**: Pagos Pendientes (10 cols), Cobros Pendientes (10 cols), API Mensual (7 cols), Uso de API (12 cols)
+- **Dashboard**: Pagos Pendientes (10 cols), Cobros Pendientes (10 cols), API Mensual (8 cols), Uso de API (15 cols)
 
 **Principles:**
 - Store counterparty info only, ADVA's role is implicit
