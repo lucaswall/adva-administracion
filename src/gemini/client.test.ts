@@ -1386,6 +1386,68 @@ describe('GeminiClient', () => {
     });
   });
 
+  describe('singleton factory', () => {
+    it('shared GeminiClient: 24 concurrent calls with rpmLimit=12 makes only 12 transport calls in first second', async () => {
+      vi.useFakeTimers();
+
+      const mockResponse = {
+        candidates: [{
+          content: {
+            parts: [{ text: 'Success' }]
+          }
+        }]
+      };
+
+      let fetchCount = 0;
+      global.fetch = vi.fn().mockImplementation(async () => {
+        fetchCount++;
+        return {
+          ok: true,
+          status: 200,
+          text: async () => JSON.stringify(mockResponse)
+        };
+      });
+
+      // Use a single shared client with rpmLimit=12
+      const sharedClient = new GeminiClient('test-key', 12);
+
+      // Submit 24 concurrent analyzeDocument calls
+      const promises = Array.from({ length: 24 }, () =>
+        sharedClient.analyzeDocument(Buffer.from('data'), 'application/pdf', 'prompt', 1)
+      );
+
+      // Advance only 1 second — enough for first batch to get through rate-limiter
+      // but NOT enough for the 60-second sleep to resolve (which blocks calls 13-24)
+      await vi.advanceTimersByTimeAsync(1000);
+
+      // At this point, only 12 transport calls should have been made
+      expect(fetchCount).toBe(12);
+
+      // Advance rest of time and confirm all 24 complete
+      await vi.runAllTimersAsync();
+      const results = await Promise.all(promises);
+      expect(results.every(r => r.ok)).toBe(true);
+      expect(fetchCount).toBe(24);
+
+      vi.useRealTimers();
+    });
+
+    it('getGeminiClient returns the same instance on repeated calls', async () => {
+      // Import the factory (will be added by implementation)
+      const { getGeminiClient, resetGeminiClient } = await import('./client.js');
+
+      // Reset to clean state
+      resetGeminiClient();
+
+      const a = getGeminiClient('test-key-singleton', 60);
+      const b = getGeminiClient('test-key-singleton', 60);
+
+      expect(a).toBe(b);
+
+      resetGeminiClient();
+    });
+  });
+
   describe('callUsageCallback async rejection handling', () => {
     const mockBuffer = Buffer.from('test-pdf-content');
     const mockMimeType = 'application/pdf';

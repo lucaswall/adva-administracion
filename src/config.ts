@@ -126,6 +126,13 @@ export const FETCH_TIMEOUT_MS = 300000;
 export const EXCHANGE_RATE_TIMEOUT_MS = 30000;
 
 /**
+ * Default maximum document size in bytes before Gemini processing.
+ * Documents exceeding this limit are routed to Sin Procesar without an API call.
+ * Override via MAX_DOCUMENT_BYTES env var (must be a positive integer).
+ */
+export const DEFAULT_MAX_DOCUMENT_BYTES = 25 * 1024 * 1024; // 25 MB
+
+/**
  * Gemini API pricing per token (Standard tier)
  * Source: https://ai.google.dev/gemini-api/docs/pricing
  * Last updated: 2026-01-23
@@ -174,6 +181,15 @@ export interface Config {
 
   // Gemini API
   geminiRpmLimit: number;
+  /**
+   * Daily Gemini request budget cap (0 = disabled / unlimited).
+   * In-memory only — resets on process restart.
+   */
+  geminiDailyBudget: number;
+
+  // Document processing
+  /** Maximum document size in bytes; documents larger than this go to Sin Procesar. */
+  maxDocumentBytes: number;
 
   // Environment identity (which Drive folder this server owns)
   environment: 'development' | 'staging' | 'production';
@@ -281,6 +297,17 @@ export function loadConfig(): Config {
   const geminiRpmLimit = parseInt(process.env.GEMINI_RPM_LIMIT || '150', 10);
   validateNumericEnv('GEMINI_RPM_LIMIT', geminiRpmLimit, 1);
 
+  // Daily Gemini budget (0 = disabled)
+  const geminiDailyBudget = parseInt(process.env.GEMINI_DAILY_BUDGET || '0', 10);
+  validateNumericEnv('GEMINI_DAILY_BUDGET', geminiDailyBudget, 0);
+
+  // Document size limit
+  const maxDocumentBytes = parseInt(
+    process.env.MAX_DOCUMENT_BYTES || String(DEFAULT_MAX_DOCUMENT_BYTES),
+    10
+  );
+  validateNumericEnv('MAX_DOCUMENT_BYTES', maxDocumentBytes, 1);
+
   return {
     port,
     nodeEnv,
@@ -296,6 +323,8 @@ export function loadConfig(): Config {
     usdMatchDaysAfter,
     usdArsTolerancePercent,
     geminiRpmLimit,
+    geminiDailyBudget,
+    maxDocumentBytes,
     environment,
   };
 }

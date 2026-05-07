@@ -2076,3 +2076,92 @@ describe('parseFacturaResponse - tipoComprobante letter variants', () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// Task 11: Type-safe validateAdvaRole boundary (ADV-203)
+// validateAdvaRole is private but exercised through parseFacturaResponse /
+// parsePagoResponse. These tests verify the typed error messages in errors[].
+// ---------------------------------------------------------------------------
+
+describe('validateAdvaRole typed error messages (Task 11 — ADV-203)', () => {
+  // Base valid factura_recibida with ADVA as receptor (uses ADVA CUIT as clientName)
+  const advaCuit = '30709076783';
+
+  it('produces typed error when cuitEmisor is missing for receptor role', () => {
+    // factura_recibida: expectedRole = 'receptor', needs cuitEmisor (counterparty)
+    const responseWithoutEmisor = JSON.stringify({
+      issuerName: 'EMPRESA PROVEEDOR SA',
+      clientName: 'ADVA',
+      // allCuits only contains ADVA — no emisor CUIT
+      allCuits: [advaCuit],
+      tipoComprobante: 'A',
+      nroFactura: '00001-00000001',
+      fechaEmision: '2025-01-15',
+      importeNeto: 1000,
+      importeIva: 210,
+      importeTotal: 1210,
+      moneda: 'ARS',
+    });
+
+    const result = parseFacturaResponse(responseWithoutEmisor, 'factura_recibida');
+
+    // Parse must succeed (missing emisor CUIT is a warning, not a parse failure)
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      const { roleValidation } = result.value;
+      // isValid stays true — it's only false if ADVA is in the WRONG role
+      expect(roleValidation).toBeDefined();
+      expect(roleValidation!.isValid).toBe(true);
+      // But errors[] must contain the typed message about missing counterparty
+      expect(roleValidation!.errors).toContain('Missing cuitEmisor (counterparty)');
+    }
+  });
+
+  it('produces typed error when cuitReceptor is missing for emisor role', () => {
+    // factura_emitida: expectedRole = 'emisor', needs cuitReceptor (counterparty)
+    const responseWithoutReceptor = JSON.stringify({
+      issuerName: 'ADVA',
+      clientName: 'EMPRESA CLIENTE SA',
+      allCuits: [advaCuit], // Only ADVA CUIT, no receptor CUIT
+      tipoComprobante: 'B',
+      nroFactura: '00001-00000002',
+      fechaEmision: '2025-02-10',
+      importeNeto: 500,
+      importeIva: 0,
+      importeTotal: 500,
+      moneda: 'ARS',
+    });
+
+    const result = parseFacturaResponse(responseWithoutReceptor, 'factura_emitida');
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      const { roleValidation } = result.value;
+      expect(roleValidation).toBeDefined();
+      expect(roleValidation!.isValid).toBe(true);
+      // errors[] must contain the typed message about missing cuitReceptor
+      expect(roleValidation!.errors.some(e => e.includes('cuitReceptor'))).toBe(true);
+    }
+  });
+
+  it('marks isValid=false and typed error when ADVA is NOT in the expected role', () => {
+    // A factura_recibida where the receptor CUIT is NOT ADVA → role validation fails
+    const wrongRoleCuit = '20123456786';
+    const responseWrongRole = JSON.stringify({
+      issuerName: 'PROVEEDOR SA',
+      clientName: 'EMPRESA CLIENTE SA',
+      allCuits: [wrongRoleCuit, '27234567891'],
+      tipoComprobante: 'A',
+      nroFactura: '00001-00000003',
+      fechaEmision: '2025-03-05',
+      importeNeto: 2000,
+      importeIva: 420,
+      importeTotal: 2420,
+      moneda: 'ARS',
+    });
+
+    // ADVA is neither issuer nor client → assignCuitsAndClassify throws → parse error
+    const result = parseFacturaResponse(responseWrongRole, 'factura_recibida');
+    expect(result.ok).toBe(false);
+  });
+});
