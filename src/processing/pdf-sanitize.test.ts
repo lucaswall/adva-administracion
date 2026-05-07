@@ -201,6 +201,26 @@ describe('detectInvisibleText', () => {
       const result = detectInvisibleText(buildMinimalPdf(contentStream));
       expect(result.hasInvisible).toBe(false);
     });
+
+    it('detects white-on-white text drawn from a hex string (Codex P2 follow-up)', () => {
+      // PDF allows hex strings (`<...>`) as text operands. A malicious PDF can
+      // hide a prompt-injection payload as `1 1 1 rg <68696464656e> Tj`.
+      const contentStream = '1 1 1 rg\nBT /F1 12 Tf 100 700 Td <68696464656e> Tj ET';
+      const result = detectInvisibleText(buildMinimalPdf(contentStream));
+      expect(result.hasInvisible).toBe(true);
+    });
+
+    it('detects white-on-white hex string with the apostrophe show operator', () => {
+      const contentStream = '1 1 1 rg\nBT /F1 12 Tf 100 700 Td <68> \' ET';
+      const result = detectInvisibleText(buildMinimalPdf(contentStream));
+      expect(result.hasInvisible).toBe(true);
+    });
+
+    it('does NOT flag visible hex-string text after a white-fill background reset', () => {
+      const contentStream = '1 1 1 rg\n0 0 595 842 re f\n0 0 0 rg\nBT /F1 12 Tf 100 700 Td <56697369626c65> Tj ET';
+      const result = detectInvisibleText(buildMinimalPdf(contentStream));
+      expect(result.hasInvisible).toBe(false);
+    });
   });
 
   describe('performance', () => {
