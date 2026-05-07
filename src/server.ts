@@ -376,10 +376,20 @@ async function start() {
       (code) => process.exit(code)
     );
 
-    // Note: The handlers call async shutdown() which is now properly awaited internally
-    // The handler returns a promise, and process.exit() is called only after completion
-    process.on('SIGTERM', () => { shutdown('SIGTERM'); });
-    process.on('SIGINT', () => { shutdown('SIGINT'); });
+    // ADV-211: Use void + .catch() so that any unexpected rejection from shutdown()
+    // is explicitly caught and logged rather than becoming an unhandled rejection.
+    // shutdown() already handles its internal errors (via createShutdownHandler's try/catch),
+    // but this outer catch is a defensive safety net.
+    process.on('SIGTERM', () => {
+      void shutdown('SIGTERM').catch((err: Error) => {
+        logError('Shutdown rejection', { module: 'server', error: err.message });
+      });
+    });
+    process.on('SIGINT', () => {
+      void shutdown('SIGINT').catch((err: Error) => {
+        logError('Shutdown rejection', { module: 'server', error: err.message });
+      });
+    });
 
   } catch (err) {
     logError('Failed to start server', {

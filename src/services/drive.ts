@@ -883,6 +883,56 @@ export async function getParents(fileId: string): Promise<Result<string[], Error
 }
 
 /**
+ * Maximum depth for ancestor traversal in isDescendantOf.
+ * Prevents runaway recursion in deep or circular folder structures.
+ */
+const MAX_ANCESTOR_DEPTH = 8;
+
+/**
+ * Checks whether a folder is a descendant of (contained within) a given ancestor.
+ *
+ * Walks up the parent chain using files.get, up to MAX_ANCESTOR_DEPTH levels.
+ * Parent IDs are cached within a single call to avoid redundant API requests.
+ *
+ * @param folderId - Folder to check
+ * @param ancestorId - Expected ancestor folder ID
+ * @returns true if folderId is inside ancestorId, false otherwise
+ */
+export async function isDescendantOf(folderId: string, ancestorId: string): Promise<boolean> {
+  // A folder is trivially a "descendant" of itself (covers the root folder case)
+  if (folderId === ancestorId) {
+    return true;
+  }
+
+  const visited = new Set<string>();
+  let currentId = folderId;
+
+  for (let depth = 0; depth < MAX_ANCESTOR_DEPTH; depth++) {
+    if (visited.has(currentId)) {
+      // Cycle detected — stop
+      break;
+    }
+    visited.add(currentId);
+
+    const result = await getParents(currentId);
+    if (!result.ok || result.value.length === 0) {
+      // No parents or error — reached the root without finding ancestorId
+      break;
+    }
+
+    const parents = result.value;
+    if (parents.includes(ancestorId)) {
+      return true;
+    }
+
+    // Traverse the first parent (Drive items typically have one parent)
+    currentId = parents[0];
+  }
+
+  return false;
+}
+
+/**
  * Creates a new Google Spreadsheet within a parent folder
  *
  * @param parentId - Parent folder ID

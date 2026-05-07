@@ -400,6 +400,28 @@ Files with stale 'processing' status are automatically recovered on server start
 - Column E: `status` (`processing` | `success` | `failed: <error message>` | `duplicate`)
 - Column F: `originalFileId` (Drive file ID of original document, populated for duplicates only)
 
+## GRACEFUL SHUTDOWN
+
+### Timeout Policy
+
+`SHUTDOWN_TIMEOUT_MS = 30 000 ms` (30 seconds, defined in `src/server.ts`).
+
+**Why 30 s:** The startup recovery mechanism (`getStaleProcessingFileIds`) already handles files that are left in `processing` status when the server is terminated mid-scan. Abrupt termination is therefore safe — any interrupted files will be re-queued on the next boot. A 30-second window gives in-flight HTTP requests and active watch-channel teardown time to complete without needing a larger window.
+
+### Signal Handler Pattern
+
+SIGTERM and SIGINT handlers use `void shutdown(signal).catch(err => logError(...))`:
+
+```typescript
+process.on('SIGTERM', () => {
+  void shutdown('SIGTERM').catch((err: Error) => {
+    logError('Shutdown rejection', { module: 'server', error: err.message });
+  });
+});
+```
+
+**Why `void` + `.catch()`:** `shutdown()` (from `createShutdownHandler`) already has an internal try/catch that handles all cleanup errors and calls `process.exit(1)` on failure. The outer `.catch()` is a defensive safety net for any unexpected rejection that escapes the internal handler, ensuring it is logged rather than silently becoming an unhandled promise rejection (ADV-211).
+
 ## SECURITY
 
 All endpoints except `/health` and `/webhooks/drive` require Bearer token: `Authorization: Bearer <API_SECRET>`

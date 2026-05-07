@@ -237,21 +237,21 @@ export function loadConfig(): Config {
     throw new Error('API_SECRET is required');
   }
 
-  // Google Auth - required
+  // Google Auth - required in all non-test environments
   const googleServiceAccountKey = process.env.GOOGLE_SERVICE_ACCOUNT_KEY || '';
-  if (!googleServiceAccountKey && nodeEnv === 'production') {
+  if (!googleServiceAccountKey && nodeEnv !== 'test') {
     throw new Error('GOOGLE_SERVICE_ACCOUNT_KEY is required');
   }
 
-  // Gemini - required
+  // Gemini - required in all non-test environments
   const geminiApiKey = process.env.GEMINI_API_KEY || '';
-  if (!geminiApiKey && nodeEnv === 'production') {
+  if (!geminiApiKey && nodeEnv !== 'test') {
     throw new Error('GEMINI_API_KEY is required');
   }
 
-  // Drive - required for production
+  // Drive - required in all non-test environments
   const driveRootFolderId = process.env.DRIVE_ROOT_FOLDER_ID || '';
-  if (!driveRootFolderId && nodeEnv === 'production') {
+  if (!driveRootFolderId && nodeEnv !== 'test') {
     throw new Error('DRIVE_ROOT_FOLDER_ID is required');
   }
 

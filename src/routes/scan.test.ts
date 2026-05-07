@@ -38,9 +38,24 @@ vi.mock('../config.js', () => ({
   getConfig: vi.fn(),
 }));
 
+// Mock drive service for descendant check
+const mockIsDescendantOf = vi.fn();
+vi.mock('../services/drive.js', () => ({
+  isDescendantOf: (...args: unknown[]) => mockIsDescendantOf(...args),
+}));
+
+// Mock logger for 500 error log assertions
+vi.mock('../utils/logger.js', () => ({
+  info: vi.fn(),
+  warn: vi.fn(),
+  error: vi.fn(),
+  debug: vi.fn(),
+}));
+
 // Import modules after mocks
 import { scanRoutes } from './scan.js';
 import { getConfig } from '../config.js';
+import * as logger from '../utils/logger.js';
 
 describe('Scan routes', () => {
   let server: FastifyInstance;
@@ -83,6 +98,8 @@ describe('Scan routes', () => {
     vi.clearAllMocks();
     vi.mocked(getConfig).mockReturnValue(mockConfig);
     mockGetCachedFolderStructure.mockReturnValue(mockFolderStructure);
+    // Default: all folderIds are considered descendants of root
+    mockIsDescendantOf.mockResolvedValue(true);
 
     server = Fastify({ logger: false });
     await server.register(scanRoutes, { prefix: '/api' });
@@ -201,7 +218,7 @@ describe('Scan routes', () => {
       expect(mockScanFolder).toHaveBeenCalledWith('1ABC2defGHIjklMNOpqrSTUvwxyz12');
     });
 
-    it('returns 500 on scan failure', async () => {
+    it('returns 500 on scan failure with sanitized body', async () => {
       mockScanFolder.mockResolvedValue({
         ok: false,
         error: new Error('Drive API error'),
@@ -218,7 +235,92 @@ describe('Scan routes', () => {
 
       expect(response.statusCode).toBe(500);
       const body = JSON.parse(response.payload);
-      expect(body.error).toBe('Drive API error');
+      expect(body.error).toBe('Internal server error');
+      expect(typeof body.correlationId).toBe('string');
+    });
+
+    it('returns 403 when folderId is not a descendant of the root folder (ADV-208)', async () => {
+      mockIsDescendantOf.mockResolvedValue(false);
+
+      const response = await server.inject({
+        method: 'POST',
+        url: '/api/scan',
+        headers: { authorization: 'Bearer test-secret-123' },
+        payload: { folderId: '1ABC2defGHIjklMNOpqrSTUvwxyz12' },
+      });
+
+      expect(response.statusCode).toBe(403);
+      const body = JSON.parse(response.payload);
+      expect(body.error).toMatch(/not within/i);
+      expect(mockIsDescendantOf).toHaveBeenCalledWith('1ABC2defGHIjklMNOpqrSTUvwxyz12', 'mock-folder-id');
+      expect(mockScanFolder).not.toHaveBeenCalled();
+    });
+
+    it('accepts a folderId that is a descendant of the root folder (ADV-208)', async () => {
+      mockIsDescendantOf.mockResolvedValue(true);
+      mockScanFolder.mockResolvedValue({
+        ok: true,
+        value: { filesProcessed: 1, facturasAdded: 0, pagosAdded: 0, recibosAdded: 0, matchesFound: 0, errors: 0, duration: 100 },
+      });
+
+      const response = await server.inject({
+        method: 'POST',
+        url: '/api/scan',
+        headers: { authorization: 'Bearer test-secret-123' },
+        payload: { folderId: '1ABC2defGHIjklMNOpqrSTUvwxyz12' },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(mockIsDescendantOf).toHaveBeenCalledWith('1ABC2defGHIjklMNOpqrSTUvwxyz12', 'mock-folder-id');
+      expect(mockScanFolder).toHaveBeenCalledWith('1ABC2defGHIjklMNOpqrSTUvwxyz12');
+    });
+
+    it('skips descendant check when no folderId is provided (ADV-208)', async () => {
+      mockScanFolder.mockResolvedValue({
+        ok: true,
+        value: { filesProcessed: 0, facturasAdded: 0, pagosAdded: 0, recibosAdded: 0, matchesFound: 0, errors: 0, duration: 50 },
+      });
+
+      const response = await server.inject({
+        method: 'POST',
+        url: '/api/scan',
+        headers: { authorization: 'Bearer test-secret-123' },
+        payload: {},
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(mockIsDescendantOf).not.toHaveBeenCalled();
+    });
+
+    it('returns sanitized 500 body and does not expose raw error message (ADV-210)', async () => {
+      mockScanFolder.mockResolvedValue({
+        ok: false,
+        error: new Error('Spreadsheet 1abc..xyz: row 5 conflict'),
+      });
+
+      const response = await server.inject({
+        method: 'POST',
+        url: '/api/scan',
+        headers: { authorization: 'Bearer test-secret-123' },
+        payload: {},
+      });
+
+      expect(response.statusCode).toBe(500);
+      const body = JSON.parse(response.payload);
+
+      // Body must be generic — no internal details
+      expect(body.error).toBe('Internal server error');
+      expect(typeof body.correlationId).toBe('string');
+      expect(body.error).not.toContain('Spreadsheet');
+
+      // Server-side log must capture the original error with correlationId
+      expect(vi.mocked(logger.error)).toHaveBeenCalledWith(
+        'Internal server error',
+        expect.objectContaining({
+          error: 'Spreadsheet 1abc..xyz: row 5 conflict',
+          correlationId: body.correlationId,
+        })
+      );
     });
 
     it('returns 400 for invalid JSON body (bug #49)', async () => {
@@ -295,7 +397,7 @@ describe('Scan routes', () => {
       expect(response.statusCode).toBe(200);
     });
 
-    it('returns 500 on rematch failure', async () => {
+    it('returns 500 on rematch failure with sanitized body', async () => {
       mockRematch.mockResolvedValue({
         ok: false,
         error: new Error('Sheets API error'),
@@ -312,7 +414,8 @@ describe('Scan routes', () => {
 
       expect(response.statusCode).toBe(500);
       const body = JSON.parse(response.payload);
-      expect(body.error).toBe('Sheets API error');
+      expect(body.error).toBe('Internal server error');
+      expect(typeof body.correlationId).toBe('string');
     });
 
     it('works without any parameters (processes all document types)', async () => {
@@ -473,7 +576,7 @@ describe('Scan routes', () => {
       expect(mockMatchAllMovimientos).toHaveBeenCalledWith({ force: true });
     });
 
-    it('returns 500 on match failure', async () => {
+    it('returns 500 on match failure with sanitized body', async () => {
       mockMatchAllMovimientos.mockResolvedValue({
         ok: false,
         error: new Error('Folder structure not cached'),
@@ -489,7 +592,8 @@ describe('Scan routes', () => {
 
       expect(response.statusCode).toBe(500);
       const body = JSON.parse(response.payload);
-      expect(body.error).toBe('Folder structure not cached');
+      expect(body.error).toBe('Internal server error');
+      expect(typeof body.correlationId).toBe('string');
     });
 
     it('requires authentication', async () => {
