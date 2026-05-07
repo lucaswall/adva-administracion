@@ -29,6 +29,7 @@ Detailed column references and procedures for document matching operations.
 3. Update via `gsheets_update`:
    - `'Facturas Emitidas'!P{row}` = PR fileId
    - `'Facturas Emitidas'!Q{row}` = MANUAL
+   - `'Facturas Emitidas'!S{row}` = SI
    - `'Pagos Recibidos'!N{row}` = FE fileId
    - `'Pagos Recibidos'!O{row}` = MANUAL
 
@@ -67,10 +68,13 @@ One-directional (only the retencion side is updated):
 
 Clear match columns on both sides by writing empty strings.
 
+**Column S (`pagada`) on both Facturas sheets is intentionally preserved on unmatch** — clearing it would clobber an `'SI'` set by NC-factura matching. This matches the auto-matcher's behavior (`factura-pago-matcher.ts`: "Column S is intentionally left untouched").
+
 ### Factura Emitida <-> Pago Recibido
 
 - `'Facturas Emitidas'!P{row}` = (empty)
 - `'Facturas Emitidas'!Q{row}` = (empty)
+- *(do not touch column S)*
 - `'Pagos Recibidos'!N{row}` = (empty)
 - `'Pagos Recibidos'!O{row}` = (empty)
 
@@ -78,7 +82,7 @@ Clear match columns on both sides by writing empty strings.
 
 - `'Facturas Recibidas'!P{row}` = (empty)
 - `'Facturas Recibidas'!Q{row}` = (empty)
-- `'Facturas Recibidas'!S{row}` = (empty)
+- *(do not touch column S)*
 - `'Pagos Enviados'!N{row}` = (empty)
 - `'Pagos Enviados'!O{row}` = (empty)
 
@@ -106,12 +110,12 @@ For full column schemas of all sheets, refer to `SPREADSHEET_FORMAT.md` in the p
 
 **Facturas Emitidas (A:T):** fechaEmision(A), fileId(B), fileName(C), tipoComprobante(D), nroFactura(E), cuitReceptor(F), razonSocialReceptor(G), importeNeto(H), importeIva(I), importeTotal(J), moneda(K), concepto(L), processedAt(M), confidence(N), needsReview(O), matchedPagoFileId(P), matchConfidence(Q), hasCuitMatch(R), pagada(S), tipoDeCambio(T)
 
-**Pagos Recibidos (A:Q):** fechaPago(A), fileId(B), fileName(C), banco(D), importePagado(E), moneda(F), referencia(G), cuitPagador(H), nombrePagador(I), concepto(J), processedAt(K), confidence(L), needsReview(M)
+**Pagos Recibidos (A:Q):** fechaPago(A), fileId(B), fileName(C), banco(D), importePagado(E), moneda(F), referencia(G), cuitPagador(H), nombrePagador(I), concepto(J), processedAt(K), confidence(L), needsReview(M), matchedFacturaFileId(N), matchConfidence(O), tipoDeCambio(P), importeEnPesos(Q)
 
-**Retenciones Recibidas (A:O):** fechaEmision(A), fileId(B), fileName(C), nroCertificado(D), cuitAgenteRetencion(E), razonSocialAgenteRetencion(F), impuesto(G), regimen(H), montoComprobante(I), montoRetencion(J), processedAt(K), confidence(L), needsReview(M)
+**Retenciones Recibidas (A:O):** fechaEmision(A), fileId(B), fileName(C), nroCertificado(D), cuitAgenteRetencion(E), razonSocialAgenteRetencion(F), impuesto(G), regimen(H), montoComprobante(I), montoRetencion(J), processedAt(K), confidence(L), needsReview(M), matchedFacturaFileId(N), matchConfidence(O)
 
 **Facturas Recibidas (A:T):** fechaEmision(A), fileId(B), fileName(C), tipoComprobante(D), nroFactura(E), cuitEmisor(F), razonSocialEmisor(G), importeNeto(H), importeIva(I), importeTotal(J), moneda(K), concepto(L), processedAt(M), confidence(N), needsReview(O), matchedPagoFileId(P), matchConfidence(Q), hasCuitMatch(R), pagada(S), tipoDeCambio(T)
 
-**Pagos Enviados (A:Q):** fechaPago(A), fileId(B), fileName(C), banco(D), importePagado(E), moneda(F), referencia(G), cuitBeneficiario(H), nombreBeneficiario(I), concepto(J), processedAt(K), confidence(L), needsReview(M)
+**Pagos Enviados (A:Q):** fechaPago(A), fileId(B), fileName(C), banco(D), importePagado(E), moneda(F), referencia(G), cuitBeneficiario(H), nombreBeneficiario(I), concepto(J), processedAt(K), confidence(L), needsReview(M), matchedFacturaFileId(N), matchConfidence(O), tipoDeCambio(P), importeEnPesos(Q)
 
-**Recibos (A:R):** fechaPago(A), fileId(B), fileName(C), tipoRecibo(D), nombreEmpleado(E), cuilEmpleado(F), legajo(G), tareaDesempenada(H), cuitEmpleador(I), periodoAbonado(J), subtotalRemuneraciones(K), subtotalDescuentos(L), totalNeto(M), processedAt(N), confidence(O), needsReview(P)
+**Recibos (A:R):** fechaPago(A), fileId(B), fileName(C), tipoRecibo(D), nombreEmpleado(E), cuilEmpleado(F), legajo(G), tareaDesempenada(H), cuitEmpleador(I), periodoAbonado(J), subtotalRemuneraciones(K), subtotalDescuentos(L), totalNeto(M), processedAt(N), confidence(O), needsReview(P), matchedPagoFileId(Q), matchConfidence(R)

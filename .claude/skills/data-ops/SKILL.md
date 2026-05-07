@@ -27,6 +27,16 @@ If **both** are set, ask the user which environment (production or staging).
 If **only one** is set, use it.
 If **neither**, fall back to `DRIVE_ROOT_FOLDER_ID`.
 
+### Verify the environment marker
+
+Before any write, list the chosen root folder and confirm the marker file matches:
+
+- Selected `DRIVE_ROOT_FOLDER_ID_PRODUCTION` → root must contain `.production`
+- Selected `DRIVE_ROOT_FOLDER_ID_STAGING` → root must contain `.staging`
+- If the wrong marker is present (or neither), STOP and report the mismatch — do not write.
+
+This mirrors the server's `checkEnvironmentMarker` safeguard and prevents cross-environment data corruption when env vars are misconfigured.
+
 ## Step 2: Find Spreadsheets
 
 Use `gdrive_list_folder` on the selected root folder. Locate:
@@ -76,7 +86,8 @@ See [references/matching-reference.md](references/matching-reference.md) for det
 **Key rules for all matching:**
 - Always update **BOTH sides** of a match link (except retenciones, which are one-directional)
 - Always set `matchConfidence=MANUAL`
-- Always set `pagada=SI` when matching a Factura Recibida with a Pago Enviado
+- Always set `pagada=SI` (column S) when matching **either** a Factura Emitida with a Pago Recibido **or** a Factura Recibida with a Pago Enviado — both factura sheets carry the `pagada` column
+- On unmatch, **leave column S (`pagada`) untouched** — clearing it can clobber an `'SI'` set by NC-factura matching (see `factura-pago-matcher.ts`, "intentionally left untouched")
 - Always verify writes by re-reading affected rows
 
 ## Data Correction
@@ -128,7 +139,7 @@ Bank movement sheets live inside bank/card/broker spreadsheets under `{YYYY}/Ban
 
 1. **Find the movement** — by date, amount, concepto, or row number in the YYYY-MM sheet
 2. **Find the document** — in Control de Ingresos or Egresos (by fileId, invoice number, etc.)
-3. **Build detalle** — must match the format in the codebase. Read `src/bank/matcher.ts` (method `formatDebitFacturaDescription` and `formatCreditDescription`) and `src/bank/match-movimientos.ts` (function `buildDetalleForDocument`) to get the exact format strings before writing. Key patterns:
+3. **Build detalle** — must match the format in the codebase. The unified builder is `buildDetalleForDocument` in `src/bank/match-movimientos.ts`; bank-fee and credit-card payment strings come from `src/bank/matcher.ts` (`createBankFeeMatch`, `createCreditCardPaymentMatch`). Read those before writing. Key patterns:
    - Debit matching a factura: `"Pago Factura {tipo} {nro} a {razonSocial} - {concepto}"`
    - Debit matching a pago_enviado: `"Pago a {nombreBeneficiario} - {concepto}"`
    - Credit matching a factura_emitida: `"Factura Emitida {tipo} {nro} a {razonSocial} - {concepto}"`
@@ -147,6 +158,18 @@ Bank movement sheets live inside bank/card/broker spreadsheets under `{YYYY}/Ban
 ### Unmatch a Movimiento
 
 Clear columns G, H, I by writing empty strings.
+
+### Resumenes (Bank / Card / Broker statements)
+
+Each bank/card/broker spreadsheet also has a header sheet (`Resumenes`) with one row per statement. These are **not** matched to anything — only correct extraction errors here. Three schemas live in the same `Resumenes` family of sheets:
+
+| Type | Cols | Sheet | Key fields |
+|------|------|-------|------------|
+| `resumen_bancario` | A:L (12) | per spreadsheet | A periodo, B fechaDesde, C fechaHasta, D fileId, F banco, G numeroCuenta, H moneda, I saldoInicial, J saldoFinal, K balanceOk, L balanceDiff |
+| `resumen_tarjeta` | A:J (10) | per spreadsheet | A periodo, B fechaDesde, C fechaHasta, D fileId, F banco, G numeroCuenta (last digits), H tipoTarjeta, I pagoMinimo, J saldoActual |
+| `resumen_broker` | A:I (9) | per spreadsheet | A periodo, B fechaDesde, C fechaHasta, D fileId, F broker, G numeroCuenta (comitente), H saldoARS, I saldoUSD |
+
+Use `gsheets_metadata` first to identify which schema lives in the target spreadsheet. After correcting `saldoInicial`/`saldoFinal` on a `resumen_bancario`, re-read column K to confirm `balanceOk = "SI"` (formula recomputes automatically). Rows are sorted by `periodo` ascending — do not insert/delete rows manually; only update cells in place.
 
 ### Review Unmatched Movimientos
 
@@ -297,11 +320,13 @@ After **any** write operation:
 
 ## Rules
 
+- **Verify the environment marker** before any write (`.production` / `.staging` file in the chosen Drive root) — refuse if mismatched
 - **Verify against source** — read the PDF before correcting extraction errors
 - **Always update BOTH sides** of document match links (except retenciones)
 - **Always set matchConfidence=MANUAL** on matched documents
 - **Always set matchedType=MANUAL** on matched movimientos
-- **Always set pagada=SI** when matching a Factura Recibida with a Pago Enviado
+- **Always set pagada=SI** (column S) on the factura side when matching either a Factura Emitida↔Pago Recibido or a Factura Recibida↔Pago Enviado
+- **On unmatch, leave column S (pagada) untouched** — preserves NC-set 'SI' (matches code behavior in `factura-pago-matcher.ts`)
 - **Always verify** writes by re-reading affected rows
 - **Always confirm** before making changes — show before/after
 - **Never delete** spreadsheet rows
