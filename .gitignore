@@ -45,5 +45,6 @@ apps-script/src/config.ts
 
 # Claude Code local settings (personal overrides)
 .claude/settings.local.json
-.claude/agent-memory/
 .claude/scheduled_tasks.lock
+# Agent memories — never commit. Wildcard so subprojects (e.g. mcp-gemini/.claude/) are covered too.
+**/.claude/agent-memory/
