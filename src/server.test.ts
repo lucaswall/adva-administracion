@@ -56,6 +56,7 @@ vi.mock('./utils/logger.js', () => ({
 import { getConfig } from './config.js';
 import { scanFolder } from './processing/scanner.js';
 import { getCachedFolderStructure } from './services/folder-structure.js';
+import { error as logError } from './utils/logger.js';
 
 
 // Reset module cache between tests to get fresh imports
@@ -330,6 +331,87 @@ describe('Server startup scan (ADV-26)', () => {
       expect(result.ok).toBe(true);
       // scanFolder should NOT be called in test mode
       expect(scanFolder).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('Signal handler void+catch (ADV-211)', () => {
+    it('SIGTERM handler catches shutdown rejection with void+catch — no unhandled rejection', async () => {
+      const { createShutdownHandler } = await import('./server.js');
+
+      // Force createShutdownHandler's returned promise to reject:
+      // processExit is called after the shutdown race completes. If it throws
+      // synchronously, the error escapes createShutdownHandler's inner try/catch
+      // (which only covers shutdownWatchManager/serverClose) and causes the outer
+      // async function to reject.
+      const throwingProcessExit = () => { throw new Error('processExit threw unexpectedly'); };
+
+      const shutdownFn = createShutdownHandler(
+        vi.fn().mockResolvedValue(undefined),
+        vi.fn().mockResolvedValue(undefined),
+        throwingProcessExit,
+        50 // short timeout for the test
+      );
+
+      let hadUnhandledRejection = false;
+      const rejectionListener = () => { hadUnhandledRejection = true; };
+      process.on('unhandledRejection', rejectionListener);
+
+      // NEW pattern (the fix): void + .catch logs the rejection
+      // OLD pattern (broken):   () => { shutdownFn('SIGTERM'); }
+      //   — causes unhandled rejection when shutdownFn rejects
+      const sigHandler = () => {
+        void shutdownFn('SIGTERM').catch((err: Error) => {
+          logError('Shutdown rejection', { module: 'server', error: err.message });
+        });
+      };
+
+      process.once('SIGTERM', sigHandler);
+      process.emit('SIGTERM' as NodeJS.Signals);
+
+      // Allow the async chain to settle
+      await new Promise(resolve => setTimeout(resolve, 100));
+      process.off('unhandledRejection', rejectionListener);
+
+      expect(hadUnhandledRejection).toBe(false);
+      expect(vi.mocked(logError)).toHaveBeenCalledWith(
+        'Shutdown rejection',
+        expect.objectContaining({ module: 'server', error: 'processExit threw unexpectedly' })
+      );
+    });
+
+    it('SIGINT handler catches shutdown rejection with void+catch — no unhandled rejection', async () => {
+      const { createShutdownHandler } = await import('./server.js');
+
+      const throwingProcessExit = () => { throw new Error('processExit threw on SIGINT'); };
+
+      const shutdownFn = createShutdownHandler(
+        vi.fn().mockResolvedValue(undefined),
+        vi.fn().mockResolvedValue(undefined),
+        throwingProcessExit,
+        50
+      );
+
+      let hadUnhandledRejection = false;
+      const rejectionListener = () => { hadUnhandledRejection = true; };
+      process.on('unhandledRejection', rejectionListener);
+
+      const sigHandler = () => {
+        void shutdownFn('SIGINT').catch((err: Error) => {
+          logError('Shutdown rejection', { module: 'server', error: err.message });
+        });
+      };
+
+      process.once('SIGINT', sigHandler);
+      process.emit('SIGINT' as NodeJS.Signals);
+
+      await new Promise(resolve => setTimeout(resolve, 100));
+      process.off('unhandledRejection', rejectionListener);
+
+      expect(hadUnhandledRejection).toBe(false);
+      expect(vi.mocked(logError)).toHaveBeenCalledWith(
+        'Shutdown rejection',
+        expect.objectContaining({ module: 'server', error: 'processExit threw on SIGINT' })
+      );
     });
   });
 

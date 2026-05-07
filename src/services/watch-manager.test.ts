@@ -11,6 +11,7 @@ import {
   resetConsecutiveFailures,
 } from './watch-manager.js';
 import * as cron from 'node-cron';
+import * as logger from '../utils/logger.js';
 
 // Mock node-cron
 vi.mock('node-cron', () => ({
@@ -30,6 +31,7 @@ vi.mock('../utils/logger.js', () => ({
 // Mock drive service
 vi.mock('./drive.js', () => ({
   watchFolder: vi.fn(async () => ({ ok: true, value: { channelId: 'test-channel', resourceId: 'test-resource', expiration: Date.now() + 86400000 } })),
+  stopWatching: vi.fn(async () => ({ ok: true, value: undefined })),
 }));
 
 // Mock config
@@ -56,6 +58,11 @@ vi.mock('../processing/scanner.js', () => ({
 // Mock folder structure
 vi.mock('./folder-structure.js', () => ({
   getCachedFolderStructure: vi.fn(() => null),
+}));
+
+// Mock status sheet
+vi.mock('./status-sheet.js', () => ({
+  updateStatusSheet: vi.fn(async () => undefined),
 }));
 
 describe('watch-manager', () => {
@@ -525,6 +532,89 @@ describe('triggerScan - failure handling (ADV-18)', () => {
 
       // Should only run 3 scans (MAX_CONSECUTIVE_FAILURES) then stop
       expect(mockScanFolder).toHaveBeenCalledTimes(3);
+    });
+  });
+
+  describe('cron callback error handling (ADV-201)', () => {
+    it('status-update cron catches errors and logs them instead of propagating', async () => {
+      // Make getCachedFolderStructure return a folder structure so updateStatusSheet is called
+      const { getCachedFolderStructure } = await import('./folder-structure.js');
+      vi.mocked(getCachedFolderStructure).mockReturnValue({
+        dashboardOperativoId: 'test-dashboard-id',
+      } as any);
+
+      // Make updateStatusSheet reject to simulate an error
+      const { updateStatusSheet } = await import('./status-sheet.js');
+      vi.mocked(updateStatusSheet).mockRejectedValue(new Error('Sheets API down'));
+
+      // Init watch manager (registers 4 cron jobs)
+      initWatchManager('http://localhost:3000/webhook');
+
+      // Extract the status-update cron callback (index 2: renewal=0, polling=1, status=2, cleanup=3)
+      const cronScheduleMock = vi.mocked(cron.schedule);
+      const statusUpdateFn = cronScheduleMock.mock.calls[2][1] as () => void | Promise<void>;
+
+      // Track unhandled rejections
+      let hadUnhandledRejection = false;
+      const rejectionListener = () => { hadUnhandledRejection = true; };
+      process.on('unhandledRejection', rejectionListener);
+
+      // Invoke callback — after fix, it returns void and catches errors internally
+      statusUpdateFn();
+
+      // Allow the async runCronTask to complete (fire-and-forget pattern)
+      await new Promise(resolve => setTimeout(resolve, 10));
+
+      process.off('unhandledRejection', rejectionListener);
+
+      // No unhandled rejection should have fired
+      expect(hadUnhandledRejection).toBe(false);
+
+      // The error should have been logged
+      expect(vi.mocked(logger.error)).toHaveBeenCalledWith(
+        'Cron task failed',
+        expect.objectContaining({
+          module: 'watch-manager',
+          phase: 'status-update',
+          error: 'Sheets API down',
+        })
+      );
+    });
+
+    it('renewal cron does not propagate errors as unhandled rejections', async () => {
+      initWatchManager('http://localhost:3000/webhook');
+
+      // Index 0 = renewal cron
+      const cronScheduleMock = vi.mocked(cron.schedule);
+      const renewalFn = cronScheduleMock.mock.calls[0][1] as () => void;
+
+      let hadUnhandledRejection = false;
+      const rejectionListener = () => { hadUnhandledRejection = true; };
+      process.on('unhandledRejection', rejectionListener);
+
+      renewalFn();
+      await new Promise(resolve => setTimeout(resolve, 10));
+      process.off('unhandledRejection', rejectionListener);
+
+      expect(hadUnhandledRejection).toBe(false);
+    });
+
+    it('cleanup cron does not propagate errors as unhandled rejections', async () => {
+      initWatchManager('http://localhost:3000/webhook');
+
+      // Index 3 = cleanup cron
+      const cronScheduleMock = vi.mocked(cron.schedule);
+      const cleanupFn = cronScheduleMock.mock.calls[3][1] as () => void;
+
+      let hadUnhandledRejection = false;
+      const rejectionListener = () => { hadUnhandledRejection = true; };
+      process.on('unhandledRejection', rejectionListener);
+
+      cleanupFn();
+      await new Promise(resolve => setTimeout(resolve, 10));
+      process.off('unhandledRejection', rejectionListener);
+
+      expect(hadUnhandledRejection).toBe(false);
     });
   });
 
