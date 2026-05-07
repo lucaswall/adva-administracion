@@ -104,9 +104,16 @@ describe('Numeric env var validation', () => {
   beforeEach(() => {
     vi.resetModules();
     process.env = { ...originalEnv };
-    // Set required vars to valid values
+    // Set required vars to valid values. Credentials must be seeded explicitly
+    // because NODE_ENV=development triggers the fail-closed credential gate
+    // (ADV-200). Without them loadConfig() throws on missing credentials
+    // before reaching the numeric assertions these tests are meant to exercise
+    // (Codex P1 review on PR 112).
     process.env.API_SECRET = 'test-secret';
     process.env.NODE_ENV = 'development';
+    process.env.GOOGLE_SERVICE_ACCOUNT_KEY = 'test-key';
+    process.env.GEMINI_API_KEY = 'test-key';
+    process.env.DRIVE_ROOT_FOLDER_ID = 'test-folder';
   });
 
   afterEach(() => {
@@ -360,9 +367,15 @@ describe('ENVIRONMENT validation', () => {
   beforeEach(() => {
     vi.resetModules();
     process.env = { ...originalEnv };
-    // Set required vars to valid values
+    // Set required vars to valid values. Credentials must be seeded explicitly
+    // because NODE_ENV=development triggers the fail-closed credential gate
+    // (ADV-200). Tests in this block focus on ENVIRONMENT validation, which
+    // runs after credential checks (Codex P1 review on PR 112).
     process.env.API_SECRET = 'test-secret';
     process.env.NODE_ENV = 'development';
+    process.env.GOOGLE_SERVICE_ACCOUNT_KEY = 'test-key';
+    process.env.GEMINI_API_KEY = 'test-key';
+    process.env.DRIVE_ROOT_FOLDER_ID = 'test-folder';
   });
 
   afterEach(() => {
