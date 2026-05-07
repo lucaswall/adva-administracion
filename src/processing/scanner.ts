@@ -32,6 +32,7 @@ import { getConfig, PROCESSING_LOCK_ID, PROCESSING_LOCK_TIMEOUT_MS } from '../co
 import { debug, info, warn, error as logError } from '../utils/logger.js';
 import { withCorrelationAsync, getCorrelationId, generateCorrelationId } from '../utils/correlation.js';
 import { withLock } from '../utils/concurrency.js';
+import { isBudgetExhaustedError } from '../gemini/budget.js';
 
 // Import from refactored modules
 import { processFile, hasValidDate } from './extractor.js';
@@ -144,6 +145,23 @@ async function processFileWithRetry(
         result,
         retriedFileIds
       );
+    }
+
+    // Daily Gemini budget exhausted — defer this file rather than burning it
+    // to Sin Procesar. The 'processing' status remains in the tracking sheet,
+    // so stale recovery (5-min threshold) re-queues the file on the next scan;
+    // when the UTC budget rolls over, the next attempt succeeds.
+    // ADV-225 (Codex P1 review on PR 112).
+    if (isBudgetExhaustedError(processResult.error)) {
+      warn('Daily Gemini budget exhausted, deferring file to next scan/day-rollover', {
+        module: 'scanner',
+        phase: isRetry ? 'process-file-retry' : 'process-file',
+        fileId: fileInfo.id,
+        fileName: fileInfo.name,
+        error: processResult.error.message,
+        correlationId,
+      });
+      return;
     }
 
     // No more retries or not a JSON error - move to Sin Procesar

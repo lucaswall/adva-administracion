@@ -180,35 +180,53 @@ function checkTextOutsideMediaBox(stream: string, box: MediaBox): InvisibleTextR
  *   - `1 g`   — DeviceGray, value 1.0 = white
  *   - `1 1 1 rg` — DeviceRGB, all channels 1.0 = white
  *
- * This is a conservative heuristic: it reports white text if ANY white fill
- * appears before any text drawing in the same stream, regardless of later
- * color resets. This may produce false positives in streams that reset the
- * color after a white section; operators that restore to a dark color before
- * drawing text would not be caught.
+ * Walks the stream in operator order and tracks the current fill color.
+ * Returns true only when a text-drawing operator fires while the *active*
+ * fill is white — i.e. the same `1 g`/`1 1 1 rg` that would actually paint
+ * the glyphs. PDFs that paint a white background or shape and then reset the
+ * fill to a dark color before drawing visible text do NOT trigger detection
+ * (Codex review on PR 112).
  *
  * Limitation: does not handle `q`/`Q` graphics state stack or CMYK/pattern
  * color spaces.
  */
 function hasWhiteFillBeforeText(stream: string): boolean {
-  // Find the first white-fill-color operator
-  const whiteGrayRe = /(?:^|\s)1(?:\.0+)?\s+g(?:\s|$)/m;
-  const whiteRgbRe = /(?:^|\s)1(?:\.0+)?\s+1(?:\.0+)?\s+1(?:\.0+)?\s+rg(?:\s|$)/m;
+  type Event = { pos: number; kind: 'color'; isWhite: boolean } | { pos: number; kind: 'text' };
+  const events: Event[] = [];
 
-  const whiteGrayMatch = whiteGrayRe.exec(stream);
-  const whiteRgbMatch = whiteRgbRe.exec(stream);
+  // Any DeviceGray fill: `<value> g`. White when value >= 1.
+  const grayRe = /(?:^|\s)([\d.]+)\s+g(?:\s|$)/gm;
+  for (const m of stream.matchAll(grayRe)) {
+    if (m.index === undefined) continue;
+    events.push({ pos: m.index, kind: 'color', isWhite: parseFloat(m[1]) >= 1 });
+  }
 
-  // Determine position of first white color operator
-  const colorPos = Math.min(
-    whiteGrayMatch ? whiteGrayMatch.index : Infinity,
-    whiteRgbMatch ? whiteRgbMatch.index : Infinity,
-  );
+  // Any DeviceRGB fill: `<r> <g> <b> rg`. White when all channels >= 1.
+  const rgbRe = /(?:^|\s)([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+rg(?:\s|$)/gm;
+  for (const m of stream.matchAll(rgbRe)) {
+    if (m.index === undefined) continue;
+    const r = parseFloat(m[1]);
+    const g = parseFloat(m[2]);
+    const b = parseFloat(m[3]);
+    events.push({ pos: m.index, kind: 'color', isWhite: r >= 1 && g >= 1 && b >= 1 });
+  }
 
-  if (colorPos === Infinity) return false; // No white color operator found
+  // Text-drawing operators
+  const textRe = /\)\s*(?:Tj|TJ|'|")/g;
+  for (const m of stream.matchAll(textRe)) {
+    if (m.index === undefined) continue;
+    events.push({ pos: m.index, kind: 'text' });
+  }
 
-  // Find first text-drawing operator after the color position
-  const textOpsRe = /\)\s*(?:Tj|TJ|'|")/g;
-  textOpsRe.lastIndex = colorPos;
-  const textMatch = textOpsRe.exec(stream);
+  events.sort((a, b) => a.pos - b.pos);
 
-  return textMatch !== null;
+  let currentFillIsWhite = false;
+  for (const e of events) {
+    if (e.kind === 'color') {
+      currentFillIsWhite = e.isWhite;
+    } else if (currentFillIsWhite) {
+      return true;
+    }
+  }
+  return false;
 }

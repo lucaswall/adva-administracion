@@ -165,6 +165,27 @@ describe('detectInvisibleText', () => {
       const result = detectInvisibleText(buildMinimalPdf(contentStream));
       expect(result.hasInvisible).toBe(true);
     });
+
+    it('returns hasInvisible:false when white fill is reset to dark before text (Codex P2)', () => {
+      // Common PDF generator pattern: paint white background or shape, then
+      // reset to dark fill and draw visible text. Earlier heuristic flagged
+      // this as invisible — fix tracks active fill at each text op.
+      const contentStream = '1 1 1 rg\n0 0 595 842 re f\n0 0 0 rg\nBT /F1 12 Tf 100 700 Td (Visible black text) Tj ET';
+      const result = detectInvisibleText(buildMinimalPdf(contentStream));
+      expect(result.hasInvisible).toBe(false);
+    });
+
+    it('returns hasInvisible:false when white gray fill is reset to dark before text', () => {
+      const contentStream = '1 g\n0 0 595 842 re f\n0 g\nBT /F1 12 Tf 100 700 Td (Visible) Tj ET';
+      const result = detectInvisibleText(buildMinimalPdf(contentStream));
+      expect(result.hasInvisible).toBe(false);
+    });
+
+    it('still detects text drawn while fill is actively white (after a non-white interlude)', () => {
+      const contentStream = '0 0 0 rg\nBT /F1 12 Tf 50 700 Td (Visible) Tj ET\n1 1 1 rg\nBT /F1 12 Tf 50 720 Td (Hidden) Tj ET';
+      const result = detectInvisibleText(buildMinimalPdf(contentStream));
+      expect(result.hasInvisible).toBe(true);
+    });
   });
 
   describe('performance', () => {

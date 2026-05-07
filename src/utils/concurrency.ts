@@ -619,6 +619,16 @@ export async function withQuotaRetry<T>(
     try {
       // Wait for global quota clearance before each attempt
       await throttle.waitForClearance();
+      // Re-check abort after the throttle wait — `waitForClearance` can block
+      // for up to QUOTA_THROTTLE_MAX_DELAY_MS, and if abort fires during that
+      // window we must NOT proceed to fn() (which would be a real Drive call
+      // after the caller's deadline already returned). ADV-224 follow-up.
+      if (signal?.aborted) {
+        return {
+          ok: false,
+          error: new Error(`Aborted: ${String(signal.reason ?? 'unknown')}`),
+        };
+      }
       const result = await fn();
       return { ok: true, value: result };
     } catch (error) {

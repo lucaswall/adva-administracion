@@ -579,20 +579,20 @@ describe('Drive folder operations', () => {
     });
 
     it('returns false when MAX_ANCESTOR_DEPTH is exceeded without finding ancestor', async () => {
-      // Build a chain longer than MAX_ANCESTOR_DEPTH (8)
-      for (let i = 0; i < 10; i++) {
+      // Build a chain longer than MAX_ANCESTOR_DEPTH (20)
+      for (let i = 0; i < 25; i++) {
         mockDriveFiles.get.mockResolvedValueOnce({ data: { parents: [`p${i + 1}`] } });
       }
 
       const result = await isDescendantOf('p0', 'unreachable-root');
 
       expect(result).toEqual({ ok: true, value: false });
-      expect(mockDriveFiles.get).toHaveBeenCalledTimes(8);
+      expect(mockDriveFiles.get).toHaveBeenCalledTimes(20);
     });
 
     it('emits a warn log when depth limit is exhausted (ADV-220)', async () => {
       vi.mocked(warn).mockClear();
-      for (let i = 0; i < 10; i++) {
+      for (let i = 0; i < 25; i++) {
         mockDriveFiles.get.mockResolvedValueOnce({ data: { parents: [`p${i + 1}`] } });
       }
 
@@ -605,11 +605,11 @@ describe('Drive folder operations', () => {
           module: 'drive',
           phase: 'descendant-check',
           folderId: 'p0',
-          // After 8 hops starting at p0, traversal sits at p8 (the 8th parent
+          // After 20 hops starting at p0, traversal sits at p20 (the 20th parent
           // mocked in the loop above), which is the deepest ancestor reached.
-          currentId: 'p8',
+          currentId: 'p20',
           ancestorId: 'unreachable-root',
-          depthLimit: 8,
+          depthLimit: 20,
         })
       );
     });

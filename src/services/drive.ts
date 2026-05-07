@@ -944,9 +944,12 @@ export async function getParents(fileId: string, signal?: AbortSignal): Promise<
 
 /**
  * Maximum depth for ancestor traversal in isDescendantOf.
- * Prevents runaway recursion in deep or circular folder structures.
+ * Matches `MAX_FOLDER_DEPTH` (20) so the ancestry check accepts every folder
+ * the scanner is willing to recurse into. A previous tighter limit (8) caused
+ * legitimate deeply-nested folders to be denied with HTTP 403 even when they
+ * were inside the configured root (Codex review on PR 112).
  */
-const MAX_ANCESTOR_DEPTH = 8;
+const MAX_ANCESTOR_DEPTH = 20;
 
 /**
  * Overall deadline for isDescendantOf. Each per-hop Drive call is wrapped in

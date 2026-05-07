@@ -1690,6 +1690,54 @@ describe('scanner', () => {
     });
   });
 
+  describe('Daily Gemini budget deferral (ADV-225)', () => {
+    it('does not move budget-exhausted file to Sin Procesar and does not increment errors', async () => {
+      const { processFile } = await import('./extractor.js');
+      const { sortToSinProcesar } = await import('../services/document-sorter.js');
+      const { updateFileStatus } = await import('./storage/index.js');
+      const { warn } = await import('../utils/logger.js');
+      const { BUDGET_EXHAUSTED_MARKER } = await import('../gemini/budget.js');
+
+      // Wrapped form mirrors what extractor.ts produces: "Classification failed: <marker>"
+      vi.mocked(processFile).mockResolvedValueOnce({
+        ok: false,
+        error: new Error(`Classification failed: ${BUDGET_EXHAUSTED_MARKER} (5/5 requests today)`),
+      } as any);
+
+      mockListFiles.mockResolvedValue({
+        ok: true,
+        value: [{ id: 'over-budget-file', name: 'over.pdf', mimeType: 'application/pdf', parents: ['entrada'] }],
+      });
+
+      const result = await scanFolder('entrada');
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        // Budget deferral is not an error; counter stays at 0
+        expect(result.value.errors).toBe(0);
+      }
+
+      // File must NOT be moved to Sin Procesar
+      expect(sortToSinProcesar).not.toHaveBeenCalled();
+      // Status row must NOT be marked 'failed' (stays as 'processing' for stale recovery)
+      expect(updateFileStatus).not.toHaveBeenCalledWith(
+        expect.anything(),
+        'over-budget-file',
+        'failed',
+        expect.anything(),
+      );
+      // A warn log is emitted explaining the deferral
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining('budget exhausted'),
+        expect.objectContaining({
+          module: 'scanner',
+          fileId: 'over-budget-file',
+          fileName: 'over.pdf',
+        }),
+      );
+    });
+  });
+
   describe('resumen duplicate routing (ADV-182)', () => {
     const mockResumenFile = {
       id: 'resumen-file-id',

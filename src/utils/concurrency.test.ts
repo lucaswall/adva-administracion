@@ -858,4 +858,35 @@ describe('withQuotaRetry abort signal (ADV-224)', () => {
     }
     expect(fn).toHaveBeenCalledTimes(1);
   });
+
+  it('exits without calling fn when abort fires during throttle.waitForClearance', async () => {
+    // Prime the global throttle so waitForClearance imposes a measurable delay.
+    quotaThrottle.reportQuotaError();
+    expect(quotaThrottle.getCurrentDelayMs()).toBeGreaterThan(0);
+
+    const fn = vi.fn().mockResolvedValue('value');
+    const controller = new AbortController();
+
+    const resultPromise = withQuotaRetry(
+      fn,
+      {},
+      SHEETS_QUOTA_RETRY_CONFIG,
+      controller.signal,
+    );
+
+    // Abort while waitForClearance is sleeping (clock not yet advanced).
+    controller.abort('mid-clearance-abort');
+
+    // Run all timers so the throttle's setTimeout resolves.
+    await vi.runAllTimersAsync();
+
+    const result = await resultPromise;
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.message.toLowerCase()).toContain('abort');
+    }
+    // fn must NOT have been invoked after the abort
+    expect(fn).not.toHaveBeenCalled();
+  });
 });

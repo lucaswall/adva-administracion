@@ -39,6 +39,27 @@ function utcDateKey(nowMs: number): string {
 }
 
 /**
+ * Unique sentinel embedded in the budget-exhaustion error message. Survives
+ * the error-wrapping the extractor and parser apply, so downstream code
+ * (scanner, in particular) can recognise the failure even after the message
+ * has been prefixed with "Classification failed: " or "Extraction failed: ".
+ *
+ * Used by `isBudgetExhaustedError` so the scanner can defer such files
+ * (leave them in Entrada for next-day retry) instead of permanently moving
+ * them to Sin Procesar (Codex P1 review on PR 112).
+ */
+export const BUDGET_EXHAUSTED_MARKER = 'Daily Gemini quota exhausted: budget reached';
+
+/**
+ * Returns true when the given error originated from the daily budget cap.
+ * Walks the message — robust to error rewrapping that prepends prefixes such
+ * as "Classification failed: " or "Extraction failed: ".
+ */
+export function isBudgetExhaustedError(error: Error): boolean {
+  return error.message.includes(BUDGET_EXHAUSTED_MARKER);
+}
+
+/**
  * Daily request-count cap for the Gemini API.
  *
  * Wire into `GeminiClient.analyzeDocument` BEFORE `enforceRateLimit`:
@@ -74,11 +95,12 @@ export class DailyBudget {
       return { ok: true, value: undefined };
     }
 
-    // Over cap — reject
+    // Over cap — reject. Use the shared marker so downstream consumers can
+    // identify budget exhaustion through any error wrapping.
     if (this.count >= this.cap) {
       return {
         ok: false,
-        error: `Daily Gemini quota exhausted: budget reached (${this.count}/${this.cap} requests today)`
+        error: `${BUDGET_EXHAUSTED_MARKER} (${this.count}/${this.cap} requests today)`
       };
     }
 

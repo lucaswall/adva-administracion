@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { DailyBudget } from './budget.js';
+import { DailyBudget, isBudgetExhaustedError, BUDGET_EXHAUSTED_MARKER } from './budget.js';
 import * as loggerModule from '../utils/logger.js';
 
 describe('DailyBudget', () => {
@@ -168,6 +168,38 @@ describe('DailyBudget', () => {
       const budget = new DailyBudget(0);
       const status = budget.getStatus();
       expect(status.disabled).toBe(true);
+    });
+  });
+
+  describe('isBudgetExhaustedError (ADV-225)', () => {
+    it('matches the bare consume() error message', () => {
+      const budget = new DailyBudget(1);
+      budget.consume();
+      const result = budget.consume();
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(isBudgetExhaustedError(new Error(result.error))).toBe(true);
+      }
+    });
+
+    it('matches the message after extractor "Classification failed:" wrapping', () => {
+      const wrapped = new Error(`Classification failed: ${BUDGET_EXHAUSTED_MARKER} (5/5 requests today)`);
+      expect(isBudgetExhaustedError(wrapped)).toBe(true);
+    });
+
+    it('matches the message after extractor "Extraction failed:" wrapping', () => {
+      const wrapped = new Error(`Extraction failed: ${BUDGET_EXHAUSTED_MARKER} (5/5 requests today)`);
+      expect(isBudgetExhaustedError(wrapped)).toBe(true);
+    });
+
+    it('does NOT match real Gemini quota errors that lack the budget marker', () => {
+      const realQuota = new Error('Quota exceeded for quota metric \'requests\'');
+      expect(isBudgetExhaustedError(realQuota)).toBe(false);
+    });
+
+    it('does NOT match unrelated errors', () => {
+      expect(isBudgetExhaustedError(new Error('Network error'))).toBe(false);
+      expect(isBudgetExhaustedError(new Error(''))).toBe(false);
     });
   });
 });
