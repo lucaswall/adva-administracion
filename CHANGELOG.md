@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.7.0] - 2026-05-07
+
+### Added
+- Daily Gemini API budget cap to prevent unbounded LLM cost from authenticated misuse or webhook replays
+- PDF invisible-text sanitization before submission to Gemini, mitigating indirect prompt-injection from malicious documents
+- `hasCuitMatch` column persisted in Recibos sheet (schema v6, automatic migration)
+
+### Changed
+- Single shared GeminiClient now enforces the configured RPM cap across concurrent file processing (previously up to 12× over the configured limit)
+- `isDescendantOf` has a 10-second overall deadline so a hung Drive API can no longer hold the scan handler open
+
+### Fixed
+- `/api/rematch` now acquires the processing lock, preventing concurrent corruption with scans and movimientos matching
+- LockManager release now CAS-checks the holder, so a stale release after auto-expiry can no longer delete another holder's lock
+- Scanner queue rejections, watch-manager cron failures, and signal-handler shutdown errors are now caught instead of becoming unhandled promise rejections
+- `pagada='SI'` write no longer silently skipped when the preceding `detalle` batchUpdate fails
+- Service-account credentials are now required at boot regardless of `NODE_ENV` — staging deploys no longer start silently without them
+
+### Security
+- `/api/scan` now restricts `folderId` to descendants of the configured root, so authenticated callers can no longer scan arbitrary Drive folders
+- HTTP 500 responses no longer echo internal `error.message` verbatim, preventing leakage of Drive IDs and internal state
+- Cleared 22 transitive Dependabot alerts via dependency updates across server and MCP subprojects
+
 ## [1.6.0] - 2026-05-06
 
 ### Added
@@ -119,7 +142,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Updated fastify to fix high-severity Content-Type body validation bypass and low-severity DoS vulnerability
 - Updated googleapis to v171, @google/clasp to v3, and resolved 6 npm audit vulnerabilities
 
-[Unreleased]: https://github.com/lucaswall/adva-administracion/compare/v1.6.0...HEAD
+[Unreleased]: https://github.com/lucaswall/adva-administracion/compare/v1.7.0...HEAD
+[1.7.0]: https://github.com/lucaswall/adva-administracion/compare/v1.6.0...v1.7.0
 [1.6.0]: https://github.com/lucaswall/adva-administracion/compare/v1.5.0...v1.6.0
 [1.5.0]: https://github.com/lucaswall/adva-administracion/compare/v1.4.1...v1.5.0
 [1.4.1]: https://github.com/lucaswall/adva-administracion/compare/v1.4.0...v1.4.1
