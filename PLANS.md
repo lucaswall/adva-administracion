@@ -779,3 +779,79 @@ All tasks completed.
 All Fix Plan tasks completed. No pending work.
 
 <!-- FIX PLAN COMPLETE -->
+
+### Review Findings
+
+Summary: 1 consolidated issue found (Team: security, reliability, quality reviewers)
+- FIX: 1 issue (M-size, multi-file → Fix Plan path) — Linear issue created
+- DISCARDED: 0
+
+**Method:** 3-reviewer agent team (security, reliability, quality) — Sonnet, parallel. 8 changed files reviewed.
+
+**Issues requiring fix:**
+
+- [MEDIUM] ASYNC: `isDescendantOf` deadline does not cancel in-flight `traverse()` (`src/services/drive.ts:1018-1032`) — abandoned coroutine continues calling `getParents` → `withQuotaRetry`, which (a) wastes Drive quota, (b) mutates the **module-singleton** `quotaThrottle` via `reportQuotaError()` and inflates global Drive backoff, (c) leaks `setTimeout` retry handles up to ~325s and can prevent graceful shutdown within the 30s `SHUTDOWN_TIMEOUT_MS`. Three findings (1 medium reliability, 1 low reliability, 1 low security) consolidated into one Fix because they share a single root cause.
+
+**Verified ADV fixes (no findings):**
+
+- ADV-219 (10s deadline via Promise.race + `clearTimeout` in finally) — correct ✓
+- ADV-220 (depth-exhaustion warn payload `module/phase/folderId/currentId/ancestorId/depthLimit`) — correct ✓
+- ADV-221 (`result.errors++` placed before `logError` in `queue.add().catch()`, test exercises `getProcessingQueue` mock to reject twice → assert `result.errors === 2`) — correct ✓
+- ADV-222 (`afterEach(() => vi.useRealTimers())` added to `analyzeDocument`, `rate limiting`, `rate limit queue robustness`, `singleton factory` describe blocks) — correct ✓
+- ADV-223 (warnSpy captures truncation log, asserts `module/phase/originalSize/status/maxSize` payload + `maxSize < originalSize`) — correct ✓
+- error-response.ts refactor (`respondError` internal, `respond500`/`respond503`, backward-compatible `Error500Response` alias) — correct ✓
+- 503 wiring in scan.ts ancestry-check failure path — correct ✓
+
+### Linear Updates
+
+- ADV-219, ADV-220, ADV-221, ADV-222, ADV-223: Review → Merge (all Iteration 2 originals completed)
+- ADV-224: Created in Todo (Fix: cancel in-flight `traverse()` on `isDescendantOf` deadline)
+
+<!-- REVIEW COMPLETE -->
+
+---
+
+## Fix Plan 2
+
+**Source:** Iteration 2 review findings
+**Linear Issues:** [ADV-224](https://linear.app/lw-claude/issue/ADV-224)
+
+### Fix 1: Cancel in-flight traverse() when isDescendantOf deadline fires
+**Linear Issue:** [ADV-224](https://linear.app/lw-claude/issue/ADV-224) — Medium
+
+**Files:**
+- `src/utils/concurrency.ts` (modify `withQuotaRetry`)
+- `src/utils/concurrency.test.ts` (modify)
+- `src/services/drive.ts` (modify `getParents`, `isDescendantOf`)
+- `src/services/drive.test.ts` (modify)
+
+**Steps:**
+
+1. Write tests in `src/utils/concurrency.test.ts`:
+   - **Test A (early abort):** Call `withQuotaRetry(fn, ..., signal)` with an `AbortController` whose signal is aborted before invocation. Assert `fn` is never called and the result is `{ ok: false, error: ... aborted }`. Spy on `quotaThrottle.reportQuotaError` and assert it is NOT called.
+   - **Test B (mid-retry abort):** Mock `fn` to throw a quota error on first attempt. Schedule `controller.abort()` during the retry-backoff `setTimeout`. Assert (1) the function returns the abort error, (2) the retry-backoff `setTimeout` does NOT keep the test process alive (use `vi.runOnlyPendingTimers()` cleanup check or assert `setTimeout.mock.calls`/`clearTimeout` symmetry).
+   - **Test C (no signal — backwards compat):** Existing tests without signal continue to pass.
+2. Run `verifier "concurrency"` (expect fail on new tests).
+3. Modify `withQuotaRetry(fn, standardConfig?, quotaConfig?, signal?)`:
+   - Accept optional `signal: AbortSignal`.
+   - At the top of each loop iteration (before `throttle.waitForClearance()`): if `signal?.aborted`, return `{ ok: false, error: new Error('Aborted: ' + (signal.reason ?? 'unknown')) }` immediately. Do NOT call `reportQuotaError`.
+   - Wrap the retry-backoff `setTimeout` in an abortable promise: `await new Promise((resolve) => { const t = setTimeout(resolve, delay); signal?.addEventListener('abort', () => { clearTimeout(t); resolve(undefined); }, { once: true }); })`. After the delay, re-check `signal?.aborted` and exit if true.
+4. Write tests in `src/services/drive.test.ts`:
+   - Add a test for `isDescendantOf` deadline that asserts the AbortSignal is propagated: mock `getParents` to capture and store the signal, fire the 10s deadline, assert `signal.aborted === true` after the deadline.
+   - Existing happy-path and timeout tests continue to pass.
+5. Modify `src/services/drive.ts`:
+   - `getParents(fileId: string, signal?: AbortSignal): Promise<Result<string[], Error>>` — pass `signal` to `withQuotaRetry`.
+   - `isDescendantOf`: create `const controller = new AbortController()`. Call `controller.abort(...)` inside the timeout-promise's `setTimeout` callback BEFORE `resolve(...)`. Pass `controller.signal` to every `getParents(currentId, controller.signal)` call inside `traverse()`. Add `controller.abort('completed')` in the success branch (after `Promise.race` resolves with `traverse()` value) so an already-completed traverse cleanly closes the abort listener — also fine if abort fires after completion (no-op).
+6. Run `verifier "concurrency\|drive"` (expect pass).
+
+**Notes:**
+- The signal does NOT need to interrupt an in-flight `drive.files.get`. gaxios accepts `signal` natively (forward via `request.signal` if you want; out of scope for this fix). The win is that abandoned `withQuotaRetry` exits cleanly between retry attempts and never inflates the global throttle.
+- Backwards-compatible: every existing `withQuotaRetry`/`getParents` call site keeps working without changes (signal is optional).
+- All other `withQuotaRetry` callers in `drive.ts`/`sheets.ts` continue to operate without the signal; they are not part of this fix.
+
+---
+
+## Post-Fix-Plan-2 Checklist
+
+1. Run `bug-hunter` agent — Review fixes for new bugs.
+2. Run `verifier` agent (full mode) — All tests pass, zero warnings.
