@@ -94,9 +94,9 @@ class LockManager {
    * @param resourceId - Unique identifier for the resource
    * @param timeoutMs - Maximum time to wait for the lock
    * @param autoExpiryMs - Lock auto-expiry timeout (defaults to LOCK_TIMEOUT_MS = 30s)
-   * @returns true if lock acquired, false if timeout
+   * @returns The lockInstanceId string if acquired, false if timeout
    */
-  async acquire(resourceId: string, timeoutMs: number = 5000, autoExpiryMs: number = LOCK_TIMEOUT_MS): Promise<boolean> {
+  async acquire(resourceId: string, timeoutMs: number = 5000, autoExpiryMs: number = LOCK_TIMEOUT_MS): Promise<string | false> {
     const startTime = Date.now();
     const correlationId = getCorrelationId();
     const myLockInstanceId = String(++lockInstanceIdCounter) + '-' + Math.random().toString(36).slice(2);
@@ -172,7 +172,7 @@ class LockManager {
             correlationId,
           });
 
-          return true;
+          return myLockInstanceId;
         }
         // === ATOMIC BLOCK END - WE LOST ===
         // Another operation set their lock after us - continue to wait for it
@@ -205,12 +205,30 @@ class LockManager {
   }
 
   /**
-   * Releases a lock for a resource
+   * Releases a lock for a resource.
+   *
+   * Uses compare-and-swap: if `lockInstanceId` is provided, the entry is only
+   * deleted when it matches the current holder's ID. This prevents a stale
+   * release from an expired lock holder from evicting a newer lock holder.
    *
    * @param resourceId - Unique identifier for the resource
+   * @param lockInstanceId - Instance ID from acquire(); if provided, CAS-checked
    */
-  release(resourceId: string): void {
+  release(resourceId: string, lockInstanceId?: string): void {
     const state = this.locks.get(resourceId);
+
+    if (lockInstanceId !== undefined && state?.lockInstanceId !== lockInstanceId) {
+      // CAS mismatch: this caller's lock was superseded by a newer holder.
+      // Silently no-op — the new holder's release will clean up.
+      debug('Stale release ignored: lock acquired by new holder', {
+        module: 'concurrency',
+        resourceId,
+        callerInstanceId: lockInstanceId,
+        currentInstanceId: state?.lockInstanceId,
+        correlationId: getCorrelationId(),
+      });
+      return;
+    }
 
     if (state?.waitResolve) {
       state.waitResolve();
@@ -234,7 +252,9 @@ class LockManager {
 
     // Check for expired lock using the lock's specific auto-expiry timeout
     if (state.acquiredAt && Date.now() - state.acquiredAt > state.autoExpiryMs) {
-      this.release(resourceId);
+      // Pass the current holder's instanceId so the CAS check in release() confirms
+      // we are evicting the correct (expired) entry rather than a newly acquired one.
+      this.release(resourceId, state.lockInstanceId);
       return false;
     }
 
@@ -274,9 +294,9 @@ export async function withLock<T>(
   timeoutMs: number = 5000,
   autoExpiryMs: number = LOCK_TIMEOUT_MS
 ): Promise<Result<T, Error>> {
-  const acquired = await lockManager.acquire(resourceId, timeoutMs, autoExpiryMs);
+  const lockInstanceId = await lockManager.acquire(resourceId, timeoutMs, autoExpiryMs);
 
-  if (!acquired) {
+  if (!lockInstanceId) {
     return {
       ok: false,
       error: new Error(`Failed to acquire lock for ${resourceId} within ${timeoutMs}ms`),
@@ -292,7 +312,8 @@ export async function withLock<T>(
       error: error instanceof Error ? error : new Error(String(error)),
     };
   } finally {
-    lockManager.release(resourceId);
+    // CAS release: only removes our entry; stale releases from expired holders are ignored.
+    lockManager.release(resourceId, lockInstanceId);
   }
 }
 
