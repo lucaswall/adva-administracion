@@ -12,6 +12,7 @@ vi.mock('./folder-structure.js', () => ({
   getCachedFolderStructure: vi.fn(),
   migrateTipoDeCambioHeaders: vi.fn(),
   migrateArchivosProcesadosHeaders: vi.fn(),
+  migrateRecibosHasCuitMatchColumn: vi.fn(),
   migrateFacturasEmitidasPagadaColumn: vi.fn(),
 }));
 
@@ -29,7 +30,7 @@ vi.mock('../utils/logger.js', () => ({
 
 import { migrateMovimientosColumns, migrateDashboardProcessedAt, runStartupMigrations, CURRENT_SCHEMA_VERSION } from './migrations.js';
 import { getValues, batchUpdate, getSheetMetadata, updateRowsWithFormatting, getSpreadsheetTimezone } from './sheets.js';
-import { getCachedFolderStructure, migrateTipoDeCambioHeaders, migrateArchivosProcesadosHeaders, migrateFacturasEmitidasPagadaColumn } from './folder-structure.js';
+import { getCachedFolderStructure, migrateTipoDeCambioHeaders, migrateArchivosProcesadosHeaders, migrateRecibosHasCuitMatchColumn, migrateFacturasEmitidasPagadaColumn } from './folder-structure.js';
 import { readSchemaVersion, writeSchemaVersion } from './schema-version.js';
 
 beforeEach(() => {
@@ -467,6 +468,8 @@ describe('runStartupMigrations', () => {
     vi.mocked(updateRowsWithFormatting).mockResolvedValue({ ok: true, value: undefined });
     // v5: pagada column migration
     vi.mocked(migrateFacturasEmitidasPagadaColumn).mockResolvedValue({ ok: true, value: undefined });
+    // v6: recibos hasCuitMatch column migration
+    vi.mocked(migrateRecibosHasCuitMatchColumn).mockResolvedValue({ ok: true, value: undefined });
     vi.mocked(writeSchemaVersion).mockResolvedValue({ ok: true, value: 'file-id' });
 
     await runStartupMigrations();
@@ -500,7 +503,7 @@ describe('runStartupMigrations', () => {
     expect(migrateArchivosProcesadosHeaders).not.toHaveBeenCalled();
   });
 
-  it('should run all 5 migrations when version is 0 and fileId exists (explicit run)', async () => {
+  it('should run all 6 migrations when version is 0 and fileId exists (explicit run)', async () => {
     vi.mocked(getCachedFolderStructure).mockReturnValue(mockFolderStructure);
     vi.mocked(readSchemaVersion).mockResolvedValue({
       ok: true,
@@ -523,6 +526,8 @@ describe('runStartupMigrations', () => {
     vi.mocked(updateRowsWithFormatting).mockResolvedValue({ ok: true, value: undefined });
     // v5: facturas emitidas pagada column
     vi.mocked(migrateFacturasEmitidasPagadaColumn).mockResolvedValue({ ok: true, value: undefined });
+    // v6: recibos hasCuitMatch column
+    vi.mocked(migrateRecibosHasCuitMatchColumn).mockResolvedValue({ ok: true, value: undefined });
     vi.mocked(writeSchemaVersion).mockResolvedValue({ ok: true, value: 'file-id' });
 
     await runStartupMigrations();
@@ -535,6 +540,8 @@ describe('runStartupMigrations', () => {
     expect(getSheetMetadata).toHaveBeenCalled();
     // v5: pagada column migration
     expect(migrateFacturasEmitidasPagadaColumn).toHaveBeenCalledWith('ingresos-id');
+    // v6: recibos hasCuitMatch column migration
+    expect(migrateRecibosHasCuitMatchColumn).toHaveBeenCalledWith('egresos-id');
     // Version updated
     expect(writeSchemaVersion).toHaveBeenCalledWith('root-id', CURRENT_SCHEMA_VERSION, 'file-id');
   });
@@ -546,6 +553,7 @@ describe('runStartupMigrations', () => {
       value: { version: 4, fileId: 'file-id' },
     });
     vi.mocked(migrateFacturasEmitidasPagadaColumn).mockResolvedValue({ ok: true, value: undefined });
+    vi.mocked(migrateRecibosHasCuitMatchColumn).mockResolvedValue({ ok: true, value: undefined });
     vi.mocked(writeSchemaVersion).mockResolvedValue({ ok: true, value: 'file-id' });
 
     await runStartupMigrations();
@@ -553,6 +561,7 @@ describe('runStartupMigrations', () => {
     expect(migrateTipoDeCambioHeaders).not.toHaveBeenCalled();
     expect(migrateArchivosProcesadosHeaders).not.toHaveBeenCalled();
     expect(migrateFacturasEmitidasPagadaColumn).toHaveBeenCalledWith('ingresos-id');
+    expect(migrateRecibosHasCuitMatchColumn).toHaveBeenCalledWith('egresos-id');
     expect(writeSchemaVersion).toHaveBeenCalledWith('root-id', CURRENT_SCHEMA_VERSION, 'file-id');
   });
 
