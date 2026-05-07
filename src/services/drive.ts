@@ -906,19 +906,26 @@ export async function renameFile(
  * Gets the parent folder IDs of a file
  *
  * @param fileId - File ID to get parents for
+ * @param signal - Optional AbortSignal to cancel cooperative retries (ADV-224).
+ *                 Forwarded to `withQuotaRetry` so an aborted caller does not
+ *                 inflate the global quota throttle or leak retry timers.
  * @returns Array of parent folder IDs
  */
-export async function getParents(fileId: string): Promise<Result<string[], Error>> {
+export async function getParents(fileId: string, signal?: AbortSignal): Promise<Result<string[], Error>> {
   return withTiming('getParents', async () => {
   try {
     const drive = await getDriveService();
 
-    const getResult = await withQuotaRetry(async () =>
-      drive.files.get({
-        fileId,
-        fields: 'parents',
-        supportsAllDrives: true,
-      })
+    const getResult = await withQuotaRetry(
+      async () =>
+        drive.files.get({
+          fileId,
+          fields: 'parents',
+          supportsAllDrives: true,
+        }),
+      undefined,
+      undefined,
+      signal,
     );
 
     if (!getResult.ok) {
@@ -969,6 +976,11 @@ export async function isDescendantOf(folderId: string, ancestorId: string): Prom
     return { ok: true, value: true };
   }
 
+  // Cooperative cancellation: when the deadline fires, abort the controller
+  // so any abandoned `traverse()` exits at its next `withQuotaRetry` checkpoint
+  // instead of inflating global quota backoff or leaking retry timers (ADV-224).
+  const controller = new AbortController();
+
   const traverse = async (): Promise<Result<boolean, Error>> => {
     const visited = new Set<string>();
     let currentId = folderId;
@@ -980,7 +992,7 @@ export async function isDescendantOf(folderId: string, ancestorId: string): Prom
       }
       visited.add(currentId);
 
-      const result = await getParents(currentId);
+      const result = await getParents(currentId, controller.signal);
       if (!result.ok) {
         // Drive API error — propagate so caller can distinguish from "not a descendant"
         return { ok: false, error: result.error };
@@ -1018,6 +1030,9 @@ export async function isDescendantOf(folderId: string, ancestorId: string): Prom
   let timeoutId: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<Result<boolean, Error>>(resolve => {
     timeoutId = setTimeout(() => {
+      // Abort BEFORE resolving so an abandoned traverse() sees the abort flag
+      // when its next withQuotaRetry checkpoint runs (ADV-224).
+      controller.abort('isDescendantOf deadline exceeded');
       resolve({
         ok: false,
         error: new Error(`isDescendantOf deadline exceeded after ${ISDESCENDANT_DEADLINE_MS}ms`),

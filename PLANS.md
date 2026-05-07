@@ -1,5 +1,6 @@
 # Implementation Plan
 
+**Status:** COMPLETE
 **Created:** 2026-05-07
 **Source:** Backlog: ADV-191, ADV-192, ADV-193, ADV-194, ADV-195, ADV-196, ADV-197, ADV-200, ADV-201, ADV-202, ADV-203, ADV-204, ADV-206, ADV-207, ADV-208, ADV-210, ADV-211, ADV-212, ADV-213, ADV-214, ADV-216, ADV-217, ADV-218
 **Linear Issues:** [ADV-191](https://linear.app/lw-claude/issue/ADV-191), [ADV-192](https://linear.app/lw-claude/issue/ADV-192), [ADV-193](https://linear.app/lw-claude/issue/ADV-193), [ADV-194](https://linear.app/lw-claude/issue/ADV-194), [ADV-195](https://linear.app/lw-claude/issue/ADV-195), [ADV-196](https://linear.app/lw-claude/issue/ADV-196), [ADV-197](https://linear.app/lw-claude/issue/ADV-197), [ADV-200](https://linear.app/lw-claude/issue/ADV-200), [ADV-201](https://linear.app/lw-claude/issue/ADV-201), [ADV-202](https://linear.app/lw-claude/issue/ADV-202), [ADV-203](https://linear.app/lw-claude/issue/ADV-203), [ADV-204](https://linear.app/lw-claude/issue/ADV-204), [ADV-206](https://linear.app/lw-claude/issue/ADV-206), [ADV-207](https://linear.app/lw-claude/issue/ADV-207), [ADV-208](https://linear.app/lw-claude/issue/ADV-208), [ADV-210](https://linear.app/lw-claude/issue/ADV-210), [ADV-211](https://linear.app/lw-claude/issue/ADV-211), [ADV-212](https://linear.app/lw-claude/issue/ADV-212), [ADV-213](https://linear.app/lw-claude/issue/ADV-213), [ADV-214](https://linear.app/lw-claude/issue/ADV-214), [ADV-216](https://linear.app/lw-claude/issue/ADV-216), [ADV-217](https://linear.app/lw-claude/issue/ADV-217), [ADV-218](https://linear.app/lw-claude/issue/ADV-218)
@@ -855,3 +856,43 @@ Summary: 1 consolidated issue found (Team: security, reliability, quality review
 
 1. Run `bug-hunter` agent — Review fixes for new bugs.
 2. Run `verifier` agent (full mode) — All tests pass, zero warnings.
+
+---
+
+## Iteration 3
+
+**Implemented:** 2026-05-07
+**Method:** Single-agent (1 fix, multi-file AbortSignal threading — effort score 4)
+
+### Tasks Completed This Iteration
+
+- Fix 1 (ADV-224): AbortSignal threading through `withQuotaRetry` → `getParents` → `isDescendantOf` so the 10s deadline cancels the abandoned `traverse()` cleanly. Eliminates the three downstream effects flagged in Iteration 2 review (wasted Drive quota, global throttle inflation, leaked retry timers delaying graceful shutdown).
+
+### Files Modified
+
+- `src/utils/concurrency.ts` — `withQuotaRetry(fn, standardConfig?, quotaConfig?, signal?)`: signal-check at top of each retry attempt, skip `quotaThrottle.reportQuotaError()` if pre-aborted, abortable retry-backoff `setTimeout` with explicit `removeEventListener` on natural completion (avoids listener accumulation if signal outlives the call).
+- `src/utils/concurrency.test.ts` — new describe block "withQuotaRetry abort signal (ADV-224)" with 4 tests: (a) pre-aborted signal returns aborted error and `fn` never called, (b) pre-aborted signal does not inflate `quotaThrottle`, (c) mid-retry abort exits without further attempts, (d) backwards-compatible without signal.
+- `src/services/drive.ts` — `getParents(fileId, signal?)` forwards signal to `withQuotaRetry`. `isDescendantOf` creates an `AbortController`; the deadline timeout calls `controller.abort('isDescendantOf deadline exceeded')` BEFORE `resolve(...)` so the abandoned `traverse()` sees `signal.aborted` at its next checkpoint.
+- `src/services/drive.test.ts` — `withQuotaRetry` mock now honours `signal`; new test "aborts the AbortSignal passed to withQuotaRetry when deadline fires (ADV-224)" captures the signal arriving at the mocked withQuotaRetry, advances past the 10s deadline, asserts the captured signal is aborted.
+
+### Linear Updates
+
+- ADV-224: Todo → In Progress → Review → Merge
+
+### Pre-commit Verification
+
+- bug-hunter (round 1): 3 S-size findings (1 medium comment-accuracy, 2 low: listener accumulation hygiene, redundant config pass). All 3 fixed inline.
+- bug-hunter (round 2): no new findings — all three follow-ups verified resolving the previous findings without introducing regressions; ordering of `controller.abort()` before `resolve()` confirmed correct.
+- verifier (full mode): 2100 tests pass, TypeScript compile clean (`tsc --noEmit`), build clean (zero warnings), Apps Script bundle clean.
+
+### Continuation Status
+
+All Fix Plan 2 tasks completed. No pending work.
+
+<!-- FIX PLAN 2 COMPLETE -->
+
+---
+
+## Status: COMPLETE
+
+All 24 Linear issues from the 2026-05-07 audit (ADV-191..218 in Iteration 1, ADV-219..223 fix-plan items in Iteration 2, ADV-224 fix-plan item in Iteration 3) implemented and reviewed successfully. All issues moved to Merge. PR pending.

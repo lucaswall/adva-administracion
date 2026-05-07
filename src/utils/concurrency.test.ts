@@ -775,3 +775,87 @@ describe('QuotaThrottle', () => {
     expect(callCount).toBe(2);
   });
 });
+
+describe('withQuotaRetry abort signal (ADV-224)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    quotaThrottle.reset();
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    quotaThrottle.reset();
+  });
+
+  it('returns aborted error and does not call fn when signal is already aborted', async () => {
+    const fn = vi.fn().mockResolvedValue('success');
+    const controller = new AbortController();
+    controller.abort('test-pre-abort');
+
+    const result = await withQuotaRetry(fn, {}, SHEETS_QUOTA_RETRY_CONFIG, controller.signal);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.message.toLowerCase()).toContain('abort');
+    }
+    expect(fn).not.toHaveBeenCalled();
+  });
+
+  it('does not inflate quotaThrottle when caller aborts before completing', async () => {
+    const fn = vi.fn().mockResolvedValue('success');
+    const controller = new AbortController();
+    controller.abort('test-pre-abort');
+
+    await withQuotaRetry(fn, {}, SHEETS_QUOTA_RETRY_CONFIG, controller.signal);
+
+    expect(quotaThrottle.getCurrentDelayMs()).toBe(0);
+  });
+
+  it('exits early without further attempts when signal aborts during retry-backoff', async () => {
+    const fn = vi.fn().mockRejectedValue(new Error('Quota exceeded'));
+    const controller = new AbortController();
+
+    const promise = withQuotaRetry(
+      fn,
+      { maxRetries: 5 },
+      { maxRetries: 5, baseDelayMs: 1000, maxDelayMs: 5000 },
+      controller.signal,
+    );
+
+    // Let the first attempt run and fail (microtask flush; no clock advance needed)
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(fn).toHaveBeenCalledTimes(1);
+
+    // Abort — this fires synchronously; the abortable backoff should resolve
+    // without firing the retry, and the next loop iteration's signal-check
+    // returns the abort error.
+    controller.abort('mid-retry-abort');
+    await vi.runAllTimersAsync();
+
+    const result = await promise;
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.message.toLowerCase()).toContain('abort');
+    }
+    // No further attempt after abort
+    expect(fn).toHaveBeenCalledTimes(1);
+  });
+
+  it('works without signal (backwards compatible)', async () => {
+    const fn = vi.fn().mockResolvedValue('value');
+
+    const resultPromise = withQuotaRetry(fn);
+    await vi.runAllTimersAsync();
+    const result = await resultPromise;
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value).toBe('value');
+    }
+    expect(fn).toHaveBeenCalledTimes(1);
+  });
+});

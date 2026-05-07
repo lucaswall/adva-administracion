@@ -40,10 +40,20 @@ vi.mock('../utils/concurrency.js', async () => {
   const actual = await vi.importActual<typeof import('../utils/concurrency.js')>('../utils/concurrency.js');
   return {
     ...actual,
-    withQuotaRetry: vi.fn(async <T>(fn: () => Promise<T>) => {
-      // Fast retry with max 3 attempts, 10ms delay for tests
+    withQuotaRetry: vi.fn(async <T>(
+      fn: () => Promise<T>,
+      _standardConfig?: unknown,
+      _quotaConfig?: unknown,
+      signal?: AbortSignal,
+    ) => {
+      // Fast retry with max 3 attempts, 10ms delay for tests.
+      // Honour the AbortSignal parameter so tests can verify cancellation
+      // propagation without exercising the real backoff machinery (ADV-224).
       let lastError: Error | null = null;
       for (let attempt = 0; attempt < 3; attempt++) {
+        if (signal?.aborted) {
+          return { ok: false, error: new Error(`Aborted: ${String(signal.reason ?? 'unknown')}`) };
+        }
         try {
           const result = await fn();
           return { ok: true, value: result };
@@ -74,6 +84,7 @@ import {
   clearDriveCache,
 } from './drive.js';
 import { warn, debug } from '../utils/logger.js';
+import { withQuotaRetry } from '../utils/concurrency.js';
 
 describe('Drive folder operations', () => {
   let mockDriveFiles: {
@@ -620,6 +631,35 @@ describe('Drive folder operations', () => {
         if (!result.ok) {
           expect(result.error.message).toContain('deadline');
         }
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('aborts the AbortSignal passed to withQuotaRetry when deadline fires (ADV-224)', async () => {
+      vi.useFakeTimers();
+      let capturedSignal: AbortSignal | undefined;
+
+      // Capture the signal arriving at withQuotaRetry on the first call and hang.
+      // This simulates the production path: traverse calls getParents which calls
+      // withQuotaRetry; if Drive is unresponsive, the deadline fires and should
+      // abort the signal so any abandoned coroutine exits cleanly.
+      vi.mocked(withQuotaRetry).mockImplementationOnce(
+        async <T>(_fn: () => Promise<T>, _standardConfig?: unknown, _quotaConfig?: unknown, signal?: AbortSignal) => {
+          capturedSignal = signal;
+          return new Promise<{ ok: false; error: Error }>(() => { /* never resolves */ });
+        },
+      );
+
+      try {
+        const promise = isDescendantOf('child-id', 'root-id');
+
+        await vi.advanceTimersByTimeAsync(10_500);
+
+        const result = await promise;
+        expect(result.ok).toBe(false);
+        expect(capturedSignal).toBeDefined();
+        expect(capturedSignal?.aborted).toBe(true);
       } finally {
         vi.useRealTimers();
       }

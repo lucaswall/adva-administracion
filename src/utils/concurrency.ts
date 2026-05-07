@@ -579,15 +579,23 @@ export function isQuotaError(error: unknown): boolean {
  * Executes a function with quota-aware retry
  * Uses longer delays for quota errors, standard delays for others
  *
+ * If `signal` is provided and aborted, the function exits early WITHOUT
+ * mutating the global `quotaThrottle` and clears any pending retry-backoff
+ * timer. This is the cancellation path used by `isDescendantOf` (ADV-224)
+ * to prevent abandoned coroutines from inflating global Drive backoff or
+ * leaking timers after their caller has already returned.
+ *
  * @param fn - Function to execute
  * @param standardConfig - Retry config for non-quota errors
  * @param quotaConfig - Retry config for quota errors
+ * @param signal - Optional AbortSignal for cooperative cancellation
  * @returns Result with the function return value or error
  */
 export async function withQuotaRetry<T>(
   fn: () => Promise<T>,
   standardConfig: Partial<RetryConfig> = {},
-  quotaConfig: Partial<RetryConfig> = SHEETS_QUOTA_RETRY_CONFIG
+  quotaConfig: Partial<RetryConfig> = SHEETS_QUOTA_RETRY_CONFIG,
+  signal?: AbortSignal
 ): Promise<Result<T, Error>> {
   const standard = { ...DEFAULT_RETRY_CONFIG, ...standardConfig };
   const quota = { ...SHEETS_QUOTA_RETRY_CONFIG, ...quotaConfig };
@@ -599,6 +607,15 @@ export async function withQuotaRetry<T>(
   const throttle = getQuotaThrottle();
 
   while (attempt <= maxAttempts) {
+    // Cooperative cancellation: exit before each attempt without inflating
+    // the global throttle or scheduling further retries (ADV-224).
+    if (signal?.aborted) {
+      return {
+        ok: false,
+        error: new Error(`Aborted: ${String(signal.reason ?? 'unknown')}`),
+      };
+    }
+
     try {
       // Wait for global quota clearance before each attempt
       await throttle.waitForClearance();
@@ -607,8 +624,13 @@ export async function withQuotaRetry<T>(
     } catch (error) {
       lastError = error instanceof Error ? error : new Error(String(error));
 
-      // Notify global throttle on quota errors
-      if (isQuotaError(lastError)) {
+      // Skip throttle inflation only when the caller had already aborted before
+      // fn() was invoked (pre-aborted signal). If abort fires during fn() or
+      // during backoff, reportQuotaError may still have been called for that
+      // attempt — this is accepted behaviour for cooperative cancellation:
+      // the next loop iteration's signal-check exits before any further
+      // throttle inflation. ADV-224.
+      if (isQuotaError(lastError) && !signal?.aborted) {
         throttle.reportQuotaError();
       }
 
@@ -628,7 +650,25 @@ export async function withQuotaRetry<T>(
           correlationId,
         });
 
-        await new Promise((resolve) => setTimeout(resolve, delay));
+        // Abortable retry-backoff: signal abort clears the timer so we don't
+        // hold the event loop alive past the caller's deadline. The abort
+        // listener is removed when the timer fires naturally, preventing
+        // accumulation if the signal outlives this call (ADV-224).
+        await new Promise<void>((resolve) => {
+          if (signal?.aborted) {
+            resolve();
+            return;
+          }
+          const onAbort = () => {
+            clearTimeout(timer);
+            resolve();
+          };
+          const timer = setTimeout(() => {
+            signal?.removeEventListener('abort', onAbort);
+            resolve();
+          }, delay);
+          signal?.addEventListener('abort', onAbort, { once: true });
+        });
       }
       attempt++;
     }
