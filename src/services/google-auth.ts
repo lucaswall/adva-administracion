@@ -101,8 +101,15 @@ export async function getGoogleAuthAsync(scopes: string[]): Promise<Auth.GoogleA
 }
 
 /**
- * Gets the default scopes for Drive and Sheets access
- * Uses full Drive access for folder creation and file movement
+ * Gets the default scopes for Drive and Sheets access.
+ *
+ * Uses full `drive` scope (not `drive.file`) because the app must read folders
+ * it did not create: Entrada, yearly archives, and banking subfolders already exist
+ * in the user's Drive. `drive.file` only grants access to files the application
+ * itself created, which is insufficient here.
+ *
+ * The service account is domain-delegated to a Workspace user who owns **only**
+ * the ADVA folder hierarchy, limiting the scope of access to that folder tree.
  */
 export function getDefaultScopes(): string[] {
   return [

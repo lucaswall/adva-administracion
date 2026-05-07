@@ -40,10 +40,20 @@ vi.mock('../utils/concurrency.js', async () => {
   const actual = await vi.importActual<typeof import('../utils/concurrency.js')>('../utils/concurrency.js');
   return {
     ...actual,
-    withQuotaRetry: vi.fn(async <T>(fn: () => Promise<T>) => {
-      // Fast retry with max 3 attempts, 10ms delay for tests
+    withQuotaRetry: vi.fn(async <T>(
+      fn: () => Promise<T>,
+      _standardConfig?: unknown,
+      _quotaConfig?: unknown,
+      signal?: AbortSignal,
+    ) => {
+      // Fast retry with max 3 attempts, 10ms delay for tests.
+      // Honour the AbortSignal parameter so tests can verify cancellation
+      // propagation without exercising the real backoff machinery (ADV-224).
       let lastError: Error | null = null;
       for (let attempt = 0; attempt < 3; attempt++) {
+        if (signal?.aborted) {
+          return { ok: false, error: new Error(`Aborted: ${String(signal.reason ?? 'unknown')}`) };
+        }
         try {
           const result = await fn();
           return { ok: true, value: result };
@@ -68,10 +78,13 @@ import {
   updateFileContent,
   moveFile,
   getParents,
+  isDescendantOf,
   renameFile,
+  downloadFile,
   clearDriveCache,
 } from './drive.js';
-import { warn } from '../utils/logger.js';
+import { warn, debug } from '../utils/logger.js';
+import { withQuotaRetry } from '../utils/concurrency.js';
 
 describe('Drive folder operations', () => {
   let mockDriveFiles: {
@@ -505,6 +518,154 @@ describe('Drive folder operations', () => {
     });
   });
 
+  describe('isDescendantOf (ADV-208)', () => {
+    it('returns true when folderId equals ancestorId (root case)', async () => {
+      const result = await isDescendantOf('root-id', 'root-id');
+      expect(result).toEqual({ ok: true, value: true });
+      expect(mockDriveFiles.get).not.toHaveBeenCalled();
+    });
+
+    it('returns true when folderId is a direct child of ancestorId', async () => {
+      mockDriveFiles.get.mockResolvedValueOnce({ data: { parents: ['root-id'] } });
+
+      const result = await isDescendantOf('child-id', 'root-id');
+
+      expect(result).toEqual({ ok: true, value: true });
+      expect(mockDriveFiles.get).toHaveBeenCalledTimes(1);
+    });
+
+    it('returns true for two-hop descendant', async () => {
+      mockDriveFiles.get
+        .mockResolvedValueOnce({ data: { parents: ['middle-id'] } })
+        .mockResolvedValueOnce({ data: { parents: ['root-id'] } });
+
+      const result = await isDescendantOf('grandchild-id', 'root-id');
+
+      expect(result).toEqual({ ok: true, value: true });
+      expect(mockDriveFiles.get).toHaveBeenCalledTimes(2);
+    });
+
+    it('returns false when folder is unrelated to ancestor', async () => {
+      mockDriveFiles.get
+        .mockResolvedValueOnce({ data: { parents: ['other-id'] } })
+        .mockResolvedValueOnce({ data: { parents: [] } });
+
+      const result = await isDescendantOf('unrelated-id', 'root-id');
+
+      expect(result).toEqual({ ok: true, value: false });
+    });
+
+    it('returns ok:false when Drive API errors during traversal (ADV-208 hardening)', async () => {
+      // All retries fail
+      mockDriveFiles.get.mockRejectedValue(new Error('500 Drive backend error'));
+
+      const result = await isDescendantOf('child-id', 'root-id');
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.error.message).toContain('500');
+      }
+    });
+
+    it('detects cycle in parent chain and returns false', async () => {
+      // A's parent is B, B's parent is A — cycle
+      mockDriveFiles.get
+        .mockResolvedValueOnce({ data: { parents: ['B'] } })
+        .mockResolvedValueOnce({ data: { parents: ['A'] } });
+
+      const result = await isDescendantOf('A', 'unrelated-root');
+
+      expect(result).toEqual({ ok: true, value: false });
+    });
+
+    it('returns false when MAX_ANCESTOR_DEPTH is exceeded without finding ancestor', async () => {
+      // Build a chain longer than MAX_ANCESTOR_DEPTH (20)
+      for (let i = 0; i < 25; i++) {
+        mockDriveFiles.get.mockResolvedValueOnce({ data: { parents: [`p${i + 1}`] } });
+      }
+
+      const result = await isDescendantOf('p0', 'unreachable-root');
+
+      expect(result).toEqual({ ok: true, value: false });
+      expect(mockDriveFiles.get).toHaveBeenCalledTimes(20);
+    });
+
+    it('emits a warn log when depth limit is exhausted (ADV-220)', async () => {
+      vi.mocked(warn).mockClear();
+      for (let i = 0; i < 25; i++) {
+        mockDriveFiles.get.mockResolvedValueOnce({ data: { parents: [`p${i + 1}`] } });
+      }
+
+      const result = await isDescendantOf('p0', 'unreachable-root');
+
+      expect(result).toEqual({ ok: true, value: false });
+      expect(vi.mocked(warn)).toHaveBeenCalledWith(
+        expect.stringContaining('depth'),
+        expect.objectContaining({
+          module: 'drive',
+          phase: 'descendant-check',
+          folderId: 'p0',
+          // After 20 hops starting at p0, traversal sits at p20 (the 20th parent
+          // mocked in the loop above), which is the deepest ancestor reached.
+          currentId: 'p20',
+          ancestorId: 'unreachable-root',
+          depthLimit: 20,
+        })
+      );
+    });
+
+    it('returns ok:false when overall deadline (10s) is exceeded (ADV-219)', async () => {
+      vi.useFakeTimers();
+      try {
+        // Make the Drive API call hang forever — withQuotaRetry awaits fn() and
+        // never reaches its retry setTimeout, so the inner traversal cannot finish.
+        mockDriveFiles.get.mockReturnValue(new Promise(() => { /* never resolves */ }));
+
+        const promise = isDescendantOf('child-id', 'root-id');
+
+        // Advance past the 10s overall deadline
+        await vi.advanceTimersByTimeAsync(10_500);
+
+        const result = await promise;
+        expect(result.ok).toBe(false);
+        if (!result.ok) {
+          expect(result.error.message).toContain('deadline');
+        }
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('aborts the AbortSignal passed to withQuotaRetry when deadline fires (ADV-224)', async () => {
+      vi.useFakeTimers();
+      let capturedSignal: AbortSignal | undefined;
+
+      // Capture the signal arriving at withQuotaRetry on the first call and hang.
+      // This simulates the production path: traverse calls getParents which calls
+      // withQuotaRetry; if Drive is unresponsive, the deadline fires and should
+      // abort the signal so any abandoned coroutine exits cleanly.
+      vi.mocked(withQuotaRetry).mockImplementationOnce(
+        async <T>(_fn: () => Promise<T>, _standardConfig?: unknown, _quotaConfig?: unknown, signal?: AbortSignal) => {
+          capturedSignal = signal;
+          return new Promise<{ ok: false; error: Error }>(() => { /* never resolves */ });
+        },
+      );
+
+      try {
+        const promise = isDescendantOf('child-id', 'root-id');
+
+        await vi.advanceTimersByTimeAsync(10_500);
+
+        const result = await promise;
+        expect(result.ok).toBe(false);
+        expect(capturedSignal).toBeDefined();
+        expect(capturedSignal?.aborted).toBe(true);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  });
+
   describe('listFilesInFolder subfolder error handling', () => {
     it('should log warning when subfolder recursion fails', async () => {
       // First call: parent folder contains a subfolder
@@ -674,5 +835,48 @@ describe('Drive folder operations', () => {
         supportsAllDrives: true,
       });
     });
+  });
+});
+
+describe('Drive API timing (ADV-216)', () => {
+  let mockDriveFiles: {
+    list: ReturnType<typeof vi.fn>;
+    get: ReturnType<typeof vi.fn>;
+    create: ReturnType<typeof vi.fn>;
+    update: ReturnType<typeof vi.fn>;
+    copy: ReturnType<typeof vi.fn>;
+  };
+
+  beforeEach(() => {
+    clearDriveCache();
+    vi.clearAllMocks();
+    mockDriveFiles = {
+      list: vi.fn(),
+      get: vi.fn(),
+      create: vi.fn(),
+      update: vi.fn(),
+      copy: vi.fn(),
+    };
+    vi.mocked(google.drive).mockReturnValue({
+      files: mockDriveFiles,
+    } as unknown as ReturnType<typeof google.drive>);
+  });
+
+  it('downloadFile emits a debug record with durationMs', async () => {
+    mockDriveFiles.get.mockResolvedValue({
+      data: Buffer.from('pdf-content'),
+    });
+
+    const result = await downloadFile('file123');
+
+    expect(result.ok).toBe(true);
+    expect(debug).toHaveBeenCalledWith(
+      expect.stringContaining('downloadFile'),
+      expect.objectContaining({
+        module: 'drive',
+        phase: 'api-call',
+        durationMs: expect.any(Number),
+      })
+    );
   });
 });

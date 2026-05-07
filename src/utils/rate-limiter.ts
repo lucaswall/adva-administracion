@@ -49,7 +49,7 @@ export interface RateLimitResult {
  * const limiter = createRateLimiter(60000, 60); // 60 requests per minute
  * const result = limiter.check('channel-id-123');
  * if (!result.allowed) {
- *   console.log(`Rate limited. Try again in ${result.resetMs}ms`);
+ *   warn('Rate limited', { module: 'rate-limiter', resetMs: result.resetMs });
  * }
  * ```
  */

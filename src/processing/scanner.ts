@@ -32,6 +32,7 @@ import { getConfig, PROCESSING_LOCK_ID, PROCESSING_LOCK_TIMEOUT_MS } from '../co
 import { debug, info, warn, error as logError } from '../utils/logger.js';
 import { withCorrelationAsync, getCorrelationId, generateCorrelationId } from '../utils/correlation.js';
 import { withLock } from '../utils/concurrency.js';
+import { isBudgetExhaustedError } from '../gemini/budget.js';
 
 // Import from refactored modules
 import { processFile, hasValidDate } from './extractor.js';
@@ -82,7 +83,7 @@ async function processFileWithRetry(
       dashboardOperativoId,
       fileInfo.id,
       fileInfo.name,
-      'unknown' as any // Placeholder - will be updated after successful extraction
+      'unknown' // Placeholder - will be updated after successful extraction
     );
     if (!markResult.ok) {
       warn('Failed to mark file as processing, continuing anyway', {
@@ -144,6 +145,23 @@ async function processFileWithRetry(
         result,
         retriedFileIds
       );
+    }
+
+    // Daily Gemini budget exhausted — defer this file rather than burning it
+    // to Sin Procesar. The 'processing' status remains in the tracking sheet,
+    // so stale recovery (5-min threshold) re-queues the file on the next scan;
+    // when the UTC budget rolls over, the next attempt succeeds.
+    // ADV-225 (Codex P1 review on PR 112).
+    if (isBudgetExhaustedError(processResult.error)) {
+      warn('Daily Gemini budget exhausted, deferring file to next scan/day-rollover', {
+        module: 'scanner',
+        phase: isRetry ? 'process-file-retry' : 'process-file',
+        fileId: fileInfo.id,
+        fileName: fileInfo.name,
+        error: processResult.error.message,
+        correlationId,
+      });
+      return;
     }
 
     // No more retries or not a JSON error - move to Sin Procesar
@@ -680,6 +698,19 @@ export async function scanFolder(folderId?: string): Promise<Result<ScanResult, 
               retriedFileIds
             );
           }, { correlationId: generateCorrelationId(), fileId: fileInfo.id, fileName: fileInfo.name });
+        }).catch((err: unknown) => {
+          // Defensive catch: processFileWithRetry handles all expected errors internally.
+          // This guard prevents unhandled promise rejections from unexpected crashes
+          // (e.g., withCorrelationAsync throwing, OOM, etc.) while still logging them.
+          // Bump result.errors so the scan summary reflects the crash (ADV-221).
+          result.errors++;
+          logError('Unexpected error in processing task', {
+            module: 'scanner',
+            phase: 'process-queue',
+            fileId: fileInfo.id,
+            fileName: fileInfo.name,
+            error: err instanceof Error ? err.message : String(err),
+          });
         });
       }
 
@@ -2281,6 +2312,9 @@ async function storeAndSortDocument(
 /**
  * Re-runs matching on unmatched documents
  *
+ * Acquires the unified processing lock so rematch cannot run concurrently
+ * with scan or match-movimientos operations.
+ *
  * @returns Rematch result with matches found
  */
 export async function rematch(): Promise<Result<RematchResult, Error>> {
@@ -2297,26 +2331,33 @@ export async function rematch(): Promise<Result<RematchResult, Error>> {
     }
 
     const config = getConfig();
-    const matchResult = await runMatching(folderStructure, config);
 
-    if (!matchResult.ok) {
-      return matchResult;
-    }
+    const lockResult = await withLock(
+      PROCESSING_LOCK_ID,
+      async () => {
+        const matchResult = await runMatching(folderStructure, config);
 
-    info('Rematch complete', {
-      module: 'scanner',
-      phase: 'rematch',
-      matchesFound: matchResult.value,
-      duration: Date.now() - startTime,
-      correlationId,
-    });
+        if (!matchResult.ok) {
+          throw matchResult.error;
+        }
 
-    return {
-      ok: true,
-      value: {
-        matchesFound: matchResult.value,
-        duration: Date.now() - startTime,
+        info('Rematch complete', {
+          module: 'scanner',
+          phase: 'rematch',
+          matchesFound: matchResult.value,
+          duration: Date.now() - startTime,
+          correlationId,
+        });
+
+        return {
+          matchesFound: matchResult.value,
+          duration: Date.now() - startTime,
+        } as RematchResult;
       },
-    };
+      PROCESSING_LOCK_TIMEOUT_MS,
+      PROCESSING_LOCK_TIMEOUT_MS
+    );
+
+    return lockResult as Result<RematchResult, Error>;
   }, { correlationId: generateCorrelationId() });
 }

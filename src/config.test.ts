@@ -104,9 +104,16 @@ describe('Numeric env var validation', () => {
   beforeEach(() => {
     vi.resetModules();
     process.env = { ...originalEnv };
-    // Set required vars to valid values
+    // Set required vars to valid values. Credentials must be seeded explicitly
+    // because NODE_ENV=development triggers the fail-closed credential gate
+    // (ADV-200). Without them loadConfig() throws on missing credentials
+    // before reaching the numeric assertions these tests are meant to exercise
+    // (Codex P1 review on PR 112).
     process.env.API_SECRET = 'test-secret';
     process.env.NODE_ENV = 'development';
+    process.env.GOOGLE_SERVICE_ACCOUNT_KEY = 'test-key';
+    process.env.GEMINI_API_KEY = 'test-key';
+    process.env.DRIVE_ROOT_FOLDER_ID = 'test-folder';
   });
 
   afterEach(() => {
@@ -267,15 +274,108 @@ describe('Numeric env var validation', () => {
   });
 });
 
+describe('Credential gate — fail-closed outside test mode (ADV-200)', () => {
+  const originalEnv = process.env;
+
+  beforeEach(() => {
+    vi.resetModules();
+    process.env = { ...originalEnv };
+    process.env.API_SECRET = 'test-secret';
+  });
+
+  afterEach(() => {
+    process.env = originalEnv;
+  });
+
+  // GOOGLE_SERVICE_ACCOUNT_KEY
+  it('throws when GOOGLE_SERVICE_ACCOUNT_KEY is missing in staging mode', async () => {
+    process.env.NODE_ENV = 'staging';
+    delete process.env.GOOGLE_SERVICE_ACCOUNT_KEY;
+    process.env.GEMINI_API_KEY = 'gemini-key';
+    process.env.DRIVE_ROOT_FOLDER_ID = 'folder-id';
+    const { getConfig, resetConfig } = await import('./config.js');
+    resetConfig();
+    expect(() => getConfig()).toThrow('GOOGLE_SERVICE_ACCOUNT_KEY is required');
+  });
+
+  it('throws when GOOGLE_SERVICE_ACCOUNT_KEY is missing in development mode', async () => {
+    process.env.NODE_ENV = 'development';
+    delete process.env.GOOGLE_SERVICE_ACCOUNT_KEY;
+    process.env.GEMINI_API_KEY = 'gemini-key';
+    process.env.DRIVE_ROOT_FOLDER_ID = 'folder-id';
+    const { getConfig, resetConfig } = await import('./config.js');
+    resetConfig();
+    expect(() => getConfig()).toThrow('GOOGLE_SERVICE_ACCOUNT_KEY is required');
+  });
+
+  it('allows GOOGLE_SERVICE_ACCOUNT_KEY to be missing in test mode', async () => {
+    process.env.NODE_ENV = 'test';
+    delete process.env.GOOGLE_SERVICE_ACCOUNT_KEY;
+    process.env.GEMINI_API_KEY = 'gemini-key';
+    process.env.DRIVE_ROOT_FOLDER_ID = 'folder-id';
+    const { getConfig, resetConfig } = await import('./config.js');
+    resetConfig();
+    expect(() => getConfig()).not.toThrow();
+  });
+
+  // GEMINI_API_KEY
+  it('throws when GEMINI_API_KEY is missing in staging mode', async () => {
+    process.env.NODE_ENV = 'staging';
+    process.env.GOOGLE_SERVICE_ACCOUNT_KEY = 'google-key';
+    delete process.env.GEMINI_API_KEY;
+    process.env.DRIVE_ROOT_FOLDER_ID = 'folder-id';
+    const { getConfig, resetConfig } = await import('./config.js');
+    resetConfig();
+    expect(() => getConfig()).toThrow('GEMINI_API_KEY is required');
+  });
+
+  it('allows GEMINI_API_KEY to be missing in test mode', async () => {
+    process.env.NODE_ENV = 'test';
+    process.env.GOOGLE_SERVICE_ACCOUNT_KEY = 'google-key';
+    delete process.env.GEMINI_API_KEY;
+    process.env.DRIVE_ROOT_FOLDER_ID = 'folder-id';
+    const { getConfig, resetConfig } = await import('./config.js');
+    resetConfig();
+    expect(() => getConfig()).not.toThrow();
+  });
+
+  // DRIVE_ROOT_FOLDER_ID
+  it('throws when DRIVE_ROOT_FOLDER_ID is missing in staging mode', async () => {
+    process.env.NODE_ENV = 'staging';
+    process.env.GOOGLE_SERVICE_ACCOUNT_KEY = 'google-key';
+    process.env.GEMINI_API_KEY = 'gemini-key';
+    delete process.env.DRIVE_ROOT_FOLDER_ID;
+    const { getConfig, resetConfig } = await import('./config.js');
+    resetConfig();
+    expect(() => getConfig()).toThrow('DRIVE_ROOT_FOLDER_ID is required');
+  });
+
+  it('allows DRIVE_ROOT_FOLDER_ID to be missing in test mode', async () => {
+    process.env.NODE_ENV = 'test';
+    process.env.GOOGLE_SERVICE_ACCOUNT_KEY = 'google-key';
+    process.env.GEMINI_API_KEY = 'gemini-key';
+    delete process.env.DRIVE_ROOT_FOLDER_ID;
+    const { getConfig, resetConfig } = await import('./config.js');
+    resetConfig();
+    expect(() => getConfig()).not.toThrow();
+  });
+});
+
 describe('ENVIRONMENT validation', () => {
   const originalEnv = process.env;
 
   beforeEach(() => {
     vi.resetModules();
     process.env = { ...originalEnv };
-    // Set required vars to valid values
+    // Set required vars to valid values. Credentials must be seeded explicitly
+    // because NODE_ENV=development triggers the fail-closed credential gate
+    // (ADV-200). Tests in this block focus on ENVIRONMENT validation, which
+    // runs after credential checks (Codex P1 review on PR 112).
     process.env.API_SECRET = 'test-secret';
     process.env.NODE_ENV = 'development';
+    process.env.GOOGLE_SERVICE_ACCOUNT_KEY = 'test-key';
+    process.env.GEMINI_API_KEY = 'test-key';
+    process.env.DRIVE_ROOT_FOLDER_ID = 'test-folder';
   });
 
   afterEach(() => {

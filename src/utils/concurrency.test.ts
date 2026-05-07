@@ -473,6 +473,70 @@ describe('lock auto-expiry atomicity', () => {
       expect(endEntry).toBe(`end-${taskId}`);
     }
   });
+
+  it('CAS release: expired lock holder release does not evict newer lock holder (ADV-195)', async () => {
+    // Bug: withLock's finally block calls lockManager.release(resourceId) unconditionally.
+    // If lock A expires and lock B acquires while A's fn is still running, then when A's fn
+    // completes and A's finally fires, it deletes B's lock entry. A third waiter C can then
+    // acquire while B is still running — a mutual exclusion violation.
+    //
+    // Fix: acquire() returns lockInstanceId (string|false); release() does CAS check —
+    // only deletes the entry if the caller's instanceId matches the current holder's.
+
+    const shortExpiry = 50; // ms
+    const runningConcurrently: string[] = [];
+    const violations: string[] = [];
+
+    // fn1: acquires at t=0, expires at t=50ms, fn body completes at t=150ms
+    const fn1 = vi.fn().mockImplementation(async () => {
+      runningConcurrently.push('fn1');
+      await new Promise(resolve => setTimeout(resolve, 150));
+      runningConcurrently.splice(runningConcurrently.indexOf('fn1'), 1);
+      return 'fn1';
+    });
+
+    // fn2: acquires at t=100ms (fn1 expired), fn body runs until t=300ms
+    const fn2 = vi.fn().mockImplementation(async () => {
+      runningConcurrently.push('fn2');
+      await new Promise(resolve => setTimeout(resolve, 200));
+      runningConcurrently.splice(runningConcurrently.indexOf('fn2'), 1);
+      return 'fn2';
+    });
+
+    // fn3: should only start AFTER fn2 completes (not when fn1 releases at t=150ms)
+    const fn3 = vi.fn().mockImplementation(async () => {
+      if (runningConcurrently.includes('fn2')) {
+        violations.push('fn3 acquired while fn2 was still running — mutual exclusion violated');
+      }
+      return 'fn3';
+    });
+
+    // t=0: fn1 acquires with short expiry
+    const p1 = withLock('cas-expiry-test', fn1, 5000, shortExpiry);
+
+    // Advance 100ms past fn1's 50ms expiry
+    await vi.advanceTimersByTimeAsync(100);
+
+    // fn2 acquires (fn1 is expired), fn3 waits for fn2
+    const p2 = withLock('cas-expiry-test', fn2, 5000, shortExpiry * 6);
+    const p3 = withLock('cas-expiry-test', fn3, 5000, shortExpiry * 6);
+
+    // Run all remaining timers:
+    // t=150: fn1's body completes → fn1's withLock finally → release()
+    //   Bug: deletes fn2's entry → fn3 wakes, acquires while fn2 is running
+    //   Fix: CAS mismatch (fn1's instanceId ≠ fn2's instanceId) → no-op
+    // t=300: fn2's body completes → fn2's withLock finally → release()
+    //   Fix: CAS match → fn2's entry removed → fn3 wakes and acquires safely
+    await vi.runAllTimersAsync();
+    const [r1, r2, r3] = await Promise.all([p1, p2, p3]);
+
+    expect(r1.ok).toBe(true);
+    expect(r2.ok).toBe(true);
+    expect(r3.ok).toBe(true);
+
+    // KEY: fn3 must NOT have run while fn2 was concurrently running
+    expect(violations).toHaveLength(0);
+  });
 });
 
 describe('computeVersion', () => {
@@ -709,5 +773,120 @@ describe('QuotaThrottle', () => {
 
     // After a quota error, the throttle should have been notified
     expect(callCount).toBe(2);
+  });
+});
+
+describe('withQuotaRetry abort signal (ADV-224)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    quotaThrottle.reset();
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    quotaThrottle.reset();
+  });
+
+  it('returns aborted error and does not call fn when signal is already aborted', async () => {
+    const fn = vi.fn().mockResolvedValue('success');
+    const controller = new AbortController();
+    controller.abort('test-pre-abort');
+
+    const result = await withQuotaRetry(fn, {}, SHEETS_QUOTA_RETRY_CONFIG, controller.signal);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.message.toLowerCase()).toContain('abort');
+    }
+    expect(fn).not.toHaveBeenCalled();
+  });
+
+  it('does not inflate quotaThrottle when caller aborts before completing', async () => {
+    const fn = vi.fn().mockResolvedValue('success');
+    const controller = new AbortController();
+    controller.abort('test-pre-abort');
+
+    await withQuotaRetry(fn, {}, SHEETS_QUOTA_RETRY_CONFIG, controller.signal);
+
+    expect(quotaThrottle.getCurrentDelayMs()).toBe(0);
+  });
+
+  it('exits early without further attempts when signal aborts during retry-backoff', async () => {
+    const fn = vi.fn().mockRejectedValue(new Error('Quota exceeded'));
+    const controller = new AbortController();
+
+    const promise = withQuotaRetry(
+      fn,
+      { maxRetries: 5 },
+      { maxRetries: 5, baseDelayMs: 1000, maxDelayMs: 5000 },
+      controller.signal,
+    );
+
+    // Let the first attempt run and fail (microtask flush; no clock advance needed)
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(fn).toHaveBeenCalledTimes(1);
+
+    // Abort — this fires synchronously; the abortable backoff should resolve
+    // without firing the retry, and the next loop iteration's signal-check
+    // returns the abort error.
+    controller.abort('mid-retry-abort');
+    await vi.runAllTimersAsync();
+
+    const result = await promise;
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.message.toLowerCase()).toContain('abort');
+    }
+    // No further attempt after abort
+    expect(fn).toHaveBeenCalledTimes(1);
+  });
+
+  it('works without signal (backwards compatible)', async () => {
+    const fn = vi.fn().mockResolvedValue('value');
+
+    const resultPromise = withQuotaRetry(fn);
+    await vi.runAllTimersAsync();
+    const result = await resultPromise;
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value).toBe('value');
+    }
+    expect(fn).toHaveBeenCalledTimes(1);
+  });
+
+  it('exits without calling fn when abort fires during throttle.waitForClearance', async () => {
+    // Prime the global throttle so waitForClearance imposes a measurable delay.
+    quotaThrottle.reportQuotaError();
+    expect(quotaThrottle.getCurrentDelayMs()).toBeGreaterThan(0);
+
+    const fn = vi.fn().mockResolvedValue('value');
+    const controller = new AbortController();
+
+    const resultPromise = withQuotaRetry(
+      fn,
+      {},
+      SHEETS_QUOTA_RETRY_CONFIG,
+      controller.signal,
+    );
+
+    // Abort while waitForClearance is sleeping (clock not yet advanced).
+    controller.abort('mid-clearance-abort');
+
+    // Run all timers so the throttle's setTimeout resolves.
+    await vi.runAllTimersAsync();
+
+    const result = await resultPromise;
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.message.toLowerCase()).toContain('abort');
+    }
+    // fn must NOT have been invoked after the abort
+    expect(fn).not.toHaveBeenCalled();
   });
 });

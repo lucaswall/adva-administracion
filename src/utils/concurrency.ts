@@ -94,9 +94,9 @@ class LockManager {
    * @param resourceId - Unique identifier for the resource
    * @param timeoutMs - Maximum time to wait for the lock
    * @param autoExpiryMs - Lock auto-expiry timeout (defaults to LOCK_TIMEOUT_MS = 30s)
-   * @returns true if lock acquired, false if timeout
+   * @returns The lockInstanceId string if acquired, false if timeout
    */
-  async acquire(resourceId: string, timeoutMs: number = 5000, autoExpiryMs: number = LOCK_TIMEOUT_MS): Promise<boolean> {
+  async acquire(resourceId: string, timeoutMs: number = 5000, autoExpiryMs: number = LOCK_TIMEOUT_MS): Promise<string | false> {
     const startTime = Date.now();
     const correlationId = getCorrelationId();
     const myLockInstanceId = String(++lockInstanceIdCounter) + '-' + Math.random().toString(36).slice(2);
@@ -172,7 +172,7 @@ class LockManager {
             correlationId,
           });
 
-          return true;
+          return myLockInstanceId;
         }
         // === ATOMIC BLOCK END - WE LOST ===
         // Another operation set their lock after us - continue to wait for it
@@ -205,12 +205,30 @@ class LockManager {
   }
 
   /**
-   * Releases a lock for a resource
+   * Releases a lock for a resource.
+   *
+   * Uses compare-and-swap: if `lockInstanceId` is provided, the entry is only
+   * deleted when it matches the current holder's ID. This prevents a stale
+   * release from an expired lock holder from evicting a newer lock holder.
    *
    * @param resourceId - Unique identifier for the resource
+   * @param lockInstanceId - Instance ID from acquire(); if provided, CAS-checked
    */
-  release(resourceId: string): void {
+  release(resourceId: string, lockInstanceId?: string): void {
     const state = this.locks.get(resourceId);
+
+    if (lockInstanceId !== undefined && state?.lockInstanceId !== lockInstanceId) {
+      // CAS mismatch: this caller's lock was superseded by a newer holder.
+      // Silently no-op — the new holder's release will clean up.
+      debug('Stale release ignored: lock acquired by new holder', {
+        module: 'concurrency',
+        resourceId,
+        callerInstanceId: lockInstanceId,
+        currentInstanceId: state?.lockInstanceId,
+        correlationId: getCorrelationId(),
+      });
+      return;
+    }
 
     if (state?.waitResolve) {
       state.waitResolve();
@@ -234,7 +252,9 @@ class LockManager {
 
     // Check for expired lock using the lock's specific auto-expiry timeout
     if (state.acquiredAt && Date.now() - state.acquiredAt > state.autoExpiryMs) {
-      this.release(resourceId);
+      // Pass the current holder's instanceId so the CAS check in release() confirms
+      // we are evicting the correct (expired) entry rather than a newly acquired one.
+      this.release(resourceId, state.lockInstanceId);
       return false;
     }
 
@@ -274,9 +294,9 @@ export async function withLock<T>(
   timeoutMs: number = 5000,
   autoExpiryMs: number = LOCK_TIMEOUT_MS
 ): Promise<Result<T, Error>> {
-  const acquired = await lockManager.acquire(resourceId, timeoutMs, autoExpiryMs);
+  const lockInstanceId = await lockManager.acquire(resourceId, timeoutMs, autoExpiryMs);
 
-  if (!acquired) {
+  if (!lockInstanceId) {
     return {
       ok: false,
       error: new Error(`Failed to acquire lock for ${resourceId} within ${timeoutMs}ms`),
@@ -292,7 +312,8 @@ export async function withLock<T>(
       error: error instanceof Error ? error : new Error(String(error)),
     };
   } finally {
-    lockManager.release(resourceId);
+    // CAS release: only removes our entry; stale releases from expired holders are ignored.
+    lockManager.release(resourceId, lockInstanceId);
   }
 }
 
@@ -558,15 +579,23 @@ export function isQuotaError(error: unknown): boolean {
  * Executes a function with quota-aware retry
  * Uses longer delays for quota errors, standard delays for others
  *
+ * If `signal` is provided and aborted, the function exits early WITHOUT
+ * mutating the global `quotaThrottle` and clears any pending retry-backoff
+ * timer. This is the cancellation path used by `isDescendantOf` (ADV-224)
+ * to prevent abandoned coroutines from inflating global Drive backoff or
+ * leaking timers after their caller has already returned.
+ *
  * @param fn - Function to execute
  * @param standardConfig - Retry config for non-quota errors
  * @param quotaConfig - Retry config for quota errors
+ * @param signal - Optional AbortSignal for cooperative cancellation
  * @returns Result with the function return value or error
  */
 export async function withQuotaRetry<T>(
   fn: () => Promise<T>,
   standardConfig: Partial<RetryConfig> = {},
-  quotaConfig: Partial<RetryConfig> = SHEETS_QUOTA_RETRY_CONFIG
+  quotaConfig: Partial<RetryConfig> = SHEETS_QUOTA_RETRY_CONFIG,
+  signal?: AbortSignal
 ): Promise<Result<T, Error>> {
   const standard = { ...DEFAULT_RETRY_CONFIG, ...standardConfig };
   const quota = { ...SHEETS_QUOTA_RETRY_CONFIG, ...quotaConfig };
@@ -578,16 +607,40 @@ export async function withQuotaRetry<T>(
   const throttle = getQuotaThrottle();
 
   while (attempt <= maxAttempts) {
+    // Cooperative cancellation: exit before each attempt without inflating
+    // the global throttle or scheduling further retries (ADV-224).
+    if (signal?.aborted) {
+      return {
+        ok: false,
+        error: new Error(`Aborted: ${String(signal.reason ?? 'unknown')}`),
+      };
+    }
+
     try {
       // Wait for global quota clearance before each attempt
       await throttle.waitForClearance();
+      // Re-check abort after the throttle wait — `waitForClearance` can block
+      // for up to QUOTA_THROTTLE_MAX_DELAY_MS, and if abort fires during that
+      // window we must NOT proceed to fn() (which would be a real Drive call
+      // after the caller's deadline already returned). ADV-224 follow-up.
+      if (signal?.aborted) {
+        return {
+          ok: false,
+          error: new Error(`Aborted: ${String(signal.reason ?? 'unknown')}`),
+        };
+      }
       const result = await fn();
       return { ok: true, value: result };
     } catch (error) {
       lastError = error instanceof Error ? error : new Error(String(error));
 
-      // Notify global throttle on quota errors
-      if (isQuotaError(lastError)) {
+      // Skip throttle inflation only when the caller had already aborted before
+      // fn() was invoked (pre-aborted signal). If abort fires during fn() or
+      // during backoff, reportQuotaError may still have been called for that
+      // attempt — this is accepted behaviour for cooperative cancellation:
+      // the next loop iteration's signal-check exits before any further
+      // throttle inflation. ADV-224.
+      if (isQuotaError(lastError) && !signal?.aborted) {
         throttle.reportQuotaError();
       }
 
@@ -607,7 +660,25 @@ export async function withQuotaRetry<T>(
           correlationId,
         });
 
-        await new Promise((resolve) => setTimeout(resolve, delay));
+        // Abortable retry-backoff: signal abort clears the timer so we don't
+        // hold the event loop alive past the caller's deadline. The abort
+        // listener is removed when the timer fires naturally, preventing
+        // accumulation if the signal outlives this call (ADV-224).
+        await new Promise<void>((resolve) => {
+          if (signal?.aborted) {
+            resolve();
+            return;
+          }
+          const onAbort = () => {
+            clearTimeout(timer);
+            resolve();
+          };
+          const timer = setTimeout(() => {
+            signal?.removeEventListener('abort', onAbort);
+            resolve();
+          }, delay);
+          signal?.addEventListener('abort', onAbort, { once: true });
+        });
       }
       attempt++;
     }

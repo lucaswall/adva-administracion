@@ -16,7 +16,7 @@ import type {
   DocumentType,
   ClassificationResult,
 } from '../types/index.js';
-import { GeminiClient, type UsageCallbackData } from '../gemini/client.js';
+import { getGeminiClient, type UsageCallbackData } from '../gemini/client.js';
 import {
   CLASSIFICATION_PROMPT,
   FACTURA_PROMPT,
@@ -38,6 +38,7 @@ import {
   parseRetencionResponse,
 } from '../gemini/parser.js';
 import { downloadFile } from '../services/drive.js';
+import { detectInvisibleText } from './pdf-sanitize.js';
 import { getCachedFolderStructure } from '../services/folder-structure.js';
 import { generateRequestId, logTokenUsage } from '../services/token-usage-logger.js';
 import { getConfig, GEMINI_PRICING } from '../config.js';
@@ -170,7 +171,10 @@ export async function processFile(
       }
     : undefined;
 
-  const gemini = new GeminiClient(config.geminiApiKey, config.geminiRpmLimit, usageCallback);
+  // Use the shared singleton GeminiClient — enforces RPM cap across all concurrent processFile invocations.
+  // The per-file usageCallback is passed per-call to analyzeDocument (not at construction time),
+  // so each call captures the correct correlation context and file metadata.
+  const gemini = getGeminiClient();
 
   // Download file content
   const downloadResult = await downloadFile(fileInfo.id);
@@ -180,6 +184,45 @@ export async function processFile(
 
   const content = downloadResult.value;
 
+  // Guard: reject documents that exceed the configured size limit.
+  // Done BEFORE the sanitizer so an oversized PDF never gets converted to a
+  // very large latin1 string for regex scanning — the size limit is meant to
+  // bound exactly that kind of allocation (Codex P2 review on PR 112). Both
+  // branches route to Sin Procesar regardless, so there is no security
+  // regression from running size first.
+  if (content.byteLength > config.maxDocumentBytes) {
+    warn('Document exceeds size limit, routing to Sin Procesar', {
+      module: 'extractor',
+      phase: 'size-check',
+      fileId: fileInfo.id,
+      fileName: fileInfo.name,
+      sizeBytes: content.byteLength,
+      limitBytes: config.maxDocumentBytes,
+    });
+    return {
+      ok: false,
+      error: new Error(
+        `Document size ${content.byteLength} bytes exceeds MAX_DOCUMENT_BYTES limit of ${config.maxDocumentBytes} bytes`
+      ),
+    };
+  }
+
+  // Sanitize: reject PDFs that contain invisible text (prompt-injection vector).
+  const sanitizeResult = detectInvisibleText(content);
+  if (sanitizeResult.hasInvisible) {
+    warn('Invisible text detected in document, routing to Sin Procesar', {
+      module: 'extractor',
+      phase: 'sanitize',
+      fileId: fileInfo.id,
+      fileName: fileInfo.name,
+      reason: sanitizeResult.reason,
+    });
+    return {
+      ok: false,
+      error: new Error(`Invisible text detected: ${sanitizeResult.reason}`),
+    };
+  }
+
   // Step 1: Classify the document
   const classifyResult = await gemini.analyzeDocument(
     content,
@@ -187,7 +230,8 @@ export async function processFile(
     CLASSIFICATION_PROMPT,
     3,
     fileInfo.id,
-    fileInfo.name
+    fileInfo.name,
+    usageCallback
   );
 
   if (!classifyResult.ok) {
@@ -275,7 +319,8 @@ export async function processFile(
     extractPrompt,
     3,
     fileInfo.id,
-    fileInfo.name
+    fileInfo.name,
+    usageCallback
   );
 
   if (!extractResult.ok) {

@@ -14,7 +14,7 @@ import type {
 } from '../types/index.js';
 import { PROCESSING_LOCK_ID, PROCESSING_LOCK_TIMEOUT_MS, ADVA_CUITS } from '../config.js';
 import { withLock } from '../utils/concurrency.js';
-import { info, warn, debug } from '../utils/logger.js';
+import { info, warn, debug, error as logError } from '../utils/logger.js';
 import { getCachedFolderStructure } from '../services/folder-structure.js';
 import { getValues, batchUpdate, type CellValue } from '../services/sheets.js';
 import { parseNumber } from '../utils/numbers.js';
@@ -211,6 +211,8 @@ export interface MatchMovimientosResult {
   creditsFilled: number;
   noMatches: number;
   errors: number;
+  /** Count of failures writing pagada=SI to Control sheets. Non-fatal; detalle and pagada are independent. */
+  pagadaErrors: number;
   duration: number;
 }
 
@@ -225,6 +227,8 @@ export interface MatchAllResult {
   totalFilled: number;
   totalDebitsFilled: number;
   totalCreditsFilled: number;
+  /** Total count of pagada=SI write failures across all banks. Non-fatal. */
+  totalPagadaErrors: number;
   duration: number;
 }
 
@@ -874,6 +878,7 @@ async function matchBankMovimientos(
       creditsFilled: 0,
       noMatches: 0,
       errors: 1,
+      pagadaErrors: 0,
       duration: Date.now() - startTime,
     };
   }
@@ -1139,6 +1144,7 @@ async function matchBankMovimientos(
 
   // Write pagada=SI for matched facturas, batched by spreadsheet
   // Only if detalle updates succeeded — keeps movimiento match and pagada flag in sync
+  let pagadaErrors = 0;
   if (updateResult.ok && pagadaUpdates.length > 0) {
     const bySpreadsheet = new Map<string, Array<{ range: string; values: CellValue[][] }>>();
     for (const update of pagadaUpdates) {
@@ -1151,7 +1157,8 @@ async function matchBankMovimientos(
     for (const [ssId, cellUpdates] of bySpreadsheet) {
       const pagadaResult = await batchUpdate(ssId, cellUpdates);
       if (!pagadaResult.ok) {
-        warn('Failed to write pagada updates', {
+        pagadaErrors++;
+        logError('Failed to write pagada updates', {
           module: 'match-movimientos',
           bankName,
           error: pagadaResult.error.message,
@@ -1173,6 +1180,7 @@ async function matchBankMovimientos(
     creditsFilled,
     noMatches,
     errors: updateResult.ok ? 0 : 1,
+    pagadaErrors,
     duration: Date.now() - startTime,
   };
 }
@@ -1290,6 +1298,7 @@ export async function matchAllMovimientos(
       const totalFilled = results.reduce((sum, r) => sum + r.movimientosFilled, 0);
       const totalDebitsFilled = results.reduce((sum, r) => sum + r.debitsFilled, 0);
       const totalCreditsFilled = results.reduce((sum, r) => sum + r.creditsFilled, 0);
+      const totalPagadaErrors = results.reduce((sum, r) => sum + r.pagadaErrors, 0);
 
       return {
         ok: true as const,
@@ -1300,6 +1309,7 @@ export async function matchAllMovimientos(
           totalFilled,
           totalDebitsFilled,
           totalCreditsFilled,
+          totalPagadaErrors,
           duration: Date.now() - startTime,
         },
       };
@@ -1308,24 +1318,42 @@ export async function matchAllMovimientos(
     PROCESSING_LOCK_TIMEOUT_MS
   );
 
-  // Handle lock acquisition failure
+  // `withLock` returns ok:false for two distinct cases:
+  //   1. Lock acquisition timeout — concurrent scan/match already running.
+  //   2. The locked callback itself threw — a real production failure.
+  // Only case (1) should be reported as `skipped/already_running`. Case (2)
+  // must surface to the caller so it appears in logs and the HTTP response
+  // (Codex P2 review on PR 112).
   if (!lockResult.ok) {
-    info('Match movimientos skipped - scan or match already running', {
+    const isLockAcquisitionTimeout = lockResult.error.message.startsWith(
+      `Failed to acquire lock for ${PROCESSING_LOCK_ID}`,
+    );
+    if (isLockAcquisitionTimeout) {
+      info('Match movimientos skipped - scan or match already running', {
+        module: 'match-movimientos',
+      });
+      return {
+        ok: true,
+        value: {
+          skipped: true,
+          reason: 'already_running',
+          results: [],
+          totalProcessed: 0,
+          totalFilled: 0,
+          totalDebitsFilled: 0,
+          totalCreditsFilled: 0,
+          totalPagadaErrors: 0,
+          duration: 0,
+        },
+      };
+    }
+    // Unexpected exception inside the locked callback — propagate so the
+    // caller (route handler, logs, monitoring) can react.
+    logError('Match movimientos failed unexpectedly inside lock', {
       module: 'match-movimientos',
+      error: lockResult.error.message,
     });
-    return {
-      ok: true,
-      value: {
-        skipped: true,
-        reason: 'already_running',
-        results: [],
-        totalProcessed: 0,
-        totalFilled: 0,
-        totalDebitsFilled: 0,
-        totalCreditsFilled: 0,
-        duration: 0,
-      },
-    };
+    return { ok: false, error: lockResult.error };
   }
 
   // Unwrap the nested result - callback returns Result<MatchAllResult, Error>

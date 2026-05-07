@@ -400,6 +400,28 @@ Files with stale 'processing' status are automatically recovered on server start
 - Column E: `status` (`processing` | `success` | `failed: <error message>` | `duplicate`)
 - Column F: `originalFileId` (Drive file ID of original document, populated for duplicates only)
 
+## GRACEFUL SHUTDOWN
+
+### Timeout Policy
+
+`SHUTDOWN_TIMEOUT_MS = 30 000 ms` (30 seconds, defined in `src/server.ts`).
+
+**Why 30 s:** The startup recovery mechanism (`getStaleProcessingFileIds`) already handles files that are left in `processing` status when the server is terminated mid-scan. Abrupt termination is therefore safe — any interrupted files will be re-queued on the next boot. A 30-second window gives in-flight HTTP requests and active watch-channel teardown time to complete without needing a larger window.
+
+### Signal Handler Pattern
+
+SIGTERM and SIGINT handlers use `void shutdown(signal).catch(err => logError(...))`:
+
+```typescript
+process.on('SIGTERM', () => {
+  void shutdown('SIGTERM').catch((err: Error) => {
+    logError('Shutdown rejection', { module: 'server', error: err.message });
+  });
+});
+```
+
+**Why `void` + `.catch()`:** `shutdown()` (from `createShutdownHandler`) already has an internal try/catch that handles all cleanup errors and calls `process.exit(1)` on failure. The outer `.catch()` is a defensive safety net for any unexpected rejection that escapes the internal handler, ensuring it is logged rather than silently becoming an unhandled promise rejection (ADV-211).
+
 ## SECURITY
 
 All endpoints except `/health` and `/webhooks/drive` require Bearer token: `Authorization: Bearer <API_SECRET>`
@@ -412,6 +434,14 @@ server.post('/api/new', { onRequest: authMiddleware }, handler);
 **Webhook endpoint:** `/webhooks/drive` is public (no auth) - Google Drive cannot send custom headers. Security via channel ID validation.
 
 **Secret rotation:** Update `API_SECRET` in Railway, redeploy. The boot sync rebuilds and re-pushes the Apps Script bundle automatically.
+
+**Google Drive scope:** The service account uses the full `https://www.googleapis.com/auth/drive` scope (not `drive.file`). The app must read pre-existing folders it did not create — Entrada, yearly archives, and banking subfolders — so `drive.file` (which only grants access to files the app itself created) is unworkable. The SA is domain-delegated to a Workspace user who owns **only** the ADVA folder hierarchy, limiting blast radius to that folder tree.
+
+**GEMINI_API_KEY GCP restriction (CWE-1390 mitigation):** The `GEMINI_API_KEY` MUST be restricted in the GCP console to the *Generative Language API* (`generativelanguage.googleapis.com`) targets only. An unrestricted key can be used against any GCP API if it is ever leaked. To verify the restriction is in place:
+```bash
+gcloud alpha services api-keys describe <key-id> --project=<project-id> | grep targets
+```
+The output must list `generativelanguage.googleapis.com`. If `targets` is empty, the key is unrestricted and must be updated immediately.
 
 ## COMMANDS
 
@@ -428,7 +458,7 @@ The Apps Script bundle is produced into `dist/apps-script/{Code.js,appsscript.js
 | Var | Required | Default |
 |-----|----------|---------|
 | GOOGLE_SERVICE_ACCOUNT_KEY | Yes | - |
-| GEMINI_API_KEY | Yes | - |
+| GEMINI_API_KEY | Yes — must be GCP-restricted (see SECURITY) | - |
 | DRIVE_ROOT_FOLDER_ID | Yes | - |
 | API_SECRET | Yes | - |
 | ENVIRONMENT | Yes (production only) | - |
@@ -544,10 +574,12 @@ ROOT/
 
 ## SPREADSHEETS
 
+**Note:** authoritative column counts live in `src/constants/spreadsheet-headers.ts` and `SPREADSHEET_FORMAT.md`. The summaries below are illustrative.
+
 See `SPREADSHEET_FORMAT.md` for complete schema.
 
 - **Control de Ingresos**: Facturas Emitidas (20 cols, A:T), Pagos Recibidos (17 cols), Retenciones Recibidas (15 cols)
-- **Control de Egresos**: Facturas Recibidas (20 cols), Pagos Enviados (17 cols), Recibos (18 cols)
+- **Control de Egresos**: Facturas Recibidas (20 cols), Pagos Enviados (17 cols), Recibos (19 cols)
 - **Control de Resumenes**: 3 distinct schemas based on document type:
   - `resumen_bancario`: 12 cols (A:L) with `periodo` (YYYY-MM) as first column, `moneda` (ARS/USD), includes `balanceOk` and `balanceDiff` columns for validation
   - `resumen_tarjeta`: 10 cols (A:J) with `periodo` (YYYY-MM) as first column, `tipoTarjeta` (Visa/Mastercard/etc)
@@ -555,7 +587,7 @@ See `SPREADSHEET_FORMAT.md` for complete schema.
   - `periodo` format matches Movimientos sheet names (YYYY-MM derived from fechaHasta)
   - Rows sorted by `periodo` ascending (oldest first)
 - **Movimientos Bancario**: 9 cols (A:I) with running balance formulas - `saldo` (parsed from PDF), `saldoCalculado` (computed formula), `matchedFileId` (fileId of matched document), `matchedType` (AUTO/MANUAL/empty), `detalle` (human-readable match description)
-- **Dashboard**: Pagos Pendientes (10 cols), Cobros Pendientes (10 cols), API Mensual (7 cols), Uso de API (12 cols)
+- **Dashboard**: Pagos Pendientes (10 cols), Cobros Pendientes (10 cols), API Mensual (8 cols), Uso de API (15 cols)
 
 **Principles:**
 - Store counterparty info only, ADVA's role is implicit

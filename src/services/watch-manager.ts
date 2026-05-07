@@ -144,6 +144,25 @@ export function getChannelCount(): number {
 }
 
 /**
+ * Wraps a cron task function with error handling to prevent unhandled rejections.
+ * Logs any errors that occur during cron task execution.
+ *
+ * @param phase - The cron task phase name (for logging)
+ * @param fn - The async task to execute
+ */
+async function runCronTask(phase: string, fn: () => Promise<void>): Promise<void> {
+  try {
+    await fn();
+  } catch (err) {
+    logError('Cron task failed', {
+      module: 'watch-manager',
+      phase,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
+/**
  * Initialize watch manager with webhook URL and start cron jobs
  *
  * @param url - Public webhook URL for Drive notifications
@@ -152,30 +171,38 @@ export function initWatchManager(url: string): void {
   webhookUrl = url;
 
   // Start channel renewal cron job (every 30 minutes)
-  renewalJob = cron.schedule('*/30 * * * *', async () => {
+  renewalJob = cron.schedule('*/30 * * * *', () => {
     debug('Running channel renewal check', { module: 'watch-manager', phase: 'renewal' });
-    await renewChannels();
+    void runCronTask('renewal', async () => {
+      await renewChannels();
+    });
   });
 
   // Start fallback polling cron job (every 5 minutes)
   pollingJob = cron.schedule('*/5 * * * *', () => {
     debug('Running fallback polling check', { module: 'watch-manager', phase: 'polling' });
-    checkAndTriggerFallbackScan();
+    void runCronTask('polling', async () => {
+      checkAndTriggerFallbackScan();
+    });
   });
 
   // Start status sheet update cron job (every 5 minutes)
-  statusUpdateJob = cron.schedule('*/5 * * * *', async () => {
+  statusUpdateJob = cron.schedule('*/5 * * * *', () => {
     debug('Running status sheet update', { module: 'watch-manager', phase: 'status-update' });
-    const folderStructure = getCachedFolderStructure();
-    if (folderStructure?.dashboardOperativoId) {
-      await updateStatusSheet(folderStructure.dashboardOperativoId);
-    }
+    void runCronTask('status-update', async () => {
+      const folderStructure = getCachedFolderStructure();
+      if (folderStructure?.dashboardOperativoId) {
+        await updateStatusSheet(folderStructure.dashboardOperativoId);
+      }
+    });
   });
 
   // Start notification cleanup cron job (every 10 minutes)
-  cleanupJob = cron.schedule('*/10 * * * *', async () => {
+  cleanupJob = cron.schedule('*/10 * * * *', () => {
     debug('Running notification cleanup', { module: 'watch-manager', phase: 'cleanup' });
-    await cleanupExpiredNotifications();
+    void runCronTask('cleanup', async () => {
+      await cleanupExpiredNotifications();
+    });
   });
 
   info('Watch manager initialized', { module: 'watch-manager', phase: 'init' });

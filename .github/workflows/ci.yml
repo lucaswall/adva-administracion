@@ -29,3 +29,8 @@ jobs:
 
       - name: Build
         run: npm run build
+        env:
+          # Fake values — CI only validates that the Apps Script bundle compiles.
+          # The real values are injected on Railway boot; these never reach Google.
+          API_BASE_URL: https://ci-stub.invalid
+          API_SECRET: ci-stub-not-deployed

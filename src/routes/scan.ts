@@ -11,6 +11,9 @@ import { extractDriveFolderId, isValidDriveId } from '../utils/drive-parser.js';
 import { updateStatusSheet } from '../services/status-sheet.js';
 import { getCachedFolderStructure } from '../services/folder-structure.js';
 import { updateLastScanTime } from '../services/watch-manager.js';
+import { isDescendantOf } from '../services/drive.js';
+import { getConfig } from '../config.js';
+import { respond500, respond503 } from '../utils/error-response.js';
 
 /**
  * Scan request body
@@ -72,6 +75,21 @@ export async function scanRoutes(server: FastifyInstance) {
         };
       }
 
+      // Verify the folder is within the configured root
+      const config = getConfig();
+      const ancestryResult = await isDescendantOf(extractedId, config.driveRootFolderId);
+      if (!ancestryResult.ok) {
+        // Drive API error or 10s deadline exceeded — return 503 (downstream service issue,
+        // not an internal server error). ADV-219.
+        return respond503(reply, ancestryResult.error, { module: 'scan', phase: 'ancestry-check' });
+      }
+      if (!ancestryResult.value) {
+        reply.status(403);
+        return {
+          error: 'Access denied: folderId is not within the configured root folder',
+        };
+      }
+
       folderId = extractedId;
     }
 
@@ -80,10 +98,7 @@ export async function scanRoutes(server: FastifyInstance) {
     const result = await scanFolder(folderId);
 
     if (!result.ok) {
-      reply.status(500);
-      return {
-        error: result.error.message,
-      };
+      return respond500(reply, result.error, { module: 'scan', phase: 'scan' });
     }
 
     // Update last scan time and status sheet after successful scan
@@ -120,10 +135,7 @@ export async function scanRoutes(server: FastifyInstance) {
     const result = await rematch();
 
     if (!result.ok) {
-      reply.status(500);
-      return {
-        error: result.error.message,
-      };
+      return respond500(reply, result.error, { module: 'scan', phase: 'rematch' });
     }
 
     return result.value;
@@ -156,10 +168,7 @@ export async function scanRoutes(server: FastifyInstance) {
     const result = await matchAllMovimientos({ force });
 
     if (!result.ok) {
-      reply.status(500);
-      return {
-        error: result.error.message,
-      };
+      return respond500(reply, result.error, { module: 'scan', phase: 'match-movimientos' });
     }
 
     return result.value;
