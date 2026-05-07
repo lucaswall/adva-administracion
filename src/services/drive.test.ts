@@ -578,6 +578,52 @@ describe('Drive folder operations', () => {
       expect(result).toEqual({ ok: true, value: false });
       expect(mockDriveFiles.get).toHaveBeenCalledTimes(8);
     });
+
+    it('emits a warn log when depth limit is exhausted (ADV-220)', async () => {
+      vi.mocked(warn).mockClear();
+      for (let i = 0; i < 10; i++) {
+        mockDriveFiles.get.mockResolvedValueOnce({ data: { parents: [`p${i + 1}`] } });
+      }
+
+      const result = await isDescendantOf('p0', 'unreachable-root');
+
+      expect(result).toEqual({ ok: true, value: false });
+      expect(vi.mocked(warn)).toHaveBeenCalledWith(
+        expect.stringContaining('depth'),
+        expect.objectContaining({
+          module: 'drive',
+          phase: 'descendant-check',
+          folderId: 'p0',
+          // After 8 hops starting at p0, traversal sits at p8 (the 8th parent
+          // mocked in the loop above), which is the deepest ancestor reached.
+          currentId: 'p8',
+          ancestorId: 'unreachable-root',
+          depthLimit: 8,
+        })
+      );
+    });
+
+    it('returns ok:false when overall deadline (10s) is exceeded (ADV-219)', async () => {
+      vi.useFakeTimers();
+      try {
+        // Make the Drive API call hang forever — withQuotaRetry awaits fn() and
+        // never reaches its retry setTimeout, so the inner traversal cannot finish.
+        mockDriveFiles.get.mockReturnValue(new Promise(() => { /* never resolves */ }));
+
+        const promise = isDescendantOf('child-id', 'root-id');
+
+        // Advance past the 10s overall deadline
+        await vi.advanceTimersByTimeAsync(10_500);
+
+        const result = await promise;
+        expect(result.ok).toBe(false);
+        if (!result.ok) {
+          expect(result.error.message).toContain('deadline');
+        }
+      } finally {
+        vi.useRealTimers();
+      }
+    });
   });
 
   describe('listFilesInFolder subfolder error handling', () => {

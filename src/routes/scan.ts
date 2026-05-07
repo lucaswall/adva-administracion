@@ -13,7 +13,7 @@ import { getCachedFolderStructure } from '../services/folder-structure.js';
 import { updateLastScanTime } from '../services/watch-manager.js';
 import { isDescendantOf } from '../services/drive.js';
 import { getConfig } from '../config.js';
-import { respond500 } from '../utils/error-response.js';
+import { respond500, respond503 } from '../utils/error-response.js';
 
 /**
  * Scan request body
@@ -79,8 +79,9 @@ export async function scanRoutes(server: FastifyInstance) {
       const config = getConfig();
       const ancestryResult = await isDescendantOf(extractedId, config.driveRootFolderId);
       if (!ancestryResult.ok) {
-        // Drive API error during traversal — could not determine, return 500
-        return respond500(reply, ancestryResult.error, { module: 'scan', phase: 'ancestry-check' });
+        // Drive API error or 10s deadline exceeded — return 503 (downstream service issue,
+        // not an internal server error). ADV-219.
+        return respond503(reply, ancestryResult.error, { module: 'scan', phase: 'ancestry-check' });
       }
       if (!ancestryResult.value) {
         reply.status(403);

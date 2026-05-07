@@ -256,7 +256,7 @@ describe('Scan routes', () => {
       expect(mockScanFolder).not.toHaveBeenCalled();
     });
 
-    it('returns 500 when ancestry check fails due to Drive API error (ADV-208)', async () => {
+    it('returns 503 when ancestry check fails due to Drive API error (ADV-208/ADV-219)', async () => {
       mockIsDescendantOf.mockResolvedValue({ ok: false, error: new Error('Drive API quota exceeded') });
 
       const response = await server.inject({
@@ -266,9 +266,10 @@ describe('Scan routes', () => {
         payload: { folderId: '1ABC2defGHIjklMNOpqrSTUvwxyz12' },
       });
 
-      expect(response.statusCode).toBe(500);
+      expect(response.statusCode).toBe(503);
       const body = JSON.parse(response.payload);
-      expect(body.error).toBe('Internal server error');
+      expect(body.error).toBe('Service unavailable');
+      expect(body.correlationId).toMatch(/^[0-9a-f-]{36}$/);
       expect(mockScanFolder).not.toHaveBeenCalled();
     });
 

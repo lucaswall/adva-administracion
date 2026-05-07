@@ -942,15 +942,26 @@ export async function getParents(fileId: string): Promise<Result<string[], Error
 const MAX_ANCESTOR_DEPTH = 8;
 
 /**
+ * Overall deadline for isDescendantOf. Each per-hop Drive call is wrapped in
+ * withQuotaRetry (up to 5 attempts, 65s max delay), so the worst-case 8-hop
+ * traversal could otherwise hold the request handler open for tens of minutes
+ * under sustained quota throttling. ADV-219.
+ */
+const ISDESCENDANT_DEADLINE_MS = 10_000;
+
+/**
  * Checks whether a folder is a descendant of (contained within) a given ancestor.
  *
  * Walks up the parent chain using files.get, up to MAX_ANCESTOR_DEPTH levels.
+ * Enforces an overall ISDESCENDANT_DEADLINE_MS budget so a hanging Drive backend
+ * cannot stall the caller.
  *
  * @param folderId - Folder to check
  * @param ancestorId - Expected ancestor folder ID
  * @returns Result with `ok: true, value: boolean` (true = descendant, false = not).
- *          On Drive API failure mid-traversal returns `ok: false, error` so the caller
- *          can distinguish "not a descendant" (403) from "couldn't determine" (5xx).
+ *          On Drive API failure or deadline exceedance returns `ok: false, error`
+ *          so the caller can distinguish "not a descendant" (403) from
+ *          "couldn't determine" (5xx).
  */
 export async function isDescendantOf(folderId: string, ancestorId: string): Promise<Result<boolean, Error>> {
   // A folder is trivially a "descendant" of itself (covers the root folder case)
@@ -958,38 +969,67 @@ export async function isDescendantOf(folderId: string, ancestorId: string): Prom
     return { ok: true, value: true };
   }
 
-  const visited = new Set<string>();
-  let currentId = folderId;
+  const traverse = async (): Promise<Result<boolean, Error>> => {
+    const visited = new Set<string>();
+    let currentId = folderId;
 
-  for (let depth = 0; depth < MAX_ANCESTOR_DEPTH; depth++) {
-    if (visited.has(currentId)) {
-      // Cycle detected — treat as not-a-descendant (we walked all reachable ancestors)
-      return { ok: true, value: false };
+    for (let depth = 0; depth < MAX_ANCESTOR_DEPTH; depth++) {
+      if (visited.has(currentId)) {
+        // Cycle detected — treat as not-a-descendant (we walked all reachable ancestors)
+        return { ok: true, value: false };
+      }
+      visited.add(currentId);
+
+      const result = await getParents(currentId);
+      if (!result.ok) {
+        // Drive API error — propagate so caller can distinguish from "not a descendant"
+        return { ok: false, error: result.error };
+      }
+
+      const parents = result.value;
+      if (parents.length === 0) {
+        // Reached the root without finding ancestorId
+        return { ok: true, value: false };
+      }
+
+      if (parents.includes(ancestorId)) {
+        return { ok: true, value: true };
+      }
+
+      // Traverse the first parent (Drive items typically have one parent)
+      currentId = parents[0];
     }
-    visited.add(currentId);
 
-    const result = await getParents(currentId);
-    if (!result.ok) {
-      // Drive API error — propagate so caller can distinguish from "not a descendant"
-      return { ok: false, error: result.error };
-    }
+    // Depth limit reached without finding ancestor — log so operators can distinguish
+    // this case from a genuinely unauthorised folder (both currently surface as 403).
+    // ADV-220. `currentId` records the deepest ancestor reached, which is the only
+    // diagnostic info that varies between calls (depthLimit is always MAX_ANCESTOR_DEPTH).
+    warn('Descendant check exhausted depth limit', {
+      module: 'drive',
+      phase: 'descendant-check',
+      folderId,
+      currentId,
+      ancestorId,
+      depthLimit: MAX_ANCESTOR_DEPTH,
+    });
+    return { ok: true, value: false };
+  };
 
-    const parents = result.value;
-    if (parents.length === 0) {
-      // Reached the root without finding ancestorId
-      return { ok: true, value: false };
-    }
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<Result<boolean, Error>>(resolve => {
+    timeoutId = setTimeout(() => {
+      resolve({
+        ok: false,
+        error: new Error(`isDescendantOf deadline exceeded after ${ISDESCENDANT_DEADLINE_MS}ms`),
+      });
+    }, ISDESCENDANT_DEADLINE_MS);
+  });
 
-    if (parents.includes(ancestorId)) {
-      return { ok: true, value: true };
-    }
-
-    // Traverse the first parent (Drive items typically have one parent)
-    currentId = parents[0];
+  try {
+    return await Promise.race([traverse(), timeout]);
+  } finally {
+    if (timeoutId !== undefined) clearTimeout(timeoutId);
   }
-
-  // Depth limit reached without finding ancestor
-  return { ok: true, value: false };
 }
 
 /**

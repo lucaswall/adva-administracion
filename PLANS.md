@@ -738,3 +738,44 @@ All tasks completed.
 
 1. Run `bug-hunter` agent — Review fixes for new bugs.
 2. Run `verifier` agent (full mode) — All tests pass, zero warnings.
+
+---
+
+## Iteration 2
+
+**Implemented:** 2026-05-07
+**Method:** Single-agent (5 S-size fixes across 3 independent units, effort score 5 — below worker threshold)
+
+### Tasks Completed This Iteration
+
+- Fix 1 (ADV-219): isDescendantOf 10s overall deadline via Promise.race; scan route returns 503 on ancestry-check failure (downstream service issue)
+- Fix 2 (ADV-220): warn log on depth-exhaustion path with `folderId`, `currentId` (deepest reached), `ancestorId`, `depthLimit`
+- Fix 3 (ADV-221): `result.errors++` added to scanner's `queue.add().catch()` defensive handler
+- Fix 4 (ADV-222): `afterEach(() => vi.useRealTimers())` added to four describe blocks in client.test.ts (`analyzeDocument`, `rate limiting`, `rate limit queue robustness`, `singleton factory`)
+- Fix 5 (ADV-223): `'truncates oversized error responses'` test now spies on warn and asserts payload (module, phase, originalSize, status, maxSize) with `maxSize < originalSize`
+
+### Files Modified
+
+- `src/services/drive.ts` — Promise.race deadline (`ISDESCENDANT_DEADLINE_MS = 10_000`), depth-exhaustion warn log
+- `src/services/drive.test.ts` — new tests for ADV-219 (timeout) and ADV-220 (warn payload)
+- `src/utils/error-response.ts` — added `respond503` helper, factored shared `respondError` internal, kept `respond500` and `Error500Response` as thin alias for backward compat
+- `src/routes/scan.ts` — switched ancestry-check failure response from `respond500` to `respond503`
+- `src/routes/scan.test.ts` — updated existing test from 500/'Internal server error' to 503/'Service unavailable' + correlationId regex
+- `src/processing/scanner.ts` — `result.errors++` in `queue.add().catch()` before logging
+- `src/processing/scanner.test.ts` — new test asserts `result.errors === 2` when both queue.add() promises reject
+- `src/gemini/client.test.ts` — `afterEach` timer cleanup in 4 describe blocks; strengthened truncation test with `warnSpy` and payload assertion
+
+### Linear Updates
+
+- ADV-219, ADV-220, ADV-221, ADV-222, ADV-223: Todo → In Progress → Review
+
+### Pre-commit Verification
+
+- bug-hunter: Found 2 LOW findings — Bug 1 (missing `currentId` in depth-exhaustion warn payload) fixed; Bug 2 (timeout test settlement reliability) skipped, bug-hunter explicitly classified it as "false positive candidate" since the test passes and `traverse()` always resolves rather than rejects.
+- verifier (full mode): 2095 tests pass, TypeScript compile clean, build clean (zero warnings), Apps Script bundle clean.
+
+### Continuation Status
+
+All Fix Plan tasks completed. No pending work.
+
+<!-- FIX PLAN COMPLETE -->

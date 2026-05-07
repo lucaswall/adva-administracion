@@ -1661,6 +1661,33 @@ describe('scanner', () => {
 
       expect(result.ok).toBe(true);
     });
+
+    it('increments result.errors when queue.add() promise rejects (ADV-221)', async () => {
+      const { getProcessingQueue } = await import('./queue.js');
+
+      const rejectionError = new Error('Queue task crashed');
+
+      vi.mocked(getProcessingQueue).mockReturnValue({
+        add: vi.fn(() => Promise.reject(rejectionError)),
+        onIdle: vi.fn(async () => {}),
+      } as any);
+
+      mockListFiles.mockResolvedValue({
+        ok: true,
+        value: [
+          { id: 'crash-1', name: 'a.pdf', mimeType: 'application/pdf', parents: ['entrada'] },
+          { id: 'crash-2', name: 'b.pdf', mimeType: 'application/pdf', parents: ['entrada'] },
+        ],
+      });
+
+      const result = await scanFolder('entrada');
+
+      // Both queue.add() calls reject; the defensive catch must bump result.errors twice
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value.errors).toBe(2);
+      }
+    });
   });
 
   describe('resumen duplicate routing (ADV-182)', () => {

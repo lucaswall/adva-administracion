@@ -684,6 +684,8 @@ export async function scanFolder(folderId?: string): Promise<Result<ScanResult, 
           // Defensive catch: processFileWithRetry handles all expected errors internally.
           // This guard prevents unhandled promise rejections from unexpected crashes
           // (e.g., withCorrelationAsync throwing, OOM, etc.) while still logging them.
+          // Bump result.errors so the scan summary reflects the crash (ADV-221).
+          result.errors++;
           logError('Unexpected error in processing task', {
             module: 'scanner',
             phase: 'process-queue',

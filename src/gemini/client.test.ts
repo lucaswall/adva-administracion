@@ -37,6 +37,12 @@ describe('GeminiClient', () => {
     const mockMimeType = 'application/pdf';
     const mockPrompt = 'Extract data from this document';
 
+    // ADV-222: ensure fake timers never leak across tests if an assertion fails
+    // before a per-test useRealTimers() call.
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
     it('returns success result for valid API response', async () => {
       const mockResponse = {
         candidates: [{
@@ -504,6 +510,11 @@ describe('GeminiClient', () => {
     const mockBuffer = Buffer.from('test');
     const mockMimeType = 'application/pdf';
     const mockPrompt = 'Extract';
+
+    // ADV-222: ensure fake timers never leak across tests
+    afterEach(() => {
+      vi.useRealTimers();
+    });
 
     it('allows requests under the limit', async () => {
       const mockResponse = {
@@ -1222,6 +1233,11 @@ describe('GeminiClient', () => {
     const mockMimeType = 'application/pdf';
     const mockPrompt = 'Extract';
 
+    // ADV-222: ensure fake timers never leak across tests
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
     it('queue continues processing after one request fails', async () => {
       vi.useFakeTimers();
 
@@ -1314,26 +1330,48 @@ describe('GeminiClient', () => {
     const mockMimeType = 'application/pdf';
     const mockPrompt = 'Extract data from this document';
 
-    it('truncates oversized error responses', async () => {
+    it('truncates oversized error responses (ADV-223)', async () => {
       // Create a very large error response (> 2MB)
       const largeErrorBody = 'ERROR '.repeat(400_000); // ~2.4MB
+      const originalSize = largeErrorBody.length;
 
-      global.fetch = vi.fn().mockResolvedValue({
-        ok: false,
-        status: 500,
-        text: async () => largeErrorBody
-      });
+      const warnSpy = vi.spyOn(loggerModule, 'warn').mockImplementation(() => {});
 
-      const result = await client.analyzeDocument(
-        mockBuffer,
-        mockMimeType,
-        mockPrompt,
-        1
-      );
+      try {
+        global.fetch = vi.fn().mockResolvedValue({
+          ok: false,
+          status: 500,
+          text: async () => largeErrorBody
+        });
 
-      expect(result.ok).toBe(false);
-      // Response should have been truncated to avoid memory issues
-      // Error processing should still work with truncated response
+        const result = await client.analyzeDocument(
+          mockBuffer,
+          mockMimeType,
+          mockPrompt,
+          1
+        );
+
+        expect(result.ok).toBe(false);
+
+        // The truncation code path MUST have run — verifies the test name's claim.
+        const truncationCalls = warnSpy.mock.calls.filter(
+          ([msg]) => typeof msg === 'string' && msg.includes('truncating')
+        );
+        expect(truncationCalls.length).toBe(1);
+
+        const [, payload] = truncationCalls[0] as [string, Record<string, unknown>];
+        expect(payload).toMatchObject({
+          module: 'gemini-client',
+          phase: 'api-call',
+          originalSize,
+          status: 500,
+        });
+        // The cap (maxSize) must be present and strictly less than the original.
+        expect(typeof payload.maxSize).toBe('number');
+        expect(payload.maxSize as number).toBeLessThan(originalSize);
+      } finally {
+        warnSpy.mockRestore();
+      }
     });
 
     it('preserves useful information in truncated error responses', async () => {
@@ -1391,6 +1429,8 @@ describe('GeminiClient', () => {
       // Reset singleton between tests so each test starts with no shared state
       const { resetGeminiClient } = await import('./client.js');
       resetGeminiClient();
+      // ADV-222: ensure fake timers never leak across tests
+      vi.useRealTimers();
     });
 
     it('shared GeminiClient: 24 concurrent calls with rpmLimit=12 makes only 12 transport calls in first second', async () => {
