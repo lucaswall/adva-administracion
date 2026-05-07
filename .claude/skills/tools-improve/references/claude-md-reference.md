@@ -4,10 +4,12 @@ Source: [Anthropic official docs](https://code.claude.com/docs/en/best-practices
 
 ## Core Principle
 
-CLAUDE.md is loaded into **every session**. It consumes context that Claude needs for actual work. Every line must earn its place.
+CLAUDE.md is loaded into **every session**. It consumes context that Claude needs for actual work. Every line must earn its place. The official guidance is to keep each CLAUDE.md **under ~200 lines**.
 
 > "For each line, ask: 'Would removing this cause Claude to make mistakes?' If not, cut it."
 > "Bloated CLAUDE.md files cause Claude to ignore your actual instructions!"
+
+**Maintainer-only notes:** block-level HTML comments in CLAUDE.md are stripped before context injection — useful for "do not load this" notes that you still want to see in source.
 
 ## What to Include
 
@@ -49,9 +51,45 @@ See @README.md for project overview and @package.json for available npm commands
 
 For larger projects, use `.claude/rules/*.md` for topic-specific instructions:
 - Each file covers one topic (e.g., `testing.md`, `api-design.md`)
-- Supports path-scoping via YAML `paths` frontmatter
+- Supports path-scoping via YAML `paths` frontmatter (glob patterns like `src/**/*.{ts,tsx}`)
+- Rules without `paths` load unconditionally; with `paths` load only when matching files are touched
 - All loaded automatically as project memory
 - Subdirectories supported (discovered recursively)
+- User-level rules at `~/.claude/rules/` also supported
+
+## Memory Locations
+
+| Path | Scope | Notes |
+|------|-------|-------|
+| `./CLAUDE.md` | Project, shared | Checked into VCS |
+| `./CLAUDE.local.md` | Project, personal | `.gitignore`d |
+| `~/.claude/CLAUDE.md` | User | Loads in every project |
+| `~/.claude/rules/*.md` | User, path-scoped | With `paths:` frontmatter |
+| `.claude/rules/*.md` | Project, path-scoped | Discovered recursively |
+| `/Library/Application Support/ClaudeCode/CLAUDE.md` (macOS) | Managed (org policy) | Cannot be excluded |
+| `/etc/claude-code/CLAUDE.md` (Linux) | Managed | Cannot be excluded |
+| `C:\Program Files\ClaudeCode\CLAUDE.md` (Windows) | Managed | Cannot be excluded |
+
+**Settings that govern memory loading:**
+- `claudeMdExcludes` — skip ancestor CLAUDE.md files in monorepos (managed-policy CLAUDE.md is exempt and cannot be excluded)
+- `CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1` — also load CLAUDE.md from `--add-dir` paths
+- `CLAUDE_CODE_NEW_INIT=1` — enables the multi-phase interactive `/init` flow
+
+**`AGENTS.md`** is **not** auto-read. Use `@AGENTS.md` inside CLAUDE.md to import it.
+
+## Auto Memory (v2.1.59+)
+
+Separate from your hand-written CLAUDE.md, Claude curates `~/.claude/projects/<project>/memory/MEMORY.md` itself across conversations. The first 200 lines / 25 KB of `MEMORY.md` plus the index of topic files are loaded each session; topic files (`debugging.md`, `feedback.md`, etc.) load on demand.
+
+Toggle via:
+- `/memory` slash command
+- `autoMemoryEnabled` setting
+- `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`
+- `autoMemoryDirectory` (user/managed settings only — not project-level, for security)
+
+## Debugging What Loads
+
+Configure an `InstructionsLoaded` hook in settings.json to log every CLAUDE.md / `.claude/rules/` file the harness pulls in. Useful for monorepos where it isn't obvious which CLAUDE.md is winning.
 
 ## When Reviewing CLAUDE.md
 
@@ -86,3 +124,4 @@ Before adding a new line, ask:
 | Domain workflows (invoked on demand) | `.claude/skills/` |
 | Background knowledge (auto-loaded when relevant) | Skill with `user-invocable: false` |
 | Personal preferences (not shared) | `CLAUDE.local.md` or `~/.claude/CLAUDE.md` |
+| Notes Claude curates over time | Auto Memory (`MEMORY.md`) |

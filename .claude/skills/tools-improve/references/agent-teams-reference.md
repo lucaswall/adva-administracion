@@ -4,7 +4,7 @@
 
 Agent teams coordinate multiple Claude Code instances working together. One session acts as **team lead**, spawning **teammates** that work independently in their own context windows and communicate via messaging.
 
-**Experimental feature** — Requires `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` in settings.json or environment.
+**Experimental feature** — Requires `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` in settings.json or environment. Available since Claude Code v2.1.32; still gated as of May 2026.
 
 ```json
 // settings.json
@@ -24,7 +24,7 @@ Agent teams coordinate multiple Claude Code instances working together. One sess
 | **Coordination** | Main agent manages all work | Shared task list with self-coordination |
 | **Best for** | Focused tasks where only the result matters | Complex work requiring discussion and collaboration |
 | **Token cost** | Lower: results summarized back | Higher: each teammate is a separate instance |
-| **MCP access** | Foreground subagents inherit MCP tools | Docs say teammates load MCP servers, but practical access is unreliable |
+| **MCP access** | Foreground subagents inherit MCP tools | Teammates ignore the spawning subagent's `skills:`/`mcpServers:` frontmatter — they load servers from project/user settings only |
 
 **Use subagents** for quick focused workers that report back. **Use agent teams** when teammates need to share findings, challenge each other, and coordinate.
 
@@ -38,8 +38,10 @@ Agent teams coordinate multiple Claude Code instances working together. One sess
 | **Mailbox** | Messaging system for inter-agent communication |
 
 Storage:
-- Team config: `~/.claude/teams/{team-name}/config.json`
+- Team config: `~/.claude/teams/{team-name}/config.json` (do not hand-edit; rewritten on state changes)
 - Task list: `~/.claude/tasks/{team-name}/`
+
+Team coordination tools (`SendMessage`, `TaskCreate/Update/List/Get`) are always available to teammates even if their `tools:` allowlist would otherwise restrict them.
 
 ## Display Modes
 
@@ -61,7 +63,7 @@ Or per-session: `claude --teammate-mode in-process`
 ## Direct Teammate Interaction
 
 **In-process mode:**
-- **Shift+Up/Down** — Select a teammate
+- **Shift+Down** — Cycle through teammates (wraps back to lead after the last)
 - **Type** — Send message to selected teammate
 - **Enter** — View a teammate's session
 - **Escape** — Interrupt their current turn
@@ -97,18 +99,18 @@ Inter-agent communication:
 - `type: "plan_approval_response"` — Approve/reject teammate's plan
 
 ### Spawning Teammates
-Use `Task` tool with `team_name` and `name` parameters:
+Use the `Agent` tool (formerly `Task`, renamed in v2.1.63) with `team_name` and `name` parameters:
 ```
-Task:
+Agent:
   team_name: "my-team"
   name: "security-reviewer"
   subagent_type: "general-purpose"
   prompt: "Detailed instructions for this teammate..."
 ```
 
-## Delegate Mode
+## Coordination-Only Lead
 
-Press **Shift+Tab** to enter delegate mode. Restricts the lead to coordination-only tools (spawning, messaging, task management). Prevents the lead from implementing tasks itself instead of delegating.
+Run the lead with `permissionMode: auto` (or set the session to `auto`) to keep it focused on coordination — the classifier reviews each action and pushes back if the lead starts implementing instead of delegating. The older "delegate mode" (Shift+Tab) is no longer in current docs; `auto` mode is the modern equivalent.
 
 ## Plan Approval for Teammates
 
@@ -193,6 +195,9 @@ Check in on progress, redirect approaches that aren't working, and synthesize fi
 ### TeammateIdle
 Runs when a teammate is about to go idle. Exit code 2 sends feedback and keeps them working.
 
+### TaskCreated
+Runs when a task is added to the shared list. Exit code 2 rejects creation (e.g., enforce a description format).
+
 ### TaskCompleted
 Runs when a task is being marked complete. Exit code 2 prevents completion and sends feedback.
 
@@ -253,7 +258,7 @@ When a skill needs to orchestrate an agent team, include team tools in `allowed-
 ```yaml
 ---
 name: my-team-skill
-allowed-tools: Read, Glob, Grep, Task, Bash, TeamCreate, TeamDelete,
+allowed-tools: Read, Glob, Grep, Agent, Bash, TeamCreate, TeamDelete,
   SendMessage, TaskCreate, TaskUpdate, TaskList, TaskGet
 disable-model-invocation: true
 ---
@@ -263,7 +268,7 @@ disable-model-invocation: true
 1. Pre-flight checks (verify dependencies like MCP connections)
 2. TeamCreate with descriptive name
 3. TaskCreate for each work unit
-4. Spawn teammates via Task tool with `team_name` and `name`
+4. Spawn teammates via the **Agent** tool with `team_name` and `name`
 5. Assign tasks via TaskUpdate
 6. Wait for teammate messages (auto-delivered)
 7. Merge/synthesize findings
@@ -275,8 +280,12 @@ disable-model-invocation: true
 ```
 1. Try TeamCreate
 2. If fails → inform user "Agent teams unavailable, running in single-agent mode"
-3. Use sequential Task tool subagents instead (without team_name)
+3. Use sequential Agent tool subagents instead (without team_name)
 ```
+
+> **Naming gotcha.** The `Task` tool was renamed to `Agent` in v2.1.63. Both names parse for compatibility, but new skills should use `Agent` in `allowed-tools` and instructions. The `TaskCreate/TaskUpdate/TaskList/TaskGet` tools (team task list) keep their `Task*` names — they are unrelated to spawning.
+
+> **Undocumented behavior** (per [#32723](https://github.com/anthropics/claude-code/issues/32723)): `TeamCreate` / `TeamDelete` are also reachable from standalone subagents, not just the lead. Don't rely on it for production skills.
 
 ## Troubleshooting
 
@@ -285,7 +294,7 @@ disable-model-invocation: true
 | Teammates not appearing | Task too simple for team, or tmux not installed | Use Shift+Down to cycle; verify `which tmux` |
 | Too many permission prompts | `mode: "bypassPermissions"` is ignored for teammates ([#24073](https://github.com/anthropics/claude-code/issues/24073)); Bash write commands prompt even when in allow list ([#17321](https://github.com/anthropics/claude-code/issues/17321)); subagents don't inherit user-level permissions ([#18950](https://github.com/anthropics/claude-code/issues/18950)) | Instruct workers to use Write/Edit tools instead of Bash for file operations; have lead pre-create directories before spawning workers; or run session with `--dangerously-skip-permissions` |
 | Teammates stopping on errors | Unhandled error | Message teammate directly with instructions, or spawn replacement |
-| Lead implements instead of delegating | Lead starts coding before teammates finish | Tell lead to wait; use delegate mode (Shift+Tab) |
+| Lead implements instead of delegating | Lead starts coding before teammates finish | Tell lead to wait; set `permissionMode: auto` on the lead so the classifier pushes back when it tries to implement |
 | Orphaned tmux sessions | Team not cleaned up properly | `tmux ls` then `tmux kill-session -t <name>` |
 | Task appears stuck | Teammate didn't mark task complete | Check if work is done; update task status manually |
 
@@ -317,6 +326,6 @@ If a task involves running a CLI generator (migrations, codegen, etc.), reserve 
 - **One team per session** — clean up before starting a new team
 - **No nested teams** — teammates cannot spawn their own teams
 - **Lead is fixed** — can't promote a teammate to lead
-- **Permissions set at spawn** — `mode: "bypassPermissions"` on Task tool is ignored for teammates; they inherit the lead's permission mode ([#24073](https://github.com/anthropics/claude-code/issues/24073)). Workaround: instruct workers to avoid Bash for file ops, have lead pre-create directories.
+- **Permissions set at spawn** — `mode: "bypassPermissions"` on the `Agent` tool (formerly `Task`) is ignored for teammates; they inherit the lead's permission mode ([#24073](https://github.com/anthropics/claude-code/issues/24073)). Workaround: instruct workers to avoid Bash for file ops, have lead pre-create directories.
 - **MCP access unreliable** for teammates — keep MCP operations on the lead
 - **Split panes** require tmux or iTerm2 (not VS Code terminal, Windows Terminal, or Ghostty)

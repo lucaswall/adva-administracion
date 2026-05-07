@@ -4,10 +4,10 @@
 
 Skills load information in stages to optimize context window usage:
 
-| Level | When Loaded | Token Cost | Content |
-|-------|------------|------------|---------|
-| **1. Metadata** | Always (at startup) | ~100 tokens/skill | `name` + `description` from YAML frontmatter |
-| **2. Instructions** | When skill is triggered | <5k tokens | SKILL.md body |
+| Level | When Loaded | Limits | Content |
+|-------|------------|--------|---------|
+| **1. Metadata** | Always (at startup) | description capped at **1,536 chars** per entry; `/skills` listing truncates each to 250 chars | `name` + `description` from YAML frontmatter |
+| **2. Instructions** | When skill is triggered | After auto-compaction, retains the first **5,000 tokens** within a combined **25,000-token** budget across all triggered skills | SKILL.md body |
 | **3. Resources** | As needed | Effectively unlimited | Supporting files (scripts, references, templates) |
 
 **Design implication:** Keep SKILL.md focused on instructions. Put large reference docs, API specs, and examples in supporting files and reference them from SKILL.md so Claude loads them only when needed.
@@ -41,11 +41,10 @@ my-skill/
 
 - `name` field: lowercase letters, numbers, and hyphens only
 - Maximum 64 characters
-- Cannot contain XML tags
-- Cannot contain reserved words: "anthropic", "claude"
-- `SKILL.md` filename is case-sensitive (not `skill.md` or `Skill.md`)
 - If `name` omitted, defaults to directory name
 - If `description` omitted, falls back to first paragraph of markdown content
+- Plugin skills are namespaced as `<plugin-name>:<skill-name>`
+- The `SKILL.md` filename should be uppercase. On case-sensitive filesystems (Linux, default macOS APFS) `skill.md` or `Skill.md` will not be discovered; on case-insensitive filesystems it works but is non-portable.
 
 ## String Substitutions
 
@@ -54,13 +53,19 @@ my-skill/
 | `$ARGUMENTS` | `/fix 123` | `123` |
 | `$0`, `$1`, `$2` | `/migrate Foo React Vue` | `Foo`, `React`, `Vue` |
 | `$ARGUMENTS[N]` | Same as `$N` | Same as above |
+| `$<name>` | Named arg via `arguments:` frontmatter | Bound value |
 | `${CLAUDE_SESSION_ID}` | - | `abc123def...` |
-| `` !`gh pr diff` `` | - | (PR diff output) |
+| `${CLAUDE_EFFORT}` | - | `low` / `medium` / `high` / `xhigh` / `max` (v2.1.119+) |
+| `${CLAUDE_SKILL_DIR}` | - | Absolute path to this skill's directory |
+| `` !`gh pr diff` `` | - | (PR diff output, single line) |
+| `` ```! ... ``` `` fenced block | - | Multi-line shell injection |
 
 **Notes:**
 - `` !`command` `` executes BEFORE Claude sees content (preprocessing, not Claude execution).
 - If `$ARGUMENTS` is absent in content, arguments are auto-appended as `ARGUMENTS: <value>`.
 - Include "ultrathink" in skill content to enable extended thinking.
+- Set `shell: powershell` in frontmatter to interpret `` !`cmd` `` via PowerShell instead of bash.
+- `disableSkillShellExecution` setting (v2.1.91+) globally blocks all `` !`cmd` `` injection.
 
 ## Context: Fork vs Inline
 
@@ -177,13 +182,21 @@ Orders table uses legacy schema:
 
 ## Hooks in Skills
 
-Same format as subagents. Three hook types available:
+Same format as subagents. **Five** hook types available:
 
-| Type | Use For |
-|------|---------|
-| `command` | Shell script validation (exit 2 to block) |
-| `prompt` | LLM yes/no decision using Haiku |
-| `agent` | Multi-turn validation with tool access (default 60s timeout) |
+| Type | Use For | Default Timeout |
+|------|---------|-----------------|
+| `command` | Shell script validation (exit 2 to block) | 600s |
+| `prompt` | LLM yes/no decision (fast model, single-turn) | 30s |
+| `agent` | Multi-turn validation with tool access | 60s |
+| `http` | POST hook input as JSON to a URL (use `allowedEnvVars` for secrets) | 30s |
+| `mcp_tool` | Direct MCP tool invocation (v2.1.118+) | per-tool |
+
+Hook events available in skill frontmatter: all settings.json events, including `PreToolUse`, `PostToolUse`, `Stop`, `SessionStart`, etc.
+
+Skill hook entries also support:
+- `once: true` — fire only once per session
+- `if: "<permission-rule>"` — evaluate only if the matched call would be governed by that rule, e.g. `if: "Bash(git *)"` or `if: "Edit(*.ts)"` (v2.1.85+)
 
 ```yaml
 ---
@@ -191,6 +204,7 @@ name: safe-modifier
 hooks:
   PreToolUse:
     - matcher: "Bash"
+      if: "Bash(rm *)"
       hooks:
         - type: command
           command: "./scripts/validate.sh"
@@ -205,6 +219,12 @@ hooks:
           prompt: "Check if all acceptance criteria are met. If not, respond with reason."
 ---
 ```
+
+JSON output (`stdout`) for non-`command` hooks:
+```json
+{ "hookSpecificOutput": { "permissionDecision": "allow" | "deny" | "ask" | "defer" } }
+```
+`defer` is `-p` mode only — it exits with the call preserved for an SDK wrapper to resume.
 
 ## Restrict Skill Access
 
@@ -223,9 +243,17 @@ Skill(deploy *)
 
 Syntax: `Skill(name)` exact, `Skill(name *)` prefix match
 
+## Settings That Govern Skills
+
+| Setting | Effect |
+|---------|--------|
+| `skillOverrides` | `off` (no overrides), `name-only` (project skill replaces user-level skill of same name), `user-invocable-only` (only override if user-invocable), or `on` |
+| `disableSkillShellExecution` | Blocks all `` !`cmd` `` shell injection in skills (v2.1.91+) |
+| `SLASH_COMMAND_TOOL_CHAR_BUDGET` | Override the description-budget character cap |
+
 ## Context Budget
 
-Skill descriptions budget scales dynamically at **2% of the context window**, with a fallback of **16,000 characters**.
+Skill descriptions budget scales dynamically at **1% of the context window**, with a fallback of **8,000 characters**.
 
 Check: `/context` — shows warning if skills excluded.
 
@@ -270,7 +298,7 @@ Skills defined in `.claude/skills/` within `--add-dir` directories are loaded au
 
 ## Best Practices Checklist
 
-- [ ] Description follows `[what] + [when] + [features]` formula
+- [ ] Description follows `[what] + [when] + [features]` formula (≤1,536 chars; first 250 shown in `/skills`)
 - [ ] SKILL.md under 500 lines
 - [ ] Side effects → `disable-model-invocation: true`
 - [ ] Research → `context: fork` with explicit task
@@ -278,3 +306,5 @@ Skills defined in `.claude/skills/` within `--add-dir` directories are loaded au
 - [ ] Large docs → separate files, linked from SKILL.md
 - [ ] Tested: skill triggers correctly and doesn't over-trigger
 - [ ] `name` follows naming rules (lowercase, hyphens, max 64 chars)
+- [ ] Effort knob considered (`effort:` or `${CLAUDE_EFFORT}`) for cost-sensitive workflows
+- [ ] Path scoping considered (`paths:` glob) if the skill is only relevant in one area
