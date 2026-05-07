@@ -96,23 +96,42 @@ Walk through the data flow for this feature:
 1. **Trigger** — How does the feature get invoked? (API call, webhook, startup, timer). What can fail at the entry point?
 2. **External data** — What external APIs are called? (Google Drive, Sheets, Gemini). What can fail? How are errors handled?
 3. **Processing** — What transforms the data? What validation happens? What edge cases exist in parsing, matching, or storage?
-4. **AI integration** — If the feature involves Gemini API: trace prompt construction -> API call -> response parsing -> validation. Check prompt quality, response validation, error handling (see checklist section 9).
-5. **Storage** — How does data get written to Google Sheets? Are column mappings correct? Are data types (CellDate, CellNumber) used correctly? Is the spreadsheet timezone handled?
+4. **AI integration** — If the feature involves Gemini API: trace prompt construction -> API call -> response parsing -> validation. Check prompt quality, response validation, error handling (see checklist section 9). **Then run the indirect-prompt-injection trace from checklist section 11** — document → extraction → prompt assembly → response → parse → routing/storage. This is where AI-pipeline features need the most cross-domain reasoning.
+5. **Storage** — How does data get written to Google Sheets? Are column mappings correct? Are data types (CellDate, CellNumber) used correctly? Is the spreadsheet timezone handled? Is `normalizeSpreadsheetDate` used on reads?
 6. **Edge cases** — Empty data, malformed documents, concurrent processing, retry scenarios, large payloads, missing folders
+7. **Failing-open paths (A10:2025)** — Apply checklist section 12 across the feature: for every await / external call / lock / config check, what state is the system in if it fails?
+8. **Cost & quota (LLM10:2025)** — Apply checklist section 13 if the feature calls Gemini: compute worst-case token spend, verify ceilings exist.
 
 ### Findings format
 
 For each finding, record:
 - **Severity:** [critical] | [high] | [medium] | [low]
-- **Domain:** code | security | data-integrity | performance
+- **Domain:** code | security | data-integrity | performance | prompt-injection | failing-open | supply-chain
 - **Location:** file:line (and related files if cross-cutting)
 - **Description:** What's wrong
 - **Impact:** Who is affected and how
 - **Cross-domain note:** How this interacts with other parts of the system (if applicable)
 
+## Verification
+
+Before creating any Linear issues, **re-read every candidate finding's file:line** and confirm the issue exists today. Even a careful Opus pass produces stale references and the occasional hallucinated pattern; the verification step is the single highest-leverage filter for backlog noise.
+
+For each candidate:
+
+1. **Read the cited file** at the cited line range (±10 lines for context).
+2. **Confirm the issue exists.** Look at the actual code, not your earlier description. Ask: would I file this issue if I were seeing it for the first time?
+3. **Decide:**
+   - **Confirmed** — keep
+   - **Stale reference** — code moved but the issue may still exist elsewhere; search and update location, or drop if the issue is gone
+   - **Hallucinated** — drop
+   - **Out of scope** — third-party / generated / explicitly excluded — drop
+4. Track verification stats for the termination report.
+
+Multi-issue rollup: if the same issue appears in multiple files (e.g., a missing validator pattern in 5 storage modules), emit ONE Linear issue with all file:line locations in the Context section, not five issues.
+
 ## Create Linear Issues
 
-For each finding, check against existing Backlog issues. Skip if a matching issue already exists.
+For each verified finding, check against existing Backlog issues. Skip if a matching issue already exists.
 
 Use `mcp__linear__create_issue`:
 
@@ -137,6 +156,9 @@ description: (format below)
 **Impact:**
 [Who is affected and how — trace the operational consequence]
 
+**Action:** Act | Attend | Track
+[SSVC outcome — see code-audit/references/category-tags.md for the decision rules. Tells planning skills "what to do" alongside the priority number.]
+
 **Acceptance Criteria:**
 - [ ] [Verifiable criterion]
 - [ ] [Another criterion]
@@ -147,9 +169,12 @@ description: (format below)
 | Finding domain | Linear label |
 |---------------|-------------|
 | code (bugs, logic, async, edge cases) | Bug |
-| security (auth, validation, injection) | Security |
+| security (auth, validation, injection, secrets) | Security |
+| prompt-injection (LLM01 — indirect injection from documents) | Security |
+| supply-chain (slopsquatting, hallucinated packages, lockfile gaps) | Security |
+| failing-open (A10:2025 — exceptional-condition mishandling) | Bug |
 | data-integrity (spreadsheet, matching, parsing) | Bug |
-| performance (memory, throughput, API calls) | Performance |
+| performance (memory, throughput, API calls, cost) | Performance |
 | convention (CLAUDE.md violation) | Convention |
 
 ## Termination
@@ -162,19 +187,25 @@ Output this report and STOP:
 **Files analyzed:** N
 **Scope:** [list of file groups with counts]
 
-### Findings (ordered by severity)
+### Verification Stats
 
-| # | ID | Severity | Domain | Title |
-|---|-----|----------|--------|-------|
-| 1 | ADVA-XX | Critical | code | Brief title |
-| 2 | ADVA-XX | High | data-integrity | Brief title |
-| ... | ... | ... | ... | ... |
+- Candidate findings: T
+- Confirmed: C
+- Dropped (stale / hallucinated / out of scope): D
 
-X issues created | Duplicates skipped: N
+### Findings (ordered by SSVC Action, then severity)
+
+| # | ID | Action | Severity | Domain | Title |
+|---|-----|--------|----------|--------|-------|
+| 1 | ADVA-XX | Act | Critical | code | Brief title |
+| 2 | ADVA-XX | Attend | High | data-integrity | Brief title |
+| ... | ... | ... | ... | ... | ... |
+
+X issues created | Multi-location rollups: R | Duplicates skipped: N
 
 ### Cross-cutting Observations
 
-[Systemic patterns observed across the feature — e.g., "error handling is inconsistent between the service and route layers" or "spreadsheet date handling uses String() instead of normalizeSpreadsheetDate() in some paths"]
+[Systemic patterns observed across the feature — e.g., "error handling is inconsistent between the service and route layers", "spreadsheet date handling uses String() instead of normalizeSpreadsheetDate() in some paths", "the Gemini prompt assembly puts file metadata in the instruction section rather than the data section in 2 of 4 callers — LLM01 surface"]
 ```
 
 Do not ask follow-up questions. Do not offer to fix issues.

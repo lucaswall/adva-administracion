@@ -138,7 +138,7 @@ You are a specialist in [domain]. When invoked:
 | `${CLAUDE_SESSION_ID}` | Current session ID |
 | `${CLAUDE_EFFORT}` | Current effort level (v2.1.119+) |
 | `${CLAUDE_SKILL_DIR}` | Absolute path to this skill's directory |
-| `!{backtick}cmd{backtick}` | Dynamic command output (runs before Claude sees content). Multi-line via fenced ` ```! ` block |
+| `!{backtick}cmd{backtick}` | Dynamic command output (runs before Claude sees content). Multi-line form: a fenced block whose opening fence is three backticks immediately followed by `!` (see `references/skills-reference.md` for an embedded example). |
 
 ## Patterns
 
