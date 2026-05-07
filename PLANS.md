@@ -597,3 +597,144 @@
 
 ### Continuation Status
 All tasks completed.
+
+### Review Findings
+
+**Method:** 3-reviewer agent team (security, reliability, quality) — Sonnet, parallel.
+
+**Summary:** 9 findings raised across 36 changed files. 5 classified as FIX (creating Fix Plan), 4 DISCARDED with documented reasoning.
+
+#### FIX (5 — all S-size, but count > 3 → Fix Plan path)
+
+| # | Severity | Category | File | Finding | New Issue |
+|---|---|---|---|---|---|
+| 1 | medium | timeout | `src/services/drive.ts:955-993` | `isDescendantOf` has no overall timeout — worst-case 8 × 5 × 65s = 43min holding scan handler open. Plan said "under 10s; 503 on exceed" — never implemented. | [ADV-219](https://linear.app/lw-claude/issue/ADV-219) |
+| 2 | medium | edge-case | `src/services/drive.ts:991-993` | Depth-exhaustion path silently returns `value: false` with no log; user gets confusing 403 indistinguishable from genuine unauthorised folder. | [ADV-220](https://linear.app/lw-claude/issue/ADV-220) |
+| 3 | low | bug | `src/processing/scanner.ts:683-694` | `queue.add().catch()` logs but does NOT increment `result.errors++`. Plan explicitly required the increment. | [ADV-221](https://linear.app/lw-claude/issue/ADV-221) |
+| 4 | medium | test | `src/gemini/client.test.ts` (4 describe blocks) | Inline `vi.useFakeTimers()` without `afterEach` guard — failing assertion can leak fake timers to subsequent tests. | [ADV-222](https://linear.app/lw-claude/issue/ADV-222) |
+| 5 | low | test | `src/gemini/client.test.ts:1317-1337` | `truncates oversized error responses` test only asserts `result.ok === false`; would pass even if truncation logic was broken. | [ADV-223](https://linear.app/lw-claude/issue/ADV-223) |
+
+#### DISCARDED (4)
+
+| Severity | Category | File | Finding | Reasoning |
+|---|---|---|---|---|
+| medium | security | `src/processing/pdf-sanitize.ts` | FlateDecode-compressed content streams bypass invisible-text detection. | **Accepted scope reduction.** PLANS.md Task 6 acceptance bar was "covers at least one well-known vector"; implementation delivered three (font-size 0, off-MediaBox, white-on-white) plus documented the compression gap in the file's JSDoc (lines 13-22). Adding zlib decompression is out of scope for this iteration; track separately if escalated. |
+| low | test | `src/utils/concurrency.test.ts` | No `clearAllLocks()` in afterEach. | Reviewer admits "since every test uses a distinct resource ID the cross-test impact is minimal in practice" — defensive hygiene only, no current bug. |
+| low | type | `src/bank/match-movimientos.test.ts` (40+ sites) | `vi.mocked(getCachedFolderStructure).mockReturnValue(mockFolderStructure as any)` pattern. | Style preference, not a correctness issue. The cast pattern is intentional and consistent for partial mocks. Refactoring 40+ sites to a typed factory would be M-size for zero current correctness impact. |
+| low | type | `src/processing/scanner.test.ts:158-164` | Six mock variables typed as `: any`. | Same as above — style preference for test mocks, no correctness impact. |
+
+#### Verified ADV Fixes (no findings)
+
+- ADV-191 (rematch withLock), ADV-195 (LockManager CAS release), ADV-194 (singleton GeminiClient), ADV-193 (MAX_DOCUMENT_BYTES guard), ADV-197 (DailyBudget), ADV-200 (fail-closed credentials), ADV-201 (cron try/catch), ADV-202 (pagadaErrors), ADV-203 (validateAdvaRole typed), ADV-211/212 (void+catch shutdown), ADV-213 (`'unknown' as any` removed), ADV-214 (apps-script-client double-cast removed), ADV-216 (durationMs logging) — all confirmed correct by reviewers.
+
+### Linear Updates
+
+- All 23 original issues: Review → Merge (ADV-191, 192, 193, 194, 195, 196, 197, 200, 201, 202, 203, 204, 206, 207, 208, 210, 211, 212, 213, 214, 216, 217, 218)
+- 5 new Fix-Plan issues created in Todo: ADV-219, ADV-220, ADV-221, ADV-222, ADV-223
+
+<!-- REVIEW COMPLETE -->
+
+---
+
+## Fix Plan
+
+5 follow-up tasks for the issues found in Iteration 1 review. All S-size; combined under one Fix Plan because count > 3 inline-fix threshold.
+
+### Fix 1: Add overall 10s deadline to isDescendantOf
+**Linear Issue:** [ADV-219](https://linear.app/lw-claude/issue/ADV-219) — Medium
+
+**Files:**
+- `src/services/drive.ts` (modify `isDescendantOf`)
+- `src/services/drive.test.ts` (modify)
+- `src/routes/scan.ts` (verify caller maps deadline-error to 503)
+
+**Steps:**
+1. Write test in `src/services/drive.test.ts`:
+   - Mock `getParents` to return a never-resolving promise. Call `isDescendantOf(...)`. Assert it resolves with `{ ok: false, error }` within ~10.5 s (allow buffer over 10 s deadline).
+   - Existing happy-path tests must continue to pass.
+2. Run `verifier "drive"` (expect fail on the new test).
+3. Wrap the body of `isDescendantOf` in a `Promise.race` against a 10 s timeout that resolves with `{ ok: false, error: new Error('isDescendantOf deadline exceeded') }`. Use `setTimeout` (cleared on success path).
+4. In `src/routes/scan.ts`, verify the existing branch where `isDescendantOf` returns `ok: false` already returns 503 (or 500). Add a 503 mapping if it currently returns 500.
+5. Run `verifier "drive\|scan"` (expect pass).
+
+**Notes:**
+- The 10 s budget is from PLANS.md Task 15 acceptance criteria.
+- Do NOT use AbortController — `withQuotaRetry` does not currently support cancellation, and we want a clean drop-out without a deeper refactor.
+
+---
+
+### Fix 2: Log warn on isDescendantOf depth exhaustion
+**Linear Issue:** [ADV-220](https://linear.app/lw-claude/issue/ADV-220) — Low
+
+**Files:**
+- `src/services/drive.ts` (modify, line 991-993)
+- `src/services/drive.test.ts` (modify)
+
+**Steps:**
+1. Write test in `src/services/drive.test.ts`:
+   - Mock `getParents` to return distinct parent IDs that never include the ancestor (force depth exhaustion). Run `isDescendantOf` and assert a `warn` log was emitted with `{ module: 'drive', phase: 'descendant-check', folderId, ancestorId, depth: 8 }` AND the result is `{ ok: true, value: false }`.
+2. Run `verifier "drive"` (expect fail).
+3. Before the final `return { ok: true, value: false }` at line 992, add `warn('Descendant check exhausted depth limit', { module: 'drive', phase: 'descendant-check', folderId, ancestorId, depth: MAX_ANCESTOR_DEPTH });`.
+4. Run `verifier "drive"` (expect pass).
+
+**Notes:**
+- Keep the return shape unchanged for now — discussion on whether to switch to `ok: false` is deferred (noted in issue).
+
+---
+
+### Fix 3: Increment result.errors in queue.add() catch
+**Linear Issue:** [ADV-221](https://linear.app/lw-claude/issue/ADV-221) — Low
+
+**Files:**
+- `src/processing/scanner.ts` (modify, line 683-694)
+- `src/processing/scanner.test.ts` (modify)
+
+**Steps:**
+1. Write test in `src/processing/scanner.test.ts`:
+   - Mock `withCorrelationAsync` (or whatever lives at the queue-task boundary) to throw on first call. Run a scan. Assert `result.errors` is incremented by 1.
+   - The existing test that exercises the `processFileWithRetry` error path stays as-is (it already asserts errors++ via the inner path).
+2. Run `verifier "scanner"` (expect fail).
+3. In the `.catch()` handler at scanner.ts:683, add `result.errors++;` as the first line of the handler body, before the `logError(...)` call.
+4. Run `verifier "scanner"` (expect pass).
+
+---
+
+### Fix 4: Add afterEach timer cleanup to gemini client.test.ts describe blocks
+**Linear Issue:** [ADV-222](https://linear.app/lw-claude/issue/ADV-222) — Low
+
+**Files:**
+- `src/gemini/client.test.ts` (modify)
+
+**Steps:**
+1. Test for this fix is the existing test suite — the requirement is that timer cleanup is structurally enforced. No new assertion needed.
+2. In each affected describe block (`analyzeDocument` ~line 221, `rate limiting` ~line 548, `rate limit queue robustness` ~line 1226, `singleton factory` ~line 1397), add `afterEach(() => vi.useRealTimers());` immediately after the existing `beforeEach` (or as the first `afterEach` if none exists). Optionally remove the per-test inline `vi.useRealTimers()` calls now that the cleanup is automatic.
+3. Run `verifier "gemini"` (expect pass — all 2092 tests still passing).
+
+**Notes:**
+- Match the pattern already used by the `retry logic` describe block in the same file.
+
+---
+
+### Fix 5: Verify truncation-test assertion matches what the test claims
+**Linear Issue:** [ADV-223](https://linear.app/lw-claude/issue/ADV-223) — Low
+
+**Files:**
+- `src/gemini/client.test.ts` (modify, lines 1317-1337)
+
+**Steps:**
+1. Modify the existing test `'truncates oversized error responses'`:
+   - Add a `warnSpy` (`vi.spyOn(loggerModule, 'warn')`) before the call.
+   - After the call, assert `warnSpy` was called with a message indicating the response was truncated AND with a structured payload showing the size cap.
+   - If the source code captures the truncated body length somewhere observable (callback, log payload), assert it ≤ `MAX_RESPONSE_SIZE`.
+2. Run `verifier "gemini"` (expect pass — the truncation code already works; this just makes the test verify it).
+
+**Notes:**
+- Reference: `warnSpy` pattern is already used elsewhere in the same file — copy the shape.
+- If the test exposes a code path where the truncation is unobservable, the fix is to add an observable hook (e.g., the warn log payload should include the original size and the truncated size).
+
+---
+
+## Post-Fix-Plan Checklist
+
+1. Run `bug-hunter` agent — Review fixes for new bugs.
+2. Run `verifier` agent (full mode) — All tests pass, zero warnings.
