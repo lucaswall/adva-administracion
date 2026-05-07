@@ -186,6 +186,21 @@ describe('detectInvisibleText', () => {
       const result = detectInvisibleText(buildMinimalPdf(contentStream));
       expect(result.hasInvisible).toBe(true);
     });
+
+    it('detects white-on-white text drawn with TJ array (Codex P2 follow-up)', () => {
+      // `TJ` operator takes an array `[(s1) num (s2) ...]` ending with `]`,
+      // not `)`. Earlier regex only matched `) TJ` and missed this form.
+      const contentStream = '1 1 1 rg\nBT /F1 12 Tf 100 700 Td [(Hidden) -50 (payload)] TJ ET';
+      const result = detectInvisibleText(buildMinimalPdf(contentStream));
+      expect(result.hasInvisible).toBe(true);
+    });
+
+    it('does NOT flag visible TJ text after a white-fill background reset', () => {
+      // White rect, then dark fill, then visible TJ text — must remain clean.
+      const contentStream = '1 1 1 rg\n0 0 595 842 re f\n0 0 0 rg\nBT /F1 12 Tf 100 700 Td [(Visible) -100 (TJ text)] TJ ET';
+      const result = detectInvisibleText(buildMinimalPdf(contentStream));
+      expect(result.hasInvisible).toBe(false);
+    });
   });
 
   describe('performance', () => {

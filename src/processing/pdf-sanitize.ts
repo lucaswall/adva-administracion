@@ -211,8 +211,15 @@ function hasWhiteFillBeforeText(stream: string): boolean {
     events.push({ pos: m.index, kind: 'color', isWhite: r >= 1 && g >= 1 && b >= 1 });
   }
 
-  // Text-drawing operators
-  const textRe = /\)\s*(?:Tj|TJ|'|")/g;
+  // Text-drawing operators. PDF defines four:
+  //   `(string) Tj`        show string
+  //   `[(s1) (s2) ...] TJ` show array (used for kerning/positioned text)
+  //   `(string) '`         move to next line and show
+  //   `aw ac (string) "`   set spacing then show
+  // Tj/'/" follow a closing `)`; TJ follows a closing `]`. Earlier code only
+  // matched `)\s*TJ`, missing the array form and letting white-on-white TJ
+  // payloads bypass detection (Codex P2 review on PR 112).
+  const textRe = /\)\s*(?:Tj|'|")|\]\s*TJ/g;
   for (const m of stream.matchAll(textRe)) {
     if (m.index === undefined) continue;
     events.push({ pos: m.index, kind: 'text' });
