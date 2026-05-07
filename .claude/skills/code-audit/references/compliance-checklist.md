@@ -11,6 +11,20 @@ OWASP 2025 reshapes the 2021 list — pay attention to `[supply-chain]` (now A03
 
 ---
 
+## Project-Specific Exemptions (DO NOT FLAG)
+
+These patterns are accepted by design in this project. Reviewers MUST NOT raise audit findings for them.
+
+1. **API_SECRET embedded in the Apps Script bundle** (`apps-script/build.js`, `apps-script/src/config.template.ts`, `dist/apps-script/Code.js`). The bound spreadsheet's script project shares the same trust principal as the Railway env. Threat-model accepted; do not propose extracting to PropertiesService or any out-of-band store.
+2. **Full Gemini raw response logged at ERROR on parse failure** (`src/processing/extractor.ts` `rawResponse: ...substring(0, 1000)`). Production debugging requires the full payload. Do not propose redaction, truncation, level-downgrade, or moving to a non-log channel.
+3. **Gemini prompt/response previews logged at DEBUG** (`src/gemini/client.ts` `promptPreview`, `responsePreview`). Same principle — full information for diagnosis is wanted. Do not propose removal, gating, or redaction.
+4. **Gemini prompts contain ADVA business identifiers** (CUIT, role rules, document-type enums) — these are not secrets. Do not flag as "system prompt leakage" if they appear in logs.
+5. **Logger output may contain CUITs, monetary values, file IDs, and document metadata.** This is internal Railway log content for operators only. Do not flag as PII exposure.
+
+When the security or quality reviewer encounters one of these patterns, treat the call site as VERIFIED CORRECT and skip it. The reviewer may note it briefly under "VERIFIED CORRECT" if helpful, but no Linear issue should result.
+
+---
+
 ## Security (OWASP 2025 RC)
 
 ### A01:2025 — Broken Access Control (now also includes SSRF)
