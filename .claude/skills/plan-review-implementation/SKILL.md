@@ -1,7 +1,7 @@
 ---
 name: plan-review-implementation
-description: QA review of completed implementation using an agent team with 3 domain-specialized reviewers (security, reliability, quality). Use after plan-implement finishes, or when user says "review the implementation". Moves Linear issues Review→Merge. Creates new issues in Todo for bugs found. Falls back to single-agent mode if agent teams unavailable.
-allowed-tools: Read, Edit, Write, Glob, Grep, Bash, Task, TeamCreate, TeamDelete, SendMessage, TaskCreate, TaskUpdate, TaskList, TaskGet, mcp__linear__list_teams, mcp__linear__list_issues, mcp__linear__get_issue, mcp__linear__create_issue, mcp__linear__update_issue, mcp__linear__list_issue_labels, mcp__linear__list_issue_statuses
+description: QA review of completed implementation using an agent team with 3 domain-specialized reviewers (security, reliability, quality). Use after plan-implement finishes, or when user says "review the implementation". Moves Linear issues Review→Merge. Creates new issues in Todo for bugs found. After PR creation, launches a 3-min Codex monitor that auto-fixes findings, watches CI, and squash-merges + cleans up when both are clean. Falls back to single-agent mode if agent teams unavailable.
+allowed-tools: Read, Edit, Write, Glob, Grep, Bash, Task, TeamCreate, TeamDelete, SendMessage, TaskCreate, TaskUpdate, TaskList, TaskGet, CronCreate, CronList, CronDelete, mcp__linear__list_teams, mcp__linear__list_issues, mcp__linear__get_issue, mcp__linear__create_issue, mcp__linear__update_issue, mcp__linear__list_issue_labels, mcp__linear__list_issue_statuses
 disable-model-invocation: true
 ---
 
@@ -364,9 +364,27 @@ If the scope assessment chose single-agent mode (≤4 changed files) OR `TeamCre
    - Fix-plan issues that completed and were moved to Merge
    Deduplicate and sort numerically. Format as: `ADVA-123, ADVA-124, ...`
 5. Create PR using the `pr-creator` subagent. **Include in the prompt:** `Linear issues to close: ADVA-123, ADVA-124, ...` with the full list from step 4. This overrides PLANS.md scanning and ensures no inline-fix issues are missed.
-6. Inform user with PR URL
+6. Inform user with PR URL.
+7. **Launch the post-PR Codex monitor cron** (only after `pr-creator` reports success):
+   - Capture the PR number from the pr-creator output (e.g., `112`).
+   - Capture the current branch name (e.g., from `git rev-parse --abbrev-ref HEAD`).
+   - Choose a unique `MONITOR_TAG` like `Codex monitor for PR <N>` so the loop can locate its own cron.
+   - Call `CronCreate` with:
+     - `cron`: `*/3 * * * *` (every 3 minutes)
+     - `recurring`: `true`
+     - `prompt` (literal — fill in the values):
+       ```
+       <MONITOR_TAG> — tick. PR_NUMBER=<N>. BRANCH=<branch>. MONITOR_TAG="<MONITOR_TAG>".
+       Read .claude/skills/plan-review-implementation/references/codex-loop.md
+       and execute exactly one iteration of the per-tick logic. The cron stops
+       itself (CronDelete by MONITOR_TAG) when the merge phase succeeds.
+       ```
+   - Tell the user: `Codex monitor active (every 3 min). It will assess each Codex finding for validity, fix CI failures, and squash-merge + clean up to main once CI is green and Codex is clean. The monitor self-terminates on completion.`
+   - Do NOT block waiting for the cron to finish — the skill exits after launching it. The cron continues across user turns.
 
 **Branch handling:** Assumes plan-implement already created a feature branch. If on `main`, create branch first.
+
+**Reference:** See [references/codex-loop.md](references/codex-loop.md) for the full per-tick logic the cron prompt invokes.
 
 ## Rules
 
@@ -393,3 +411,5 @@ If the scope assessment chose single-agent mode (≤4 changed files) OR `TeamCre
 - **Review scope assessment** — ≤4 changed files → single-agent review. 5+ files → 3 reviewers. Always use team for security-sensitive changes regardless of file count.
 - **Only reviewers are teammates** — Bug-hunter, verifier, and pr-creator are standalone subagents spawned via `Agent` tool WITHOUT `team_name`. Only the 3 domain reviewers are team members.
 - **Shut down reviewers immediately** — Send shutdown request to each reviewer as soon as they report findings. Call `TeamDelete` as soon as the last reviewer is shut down. Do NOT keep teammates alive during merge/evaluate/document phases.
+- **Launch Codex monitor only after a successful PR** — When `pr-creator` reports success in the For-Complete-Plans flow, create the 3-min cron with the prompt template above. The cron self-terminates when its merge phase completes (CI green, all threads resolved, squash-merge succeeded, on `main`). See [references/codex-loop.md](references/codex-loop.md) for the per-tick logic.
+- **Codex findings must be assessed for validity** — The monitor never accepts a Codex finding on face value. Each finding is verified against the actual code, accepted patterns, and CLAUDE.md before fixing. Invalid findings are resolved with reasoning, not silently dismissed.

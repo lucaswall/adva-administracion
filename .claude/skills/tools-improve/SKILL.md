@@ -105,7 +105,7 @@ You are a specialist in [domain]. When invoked:
 | `context` | `fork` = run in isolated subagent |
 | `agent` | Subagent type when forked |
 | `paths` | Glob filter — only auto-trigger when files matching patterns are touched |
-| `shell` | `bash` (default) or `powershell` for `` !`cmd` `` substitution |
+| `shell` | `bash` (default) or `powershell` for `!{backtick}cmd{backtick}` substitution |
 | `keep-coding-instructions` | `true` retains coding-instructions in forked context (v2.1.118+) |
 | `hooks` | Lifecycle hooks (all events; `once: true` and `if:` permission filter supported) |
 
