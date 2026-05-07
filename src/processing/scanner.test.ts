@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { scanFolder } from './scanner.js';
+import { scanFolder, rematch } from './scanner.js';
 
 // Mock dependencies
 vi.mock('../services/drive.js', () => ({
@@ -182,19 +182,32 @@ describe('scanner', () => {
     mockSortAndRename = vi.mocked(sortAndRenameDocument);
     mockMarkFileProcessing = vi.mocked(markFileProcessing);
 
-    // Reset withLock mock to default behavior
+    // Reset withLock mock fully (mockReset clears once-queues; clearAllMocks only clears call history)
+    // This prevents unconsumed mockResolvedValueOnce from prior tests leaking into subsequent tests.
+    vi.mocked(withLock).mockReset();
+    // Reset withLock mock to default behavior (with try/catch matching real withLock)
     vi.mocked(withLock).mockImplementation(async (_lockId: string, fn: () => Promise<any>) => {
-      const result = await fn();
-      return { ok: true, value: result };
+      try {
+        const result = await fn();
+        return { ok: true, value: result };
+      } catch (error) {
+        return { ok: false, error: error instanceof Error ? error : new Error(String(error)) };
+      }
     });
 
-    // Create a proper queue mock that tracks pending tasks
+    // Create a proper queue mock that tracks pending tasks.
+    // trackTask is always-resolving (errors absorbed) so onIdle never throws,
+    // matching real p-queue.onIdle() behavior. The raw task is returned so
+    // scanner.ts can attach its own .catch() handler.
     pendingTasks = new Set<Promise<void>>();
     mockQueue = {
       add: vi.fn((fn: () => Promise<void>) => {
-        const task = fn().finally(() => pendingTasks.delete(task));
-        pendingTasks.add(task);
-        return task;
+        const rawTask = fn();
+        const trackTask: Promise<void> = rawTask
+          .catch(() => {})
+          .finally(() => pendingTasks.delete(trackTask)) as Promise<void>;
+        pendingTasks.add(trackTask);
+        return rawTask;
       }),
       onIdle: vi.fn(async () => {
         while (pendingTasks.size > 0) {
@@ -1511,6 +1524,141 @@ describe('scanner', () => {
       if (result2.ok && 'skipped' in result2.value) {
         expect(result2.value.skipped).toBe(false);
       }
+    });
+  });
+
+  describe('rematch (ADV-191)', () => {
+    it('acquires processing lock with PROCESSING_LOCK_ID', async () => {
+      const { withLock } = await import('../utils/concurrency.js');
+      const { PROCESSING_LOCK_ID } = await import('../config.js');
+
+      const result = await rematch();
+
+      expect(result.ok).toBe(true);
+      expect(withLock).toHaveBeenCalledWith(
+        PROCESSING_LOCK_ID,
+        expect.any(Function),
+        expect.any(Number),
+        expect.any(Number)
+      );
+    });
+
+    it('returns lock error without calling runMatching when lock is unavailable', async () => {
+      const { withLock } = await import('../utils/concurrency.js');
+      const { runMatching } = await import('./matching/index.js');
+
+      vi.mocked(withLock).mockResolvedValueOnce({
+        ok: false,
+        error: new Error('Failed to acquire lock for document-processing within 300000ms'),
+      });
+
+      const result = await rematch();
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.error.message).toContain('Failed to acquire lock');
+      }
+      // runMatching must NOT be invoked when lock is held
+      expect(runMatching).not.toHaveBeenCalled();
+    });
+
+    it('returns error result when runMatching rejects inside lock (lock released via withLock try/finally)', async () => {
+      const { runMatching } = await import('./matching/index.js');
+
+      vi.mocked(runMatching).mockRejectedValueOnce(new Error('Matching engine crash'));
+
+      const result = await rematch();
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.error.message).toContain('Matching engine crash');
+      }
+    });
+
+    it('returns matchesFound and duration on success', async () => {
+      const { runMatching } = await import('./matching/index.js');
+
+      vi.mocked(runMatching).mockResolvedValueOnce({ ok: true, value: 7 });
+
+      const result = await rematch();
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value.matchesFound).toBe(7);
+        expect(result.value.duration).toBeGreaterThanOrEqual(0);
+      }
+    });
+
+    it('logs Rematch complete inside the locked block', async () => {
+      const { info: logInfo } = await import('../utils/logger.js');
+      const { runMatching } = await import('./matching/index.js');
+
+      vi.mocked(runMatching).mockResolvedValueOnce({ ok: true, value: 3 });
+
+      await rematch();
+
+      expect(logInfo).toHaveBeenCalledWith(
+        'Rematch complete',
+        expect.objectContaining({
+          module: 'scanner',
+          phase: 'rematch',
+          matchesFound: 3,
+        })
+      );
+    });
+  });
+
+  describe('queue.add().catch() unhandled rejection guard (ADV-196)', () => {
+    it('logs error when queue.add() promise rejects (unhandled rejection guard)', async () => {
+      const { error: logError } = await import('../utils/logger.js');
+      const { getProcessingQueue } = await import('./queue.js');
+
+      const rejectionError = new Error('Unexpected queue task crash');
+
+      // Override queue mock: add() returns an already-rejected promise
+      // (scanner.ts should attach .catch() to prevent unhandled rejection)
+      vi.mocked(getProcessingQueue).mockReturnValue({
+        add: vi.fn(() => Promise.reject(rejectionError)),
+        onIdle: vi.fn(async () => {}),
+      } as any);
+
+      mockListFiles.mockResolvedValue({
+        ok: true,
+        value: [{ id: 'crash-file', name: 'crash.pdf', mimeType: 'application/pdf', parents: ['entrada'] }],
+      });
+
+      await scanFolder('entrada');
+
+      // scanner.ts must attach .catch() on the return of queue.add()
+      // so the rejection is handled and logged instead of being unhandled
+      expect(logError).toHaveBeenCalledWith(
+        expect.stringContaining('Unexpected error'),
+        expect.objectContaining({
+          module: 'scanner',
+          error: expect.stringContaining('Unexpected queue task crash'),
+        })
+      );
+    });
+
+    it('scanner completes normally even when a queue task rejects unexpectedly', async () => {
+      const { getProcessingQueue } = await import('./queue.js');
+
+      const rejectionError = new Error('Another queue crash');
+
+      vi.mocked(getProcessingQueue).mockReturnValue({
+        add: vi.fn(() => Promise.reject(rejectionError)),
+        onIdle: vi.fn(async () => {}),
+      } as any);
+
+      mockListFiles.mockResolvedValue({
+        ok: true,
+        value: [{ id: 'crash-file-2', name: 'crash2.pdf', mimeType: 'application/pdf', parents: ['entrada'] }],
+      });
+
+      // scanFolder should resolve normally — the .catch() prevents unhandled rejection
+      const result = await scanFolder('entrada');
+
+      expect(result.ok).toBe(true);
     });
   });
 
