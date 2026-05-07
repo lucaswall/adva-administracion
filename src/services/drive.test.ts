@@ -68,6 +68,7 @@ import {
   updateFileContent,
   moveFile,
   getParents,
+  isDescendantOf,
   renameFile,
   downloadFile,
   clearDriveCache,
@@ -503,6 +504,79 @@ describe('Drive folder operations', () => {
         expect(result.value).toEqual(['parent1']);
       }
       expect(mockDriveFiles.get).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  describe('isDescendantOf (ADV-208)', () => {
+    it('returns true when folderId equals ancestorId (root case)', async () => {
+      const result = await isDescendantOf('root-id', 'root-id');
+      expect(result).toEqual({ ok: true, value: true });
+      expect(mockDriveFiles.get).not.toHaveBeenCalled();
+    });
+
+    it('returns true when folderId is a direct child of ancestorId', async () => {
+      mockDriveFiles.get.mockResolvedValueOnce({ data: { parents: ['root-id'] } });
+
+      const result = await isDescendantOf('child-id', 'root-id');
+
+      expect(result).toEqual({ ok: true, value: true });
+      expect(mockDriveFiles.get).toHaveBeenCalledTimes(1);
+    });
+
+    it('returns true for two-hop descendant', async () => {
+      mockDriveFiles.get
+        .mockResolvedValueOnce({ data: { parents: ['middle-id'] } })
+        .mockResolvedValueOnce({ data: { parents: ['root-id'] } });
+
+      const result = await isDescendantOf('grandchild-id', 'root-id');
+
+      expect(result).toEqual({ ok: true, value: true });
+      expect(mockDriveFiles.get).toHaveBeenCalledTimes(2);
+    });
+
+    it('returns false when folder is unrelated to ancestor', async () => {
+      mockDriveFiles.get
+        .mockResolvedValueOnce({ data: { parents: ['other-id'] } })
+        .mockResolvedValueOnce({ data: { parents: [] } });
+
+      const result = await isDescendantOf('unrelated-id', 'root-id');
+
+      expect(result).toEqual({ ok: true, value: false });
+    });
+
+    it('returns ok:false when Drive API errors during traversal (ADV-208 hardening)', async () => {
+      // All retries fail
+      mockDriveFiles.get.mockRejectedValue(new Error('500 Drive backend error'));
+
+      const result = await isDescendantOf('child-id', 'root-id');
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.error.message).toContain('500');
+      }
+    });
+
+    it('detects cycle in parent chain and returns false', async () => {
+      // A's parent is B, B's parent is A — cycle
+      mockDriveFiles.get
+        .mockResolvedValueOnce({ data: { parents: ['B'] } })
+        .mockResolvedValueOnce({ data: { parents: ['A'] } });
+
+      const result = await isDescendantOf('A', 'unrelated-root');
+
+      expect(result).toEqual({ ok: true, value: false });
+    });
+
+    it('returns false when MAX_ANCESTOR_DEPTH is exceeded without finding ancestor', async () => {
+      // Build a chain longer than MAX_ANCESTOR_DEPTH (8)
+      for (let i = 0; i < 10; i++) {
+        mockDriveFiles.get.mockResolvedValueOnce({ data: { parents: [`p${i + 1}`] } });
+      }
+
+      const result = await isDescendantOf('p0', 'unreachable-root');
+
+      expect(result).toEqual({ ok: true, value: false });
+      expect(mockDriveFiles.get).toHaveBeenCalledTimes(8);
     });
   });
 

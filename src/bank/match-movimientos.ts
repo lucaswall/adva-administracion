@@ -211,7 +211,7 @@ export interface MatchMovimientosResult {
   creditsFilled: number;
   noMatches: number;
   errors: number;
-  /** Count of failures writing pagada=SI to Control sheets. Non-fatal; detaille and pagada are independent. */
+  /** Count of failures writing pagada=SI to Control sheets. Non-fatal; detalle and pagada are independent. */
   pagadaErrors: number;
   duration: number;
 }
@@ -1143,7 +1143,7 @@ async function matchBankMovimientos(
   }
 
   // Write pagada=SI for matched facturas, batched by spreadsheet
-  // Only if detaille updates succeeded — keeps movimiento match and pagada flag in sync
+  // Only if detalle updates succeeded — keeps movimiento match and pagada flag in sync
   let pagadaErrors = 0;
   if (updateResult.ok && pagadaUpdates.length > 0) {
     const bySpreadsheet = new Map<string, Array<{ range: string; values: CellValue[][] }>>();

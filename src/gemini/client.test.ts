@@ -1387,6 +1387,12 @@ describe('GeminiClient', () => {
   });
 
   describe('singleton factory', () => {
+    afterEach(async () => {
+      // Reset singleton between tests so each test starts with no shared state
+      const { resetGeminiClient } = await import('./client.js');
+      resetGeminiClient();
+    });
+
     it('shared GeminiClient: 24 concurrent calls with rpmLimit=12 makes only 12 transport calls in first second', async () => {
       vi.useFakeTimers();
 

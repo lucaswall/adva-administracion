@@ -77,8 +77,12 @@ export async function scanRoutes(server: FastifyInstance) {
 
       // Verify the folder is within the configured root
       const config = getConfig();
-      const isDescendant = await isDescendantOf(extractedId, config.driveRootFolderId);
-      if (!isDescendant) {
+      const ancestryResult = await isDescendantOf(extractedId, config.driveRootFolderId);
+      if (!ancestryResult.ok) {
+        // Drive API error during traversal — could not determine, return 500
+        return respond500(reply, ancestryResult.error, { module: 'scan', phase: 'ancestry-check' });
+      }
+      if (!ancestryResult.value) {
         reply.status(403);
         return {
           error: 'Access denied: folderId is not within the configured root folder',

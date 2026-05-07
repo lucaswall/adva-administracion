@@ -945,16 +945,17 @@ const MAX_ANCESTOR_DEPTH = 8;
  * Checks whether a folder is a descendant of (contained within) a given ancestor.
  *
  * Walks up the parent chain using files.get, up to MAX_ANCESTOR_DEPTH levels.
- * Parent IDs are cached within a single call to avoid redundant API requests.
  *
  * @param folderId - Folder to check
  * @param ancestorId - Expected ancestor folder ID
- * @returns true if folderId is inside ancestorId, false otherwise
+ * @returns Result with `ok: true, value: boolean` (true = descendant, false = not).
+ *          On Drive API failure mid-traversal returns `ok: false, error` so the caller
+ *          can distinguish "not a descendant" (403) from "couldn't determine" (5xx).
  */
-export async function isDescendantOf(folderId: string, ancestorId: string): Promise<boolean> {
+export async function isDescendantOf(folderId: string, ancestorId: string): Promise<Result<boolean, Error>> {
   // A folder is trivially a "descendant" of itself (covers the root folder case)
   if (folderId === ancestorId) {
-    return true;
+    return { ok: true, value: true };
   }
 
   const visited = new Set<string>();
@@ -962,27 +963,33 @@ export async function isDescendantOf(folderId: string, ancestorId: string): Prom
 
   for (let depth = 0; depth < MAX_ANCESTOR_DEPTH; depth++) {
     if (visited.has(currentId)) {
-      // Cycle detected — stop
-      break;
+      // Cycle detected — treat as not-a-descendant (we walked all reachable ancestors)
+      return { ok: true, value: false };
     }
     visited.add(currentId);
 
     const result = await getParents(currentId);
-    if (!result.ok || result.value.length === 0) {
-      // No parents or error — reached the root without finding ancestorId
-      break;
+    if (!result.ok) {
+      // Drive API error — propagate so caller can distinguish from "not a descendant"
+      return { ok: false, error: result.error };
     }
 
     const parents = result.value;
+    if (parents.length === 0) {
+      // Reached the root without finding ancestorId
+      return { ok: true, value: false };
+    }
+
     if (parents.includes(ancestorId)) {
-      return true;
+      return { ok: true, value: true };
     }
 
     // Traverse the first parent (Drive items typically have one parent)
     currentId = parents[0];
   }
 
-  return false;
+  // Depth limit reached without finding ancestor
+  return { ok: true, value: false };
 }
 
 /**

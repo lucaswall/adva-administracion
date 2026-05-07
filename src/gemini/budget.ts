@@ -78,7 +78,7 @@ export class DailyBudget {
     if (this.count >= this.cap) {
       return {
         ok: false,
-        error: `Daily Gemini budget exhausted (${this.count}/${this.cap} requests today)`
+        error: `Daily Gemini quota exhausted: budget reached (${this.count}/${this.cap} requests today)`
       };
     }
 

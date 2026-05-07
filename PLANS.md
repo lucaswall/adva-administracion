@@ -513,3 +513,87 @@
 - Task 6 (invisible PDF text) has uncertain implementation cost — pure-JS detection of all three vectors (white-on-white, font-size 0, off-MediaBox) is non-trivial. Acceptance bar: at least one well-known vector handled, with the others documented as gaps.
 - Task 8 (credential gate) will break local development workflows that ran without `GEMINI_API_KEY`. Document `NODE_ENV=test` bypass.
 - Task 15 (folder ancestry check) adds 1–8 Drive API calls per scan request. Cache parent lookups; budget under 10s with explicit timeout.
+
+---
+
+## Iteration 1
+
+**Implemented:** 2026-05-07
+**Method:** Agent team (4 workers, worktree-isolated)
+
+### Tasks Completed This Iteration
+- Task 1 (ADV-191): Acquire processing lock in /api/rematch path (worker-1)
+- Task 2 (ADV-195): LockManager.release CAS on lockInstanceId (worker-1)
+- Task 3 (ADV-196): Catch unhandled rejections from queue.add() in scanner (worker-1)
+- Task 4 (ADV-194): Single shared GeminiClient enforces RPM cap (worker-2)
+- Task 5 (ADV-193): MAX_DOCUMENT_BYTES guard before Gemini (worker-2)
+- Task 6 (ADV-192): Invisible-text detection on PDFs (worker-2)
+- Task 7 (ADV-197): Daily Gemini request budget ceiling (worker-2)
+- Task 8 (ADV-200): Fail-closed credential gate independent of NODE_ENV (worker-3)
+- Task 9 (ADV-201): Try/catch wrapper around watch-manager cron callbacks (worker-3)
+- Task 10 (ADV-202): Track pagada update failures separately (worker-4)
+- Task 11 (ADV-203): Type-safe validateAdvaRole boundary (worker-2)
+- Task 12 (ADV-204): Orchestration unit tests for extractDocument and processFile (worker-2)
+- Task 13 (ADV-206): Document Drive scope requirement (worker-4)
+- Task 14 (ADV-207): Document GEMINI_API_KEY GCP-side restriction (worker-4)
+- Task 15 (ADV-208): Constrain /api/scan folderId to root descendants (worker-3)
+- Task 16 (ADV-210): Sanitize 500 error responses (worker-3)
+- Task 17 (ADV-211/212): Fix shutdown handlers (void + timeout policy) (worker-3)
+- Task 18 (ADV-213): Remove unnecessary 'unknown' as any cast (worker-1)
+- Task 19 (ADV-214): Replace double cast in apps-script-client (worker-4)
+- Task 20 (ADV-216): Log durationMs on Drive and Sheets API calls (worker-4)
+- Task 21 (ADV-217): Fix CLAUDE.md spreadsheet column counts (worker-4)
+- Task 22 (ADV-218): Update rate-limiter.ts JSDoc example to use Pino (worker-4)
+
+### Files Modified
+- `CLAUDE.md` — Drive scope, GEMINI_API_KEY restriction, column counts, Graceful Shutdown subsection
+- `src/config.ts` — `maxDocumentBytes`, `geminiDailyBudget` config; fail-closed credential gate
+- `src/config.test.ts` — credential gate tests (new)
+- `src/server.ts` — `void shutdown().catch()` in SIGTERM/SIGINT handlers
+- `src/server.test.ts` — shutdown handler tests
+- `src/bank/match-movimientos.ts` — `pagadaErrors` field, error-level logging
+- `src/bank/match-movimientos.test.ts` — pagada/detalle separation tests
+- `src/gemini/budget.ts`, `budget.test.ts` (new) — `DailyBudget` class
+- `src/gemini/client.ts`, `client.test.ts` — singleton factory, per-call usageCallback, budget integration
+- `src/gemini/parser.ts`, `parser.test.ts` — typed `validateAdvaRole`
+- `src/processing/extractor.ts`, `extractor.test.ts` — singleton, size guard, sanitize check, orchestration tests
+- `src/processing/pdf-sanitize.ts`, `pdf-sanitize.test.ts` (new) — invisible-text detector
+- `src/processing/scanner.ts`, `scanner.test.ts` — rematch lock, queue.add().catch(), `as any` removed
+- `src/utils/concurrency.ts`, `concurrency.test.ts` — CAS release on `lockInstanceId`
+- `src/utils/error-response.ts` (new) — `respond500` helper
+- `src/utils/rate-limiter.ts` — JSDoc example updated to Pino
+- `src/routes/scan.ts`, `scan.test.ts` — folder ancestry check, sanitized 500 responses
+- `src/routes/status.test.ts` — Config mocks updated
+- `src/middleware/auth.test.ts` — Config mocks updated
+- `src/services/apps-script-client.ts`, `apps-script-client.test.ts` (new) — explicit `ServiceAccountKey` construction
+- `src/services/drive.ts`, `drive.test.ts` — `isDescendantOf`, `withTiming` durationMs
+- `src/services/google-auth.ts` — JSDoc on `getDefaultScopes`
+- `src/services/sheets.ts`, `sheets.test.ts` — `withTiming` durationMs
+- `src/services/watch-manager.ts`, `watch-manager.test.ts` — `runCronTask` helper, try/catch on all 4 crons
+
+### Linear Updates
+- ADV-191, ADV-192, ADV-193, ADV-194, ADV-195, ADV-196, ADV-197: Todo → In Progress → Review
+- ADV-200, ADV-201, ADV-202, ADV-203, ADV-204: Todo → In Progress → Review
+- ADV-206, ADV-207, ADV-208, ADV-210, ADV-211, ADV-212, ADV-213, ADV-214: Todo → In Progress → Review
+- ADV-216, ADV-217, ADV-218: Todo → In Progress → Review
+
+### Pre-commit Verification
+- bug-hunter: Found 7 bugs (2 HIGH, 4 MEDIUM, 1 LOW); 5 real bugs fixed (Bug 6 not-a-regression and Bug 7 style debt skipped)
+- verifier: 2092 tests pass, zero TypeScript errors, build clean (TypeScript + Apps Script bundle)
+
+### Work Partition
+- Worker 1: concurrency primitives + scanner (Tasks 1, 2, 3, 18) — 5 effort points
+- Worker 2: Gemini & extractor pipeline (Tasks 4, 5, 6, 7, 11, 12) — 15 effort points
+- Worker 3: API/server/config (Tasks 8, 9, 15, 16, 17) — 6 effort points
+- Worker 4: services & docs (Tasks 10, 13, 14, 19, 20, 21, 22) — 4 effort points
+
+### Merge Summary
+- Worker 1: fast-forward, no conflicts (concurrency.ts, scanner.ts)
+- Worker 2: merged after worker-1, no conflicts
+- Worker 3: auto-merged 3 files (config.ts, scan.test.ts, server.test.ts) — Config-mock test additions integrated cleanly
+- Worker 4: auto-merged 3 files (CLAUDE.md, scanner.test.ts, drive.ts) — drive.ts withTiming + isDescendantOf both preserved
+- Typecheck clean after each merge
+- Post-merge bug-hunter follow-ups: budget retry classification, isDescendantOf failing-open, singleton afterEach, isDescendantOf test coverage, "detaille" typo
+
+### Continuation Status
+All tasks completed.

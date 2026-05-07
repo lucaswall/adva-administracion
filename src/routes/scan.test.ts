@@ -99,7 +99,7 @@ describe('Scan routes', () => {
     vi.mocked(getConfig).mockReturnValue(mockConfig);
     mockGetCachedFolderStructure.mockReturnValue(mockFolderStructure);
     // Default: all folderIds are considered descendants of root
-    mockIsDescendantOf.mockResolvedValue(true);
+    mockIsDescendantOf.mockResolvedValue({ ok: true, value: true });
 
     server = Fastify({ logger: false });
     await server.register(scanRoutes, { prefix: '/api' });
@@ -240,7 +240,7 @@ describe('Scan routes', () => {
     });
 
     it('returns 403 when folderId is not a descendant of the root folder (ADV-208)', async () => {
-      mockIsDescendantOf.mockResolvedValue(false);
+      mockIsDescendantOf.mockResolvedValue({ ok: true, value: false });
 
       const response = await server.inject({
         method: 'POST',
@@ -256,8 +256,24 @@ describe('Scan routes', () => {
       expect(mockScanFolder).not.toHaveBeenCalled();
     });
 
+    it('returns 500 when ancestry check fails due to Drive API error (ADV-208)', async () => {
+      mockIsDescendantOf.mockResolvedValue({ ok: false, error: new Error('Drive API quota exceeded') });
+
+      const response = await server.inject({
+        method: 'POST',
+        url: '/api/scan',
+        headers: { authorization: 'Bearer test-secret-123' },
+        payload: { folderId: '1ABC2defGHIjklMNOpqrSTUvwxyz12' },
+      });
+
+      expect(response.statusCode).toBe(500);
+      const body = JSON.parse(response.payload);
+      expect(body.error).toBe('Internal server error');
+      expect(mockScanFolder).not.toHaveBeenCalled();
+    });
+
     it('accepts a folderId that is a descendant of the root folder (ADV-208)', async () => {
-      mockIsDescendantOf.mockResolvedValue(true);
+      mockIsDescendantOf.mockResolvedValue({ ok: true, value: true });
       mockScanFolder.mockResolvedValue({
         ok: true,
         value: { filesProcessed: 1, facturasAdded: 0, pagosAdded: 0, recibosAdded: 0, matchesFound: 0, errors: 0, duration: 100 },
