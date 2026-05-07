@@ -1318,25 +1318,42 @@ export async function matchAllMovimientos(
     PROCESSING_LOCK_TIMEOUT_MS
   );
 
-  // Handle lock acquisition failure
+  // `withLock` returns ok:false for two distinct cases:
+  //   1. Lock acquisition timeout — concurrent scan/match already running.
+  //   2. The locked callback itself threw — a real production failure.
+  // Only case (1) should be reported as `skipped/already_running`. Case (2)
+  // must surface to the caller so it appears in logs and the HTTP response
+  // (Codex P2 review on PR 112).
   if (!lockResult.ok) {
-    info('Match movimientos skipped - scan or match already running', {
+    const isLockAcquisitionTimeout = lockResult.error.message.startsWith(
+      `Failed to acquire lock for ${PROCESSING_LOCK_ID}`,
+    );
+    if (isLockAcquisitionTimeout) {
+      info('Match movimientos skipped - scan or match already running', {
+        module: 'match-movimientos',
+      });
+      return {
+        ok: true,
+        value: {
+          skipped: true,
+          reason: 'already_running',
+          results: [],
+          totalProcessed: 0,
+          totalFilled: 0,
+          totalDebitsFilled: 0,
+          totalCreditsFilled: 0,
+          totalPagadaErrors: 0,
+          duration: 0,
+        },
+      };
+    }
+    // Unexpected exception inside the locked callback — propagate so the
+    // caller (route handler, logs, monitoring) can react.
+    logError('Match movimientos failed unexpectedly inside lock', {
       module: 'match-movimientos',
+      error: lockResult.error.message,
     });
-    return {
-      ok: true,
-      value: {
-        skipped: true,
-        reason: 'already_running',
-        results: [],
-        totalProcessed: 0,
-        totalFilled: 0,
-        totalDebitsFilled: 0,
-        totalCreditsFilled: 0,
-        totalPagadaErrors: 0,
-        duration: 0,
-      },
-    };
+    return { ok: false, error: lockResult.error };
   }
 
   // Unwrap the nested result - callback returns Result<MatchAllResult, Error>

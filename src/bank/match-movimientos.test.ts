@@ -633,9 +633,11 @@ describe('matchAllMovimientos', () => {
   });
 
   it('should return skipped result when lock cannot be acquired', async () => {
+    // Use the actual error message that withLock produces on acquisition
+    // timeout so the new "is acquisition timeout?" check matches.
     vi.mocked(withLock).mockResolvedValue({
       ok: false,
-      error: new Error('Lock timeout'),
+      error: new Error('Failed to acquire lock for document-processing within 300000ms'),
     });
 
     const resultPromise = matchAllMovimientos();
@@ -649,10 +651,29 @@ describe('matchAllMovimientos', () => {
     }
   });
 
+  it('propagates unexpected exceptions from the locked callback as failure (Codex P2)', async () => {
+    // When the callback inside withLock throws, withLock returns ok:false with
+    // the actual exception — NOT the "Failed to acquire lock" prefix. This
+    // must surface as a real failure, not a silent "already_running" skip.
+    vi.mocked(withLock).mockResolvedValue({
+      ok: false,
+      error: new Error('Unexpected: failed to load control sheets'),
+    });
+
+    const resultPromise = matchAllMovimientos();
+    await vi.runAllTimersAsync();
+    const result = await resultPromise;
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.message).toContain('failed to load control sheets');
+    }
+  });
+
   it('should use unified lock ID from config', async () => {
     vi.mocked(withLock).mockResolvedValue({
       ok: false,
-      error: new Error('Lock timeout'),
+      error: new Error('Failed to acquire lock for document-processing within 300000ms'),
     });
 
     await matchAllMovimientos();
