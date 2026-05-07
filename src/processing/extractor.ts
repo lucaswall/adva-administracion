@@ -184,27 +184,12 @@ export async function processFile(
 
   const content = downloadResult.value;
 
-  // Sanitize: reject PDFs that contain invisible text (prompt-injection vector).
-  // Done BEFORE size check so we never send a malicious payload to Gemini.
-  const sanitizeResult = detectInvisibleText(content);
-  if (sanitizeResult.hasInvisible) {
-    warn('Invisible text detected in document, routing to Sin Procesar', {
-      module: 'extractor',
-      phase: 'sanitize',
-      fileId: fileInfo.id,
-      fileName: fileInfo.name,
-      reason: sanitizeResult.reason,
-    });
-    return {
-      ok: false,
-      error: new Error(`Invisible text detected: ${sanitizeResult.reason}`),
-    };
-  }
-
   // Guard: reject documents that exceed the configured size limit.
-  // Large files would exhaust the Gemini API's inline_data payload limit and
-  // cause JSON parse errors. Route to Sin Procesar (permanent error) so the
-  // file is not retried until an operator reviews it.
+  // Done BEFORE the sanitizer so an oversized PDF never gets converted to a
+  // very large latin1 string for regex scanning — the size limit is meant to
+  // bound exactly that kind of allocation (Codex P2 review on PR 112). Both
+  // branches route to Sin Procesar regardless, so there is no security
+  // regression from running size first.
   if (content.byteLength > config.maxDocumentBytes) {
     warn('Document exceeds size limit, routing to Sin Procesar', {
       module: 'extractor',
@@ -219,6 +204,22 @@ export async function processFile(
       error: new Error(
         `Document size ${content.byteLength} bytes exceeds MAX_DOCUMENT_BYTES limit of ${config.maxDocumentBytes} bytes`
       ),
+    };
+  }
+
+  // Sanitize: reject PDFs that contain invisible text (prompt-injection vector).
+  const sanitizeResult = detectInvisibleText(content);
+  if (sanitizeResult.hasInvisible) {
+    warn('Invisible text detected in document, routing to Sin Procesar', {
+      module: 'extractor',
+      phase: 'sanitize',
+      fileId: fileInfo.id,
+      fileName: fileInfo.name,
+      reason: sanitizeResult.reason,
+    });
+    return {
+      ok: false,
+      error: new Error(`Invisible text detected: ${sanitizeResult.reason}`),
     };
   }
 
