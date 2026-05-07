@@ -7,7 +7,8 @@ import type { GeminiResponse, GeminiUsageMetadata, Result } from '../types/index
 import { GeminiError } from '../types/index.js';
 import { classifyError } from './errors.js';
 import { debug, warn, error as logError } from '../utils/logger.js';
-import { FETCH_TIMEOUT_MS } from '../config.js';
+import { FETCH_TIMEOUT_MS, getConfig } from '../config.js';
+import { DailyBudget } from './budget.js';
 
 /**
  * Maximum HTTP response size (2MB)
@@ -61,7 +62,7 @@ function sleep(ms: number): Promise<void> {
 const PIPELINE_TIMEOUT_MS = 900000;
 
 /**
- * Gemini API client with built-in rate limiting
+ * Gemini API client with built-in rate limiting and daily budget enforcement
  */
 export class GeminiClient {
   private apiKey: string;
@@ -72,6 +73,7 @@ export class GeminiClient {
   private readonly ENDPOINT: string;
   private readonly usageCallback?: UsageCallback;
   private rateLimitQueue: Promise<void> = Promise.resolve();
+  private readonly budget: DailyBudget;
 
   /**
    * Creates a new Gemini client
@@ -79,11 +81,13 @@ export class GeminiClient {
    * @param apiKey - Gemini API key
    * @param rpmLimit - Requests per minute limit (default: 60)
    * @param usageCallback - Optional callback for tracking token usage
+   * @param dailyBudget - Optional daily request budget (0 = disabled)
    */
-  constructor(apiKey: string, rpmLimit: number = 60, usageCallback?: UsageCallback) {
+  constructor(apiKey: string, rpmLimit: number = 60, usageCallback?: UsageCallback, dailyBudget: number = 0) {
     this.apiKey = apiKey;
     this.rpmLimit = rpmLimit;
     this.usageCallback = usageCallback;
+    this.budget = new DailyBudget(dailyBudget);
     this.ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${this.MODEL}:generateContent`;
   }
 
@@ -96,6 +100,7 @@ export class GeminiClient {
    * @param maxRetries - Maximum number of retry attempts (default: 3)
    * @param fileId - Optional Drive file ID for usage tracking
    * @param fileName - Optional file name for usage tracking
+   * @param perCallUsageCallback - Optional per-call usage callback (overrides instance callback)
    * @returns API response text or error
    */
   async analyzeDocument(
@@ -104,7 +109,8 @@ export class GeminiClient {
     prompt: string,
     maxRetries: number = 3,
     fileId: string = '',
-    fileName: string = ''
+    fileName: string = '',
+    perCallUsageCallback?: UsageCallback
   ): Promise<Result<string, GeminiError>> {
     // Track pipeline start time for timeout enforcement
     const pipelineStartTime = Date.now();
@@ -135,7 +141,7 @@ export class GeminiClient {
       }
 
       // Attempt the API call
-      lastResult = await this.doAnalyzeDocument(fileBuffer, mimeType, prompt, fileId, fileName);
+      lastResult = await this.doAnalyzeDocument(fileBuffer, mimeType, prompt, fileId, fileName, perCallUsageCallback);
 
       // If successful, return immediately
       if (lastResult.ok) {
@@ -191,6 +197,7 @@ export class GeminiClient {
    * @param prompt - Extraction prompt
    * @param fileId - Drive file ID for usage tracking
    * @param fileName - File name for usage tracking
+   * @param perCallUsageCallback - Optional per-call usage callback (overrides instance callback)
    * @returns API response text or error
    */
   private async doAnalyzeDocument(
@@ -198,19 +205,38 @@ export class GeminiClient {
     mimeType: string,
     prompt: string,
     fileId: string,
-    fileName: string
+    fileName: string,
+    perCallUsageCallback?: UsageCallback
   ): Promise<Result<string, GeminiError>> {
     const startTime = Date.now();
     let usageMetadata: GeminiUsageMetadata | undefined;
 
     try {
+      // Check daily budget BEFORE the rate-limit queue so an exhausted budget
+      // returns immediately without consuming a rate-limit slot or making an API call.
+      const budgetResult = this.budget.consume();
+      if (!budgetResult.ok) {
+        warn('Gemini daily budget exhausted, request skipped', {
+          module: 'gemini-client',
+          phase: 'budget-check',
+          fileId,
+          fileName,
+          reason: budgetResult.error,
+        });
+        // Return as a retryable error (file stays in Entrada for next-day retry)
+        return {
+          ok: false,
+          error: new GeminiError(budgetResult.error, 429)
+        };
+      }
+
       await this.enforceRateLimit();
 
       const base64Data = fileBuffer.toString('base64');
 
       if (!mimeType) {
         const error = new GeminiError('Unable to determine file MIME type', 400);
-        this.callUsageCallback(false, usageMetadata, Date.now() - startTime, fileId, fileName, error.message);
+        this.callUsageCallback(false, usageMetadata, Date.now() - startTime, fileId, fileName, error.message, perCallUsageCallback);
         return { ok: false, error };
       }
 
@@ -281,10 +307,10 @@ export class GeminiClient {
             });
           }
 
-          this.callUsageCallback(true, usageMetadata, duration, fileId, fileName);
+          this.callUsageCallback(true, usageMetadata, duration, fileId, fileName, undefined, perCallUsageCallback);
           return { ok: true, value: parseResult.value };
         } else {
-          this.callUsageCallback(false, usageMetadata, duration, fileId, fileName, parseResult.error.message);
+          this.callUsageCallback(false, usageMetadata, duration, fileId, fileName, parseResult.error.message, perCallUsageCallback);
           return parseResult;
         }
       } catch (fetchError) {
@@ -308,7 +334,7 @@ export class GeminiClient {
           errorType: err.constructor.name
         });
 
-        this.callUsageCallback(false, usageMetadata, duration, fileId, fileName, errorMessage);
+        this.callUsageCallback(false, usageMetadata, duration, fileId, fileName, errorMessage, perCallUsageCallback);
 
         return {
           ok: false,
@@ -331,7 +357,7 @@ export class GeminiClient {
         errorType: err.constructor.name
       });
 
-      this.callUsageCallback(false, usageMetadata, duration, fileId, fileName, err.message);
+      this.callUsageCallback(false, usageMetadata, duration, fileId, fileName, err.message, perCallUsageCallback);
 
       return {
         ok: false,
@@ -345,7 +371,8 @@ export class GeminiClient {
   }
 
   /**
-   * Calls the usage callback if provided, safely handling async rejections
+   * Calls the usage callback if provided, safely handling async rejections.
+   * Per-call callback takes priority over the instance-level callback.
    */
   private callUsageCallback(
     success: boolean,
@@ -353,11 +380,13 @@ export class GeminiClient {
     durationMs: number,
     fileId: string,
     fileName: string,
-    errorMessage?: string
+    errorMessage?: string,
+    perCallCallback?: UsageCallback
   ): void {
-    if (!this.usageCallback) return;
+    const cb = perCallCallback ?? this.usageCallback;
+    if (!cb) return;
 
-    const result = this.usageCallback({
+    const result = cb({
       success,
       model: this.MODEL,
       promptTokens: usageMetadata?.promptTokenCount || 0,
@@ -565,4 +594,43 @@ export class GeminiClient {
       timeUntilReset
     };
   }
+}
+
+/**
+ * Module-scoped singleton instance — shared across all processFile invocations.
+ * Created lazily on first call; lives for the process lifetime.
+ * This ensures the RPM cap is enforced across the entire processing queue,
+ * not per-file.
+ */
+let _geminiClientInstance: GeminiClient | null = null;
+
+/**
+ * Returns the shared GeminiClient singleton.
+ *
+ * The client is lazily constructed from the current config on first call.
+ * Subsequent calls return the same instance regardless of arguments —
+ * pass `apiKey` and `rpmLimit` only when you want to override (e.g. tests).
+ *
+ * @param apiKey - Optional API key override (only used when creating a new instance)
+ * @param rpmLimit - Optional RPM limit override (only used when creating a new instance)
+ */
+export function getGeminiClient(apiKey?: string, rpmLimit?: number, dailyBudget?: number): GeminiClient {
+  if (!_geminiClientInstance) {
+    const config = getConfig();
+    _geminiClientInstance = new GeminiClient(
+      apiKey ?? config.geminiApiKey,
+      rpmLimit ?? config.geminiRpmLimit,
+      undefined,
+      dailyBudget ?? config.geminiDailyBudget
+    );
+  }
+  return _geminiClientInstance;
+}
+
+/**
+ * Resets the GeminiClient singleton.
+ * For testing only — do not call in production code.
+ */
+export function resetGeminiClient(): void {
+  _geminiClientInstance = null;
 }

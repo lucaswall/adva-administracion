@@ -276,15 +276,20 @@ export function extractJSON(response: string): ExtractJSONResult {
 }
 
 /**
- * Validates that ADVA is in the expected role for the document type
+ * Validates that ADVA is in the expected role for the document type.
  *
- * @param data - Extracted document data
+ * The `data` parameter is typed as the intersection of the three document
+ * interfaces (all fields made optional via Partial<>) so TypeScript catches
+ * field-name typos and invalid accesses while remaining flexible enough to
+ * accept Partial<Factura>, Partial<Pago>, and Partial<Recibo> at call sites.
+ *
+ * @param data - Extracted document data (factura, pago, or recibo fields)
  * @param expectedRole - Role ADVA should have
- * @param documentType - Type of document
+ * @param documentType - Type of document (unused, kept for future narrowing)
  * @returns Validation result with errors if invalid
  */
 function validateAdvaRole(
-  data: any,
+  data: Partial<Factura> & Partial<Pago> & Partial<Recibo>,
   expectedRole: 'emisor' | 'receptor' | 'pagador' | 'beneficiario' | 'empleador',
   _documentType: string
 ): AdvaRoleValidation {

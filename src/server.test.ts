@@ -23,6 +23,8 @@ vi.mock('./config.js', () => ({
     usdMatchDaysAfter: 90,
     usdArsTolerancePercent: 5,
     geminiRpmLimit: 150,
+    geminiDailyBudget: 0,
+    maxDocumentBytes: 25 * 1024 * 1024,
   })),
 }));
 
@@ -137,6 +139,8 @@ describe('Server startup scan (ADV-26)', () => {
         usdMatchDaysAfter: 90,
         usdArsTolerancePercent: 5,
         geminiRpmLimit: 150,
+        geminiDailyBudget: 0,
+        maxDocumentBytes: 25 * 1024 * 1024,
         environment: 'staging' as const,
       });
 
@@ -180,6 +184,8 @@ describe('Server startup scan (ADV-26)', () => {
         usdMatchDaysAfter: 90,
         usdArsTolerancePercent: 5,
         geminiRpmLimit: 150,
+        geminiDailyBudget: 0,
+        maxDocumentBytes: 25 * 1024 * 1024,
         environment: 'staging' as const,
       });
 
@@ -214,6 +220,8 @@ describe('Server startup scan (ADV-26)', () => {
         usdMatchDaysAfter: 90,
         usdArsTolerancePercent: 5,
         geminiRpmLimit: 150,
+        geminiDailyBudget: 0,
+        maxDocumentBytes: 25 * 1024 * 1024,
         environment: 'staging' as const,
       });
 
@@ -248,6 +256,8 @@ describe('Server startup scan (ADV-26)', () => {
         usdMatchDaysAfter: 90,
         usdArsTolerancePercent: 5,
         geminiRpmLimit: 150,
+        geminiDailyBudget: 0,
+        maxDocumentBytes: 25 * 1024 * 1024,
         environment: 'staging' as const,
       });
 
@@ -280,6 +290,8 @@ describe('Server startup scan (ADV-26)', () => {
         usdMatchDaysAfter: 90,
         usdArsTolerancePercent: 5,
         geminiRpmLimit: 150,
+        geminiDailyBudget: 0,
+        maxDocumentBytes: 25 * 1024 * 1024,
         environment: 'staging' as const,
       });
 
@@ -321,6 +333,8 @@ describe('Server startup scan (ADV-26)', () => {
         usdMatchDaysAfter: 90,
         usdArsTolerancePercent: 5,
         geminiRpmLimit: 150,
+        geminiDailyBudget: 0,
+        maxDocumentBytes: 25 * 1024 * 1024,
         environment: 'staging' as const,
       });
 
