@@ -10,6 +10,35 @@ import { debug, warn, error as logError } from '../utils/logger.js';
 import { withQuotaRetry } from '../utils/concurrency.js';
 
 /**
+ * Slow-call threshold: warn if a Drive API call exceeds this duration.
+ */
+const SLOW_CALL_THRESHOLD_MS = 5_000;
+
+/**
+ * Wraps an async operation with debug-level duration logging.
+ * Emits a WARN if the operation exceeds SLOW_CALL_THRESHOLD_MS.
+ */
+async function withTiming<T>(apiName: string, fn: () => Promise<T>): Promise<T> {
+  const start = Date.now();
+  try {
+    const result = await fn();
+    const durationMs = Date.now() - start;
+    debug(apiName, { module: 'drive', phase: 'api-call', durationMs });
+    if (durationMs > SLOW_CALL_THRESHOLD_MS) {
+      warn(apiName, { module: 'drive', phase: 'api-call', slow: true, durationMs });
+    }
+    return result;
+  } catch (e) {
+    const durationMs = Date.now() - start;
+    debug(apiName, { module: 'drive', phase: 'api-call', durationMs, failed: true });
+    if (durationMs > SLOW_CALL_THRESHOLD_MS) {
+      warn(apiName, { module: 'drive', phase: 'api-call', slow: true, durationMs });
+    }
+    throw e;
+  }
+}
+
+/**
  * Drive service instance
  */
 let driveService: drive_v3.Drive | null = null;
@@ -155,34 +184,36 @@ export async function listFilesInFolder(
  * @returns File content as Buffer
  */
 export async function downloadFile(fileId: string): Promise<Result<Buffer, Error>> {
-  try {
-    const drive = await getDriveService();
+  return withTiming('downloadFile', async () => {
+    try {
+      const drive = await getDriveService();
 
-    const getResult = await withQuotaRetry(async () =>
-      drive.files.get(
-        {
-          fileId,
-          alt: 'media',
-          supportsAllDrives: true,
-        },
-        {
-          responseType: 'arraybuffer',
-        }
-      )
-    );
+      const getResult = await withQuotaRetry(async () =>
+        drive.files.get(
+          {
+            fileId,
+            alt: 'media',
+            supportsAllDrives: true,
+          },
+          {
+            responseType: 'arraybuffer',
+          }
+        )
+      );
 
-    if (!getResult.ok) {
-      return getResult;
+      if (!getResult.ok) {
+        return getResult;
+      }
+
+      const buffer = Buffer.from(getResult.value.data as ArrayBuffer);
+      return { ok: true, value: buffer };
+    } catch (error) {
+      return {
+        ok: false,
+        error: error instanceof Error ? error : new Error(String(error)),
+      };
     }
-
-    const buffer = Buffer.from(getResult.value.data as ArrayBuffer);
-    return { ok: true, value: buffer };
-  } catch (error) {
-    return {
-      ok: false,
-      error: error instanceof Error ? error : new Error(String(error)),
-    };
-  }
+  });
 }
 
 /**
@@ -233,41 +264,43 @@ export async function watchFolder(
   channelId: string,
   expirationMs: number = 3600000 // 1 hour default
 ): Promise<Result<{ resourceId: string; expiration: string }, Error>> {
-  try {
-    const drive = await getDriveService();
+  return withTiming('watchFolder', async () => {
+    try {
+      const drive = await getDriveService();
 
-    const expiration = Date.now() + expirationMs;
+      const expiration = Date.now() + expirationMs;
 
-    const watchResult = await withQuotaRetry(async () =>
-      drive.files.watch({
-        fileId: folderId,
-        supportsAllDrives: true,
-        requestBody: {
-          id: channelId,
-          type: 'web_hook',
-          address: webhookUrl,
-          expiration: String(expiration),
+      const watchResult = await withQuotaRetry(async () =>
+        drive.files.watch({
+          fileId: folderId,
+          supportsAllDrives: true,
+          requestBody: {
+            id: channelId,
+            type: 'web_hook',
+            address: webhookUrl,
+            expiration: String(expiration),
+          },
+        })
+      );
+
+      if (!watchResult.ok) {
+        return watchResult;
+      }
+
+      return {
+        ok: true,
+        value: {
+          resourceId: watchResult.value.data.resourceId || '',
+          expiration: watchResult.value.data.expiration || String(expiration),
         },
-      })
-    );
-
-    if (!watchResult.ok) {
-      return watchResult;
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        error: error instanceof Error ? error : new Error(String(error)),
+      };
     }
-
-    return {
-      ok: true,
-      value: {
-        resourceId: watchResult.value.data.resourceId || '',
-        expiration: watchResult.value.data.expiration || String(expiration),
-      },
-    };
-  } catch (error) {
-    return {
-      ok: false,
-      error: error instanceof Error ? error : new Error(String(error)),
-    };
-  }
+  });
 }
 
 /**
@@ -280,29 +313,31 @@ export async function stopWatching(
   channelId: string,
   resourceId: string
 ): Promise<Result<void, Error>> {
-  try {
-    const drive = await getDriveService();
+  return withTiming('stopWatching', async () => {
+    try {
+      const drive = await getDriveService();
 
-    const stopResult = await withQuotaRetry(async () =>
-      drive.channels.stop({
-        requestBody: {
-          id: channelId,
-          resourceId,
-        },
-      })
-    );
+      const stopResult = await withQuotaRetry(async () =>
+        drive.channels.stop({
+          requestBody: {
+            id: channelId,
+            resourceId,
+          },
+        })
+      );
 
-    if (!stopResult.ok) {
-      return stopResult;
+      if (!stopResult.ok) {
+        return stopResult;
+      }
+
+      return { ok: true, value: undefined };
+    } catch (error) {
+      return {
+        ok: false,
+        error: error instanceof Error ? error : new Error(String(error)),
+      };
     }
-
-    return { ok: true, value: undefined };
-  } catch (error) {
-    return {
-      ok: false,
-      error: error instanceof Error ? error : new Error(String(error)),
-    };
-  }
+  });
 }
 
 /**
@@ -334,6 +369,7 @@ export async function findByName(
   name: string,
   mimeType?: string
 ): Promise<Result<DriveFileInfo | null, Error>> {
+  return withTiming('findByName', async () => {
   try {
     const drive = await getDriveService();
     const escapedName = name.replace(/'/g, "\\'");
@@ -432,6 +468,7 @@ export async function findByName(
       error: error instanceof Error ? error : new Error(String(error)),
     };
   }
+  });
 }
 
 /**
@@ -445,49 +482,51 @@ export async function listByMimeType(
   folderId: string,
   mimeType: string
 ): Promise<Result<DriveFileInfo[], Error>> {
-  try {
-    const drive = await getDriveService();
-    const files: DriveFileInfo[] = [];
-    let pageToken: string | undefined;
+  return withTiming('listByMimeType', async () => {
+    try {
+      const drive = await getDriveService();
+      const files: DriveFileInfo[] = [];
+      let pageToken: string | undefined;
 
-    do {
-      const listResult = await withQuotaRetry(async () =>
-        drive.files.list({
-          q: `'${folderId}' in parents and mimeType = '${mimeType}' and trashed = false`,
-          fields: 'nextPageToken, files(id, name, mimeType)',
-          pageSize: 100,
-          pageToken,
-          supportsAllDrives: true,
-          includeItemsFromAllDrives: true,
-        })
-      );
+      do {
+        const listResult = await withQuotaRetry(async () =>
+          drive.files.list({
+            q: `'${folderId}' in parents and mimeType = '${mimeType}' and trashed = false`,
+            fields: 'nextPageToken, files(id, name, mimeType)',
+            pageSize: 100,
+            pageToken,
+            supportsAllDrives: true,
+            includeItemsFromAllDrives: true,
+          })
+        );
 
-      if (!listResult.ok) {
-        return listResult;
-      }
-
-      const items = listResult.value.data.files || [];
-
-      for (const item of items) {
-        if (item.id && item.name && item.mimeType) {
-          files.push({
-            id: item.id,
-            name: item.name,
-            mimeType: item.mimeType,
-          });
+        if (!listResult.ok) {
+          return listResult;
         }
-      }
 
-      pageToken = listResult.value.data.nextPageToken || undefined;
-    } while (pageToken);
+        const items = listResult.value.data.files || [];
 
-    return { ok: true, value: files };
-  } catch (error) {
-    return {
-      ok: false,
-      error: error instanceof Error ? error : new Error(String(error)),
-    };
-  }
+        for (const item of items) {
+          if (item.id && item.name && item.mimeType) {
+            files.push({
+              id: item.id,
+              name: item.name,
+              mimeType: item.mimeType,
+            });
+          }
+        }
+
+        pageToken = listResult.value.data.nextPageToken || undefined;
+      } while (pageToken);
+
+      return { ok: true, value: files };
+    } catch (error) {
+      return {
+        ok: false,
+        error: error instanceof Error ? error : new Error(String(error)),
+      };
+    }
+  });
 }
 
 /**
@@ -501,6 +540,7 @@ export async function createFolder(
   parentId: string,
   name: string
 ): Promise<Result<DriveFileInfo, Error>> {
+  return withTiming('createFolder', async () => {
   try {
     const drive = await getDriveService();
 
@@ -567,6 +607,7 @@ export async function createFolder(
       error: error instanceof Error ? error : new Error(String(error)),
     };
   }
+  });
 }
 
 /**
@@ -581,6 +622,7 @@ export async function createFile(
   parentId: string,
   name: string
 ): Promise<Result<DriveFileInfo, Error>> {
+  return withTiming('createFile', async () => {
   try {
     const drive = await getDriveService();
 
@@ -642,6 +684,7 @@ export async function createFile(
       error: error instanceof Error ? error : new Error(String(error)),
     };
   }
+  });
 }
 
 /**
@@ -658,6 +701,7 @@ export async function createFileWithContent(
   name: string,
   content: string
 ): Promise<Result<DriveFileInfo, Error>> {
+  return withTiming('createFileWithContent', async () => {
   try {
     const drive = await getDriveService();
 
@@ -723,6 +767,7 @@ export async function createFileWithContent(
       error: error instanceof Error ? error : new Error(String(error)),
     };
   }
+  });
 }
 
 /**
@@ -736,6 +781,7 @@ export async function updateFileContent(
   fileId: string,
   content: string
 ): Promise<Result<void, Error>> {
+  return withTiming('updateFileContent', async () => {
   try {
     const drive = await getDriveService();
 
@@ -774,6 +820,7 @@ export async function updateFileContent(
       error: error instanceof Error ? error : new Error(String(error)),
     };
   }
+  });
 }
 
 /**
@@ -789,6 +836,7 @@ export async function moveFile(
   fromFolderId: string,
   toFolderId: string
 ): Promise<Result<void, Error>> {
+  return withTiming('moveFile', async () => {
   try {
     const drive = await getDriveService();
 
@@ -813,6 +861,7 @@ export async function moveFile(
       error: error instanceof Error ? error : new Error(String(error)),
     };
   }
+  });
 }
 
 /**
@@ -826,6 +875,7 @@ export async function renameFile(
   fileId: string,
   newName: string
 ): Promise<Result<void, Error>> {
+  return withTiming('renameFile', async () => {
   try {
     const drive = await getDriveService();
 
@@ -849,6 +899,7 @@ export async function renameFile(
       error: error instanceof Error ? error : new Error(String(error)),
     };
   }
+  });
 }
 
 /**
@@ -858,6 +909,7 @@ export async function renameFile(
  * @returns Array of parent folder IDs
  */
 export async function getParents(fileId: string): Promise<Result<string[], Error>> {
+  return withTiming('getParents', async () => {
   try {
     const drive = await getDriveService();
 
@@ -880,6 +932,7 @@ export async function getParents(fileId: string): Promise<Result<string[], Error
       error: error instanceof Error ? error : new Error(String(error)),
     };
   }
+  });
 }
 
 /**
@@ -943,6 +996,7 @@ export async function createSpreadsheet(
   parentId: string,
   name: string
 ): Promise<Result<DriveFileInfo, Error>> {
+  return withTiming('createSpreadsheet', async () => {
   try {
     const drive = await getDriveService();
 
@@ -984,4 +1038,5 @@ export async function createSpreadsheet(
       error: error instanceof Error ? error : new Error(String(error)),
     };
   }
+  });
 }

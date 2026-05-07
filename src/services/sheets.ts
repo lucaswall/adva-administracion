@@ -8,6 +8,36 @@ import { getGoogleAuthAsync, getDefaultScopes } from './google-auth.js';
 import type { Result } from '../types/index.js';
 import { withQuotaRetry, withLock } from '../utils/concurrency.js';
 import { sanitizeForSpreadsheet } from '../utils/spreadsheet.js';
+import { debug, warn } from '../utils/logger.js';
+
+/**
+ * Slow-call threshold: warn if a Sheets API call exceeds this duration.
+ */
+const SLOW_CALL_THRESHOLD_MS = 5_000;
+
+/**
+ * Wraps an async operation with debug-level duration logging.
+ * Emits a WARN if the operation exceeds SLOW_CALL_THRESHOLD_MS.
+ */
+async function withTiming<T>(apiName: string, fn: () => Promise<T>): Promise<T> {
+  const start = Date.now();
+  try {
+    const result = await fn();
+    const durationMs = Date.now() - start;
+    debug(apiName, { module: 'sheets', phase: 'api-call', durationMs });
+    if (durationMs > SLOW_CALL_THRESHOLD_MS) {
+      warn(apiName, { module: 'sheets', phase: 'api-call', slow: true, durationMs });
+    }
+    return result;
+  } catch (e) {
+    const durationMs = Date.now() - start;
+    debug(apiName, { module: 'sheets', phase: 'api-call', durationMs, failed: true });
+    if (durationMs > SLOW_CALL_THRESHOLD_MS) {
+      warn(apiName, { module: 'sheets', phase: 'api-call', slow: true, durationMs });
+    }
+    throw e;
+  }
+}
 
 /**
  * Converts a column index (1-based) to column letter(s)
@@ -198,7 +228,7 @@ export async function getValues(
   spreadsheetId: string,
   range: string
 ): Promise<Result<CellValue[][], Error>> {
-  return withQuotaRetry(async () => {
+  return withTiming('getValues', () => withQuotaRetry(async () => {
     const sheets = await getSheetsService();
     const response = await sheets.spreadsheets.values.get({
       spreadsheetId,
@@ -210,7 +240,7 @@ export async function getValues(
   }).then(result => {
     if (!result.ok) return { ok: false, error: result.error };
     return { ok: true, value: result.value as CellValue[][] };
-  });
+  }));
 }
 
 /**
@@ -226,7 +256,7 @@ export async function setValues(
   range: string,
   values: CellValue[][]
 ): Promise<Result<number, Error>> {
-  return withQuotaRetry(async () => {
+  return withTiming('setValues', () => withQuotaRetry(async () => {
     const sheets = await getSheetsService();
     const response = await sheets.spreadsheets.values.update({
       spreadsheetId,
@@ -240,7 +270,7 @@ export async function setValues(
   }).then(result => {
     if (!result.ok) return { ok: false, error: result.error };
     return { ok: true, value: result.value };
-  });
+  }));
 }
 
 /**
@@ -256,7 +286,7 @@ export async function appendRows(
   range: string,
   values: CellValue[][]
 ): Promise<Result<number, Error>> {
-  return withQuotaRetry(async () => {
+  return withTiming('appendRows', () => withQuotaRetry(async () => {
     const sheets = await getSheetsService();
     const response = await sheets.spreadsheets.values.append({
       spreadsheetId,
@@ -271,7 +301,7 @@ export async function appendRows(
   }).then(result => {
     if (!result.ok) return { ok: false, error: result.error };
     return { ok: true, value: result.value };
-  });
+  }));
 }
 
 /**
@@ -285,7 +315,7 @@ export async function batchUpdate(
   spreadsheetId: string,
   updates: Array<{ range: string; values: CellValue[][] }>
 ): Promise<Result<number, Error>> {
-  return withQuotaRetry(async () => {
+  return withTiming('batchUpdate', () => withQuotaRetry(async () => {
     const sheets = await getSheetsService();
     const response = await sheets.spreadsheets.values.batchUpdate({
       spreadsheetId,
@@ -301,7 +331,7 @@ export async function batchUpdate(
   }).then(result => {
     if (!result.ok) return { ok: false, error: result.error };
     return { ok: true, value: result.value };
-  });
+  }));
 }
 
 /**
@@ -1080,8 +1110,8 @@ export async function appendRowsWithLinks(
   timeZone?: string,
   metadataCache?: import('../processing/caches/index.js').MetadataCache
 ): Promise<Result<number, Error>> {
-  // Single retry wrapper for ENTIRE operation
-  return withQuotaRetry(async () => {
+  // Single retry wrapper for ENTIRE operation, wrapped with timing
+  return withTiming('appendRowsWithLinks', () => withQuotaRetry(async () => {
     // Parse sheet name from range (e.g., 'Sheet1!A:Z' -> 'Sheet1')
     const sheetName = range.split('!')[0];
 
@@ -1128,7 +1158,7 @@ export async function appendRowsWithLinks(
   }).then(result => {
     if (!result.ok) return { ok: false, error: result.error };
     return { ok: true, value: result.value };
-  });
+  }));
 }
 
 /**

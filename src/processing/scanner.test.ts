@@ -822,6 +822,7 @@ describe('scanner', () => {
           totalFilled: 0,
           totalDebitsFilled: 0,
           totalCreditsFilled: 0,
+          totalPagadaErrors: 0,
           duration: 0,
         },
       });

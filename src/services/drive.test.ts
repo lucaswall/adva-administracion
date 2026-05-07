@@ -69,9 +69,10 @@ import {
   moveFile,
   getParents,
   renameFile,
+  downloadFile,
   clearDriveCache,
 } from './drive.js';
-import { warn } from '../utils/logger.js';
+import { warn, debug } from '../utils/logger.js';
 
 describe('Drive folder operations', () => {
   let mockDriveFiles: {
@@ -674,5 +675,48 @@ describe('Drive folder operations', () => {
         supportsAllDrives: true,
       });
     });
+  });
+});
+
+describe('Drive API timing (ADV-216)', () => {
+  let mockDriveFiles: {
+    list: ReturnType<typeof vi.fn>;
+    get: ReturnType<typeof vi.fn>;
+    create: ReturnType<typeof vi.fn>;
+    update: ReturnType<typeof vi.fn>;
+    copy: ReturnType<typeof vi.fn>;
+  };
+
+  beforeEach(() => {
+    clearDriveCache();
+    vi.clearAllMocks();
+    mockDriveFiles = {
+      list: vi.fn(),
+      get: vi.fn(),
+      create: vi.fn(),
+      update: vi.fn(),
+      copy: vi.fn(),
+    };
+    vi.mocked(google.drive).mockReturnValue({
+      files: mockDriveFiles,
+    } as unknown as ReturnType<typeof google.drive>);
+  });
+
+  it('downloadFile emits a debug record with durationMs', async () => {
+    mockDriveFiles.get.mockResolvedValue({
+      data: Buffer.from('pdf-content'),
+    });
+
+    const result = await downloadFile('file123');
+
+    expect(result.ok).toBe(true);
+    expect(debug).toHaveBeenCalledWith(
+      expect.stringContaining('downloadFile'),
+      expect.objectContaining({
+        module: 'drive',
+        phase: 'api-call',
+        durationMs: expect.any(Number),
+      })
+    );
   });
 });

@@ -14,7 +14,7 @@ import type {
 } from '../types/index.js';
 import { PROCESSING_LOCK_ID, PROCESSING_LOCK_TIMEOUT_MS, ADVA_CUITS } from '../config.js';
 import { withLock } from '../utils/concurrency.js';
-import { info, warn, debug } from '../utils/logger.js';
+import { info, warn, debug, error as logError } from '../utils/logger.js';
 import { getCachedFolderStructure } from '../services/folder-structure.js';
 import { getValues, batchUpdate, type CellValue } from '../services/sheets.js';
 import { parseNumber } from '../utils/numbers.js';
@@ -211,6 +211,8 @@ export interface MatchMovimientosResult {
   creditsFilled: number;
   noMatches: number;
   errors: number;
+  /** Count of failures writing pagada=SI to Control sheets. Non-fatal; detaille and pagada are independent. */
+  pagadaErrors: number;
   duration: number;
 }
 
@@ -225,6 +227,8 @@ export interface MatchAllResult {
   totalFilled: number;
   totalDebitsFilled: number;
   totalCreditsFilled: number;
+  /** Total count of pagada=SI write failures across all banks. Non-fatal. */
+  totalPagadaErrors: number;
   duration: number;
 }
 
@@ -874,6 +878,7 @@ async function matchBankMovimientos(
       creditsFilled: 0,
       noMatches: 0,
       errors: 1,
+      pagadaErrors: 0,
       duration: Date.now() - startTime,
     };
   }
@@ -1138,7 +1143,8 @@ async function matchBankMovimientos(
   }
 
   // Write pagada=SI for matched facturas, batched by spreadsheet
-  // Only if detalle updates succeeded — keeps movimiento match and pagada flag in sync
+  // Only if detaille updates succeeded — keeps movimiento match and pagada flag in sync
+  let pagadaErrors = 0;
   if (updateResult.ok && pagadaUpdates.length > 0) {
     const bySpreadsheet = new Map<string, Array<{ range: string; values: CellValue[][] }>>();
     for (const update of pagadaUpdates) {
@@ -1151,7 +1157,8 @@ async function matchBankMovimientos(
     for (const [ssId, cellUpdates] of bySpreadsheet) {
       const pagadaResult = await batchUpdate(ssId, cellUpdates);
       if (!pagadaResult.ok) {
-        warn('Failed to write pagada updates', {
+        pagadaErrors++;
+        logError('Failed to write pagada updates', {
           module: 'match-movimientos',
           bankName,
           error: pagadaResult.error.message,
@@ -1173,6 +1180,7 @@ async function matchBankMovimientos(
     creditsFilled,
     noMatches,
     errors: updateResult.ok ? 0 : 1,
+    pagadaErrors,
     duration: Date.now() - startTime,
   };
 }
@@ -1290,6 +1298,7 @@ export async function matchAllMovimientos(
       const totalFilled = results.reduce((sum, r) => sum + r.movimientosFilled, 0);
       const totalDebitsFilled = results.reduce((sum, r) => sum + r.debitsFilled, 0);
       const totalCreditsFilled = results.reduce((sum, r) => sum + r.creditsFilled, 0);
+      const totalPagadaErrors = results.reduce((sum, r) => sum + r.pagadaErrors, 0);
 
       return {
         ok: true as const,
@@ -1300,6 +1309,7 @@ export async function matchAllMovimientos(
           totalFilled,
           totalDebitsFilled,
           totalCreditsFilled,
+          totalPagadaErrors,
           duration: Date.now() - startTime,
         },
       };
@@ -1323,6 +1333,7 @@ export async function matchAllMovimientos(
         totalFilled: 0,
         totalDebitsFilled: 0,
         totalCreditsFilled: 0,
+        totalPagadaErrors: 0,
         duration: 0,
       },
     };

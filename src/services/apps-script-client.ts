@@ -45,7 +45,8 @@ interface ServiceAccountKey {
   private_key: string;
 }
 
-function parseServiceAccountKey(saKeyJson: string): ServiceAccountKey {
+/** Exported for testing only. */
+export function parseServiceAccountKey(saKeyJson: string): ServiceAccountKey {
   let parsed: unknown;
   try {
     parsed = JSON.parse(saKeyJson);
@@ -59,7 +60,7 @@ function parseServiceAccountKey(saKeyJson: string): ServiceAccountKey {
   if (missing.length > 0) {
     throw new Error(`APPS_SCRIPT_SA_KEY JSON missing required field(s): ${missing.join(', ')}`);
   }
-  return obj as unknown as ServiceAccountKey;
+  return { client_email: obj.client_email as string, private_key: obj.private_key as string };
 }
 
 async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number): Promise<Response> {
