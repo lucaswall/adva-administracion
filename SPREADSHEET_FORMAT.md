@@ -158,7 +158,7 @@ Payments BY ADVA (ADVA is pagador). ADVA info is implicit; only beneficiario (co
 
 Rows sorted by `fechaPago` descending after insert.
 
-### Recibos (18 columns, A:R)
+### Recibos (19 columns, A:S)
 
 Employee salary receipts (ADVA is empleador). ADVA info is implicit; only employee stored.
 
@@ -182,6 +182,9 @@ Employee salary receipts (ADVA is empleador). ADVA info is implicit; only employ
 | P | needsReview | boolean | Manual review needed |
 | Q | matchedPagoFileId | string | Linked Pago Enviado fileId |
 | R | matchConfidence | enum | HIGH\|MEDIUM\|LOW\|MANUAL |
+| S | hasCuitMatch | boolean | Whether match was based on CUIL match (YES/NO) |
+
+**Schema migration:** Column S (`hasCuitMatch`) was added in ADV-189, mirroring the `hasCuitMatch` column on Facturas Emitidas/Recibidas. The startup migration (`migrateRecibosHasCuitMatchColumn`) inserts the column and backfills existing rows from `matchConfidence` (HIGH → YES, otherwise → NO) to preserve the previous proxy semantics.
 
 Rows sorted by `fechaPago` descending after insert.
 

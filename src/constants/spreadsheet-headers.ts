@@ -112,7 +112,7 @@ export const RETENCIONES_RECIBIDAS_HEADERS = [
   'matchConfidence',
 ];
 
-/** Headers for Recibos sheet (columns A:R) */
+/** Headers for Recibos sheet (columns A:S) */
 export const RECIBO_HEADERS = [
   'fechaPago',
   'fileId',
@@ -132,6 +132,7 @@ export const RECIBO_HEADERS = [
   'needsReview',
   'matchedPagoFileId',
   'matchConfidence',
+  'hasCuitMatch',
 ];
 
 /**

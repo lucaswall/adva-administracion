@@ -98,13 +98,12 @@ async function processCascadingReciboDisplacements(
       const bestMatch = matches[0];
 
       if (bestMatch.isUpgrade && bestMatch.existingPagoFileId) {
-        // This match would displace another pago - check if it's strictly better
-        // hasCuitMatch for existing match: prefer the recibo's actual flag when available
-        // (in-memory matching path), fall back to the HIGH-confidence proxy when the recibo
-        // was loaded from the spreadsheet (Recibos sheet has no hasCuitMatch column).
+        // This match would displace another pago - check if it's strictly better.
+        // hasCuitMatch is now persisted at column S of the Recibos sheet (ADV-189),
+        // so reading the flag directly is correct in both the in-memory and re-match paths.
         const existingQuality: MatchQuality = {
           confidence: bestMatch.existingMatchConfidence || 'LOW',
-          hasCuitMatch: bestMatch.recibo.hasCuitMatch ?? (bestMatch.existingMatchConfidence === 'HIGH'),
+          hasCuitMatch: bestMatch.recibo.hasCuitMatch || false,
           dateProximityDays: bestMatch.existingDateProximityDays ?? 999
         };
         const newQuality: MatchQuality = {
@@ -274,7 +273,7 @@ async function doMatchRecibosWithPagos(
   const correlationId = getCorrelationId();
 
   // Get all recibos
-  const recibosResult = await getValues(spreadsheetId, 'Recibos!A:R');
+  const recibosResult = await getValues(spreadsheetId, 'Recibos!A:S');
   if (!recibosResult.ok) {
     throw recibosResult.error;
   }
@@ -314,6 +313,7 @@ async function doMatchRecibosWithPagos(
         needsReview: row[15] === 'YES',
         matchedPagoFileId: row[16] ? String(row[16]) : undefined,
         matchConfidence: validateMatchConfidence(row[17]),
+        hasCuitMatch: row[18] === 'YES',
       });
     }
   }
@@ -405,12 +405,10 @@ async function doMatchRecibosWithPagos(
       if (bestMatch.confidence === 'HIGH' || matches.length === 1) {
         // Check if this is an upgrade (recibo already matched)
         if (bestMatch.isUpgrade && bestMatch.existingPagoFileId) {
-          // hasCuitMatch for existing match: prefer the recibo's actual flag when available
-          // (in-memory matching path), fall back to the HIGH-confidence proxy when the recibo
-          // was loaded from the spreadsheet (Recibos sheet has no hasCuitMatch column).
+          // hasCuitMatch is now persisted at column S of the Recibos sheet (ADV-189).
           const existingQuality: MatchQuality = {
             confidence: bestMatch.existingMatchConfidence || 'LOW',
-            hasCuitMatch: bestMatch.recibo.hasCuitMatch ?? (bestMatch.existingMatchConfidence === 'HIGH'),
+            hasCuitMatch: bestMatch.recibo.hasCuitMatch || false,
             dateProximityDays: bestMatch.existingDateProximityDays ?? 999
           };
           const newQuality: MatchQuality = {
@@ -525,12 +523,13 @@ async function doMatchRecibosWithPagos(
     } else if (update.reciboFileId && update.reciboRow && update.pagoFileId) {
       matchesFound++;
 
-      // Update recibo with match info (columns Q:R)
+      // Update recibo with match info (columns Q:S — pagoFileId, confidence, hasCuitMatch)
       updates.push({
-        range: `'Recibos'!Q${update.reciboRow}:R${update.reciboRow}`,
+        range: `'Recibos'!Q${update.reciboRow}:S${update.reciboRow}`,
         values: [[
           update.pagoFileId,
           update.confidence,
+          update.hasCuitMatch ? 'YES' : 'NO',
         ]],
       });
 
@@ -546,10 +545,10 @@ async function doMatchRecibosWithPagos(
         });
       }
     } else if (update.reciboFileId && update.reciboRow) {
-      // Recibo unmatch - clear recibo match columns (columns Q:R)
+      // Recibo unmatch - clear recibo match columns (columns Q:S)
       updates.push({
-        range: `'Recibos'!Q${update.reciboRow}:R${update.reciboRow}`,
-        values: [['', '']],
+        range: `'Recibos'!Q${update.reciboRow}:S${update.reciboRow}`,
+        values: [['', '', '']],
       });
     }
   }

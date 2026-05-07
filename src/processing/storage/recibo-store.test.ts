@@ -108,6 +108,66 @@ describe('storeRecibo', () => {
     });
   });
 
+  describe('hasCuitMatch column (ADV-189)', () => {
+    it('writes hasCuitMatch=YES at index 18 (column S) when recibo.hasCuitMatch is true on append', async () => {
+      vi.mocked(getValues).mockResolvedValue({ ok: true, value: [['Header']] });
+      vi.mocked(appendRowsWithLinks).mockResolvedValue({ ok: true, value: 1 });
+      vi.mocked(sortSheet).mockResolvedValue({ ok: true, value: undefined });
+
+      const recibo = createTestRecibo({ hasCuitMatch: true });
+      await storeRecibo(recibo, 'spreadsheet-id');
+
+      const callArgs = vi.mocked(appendRowsWithLinks).mock.calls[0];
+      const row = callArgs[2][0];
+      expect(row[18]).toBe('YES');
+      // Range bumped from A:R to A:S
+      expect(callArgs[1]).toBe('Recibos!A:S');
+    });
+
+    it('writes hasCuitMatch=NO at index 18 when recibo.hasCuitMatch is false on append', async () => {
+      vi.mocked(getValues).mockResolvedValue({ ok: true, value: [['Header']] });
+      vi.mocked(appendRowsWithLinks).mockResolvedValue({ ok: true, value: 1 });
+      vi.mocked(sortSheet).mockResolvedValue({ ok: true, value: undefined });
+
+      const recibo = createTestRecibo({ hasCuitMatch: false });
+      await storeRecibo(recibo, 'spreadsheet-id');
+
+      const callArgs = vi.mocked(appendRowsWithLinks).mock.calls[0];
+      const row = callArgs[2][0];
+      expect(row[18]).toBe('NO');
+    });
+
+    it('writes hasCuitMatch=NO at index 18 when recibo.hasCuitMatch is undefined on append', async () => {
+      vi.mocked(getValues).mockResolvedValue({ ok: true, value: [['Header']] });
+      vi.mocked(appendRowsWithLinks).mockResolvedValue({ ok: true, value: 1 });
+      vi.mocked(sortSheet).mockResolvedValue({ ok: true, value: undefined });
+
+      const recibo = createTestRecibo();
+      await storeRecibo(recibo, 'spreadsheet-id');
+
+      const callArgs = vi.mocked(appendRowsWithLinks).mock.calls[0];
+      const row = callArgs[2][0];
+      expect(row[18]).toBe('NO');
+    });
+
+    it('writes hasCuitMatch at index 18 in reprocessing (existing fileId) path with A:S range', async () => {
+      vi.mocked(getValues).mockResolvedValueOnce({
+        ok: true,
+        value: [['fileId'], ['test-file-id']],
+      });
+      vi.mocked(updateRowsWithFormatting).mockResolvedValue({ ok: true, value: undefined });
+      vi.mocked(sortSheet).mockResolvedValue({ ok: true, value: undefined });
+
+      const recibo = createTestRecibo({ hasCuitMatch: true });
+      await storeRecibo(recibo, 'spreadsheet-id');
+
+      const callArgs = vi.mocked(updateRowsWithFormatting).mock.calls[0];
+      const update = callArgs[1][0];
+      expect(update.values[18]).toBe('YES');
+      expect(update.range).toMatch(/Recibos!A2:S2$/);
+    });
+  });
+
   describe('duplicate detection', () => {
     it('returns { stored: true } when recibo is new', async () => {
       // findRowByFileId → B:B: no match

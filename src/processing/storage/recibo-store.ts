@@ -44,6 +44,7 @@ function buildReciboRowFormatted(
     recibo.needsReview ? 'YES' : 'NO',                    // P
     recibo.matchedPagoFileId || '',                       // Q
     recibo.matchConfidence || '',                         // R
+    recibo.hasCuitMatch ? 'YES' : 'NO',                   // S - hasCuitMatch (ADV-189)
   ];
 }
 
@@ -86,7 +87,7 @@ async function isDuplicateRecibo(
   periodoAbonado: string,
   totalNeto: number
 ): Promise<{ isDuplicate: boolean; existingFileId?: string }> {
-  const rowsResult = await getValues(spreadsheetId, 'Recibos!A:R');
+  const rowsResult = await getValues(spreadsheetId, 'Recibos!A:S');
   if (!rowsResult.ok || rowsResult.value.length <= 1) {
     return { isDuplicate: false };
   }
@@ -143,7 +144,7 @@ export async function storeRecibo(
       const renamedFileName = generateReciboFileName(recibo);
       const updateRow = buildReciboRowFormatted(recibo, renamedFileName);
       const updateResult = await updateRowsWithFormatting(spreadsheetId, [{
-        range: `${sheetName}!A${fileIdCheck.rowIndex}:R${fileIdCheck.rowIndex}`,
+        range: `${sheetName}!A${fileIdCheck.rowIndex}:S${fileIdCheck.rowIndex}`,
         values: updateRow,
       }], timeZone, context?.metadataCache);
       if (!updateResult.ok) {
@@ -199,7 +200,7 @@ export async function storeRecibo(
 
     const row = buildReciboRowFormatted(recibo, renamedFileName);
 
-    const result = await appendRowsWithLinks(spreadsheetId, `${sheetName}!A:R`, [row], timeZone, context?.metadataCache);
+    const result = await appendRowsWithLinks(spreadsheetId, `${sheetName}!A:S`, [row], timeZone, context?.metadataCache);
     if (!result.ok) {
       throw result.error;
     }

@@ -465,6 +465,75 @@ export async function migrateFacturasEmitidasPagadaColumn(
 }
 
 /**
+ * Migrates Recibos sheet from 18 columns (A:R) to 19 columns (A:S) by adding
+ * `hasCuitMatch` at column S. Backfills existing rows from `matchConfidence`
+ * (HIGH → 'YES', anything else → 'NO') to preserve the previous proxy semantics
+ * for legacy rows.
+ *
+ * Idempotent: skips if header at index 18 is already `hasCuitMatch` or sheet is empty.
+ *
+ * @param controlEgresosId - Control de Egresos spreadsheet ID
+ * @returns Success or error
+ */
+export async function migrateRecibosHasCuitMatchColumn(
+  controlEgresosId: string
+): Promise<Result<void, Error>> {
+  const dataResult = await getValues(controlEgresosId, 'Recibos!A:S');
+  if (!dataResult.ok) return dataResult;
+
+  const rows = dataResult.value;
+  if (rows.length === 0) {
+    return { ok: true, value: undefined };
+  }
+
+  const headerRow = rows[0] ?? [];
+  if (headerRow.length >= 19 && headerRow[18] === 'hasCuitMatch') {
+    return { ok: true, value: undefined };
+  }
+
+  // Insert column at S (0-based index 18)
+  const metadataResult = await getSheetMetadata(controlEgresosId);
+  if (!metadataResult.ok) return metadataResult;
+
+  const recibosSheet = metadataResult.value.find(s => s.title === 'Recibos');
+  if (!recibosSheet) {
+    return { ok: false, error: new Error('Recibos sheet not found in Control de Egresos') };
+  }
+
+  const insertResult = await insertColumn(controlEgresosId, recibosSheet.sheetId, 18);
+  if (!insertResult.ok) return insertResult;
+
+  const headerWriteResult = await setValues(controlEgresosId, 'Recibos!S1', [['hasCuitMatch']]);
+  if (!headerWriteResult.ok) return headerWriteResult;
+
+  // Backfill data rows: HIGH matchConfidence → 'YES', everything else → 'NO'
+  const dataRowCount = rows.length - 1;
+  if (dataRowCount > 0) {
+    const backfillValues: string[][] = [];
+    for (let i = 1; i < rows.length; i++) {
+      const row = rows[i] ?? [];
+      const matchConfidence = String(row[17] ?? '');
+      backfillValues.push([matchConfidence === 'HIGH' ? 'YES' : 'NO']);
+    }
+    const backfillResult = await setValues(
+      controlEgresosId,
+      `Recibos!S2:S${dataRowCount + 1}`,
+      backfillValues
+    );
+    if (!backfillResult.ok) return backfillResult;
+  }
+
+  info('Migrated Recibos: inserted hasCuitMatch column at S, backfilled from matchConfidence', {
+    module: 'folder-structure',
+    phase: 'migration',
+    controlEgresosId,
+    backfilledRows: dataRowCount,
+  });
+
+  return { ok: true, value: undefined };
+}
+
+/**
  * Initializes Dashboard Operativo Contable spreadsheet with sheets and data
  * Creates "API Mensual" and "Uso de API" sheets with headers
  * Initializes "API Mensual" with current month only, with IFERROR handling for empty data

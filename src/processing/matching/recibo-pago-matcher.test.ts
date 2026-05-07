@@ -90,6 +90,7 @@ describe('recibo-pago-matcher', () => {
         'NO',                         // P: needsReview
         '',                           // Q: matchedPagoFileId
         '',                           // R: matchConfidence
+        'YES',                        // S: hasCuitMatch (ADV-189)
       ];
 
       // This is the pattern that should be used (normalizeSpreadsheetDate)
@@ -113,10 +114,13 @@ describe('recibo-pago-matcher', () => {
         needsReview: row[15] === 'YES',
         matchedPagoFileId: row[16] ? String(row[16]) : undefined,
         matchConfidence: row[17] ? (String(row[17]) as MatchConfidence) : undefined,
+        hasCuitMatch: row[18] === 'YES',
       };
 
       // Serial number 45671 => '2025-01-14'
       expect(recibo.fechaPago).toBe('2025-01-14');
+      // ADV-189: hasCuitMatch persisted at column S (index 18)
+      expect(recibo.hasCuitMatch).toBe(true);
     });
 
     it('should normalize serial number dates in pago fechaPago', () => {
@@ -430,28 +434,18 @@ describe('hasCuitMatch asymmetry fix (ADV-183)', () => {
     expect(existingQualityFixed.hasCuitMatch).toBe(true);
   });
 
-  it('falls back to HIGH-confidence proxy when hasCuitMatch is undefined (loaded from spreadsheet)', () => {
-    // Recibos sheet has no hasCuitMatch column, so recibos loaded via getValues have
-    // hasCuitMatch === undefined. The fallback `?? (existingMatchConfidence === 'HIGH')`
-    // preserves the pre-fix behavior in that path: HIGH means CUIT matched, others mean false.
-    const computeHasCuitMatch = (
-      reciboHasCuitMatch: boolean | undefined,
-      existingConfidence: MatchConfidence
-    ): boolean => reciboHasCuitMatch ?? (existingConfidence === 'HIGH');
+  it('reads hasCuitMatch directly from spreadsheet column S — no HIGH-proxy fallback (ADV-189)', () => {
+    // ADV-189: hasCuitMatch is now persisted at column S (index 18) of the Recibos sheet.
+    // The previous proxy fallback `?? (existingConfidence === 'HIGH')` is removed; the only
+    // formula in production is `recibo.hasCuitMatch || false`.
+    const computeHasCuitMatch = (reciboHasCuitMatch: boolean | undefined): boolean =>
+      reciboHasCuitMatch || false;
 
-    // Case 1: HIGH confidence recibo loaded from sheet with undefined flag → proxy returns true
-    expect(computeHasCuitMatch(undefined, 'HIGH')).toBe(true);
-
-    // Case 2: MANUAL confidence recibo loaded from sheet with undefined flag → proxy returns false
-    // (best we can do without persistence; column-level fix is a follow-up)
-    expect(computeHasCuitMatch(undefined, 'MANUAL')).toBe(false);
-
-    // Case 3: in-memory recibo with explicit hasCuitMatch=true wins over the proxy
-    // This is the ADV-183 fix: a MANUAL-locked recibo with CUIL match is no longer wrongly
-    // displaced when its in-memory flag is available.
-    expect(computeHasCuitMatch(true, 'MANUAL')).toBe(true);
-
-    // Case 4: explicit hasCuitMatch=false wins over a HIGH-confidence proxy that would say true
-    expect(computeHasCuitMatch(false, 'HIGH')).toBe(false);
+    // MANUAL with CUIL match preserved across periodic re-match (was wrong before ADV-189)
+    expect(computeHasCuitMatch(true)).toBe(true);
+    // MANUAL without CUIL match — correctly false
+    expect(computeHasCuitMatch(false)).toBe(false);
+    // Unset/legacy rows — false (the migration backfills HIGH→YES so this is rare)
+    expect(computeHasCuitMatch(undefined)).toBe(false);
   });
 });

@@ -634,7 +634,7 @@ async function loadControlEgresos(spreadsheetId: string): Promise<Result<Egresos
     const [facturasResult, pagosResult, recibosResult] = await Promise.all([
       getValues(spreadsheetId, 'Facturas Recibidas!A:T'),
       getValues(spreadsheetId, 'Pagos Enviados!A:Q'),
-      getValues(spreadsheetId, 'Recibos!A:R'),
+      getValues(spreadsheetId, 'Recibos!A:S'),
     ]);
 
     if (!facturasResult.ok) return facturasResult;

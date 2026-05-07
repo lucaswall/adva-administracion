@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { validateYear, clearFolderStructureCache, getCachedFolderStructure, checkEnvironmentMarker, migrateArchivosProcesadosHeaders, migrateTipoDeCambioHeaders, migrateFacturasEmitidasPagadaColumn } from './folder-structure.js';
+import { validateYear, clearFolderStructureCache, getCachedFolderStructure, checkEnvironmentMarker, migrateArchivosProcesadosHeaders, migrateTipoDeCambioHeaders, migrateFacturasEmitidasPagadaColumn, migrateRecibosHasCuitMatchColumn } from './folder-structure.js';
 
 // Mock drive.js for environment marker tests
 vi.mock('./drive.js', () => ({
@@ -658,5 +658,139 @@ describe('migrateFacturasEmitidasPagadaColumn', () => {
 
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error.message).toBe('Write failed');
+  });
+});
+
+describe('migrateRecibosHasCuitMatchColumn (ADV-189)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('inserts hasCuitMatch column at S and backfills from matchConfidence (HIGH→YES, others→NO)', async () => {
+    // Old A:R schema, 18 cols, header row + 4 data rows with various matchConfidence
+    const headers = [
+      'fechaPago', 'fileId', 'fileName', 'tipoRecibo', 'nombreEmpleado',
+      'cuilEmpleado', 'legajo', 'tareaDesempenada', 'cuitEmpleador', 'periodoAbonado',
+      'subtotalRemuneraciones', 'subtotalDescuentos', 'totalNeto', 'processedAt',
+      'confidence', 'needsReview', 'matchedPagoFileId', 'matchConfidence',
+    ];
+    const data = [
+      headers,
+      ['2025-01-15', 'r1', 'r1.pdf', 'sueldo', 'A', '20', '1', '', '30', '2025-01', '100', '20', '80', '2025-01-15', '0.95', 'NO', 'p1', 'HIGH'],
+      ['2025-01-15', 'r2', 'r2.pdf', 'sueldo', 'B', '21', '2', '', '30', '2025-01', '100', '20', '80', '2025-01-15', '0.95', 'NO', 'p2', 'MEDIUM'],
+      ['2025-01-15', 'r3', 'r3.pdf', 'sueldo', 'C', '22', '3', '', '30', '2025-01', '100', '20', '80', '2025-01-15', '0.95', 'NO', 'p3', 'MANUAL'],
+      ['2025-01-15', 'r4', 'r4.pdf', 'sueldo', 'D', '23', '4', '', '30', '2025-01', '100', '20', '80', '2025-01-15', '0.95', 'NO', '', ''],
+    ];
+    vi.mocked(getValues).mockResolvedValue({ ok: true, value: data });
+    vi.mocked(getSheetMetadata).mockResolvedValue({
+      ok: true,
+      value: [{ title: 'Recibos', sheetId: 99, index: 0 }],
+    });
+    vi.mocked(insertColumn).mockResolvedValue({ ok: true, value: undefined });
+    vi.mocked(setValues).mockResolvedValue({ ok: true, value: 1 });
+
+    const result = await migrateRecibosHasCuitMatchColumn('egresos-id');
+
+    expect(result.ok).toBe(true);
+    expect(insertColumn).toHaveBeenCalledWith('egresos-id', 99, 18);
+
+    // Header write
+    expect(setValues).toHaveBeenCalledWith('egresos-id', 'Recibos!S1', [['hasCuitMatch']]);
+
+    // Backfill: HIGH→YES, MEDIUM→NO, MANUAL→NO, empty→NO (4 data rows starting at row 2)
+    expect(setValues).toHaveBeenCalledWith(
+      'egresos-id',
+      'Recibos!S2:S5',
+      [['YES'], ['NO'], ['NO'], ['NO']]
+    );
+  });
+
+  it('skips when hasCuitMatch header is already present at index 18 (idempotent)', async () => {
+    const headers = Array.from({ length: 19 }, (_, i) => `col${i}`);
+    headers[18] = 'hasCuitMatch';
+    vi.mocked(getValues).mockResolvedValue({ ok: true, value: [headers] });
+
+    const result = await migrateRecibosHasCuitMatchColumn('egresos-id');
+
+    expect(result.ok).toBe(true);
+    expect(insertColumn).not.toHaveBeenCalled();
+    expect(setValues).not.toHaveBeenCalled();
+  });
+
+  it('skips when sheet has 19+ columns already (idempotent)', async () => {
+    const headers19 = Array.from({ length: 19 }, (_, i) => `col${i}`);
+    headers19[18] = 'hasCuitMatch';
+    vi.mocked(getValues).mockResolvedValue({ ok: true, value: [headers19] });
+
+    const result = await migrateRecibosHasCuitMatchColumn('egresos-id');
+
+    expect(result.ok).toBe(true);
+    expect(insertColumn).not.toHaveBeenCalled();
+  });
+
+  it('skips when sheet is empty', async () => {
+    vi.mocked(getValues).mockResolvedValue({ ok: true, value: [] });
+
+    const result = await migrateRecibosHasCuitMatchColumn('egresos-id');
+
+    expect(result.ok).toBe(true);
+    expect(insertColumn).not.toHaveBeenCalled();
+    expect(setValues).not.toHaveBeenCalled();
+  });
+
+  it('inserts column and writes header but skips backfill when sheet has only header row', async () => {
+    const headers = Array.from({ length: 18 }, (_, i) => `col${i}`);
+    vi.mocked(getValues).mockResolvedValue({ ok: true, value: [headers] });
+    vi.mocked(getSheetMetadata).mockResolvedValue({
+      ok: true,
+      value: [{ title: 'Recibos', sheetId: 99, index: 0 }],
+    });
+    vi.mocked(insertColumn).mockResolvedValue({ ok: true, value: undefined });
+    vi.mocked(setValues).mockResolvedValue({ ok: true, value: 1 });
+
+    const result = await migrateRecibosHasCuitMatchColumn('egresos-id');
+
+    expect(result.ok).toBe(true);
+    expect(insertColumn).toHaveBeenCalledWith('egresos-id', 99, 18);
+    expect(setValues).toHaveBeenCalledTimes(1); // header only
+    expect(setValues).toHaveBeenCalledWith('egresos-id', 'Recibos!S1', [['hasCuitMatch']]);
+  });
+
+  it('returns error when getValues fails', async () => {
+    vi.mocked(getValues).mockResolvedValue({ ok: false, error: new Error('API error') });
+
+    const result = await migrateRecibosHasCuitMatchColumn('egresos-id');
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.message).toBe('API error');
+  });
+
+  it('returns error when Recibos sheet not found in metadata', async () => {
+    const headers18 = Array.from({ length: 18 }, (_, i) => `col${i}`);
+    vi.mocked(getValues).mockResolvedValue({ ok: true, value: [headers18] });
+    vi.mocked(getSheetMetadata).mockResolvedValue({
+      ok: true,
+      value: [{ title: 'Other Sheet', sheetId: 1, index: 0 }],
+    });
+
+    const result = await migrateRecibosHasCuitMatchColumn('egresos-id');
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.message).toContain('not found');
+  });
+
+  it('returns error when insertColumn fails', async () => {
+    const headers18 = Array.from({ length: 18 }, (_, i) => `col${i}`);
+    vi.mocked(getValues).mockResolvedValue({ ok: true, value: [headers18] });
+    vi.mocked(getSheetMetadata).mockResolvedValue({
+      ok: true,
+      value: [{ title: 'Recibos', sheetId: 99, index: 0 }],
+    });
+    vi.mocked(insertColumn).mockResolvedValue({ ok: false, error: new Error('Insert failed') });
+
+    const result = await migrateRecibosHasCuitMatchColumn('egresos-id');
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.message).toBe('Insert failed');
   });
 });

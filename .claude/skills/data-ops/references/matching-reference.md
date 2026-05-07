@@ -118,4 +118,4 @@ For full column schemas of all sheets, refer to `SPREADSHEET_FORMAT.md` in the p
 
 **Pagos Enviados (A:Q):** fechaPago(A), fileId(B), fileName(C), banco(D), importePagado(E), moneda(F), referencia(G), cuitBeneficiario(H), nombreBeneficiario(I), concepto(J), processedAt(K), confidence(L), needsReview(M), matchedFacturaFileId(N), matchConfidence(O), tipoDeCambio(P), importeEnPesos(Q)
 
-**Recibos (A:R):** fechaPago(A), fileId(B), fileName(C), tipoRecibo(D), nombreEmpleado(E), cuilEmpleado(F), legajo(G), tareaDesempenada(H), cuitEmpleador(I), periodoAbonado(J), subtotalRemuneraciones(K), subtotalDescuentos(L), totalNeto(M), processedAt(N), confidence(O), needsReview(P), matchedPagoFileId(Q), matchConfidence(R)
+**Recibos (A:S):** fechaPago(A), fileId(B), fileName(C), tipoRecibo(D), nombreEmpleado(E), cuilEmpleado(F), legajo(G), tareaDesempenada(H), cuitEmpleador(I), periodoAbonado(J), subtotalRemuneraciones(K), subtotalDescuentos(L), totalNeto(M), processedAt(N), confidence(O), needsReview(P), matchedPagoFileId(Q), matchConfidence(R), hasCuitMatch(S)
