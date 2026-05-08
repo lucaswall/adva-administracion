@@ -253,6 +253,11 @@ export const MOVIMIENTOS_BANCARIO_SHEET: SheetConfig = {
  * Sheet configuration for Movimientos - Credit Card Transactions
  * Stores individual credit card transactions in per-month sheets
  * One sheet per month (e.g., "2025-01")
+ *
+ * `detalle` is a manually-filled column (column F). Storage code only writes
+ * A:E — the F column is reserved for human annotations on purchases. Only
+ * meaningful when nroCupon is set (i.e., real purchases, not interest, fees,
+ * taxes, or card payments).
  */
 export const MOVIMIENTOS_TARJETA_SHEET: SheetConfig = {
   title: 'Movimientos',
@@ -262,6 +267,7 @@ export const MOVIMIENTOS_TARJETA_SHEET: SheetConfig = {
     'nroCupon',
     'pesos',
     'dolares',
+    'detalle',
   ],
   numberFormats: new Map([
     [0, { type: 'date' }],                    // fecha

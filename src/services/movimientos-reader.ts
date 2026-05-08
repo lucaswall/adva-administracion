@@ -37,7 +37,7 @@ export function isSpecialRow(concepto: string): boolean {
  * Checks if a header row is the bank movimientos schema.
  * Bank (9-col): fecha, concepto, debito, credito, saldo, saldoCalculado, matchedFileId, matchedType, detalle
  * Bank (8-col legacy): same minus matchedType
- * Card (5-col): fecha, descripcion, nroCupon, pesos, dolares
+ * Card (6-col): fecha, descripcion, nroCupon, pesos, dolares, detalle
  * Broker (10-col): descripcion, cantidadVN, saldo, precio, bruto, arancel, iva, neto, fechaConcertacion, fechaLiquidacion
  *
  * The matcher writes to columns G/H/I (matchedFileId, matchedType, detalle).

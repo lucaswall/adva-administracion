@@ -25,7 +25,7 @@ vi.mock('../../constants/spreadsheet-headers.js', () => ({
     headers: ['fecha', 'concepto', 'debito', 'credito', 'saldo', 'saldoCalculado', 'matchedFileId', 'matchedType', 'detalle'],
   },
   MOVIMIENTOS_TARJETA_SHEET: {
-    headers: ['fecha', 'descripcion', 'nroCupon', 'pesos', 'dolares'],
+    headers: ['fecha', 'descripcion', 'nroCupon', 'pesos', 'dolares', 'detalle'],
   },
   MOVIMIENTOS_BROKER_SHEET: {
     headers: ['descripcion', 'cantidadVN', 'saldo', 'precio', 'bruto', 'arancel', 'iva', 'neto', 'fechaConcertacion', 'fechaLiquidacion'],
@@ -535,7 +535,7 @@ describe('storeMovimientosTarjeta', () => {
       expect.any(Array),
       undefined  // sheetOrderBatch is optional
     );
-    expect(formatEmptyMonthSheet).toHaveBeenCalledWith('spreadsheet-id', 123, 5);
+    expect(formatEmptyMonthSheet).toHaveBeenCalledWith('spreadsheet-id', 123, 6);
     expect(appendRowsWithLinks).not.toHaveBeenCalled();
   });
 
