@@ -20,7 +20,7 @@ import { getGeminiClient, type UsageCallbackData } from '../gemini/client.js';
 import {
   CLASSIFICATION_PROMPT,
   FACTURA_PROMPT,
-  PAGO_BBVA_PROMPT,
+  getPagoBbvaPrompt,
   RECIBO_PROMPT,
   getResumenBancarioPrompt,
   getResumenTarjetaPrompt,
@@ -285,7 +285,7 @@ export async function processFile(
       break;
     case 'pago_enviado':
     case 'pago_recibido':
-      extractPrompt = PAGO_BBVA_PROMPT;
+      extractPrompt = getPagoBbvaPrompt(fileInfo.name);
       break;
     case 'recibo':
       extractPrompt = RECIBO_PROMPT;
