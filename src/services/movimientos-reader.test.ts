@@ -390,6 +390,78 @@ describe('readMovimientosForPeriod', () => {
 
     expect(getValues).toHaveBeenCalledWith('spreadsheet-id', "'2025-01'!A:I");
   });
+
+  it('should return empty for credit-card schema (no matchedFileId/matchedType/detalle)', async () => {
+    // Visa schema: fecha, descripcion, nroCupon, pesos, dolares
+    vi.mocked(getValues).mockResolvedValue({
+      ok: true,
+      value: [
+        ['fecha', 'descripcion', 'nroCupon', 'pesos', 'dolares'],
+        ['2026-01-29', 'COMISION MANT. DE CUENTA', '', 7128.10, ''],
+        ['2026-03-02', 'Amazon web services USD 30,00', '915056', '', 30.00],
+      ],
+    });
+
+    const result = await readMovimientosForPeriod('spreadsheet-id', '2026-01');
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value).toHaveLength(0);
+    }
+  });
+
+  it('should return empty for broker schema (descripcion at index 0, cantidadVN at index 1)', async () => {
+    // Broker schema: descripcion, cantidadVN, saldo, precio, bruto, arancel, iva, neto, fechaCo, fechaLi
+    vi.mocked(getValues).mockResolvedValue({
+      ok: true,
+      value: [
+        ['descripcion', 'cantidadVN', 'saldo', 'precio', 'bruto', 'arancel', 'iva', 'neto', 'fechaConcertacion', 'fechaLiquidacion'],
+        ['Saldo Anterior', '', 2.13, '', '', '', '', '', '', ''],
+      ],
+    });
+
+    const result = await readMovimientosForPeriod('spreadsheet-id', '2026-01');
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value).toHaveLength(0);
+    }
+  });
+
+  it('should return empty when header row is missing matchedFileId/matchedType/detalle', async () => {
+    vi.mocked(getValues).mockResolvedValue({
+      ok: true,
+      value: [
+        ['fecha', 'concepto', 'debito', 'credito', 'saldo'],
+        ['2026-01-15', 'PAGO', 1000, null, 9000],
+      ],
+    });
+
+    const result = await readMovimientosForPeriod('spreadsheet-id', '2026-01');
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value).toHaveLength(0);
+    }
+  });
+
+  it('should accept bank schema header in any case (case-insensitive match)', async () => {
+    vi.mocked(getValues).mockResolvedValue({
+      ok: true,
+      value: [
+        ['Fecha', 'Concepto', 'Debito', 'Credito', 'Saldo', 'SaldoCalculado', 'MatchedFileID', 'MatchedType', 'Detalle'],
+        ['2026-01-15', 'TRANSFERENCIA', 1000, null, 9000, 9000, '', '', ''],
+      ],
+    });
+
+    const result = await readMovimientosForPeriod('spreadsheet-id', '2026-01');
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value).toHaveLength(1);
+      expect(result.value[0].concepto).toBe('TRANSFERENCIA');
+    }
+  });
 });
 
 describe('getMovimientosToFill', () => {

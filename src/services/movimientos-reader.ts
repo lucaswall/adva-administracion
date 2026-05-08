@@ -34,6 +34,29 @@ export function isSpecialRow(concepto: string): boolean {
 }
 
 /**
+ * Checks if a header row is the bank movimientos schema.
+ * Bank (9-col): fecha, concepto, debito, credito, saldo, saldoCalculado, matchedFileId, matchedType, detalle
+ * Bank (8-col legacy): same minus matchedType
+ * Card (5-col): fecha, descripcion, nroCupon, pesos, dolares
+ * Broker (10-col): descripcion, cantidadVN, saldo, precio, bruto, arancel, iva, neto, fechaConcertacion, fechaLiquidacion
+ *
+ * The matcher writes to columns G/H/I (matchedFileId, matchedType, detalle).
+ * Index 6 = matchedFileId is the unique-to-bank invariant across both
+ * 9-col (current) and 8-col (legacy) bank schemas, while card/broker schemas
+ * have something else (or nothing) at that index. Skipping when this
+ * invariant is missing prevents the matcher from writing rogue cells into
+ * card/broker sheets where columns G/H/I belong to a different schema.
+ *
+ * @param header - First row of the sheet (header)
+ * @returns True if the header matches the bank schema
+ */
+export function isBankMovimientosHeader(header: CellValue[]): boolean {
+  if (!header || header.length < 7) return false;
+  const norm = (v: CellValue): string => String(v || '').trim().toLowerCase();
+  return norm(header[6]) === 'matchedfileid';
+}
+
+/**
  * Normalizes a raw matchedType value from the spreadsheet.
  * Handles case-insensitive input (e.g., 'manual' → 'MANUAL').
  *
@@ -138,6 +161,19 @@ export async function readMovimientosForPeriod(
 
   // Skip header row
   if (data.length < 2) {
+    return { ok: true, value: [] };
+  }
+
+  // Skip non-bank movimientos sheets (credit cards, brokers, etc.).
+  // The matcher unconditionally writes to G/H/I; if the schema isn't bank,
+  // those columns either don't exist or hold unrelated data. Returning empty
+  // here means matchAllMovimientos finds nothing to process for those sheets.
+  if (!isBankMovimientosHeader(data[0])) {
+    debug('Skipping non-bank movimientos sheet (header schema mismatch)', {
+      module: 'movimientos-reader',
+      sheetName,
+      headerSample: data[0].slice(0, 3).map(c => String(c || '')).join(','),
+    });
     return { ok: true, value: [] };
   }
 
