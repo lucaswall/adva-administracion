@@ -189,6 +189,23 @@ describe('getPagoBbvaPrompt', () => {
     expect(match?.[1]).not.toContain('{');
     expect(match?.[1]).not.toContain('}');
   });
+
+  it('hint section addresses counterparty fields in both pago directions', () => {
+    // The same prompt is used for pago_enviado and pago_recibido. The
+    // counterparty fields differ by direction:
+    //   - pago_recibido (ADVA = beneficiario): counterparty = nombrePagador / cuitPagador
+    //   - pago_enviado  (ADVA = pagador):     counterparty = nombreBeneficiario / cuitBeneficiario
+    // The hint section must reference both pairs so it doesn't mis-target the
+    // model when the document is a pago_enviado with a sparse beneficiary.
+    const prompt = getPagoBbvaPrompt('Pago Juan Perez Socio 12345.pdf');
+    const hintStart = prompt.indexOf('FILENAME: <<<');
+    expect(hintStart).toBeGreaterThan(-1);
+    const hintSection = prompt.slice(hintStart);
+    expect(hintSection).toContain('nombrePagador');
+    expect(hintSection).toContain('cuitPagador');
+    expect(hintSection).toContain('nombreBeneficiario');
+    expect(hintSection).toContain('cuitBeneficiario');
+  });
 });
 
 describe('formatCurrentDateForPrompt', () => {

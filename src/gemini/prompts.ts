@@ -392,9 +392,14 @@ The user-provided filename below is supplied as a fallback for sparse documents 
 
 FILENAME: <<<${safe}>>>
 
-Use the filename as a fallback to populate nombrePagador, cuitPagador, referencia, and concepto ONLY when those fields are not visible in the PDF body. Never override values found in the document.
-- Names in the filename may populate nombrePagador.
+Use the filename as a fallback to populate the COUNTERPARTY fields and referencia/concepto ONLY when those fields are not visible in the PDF body. Never override values found in the document. The counterparty depends on direction (per the ADVA IDENTIFICATION section above):
+- For PAGOS RECIBIDOS (ADVA is beneficiario): the counterparty is the payer — use the filename to populate nombrePagador and cuitPagador.
+- For PAGOS ENVIADOS (ADVA is pagador): the counterparty is the recipient — use the filename to populate nombreBeneficiario and cuitBeneficiario.
+
+In either direction:
+- Names in the filename may populate the counterparty name field.
 - Member-style numeric codes (e.g., "Socio 12345") may populate referencia.
+- Free-form descriptions in the filename may populate concepto.
 - Only extract a CUIT from the filename if it appears as a clear 11-digit sequence; do NOT invent CUITs from shorter numeric codes.`;
 }
 
