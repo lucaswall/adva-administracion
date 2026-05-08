@@ -491,6 +491,52 @@ describe('processFile orchestration (Task 12 — ADV-204)', () => {
     }
   });
 
+  // ── pago_recibido: filename hint wiring (ADV-227) ────────────────────────
+  it('passes sanitized filename hint to pago_recibido extraction prompt', async () => {
+    const classJson = JSON.stringify({ documentType: 'pago_recibido', confidence: 0.88, reason: 'incoming payment' });
+    const extractJson = JSON.stringify({
+      banco: 'Galicia',
+      fechaPago: '2025-03-10',
+      importePagado: 10000,
+      moneda: 'ARS',
+      cuitBeneficiario: ADVA_CUIT,
+      nombreBeneficiario: 'ADVA',
+    });
+
+    const { processFile, analyzeDocumentMock } = await buildProcessFile(classJson, extractJson);
+    const fileWithName = { ...FAKE_FILE, name: 'Pago Juan Perez Socio 12345.pdf' };
+    const result = await processFile(fileWithName);
+
+    expect(result.ok).toBe(true);
+    // The extraction call is the second analyzeDocument call (index 1).
+    // Argument index 2 is the prompt string.
+    const extractionPrompt = analyzeDocumentMock.mock.calls[1][2] as string;
+    expect(extractionPrompt).toContain('<<<Pago Juan Perez Socio 12345.pdf>>>');
+  });
+
+  // ── pago_enviado: filename hint wiring (ADV-227) ─────────────────────────
+  it('passes sanitized filename hint to pago_enviado extraction prompt', async () => {
+    const classJson = JSON.stringify({ documentType: 'pago_enviado', confidence: 0.92, reason: 'payment slip' });
+    const extractJson = JSON.stringify({
+      banco: 'BBVA',
+      fechaPago: '2025-03-05',
+      importePagado: 5000,
+      moneda: 'ARS',
+      cuitPagador: ADVA_CUIT,
+      nombrePagador: 'ADVA',
+      cuitBeneficiario: SUPPLIER_CUIT,
+      nombreBeneficiario: 'PROVEEDOR SA',
+    });
+
+    const { processFile, analyzeDocumentMock } = await buildProcessFile(classJson, extractJson);
+    const fileWithName = { ...FAKE_FILE, name: 'Transferencia ADVA 0042.pdf' };
+    const result = await processFile(fileWithName);
+
+    expect(result.ok).toBe(true);
+    const extractionPrompt = analyzeDocumentMock.mock.calls[1][2] as string;
+    expect(extractionPrompt).toContain('<<<Transferencia ADVA 0042.pdf>>>');
+  });
+
   // ── recibo ───────────────────────────────────────────────────────────────
   it('routes recibo branch: returns Recibo', async () => {
     const classJson = JSON.stringify({ documentType: 'recibo', confidence: 0.91, reason: 'salary slip' });
