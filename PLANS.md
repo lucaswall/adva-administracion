@@ -1,6 +1,7 @@
 # Implementation Plan
 
 **Created:** 2026-05-08
+**Status:** COMPLETE
 **Source:** Inline request: Use original filename of files in Entrada as a hint for Gemini extraction (especially for sparse comprobantes / pagos), so payer info parsed from the filename flows into the structured Pago fields and improves downstream matching.
 **Linear Issues:** [ADV-225](https://linear.app/lw-claude/issue/ADV-225/add-filename-sanitizer-for-prompt-injection-sanitizefilenameforprompt), [ADV-226](https://linear.app/lw-claude/issue/ADV-226/convert-pago-bbva-prompt-to-getpagobbvapromptfilenamehint-builder), [ADV-227](https://linear.app/lw-claude/issue/ADV-227/wire-sanitized-filename-through-to-pago-extraction-in-extractorts)
 **Branch:** feat/filename-hint-pago-extraction
@@ -226,3 +227,30 @@ In `src/processing/extractor.ts`:
 ### Status
 
 **COMPLETE** — All three tasks implemented, both bug-hunter findings resolved, full test suite + build green. Ready for review and merge.
+
+### Review Findings
+
+**Method:** single-agent review (4 changed files; below the 5-file team threshold; security-sensitive but not in the auth/session/tokens/crypto override category).
+
+**Files reviewed:** `src/gemini/prompts.ts`, `src/gemini/prompts.test.ts`, `src/processing/extractor.ts`, `src/processing/extractor.test.ts`.
+
+**No bugs found.** The implementation is clean: structural prompt-injection mitigations (control-char stripping, backtick/brace/angle-bracket stripping, length cap with visible truncation, `<<< >>>` fencing, "untrusted fallback only" framing) match the documented threat model. Backwards-compat verified — `getPagoBbvaPrompt()` with no hint short-circuits to a byte-identical base prompt. Bug-hunter already caught the `<>` stripping gap during implementation. TDD coverage is comprehensive (14 sanitizer + 12 builder + 2 wiring tests). No CLAUDE.md violations, no migration needed (no schema/folder/env-var changes), ESM imports use `.js`, JSDoc on all new exports.
+
+**Discarded (genuinely not bugs):**
+
+- **Unicode invisible-char stripping** (zero-width, bidi-controls, Tags Block U+E0000-E007F): Out of scope. The JSDoc threat model is explicitly structural (fence-breaking, code-fence injection, length DoS). Semantic injection via invisible Unicode is a documented residual risk in PLANS.md's Risks section — worst case is a low-confidence match, identical to today's no-hint behavior, bounded by the manual review flow.
+- **Surrogate-pair-aware truncation**: `slice(0, 199)` operates on UTF-16 code units; an emoji landing exactly at positions 198–199 of a >200-char sanitized filename would leave a lone high surrogate. Preconditions (filename >200 chars after sanitization AND emoji at the boundary) are vanishingly rare. Fail-mode is fail-closed (Gemini rejects → file routed to Sin Procesar) — no regression vs. pre-iteration behavior since filenames weren't passed at all before.
+
+### Linear Updates
+
+- ADV-225: Review → Merge.
+- ADV-226: Review → Merge.
+- ADV-227: Review → Merge.
+
+<!-- REVIEW COMPLETE -->
+
+---
+
+## Status: COMPLETE
+
+All tasks implemented and reviewed successfully. All Linear issues moved to Merge.
