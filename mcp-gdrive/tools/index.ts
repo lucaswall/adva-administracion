@@ -9,6 +9,7 @@ import { schema as gsheetsAppendRowsSchema, appendRows } from './gsheets_append_
 import { schema as gdriveMoveFileSchema, moveFile } from './gdrive_move_file.js';
 import { schema as gdriveRenameFileSchema, renameFile } from './gdrive_rename_file.js';
 import { schema as gdriveCopyFileSchema, copyFile } from './gdrive_copy_file.js';
+import { schema as gdriveUploadFileSchema, uploadFile } from './gdrive_upload_file.js';
 import { schema as gdriveGetFileInfoSchema, getFileInfo } from './gdrive_get_file_info.js';
 import { schema as gsheetsMetadataSchema, getMetadata } from './gsheets_metadata.js';
 import { schema as gsheetsQuerySchema, querySheet } from './gsheets_query.js';
@@ -25,6 +26,7 @@ import {
   GDriveMoveFileInput,
   GDriveRenameFileInput,
   GDriveCopyFileInput,
+  GDriveUploadFileInput,
   GDriveGetFileInfoInput,
   GSheetsMetadataInput,
   GSheetsQueryInput,
@@ -43,6 +45,7 @@ export const tools: [
   Tool<GDriveMoveFileInput>,
   Tool<GDriveRenameFileInput>,
   Tool<GDriveCopyFileInput>,
+  Tool<GDriveUploadFileInput>,
   Tool<GSheetsMetadataInput>,
   Tool<GSheetsQueryInput>
 ] = [
@@ -93,6 +96,10 @@ export const tools: [
   {
     ...gdriveCopyFileSchema,
     handler: copyFile,
+  },
+  {
+    ...gdriveUploadFileSchema,
+    handler: uploadFile,
   },
   {
     ...gsheetsMetadataSchema,

@@ -89,6 +89,13 @@ export interface GDriveCopyFileInput {
   parentFolderId?: string;
 }
 
+export interface GDriveUploadFileInput {
+  localPath: string;
+  parentFolderId: string;
+  newName?: string;
+  mimeType?: string;
+}
+
 export interface GSheetsMetadataInput {
   spreadsheetId: string;
 }

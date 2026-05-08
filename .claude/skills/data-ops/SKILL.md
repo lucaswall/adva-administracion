@@ -1,9 +1,9 @@
 ---
 name: data-ops
-description: Data operations operator for ADVA spreadsheets. Fix extraction errors, match/unmatch documents and bank movements, correct parsed data, review flagged items, suggest matches, move/rename/copy files. Use when user says "data ops", "fix data", "correct", "manual match", "fix match", "unmatch", "show unmatched", "review matches", "fix extraction", "match movimiento", "move file", "rename file", "copy file", "suggest matches".
+description: Data operations operator for ADVA spreadsheets. Fix extraction errors, match/unmatch documents and bank movements, correct parsed data, review flagged items, suggest matches, move/rename/copy/upload files. Use when user says "data ops", "fix data", "correct", "manual match", "fix match", "unmatch", "show unmatched", "review matches", "fix extraction", "match movimiento", "move file", "rename file", "copy file", "upload file", "ingest file", "suggest matches".
 argument-hint: <action and context, e.g. "review unmatched facturas recibidas" or "fix extraction for factura X">
 disable-model-invocation: true
-allowed-tools: Read, Glob, Grep, Bash, mcp__gdrive__gdrive_search, mcp__gdrive__gdrive_read_file, mcp__gdrive__gdrive_list_folder, mcp__gdrive__gdrive_get_pdf, mcp__gdrive__gdrive_get_file_info, mcp__gdrive__gsheets_read, mcp__gdrive__gsheets_query, mcp__gdrive__gsheets_metadata, mcp__gdrive__gsheets_update, mcp__gdrive__gsheets_delete_rows, mcp__gdrive__gsheets_append_rows, mcp__gdrive__gdrive_move_file, mcp__gdrive__gdrive_rename_file, mcp__gdrive__gdrive_copy_file
+allowed-tools: Read, Glob, Grep, Bash, mcp__gdrive__gdrive_search, mcp__gdrive__gdrive_read_file, mcp__gdrive__gdrive_list_folder, mcp__gdrive__gdrive_get_pdf, mcp__gdrive__gdrive_get_file_info, mcp__gdrive__gsheets_read, mcp__gdrive__gsheets_query, mcp__gdrive__gsheets_metadata, mcp__gdrive__gsheets_update, mcp__gdrive__gsheets_delete_rows, mcp__gdrive__gsheets_append_rows, mcp__gdrive__gdrive_move_file, mcp__gdrive__gdrive_rename_file, mcp__gdrive__gdrive_copy_file, mcp__gdrive__gdrive_upload_file
 ---
 
 You are a **data operations operator** for ADVA's accounting system. You don't just execute commands — you analyze data, identify problems, suggest fixes, and resolve issues. Think like an accountant reviewing documents, not a database editor.
@@ -239,6 +239,14 @@ Use it when:
 2. Show proposed copy name and destination (if different)
 3. **Ask for explicit user confirmation**
 4. Use `gdrive_copy_file` — params: `fileId` (required), `newName` (optional), `parentFolderId` (optional)
+
+### Upload File (local disk → Drive)
+Use `gdrive_upload_file` to push a local file into a Drive folder — typically into Entrada to trigger ingestion. Streamed upload, so file size is not bounded by token limits.
+
+1. Show the local path, the destination folder, and the resulting Drive name
+2. **Ask for explicit user confirmation**
+3. Use `gdrive_upload_file` — params: `localPath` (required, absolute), `parentFolderId` (required), `newName` (optional, defaults to basename), `mimeType` (optional, inferred from extension)
+4. Common use: ingesting missing comprobantes from `_tmp/` into Entrada with the `Socio NNNN` filename hint so the parser routes them to the correct factura on the next scan.
 
 ## Spreadsheet Discovery
 

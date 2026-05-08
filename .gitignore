@@ -1,6 +1,7 @@
 
 _samples
 _samples*
+_tmp/
 
 # Dependencies
 node_modules
