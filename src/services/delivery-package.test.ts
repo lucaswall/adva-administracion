@@ -1327,6 +1327,36 @@ describe('buildMovimientosWorkbook', () => {
     expect(createSheet).toHaveBeenCalledWith(WORKBOOK_ID, '2025-02 BBVA 1234 ARS');
   });
 
+  it('sanitizes characters disallowed in Google Sheets tab titles (/, \\, :, ?, *, [, ])', async () => {
+    // Codex P2: production accounts can contain "/" (e.g. "BBVA 007-009364/1 ARS"
+    // per folder-structure.ts:1847). createSheet would reject the unsanitized
+    // title, silently dropping that account's movimientos from the workbook.
+    setupCreateSpreadsheet();
+    setupInitialMeta(0);
+    vi.mocked(createSheet).mockResolvedValue(ok(101));
+    vi.mocked(readMovimientosForPeriod).mockResolvedValue(
+      ok([makeMovimiento('2025-01-10', 'Pago', 500, 0, 4500, '')])
+    );
+    vi.mocked(appendRowsWithLinks).mockResolvedValue(ok(2));
+    vi.mocked(formatSheet).mockResolvedValue(ok(undefined));
+    vi.mocked(deleteSheet).mockResolvedValue(ok(undefined));
+
+    const scope = [
+      { spreadsheetId: 'src-ssid', sheetName: '2025-01', banco: 'BBVA', numeroCuenta: '007-009364/1', moneda: 'ARS' },
+    ];
+    const result = await buildMovimientosWorkbook(FOLDER_ID, scope);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value.tabCount).toBe(1);
+
+    // The "/" must be replaced before reaching createSheet
+    const createCall = vi.mocked(createSheet).mock.calls[0];
+    const titleArg = createCall[1] as string;
+    expect(titleArg).not.toContain('/');
+    expect(titleArg).toContain('BBVA');
+    expect(titleArg).toContain('007-009364');
+    expect(titleArg).toContain('ARS');
+  });
+
   it('appendRowsWithLinks failure on one tab → tab is removed, not counted; others written, Result.ok', async () => {
     // Codex P2: when the data write fails after the tab is created, leaving the
     // empty tab and incrementing tabCount silently omits the account's data

@@ -620,6 +620,15 @@ export async function copyPdfsToDelivery(
 /** Output column headers for the movimientos workbook */
 const MOVIMIENTOS_OUTPUT_HEADERS = ['fecha', 'concepto', 'debito', 'credito', 'saldo', 'detalle'];
 
+/**
+ * Replaces characters Google Sheets rejects in sheet titles. Real bank account
+ * numbers can contain "/" (e.g. `BBVA 007-009364/1 ARS`); without sanitisation
+ * createSheet silently fails and the account is dropped from the workbook.
+ */
+function sanitizeTabTitle(title: string): string {
+  return title.replace(/[\\/?*[\]:]/g, '-');
+}
+
 /** Number formats for movimientos workbook columns */
 const MOVIMIENTOS_NUMBER_FORMATS = new Map([
   [0, { type: 'date' as const }],
@@ -698,7 +707,7 @@ export async function buildMovimientosWorkbook(
     // Build tab name: YYYY-MM {banco} {numeroCuenta} [{moneda}]
     const tabParts = [item.sheetName, item.banco, item.numeroCuenta];
     if (item.moneda) tabParts.push(item.moneda);
-    const tabName = tabParts.join(' ');
+    const tabName = sanitizeTabTitle(tabParts.join(' '));
 
     // Read source first — if a transient Sheets read fails, skip the tab
     // entirely rather than creating an empty placeholder that would silently
