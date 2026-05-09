@@ -419,3 +419,135 @@ The plan assumed a single root-level "Control de Resumenes" spreadsheet with thr
 
 ### Continuation Status
 All tasks completed.
+
+### Review Findings
+
+**Method:** 3-reviewer team (security, reliability, quality) on 10 changed files.
+
+**FIX (5 — bugs to address in Fix Plan):**
+
+1. **[high] [bug]** `src/services/delivery-package.ts:513-514` — `prepareDeliveryFolder` re-delivery uses `f.name.startsWith(prefix)`, so a single-month delivery `"2025-01 "` silently matches and clobbers an existing multi-month folder `"2025-01 al 2025-12 (entregado ...)"`. Asymmetric bug. → ADV-237
+2. **[medium] [security]** `src/routes/delivery.ts:200-255` — `POST /api/delivery/build-movimientos` accepts a user-supplied `folderId` and passes it to `buildMovimientosWorkbook` without verifying it lies within `Entregas/`. An authenticated caller could write the workbook into any folder reachable by the service account. The `isDescendantOf` helper already exists in `drive.ts`. → ADV-238
+3. **[medium] [edge-case]** `src/services/delivery-package.ts:763-780` — `buildMovimientosWorkbook` calls `deleteSheet(defaultSheet.sheetId)` even when every `createSheet` in the loop failed (`tabCount === 0`). The Sheets API rejects deleting the only sheet, the failure is only `warn`-logged, and the function returns `{ ok: true, tabCount: 0 }` with the workbook in a broken state. → ADV-239
+4. **[medium] [type]** `src/routes/delivery.test.ts:239,653-655,686` — Mock `MovimientoScopeItem` fixtures use a non-existent `bankName` field. Real type has `banco`, `numeroCuenta`, `moneda`. The "passes correct arguments" assertion only verifies that the same wrong-shape data is passed through, so a future regression on real fields would go undetected. → ADV-240
+5. **[low] [bug]** `src/services/delivery-package.ts:69-72` — Local `colLetter(count)` only handles A-Z. `columnIndexToLetter` already exists in `sheets.ts:49` and supports multi-letter columns. Currently safe (max 12 cols) but silently produces garbage A1 ranges if any schema expands beyond 26 cols. → ADV-241
+
+**DISCARDED (5 — not real bugs, with reasoning):**
+
+1. **[medium] [async] No atomic find-or-create in `prepareDeliveryFolder`** — Plan explicitly documents "no `withLock` acquired" as an architectural decision. Single-user Apps Script UI flow makes concurrent same-period calls unlikely; the worst-case cost is a duplicate folder, not data corruption.
+2. **[medium] [timeout] Apps Script `UrlFetchApp` 60s timeout for large scopes** — Plan Risks section explicitly states: "Initial cut accepts this; chunking can be added if observed in practice."
+3. **[low] [convention] `withTiming` missing on new sheets.ts functions** — Reviewer's premise that "every pre-existing function uses `withTiming`" is incorrect. Many existing functions in `sheets.ts` (`formatStatusSheet`, `applyConditionalFormat`, `insertColumn`, `sortSheet`, `clearSheetData`, `moveSheetToFirst`, `appendRowsWithFormatting`, `formatEmptyMonthSheet`, `updateRowsWithFormatting`) also lack `withTiming`. The new `renameSheet` follows the dominant existing pattern.
+4. **[low] [test] No `createSheet` failure-path test in `buildMovimientosWorkbook`** — Coverage will be added by ADV-239 (the fix asserts the placeholder-tab path covers all-failure cases).
+5. **[low] [edge-case] Tab name 100-char Sheets limit** — Bank folder names follow `{Bank} {Account} {Currency}` (typically ≤30 chars). With YYYY-MM prefix, well under 100. Theoretical, not realistic with current data.
+
+### Linear Updates (review pass)
+- ADV-228..ADV-236 → Merge (review pass; original tasks were completed)
+- ADV-237 (high, bug) — created in Todo for Fix Plan
+- ADV-238 (medium, security) — created in Todo for Fix Plan
+- ADV-239 (medium, bug) — created in Todo for Fix Plan
+- ADV-240 (medium, bug) — created in Todo for Fix Plan
+- ADV-241 (low, bug) — created in Todo for Fix Plan
+
+<!-- REVIEW COMPLETE -->
+
+---
+
+## Fix Plan
+
+Five fixes, TDD-driven. Order is independent — any ordering works because the fixes touch disjoint areas (one folder-prep bug, one route validation, one workbook build branch, one test fixture, one helper swap).
+
+### Fix 1: prepareDeliveryFolder prefix-startsWith silently matches multi-month folder
+
+**Linear Issue:** [ADV-237](https://linear.app/lw-claude/issue/ADV-237/envio-a-contadores-preparedeliveryfolder-prefix-startswith-silently)
+
+**Files:**
+- `src/services/delivery-package.ts` (modify)
+- `src/services/delivery-package.test.ts` (modify)
+
+**Steps:**
+1. Add a test in `delivery-package.test.ts`: existing folder `"2025-01 al 2025-12 (entregado 2026-05-01)"` is NOT matched when calling `prepareDeliveryFolder` for single month `2025-01` — instead a new folder is created. Add a complementary test confirming that `"2025-01 (entregado 2026-05-01)"` IS still reused for `2025-01` re-delivery.
+2. Run verifier (expect fail on the new "no false match" test).
+3. Replace the existing predicate at `delivery-package.ts:513-515`:
+   ```ts
+   const existing = existingFoldersResult.value.find(
+     f => f.name === folderName || extractPeriodPrefix(f.name) === prefix
+   );
+   ```
+4. Run verifier (expect pass).
+
+---
+
+### Fix 2: IDOR on user-supplied folderId in build-movimientos
+
+**Linear Issue:** [ADV-238](https://linear.app/lw-claude/issue/ADV-238/envio-a-contadores-idor-on-user-supplied-folderid-in-apideliverybuild)
+
+**Files:**
+- `src/routes/delivery.ts` (modify)
+- `src/routes/delivery.test.ts` (modify)
+
+**Steps:**
+1. Add tests for `POST /api/delivery/build-movimientos`:
+   - When `folderId` is not a descendant of `Entregas/` → 400 with Spanish message.
+   - When `folderId` is a descendant of `Entregas/` → proceeds normally.
+   - When the `Entregas/` folder cannot be located → 500.
+2. Run verifier (expect fail).
+3. Add an ancestry check inside the `/delivery/build-movimientos` handler before calling `buildMovimientosWorkbook`:
+   - `findByName(rootFolderId, 'Entregas', 'application/vnd.google-apps.folder')` — if absent, respond 500.
+   - `isDescendantOf(folderId, entregasFolderId)` (from `drive.ts:976`) — if false, respond 400 with `'folderId no pertenece a la carpeta Entregas/'`.
+4. Run verifier (expect pass).
+
+---
+
+### Fix 3: buildMovimientosWorkbook leaves broken workbook when all createSheet calls fail
+
+**Linear Issue:** [ADV-239](https://linear.app/lw-claude/issue/ADV-239/envio-a-contadores-buildmovimientosworkbook-leaves-broken-workbook)
+
+**Files:**
+- `src/services/delivery-package.ts` (modify)
+- `src/services/delivery-package.test.ts` (modify)
+
+**Steps:**
+1. Add a test: `scope.length > 0` with `createSheet` mocked to always fail → workbook ends with one tab named `Sin Movimientos` containing only the six-column header row; `tabCount: 0`; overall `Result.ok`. `deleteSheet` must NOT be called.
+2. Run verifier (expect fail).
+3. Refactor the existing empty-scope branch (rename Sheet1 to `Sin Movimientos` + write headers) into a private helper. After the loop, if `tabCount === 0`, invoke that helper instead of calling `deleteSheet(defaultSheet.sheetId)`.
+4. Run verifier (expect pass).
+
+---
+
+### Fix 4: delivery.test.ts mocks use non-existent bankName field
+
+**Linear Issue:** [ADV-240](https://linear.app/lw-claude/issue/ADV-240/envio-a-contadores-deliverytestts-mocks-use-non-existent-bankname)
+
+**Files:**
+- `src/routes/delivery.test.ts` (modify)
+
+**Steps:**
+1. Update the three mock fixture spots (lines 239, 653-655, 686) to use the real `MovimientoScopeItem` shape:
+   ```ts
+   { spreadsheetId: 'sp1', sheetName: '2025-01', banco: 'BBVA', numeroCuenta: '1234567890', moneda: 'ARS' }
+   ```
+2. Run verifier — tests must continue to pass with the corrected fixtures (the mocks flow through to mocked services that do not read the fields, so no assertion changes are needed).
+
+---
+
+### Fix 5: Replace local colLetter helper with sheets.ts columnIndexToLetter
+
+**Linear Issue:** [ADV-241](https://linear.app/lw-claude/issue/ADV-241/envio-a-contadores-replace-local-colletter-helper-with-sheetsts)
+
+**Files:**
+- `src/services/delivery-package.ts` (modify)
+- `src/services/delivery-package.test.ts` (modify if a regression test is added)
+
+**Steps:**
+1. (Optional) Add a regression test asserting `widestResumenesColumn` paired with `columnIndexToLetter` produces a valid A1 range for ≤12 columns; behavior unchanged for current data.
+2. Run verifier (expect pass — pre-existing behavior).
+3. In `delivery-package.ts`: import `columnIndexToLetter` from `./sheets.js`, remove the local `colLetter` helper at lines 69-72, and update the call site at line 206.
+4. Run verifier (expect pass).
+
+---
+
+## Post-Fix Checklist
+
+After all 5 fixes are implemented:
+1. Run `bug-hunter` agent — confirm no regressions and no new issues introduced by the fixes.
+2. Run `verifier` agent — confirm all tests pass and zero warnings.
