@@ -743,15 +743,27 @@ export async function buildMovimientosWorkbook(
       rows.push(row);
     }
 
-    // Write rows to tab
+    // Write rows to tab. If the write fails, remove the empty tab and skip
+    // counting — leaving an empty tab in place would silently omit this
+    // account's data while the route reports success.
     const appendResult = await appendRowsWithLinks(workbookId, `${tabName}!A:F`, rows);
     if (!appendResult.ok) {
-      warn('Failed to write movimientos data', {
+      warn('Failed to write movimientos data — removing empty tab', {
         module: 'delivery',
         phase: 'build-movimientos',
         tabName,
         error: appendResult.error.message,
       });
+      const deleteResult = await deleteSheet(workbookId, sheetId);
+      if (!deleteResult.ok) {
+        warn('Failed to delete empty tab after write failure', {
+          module: 'delivery',
+          phase: 'build-movimientos',
+          tabName,
+          error: deleteResult.error.message,
+        });
+      }
+      continue;
     }
 
     // Format tab: freeze header, number formats for date/currency columns

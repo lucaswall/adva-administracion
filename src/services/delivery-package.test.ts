@@ -1327,6 +1327,43 @@ describe('buildMovimientosWorkbook', () => {
     expect(createSheet).toHaveBeenCalledWith(WORKBOOK_ID, '2025-02 BBVA 1234 ARS');
   });
 
+  it('appendRowsWithLinks failure on one tab → tab is removed, not counted; others written, Result.ok', async () => {
+    // Codex P2: when the data write fails after the tab is created, leaving the
+    // empty tab and incrementing tabCount silently omits the account's data
+    // while reporting success. The fix removes the empty tab and skips it.
+    setupCreateSpreadsheet();
+    setupInitialMeta(0);
+    vi.mocked(createSheet)
+      .mockResolvedValueOnce(ok(101)) // tab for 2025-01 (will fail to append)
+      .mockResolvedValueOnce(ok(102)); // tab for 2025-02 (will succeed)
+    vi.mocked(readMovimientosForPeriod).mockResolvedValue(
+      ok([makeMovimiento('2025-01-10', 'Pago', 500, 0, 4500, '')])
+    );
+    vi.mocked(appendRowsWithLinks)
+      .mockResolvedValueOnce(err('Quota exceeded'))
+      .mockResolvedValueOnce(ok(6));
+    vi.mocked(formatSheet).mockResolvedValue(ok(undefined));
+    vi.mocked(deleteSheet).mockResolvedValue(ok(undefined));
+
+    const scope = [
+      { spreadsheetId: 'src-ssid', sheetName: '2025-01', banco: 'BBVA', numeroCuenta: '1234', moneda: 'ARS' },
+      { spreadsheetId: 'src-ssid', sheetName: '2025-02', banco: 'BBVA', numeroCuenta: '1234', moneda: 'ARS' },
+    ];
+    const result = await buildMovimientosWorkbook(FOLDER_ID, scope);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      // Only the successful tab is counted
+      expect(result.value.tabCount).toBe(1);
+    }
+    // The failed tab was deleted (tab 101) and the default sheet was deleted
+    // (post-loop cleanup). The successful tab (102) is NOT deleted.
+    expect(deleteSheet).toHaveBeenCalledWith(WORKBOOK_ID, 101);
+    expect(deleteSheet).not.toHaveBeenCalledWith(WORKBOOK_ID, 102);
+    // Format must NOT be called for the failed tab
+    expect(formatSheet).toHaveBeenCalledTimes(1);
+    expect(formatSheet).toHaveBeenCalledWith(WORKBOOK_ID, 102, expect.anything());
+  });
+
   it('all createSheet calls fail → falls back to Sin Movimientos placeholder, deleteSheet not called', async () => {
     setupCreateSpreadsheet();
     setupInitialMeta(7);
