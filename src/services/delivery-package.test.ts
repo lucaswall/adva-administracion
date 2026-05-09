@@ -1297,7 +1297,11 @@ describe('buildMovimientosWorkbook', () => {
     expect(appendCall[2]).toHaveLength(1); // only header row
   });
 
-  it('readMovimientosForPeriod error on one tab → tab skipped, others written, Result.ok', async () => {
+  it('readMovimientosForPeriod error on one tab → tab is fully skipped (not created), others written, Result.ok', async () => {
+    // Codex P2: when readMovimientosForPeriod fails (e.g. transient Sheets
+    // error), the previous implementation logged + continued and ended up with
+    // a header-only tab, hiding the data loss behind a successful response.
+    // The fixed implementation skips the tab entirely.
     setupCreateSpreadsheet();
     setupInitialMeta(0);
     vi.mocked(createSheet).mockResolvedValue(ok(1));
@@ -1315,9 +1319,12 @@ describe('buildMovimientosWorkbook', () => {
     const result = await buildMovimientosWorkbook(FOLDER_ID, scope);
     expect(result.ok).toBe(true);
     if (result.ok) {
-      // Both tabs still counted (tab created, just no data)
-      expect(result.value.tabCount).toBe(2);
+      // Only the successful tab is counted; the failed tab is skipped entirely
+      expect(result.value.tabCount).toBe(1);
     }
+    // createSheet must NOT have been called for the failed scope item
+    expect(createSheet).toHaveBeenCalledTimes(1);
+    expect(createSheet).toHaveBeenCalledWith(WORKBOOK_ID, '2025-02 BBVA 1234 ARS');
   });
 
   it('all createSheet calls fail → falls back to Sin Movimientos placeholder, deleteSheet not called', async () => {

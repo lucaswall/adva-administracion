@@ -700,7 +700,22 @@ export async function buildMovimientosWorkbook(
     if (item.moneda) tabParts.push(item.moneda);
     const tabName = tabParts.join(' ');
 
-    // Create the tab
+    // Read source first — if a transient Sheets read fails, skip the tab
+    // entirely rather than creating an empty placeholder that would silently
+    // hide missing data behind a successful response.
+    const rowsResult = await readMovimientosForPeriod(item.spreadsheetId, item.sheetName);
+    if (!rowsResult.ok) {
+      warn('Failed to read movimientos for tab — skipping', {
+        module: 'delivery',
+        phase: 'build-movimientos',
+        sheetName: item.sheetName,
+        spreadsheetId: item.spreadsheetId,
+        error: rowsResult.error.message,
+      });
+      continue;
+    }
+
+    // Create the tab now that we know there's data to write
     const createTabResult = await createSheet(workbookId, tabName);
     if (!createTabResult.ok) {
       warn('Failed to create movimientos tab', {
@@ -713,33 +728,19 @@ export async function buildMovimientosWorkbook(
     }
     const sheetId = createTabResult.value;
 
-    // Read source movimientos (already filtered by readMovimientosForPeriod)
-    const rowsResult = await readMovimientosForPeriod(item.spreadsheetId, item.sheetName);
-    if (!rowsResult.ok) {
-      warn('Failed to read movimientos for tab', {
-        module: 'delivery',
-        phase: 'build-movimientos',
-        sheetName: item.sheetName,
-        spreadsheetId: item.spreadsheetId,
-        error: rowsResult.error.message,
-      });
-    }
-
     // Build rows: header + data
     const rows: CellValueOrLink[][] = [MOVIMIENTOS_OUTPUT_HEADERS];
 
-    if (rowsResult.ok) {
-      for (const mov of rowsResult.value) {
-        const row: CellValueOrLink[] = [
-          { type: 'date', value: mov.fecha } as CellDate,
-          mov.concepto,
-          { type: 'number', value: mov.debito } as CellNumber,
-          { type: 'number', value: mov.credito } as CellNumber,
-          { type: 'number', value: mov.saldo } as CellNumber,
-          mov.detalle,
-        ];
-        rows.push(row);
-      }
+    for (const mov of rowsResult.value) {
+      const row: CellValueOrLink[] = [
+        { type: 'date', value: mov.fecha } as CellDate,
+        mov.concepto,
+        { type: 'number', value: mov.debito } as CellNumber,
+        { type: 'number', value: mov.credito } as CellNumber,
+        { type: 'number', value: mov.saldo } as CellNumber,
+        mov.detalle,
+      ];
+      rows.push(row);
     }
 
     // Write rows to tab
