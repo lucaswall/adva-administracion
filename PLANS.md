@@ -1,5 +1,6 @@
 # Implementation Plan
 
+**Status:** COMPLETE
 **Created:** 2026-05-08
 **Source:** Inline request: "Envío a Contadores" delivery package — Dashboard menu operation that gathers all resumen PDFs (banks, cards, brokers) and a per-month per-bank movimientos workbook into a flat `Entregas/` Drive folder for a chosen period or range.
 **Linear Issues:** [ADV-228](https://linear.app/lw-claude/issue/ADV-228/envio-a-contadores-period-range-parser), [ADV-229](https://linear.app/lw-claude/issue/ADV-229/envio-a-contadores-enumerate-resumenes-for-period-range), [ADV-230](https://linear.app/lw-claude/issue/ADV-230/envio-a-contadores-enumerate-movimientos-for-period-range), [ADV-231](https://linear.app/lw-claude/issue/ADV-231/envio-a-contadores-drive-copyfile-helper), [ADV-232](https://linear.app/lw-claude/issue/ADV-232/envio-a-contadores-prepare-delivery-folder-create-or-clear), [ADV-233](https://linear.app/lw-claude/issue/ADV-233/envio-a-contadores-copy-pdfs-to-delivery-folder), [ADV-234](https://linear.app/lw-claude/issue/ADV-234/envio-a-contadores-build-movimientos-workbook), [ADV-235](https://linear.app/lw-claude/issue/ADV-235/envio-a-contadores-delivery-routes-plan-copy-pdfs-build-movimientos), [ADV-236](https://linear.app/lw-claude/issue/ADV-236/envio-a-contadores-apps-script-menu-integration-with-progress-toasts)
@@ -581,3 +582,32 @@ After all 5 fixes are implemented:
 
 ### Continuation Status
 All Fix Plan items completed.
+
+### Review Findings (Iteration 2)
+
+**Method:** Single-agent review (4 changed files, sub-team threshold) with sequential security / reliability / quality / CLAUDE.md passes against `src/services/delivery-package.ts`, `src/services/delivery-package.test.ts`, `src/routes/delivery.ts`, `src/routes/delivery.test.ts`.
+
+**No bugs found.** All 5 fixes implement the Fix Plan correctly:
+
+- Fix 1 [ADV-237]: `extractPeriodPrefix(folderName) === prefix` correctly handles the single-month vs multi-month asymmetry. Preserved trailing-space sentinel inside `extractPeriodPrefix` keeps `"2025-01 "` unambiguous against `"2025-10 …"`. New tests assert both directions (no-false-match and same-period reuse on a different day).
+- Fix 2 [ADV-238]: IDOR guard at `delivery.ts:240-254` anchors to root via `findByName(rootFolderId, 'Entregas')` (direct-children query per `drive.ts:377`), then walks parents via `isDescendantOf` (10s deadline, depth-limited). Guard fires before `enumerateMovimientos` / `buildMovimientosWorkbook`, with all four error paths covered (not-descendant → 400, Entregas missing → 500, descendant-check error → 500, happy path → 200).
+- Fix 3 [ADV-239]: `applySinMovimientosPlaceholder` helper unifies the empty-scope and all-createSheet-fail branches. `tabCount === 0` correctly skips `deleteSheet` (which would fail on the only remaining tab) and falls through to placeholder treatment. Test asserts `deleteSheet` is NOT called in the all-fail branch.
+- Fix 4 [ADV-240]: Five fixture occurrences across `delivery.test.ts` corrected to the real `MovimientoScopeItem` shape (`banco`/`numeroCuenta`/`moneda`).
+- Fix 5 [ADV-241]: `columnIndexToLetter` from `sheets.ts` now supports multi-letter columns; the test mock mirrors the real implementation.
+
+CLAUDE.md compliance verified: ESM `.js` imports, `Result<T,E>` pattern, Pino logger, TDD (each fix has a corresponding test), zero warnings per the iteration's verifier run.
+
+### Linear Updates (review pass)
+- ADV-237..ADV-241 → Merge (all 5 fixes verified, no new issues introduced)
+
+<!-- REVIEW COMPLETE -->
+
+---
+
+## Status: COMPLETE
+
+All tasks implemented and reviewed successfully across 2 iterations:
+- Iteration 1: 9 original tasks (ADV-228..ADV-236) → Merge
+- Iteration 2: 5 fix-plan tasks (ADV-237..ADV-241) → Merge
+
+E2E tests N/A — this is a backend-only Fastify server with no E2E harness; the iteration's full unit-test pass (2256 tests, zero warnings on lint/typecheck/build) is the equivalent gate.
