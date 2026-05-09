@@ -154,6 +154,7 @@ async function build() {
     { exposed: 'triggerScan', topLevel: 'triggerScan' },
     { exposed: 'triggerRematch', topLevel: 'triggerRematch' },
     { exposed: 'triggerMatchMovimientos', topLevel: 'triggerMatchMovimientos' },
+    { exposed: 'triggerEnvioContadores', topLevel: 'triggerEnvioContadores' },
     { exposed: 'showAbout', topLevel: 'showAbout' },
   ];
   const stubBlock = STUBS.map(

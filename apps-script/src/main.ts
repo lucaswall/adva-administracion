@@ -42,10 +42,181 @@ export function createMenu(): void {
     .addItem('🔄 Procesar Entrada', 'triggerScan')
     .addItem('🔗 Volver a Vincular Documentos', 'triggerRematch')
     .addItem('📝 Completar Detalles de Movimientos', 'triggerMatchMovimientos')
+    .addItem('📦 Envío a Contadores', 'triggerEnvioContadores')
     .addSeparator()
     .addItem('ℹ️ Acerca de', 'showAbout')
     .addToUi();
 }
+
+// ─── Helpers for Envío a Contadores progress feedback ────────────────────────
+
+/**
+ * Shows a long-lived progress toast in the "Envío a Contadores" title.
+ * Timeout is 300 s so successive calls replace the previous toast.
+ *
+ * @param msg - Message body to display
+ */
+function progressToast(msg: string): void {
+  SpreadsheetApp.getActiveSpreadsheet().toast(msg, 'Envío a Contadores', 300);
+}
+
+/**
+ * Shows a short-lived "Listo." toast that clears any lingering progress toast.
+ */
+function doneToast(): void {
+  SpreadsheetApp.getActiveSpreadsheet().toast('Listo.', 'Envío a Contadores', 3);
+}
+
+/**
+ * Internal helper — makes a single POST call to a delivery endpoint.
+ * Parses the JSON response and returns typed data on success.
+ * Throws an Error with the backend's Spanish error message on HTTP error.
+ *
+ * @param url - Full URL to POST to
+ * @param payload - JSON body to send
+ * @returns Parsed response body
+ */
+function callDeliveryApi<T>(url: string, payload: Record<string, unknown>): T {
+  const options: GoogleAppsScript.URL_Fetch.URLFetchRequestOptions = {
+    method: 'post',
+    headers: {
+      'Content-Type': 'application/json',
+      'User-Agent': 'ADVA-Spreadsheet',
+      'Authorization': `Bearer ${API_SECRET}`,
+    },
+    payload: JSON.stringify(payload),
+    muteHttpExceptions: true,
+  };
+
+  const response = UrlFetchApp.fetch(url, options);
+  const statusCode = response.getResponseCode();
+  const responseText = response.getContentText();
+
+  if (statusCode >= 200 && statusCode < 300) {
+    return JSON.parse(responseText) as T;
+  }
+
+  // Surface the backend's Spanish-language error message
+  let errorMsg = `Error del servidor (${statusCode})`;
+  try {
+    const errorData = JSON.parse(responseText) as { error?: string };
+    if (errorData.error) {
+      errorMsg = errorData.error;
+    }
+  } catch {
+    if (responseText) {
+      errorMsg += `: ${responseText}`;
+    }
+  }
+  throw new Error(errorMsg);
+}
+
+// ─── Envío a Contadores trigger ───────────────────────────────────────────────
+
+/**
+ * Menu handler — guides the user through the full delivery flow:
+ *   1. Prompt for period (YYYY-MM or YYYY-MM..YYYY-MM)
+ *   2. Plan (enumerate scope, no Drive writes)
+ *   3. Copy PDFs to a new Entregas/ folder
+ *   4. Build the movimientos workbook
+ *   5. Show a summary alert
+ *
+ * Each step shows a progress toast that replaces the previous one.
+ * On any API error, surfaces the backend's Spanish message via ui.alert.
+ */
+export function triggerEnvioContadores(): void {
+  const ui = SpreadsheetApp.getUi();
+
+  // 1. Validate config (throws if not configured, caught below)
+  try {
+    validateConfig();
+  } catch (err) {
+    const errorMessage = err instanceof Error ? err.message : String(err);
+    ui.alert('⚠️ Error de configuración', errorMessage, ui.ButtonSet.OK);
+    return;
+  }
+
+  // 2. Prompt user for delivery period
+  const promptResponse = ui.prompt(
+    'Período de entrega',
+    'YYYY-MM para un mes, o YYYY-MM..YYYY-MM para un rango.',
+    ui.ButtonSet.OK_CANCEL
+  );
+
+  if (promptResponse.getSelectedButton() !== ui.Button.OK) {
+    return; // User cancelled — exit silently
+  }
+
+  const periodo = promptResponse.getResponseText().trim();
+
+  // 3. Client-side format validation (server also validates, but this gives instant feedback)
+  if (!/^\d{4}-\d{2}(\.\.\d{4}-\d{2})?$/.test(periodo)) {
+    ui.alert(
+      '⚠️ Formato inválido',
+      'El período debe tener formato YYYY-MM o YYYY-MM..YYYY-MM.',
+      ui.ButtonSet.OK
+    );
+    return;
+  }
+
+  try {
+    // 4. Progress: preparing
+    progressToast(`Preparando entrega para ${periodo}...`);
+
+    // 5. Plan — enumerate scope (read-only, no Drive writes)
+    const planUrl = getApiUrl('/api/delivery/plan');
+    const plan = callDeliveryApi<{
+      folderName: string;
+      pdfCount: number;
+      movimientosTabCount: number;
+      periodLabel: string;
+    }>(planUrl, { period: periodo });
+
+    // 6. Progress: copying PDFs
+    progressToast(
+      `Encontrados ${plan.pdfCount} PDFs y ${plan.movimientosTabCount} hojas. Copiando PDFs...`
+    );
+
+    // 7. Copy PDFs to delivery folder
+    const copyUrl = getApiUrl('/api/delivery/copy-pdfs');
+    const copy = callDeliveryApi<{
+      folderId: string;
+      folderUrl: string;
+      copied: number;
+      failed: Array<{ fileId: string; error: string }>;
+    }>(copyUrl, { period: periodo });
+
+    // 8. Progress: building workbook
+    progressToast(`PDFs copiados (${copy.copied}). Generando movimientos...`);
+
+    // 9. Build movimientos workbook in delivery folder
+    const buildUrl = getApiUrl('/api/delivery/build-movimientos');
+    const build = callDeliveryApi<{
+      workbookUrl: string;
+      tabCount: number;
+    }>(buildUrl, { period: periodo, folderId: copy.folderId });
+
+    // 10. Short "done" toast — clears the lingering progress toast
+    doneToast();
+
+    // 11. Summary modal
+    let summary = `Carpeta: ${plan.folderName}\n`;
+    summary += `PDFs copiados: ${plan.pdfCount}\n`;
+    summary += `Hojas de movimientos: ${build.tabCount}\n`;
+    summary += `\nCarpeta en Drive:\n${copy.folderUrl}`;
+    if (copy.failed.length > 0) {
+      summary += `\n\n⚠️ ${copy.failed.length} PDF(s) no pudieron copiarse.`;
+    }
+
+    ui.alert('✅ Entrega lista', summary, ui.ButtonSet.OK);
+
+  } catch (err) {
+    const errorMessage = err instanceof Error ? err.message : String(err);
+    ui.alert('⚠️ Error de la API', errorMessage, ui.ButtonSet.OK);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 /**
  * Triggers a manual scan of the Entrada folder
