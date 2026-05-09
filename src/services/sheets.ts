@@ -1886,6 +1886,43 @@ export async function updateRowsWithFormatting(
 }
 
 /**
+ * Renames a sheet tab by its numeric sheet ID
+ *
+ * @param spreadsheetId - Spreadsheet ID
+ * @param sheetId - Numeric sheet ID (from getSheetMetadata)
+ * @param newTitle - New title for the sheet
+ * @returns Success or error
+ */
+export async function renameSheet(
+  spreadsheetId: string,
+  sheetId: number,
+  newTitle: string
+): Promise<Result<void, Error>> {
+  return withQuotaRetry(async () => {
+    const sheets = await getSheetsService();
+    await sheets.spreadsheets.batchUpdate({
+      spreadsheetId,
+      requestBody: {
+        requests: [
+          {
+            updateSheetProperties: {
+              properties: {
+                sheetId,
+                title: newTitle,
+              },
+              fields: 'title',
+            },
+          },
+        ],
+      },
+    });
+  }).then(result => {
+    if (!result.ok) return { ok: false, error: result.error };
+    return { ok: true, value: undefined };
+  });
+}
+
+/**
  * Clears the cached Sheets service (for testing)
  */
 export function clearSheetsCache(): void {
