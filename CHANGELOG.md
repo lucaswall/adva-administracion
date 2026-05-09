@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.8.0] - 2026-05-09
+
+### Added
+- "Envío a Contadores" delivery package: new Dashboard menu and API endpoints assemble bank, credit card, and broker resumen PDFs plus a per-bank Movimientos workbook into a flat `Entregas/` folder for delivery to accountants
+- BBVA pago extraction now uses the document filename as a hint to disambiguate transfer-vs-payment cases on ambiguous documents
+- Manually-filled `detalle` column on the Resumen Tarjeta schema for human-entered credit-card payment notes (automatic migration)
+
+### Fixed
+- Bank movement matcher now skips non-bank movimientos sheets via header schema check, preventing false matches against unrelated tabs
+
+### Security
+- Filename hints are sanitized before being interpolated into Gemini prompts, preventing indirect prompt injection from email-attachment filenames
+- Delivery endpoints verify `folderId` is a descendant of the configured `Entregas/` subtree, preventing IDOR via authenticated callers
+
 ## [1.7.0] - 2026-05-07
 
 ### Added
@@ -142,7 +156,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Updated fastify to fix high-severity Content-Type body validation bypass and low-severity DoS vulnerability
 - Updated googleapis to v171, @google/clasp to v3, and resolved 6 npm audit vulnerabilities
 
-[Unreleased]: https://github.com/lucaswall/adva-administracion/compare/v1.7.0...HEAD
+[Unreleased]: https://github.com/lucaswall/adva-administracion/compare/v1.8.0...HEAD
+[1.8.0]: https://github.com/lucaswall/adva-administracion/compare/v1.7.0...v1.8.0
 [1.7.0]: https://github.com/lucaswall/adva-administracion/compare/v1.6.0...v1.7.0
 [1.6.0]: https://github.com/lucaswall/adva-administracion/compare/v1.5.0...v1.6.0
 [1.5.0]: https://github.com/lucaswall/adva-administracion/compare/v1.4.1...v1.5.0
