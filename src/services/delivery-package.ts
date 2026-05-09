@@ -679,6 +679,16 @@ export async function buildMovimientosWorkbook(
   folderId: string,
   scope: MovimientoScopeItem[]
 ): Promise<Result<{ workbookId: string; workbookUrl: string; tabCount: number }, Error>> {
+  // Idempotent retry: if a previous build (or a retried Apps Script call after
+  // a timeout) already left a Movimientos workbook here, delete it first so we
+  // don't accumulate duplicates.
+  const existingResult = await findByName(folderId, 'Movimientos', SPREADSHEET_MIME);
+  if (!existingResult.ok) return existingResult;
+  if (existingResult.value) {
+    const deleteResult = await deleteFileById(existingResult.value.id);
+    if (!deleteResult.ok) return deleteResult;
+  }
+
   // Create the spreadsheet in the delivery folder
   const createResult = await createSpreadsheet(folderId, 'Movimientos');
   if (!createResult.ok) return createResult;

@@ -1153,6 +1153,9 @@ describe('copyPdfsToDelivery', () => {
 describe('buildMovimientosWorkbook', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Default: no existing Movimientos workbook in the folder. Individual
+    // tests covering the retry path override this.
+    vi.mocked(findByName).mockResolvedValue(ok(null));
   });
 
   const FOLDER_ID = 'delivery-folder-id';
@@ -1325,6 +1328,45 @@ describe('buildMovimientosWorkbook', () => {
     // createSheet must NOT have been called for the failed scope item
     expect(createSheet).toHaveBeenCalledTimes(1);
     expect(createSheet).toHaveBeenCalledWith(WORKBOOK_ID, '2025-02 BBVA 1234 ARS');
+  });
+
+  it('idempotent retry: deletes pre-existing Movimientos workbook in the folder before creating a new one', async () => {
+    // Codex P2: a retried /api/delivery/build-movimientos call (e.g. after an
+    // Apps Script timeout) would otherwise leave a duplicate Movimientos
+    // workbook beside the prior one. The route is documented as idempotent.
+    vi.mocked(findByName).mockResolvedValue(
+      ok({ id: 'old-workbook-id', name: 'Movimientos', mimeType: 'application/vnd.google-apps.spreadsheet' })
+    );
+    vi.mocked(deleteFileById).mockResolvedValue(ok(undefined));
+    setupCreateSpreadsheet();
+    setupInitialMeta(42);
+    vi.mocked(renameSheet).mockResolvedValue(ok(undefined));
+    vi.mocked(appendRowsWithLinks).mockResolvedValue(ok(6));
+
+    const result = await buildMovimientosWorkbook(FOLDER_ID, []);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      // The new workbook is the freshly created one, not the stale old id
+      expect(result.value.workbookId).toBe(WORKBOOK_ID);
+    }
+    expect(deleteFileById).toHaveBeenCalledWith('old-workbook-id');
+    // findByName must look up the correct folder/name/mime
+    expect(findByName).toHaveBeenCalledWith(
+      FOLDER_ID,
+      'Movimientos',
+      'application/vnd.google-apps.spreadsheet'
+    );
+  });
+
+  it('idempotent retry: returns Result.err when deleting the prior workbook fails', async () => {
+    vi.mocked(findByName).mockResolvedValue(
+      ok({ id: 'old-workbook-id', name: 'Movimientos', mimeType: 'application/vnd.google-apps.spreadsheet' })
+    );
+    vi.mocked(deleteFileById).mockResolvedValue(err('Drive delete failed'));
+
+    const result = await buildMovimientosWorkbook(FOLDER_ID, []);
+    expect(result.ok).toBe(false);
+    expect(createSpreadsheet).not.toHaveBeenCalled();
   });
 
   it('sanitizes characters disallowed in Google Sheets tab titles (/, \\, :, ?, *, [, ])', async () => {
