@@ -81,7 +81,7 @@ For **each** finding:
    - Is there project-specific context (CLAUDE.md, accepted patterns) that makes this a non-issue?
 3. **Decide:**
    - **Valid** → fix with TDD where appropriate (test → implement → verify), commit, push, then resolve the thread via `gh api graphql ... resolveReviewThread`.
-   - **Invalid** (false positive, misread, accepted-by-design) → resolve the thread with `resolveReviewThread`. Optionally post a brief reply explaining the rejection (`gh api repos/.../pulls/.../comments` or via reply mutation), but only if it adds clarity. Do not silently dismiss.
+   - **Invalid** (false positive, misread, accepted-by-design, theoretical-not-realistic) → post a brief reply explaining the rejection via `gh api graphql ... addPullRequestReviewThreadReply`, **then** resolve the thread with `resolveReviewThread`. The rationale reply is **required**, not optional — step 3c relies on it to recognize "all addressed" as a merge signal, and silent dismissal hides the reasoning from future reviewers. Cite the specific reason and link CLAUDE.md or project memory when relevant.
 
 Top-level review body findings (no thread) are addressed by pushing the fix —
 they do not have a thread to resolve, but the next Codex review on the new
@@ -95,13 +95,20 @@ misreads regex semantics, and sometimes flags accepted patterns that the
 project has explicitly opted into. The project memory and CLAUDE.md list
 known-accepted patterns — consult them.
 
-#### 3c. Latest review on HEAD has zero findings (no body content beyond boilerplate AND no inline threads)
-**Action:** STOP — proceed to step 4. Codex reviewed and had nothing to say.
+#### 3c. Latest review is on HEAD AND nothing remains to address
+**Action:** STOP — proceed to step 4.
 
-A "zero findings" review body looks like the standard `### 💡 Codex Review` /
-`Reviewed commit: <sha>` boilerplate with no `P0/P1/P2/P3` badges and no
-inline comments. Codex would normally use a 👍 reaction for this case;
-treat the empty-body review as equivalent.
+Conditions (all four required):
+- Latest Codex review's `commit.oid` matches `HEAD_SHA` (Codex saw the current code).
+- Review body contains only the standard `### 💡 Codex Review` / `Reviewed commit: <sha>` boilerplate (no `P0/P1/P2/P3` badges).
+- Every PR review thread is resolved (`isResolved: true` for all nodes).
+- **No 👀 (EYES) reaction is currently present from `chatgpt-codex-connector`** — an EYES reaction means Codex is mid-review (e.g. after a manual `@codex review` trigger) and may post fresh findings imminently. Wait it out via 3e.
+
+This covers two end states:
+- **Zero findings:** Codex reviewed HEAD and had nothing to flag. Codex would normally use 👍 here; treat the empty-body, no-threads review as equivalent.
+- **All addressed:** Codex posted findings, and every thread is now resolved — either by a fix that landed in HEAD or by a documented rejection-as-invalid (per 3b's required rationale reply). Codex does not re-react 👍 once it has already submitted a review for a commit, so this is the only signal we get when every concern has been handled without a follow-up commit.
+
+If a finding lives in the **top-level review body** (not a thread) and has not been addressed by a new commit, 3c does not apply — push a fix or wait for a new review on the next HEAD.
 
 #### 3d. HEAD pushed > 15 min ago AND no review of HEAD
 **Action:** STOP — proceed to step 4. Codex queue is drained or skipped this
@@ -146,6 +153,7 @@ Run all checks again before merging — state can change between ticks:
 | CronDelete fails (cron not found) | Inform user; instruct them to run `/cron list` and `/cron delete <id>` manually. |
 | New commits pushed by another author mid-loop | Continue normally — the tick reads the latest HEAD. Codex re-reviews on next push. |
 | Codex never reviews HEAD AND no eyes ever | Step 3d (15-min timeout) covers this. |
+| All Codex findings rejected as invalid; no 👍 from Codex | Step 3c covers this. Each rejection MUST have a rationale reply on the thread before resolving (per 3b "Decide → Invalid"); without that reply 3c cannot recognize the addressed state and the loop will stall at 3e until the user intervenes or pushes a new commit. |
 | Codex 👍 but CI later regresses | Step 4 re-verification catches this. Don't merge. Wait for fix; user-initiated. |
 
 ## Bounds
