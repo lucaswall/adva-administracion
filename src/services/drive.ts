@@ -530,6 +530,63 @@ export async function listByMimeType(
 }
 
 /**
+ * Lists all direct children of a folder regardless of MIME type. Non-recursive:
+ * subfolders are returned but not descended into. Use this when the folder is
+ * "operation-owned" and every direct child should be enumerated for cleanup.
+ *
+ * @param folderId - Folder to list
+ * @returns Array of file info (any MIME, including subfolders)
+ */
+export async function listAllChildren(
+  folderId: string
+): Promise<Result<DriveFileInfo[], Error>> {
+  return withTiming('listAllChildren', async () => {
+    try {
+      const drive = await getDriveService();
+      const files: DriveFileInfo[] = [];
+      let pageToken: string | undefined;
+
+      do {
+        const listResult = await withQuotaRetry(async () =>
+          drive.files.list({
+            q: `'${folderId}' in parents and trashed = false`,
+            fields: 'nextPageToken, files(id, name, mimeType)',
+            pageSize: 100,
+            pageToken,
+            supportsAllDrives: true,
+            includeItemsFromAllDrives: true,
+          })
+        );
+
+        if (!listResult.ok) {
+          return listResult;
+        }
+
+        const items = listResult.value.data.files || [];
+        for (const item of items) {
+          if (item.id && item.name && item.mimeType) {
+            files.push({
+              id: item.id,
+              name: item.name,
+              mimeType: item.mimeType,
+            });
+          }
+        }
+
+        pageToken = listResult.value.data.nextPageToken || undefined;
+      } while (pageToken);
+
+      return { ok: true, value: files };
+    } catch (error) {
+      return {
+        ok: false,
+        error: error instanceof Error ? error : new Error(String(error)),
+      };
+    }
+  });
+}
+
+/**
  * Creates a new folder within a parent folder
  *
  * @param parentId - Parent folder ID
@@ -1097,6 +1154,113 @@ export async function createSpreadsheet(
         mimeType: file.mimeType || 'application/vnd.google-apps.spreadsheet',
       },
     };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error : new Error(String(error)),
+    };
+  }
+  });
+}
+
+/**
+ * Copies a file to a target folder
+ *
+ * @param fileId - ID of the file to copy
+ * @param parentFolderId - Destination folder ID
+ * @param name - Optional new name for the copy (keeps original name if omitted)
+ * @returns Copied file info
+ */
+export async function copyFile(
+  fileId: string,
+  parentFolderId: string,
+  name?: string
+): Promise<Result<DriveFileInfo, Error>> {
+  return withTiming('copyFile', async () => {
+  try {
+    const drive = await getDriveService();
+
+    const requestBody: { parents: string[]; name?: string } = {
+      parents: [parentFolderId],
+    };
+    if (name !== undefined) requestBody.name = name;
+
+    const copyResult = await withQuotaRetry(async () =>
+      drive.files.copy({
+        fileId,
+        requestBody,
+        fields: 'id, name, mimeType',
+        supportsAllDrives: true,
+      })
+    );
+
+    if (!copyResult.ok) {
+      return copyResult;
+    }
+
+    const file = copyResult.value.data;
+    if (!file.id || !file.name) {
+      return {
+        ok: false,
+        error: new Error('No file ID or name in copy response'),
+      };
+    }
+
+    debug('File copied', {
+      module: 'drive',
+      phase: 'copy-file',
+      fileId,
+      copiedId: file.id,
+    });
+
+    return {
+      ok: true,
+      value: {
+        id: file.id,
+        name: file.name,
+        mimeType: file.mimeType || 'application/pdf',
+      },
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error : new Error(String(error)),
+    };
+  }
+  });
+}
+
+/**
+ * Deletes a file by ID (permanently, bypasses trash)
+ *
+ * @param fileId - ID of the file to delete
+ * @returns Success or error
+ */
+export async function deleteFileById(
+  fileId: string
+): Promise<Result<void, Error>> {
+  return withTiming('deleteFileById', async () => {
+  try {
+    const drive = await getDriveService();
+
+    const deleteResult = await withQuotaRetry(async () =>
+      drive.files.delete({
+        fileId,
+        supportsAllDrives: true,
+      })
+    );
+
+    if (!deleteResult.ok) {
+      return deleteResult;
+    }
+
+    debug('File deleted', {
+      module: 'drive',
+      phase: 'delete-file',
+      fileId,
+    });
+
+    return { ok: true, value: undefined };
   } catch (error) {
     return {
       ok: false,
