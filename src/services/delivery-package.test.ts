@@ -33,6 +33,7 @@ vi.mock('./drive.js', () => ({
   findByName: vi.fn(),
   createFolder: vi.fn(),
   listByMimeType: vi.fn(),
+  listAllChildren: vi.fn(),
   deleteFileById: vi.fn(),
   copyFile: vi.fn(),
   createSpreadsheet: vi.fn(),
@@ -90,6 +91,7 @@ import {
   findByName,
   createFolder,
   listByMimeType,
+  listAllChildren,
   deleteFileById,
   copyFile,
   createSpreadsheet,
@@ -781,6 +783,30 @@ describe('enumerateMovimientos', () => {
     const result = await enumerateMovimientos('2025-01', '2025-03', 'root-id');
     expect(result.ok).toBe(false);
   });
+
+  it('skips non-bank movimientos spreadsheets (credit cards, brokers)', async () => {
+    // Codex P2: card/broker Movimientos sheets have a different schema.
+    // readMovimientosForPeriod returns [] for them, so without filtering we
+    // would create empty placeholder tabs in the delivery workbook.
+    const spreadsheets = new Map([
+      ['2025:BBVA 1234567890 ARS', 'ssid-bank'],
+      ['2025:BBVA Visa 4563', 'ssid-card'],
+      ['2025:BALANZ CAPITAL VALORES SAU 123456', 'ssid-broker'],
+    ]);
+    vi.mocked(discoverMovimientosSpreadsheets).mockResolvedValue(ok(spreadsheets));
+    vi.mocked(getSheetMetadata).mockResolvedValue(ok([
+      { title: '2025-01', sheetId: 1, index: 0 },
+    ]));
+
+    const result = await enumerateMovimientos('2025-01', '2025-01', 'root-id');
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value).toHaveLength(1);
+      expect(result.value[0].spreadsheetId).toBe('ssid-bank');
+      expect(result.value[0].banco).toBe('BBVA');
+      expect(result.value[0].moneda).toBe('ARS');
+    }
+  });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -859,7 +885,11 @@ describe('prepareDeliveryFolder', () => {
     expect(createFolder).toHaveBeenCalledTimes(1);
   });
 
-  it('re-delivery same day: finds folder by exact name, deletes PDFs and Sheets, returns isReuse: true', async () => {
+  it('re-delivery same day: finds folder by exact name, deletes ALL children, returns isReuse: true', async () => {
+    // Codex P2: re-delivery must clear every file, not just PDFs and Sheets.
+    // The delivery folder is documented as operation-owned: any leftover file
+    // (image, doc, zip, manual note) from the previous run survives without
+    // this guarantee.
     vi.mocked(findByName).mockResolvedValueOnce(
       ok({ id: 'entregas-id', name: 'Entregas', mimeType: FOLDER_MIME })
     );
@@ -868,16 +898,17 @@ describe('prepareDeliveryFolder', () => {
       if (folderId === 'entregas-id' && mime === FOLDER_MIME) {
         return ok([{ id: 'period-id', name: FOLDER_NAME, mimeType: FOLDER_MIME }]);
       }
-      // Listing PDFs in the period folder
-      if (folderId === 'period-id' && mime === 'application/pdf') {
+      return ok([]);
+    });
+    vi.mocked(listAllChildren).mockImplementation(async (folderId: string) => {
+      if (folderId === 'period-id') {
         return ok([
           { id: 'pdf1', name: 'resumen1.pdf', mimeType: 'application/pdf' },
           { id: 'pdf2', name: 'resumen2.pdf', mimeType: 'application/pdf' },
+          { id: 'sheet1', name: 'Movimientos', mimeType: SHEET_MIME },
+          { id: 'note1', name: 'manual-note.txt', mimeType: 'text/plain' },
+          { id: 'img1', name: 'screenshot.png', mimeType: 'image/png' },
         ]);
-      }
-      // Listing Sheets in the period folder
-      if (folderId === 'period-id' && mime === SHEET_MIME) {
-        return ok([{ id: 'sheet1', name: 'Movimientos', mimeType: SHEET_MIME }]);
       }
       return ok([]);
     });
@@ -889,10 +920,13 @@ describe('prepareDeliveryFolder', () => {
       expect(result.value.folderId).toBe('period-id');
       expect(result.value.isReuse).toBe(true);
     }
-    expect(deleteFileById).toHaveBeenCalledTimes(3);
+    // Every child must be deleted, regardless of MIME type
+    expect(deleteFileById).toHaveBeenCalledTimes(5);
     expect(deleteFileById).toHaveBeenCalledWith('pdf1');
     expect(deleteFileById).toHaveBeenCalledWith('pdf2');
     expect(deleteFileById).toHaveBeenCalledWith('sheet1');
+    expect(deleteFileById).toHaveBeenCalledWith('note1');
+    expect(deleteFileById).toHaveBeenCalledWith('img1');
   });
 
   it('re-delivery on different day: matches by period prefix and renames folder to new date', async () => {
@@ -906,6 +940,7 @@ describe('prepareDeliveryFolder', () => {
       }
       return ok([]);
     });
+    vi.mocked(listAllChildren).mockResolvedValue(ok([]));
     vi.mocked(deleteFileById).mockResolvedValue(ok(undefined));
     vi.mocked(renameFile).mockResolvedValue(ok(undefined));
 
@@ -949,6 +984,7 @@ describe('prepareDeliveryFolder', () => {
       }
       return ok([]); // no contents
     });
+    vi.mocked(listAllChildren).mockResolvedValue(ok([])); // empty period folder
 
     const result = await prepareDeliveryFolder(ROOT_ID, FOLDER_NAME, DELIVERY_DATE);
     expect(result.ok).toBe(true);
@@ -1001,6 +1037,7 @@ describe('prepareDeliveryFolder', () => {
       }
       return ok([]);
     });
+    vi.mocked(listAllChildren).mockResolvedValue(ok([]));
     vi.mocked(deleteFileById).mockResolvedValue(ok(undefined));
     vi.mocked(renameFile).mockResolvedValue(ok(undefined));
 
@@ -1029,11 +1066,11 @@ describe('prepareDeliveryFolder', () => {
       if (folderId === 'entregas-id' && mime === FOLDER_MIME) {
         return ok([{ id: 'period-id', name: FOLDER_NAME, mimeType: FOLDER_MIME }]);
       }
-      if (folderId === 'period-id' && mime === 'application/pdf') {
-        return ok([{ id: 'pdf1', name: 'resumen.pdf', mimeType: 'application/pdf' }]);
-      }
       return ok([]);
     });
+    vi.mocked(listAllChildren).mockResolvedValue(ok([
+      { id: 'pdf1', name: 'resumen.pdf', mimeType: 'application/pdf' },
+    ]));
     vi.mocked(deleteFileById).mockResolvedValue(err('Delete failed'));
 
     const result = await prepareDeliveryFolder(ROOT_ID, FOLDER_NAME, DELIVERY_DATE);

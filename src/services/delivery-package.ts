@@ -27,6 +27,7 @@ import {
   findByName,
   createFolder,
   listByMimeType,
+  listAllChildren,
   deleteFileById,
   copyFile,
   createSpreadsheet,
@@ -366,23 +367,20 @@ export async function enumerateMovimientos(
     const colonIdx = key.indexOf(':');
     const folderName = key.substring(colonIdx + 1);
 
-    // Parse banco / numeroCuenta / moneda from folder name tokens
+    // Parse banco / numeroCuenta / moneda from folder name tokens.
+    // Only bank accounts have an ARS/USD suffix. Credit-card and broker folders
+    // also end up with `Movimientos - …` spreadsheets (created by the scanner
+    // for all three types), but their schemas are different and
+    // readMovimientosForPeriod returns [] for them — so without this filter the
+    // delivery workbook would include empty placeholder tabs.
     const tokens = folderName.split(' ');
-    let banco: string;
-    let numeroCuenta: string;
-    let moneda: string;
-
     const lastToken = tokens[tokens.length - 1];
-    if (tokens.length >= 3 && (lastToken === 'ARS' || lastToken === 'USD')) {
-      moneda = lastToken;
-      numeroCuenta = tokens[tokens.length - 2];
-      banco = tokens.slice(0, tokens.length - 2).join(' ');
-    } else {
-      // No currency suffix (credit cards, brokers)
-      moneda = '';
-      numeroCuenta = lastToken;
-      banco = tokens.slice(0, tokens.length - 1).join(' ');
+    if (!(tokens.length >= 3 && (lastToken === 'ARS' || lastToken === 'USD'))) {
+      continue;
     }
+    const moneda = lastToken;
+    const numeroCuenta = tokens[tokens.length - 2];
+    const banco = tokens.slice(0, tokens.length - 2).join(' ');
 
     // Get sheet metadata for this spreadsheet
     const metaResult = await getSheetMetadata(spreadsheetId);
@@ -511,14 +509,15 @@ export async function prepareDeliveryFolder(
   );
 
   if (existing) {
-    // Folder exists — clear its contents (PDFs + Movimientos spreadsheet)
+    // Folder exists — clear ALL contents. The delivery folder is documented as
+    // "operation-owned": re-delivery is an overwrite, so any leftover files
+    // (PDFs, the prior Movimientos workbook, plus anything else a user may have
+    // dropped in — images, docs, zips) must go.
     const folderId = existing.id;
 
-    const pdfsResult = await listByMimeType(folderId, 'application/pdf');
-    if (!pdfsResult.ok) return pdfsResult;
-    const sheetsResult = await listByMimeType(folderId, SPREADSHEET_MIME);
-    if (!sheetsResult.ok) return sheetsResult;
-    const filesToDelete = [...pdfsResult.value, ...sheetsResult.value];
+    const childrenResult = await listAllChildren(folderId);
+    if (!childrenResult.ok) return childrenResult;
+    const filesToDelete = childrenResult.value;
 
     for (const file of filesToDelete) {
       const deleteResult = await deleteFileById(file.id);

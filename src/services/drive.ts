@@ -530,6 +530,63 @@ export async function listByMimeType(
 }
 
 /**
+ * Lists all direct children of a folder regardless of MIME type. Non-recursive:
+ * subfolders are returned but not descended into. Use this when the folder is
+ * "operation-owned" and every direct child should be enumerated for cleanup.
+ *
+ * @param folderId - Folder to list
+ * @returns Array of file info (any MIME, including subfolders)
+ */
+export async function listAllChildren(
+  folderId: string
+): Promise<Result<DriveFileInfo[], Error>> {
+  return withTiming('listAllChildren', async () => {
+    try {
+      const drive = await getDriveService();
+      const files: DriveFileInfo[] = [];
+      let pageToken: string | undefined;
+
+      do {
+        const listResult = await withQuotaRetry(async () =>
+          drive.files.list({
+            q: `'${folderId}' in parents and trashed = false`,
+            fields: 'nextPageToken, files(id, name, mimeType)',
+            pageSize: 100,
+            pageToken,
+            supportsAllDrives: true,
+            includeItemsFromAllDrives: true,
+          })
+        );
+
+        if (!listResult.ok) {
+          return listResult;
+        }
+
+        const items = listResult.value.data.files || [];
+        for (const item of items) {
+          if (item.id && item.name && item.mimeType) {
+            files.push({
+              id: item.id,
+              name: item.name,
+              mimeType: item.mimeType,
+            });
+          }
+        }
+
+        pageToken = listResult.value.data.nextPageToken || undefined;
+      } while (pageToken);
+
+      return { ok: true, value: files };
+    } catch (error) {
+      return {
+        ok: false,
+        error: error instanceof Error ? error : new Error(String(error)),
+      };
+    }
+  });
+}
+
+/**
  * Creates a new folder within a parent folder
  *
  * @param parentId - Parent folder ID
