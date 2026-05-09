@@ -201,7 +201,7 @@ export function triggerEnvioContadores(): void {
 
     // 11. Summary modal
     let summary = `Carpeta: ${plan.folderName}\n`;
-    summary += `PDFs copiados: ${plan.pdfCount}\n`;
+    summary += `PDFs copiados: ${copy.copied}\n`;
     summary += `Hojas de movimientos: ${build.tabCount}\n`;
     summary += `\nCarpeta en Drive:\n${copy.folderUrl}`;
     if (copy.failed.length > 0) {

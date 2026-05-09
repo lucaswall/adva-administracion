@@ -16,6 +16,7 @@ vi.mock('googleapis', () => ({
         create: vi.fn(),
         update: vi.fn(),
         copy: vi.fn(),
+        delete: vi.fn(),
       },
     })),
   },
@@ -81,6 +82,7 @@ import {
   isDescendantOf,
   renameFile,
   copyFile,
+  deleteFileById,
   downloadFile,
   clearDriveCache,
 } from './drive.js';
@@ -94,6 +96,7 @@ describe('Drive folder operations', () => {
     create: ReturnType<typeof vi.fn>;
     update: ReturnType<typeof vi.fn>;
     copy: ReturnType<typeof vi.fn>;
+    delete: ReturnType<typeof vi.fn>;
   };
 
   beforeEach(() => {
@@ -104,6 +107,7 @@ describe('Drive folder operations', () => {
       create: vi.fn(),
       update: vi.fn(),
       copy: vi.fn(),
+      delete: vi.fn(),
     };
     vi.mocked(google.drive).mockReturnValue({
       files: mockDriveFiles,
@@ -920,6 +924,42 @@ describe('Drive folder operations', () => {
       if (!result.ok) {
         expect(result.error.message).toBe('Copy failed');
       }
+    });
+  });
+
+  describe('deleteFileById', () => {
+    it('deletes a file by ID and returns Result.ok', async () => {
+      mockDriveFiles.delete.mockResolvedValue({ data: '' });
+
+      const result = await deleteFileById('fileToDelete');
+
+      expect(result.ok).toBe(true);
+      expect(mockDriveFiles.delete).toHaveBeenCalledWith({
+        fileId: 'fileToDelete',
+        supportsAllDrives: true,
+      });
+    });
+
+    it('returns Result.err on API failure', async () => {
+      mockDriveFiles.delete.mockRejectedValue(new Error('Permission denied'));
+
+      const result = await deleteFileById('fileToDelete');
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.error.message).toBe('Permission denied');
+      }
+    });
+
+    it('retries on quota exceeded', async () => {
+      mockDriveFiles.delete
+        .mockRejectedValueOnce(new Error('Quota exceeded'))
+        .mockResolvedValueOnce({ data: '' });
+
+      const result = await deleteFileById('fileToDelete');
+
+      expect(result.ok).toBe(true);
+      expect(mockDriveFiles.delete).toHaveBeenCalledTimes(2);
     });
   });
 });

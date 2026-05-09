@@ -220,6 +220,14 @@ export async function deliveryRoutes(server: FastifyInstance) {
     }
     const { from, to } = parsedPeriod.value;
 
+    if (!getCachedFolderStructure()) {
+      return respond503(
+        reply,
+        new Error('Folder structure not initialized'),
+        { module: 'delivery', phase: 'build-movimientos' }
+      );
+    }
+
     const config = getConfig();
     const rootFolderId = config.driveRootFolderId;
 

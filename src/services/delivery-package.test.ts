@@ -23,10 +23,10 @@ vi.mock('./drive.js', () => ({
   findByName: vi.fn(),
   createFolder: vi.fn(),
   listByMimeType: vi.fn(),
-  listFilesInFolder: vi.fn(),
   deleteFileById: vi.fn(),
   copyFile: vi.fn(),
   createSpreadsheet: vi.fn(),
+  renameFile: vi.fn(),
 }));
 
 vi.mock('./folder-structure.js', () => ({
@@ -80,10 +80,10 @@ import {
   findByName,
   createFolder,
   listByMimeType,
-  listFilesInFolder,
   deleteFileById,
   copyFile,
   createSpreadsheet,
+  renameFile,
 } from './drive.js';
 
 import { discoverMovimientosSpreadsheets } from './folder-structure.js';
@@ -814,14 +814,15 @@ describe('prepareDeliveryFolder', () => {
   const ROOT_ID = 'root-folder-id';
   const DELIVERY_DATE = new Date('2025-05-08T12:00:00Z');
   const FOLDER_NAME = '2025-01 (entregado 2025-05-08)';
+  const FOLDER_MIME = 'application/vnd.google-apps.folder';
+  const SHEET_MIME = 'application/vnd.google-apps.spreadsheet';
 
   it('creates Entregas/ folder if missing, then creates period folder — isReuse: false', async () => {
-    vi.mocked(findByName)
-      .mockResolvedValueOnce(ok(null))  // Entregas/ not found
-      .mockResolvedValueOnce(ok(null)); // period folder not found
+    vi.mocked(findByName).mockResolvedValueOnce(ok(null));  // Entregas/ not found
     vi.mocked(createFolder)
-      .mockResolvedValueOnce(ok({ id: 'entregas-id', name: 'Entregas', mimeType: 'application/vnd.google-apps.folder' }))
-      .mockResolvedValueOnce(ok({ id: 'period-id', name: FOLDER_NAME, mimeType: 'application/vnd.google-apps.folder' }));
+      .mockResolvedValueOnce(ok({ id: 'entregas-id', name: 'Entregas', mimeType: FOLDER_MIME }))
+      .mockResolvedValueOnce(ok({ id: 'period-id', name: FOLDER_NAME, mimeType: FOLDER_MIME }));
+    vi.mocked(listByMimeType).mockResolvedValue(ok([])); // no existing delivery folders under Entregas
 
     const result = await prepareDeliveryFolder(ROOT_ID, FOLDER_NAME, DELIVERY_DATE);
     expect(result.ok).toBe(true);
@@ -833,29 +834,43 @@ describe('prepareDeliveryFolder', () => {
   });
 
   it('reuses existing Entregas/ folder without duplicating it', async () => {
-    vi.mocked(findByName)
-      .mockResolvedValueOnce(ok({ id: 'existing-entregas-id', name: 'Entregas', mimeType: 'application/vnd.google-apps.folder' }))
-      .mockResolvedValueOnce(ok(null)); // period folder not found
-    vi.mocked(createFolder)
-      .mockResolvedValueOnce(ok({ id: 'period-id', name: FOLDER_NAME, mimeType: 'application/vnd.google-apps.folder' }));
+    vi.mocked(findByName).mockResolvedValueOnce(
+      ok({ id: 'existing-entregas-id', name: 'Entregas', mimeType: FOLDER_MIME })
+    );
+    vi.mocked(listByMimeType).mockResolvedValue(ok([])); // no existing delivery folders
+    vi.mocked(createFolder).mockResolvedValueOnce(
+      ok({ id: 'period-id', name: FOLDER_NAME, mimeType: FOLDER_MIME })
+    );
 
     const result = await prepareDeliveryFolder(ROOT_ID, FOLDER_NAME, DELIVERY_DATE);
     expect(result.ok).toBe(true);
-    if (result.ok) {
-      expect(result.value.isReuse).toBe(false);
-    }
+    if (result.ok) expect(result.value.isReuse).toBe(false);
     // createFolder called once only (for period, not Entregas)
     expect(createFolder).toHaveBeenCalledTimes(1);
   });
 
-  it('re-delivery: finds existing period folder, deletes contents, returns isReuse: true', async () => {
-    vi.mocked(findByName)
-      .mockResolvedValueOnce(ok({ id: 'entregas-id', name: 'Entregas', mimeType: 'application/vnd.google-apps.folder' }))
-      .mockResolvedValueOnce(ok({ id: 'period-id', name: FOLDER_NAME, mimeType: 'application/vnd.google-apps.folder' }));
-    vi.mocked(listFilesInFolder).mockResolvedValue(ok([
-      { id: 'file1', name: 'resumen1.pdf', mimeType: 'application/pdf', lastUpdated: new Date() },
-      { id: 'file2', name: 'resumen2.pdf', mimeType: 'application/pdf', lastUpdated: new Date() },
-    ]));
+  it('re-delivery same day: finds folder by exact name, deletes PDFs and Sheets, returns isReuse: true', async () => {
+    vi.mocked(findByName).mockResolvedValueOnce(
+      ok({ id: 'entregas-id', name: 'Entregas', mimeType: FOLDER_MIME })
+    );
+    vi.mocked(listByMimeType).mockImplementation(async (folderId: string, mime: string) => {
+      // Listing folders under Entregas
+      if (folderId === 'entregas-id' && mime === FOLDER_MIME) {
+        return ok([{ id: 'period-id', name: FOLDER_NAME, mimeType: FOLDER_MIME }]);
+      }
+      // Listing PDFs in the period folder
+      if (folderId === 'period-id' && mime === 'application/pdf') {
+        return ok([
+          { id: 'pdf1', name: 'resumen1.pdf', mimeType: 'application/pdf' },
+          { id: 'pdf2', name: 'resumen2.pdf', mimeType: 'application/pdf' },
+        ]);
+      }
+      // Listing Sheets in the period folder
+      if (folderId === 'period-id' && mime === SHEET_MIME) {
+        return ok([{ id: 'sheet1', name: 'Movimientos', mimeType: SHEET_MIME }]);
+      }
+      return ok([]);
+    });
     vi.mocked(deleteFileById).mockResolvedValue(ok(undefined));
 
     const result = await prepareDeliveryFolder(ROOT_ID, FOLDER_NAME, DELIVERY_DATE);
@@ -864,16 +879,25 @@ describe('prepareDeliveryFolder', () => {
       expect(result.value.folderId).toBe('period-id');
       expect(result.value.isReuse).toBe(true);
     }
-    expect(deleteFileById).toHaveBeenCalledTimes(2);
-    expect(deleteFileById).toHaveBeenCalledWith('file1');
-    expect(deleteFileById).toHaveBeenCalledWith('file2');
+    expect(deleteFileById).toHaveBeenCalledTimes(3);
+    expect(deleteFileById).toHaveBeenCalledWith('pdf1');
+    expect(deleteFileById).toHaveBeenCalledWith('pdf2');
+    expect(deleteFileById).toHaveBeenCalledWith('sheet1');
   });
 
-  it('delivery folder itself is NOT deleted — only contents', async () => {
-    vi.mocked(findByName)
-      .mockResolvedValueOnce(ok({ id: 'entregas-id', name: 'Entregas', mimeType: 'application/vnd.google-apps.folder' }))
-      .mockResolvedValueOnce(ok({ id: 'period-id', name: FOLDER_NAME, mimeType: 'application/vnd.google-apps.folder' }));
-    vi.mocked(listFilesInFolder).mockResolvedValue(ok([]));
+  it('re-delivery on different day: matches by period prefix and renames folder to new date', async () => {
+    const PRIOR_NAME = '2025-01 (entregado 2025-05-07)'; // delivered yesterday
+    vi.mocked(findByName).mockResolvedValueOnce(
+      ok({ id: 'entregas-id', name: 'Entregas', mimeType: FOLDER_MIME })
+    );
+    vi.mocked(listByMimeType).mockImplementation(async (folderId: string, mime: string) => {
+      if (folderId === 'entregas-id' && mime === FOLDER_MIME) {
+        return ok([{ id: 'period-id', name: PRIOR_NAME, mimeType: FOLDER_MIME }]);
+      }
+      return ok([]);
+    });
+    vi.mocked(deleteFileById).mockResolvedValue(ok(undefined));
+    vi.mocked(renameFile).mockResolvedValue(ok(undefined));
 
     const result = await prepareDeliveryFolder(ROOT_ID, FOLDER_NAME, DELIVERY_DATE);
     expect(result.ok).toBe(true);
@@ -881,7 +905,47 @@ describe('prepareDeliveryFolder', () => {
       expect(result.value.folderId).toBe('period-id');
       expect(result.value.isReuse).toBe(true);
     }
-    // Delete never called (no contents) — but also period-id itself NOT deleted
+    // Folder renamed to today's name
+    expect(renameFile).toHaveBeenCalledWith('period-id', FOLDER_NAME);
+  });
+
+  it('does not match a different period (e.g. 2025-10 should not match 2025-01 prefix)', async () => {
+    vi.mocked(findByName).mockResolvedValueOnce(
+      ok({ id: 'entregas-id', name: 'Entregas', mimeType: FOLDER_MIME })
+    );
+    vi.mocked(listByMimeType).mockResolvedValue(ok([
+      { id: 'wrong-period', name: '2025-10 (entregado 2025-05-08)', mimeType: FOLDER_MIME },
+    ]));
+    vi.mocked(createFolder).mockResolvedValueOnce(
+      ok({ id: 'new-period-id', name: FOLDER_NAME, mimeType: FOLDER_MIME })
+    );
+
+    const result = await prepareDeliveryFolder(ROOT_ID, FOLDER_NAME, DELIVERY_DATE);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.folderId).toBe('new-period-id');
+      expect(result.value.isReuse).toBe(false);
+    }
+    expect(deleteFileById).not.toHaveBeenCalled();
+  });
+
+  it('delivery folder itself is NOT deleted — only contents', async () => {
+    vi.mocked(findByName).mockResolvedValueOnce(
+      ok({ id: 'entregas-id', name: 'Entregas', mimeType: FOLDER_MIME })
+    );
+    vi.mocked(listByMimeType).mockImplementation(async (folderId: string, mime: string) => {
+      if (folderId === 'entregas-id' && mime === FOLDER_MIME) {
+        return ok([{ id: 'period-id', name: FOLDER_NAME, mimeType: FOLDER_MIME }]);
+      }
+      return ok([]); // no contents
+    });
+
+    const result = await prepareDeliveryFolder(ROOT_ID, FOLDER_NAME, DELIVERY_DATE);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.folderId).toBe('period-id');
+      expect(result.value.isReuse).toBe(true);
+    }
     expect(deleteFileById).not.toHaveBeenCalledWith('period-id');
   });
 
@@ -894,12 +958,18 @@ describe('prepareDeliveryFolder', () => {
   });
 
   it('returns Result.err when delete fails (does not silently continue)', async () => {
-    vi.mocked(findByName)
-      .mockResolvedValueOnce(ok({ id: 'entregas-id', name: 'Entregas', mimeType: 'application/vnd.google-apps.folder' }))
-      .mockResolvedValueOnce(ok({ id: 'period-id', name: FOLDER_NAME, mimeType: 'application/vnd.google-apps.folder' }));
-    vi.mocked(listFilesInFolder).mockResolvedValue(ok([
-      { id: 'file1', name: 'resumen1.pdf', mimeType: 'application/pdf', lastUpdated: new Date() },
-    ]));
+    vi.mocked(findByName).mockResolvedValueOnce(
+      ok({ id: 'entregas-id', name: 'Entregas', mimeType: FOLDER_MIME })
+    );
+    vi.mocked(listByMimeType).mockImplementation(async (folderId: string, mime: string) => {
+      if (folderId === 'entregas-id' && mime === FOLDER_MIME) {
+        return ok([{ id: 'period-id', name: FOLDER_NAME, mimeType: FOLDER_MIME }]);
+      }
+      if (folderId === 'period-id' && mime === 'application/pdf') {
+        return ok([{ id: 'pdf1', name: 'resumen.pdf', mimeType: 'application/pdf' }]);
+      }
+      return ok([]);
+    });
     vi.mocked(deleteFileById).mockResolvedValue(err('Delete failed'));
 
     const result = await prepareDeliveryFolder(ROOT_ID, FOLDER_NAME, DELIVERY_DATE);

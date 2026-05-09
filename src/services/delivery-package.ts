@@ -26,10 +26,10 @@ import {
   findByName,
   createFolder,
   listByMimeType,
-  listFilesInFolder,
   deleteFileById,
   copyFile,
   createSpreadsheet,
+  renameFile,
 } from './drive.js';
 import { discoverMovimientosSpreadsheets, validateYear } from './folder-structure.js';
 import { readMovimientosForPeriod } from './movimientos-reader.js';
@@ -451,8 +451,23 @@ export function formatDeliveryFolderName(opts: {
 }
 
 /**
+ * Extracts the period-prefix portion of a delivery folder name (everything
+ * before the " (entregado YYYY-MM-DD)" suffix), preserving the trailing space
+ * to make prefix matching unambiguous (so `"2025-01 "` does not match `"2025-10 …"`).
+ */
+function extractPeriodPrefix(folderName: string): string {
+  const idx = folderName.indexOf(' (entregado ');
+  if (idx < 0) return folderName;
+  return folderName.substring(0, idx) + ' ';
+}
+
+/**
  * Finds or creates the delivery folder inside `Entregas/` within the root.
- * If the period folder already exists, deletes its contents first (idempotent re-delivery).
+ *
+ * Re-delivery is idempotent across days: any existing folder under `Entregas/`
+ * whose name starts with the period prefix (e.g. `"2025-01 "`) is reused —
+ * its contents (PDFs and the Movimientos spreadsheet) are deleted, and the
+ * folder is renamed to reflect the new delivery date.
  *
  * @param rootFolderId - Drive root folder ID
  * @param folderName - Full formatted folder name (from formatDeliveryFolderName)
@@ -475,7 +490,7 @@ export async function prepareDeliveryFolder(
   const entregasResult = await findByName(
     rootFolderId,
     'Entregas',
-    'application/vnd.google-apps.folder'
+    FOLDER_MIME
   );
   if (!entregasResult.ok) return entregasResult;
 
@@ -488,30 +503,45 @@ export async function prepareDeliveryFolder(
     entregasFolderId = createResult.value.id;
   }
 
-  // Step 2: Find or create the period folder inside Entregas/
-  const periodResult = await findByName(
-    entregasFolderId,
-    folderName,
-    'application/vnd.google-apps.folder'
+  // Step 2: Look for any existing delivery folder for the same period
+  // (matches by the "YYYY-MM " or "YYYY-MM al YYYY-MM " prefix, ignoring the
+  // delivery-date suffix so re-deliveries on different days reuse the folder).
+  const prefix = extractPeriodPrefix(folderName);
+  const existingFoldersResult = await listByMimeType(entregasFolderId, FOLDER_MIME);
+  if (!existingFoldersResult.ok) return existingFoldersResult;
+
+  const existing = existingFoldersResult.value.find(
+    f => f.name === folderName || f.name.startsWith(prefix)
   );
-  if (!periodResult.ok) return periodResult;
 
-  if (periodResult.value) {
-    // Folder exists — clear its contents (re-delivery)
-    const folderId = periodResult.value.id;
-    const filesResult = await listFilesInFolder(folderId);
-    if (!filesResult.ok) return filesResult;
+  if (existing) {
+    // Folder exists — clear its contents (PDFs + Movimientos spreadsheet)
+    const folderId = existing.id;
 
-    for (const file of filesResult.value) {
+    const pdfsResult = await listByMimeType(folderId, 'application/pdf');
+    if (!pdfsResult.ok) return pdfsResult;
+    const sheetsResult = await listByMimeType(folderId, SPREADSHEET_MIME);
+    if (!sheetsResult.ok) return sheetsResult;
+    const filesToDelete = [...pdfsResult.value, ...sheetsResult.value];
+
+    for (const file of filesToDelete) {
       const deleteResult = await deleteFileById(file.id);
       if (!deleteResult.ok) return deleteResult;
+    }
+
+    // Rename to reflect the latest delivery date if it changed
+    if (existing.name !== folderName) {
+      const renameResult = await renameFile(folderId, folderName);
+      if (!renameResult.ok) return renameResult;
     }
 
     info('Delivery folder cleared for re-delivery', {
       module: 'delivery',
       phase: 'prepare-folder',
       folderId,
-      filesDeleted: filesResult.value.length,
+      previousName: existing.name,
+      folderName,
+      filesDeleted: filesToDelete.length,
     });
 
     return {
@@ -714,10 +744,18 @@ export async function buildMovimientosWorkbook(
     }
 
     // Format tab: freeze header, number formats for date/currency columns
-    await formatSheet(workbookId, sheetId, {
+    const formatResult = await formatSheet(workbookId, sheetId, {
       numberFormats: MOVIMIENTOS_NUMBER_FORMATS,
       frozenRows: 1,
     });
+    if (!formatResult.ok) {
+      warn('Failed to format movimientos tab', {
+        module: 'delivery',
+        phase: 'build-movimientos',
+        tabName,
+        error: formatResult.error.message,
+      });
+    }
 
     tabCount++;
   }
