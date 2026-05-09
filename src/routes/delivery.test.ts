@@ -81,7 +81,6 @@ describe('Delivery routes', () => {
     duplicadoId: 'duplicado-id',
     controlIngresosId: 'control-ingresos-id',
     controlEgresosId: 'control-egresos-id',
-    controlResumenesId: 'mock-resumenes-id',
     dashboardOperativoId: 'dashboard-id',
     bankSpreadsheets: new Map(),
     movimientosSpreadsheets: new Map(),
@@ -295,7 +294,7 @@ describe('Delivery routes', () => {
       });
 
       expect(mockParsePeriodRange).toHaveBeenCalledWith('2025-01..2025-03');
-      expect(mockEnumerateResumenes).toHaveBeenCalledWith('2025-01', '2025-03', 'mock-resumenes-id');
+      expect(mockEnumerateResumenes).toHaveBeenCalledWith('2025-01', '2025-03', 'mock-root-folder-id');
       expect(mockEnumerateMovimientos).toHaveBeenCalledWith('2025-01', '2025-03', 'mock-root-folder-id');
     });
 
@@ -532,7 +531,7 @@ describe('Delivery routes', () => {
         payload: { period: '2025-01..2025-03' },
       });
 
-      expect(mockEnumerateResumenes).toHaveBeenCalledWith('2025-01', '2025-03', 'mock-resumenes-id');
+      expect(mockEnumerateResumenes).toHaveBeenCalledWith('2025-01', '2025-03', 'mock-root-folder-id');
       expect(mockPrepareDeliveryFolder).toHaveBeenCalledWith(
         'mock-root-folder-id',
         expect.any(String),

@@ -79,11 +79,8 @@ export async function deliveryRoutes(server: FastifyInstance) {
     }
     const { from, to } = parsedPeriod.value;
 
-    // Require cached folder structure for IDs
-    const folderStructure = getCachedFolderStructure() as (ReturnType<typeof getCachedFolderStructure> & {
-      controlResumenesId?: string;
-    }) | null;
-    if (!folderStructure) {
+    // Require folder structure to be initialized (boot-time discovery)
+    if (!getCachedFolderStructure()) {
       return respond503(
         reply,
         new Error('Folder structure not initialized'),
@@ -93,11 +90,10 @@ export async function deliveryRoutes(server: FastifyInstance) {
 
     const config = getConfig();
     const rootFolderId = config.driveRootFolderId;
-    const controlResumenesId = folderStructure.controlResumenesId ?? '';
 
     // Enumerate both scopes in parallel
     const [resumenesResult, movimientosResult] = await Promise.all([
-      enumerateResumenes(from, to, controlResumenesId),
+      enumerateResumenes(from, to, rootFolderId),
       enumerateMovimientos(from, to, rootFolderId),
     ]);
 
@@ -151,10 +147,7 @@ export async function deliveryRoutes(server: FastifyInstance) {
     }
     const { from, to } = parsedPeriod.value;
 
-    const folderStructure = getCachedFolderStructure() as (ReturnType<typeof getCachedFolderStructure> & {
-      controlResumenesId?: string;
-    }) | null;
-    if (!folderStructure) {
+    if (!getCachedFolderStructure()) {
       return respond503(
         reply,
         new Error('Folder structure not initialized'),
@@ -164,18 +157,17 @@ export async function deliveryRoutes(server: FastifyInstance) {
 
     const config = getConfig();
     const rootFolderId = config.driveRootFolderId;
-    const controlResumenesId = folderStructure.controlResumenesId ?? '';
-    const label = periodLabel(from, to);
     const deliveryDate = new Date();
+    const folderName = formatDeliveryFolderName({ from, to, deliveryDate });
 
     // Enumerate resumenes
-    const resumenesResult = await enumerateResumenes(from, to, controlResumenesId);
+    const resumenesResult = await enumerateResumenes(from, to, rootFolderId);
     if (!resumenesResult.ok) {
       return respond500(reply, resumenesResult.error, { module: 'delivery', phase: 'enumerate-resumenes' });
     }
 
     // Prepare (create or reuse) delivery folder
-    const folderResult = await prepareDeliveryFolder(rootFolderId, label, deliveryDate);
+    const folderResult = await prepareDeliveryFolder(rootFolderId, folderName, deliveryDate);
     if (!folderResult.ok) {
       return respond500(reply, folderResult.error, { module: 'delivery', phase: 'prepare-folder' });
     }

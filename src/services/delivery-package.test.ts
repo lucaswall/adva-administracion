@@ -22,6 +22,7 @@ vi.mock('./sheets.js', () => ({
 vi.mock('./drive.js', () => ({
   findByName: vi.fn(),
   createFolder: vi.fn(),
+  listByMimeType: vi.fn(),
   listFilesInFolder: vi.fn(),
   deleteFileById: vi.fn(),
   copyFile: vi.fn(),
@@ -30,6 +31,13 @@ vi.mock('./drive.js', () => ({
 
 vi.mock('./folder-structure.js', () => ({
   discoverMovimientosSpreadsheets: vi.fn(),
+  validateYear: vi.fn((year: string) => {
+    const n = parseInt(year, 10);
+    if (Number.isNaN(n) || n < 2000 || n > 2100) {
+      return { ok: false as const, error: new Error('Invalid year') };
+    }
+    return { ok: true as const, value: n };
+  }),
 }));
 
 vi.mock('./movimientos-reader.js', () => ({
@@ -65,11 +73,13 @@ import {
   formatSheet,
   deleteSheet,
   renameSheet,
+  type CellValue,
 } from './sheets.js';
 
 import {
   findByName,
   createFolder,
+  listByMimeType,
   listFilesInFolder,
   deleteFileById,
   copyFile,
@@ -250,7 +260,7 @@ describe('enumerateResumenes', () => {
     vi.clearAllMocks();
   });
 
-  // Header rows for each schema
+  // Header rows for each schema (lower-cased to match function's normalization)
   const bancarioHeaders = [
     'periodo','fechaDesde','fechaHasta','fileId','fileName',
     'banco','numeroCuenta','moneda','saldoInicial','saldoFinal','balanceOk','balanceDiff',
@@ -264,37 +274,119 @@ describe('enumerateResumenes', () => {
     'broker','numeroCuenta','saldoARS','saldoUSD',
   ];
 
-  function mockGetValues(
-    bancarioRows: unknown[][],
-    tarjetaRows: unknown[][],
-    brokerRows: unknown[][]
-  ) {
-    vi.mocked(getValues).mockImplementation(async (_id: string, range: string) => {
-      if (range.endsWith(':L')) return ok([[...bancarioHeaders], ...bancarioRows]);
-      if (range.endsWith(':J')) return ok([[...tarjetaHeaders], ...tarjetaRows]);
-      if (range.endsWith(':I')) return ok([[...brokerHeaders], ...brokerRows]);
-      return ok([[]]);
+  /**
+   * Sets up mocks for a folder hierarchy:
+   *  ROOT/{year}/Bancos/{account}/Control de Resumenes
+   * `accounts` is a map: yearFolderId -> [{ name, sheetId, headers, rows }]
+   */
+  type AccountFixture = {
+    name: string;
+    sheetId: string | null;
+    headers: string[];
+    rows: CellValue[][];
+    readError?: string;
+  };
+  function setupHierarchy(years: Array<{
+    yearName: string;
+    yearId: string;
+    bancosId: string | null;
+    accounts: AccountFixture[];
+  }>) {
+    // Root listByMimeType returns year folders
+    vi.mocked(listByMimeType).mockImplementation(async (folderId: string, _mime: string) => {
+      // Root folder lookup
+      if (folderId === 'root-id') {
+        return ok(years.map(y => ({ id: y.yearId, name: y.yearName, mimeType: 'application/vnd.google-apps.folder' })));
+      }
+      // Bancos folder lookup → list account folders
+      const yearWithThisBancos = years.find(y => y.bancosId === folderId);
+      if (yearWithThisBancos) {
+        return ok(yearWithThisBancos.accounts.map((a, i) => ({
+          id: `${yearWithThisBancos.yearId}:acc-${i}`,
+          name: a.name,
+          mimeType: 'application/vnd.google-apps.folder',
+        })));
+      }
+      return ok([]);
+    });
+
+    // findByName: handles Bancos lookup and Control de Resumenes lookup
+    vi.mocked(findByName).mockImplementation(async (parentId: string, name: string, _mime?: string) => {
+      // Bancos folder under a year
+      if (name === 'Bancos') {
+        const year = years.find(y => y.yearId === parentId);
+        if (!year) return ok(null);
+        if (year.bancosId === null) return ok(null);
+        return ok({ id: year.bancosId, name: 'Bancos', mimeType: 'application/vnd.google-apps.folder' });
+      }
+      // Control de Resumenes spreadsheet under an account folder
+      if (name === 'Control de Resumenes') {
+        for (const year of years) {
+          const idx = year.accounts.findIndex((_, i) => `${year.yearId}:acc-${i}` === parentId);
+          if (idx >= 0) {
+            const acc = year.accounts[idx];
+            if (acc.sheetId === null) return ok(null);
+            return ok({ id: acc.sheetId, name: 'Control de Resumenes', mimeType: 'application/vnd.google-apps.spreadsheet' });
+          }
+        }
+        return ok(null);
+      }
+      return ok(null);
+    });
+
+    // getValues: keyed by sheetId
+    vi.mocked(getValues).mockImplementation(async (id: string, _range: string) => {
+      for (const year of years) {
+        for (const acc of year.accounts) {
+          if (acc.sheetId === id) {
+            if (acc.readError) return err(acc.readError);
+            if (acc.rows.length === 0 && acc.headers.length === 0) return ok([]);
+            return ok([[...acc.headers], ...acc.rows]);
+          }
+        }
+      }
+      return ok([]);
     });
   }
 
-  it('returns empty array when all sheets are empty', async () => {
-    mockGetValues([], [], []);
-    const result = await enumerateResumenes('2025-01', '2025-03', 'ctrl-id');
+  it('returns empty array when no year folders exist', async () => {
+    setupHierarchy([]);
+    const result = await enumerateResumenes('2025-01', '2025-03', 'root-id');
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value).toEqual([]);
+  });
+
+  it('returns empty array when all per-account sheets are empty', async () => {
+    setupHierarchy([
+      {
+        yearName: '2025', yearId: 'year-2025', bancosId: 'bancos-2025',
+        accounts: [
+          { name: 'BBVA 1234567890 ARS', sheetId: 'sh-bbva', headers: bancarioHeaders, rows: [] },
+        ],
+      },
+    ]);
+    const result = await enumerateResumenes('2025-01', '2025-03', 'root-id');
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.value).toEqual([]);
   });
 
   it('includes periods inside range and excludes outside', async () => {
-    mockGetValues(
-      [
-        ['2024-12', '2024-12-01', '2024-12-31', 'fid-dec', 'dec.pdf', 'BBVA', '1234', 'ARS', 0, 0, true, 0],
-        ['2025-01', '2025-01-01', '2025-01-31', 'fid-jan', 'jan.pdf', 'BBVA', '1234', 'ARS', 0, 0, true, 0],
-        ['2025-04', '2025-04-01', '2025-04-30', 'fid-apr', 'apr.pdf', 'BBVA', '1234', 'ARS', 0, 0, true, 0],
-      ],
-      [],
-      []
-    );
-    const result = await enumerateResumenes('2025-01', '2025-03', 'ctrl-id');
+    setupHierarchy([
+      {
+        yearName: '2025', yearId: 'year-2025', bancosId: 'bancos-2025',
+        accounts: [
+          {
+            name: 'BBVA 1234567890 ARS', sheetId: 'sh-bbva', headers: bancarioHeaders,
+            rows: [
+              ['2024-12', '2024-12-01', '2024-12-31', 'fid-dec', 'dec.pdf', 'BBVA', '1234', 'ARS', 0, 0, true, 0],
+              ['2025-01', '2025-01-01', '2025-01-31', 'fid-jan', 'jan.pdf', 'BBVA', '1234', 'ARS', 0, 0, true, 0],
+              ['2025-04', '2025-04-01', '2025-04-30', 'fid-apr', 'apr.pdf', 'BBVA', '1234', 'ARS', 0, 0, true, 0],
+            ],
+          },
+        ],
+      },
+    ]);
+    const result = await enumerateResumenes('2025-01', '2025-03', 'root-id');
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.value).toHaveLength(1);
@@ -303,67 +395,96 @@ describe('enumerateResumenes', () => {
   });
 
   it('includes boundaries (from and to inclusive)', async () => {
-    mockGetValues(
-      [
-        ['2025-01', '', '', 'fid-jan', 'jan.pdf', '', '', '', 0, 0, true, 0],
-        ['2025-03', '', '', 'fid-mar', 'mar.pdf', '', '', '', 0, 0, true, 0],
-      ],
-      [],
-      []
-    );
-    const result = await enumerateResumenes('2025-01', '2025-03', 'ctrl-id');
+    setupHierarchy([
+      {
+        yearName: '2025', yearId: 'year-2025', bancosId: 'bancos-2025',
+        accounts: [
+          {
+            name: 'BBVA 1234567890 ARS', sheetId: 'sh-bbva', headers: bancarioHeaders,
+            rows: [
+              ['2025-01', '', '', 'fid-jan', 'jan.pdf', '', '', '', 0, 0, true, 0],
+              ['2025-03', '', '', 'fid-mar', 'mar.pdf', '', '', '', 0, 0, true, 0],
+            ],
+          },
+        ],
+      },
+    ]);
+    const result = await enumerateResumenes('2025-01', '2025-03', 'root-id');
     expect(result.ok).toBe(true);
-    if (result.ok) {
-      expect(result.value).toHaveLength(2);
-    }
+    if (result.ok) expect(result.value).toHaveLength(2);
   });
 
   it('skips header row (uses header-based column lookup)', async () => {
-    // Data has a row where periodo matches a header value - should be skipped because it's in row 0
-    mockGetValues(
-      [['2025-02', '', '', 'fid-feb', 'feb.pdf', '', '', '', 0, 0, true, 0]],
-      [],
-      []
-    );
-    const result = await enumerateResumenes('2025-01', '2025-12', 'ctrl-id');
+    setupHierarchy([
+      {
+        yearName: '2025', yearId: 'year-2025', bancosId: 'bancos-2025',
+        accounts: [
+          {
+            name: 'BBVA 1234567890 ARS', sheetId: 'sh-bbva', headers: bancarioHeaders,
+            rows: [['2025-02', '', '', 'fid-feb', 'feb.pdf', '', '', '', 0, 0, true, 0]],
+          },
+        ],
+      },
+    ]);
+    const result = await enumerateResumenes('2025-01', '2025-12', 'root-id');
     expect(result.ok).toBe(true);
     if (result.ok) {
-      // Only data row should be included (not header row)
       expect(result.value).toHaveLength(1);
       expect(result.value[0].fileId).toBe('fid-feb');
     }
   });
 
-  it('aggregates mixed types correctly', async () => {
-    mockGetValues(
-      [['2025-01', '', '', 'fid-bank', 'bank.pdf', '', '', '', 0, 0, true, 0]],
-      [
-        ['2025-01', '', '', 'fid-card1', 'card1.pdf', '', '', 'Visa', 0, 0],
-        ['2025-02', '', '', 'fid-card2', 'card2.pdf', '', '', 'Mastercard', 0, 0],
-      ],
-      [['2025-01', '', '', 'fid-brok', 'brok.pdf', '', '', 0, 0]]
-    );
-    const result = await enumerateResumenes('2025-01', '2025-02', 'ctrl-id');
+  it('aggregates mixed account types correctly (bank + 2 cards + broker)', async () => {
+    setupHierarchy([
+      {
+        yearName: '2025', yearId: 'year-2025', bancosId: 'bancos-2025',
+        accounts: [
+          {
+            name: 'BBVA 1234567890 ARS', sheetId: 'sh-bank', headers: bancarioHeaders,
+            rows: [['2025-01', '', '', 'fid-bank', 'bank.pdf', '', '', '', 0, 0, true, 0]],
+          },
+          {
+            name: 'BBVA Visa 4563', sheetId: 'sh-card1', headers: tarjetaHeaders,
+            rows: [['2025-01', '', '', 'fid-card1', 'card1.pdf', '', '', 'Visa', 0, 0]],
+          },
+          {
+            name: 'BBVA Mastercard 9876', sheetId: 'sh-card2', headers: tarjetaHeaders,
+            rows: [['2025-02', '', '', 'fid-card2', 'card2.pdf', '', '', 'Mastercard', 0, 0]],
+          },
+          {
+            name: 'BALANZ CAPITAL VALORES SAU 123456', sheetId: 'sh-brok', headers: brokerHeaders,
+            rows: [['2025-01', '', '', 'fid-brok', 'brok.pdf', '', '', 0, 0]],
+          },
+        ],
+      },
+    ]);
+    const result = await enumerateResumenes('2025-01', '2025-02', 'root-id');
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.value).toHaveLength(4);
       const types = result.value.map(i => i.type);
-      expect(types).toContain('bancario');
+      expect(types.filter(t => t === 'bancario')).toHaveLength(1);
       expect(types.filter(t => t === 'tarjeta')).toHaveLength(2);
-      expect(types).toContain('broker');
+      expect(types.filter(t => t === 'broker')).toHaveLength(1);
     }
   });
 
   it('single-month range returns only that period', async () => {
-    mockGetValues(
-      [
-        ['2025-01', '', '', 'fid-jan', 'jan.pdf', '', '', '', 0, 0, true, 0],
-        ['2025-02', '', '', 'fid-feb', 'feb.pdf', '', '', '', 0, 0, true, 0],
-      ],
-      [],
-      []
-    );
-    const result = await enumerateResumenes('2025-01', '2025-01', 'ctrl-id');
+    setupHierarchy([
+      {
+        yearName: '2025', yearId: 'year-2025', bancosId: 'bancos-2025',
+        accounts: [
+          {
+            name: 'BBVA 1234567890 ARS', sheetId: 'sh-bbva', headers: bancarioHeaders,
+            rows: [
+              ['2025-01', '', '', 'fid-jan', 'jan.pdf', '', '', '', 0, 0, true, 0],
+              ['2025-02', '', '', 'fid-feb', 'feb.pdf', '', '', '', 0, 0, true, 0],
+            ],
+          },
+        ],
+      },
+    ]);
+    const result = await enumerateResumenes('2025-01', '2025-01', 'root-id');
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.value).toHaveLength(1);
@@ -371,12 +492,126 @@ describe('enumerateResumenes', () => {
     }
   });
 
-  it('returns Result.err when getValues fails for any tab', async () => {
-    vi.mocked(getValues).mockImplementation(async (_id: string, range: string) => {
-      if (range.endsWith(':L')) return err('Drive API error');
-      return ok([[]]);
-    });
-    const result = await enumerateResumenes('2025-01', '2025-03', 'ctrl-id');
+  it('walks multiple years (range crossing year boundary)', async () => {
+    setupHierarchy([
+      {
+        yearName: '2024', yearId: 'year-2024', bancosId: 'bancos-2024',
+        accounts: [
+          {
+            name: 'BBVA 1234567890 ARS', sheetId: 'sh-2024', headers: bancarioHeaders,
+            rows: [
+              ['2024-11', '', '', 'fid-2024-11', 'nov.pdf', '', '', '', 0, 0, true, 0],
+              ['2024-12', '', '', 'fid-2024-12', 'dec.pdf', '', '', '', 0, 0, true, 0],
+            ],
+          },
+        ],
+      },
+      {
+        yearName: '2025', yearId: 'year-2025', bancosId: 'bancos-2025',
+        accounts: [
+          {
+            name: 'BBVA 1234567890 ARS', sheetId: 'sh-2025', headers: bancarioHeaders,
+            rows: [
+              ['2025-01', '', '', 'fid-2025-01', 'jan.pdf', '', '', '', 0, 0, true, 0],
+              ['2025-02', '', '', 'fid-2025-02', 'feb.pdf', '', '', '', 0, 0, true, 0],
+            ],
+          },
+        ],
+      },
+    ]);
+    const result = await enumerateResumenes('2024-11', '2025-02', 'root-id');
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value).toHaveLength(4);
+      const fileIds = result.value.map(i => i.fileId).sort();
+      expect(fileIds).toEqual(['fid-2024-11', 'fid-2024-12', 'fid-2025-01', 'fid-2025-02']);
+    }
+  });
+
+  it('skips year folders that do not validate as a year', async () => {
+    setupHierarchy([
+      { yearName: 'Entrada', yearId: 'entrada-id', bancosId: null, accounts: [] },
+      {
+        yearName: '2025', yearId: 'year-2025', bancosId: 'bancos-2025',
+        accounts: [
+          {
+            name: 'BBVA 1234567890 ARS', sheetId: 'sh-bbva', headers: bancarioHeaders,
+            rows: [['2025-01', '', '', 'fid-jan', 'jan.pdf', '', '', '', 0, 0, true, 0]],
+          },
+        ],
+      },
+    ]);
+    const result = await enumerateResumenes('2025-01', '2025-03', 'root-id');
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value).toHaveLength(1);
+  });
+
+  it('skips a year that has no Bancos folder', async () => {
+    setupHierarchy([
+      { yearName: '2024', yearId: 'year-2024', bancosId: null, accounts: [] },
+      {
+        yearName: '2025', yearId: 'year-2025', bancosId: 'bancos-2025',
+        accounts: [
+          {
+            name: 'BBVA 1234567890 ARS', sheetId: 'sh-bbva', headers: bancarioHeaders,
+            rows: [['2025-01', '', '', 'fid-jan', 'jan.pdf', '', '', '', 0, 0, true, 0]],
+          },
+        ],
+      },
+    ]);
+    const result = await enumerateResumenes('2025-01', '2025-03', 'root-id');
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value).toHaveLength(1);
+  });
+
+  it('skips an account whose Control de Resumenes spreadsheet is missing', async () => {
+    setupHierarchy([
+      {
+        yearName: '2025', yearId: 'year-2025', bancosId: 'bancos-2025',
+        accounts: [
+          { name: 'BBVA 1234567890 ARS', sheetId: null, headers: [], rows: [] },
+          {
+            name: 'BBVA Visa 4563', sheetId: 'sh-card', headers: tarjetaHeaders,
+            rows: [['2025-01', '', '', 'fid-card', 'card.pdf', '', '', 'Visa', 0, 0]],
+          },
+        ],
+      },
+    ]);
+    const result = await enumerateResumenes('2025-01', '2025-03', 'root-id');
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value).toHaveLength(1);
+      expect(result.value[0].type).toBe('tarjeta');
+    }
+  });
+
+  it('skips an account whose Resumenes read fails (warns + continues)', async () => {
+    setupHierarchy([
+      {
+        yearName: '2025', yearId: 'year-2025', bancosId: 'bancos-2025',
+        accounts: [
+          {
+            name: 'BBVA 1234567890 ARS', sheetId: 'sh-bbva', headers: bancarioHeaders,
+            rows: [], readError: 'Drive API error',
+          },
+          {
+            name: 'BBVA Visa 4563', sheetId: 'sh-card', headers: tarjetaHeaders,
+            rows: [['2025-01', '', '', 'fid-card', 'card.pdf', '', '', 'Visa', 0, 0]],
+          },
+        ],
+      },
+    ]);
+    const result = await enumerateResumenes('2025-01', '2025-03', 'root-id');
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value).toHaveLength(1);
+      expect(result.value[0].fileId).toBe('fid-card');
+    }
+  });
+
+  it('returns Result.err when listing year folders fails (top-level discovery)', async () => {
+    vi.mocked(listByMimeType).mockResolvedValueOnce(err('Drive root listing failed'));
+    const result = await enumerateResumenes('2025-01', '2025-03', 'root-id');
     expect(result.ok).toBe(false);
   });
 });

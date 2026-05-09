@@ -25,14 +25,20 @@ import {
 import {
   findByName,
   createFolder,
+  listByMimeType,
   listFilesInFolder,
   deleteFileById,
   copyFile,
   createSpreadsheet,
 } from './drive.js';
-import { discoverMovimientosSpreadsheets } from './folder-structure.js';
+import { discoverMovimientosSpreadsheets, validateYear } from './folder-structure.js';
 import { readMovimientosForPeriod } from './movimientos-reader.js';
 import { debug, info, warn } from '../utils/logger.js';
+
+const FOLDER_MIME = 'application/vnd.google-apps.folder';
+const SPREADSHEET_MIME = 'application/vnd.google-apps.spreadsheet';
+const BANCOS_FOLDER_NAME = 'Bancos';
+const CONTROL_RESUMENES_SPREADSHEET_NAME = 'Control de Resumenes';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -171,66 +177,164 @@ export function parsePeriodRange(input: string): Result<{ from: string; to: stri
 // ── Task 2: enumerateResumenes ───────────────────────────────────────────────
 
 /**
+ * Classifies a Resumenes sheet by inspecting its headers.
+ *
+ * Each per-account `Control de Resumenes` spreadsheet has a single `Resumenes`
+ * tab whose schema depends on the account type:
+ * - `moneda` header → bancario
+ * - `tipoTarjeta` header → tarjeta
+ * - `broker` header → broker
+ */
+function classifyResumenSheet(headerRow: string[]): 'bancario' | 'tarjeta' | 'broker' | null {
+  const lowered = headerRow.map(h => h.toLowerCase());
+  if (lowered.includes('moneda')) return 'bancario';
+  if (lowered.includes('tipotarjeta')) return 'tarjeta';
+  if (lowered.includes('broker')) return 'broker';
+  return null;
+}
+
+/**
+ * Computes the broadest A1 column range needed to read any Resumenes schema.
+ * Returns the column letter for the widest of the three schemas.
+ */
+function widestResumenesColumn(): string {
+  const widest = Math.max(
+    CONTROL_RESUMENES_BANCARIO_SHEET.headers.length,
+    CONTROL_RESUMENES_TARJETA_SHEET.headers.length,
+    CONTROL_RESUMENES_BROKER_SHEET.headers.length
+  );
+  return colLetter(widest);
+}
+
+/**
  * Enumerates all resumen PDFs (bancario, tarjeta, broker) within a period range
- * by reading the three Control de Resumenes tabs.
+ * by walking each per-account `Control de Resumenes` spreadsheet under
+ * `{YYYY}/Bancos/{Account folder}/`. The spreadsheet schema is detected from
+ * its headers (each account type has a distinct schema).
+ *
+ * Per-account read failures are logged as warnings and skipped — only a top-level
+ * directory-listing failure aborts the whole operation. This mirrors
+ * `enumerateMovimientos`.
  *
  * @param from - Start period YYYY-MM (inclusive)
  * @param to - End period YYYY-MM (inclusive)
- * @param controlResumenesId - Spreadsheet ID of the Control de Resumenes file
- * @returns Sorted list of scope items or error
+ * @param rootFolderId - Drive root folder ID
+ * @returns List of scope items or error
  */
 export async function enumerateResumenes(
   from: string,
   to: string,
-  controlResumenesId: string
+  rootFolderId: string
 ): Promise<Result<ResumenScopeItem[], Error>> {
-  const configs = [
-    { sheet: CONTROL_RESUMENES_BANCARIO_SHEET, type: 'bancario' as const },
-    { sheet: CONTROL_RESUMENES_TARJETA_SHEET, type: 'tarjeta' as const },
-    { sheet: CONTROL_RESUMENES_BROKER_SHEET, type: 'broker' as const },
-  ];
-
-  // Read all three tabs in parallel — differentiate by column range width
-  const reads = await Promise.all(
-    configs.map(({ sheet, type }) => {
-      const col = colLetter(sheet.headers.length);
-      const range = `${sheet.title}!A:${col}`;
-      return getValues(controlResumenesId, range).then(r => ({ r, type }));
-    })
-  );
-
   const items: ResumenScopeItem[] = [];
+  const rangeColumn = widestResumenesColumn();
+  const range = `${CONTROL_RESUMENES_BANCARIO_SHEET.title}!A:${rangeColumn}`;
 
-  for (const { r, type } of reads) {
-    if (!r.ok) return r;
+  const yearFoldersResult = await listByMimeType(rootFolderId, FOLDER_MIME);
+  if (!yearFoldersResult.ok) return yearFoldersResult;
 
-    const rows = r.value;
-    if (rows.length < 2) continue; // header-only or empty sheet
+  for (const yearFolder of yearFoldersResult.value) {
+    if (!validateYear(yearFolder.name).ok) continue;
 
-    // Header-based column lookup (row 0)
-    const headerRow = rows[0].map(h => String(h ?? '').toLowerCase());
-    const periodoIdx = headerRow.indexOf('periodo');
-    const fileIdIdx = headerRow.indexOf('fileid');
-    const fileNameIdx = headerRow.indexOf('filename');
-
-    if (periodoIdx < 0 || fileIdIdx < 0 || fileNameIdx < 0) continue;
-
-    for (let i = 1; i < rows.length; i++) {
-      const row = rows[i];
-      const periodo = String(row[periodoIdx] ?? '');
-      if (!periodo || periodo < from || periodo > to) continue;
-
-      const fileId = String(row[fileIdIdx] ?? '');
-      if (!fileId) continue;
-
-      items.push({
-        fileId,
-        fileName: String(row[fileNameIdx] ?? ''),
-        type,
-        periodo,
+    const bancosResult = await findByName(yearFolder.id, BANCOS_FOLDER_NAME, FOLDER_MIME);
+    if (!bancosResult.ok) {
+      warn('Failed to locate Bancos folder for year — skipping', {
+        module: 'delivery',
+        phase: 'enumerate-resumenes',
+        year: yearFolder.name,
+        error: bancosResult.error.message,
       });
+      continue;
+    }
+    if (!bancosResult.value) continue;
+
+    const accountFoldersResult = await listByMimeType(bancosResult.value.id, FOLDER_MIME);
+    if (!accountFoldersResult.ok) {
+      warn('Failed to list account folders — skipping year', {
+        module: 'delivery',
+        phase: 'enumerate-resumenes',
+        year: yearFolder.name,
+        error: accountFoldersResult.error.message,
+      });
+      continue;
+    }
+
+    for (const accountFolder of accountFoldersResult.value) {
+      const sheetFileResult = await findByName(
+        accountFolder.id,
+        CONTROL_RESUMENES_SPREADSHEET_NAME,
+        SPREADSHEET_MIME
+      );
+      if (!sheetFileResult.ok) {
+        warn('Failed to locate Control de Resumenes spreadsheet — skipping account', {
+          module: 'delivery',
+          phase: 'enumerate-resumenes',
+          year: yearFolder.name,
+          account: accountFolder.name,
+          error: sheetFileResult.error.message,
+        });
+        continue;
+      }
+      if (!sheetFileResult.value) continue;
+
+      const valuesResult = await getValues(sheetFileResult.value.id, range);
+      if (!valuesResult.ok) {
+        warn('Failed to read Resumenes tab — skipping account', {
+          module: 'delivery',
+          phase: 'enumerate-resumenes',
+          year: yearFolder.name,
+          account: accountFolder.name,
+          spreadsheetId: sheetFileResult.value.id,
+          error: valuesResult.error.message,
+        });
+        continue;
+      }
+
+      const rows = valuesResult.value;
+      if (rows.length < 2) continue;
+
+      const headerRow = rows[0].map(h => String(h ?? '').toLowerCase());
+      const type = classifyResumenSheet(headerRow);
+      if (type === null) {
+        warn('Unrecognized Resumenes schema — skipping account', {
+          module: 'delivery',
+          phase: 'enumerate-resumenes',
+          year: yearFolder.name,
+          account: accountFolder.name,
+        });
+        continue;
+      }
+
+      const periodoIdx = headerRow.indexOf('periodo');
+      const fileIdIdx = headerRow.indexOf('fileid');
+      const fileNameIdx = headerRow.indexOf('filename');
+      if (periodoIdx < 0 || fileIdIdx < 0 || fileNameIdx < 0) continue;
+
+      for (let i = 1; i < rows.length; i++) {
+        const row = rows[i];
+        const periodo = String(row[periodoIdx] ?? '');
+        if (!periodo || periodo < from || periodo > to) continue;
+
+        const fileId = String(row[fileIdIdx] ?? '');
+        if (!fileId) continue;
+
+        items.push({
+          fileId,
+          fileName: String(row[fileNameIdx] ?? ''),
+          type,
+          periodo,
+        });
+      }
     }
   }
+
+  debug('Enumerated resumenes for period range', {
+    module: 'delivery',
+    phase: 'enumerate-resumenes',
+    from,
+    to,
+    count: items.length,
+  });
 
   return { ok: true, value: items };
 }
