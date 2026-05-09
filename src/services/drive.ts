@@ -1105,3 +1105,58 @@ export async function createSpreadsheet(
   }
   });
 }
+
+/**
+ * Copies a file into a target folder in Google Drive
+ *
+ * @param fileId - ID of the file to copy
+ * @param parentFolderId - ID of the destination parent folder
+ * @param name - Optional new name for the copy; omit to keep the original name
+ * @returns DriveFileInfo of the new copy, or an error
+ */
+export async function copyFile(
+  fileId: string,
+  parentFolderId: string,
+  name?: string
+): Promise<Result<DriveFileInfo, Error>> {
+  return withTiming('copyFile', async () => {
+  try {
+    const drive = await getDriveService();
+
+    const requestBody: { parents: string[]; name?: string } = {
+      parents: [parentFolderId],
+    };
+    if (name !== undefined) {
+      requestBody.name = name;
+    }
+
+    const copyResult = await withQuotaRetry(async () =>
+      drive.files.copy({
+        fileId,
+        requestBody,
+        fields: 'id, name, mimeType',
+        supportsAllDrives: true,
+      })
+    );
+
+    if (!copyResult.ok) {
+      return copyResult;
+    }
+
+    const file = copyResult.value.data;
+    return {
+      ok: true,
+      value: {
+        id: file.id ?? '',
+        name: file.name ?? '',
+        mimeType: file.mimeType ?? '',
+      },
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error : new Error(String(error)),
+    };
+  }
+  });
+}

@@ -80,6 +80,7 @@ import {
   getParents,
   isDescendantOf,
   renameFile,
+  copyFile,
   downloadFile,
   clearDriveCache,
 } from './drive.js';
@@ -501,6 +502,19 @@ describe('Drive folder operations', () => {
       expect(mockDriveFiles.update).toHaveBeenCalledTimes(2);
     });
 
+    it('retries on quota exceeded in copyFile', async () => {
+      mockDriveFiles.copy
+        .mockRejectedValueOnce(new Error('Quota exceeded'))
+        .mockResolvedValueOnce({
+          data: { id: 'copy123', name: 'Copy of file.pdf', mimeType: 'application/pdf' },
+        });
+
+      const result = await copyFile('srcFileId', 'parentFolderId');
+
+      expect(result.ok).toBe(true);
+      expect(mockDriveFiles.copy).toHaveBeenCalledTimes(2);
+    });
+
     it('retries on rate limit in getParents', async () => {
       mockDriveFiles.get
         .mockRejectedValueOnce(new Error('429'))
@@ -834,6 +848,78 @@ describe('Drive folder operations', () => {
         fields: 'id, name',
         supportsAllDrives: true,
       });
+    });
+  });
+
+  describe('copyFile', () => {
+    it('copies a file into the target folder and returns DriveFileInfo', async () => {
+      mockDriveFiles.copy.mockResolvedValue({
+        data: { id: 'copy123', name: 'Copy of file.pdf', mimeType: 'application/pdf' },
+      });
+
+      const result = await copyFile('srcFileId', 'parentFolderId');
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value).toEqual({
+          id: 'copy123',
+          name: 'Copy of file.pdf',
+          mimeType: 'application/pdf',
+        });
+      }
+
+      expect(mockDriveFiles.copy).toHaveBeenCalledWith({
+        fileId: 'srcFileId',
+        requestBody: { parents: ['parentFolderId'] },
+        fields: 'id, name, mimeType',
+        supportsAllDrives: true,
+      });
+    });
+
+    it('passes name in requestBody when name parameter is provided', async () => {
+      mockDriveFiles.copy.mockResolvedValue({
+        data: { id: 'copy456', name: 'My Copy.pdf', mimeType: 'application/pdf' },
+      });
+
+      const result = await copyFile('srcFileId', 'parentFolderId', 'My Copy.pdf');
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value).toEqual({
+          id: 'copy456',
+          name: 'My Copy.pdf',
+          mimeType: 'application/pdf',
+        });
+      }
+
+      expect(mockDriveFiles.copy).toHaveBeenCalledWith({
+        fileId: 'srcFileId',
+        requestBody: { parents: ['parentFolderId'], name: 'My Copy.pdf' },
+        fields: 'id, name, mimeType',
+        supportsAllDrives: true,
+      });
+    });
+
+    it('does not include name in requestBody when name parameter is omitted', async () => {
+      mockDriveFiles.copy.mockResolvedValue({
+        data: { id: 'copy789', name: 'original.pdf', mimeType: 'application/pdf' },
+      });
+
+      await copyFile('srcFileId', 'parentFolderId');
+
+      const callArgs = mockDriveFiles.copy.mock.calls[0][0] as { requestBody: Record<string, unknown> };
+      expect(callArgs.requestBody).not.toHaveProperty('name');
+    });
+
+    it('returns error on API failure', async () => {
+      mockDriveFiles.copy.mockRejectedValue(new Error('Copy failed'));
+
+      const result = await copyFile('srcFileId', 'parentFolderId');
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.error.message).toBe('Copy failed');
+      }
     });
   });
 });
