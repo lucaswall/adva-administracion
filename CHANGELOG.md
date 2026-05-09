@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.8.1] - 2026-05-09
+
+### Fixed
+- "Envío a Contadores" now finds all resumen PDFs in the requested range — previously dropped rows whose `periodo` cell had been auto-formatted by Google Sheets as a date serial instead of plain text
+
+### Changed
+- "Envío a Contadores" delivery layout: one standalone spreadsheet per (bank account × month) inside the delivery folder, instead of a single workbook with multiple tabs; credit cards are now included alongside bank accounts with the manually-filled `detalle` column
+
 ## [1.8.0] - 2026-05-09
 
 ### Added
@@ -156,7 +164,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Updated fastify to fix high-severity Content-Type body validation bypass and low-severity DoS vulnerability
 - Updated googleapis to v171, @google/clasp to v3, and resolved 6 npm audit vulnerabilities
 
-[Unreleased]: https://github.com/lucaswall/adva-administracion/compare/v1.8.0...HEAD
+[Unreleased]: https://github.com/lucaswall/adva-administracion/compare/v1.8.1...HEAD
+[1.8.1]: https://github.com/lucaswall/adva-administracion/compare/v1.8.0...v1.8.1
 [1.8.0]: https://github.com/lucaswall/adva-administracion/compare/v1.7.0...v1.8.0
 [1.7.0]: https://github.com/lucaswall/adva-administracion/compare/v1.6.0...v1.7.0
 [1.6.0]: https://github.com/lucaswall/adva-administracion/compare/v1.5.0...v1.6.0
