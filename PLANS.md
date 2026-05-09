@@ -357,3 +357,65 @@ Menu insertion: in `createMenu()` at `main.ts:39-48`, after `📝 Completar Deta
 - Very large ranges (year-plus, many accounts) may approach Apps Script's 60s `UrlFetchApp` timeout on the `build-movimientos` step. Initial cut accepts this; chunking can be added if observed in practice.
 - `drive.files.copy` quota: each copy is a single API call. For typical quarter-scale deliveries (≤30 PDFs) this is well under quota; sequential iteration is intentionally quota-gentle.
 - User-placed files inside a re-used delivery folder are deleted on overwrite. Documented as "the folder is owned by the operation."
+
+---
+
+## Iteration 1
+
+**Implemented:** 2026-05-08
+**Method:** Agent team (3 workers, worktree-isolated)
+
+### Tasks Completed This Iteration
+- Task 1 [ADV-228]: parsePeriodRange — strict YYYY-MM / YYYY-MM..YYYY-MM regex parser, Spanish errors (worker-1)
+- Task 2 [ADV-229]: enumerateResumenes — walks per-account `Control de Resumenes` spreadsheets across `{YYYY}/Bancos/{Account}/`, classifies by header inspection, aggregates rows (worker-1, then architecturally rewritten by lead post-merge — see Architectural Fix below)
+- Task 3 [ADV-230]: enumerateMovimientos — walks discoverMovimientosSpreadsheets, intersects YYYY-MM tabs with month list (worker-1)
+- Task 4 [ADV-231]: copyFile helper in drive.ts (worker-2; worker-1 also added an equivalent version, lead kept worker-1's more defensive impl during merge)
+- Task 5 [ADV-232]: prepareDeliveryFolder + formatDeliveryFolderName — find-or-create Entregas/period folder, idempotent re-delivery via period-prefix matching + rename to current date (worker-1; lead extended re-delivery semantics during bug-fix pass)
+- Task 6 [ADV-233]: copyPdfsToDelivery — sequential per-PDF copy with per-failure accumulation (worker-1)
+- Task 7 [ADV-234]: buildMovimientosWorkbook — creates Sheets workbook, one tab per `(month, bank-account)`, empty-scope renames default tab to `Sin Movimientos` placeholder (worker-1)
+- Task 8 [ADV-235]: 3 Fastify routes (plan, copy-pdfs, build-movimientos) with auth, schema validation, Spanish error messages (worker-3)
+- Task 9 [ADV-236]: Apps Script `triggerEnvioContadores` — menu entry, prompt, progress toasts, modal summary (worker-3)
+
+### Files Modified
+- `src/services/delivery-package.ts` (new — 7 exported functions, ~700 lines)
+- `src/services/delivery-package.test.ts` (new — 64 tests)
+- `src/services/drive.ts` — `copyFile` and `deleteFileById` helpers added
+- `src/services/drive.test.ts` — copyFile + deleteFileById tests
+- `src/services/sheets.ts` — `renameSheet` helper added
+- `src/routes/delivery.ts` (new — 3 routes, ~250 lines)
+- `src/routes/delivery.test.ts` (new — 27 tests)
+- `src/server.ts` — delivery routes registered with `/api` prefix
+- `apps-script/src/main.ts` — `triggerEnvioContadores`, `progressToast`, `doneToast`, `callDeliveryApi`, menu entry
+- `apps-script/build.js` — `triggerEnvioContadores` STUB added
+
+### Linear Updates
+- ADV-228 → Review · ADV-229 → Review · ADV-230 → Review · ADV-231 → Review · ADV-232 → Review · ADV-233 → Review · ADV-234 → Review · ADV-235 → Review · ADV-236 → Review
+
+### Architectural Fix (post-merge)
+The plan assumed a single root-level "Control de Resumenes" spreadsheet with three tabs. The actual codebase has many per-account "Control de Resumenes" spreadsheets — one per `{YYYY}/Bancos/{Account folder}/` — each with one `Resumenes` tab whose schema depends on the account type (bancario / tarjeta / broker). Worker-1 implemented `enumerateResumenes(controlResumenesId)` against the plan's incorrect model; the route's `controlResumenesId ?? ''` fallback would have failed at runtime. Lead rewrote `enumerateResumenes` to walk the actual hierarchy (year folders → Bancos → account folders → Control de Resumenes spreadsheet → Resumenes tab), classify by header inspection (presence of `moneda` / `tipotarjeta` / `broker`), and aggregate. Routes now pass `rootFolderId` directly. Tests rewritten accordingly.
+
+### Bug-Hunter Findings (all fixed this iteration)
+- HIGH: `prepareDeliveryFolder` re-delivery used `listFilesInFolder` (PDF+image only) so the Movimientos workbook was never deleted on re-delivery. Switched to explicit `listByMimeType` for PDF and Spreadsheet types.
+- HIGH: Apps Script summary modal reported `plan.pdfCount` as "PDFs copiados" instead of `copy.copied`.
+- MEDIUM: `formatSheet` result silently swallowed in `buildMovimientosWorkbook`. Now warns on failure.
+- MEDIUM: Re-delivery on a different day created a sibling folder because the date suffix changed. `prepareDeliveryFolder` now matches by period prefix and renames the existing folder.
+- MEDIUM: `build-movimientos` route lacked the `getCachedFolderStructure()` guard. Added.
+- LOW: `deleteFileById` had no test coverage. Added 3 tests.
+
+### Pre-commit Verification
+- bug-hunter: 6 bugs found, all fixed before commit.
+- verifier: 2249 tests pass, zero warnings on lint, zero warnings on typecheck, server + apps-script bundle build cleanly.
+
+### Work Partition
+- Worker 1: delivery-package core (Tasks 1, 2, 3, 5, 6, 7) — 12 effort points
+- Worker 2: drive copyFile helper (Task 4) — 1 effort point
+- Worker 3: routes + apps script (Tasks 8, 9) — 3 effort points
+
+### Merge Summary
+- Worker 1 → feature: clean merge.
+- Worker 2 → feature: 1 conflict in `drive.ts` (both workers added `copyFile`); kept worker-1's more defensive implementation, accepted worker-2's tests.
+- Worker 3 → feature: clean merge.
+- Post-merge: architectural fix commit + bug-hunter fix commit.
+
+### Continuation Status
+All tasks completed.
