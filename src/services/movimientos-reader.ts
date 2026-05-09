@@ -202,6 +202,67 @@ export async function readMovimientosForPeriod(
 }
 
 /**
+ * A single credit-card movimiento row, projected for delivery export.
+ * Source schema (MOVIMIENTOS_TARJETA_SHEET): fecha, descripcion, nroCupon,
+ * pesos, dolares, detalle. The `detalle` column is manually filled by humans.
+ */
+export interface CardMovimientoRow {
+  fecha: string;
+  descripcion: string;
+  nroCupon: string;
+  pesos: number;
+  dolares: number;
+  detalle: string;
+}
+
+/**
+ * Reads credit-card movimientos from a specific month sheet for delivery.
+ *
+ * Distinct from `readMovimientosForPeriod` (which is wired to the bank-only
+ * matcher and intentionally returns [] for non-bank schemas). Card
+ * movimientos sheets follow the 6-column schema; we read A:F directly and
+ * project the row.
+ */
+export async function readCardMovimientosForPeriod(
+  spreadsheetId: string,
+  sheetName: string
+): Promise<Result<CardMovimientoRow[], Error>> {
+  const range = `'${sheetName}'!A:F`;
+  const valuesResult = await getValues(spreadsheetId, range);
+  if (!valuesResult.ok) return valuesResult;
+
+  const data = valuesResult.value;
+  if (data.length < 2) return { ok: true, value: [] };
+
+  const rows: CardMovimientoRow[] = [];
+  for (let i = 1; i < data.length; i++) {
+    const row = data[i];
+    if (!row || row.length === 0) continue;
+
+    const descripcion = String(row[1] || '');
+    if (isSpecialRow(descripcion)) continue;
+
+    rows.push({
+      fecha: normalizeSpreadsheetDate(row[0]),
+      descripcion,
+      nroCupon: String(row[2] || ''),
+      pesos: parseNumber(row[3]) ?? 0,
+      dolares: parseNumber(row[4]) ?? 0,
+      detalle: String(row[5] || ''),
+    });
+  }
+
+  debug('Read card movimientos from sheet', {
+    module: 'movimientos-reader',
+    sheetName,
+    totalRows: data.length - 1,
+    movimientos: rows.length,
+  });
+
+  return { ok: true, value: rows };
+}
+
+/**
  * Gets all recent movimientos from a bank spreadsheet
  * Excludes SALDO INICIAL/FINAL rows
  * Returns ALL movimientos (with or without detalles) for replacement logic

@@ -17,7 +17,7 @@ import {
   formatDeliveryFolderName,
   prepareDeliveryFolder,
   copyPdfsToDelivery,
-  buildMovimientosWorkbook,
+  buildMovimientosFiles,
 } from '../services/delivery-package.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { getCachedFolderStructure } from '../services/folder-structure.js';
@@ -259,20 +259,20 @@ export async function deliveryRoutes(server: FastifyInstance) {
       return respond500(reply, movimientosResult.error, { module: 'delivery', phase: 'enumerate-movimientos' });
     }
 
-    // Build workbook in delivery folder
-    const workbookResult = await buildMovimientosWorkbook(folderId, movimientosResult.value);
-    if (!workbookResult.ok) {
-      return respond500(reply, workbookResult.error, { module: 'delivery', phase: 'build-workbook' });
+    // Build per-(account × month) spreadsheets in delivery folder
+    const buildResult = await buildMovimientosFiles(folderId, movimientosResult.value);
+    if (!buildResult.ok) {
+      return respond500(reply, buildResult.error, { module: 'delivery', phase: 'build-movimientos' });
     }
 
     server.log.info(
-      { folderId, workbookId: workbookResult.value.workbookId, tabCount: workbookResult.value.tabCount },
-      'Movimientos workbook built'
+      { folderId, created: buildResult.value.created, failed: buildResult.value.failed.length },
+      'Movimientos files built'
     );
 
     return {
-      workbookUrl: workbookResult.value.workbookUrl,
-      tabCount: workbookResult.value.tabCount,
+      created: buildResult.value.created,
+      failed: buildResult.value.failed,
     };
   });
 }

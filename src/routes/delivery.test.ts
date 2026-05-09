@@ -14,7 +14,7 @@ const mockEnumerateMovimientos = vi.fn();
 const mockFormatDeliveryFolderName = vi.fn();
 const mockPrepareDeliveryFolder = vi.fn();
 const mockCopyPdfsToDelivery = vi.fn();
-const mockBuildMovimientosWorkbook = vi.fn();
+const mockBuildMovimientosFiles = vi.fn();
 
 vi.mock('../services/delivery-package.js', () => ({
   parsePeriodRange: (...args: unknown[]) => mockParsePeriodRange(...args),
@@ -23,7 +23,7 @@ vi.mock('../services/delivery-package.js', () => ({
   formatDeliveryFolderName: (...args: unknown[]) => mockFormatDeliveryFolderName(...args),
   prepareDeliveryFolder: (...args: unknown[]) => mockPrepareDeliveryFolder(...args),
   copyPdfsToDelivery: (...args: unknown[]) => mockCopyPdfsToDelivery(...args),
-  buildMovimientosWorkbook: (...args: unknown[]) => mockBuildMovimientosWorkbook(...args),
+  buildMovimientosFiles: (...args: unknown[]) => mockBuildMovimientosFiles(...args),
 }));
 
 // Mock folder structure
@@ -245,7 +245,7 @@ describe('Delivery routes', () => {
       mockEnumerateMovimientos.mockResolvedValue({
         ok: true,
         value: [
-          { spreadsheetId: 'sp1', sheetName: '2025-01', banco: 'BBVA', numeroCuenta: '1234567890', moneda: 'ARS' },
+          { kind: 'bank', spreadsheetId: 'sp1', sheetName: '2025-01', banco: 'BBVA', numeroCuenta: '1234567890', moneda: 'ARS' },
         ],
       });
       mockFormatDeliveryFolderName.mockReturnValue('Entregas 2025-01 - 08-05-2025');
@@ -637,7 +637,7 @@ describe('Delivery routes', () => {
       expect(body.error).toBe('Internal server error');
     });
 
-    it('returns 500 when buildMovimientosWorkbook fails', async () => {
+    it('returns 500 when buildMovimientosFiles fails', async () => {
       mockParsePeriodRange.mockReturnValue({
         ok: true,
         value: { from: '2025-01', to: '2025-01' },
@@ -646,7 +646,7 @@ describe('Delivery routes', () => {
         ok: true,
         value: [],
       });
-      mockBuildMovimientosWorkbook.mockResolvedValue({
+      mockBuildMovimientosFiles.mockResolvedValue({
         ok: false,
         error: new Error('Sheets creation failed'),
       });
@@ -661,7 +661,7 @@ describe('Delivery routes', () => {
       expect(response.statusCode).toBe(500);
     });
 
-    it('returns 200 with correct shape on happy path', async () => {
+    it('returns 200 with {created, failed} shape on happy path', async () => {
       mockParsePeriodRange.mockReturnValue({
         ok: true,
         value: { from: '2025-01', to: '2025-03' },
@@ -669,17 +669,16 @@ describe('Delivery routes', () => {
       mockEnumerateMovimientos.mockResolvedValue({
         ok: true,
         value: [
-          { spreadsheetId: 'sp1', sheetName: '2025-01', banco: 'BBVA', numeroCuenta: '1234567890', moneda: 'ARS' },
-          { spreadsheetId: 'sp1', sheetName: '2025-02', banco: 'BBVA', numeroCuenta: '1234567890', moneda: 'ARS' },
-          { spreadsheetId: 'sp2', sheetName: '2025-01', banco: 'Galicia', numeroCuenta: '9876543210', moneda: 'USD' },
+          { kind: 'bank', spreadsheetId: 'sp1', sheetName: '2025-01', banco: 'BBVA', numeroCuenta: '1234567890', moneda: 'ARS' },
+          { kind: 'bank', spreadsheetId: 'sp1', sheetName: '2025-02', banco: 'BBVA', numeroCuenta: '1234567890', moneda: 'ARS' },
+          { kind: 'bank', spreadsheetId: 'sp2', sheetName: '2025-01', banco: 'Galicia', numeroCuenta: '9876543210', moneda: 'USD' },
         ],
       });
-      mockBuildMovimientosWorkbook.mockResolvedValue({
+      mockBuildMovimientosFiles.mockResolvedValue({
         ok: true,
         value: {
-          workbookId: 'workbook-id-123',
-          workbookUrl: 'https://docs.google.com/spreadsheets/d/workbook-id-123',
-          tabCount: 3,
+          created: 3,
+          failed: [],
         },
       });
 
@@ -692,8 +691,8 @@ describe('Delivery routes', () => {
 
       expect(response.statusCode).toBe(200);
       const body = JSON.parse(response.payload);
-      expect(body.workbookUrl).toBe('https://docs.google.com/spreadsheets/d/workbook-id-123');
-      expect(body.tabCount).toBe(3);
+      expect(body.created).toBe(3);
+      expect(body.failed).toEqual([]);
     });
 
     it('passes correct arguments to service functions', async () => {
@@ -702,12 +701,12 @@ describe('Delivery routes', () => {
         value: { from: '2025-01', to: '2025-01' },
       });
       const mockScope = [
-        { spreadsheetId: 'sp1', sheetName: '2025-01', banco: 'BBVA', numeroCuenta: '1234567890', moneda: 'ARS' },
+        { kind: 'bank', spreadsheetId: 'sp1', sheetName: '2025-01', banco: 'BBVA', numeroCuenta: '1234567890', moneda: 'ARS' },
       ];
       mockEnumerateMovimientos.mockResolvedValue({ ok: true, value: mockScope });
-      mockBuildMovimientosWorkbook.mockResolvedValue({
+      mockBuildMovimientosFiles.mockResolvedValue({
         ok: true,
-        value: { workbookId: 'wb1', workbookUrl: 'https://...', tabCount: 1 },
+        value: { created: 1, failed: [] },
       });
 
       await server.inject({
@@ -719,7 +718,7 @@ describe('Delivery routes', () => {
 
       expect(mockParsePeriodRange).toHaveBeenCalledWith('2025-01');
       expect(mockEnumerateMovimientos).toHaveBeenCalledWith('2025-01', '2025-01', 'mock-root-folder-id');
-      expect(mockBuildMovimientosWorkbook).toHaveBeenCalledWith('custom-folder-id', mockScope);
+      expect(mockBuildMovimientosFiles).toHaveBeenCalledWith('custom-folder-id', mockScope);
     });
 
     it('logs error at error level and does not expose raw error message on 500', async () => {
@@ -772,7 +771,7 @@ describe('Delivery routes', () => {
       expect(body.error).toBe('folderId no pertenece a la carpeta Entregas/');
       // Validation must happen BEFORE any expensive enumeration / build call
       expect(mockEnumerateMovimientos).not.toHaveBeenCalled();
-      expect(mockBuildMovimientosWorkbook).not.toHaveBeenCalled();
+      expect(mockBuildMovimientosFiles).not.toHaveBeenCalled();
     });
 
     it('proceeds normally when folderId IS a descendant of Entregas/', async () => {
@@ -782,9 +781,9 @@ describe('Delivery routes', () => {
       });
       mockIsDescendantOf.mockResolvedValue({ ok: true, value: true });
       mockEnumerateMovimientos.mockResolvedValue({ ok: true, value: [] });
-      mockBuildMovimientosWorkbook.mockResolvedValue({
+      mockBuildMovimientosFiles.mockResolvedValue({
         ok: true,
-        value: { workbookId: 'wb1', workbookUrl: 'https://docs.google.com/spreadsheets/d/wb1', tabCount: 0 },
+        value: { created: 0, failed: [] },
       });
 
       const response = await server.inject({
@@ -796,7 +795,7 @@ describe('Delivery routes', () => {
 
       expect(response.statusCode).toBe(200);
       expect(mockIsDescendantOf).toHaveBeenCalledWith('legit-folder-inside-entregas', 'entregas-id');
-      expect(mockBuildMovimientosWorkbook).toHaveBeenCalled();
+      expect(mockBuildMovimientosFiles).toHaveBeenCalled();
     });
 
     it('returns 500 when the Entregas/ folder cannot be located', async () => {
@@ -815,7 +814,7 @@ describe('Delivery routes', () => {
 
       expect(response.statusCode).toBe(500);
       expect(mockEnumerateMovimientos).not.toHaveBeenCalled();
-      expect(mockBuildMovimientosWorkbook).not.toHaveBeenCalled();
+      expect(mockBuildMovimientosFiles).not.toHaveBeenCalled();
     });
 
     it('returns 500 when the descendant check itself fails', async () => {
@@ -833,7 +832,7 @@ describe('Delivery routes', () => {
       });
 
       expect(response.statusCode).toBe(500);
-      expect(mockBuildMovimientosWorkbook).not.toHaveBeenCalled();
+      expect(mockBuildMovimientosFiles).not.toHaveBeenCalled();
     });
   });
 });

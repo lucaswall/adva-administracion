@@ -2,7 +2,7 @@
  * Tests for delivery-package service
  * Covers: parsePeriodRange, enumerateResumenes, enumerateMovimientos,
  *         formatDeliveryFolderName, prepareDeliveryFolder, copyPdfsToDelivery,
- *         buildMovimientosWorkbook
+ *         buildMovimientosFiles
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -12,10 +12,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 vi.mock('./sheets.js', () => ({
   getValues: vi.fn(),
   getSheetMetadata: vi.fn(),
-  createSheet: vi.fn(),
   appendRowsWithLinks: vi.fn(),
   formatSheet: vi.fn(),
-  deleteSheet: vi.fn(),
   renameSheet: vi.fn(),
   columnIndexToLetter: (index: number): string => {
     let result = '';
@@ -53,6 +51,7 @@ vi.mock('./folder-structure.js', () => ({
 
 vi.mock('./movimientos-reader.js', () => ({
   readMovimientosForPeriod: vi.fn(),
+  readCardMovimientosForPeriod: vi.fn(),
 }));
 
 vi.mock('../utils/logger.js', () => ({
@@ -71,7 +70,7 @@ import {
   formatDeliveryFolderName,
   prepareDeliveryFolder,
   copyPdfsToDelivery,
-  buildMovimientosWorkbook,
+  buildMovimientosFiles,
   type ResumenScopeItem,
   type MovimientoScopeItem,
 } from './delivery-package.js';
@@ -79,10 +78,8 @@ import {
 import {
   getValues,
   getSheetMetadata,
-  createSheet,
   appendRowsWithLinks,
   formatSheet,
-  deleteSheet,
   renameSheet,
   type CellValue,
 } from './sheets.js';
@@ -99,7 +96,7 @@ import {
 } from './drive.js';
 
 import { discoverMovimientosSpreadsheets } from './folder-structure.js';
-import { readMovimientosForPeriod } from './movimientos-reader.js';
+import { readMovimientosForPeriod, readCardMovimientosForPeriod } from './movimientos-reader.js';
 
 // ── Helper ────────────────────────────────────────────────────────────────────
 
@@ -682,6 +679,7 @@ describe('enumerateMovimientos', () => {
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.value[0]).toMatchObject({
+        kind: 'bank',
         banco: 'BBVA',
         numeroCuenta: '1234567890',
         moneda: 'ARS',
@@ -784,10 +782,11 @@ describe('enumerateMovimientos', () => {
     expect(result.ok).toBe(false);
   });
 
-  it('skips non-bank movimientos spreadsheets (credit cards, brokers)', async () => {
-    // Codex P2: card/broker Movimientos sheets have a different schema.
-    // readMovimientosForPeriod returns [] for them, so without filtering we
-    // would create empty placeholder tabs in the delivery workbook.
+  it('includes credit cards (kind: card) and skips brokers and other shapes', async () => {
+    // Cards have schema `{Bank} (Visa|Mastercard|Amex|Naranja|Cabal) {Digits}`
+    // and produce `kind: 'card'` scope items. Brokers (and any other folder
+    // shape that doesn't match bank or card patterns) are still skipped —
+    // their movimientos use a different schema not requested by accountants.
     const spreadsheets = new Map([
       ['2025:BBVA 1234567890 ARS', 'ssid-bank'],
       ['2025:BBVA Visa 4563', 'ssid-card'],
@@ -801,10 +800,13 @@ describe('enumerateMovimientos', () => {
     const result = await enumerateMovimientos('2025-01', '2025-01', 'root-id');
     expect(result.ok).toBe(true);
     if (result.ok) {
-      expect(result.value).toHaveLength(1);
-      expect(result.value[0].spreadsheetId).toBe('ssid-bank');
-      expect(result.value[0].banco).toBe('BBVA');
-      expect(result.value[0].moneda).toBe('ARS');
+      expect(result.value).toHaveLength(2);
+      const bank = result.value.find(i => i.spreadsheetId === 'ssid-bank');
+      const card = result.value.find(i => i.spreadsheetId === 'ssid-card');
+      expect(bank).toMatchObject({ kind: 'bank', banco: 'BBVA', numeroCuenta: '1234567890', moneda: 'ARS' });
+      expect(card).toMatchObject({ kind: 'card', banco: 'BBVA', tipoTarjeta: 'Visa', numeroCuenta: '4563' });
+      // Broker is excluded
+      expect(result.value.find(i => i.spreadsheetId === 'ssid-broker')).toBeUndefined();
     }
   });
 });
@@ -1147,43 +1149,35 @@ describe('copyPdfsToDelivery', () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Task 7: buildMovimientosWorkbook
+// Task 7: buildMovimientosFiles
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe('buildMovimientosWorkbook', () => {
+describe('buildMovimientosFiles', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    // Default: no existing Movimientos workbook in the folder. Individual
-    // tests covering the retry path override this.
-    vi.mocked(findByName).mockResolvedValue(ok(null));
+    // Default mocks for the happy path: spreadsheet creation + metadata +
+    // append succeed. Individual tests override to test failure modes.
+    let nextId = 1;
+    vi.mocked(createSpreadsheet).mockImplementation(async (_folderId, name) => {
+      const id = `ssid-${nextId++}`;
+      return ok({ id, name, mimeType: 'application/vnd.google-apps.spreadsheet' });
+    });
+    vi.mocked(getSheetMetadata).mockResolvedValue(ok([
+      { title: 'Sheet1', sheetId: 0, index: 0 },
+    ]));
+    vi.mocked(renameSheet).mockResolvedValue(ok(undefined));
+    vi.mocked(appendRowsWithLinks).mockResolvedValue(ok(6));
+    vi.mocked(formatSheet).mockResolvedValue(ok(undefined));
+    // Pre-flight cleanup: by default, no stale spreadsheets in the folder.
+    vi.mocked(listByMimeType).mockResolvedValue(ok([]));
+    vi.mocked(deleteFileById).mockResolvedValue(ok(undefined));
   });
 
   const FOLDER_ID = 'delivery-folder-id';
-  const WORKBOOK_ID = 'workbook-id';
-  const WORKBOOK_URL = `https://docs.google.com/spreadsheets/d/${WORKBOOK_ID}/edit`;
 
-  function setupCreateSpreadsheet() {
-    vi.mocked(createSpreadsheet).mockResolvedValue(
-      ok({ id: WORKBOOK_ID, name: 'Movimientos', mimeType: 'application/vnd.google-apps.spreadsheet' })
-    );
-  }
-
-  function setupInitialMeta(sheetId = 0) {
-    vi.mocked(getSheetMetadata).mockResolvedValue(ok([
-      { title: 'Sheet1', sheetId, index: 0 },
-    ]));
-  }
-
-  function makeScope(...items: Array<{ sheetName: string; banco: string; numeroCuenta: string; moneda: string }>): MovimientoScopeItem[] {
-    return items.map(i => ({
-      spreadsheetId: 'src-ssid',
-      ...i,
-    }));
-  }
-
-  function makeMovimiento(fecha: string, concepto: string, debito: number, credito: number, saldo: number, detalle: string) {
+  function makeBankMovimiento(fecha: string, concepto: string, debito: number, credito: number, saldo: number, detalle: string) {
     return {
-      sheetName: '2025-01',
+      sheetName: '2026-01',
       rowNumber: 2,
       fecha,
       concepto,
@@ -1197,270 +1191,326 @@ describe('buildMovimientosWorkbook', () => {
     };
   }
 
-  it('empty scope → placeholder tab "Sin Movimientos" with headers; tabCount: 0', async () => {
-    setupCreateSpreadsheet();
-    setupInitialMeta(42);
-    vi.mocked(renameSheet).mockResolvedValue(ok(undefined));
-    vi.mocked(appendRowsWithLinks).mockResolvedValue(ok(6));
+  function makeCardMovimiento(fecha: string, descripcion: string, nroCupon: string, pesos: number, dolares: number, detalle: string) {
+    return { fecha, descripcion, nroCupon, pesos, dolares, detalle };
+  }
 
-    const result = await buildMovimientosWorkbook(FOLDER_ID, []);
+  it('empty scope → Result.ok with created: 0, no Drive writes', async () => {
+    const result = await buildMovimientosFiles(FOLDER_ID, []);
     expect(result.ok).toBe(true);
     if (result.ok) {
-      expect(result.value.workbookId).toBe(WORKBOOK_ID);
-      expect(result.value.workbookUrl).toBe(WORKBOOK_URL);
-      expect(result.value.tabCount).toBe(0);
+      expect(result.value.created).toBe(0);
+      expect(result.value.failed).toEqual([]);
     }
-    expect(renameSheet).toHaveBeenCalledWith(WORKBOOK_ID, 42, 'Sin Movimientos');
-    expect(appendRowsWithLinks).toHaveBeenCalledWith(
-      WORKBOOK_ID,
-      expect.stringContaining('Sin Movimientos'),
-      [expect.arrayContaining(['fecha', 'concepto', 'debito', 'credito', 'saldo', 'detalle'])]
-    );
-  });
-
-  it('one scope item → one tab named correctly, six columns, default tab deleted', async () => {
-    setupCreateSpreadsheet();
-    setupInitialMeta(0);
-    vi.mocked(createSheet).mockResolvedValue(ok(1));
-    vi.mocked(readMovimientosForPeriod).mockResolvedValue(ok([
-      makeMovimiento('2025-01-15', 'Pago', 1000, 0, 5000, 'Match XYZ'),
-    ]));
-    vi.mocked(appendRowsWithLinks).mockResolvedValue(ok(12));
-    vi.mocked(formatSheet).mockResolvedValue(ok(undefined));
-    vi.mocked(deleteSheet).mockResolvedValue(ok(undefined));
-
-    const scope = makeScope({ sheetName: '2025-01', banco: 'BBVA', numeroCuenta: '1234567890', moneda: 'ARS' });
-    const result = await buildMovimientosWorkbook(FOLDER_ID, scope);
-    expect(result.ok).toBe(true);
-    if (result.ok) {
-      expect(result.value.tabCount).toBe(1);
-    }
-    // Tab created with correct name
-    expect(createSheet).toHaveBeenCalledWith(WORKBOOK_ID, '2025-01 BBVA 1234567890 ARS');
-    // Default tab deleted
-    expect(deleteSheet).toHaveBeenCalledWith(WORKBOOK_ID, 0);
-    // Data appended (header + 1 data row)
-    expect(appendRowsWithLinks).toHaveBeenCalled();
-    const appendCall = vi.mocked(appendRowsWithLinks).mock.calls[0];
-    const rows = appendCall[2];
-    expect(rows).toHaveLength(2); // header + data row
-    // Header row is plain strings
-    expect(rows[0]).toEqual(['fecha', 'concepto', 'debito', 'credito', 'saldo', 'detalle']);
-    // Data row has CellDate for fecha, CellNumber for debito/credito/saldo
-    const dataRow = rows[1];
-    expect(dataRow[0]).toMatchObject({ type: 'date', value: '2025-01-15' });
-    expect(dataRow[1]).toBe('Pago');
-    expect(dataRow[2]).toMatchObject({ type: 'number', value: 1000 });
-    expect(dataRow[3]).toMatchObject({ type: 'number', value: 0 });
-    expect(dataRow[4]).toMatchObject({ type: 'number', value: 5000 });
-    expect(dataRow[5]).toBe('Match XYZ');
-    // formatSheet called
-    expect(formatSheet).toHaveBeenCalledWith(WORKBOOK_ID, 1, expect.objectContaining({ frozenRows: 1 }));
-  });
-
-  it('multiple items sort tabs lexicographically (month-major)', async () => {
-    setupCreateSpreadsheet();
-    setupInitialMeta(0);
-    vi.mocked(createSheet).mockResolvedValue(ok(1));
-    vi.mocked(readMovimientosForPeriod).mockResolvedValue(ok([]));
-    vi.mocked(appendRowsWithLinks).mockResolvedValue(ok(6));
-    vi.mocked(formatSheet).mockResolvedValue(ok(undefined));
-    vi.mocked(deleteSheet).mockResolvedValue(ok(undefined));
-
-    const scope = makeScope(
-      { sheetName: '2025-03', banco: 'BBVA', numeroCuenta: '1234', moneda: 'ARS' },
-      { sheetName: '2025-01', banco: 'BBVA', numeroCuenta: '1234', moneda: 'ARS' },
-      { sheetName: '2025-02', banco: 'BBVA', numeroCuenta: '1234', moneda: 'ARS' },
-    );
-    const result = await buildMovimientosWorkbook(FOLDER_ID, scope);
-    expect(result.ok).toBe(true);
-    if (result.ok) expect(result.value.tabCount).toBe(3);
-
-    const tabNames = vi.mocked(createSheet).mock.calls.map(c => c[1]);
-    expect(tabNames[0]).toContain('2025-01');
-    expect(tabNames[1]).toContain('2025-02');
-    expect(tabNames[2]).toContain('2025-03');
-  });
-
-  it('source with only SALDO rows (empty after filter) → tab with header only', async () => {
-    setupCreateSpreadsheet();
-    setupInitialMeta(0);
-    vi.mocked(createSheet).mockResolvedValue(ok(1));
-    vi.mocked(readMovimientosForPeriod).mockResolvedValue(ok([])); // empty after filtering
-    vi.mocked(appendRowsWithLinks).mockResolvedValue(ok(6));
-    vi.mocked(formatSheet).mockResolvedValue(ok(undefined));
-    vi.mocked(deleteSheet).mockResolvedValue(ok(undefined));
-
-    const scope = makeScope({ sheetName: '2025-01', banco: 'BBVA', numeroCuenta: '1234', moneda: 'ARS' });
-    const result = await buildMovimientosWorkbook(FOLDER_ID, scope);
-    expect(result.ok).toBe(true);
-    if (result.ok) expect(result.value.tabCount).toBe(1);
-
-    const appendCall = vi.mocked(appendRowsWithLinks).mock.calls[0];
-    expect(appendCall[2]).toHaveLength(1); // only header row
-  });
-
-  it('readMovimientosForPeriod error on one tab → tab is fully skipped (not created), others written, Result.ok', async () => {
-    // Codex P2: when readMovimientosForPeriod fails (e.g. transient Sheets
-    // error), the previous implementation logged + continued and ended up with
-    // a header-only tab, hiding the data loss behind a successful response.
-    // The fixed implementation skips the tab entirely.
-    setupCreateSpreadsheet();
-    setupInitialMeta(0);
-    vi.mocked(createSheet).mockResolvedValue(ok(1));
-    vi.mocked(readMovimientosForPeriod)
-      .mockResolvedValueOnce(err('Read error'))
-      .mockResolvedValueOnce(ok([makeMovimiento('2025-02-10', 'Pago', 500, 0, 4500, '')]));
-    vi.mocked(appendRowsWithLinks).mockResolvedValue(ok(6));
-    vi.mocked(formatSheet).mockResolvedValue(ok(undefined));
-    vi.mocked(deleteSheet).mockResolvedValue(ok(undefined));
-
-    const scope = [
-      { spreadsheetId: 'src-ssid', sheetName: '2025-01', banco: 'BBVA', numeroCuenta: '1234', moneda: 'ARS' },
-      { spreadsheetId: 'src-ssid', sheetName: '2025-02', banco: 'BBVA', numeroCuenta: '1234', moneda: 'ARS' },
-    ];
-    const result = await buildMovimientosWorkbook(FOLDER_ID, scope);
-    expect(result.ok).toBe(true);
-    if (result.ok) {
-      // Only the successful tab is counted; the failed tab is skipped entirely
-      expect(result.value.tabCount).toBe(1);
-    }
-    // createSheet must NOT have been called for the failed scope item
-    expect(createSheet).toHaveBeenCalledTimes(1);
-    expect(createSheet).toHaveBeenCalledWith(WORKBOOK_ID, '2025-02 BBVA 1234 ARS');
-  });
-
-  it('idempotent retry: deletes pre-existing Movimientos workbook in the folder before creating a new one', async () => {
-    // Codex P2: a retried /api/delivery/build-movimientos call (e.g. after an
-    // Apps Script timeout) would otherwise leave a duplicate Movimientos
-    // workbook beside the prior one. The route is documented as idempotent.
-    vi.mocked(findByName).mockResolvedValue(
-      ok({ id: 'old-workbook-id', name: 'Movimientos', mimeType: 'application/vnd.google-apps.spreadsheet' })
-    );
-    vi.mocked(deleteFileById).mockResolvedValue(ok(undefined));
-    setupCreateSpreadsheet();
-    setupInitialMeta(42);
-    vi.mocked(renameSheet).mockResolvedValue(ok(undefined));
-    vi.mocked(appendRowsWithLinks).mockResolvedValue(ok(6));
-
-    const result = await buildMovimientosWorkbook(FOLDER_ID, []);
-    expect(result.ok).toBe(true);
-    if (result.ok) {
-      // The new workbook is the freshly created one, not the stale old id
-      expect(result.value.workbookId).toBe(WORKBOOK_ID);
-    }
-    expect(deleteFileById).toHaveBeenCalledWith('old-workbook-id');
-    // findByName must look up the correct folder/name/mime
-    expect(findByName).toHaveBeenCalledWith(
-      FOLDER_ID,
-      'Movimientos',
-      'application/vnd.google-apps.spreadsheet'
-    );
-  });
-
-  it('idempotent retry: returns Result.err when deleting the prior workbook fails', async () => {
-    vi.mocked(findByName).mockResolvedValue(
-      ok({ id: 'old-workbook-id', name: 'Movimientos', mimeType: 'application/vnd.google-apps.spreadsheet' })
-    );
-    vi.mocked(deleteFileById).mockResolvedValue(err('Drive delete failed'));
-
-    const result = await buildMovimientosWorkbook(FOLDER_ID, []);
-    expect(result.ok).toBe(false);
     expect(createSpreadsheet).not.toHaveBeenCalled();
   });
 
-  it('sanitizes characters disallowed in Google Sheets tab titles (/, \\, :, ?, *, [, ])', async () => {
-    // Codex P2: production accounts can contain "/" (e.g. "BBVA 007-009364/1 ARS"
-    // per folder-structure.ts:1847). createSheet would reject the unsanitized
-    // title, silently dropping that account's movimientos from the workbook.
-    setupCreateSpreadsheet();
-    setupInitialMeta(0);
-    vi.mocked(createSheet).mockResolvedValue(ok(101));
-    vi.mocked(readMovimientosForPeriod).mockResolvedValue(
-      ok([makeMovimiento('2025-01-10', 'Pago', 500, 0, 4500, '')])
-    );
-    vi.mocked(appendRowsWithLinks).mockResolvedValue(ok(2));
-    vi.mocked(formatSheet).mockResolvedValue(ok(undefined));
-    vi.mocked(deleteSheet).mockResolvedValue(ok(undefined));
+  it('one bank scope item → one spreadsheet named {banco} {numeroCuenta} {moneda} {YYYY-MM}', async () => {
+    vi.mocked(readMovimientosForPeriod).mockResolvedValue(ok([
+      makeBankMovimiento('2026-01-15', 'Pago', 1000, 0, 5000, 'Match XYZ'),
+    ]));
 
-    const scope = [
-      { spreadsheetId: 'src-ssid', sheetName: '2025-01', banco: 'BBVA', numeroCuenta: '007-009364/1', moneda: 'ARS' },
+    const scope: MovimientoScopeItem[] = [
+      { kind: 'bank', spreadsheetId: 'src', sheetName: '2026-01', banco: 'BBVA', numeroCuenta: '1234567890', moneda: 'ARS' },
     ];
-    const result = await buildMovimientosWorkbook(FOLDER_ID, scope);
+    const result = await buildMovimientosFiles(FOLDER_ID, scope);
     expect(result.ok).toBe(true);
-    if (result.ok) expect(result.value.tabCount).toBe(1);
+    if (result.ok) expect(result.value.created).toBe(1);
 
-    // The "/" must be replaced before reaching createSheet
-    const createCall = vi.mocked(createSheet).mock.calls[0];
-    const titleArg = createCall[1] as string;
-    expect(titleArg).not.toContain('/');
-    expect(titleArg).toContain('BBVA');
-    expect(titleArg).toContain('007-009364');
-    expect(titleArg).toContain('ARS');
+    expect(createSpreadsheet).toHaveBeenCalledWith(FOLDER_ID, 'BBVA 1234567890 ARS 2026-01');
+    // Header + 1 data row appended
+    const appendCall = vi.mocked(appendRowsWithLinks).mock.calls[0];
+    const rows = appendCall[2];
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toEqual(['fecha', 'concepto', 'debito', 'credito', 'saldo', 'detalle']);
+    const dataRow = rows[1];
+    expect(dataRow[0]).toMatchObject({ type: 'date', value: '2026-01-15' });
+    expect(dataRow[1]).toBe('Pago');
+    expect(dataRow[2]).toMatchObject({ type: 'number', value: 1000 });
+    // Format applied with frozen header
+    expect(formatSheet).toHaveBeenCalledWith(expect.any(String), 0, expect.objectContaining({ frozenRows: 1 }));
+    // Default Sheet1 renamed to Movimientos
+    expect(renameSheet).toHaveBeenCalledWith(expect.any(String), 0, 'Movimientos');
   });
 
-  it('appendRowsWithLinks failure on one tab → tab is removed, not counted; others written, Result.ok', async () => {
-    // Codex P2: when the data write fails after the tab is created, leaving the
-    // empty tab and incrementing tabCount silently omits the account's data
-    // while reporting success. The fix removes the empty tab and skips it.
-    setupCreateSpreadsheet();
-    setupInitialMeta(0);
-    vi.mocked(createSheet)
-      .mockResolvedValueOnce(ok(101)) // tab for 2025-01 (will fail to append)
-      .mockResolvedValueOnce(ok(102)); // tab for 2025-02 (will succeed)
-    vi.mocked(readMovimientosForPeriod).mockResolvedValue(
-      ok([makeMovimiento('2025-01-10', 'Pago', 500, 0, 4500, '')])
-    );
-    vi.mocked(appendRowsWithLinks)
-      .mockResolvedValueOnce(err('Quota exceeded'))
-      .mockResolvedValueOnce(ok(6));
-    vi.mocked(formatSheet).mockResolvedValue(ok(undefined));
-    vi.mocked(deleteSheet).mockResolvedValue(ok(undefined));
+  it('one card scope item → one spreadsheet with card schema (fecha, descripcion, nroCupon, pesos, dolares, detalle)', async () => {
+    vi.mocked(readCardMovimientosForPeriod).mockResolvedValue(ok([
+      makeCardMovimiento('2026-01-15', 'COMPRA SUPERMERCADO', '012345', 12500, 0, 'Mercado mensual'),
+    ]));
 
-    const scope = [
-      { spreadsheetId: 'src-ssid', sheetName: '2025-01', banco: 'BBVA', numeroCuenta: '1234', moneda: 'ARS' },
-      { spreadsheetId: 'src-ssid', sheetName: '2025-02', banco: 'BBVA', numeroCuenta: '1234', moneda: 'ARS' },
+    const scope: MovimientoScopeItem[] = [
+      { kind: 'card', spreadsheetId: 'src', sheetName: '2026-01', banco: 'BBVA', tipoTarjeta: 'Visa', numeroCuenta: '0941198918' },
     ];
-    const result = await buildMovimientosWorkbook(FOLDER_ID, scope);
+    const result = await buildMovimientosFiles(FOLDER_ID, scope);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value.created).toBe(1);
+
+    expect(createSpreadsheet).toHaveBeenCalledWith(FOLDER_ID, 'BBVA Visa 0941198918 2026-01');
+    // Card schema headers
+    const appendCall = vi.mocked(appendRowsWithLinks).mock.calls[0];
+    const rows = appendCall[2];
+    expect(rows[0]).toEqual(['fecha', 'descripcion', 'nroCupon', 'pesos', 'dolares', 'detalle']);
+    const dataRow = rows[1];
+    expect(dataRow[0]).toMatchObject({ type: 'date', value: '2026-01-15' });
+    expect(dataRow[1]).toBe('COMPRA SUPERMERCADO');
+    expect(dataRow[2]).toBe('012345');
+    expect(dataRow[3]).toMatchObject({ type: 'number', value: 12500 });
+    expect(dataRow[5]).toBe('Mercado mensual');
+  });
+
+  it('account number with "/" is sanitized in the filename', async () => {
+    vi.mocked(readMovimientosForPeriod).mockResolvedValue(ok([
+      makeBankMovimiento('2026-01-10', 'Pago', 500, 0, 4500, ''),
+    ]));
+
+    const scope: MovimientoScopeItem[] = [
+      { kind: 'bank', spreadsheetId: 'src', sheetName: '2026-01', banco: 'BBVA', numeroCuenta: '007-009364/1', moneda: 'ARS' },
+    ];
+    const result = await buildMovimientosFiles(FOLDER_ID, scope);
+    expect(result.ok).toBe(true);
+
+    const nameArg = vi.mocked(createSpreadsheet).mock.calls[0][1] as string;
+    expect(nameArg).not.toContain('/');
+    expect(nameArg).toBe('BBVA 007-009364-1 ARS 2026-01');
+  });
+
+  it('empty source rows → file is skipped (no spreadsheet created), not counted in created or failed', async () => {
+    vi.mocked(readMovimientosForPeriod).mockResolvedValue(ok([]));
+
+    const scope: MovimientoScopeItem[] = [
+      { kind: 'bank', spreadsheetId: 'src', sheetName: '2026-01', banco: 'BBVA', numeroCuenta: '1234', moneda: 'ARS' },
+    ];
+    const result = await buildMovimientosFiles(FOLDER_ID, scope);
     expect(result.ok).toBe(true);
     if (result.ok) {
-      // Only the successful tab is counted
-      expect(result.value.tabCount).toBe(1);
+      expect(result.value.created).toBe(0);
+      expect(result.value.failed).toEqual([]);
     }
-    // The failed tab was deleted (tab 101) and the default sheet was deleted
-    // (post-loop cleanup). The successful tab (102) is NOT deleted.
-    expect(deleteSheet).toHaveBeenCalledWith(WORKBOOK_ID, 101);
-    expect(deleteSheet).not.toHaveBeenCalledWith(WORKBOOK_ID, 102);
-    // Format must NOT be called for the failed tab
-    expect(formatSheet).toHaveBeenCalledTimes(1);
-    expect(formatSheet).toHaveBeenCalledWith(WORKBOOK_ID, 102, expect.anything());
+    expect(createSpreadsheet).not.toHaveBeenCalled();
   });
 
-  it('all createSheet calls fail → falls back to Sin Movimientos placeholder, deleteSheet not called', async () => {
-    setupCreateSpreadsheet();
-    setupInitialMeta(7);
-    vi.mocked(createSheet).mockResolvedValue(err('Sheet quota exceeded'));
-    vi.mocked(renameSheet).mockResolvedValue(ok(undefined));
-    vi.mocked(appendRowsWithLinks).mockResolvedValue(ok(6));
-    vi.mocked(deleteSheet).mockResolvedValue(ok(undefined));
+  it('source read failure on one item → that item lands in failed, others still created', async () => {
+    vi.mocked(readMovimientosForPeriod)
+      .mockResolvedValueOnce(err('Read error'))
+      .mockResolvedValueOnce(ok([makeBankMovimiento('2026-02-10', 'Pago', 500, 0, 4500, '')]));
 
-    const scope = makeScope(
-      { sheetName: '2025-01', banco: 'BBVA', numeroCuenta: '1234', moneda: 'ARS' },
-      { sheetName: '2025-02', banco: 'BBVA', numeroCuenta: '1234', moneda: 'ARS' },
-    );
-    const result = await buildMovimientosWorkbook(FOLDER_ID, scope);
-
+    const scope: MovimientoScopeItem[] = [
+      { kind: 'bank', spreadsheetId: 'src', sheetName: '2026-01', banco: 'BBVA', numeroCuenta: '1234', moneda: 'ARS' },
+      { kind: 'bank', spreadsheetId: 'src', sheetName: '2026-02', banco: 'BBVA', numeroCuenta: '1234', moneda: 'ARS' },
+    ];
+    const result = await buildMovimientosFiles(FOLDER_ID, scope);
     expect(result.ok).toBe(true);
-    if (result.ok) expect(result.value.tabCount).toBe(0);
+    if (result.ok) {
+      expect(result.value.created).toBe(1);
+      expect(result.value.failed).toHaveLength(1);
+      expect(result.value.failed[0]).toMatchObject({ name: 'BBVA 1234 ARS 2026-01', error: 'Read error' });
+    }
+    // createSpreadsheet only called for the successful (2026-02) item
+    expect(createSpreadsheet).toHaveBeenCalledTimes(1);
+    expect(createSpreadsheet).toHaveBeenCalledWith(FOLDER_ID, 'BBVA 1234 ARS 2026-02');
+  });
 
-    // Default sheet must NOT be deleted (would orphan the workbook)
-    expect(deleteSheet).not.toHaveBeenCalled();
-    // Default sheet renamed to Sin Movimientos and headers written
-    expect(renameSheet).toHaveBeenCalledWith(WORKBOOK_ID, 7, 'Sin Movimientos');
-    expect(appendRowsWithLinks).toHaveBeenCalledWith(
-      WORKBOOK_ID,
-      expect.stringContaining('Sin Movimientos'),
-      [expect.arrayContaining(['fecha', 'concepto', 'debito', 'credito', 'saldo', 'detalle'])]
-    );
+  it('pre-flight: deletes existing spreadsheets in the folder before creating new ones (idempotent retry)', async () => {
+    // A retried Apps Script call must not accumulate duplicate files alongside
+    // those created by the first attempt. Pre-flight clears spreadsheet MIME
+    // files only — PDFs already copied by /copy-pdfs are untouched.
+    vi.mocked(listByMimeType).mockResolvedValueOnce(ok([
+      { id: 'stale-1', name: 'BBVA 1234 ARS 2026-01', mimeType: 'application/vnd.google-apps.spreadsheet' },
+      { id: 'stale-2', name: 'BBVA 1234 ARS 2026-02', mimeType: 'application/vnd.google-apps.spreadsheet' },
+    ]));
+    vi.mocked(readMovimientosForPeriod).mockResolvedValue(ok([
+      makeBankMovimiento('2026-01-15', 'Pago', 1000, 0, 5000, ''),
+    ]));
+
+    const scope: MovimientoScopeItem[] = [
+      { kind: 'bank', spreadsheetId: 'src', sheetName: '2026-01', banco: 'BBVA', numeroCuenta: '1234', moneda: 'ARS' },
+    ];
+    const result = await buildMovimientosFiles(FOLDER_ID, scope);
+    expect(result.ok).toBe(true);
+
+    // Stale files deleted before any creation
+    expect(deleteFileById).toHaveBeenCalledWith('stale-1');
+    expect(deleteFileById).toHaveBeenCalledWith('stale-2');
+    // listByMimeType filters to spreadsheet MIME (not folder, not PDF)
+    expect(listByMimeType).toHaveBeenCalledWith(FOLDER_ID, 'application/vnd.google-apps.spreadsheet');
+  });
+
+  it('pre-flight: returns Result.err if listing existing spreadsheets fails', async () => {
+    vi.mocked(listByMimeType).mockResolvedValueOnce(err('Drive list failed'));
+    const result = await buildMovimientosFiles(FOLDER_ID, []);
+    expect(result.ok).toBe(false);
+    // No creation attempted on cleanup failure
+    expect(createSpreadsheet).not.toHaveBeenCalled();
+  });
+
+  it('renameSheet failure → item lands in failed (no misleading append attempt)', async () => {
+    // The append uses 'Movimientos!A:F' — without rename, the tab is still
+    // 'Sheet1', so the append would fail anyway. Skip the item up front
+    // rather than continuing into a guaranteed second error.
+    vi.mocked(readMovimientosForPeriod).mockResolvedValue(ok([
+      makeBankMovimiento('2026-01-15', 'Pago', 1000, 0, 5000, ''),
+    ]));
+    vi.mocked(renameSheet).mockResolvedValue(err('Rename quota exceeded'));
+
+    const scope: MovimientoScopeItem[] = [
+      { kind: 'bank', spreadsheetId: 'src', sheetName: '2026-01', banco: 'BBVA', numeroCuenta: '1234', moneda: 'ARS' },
+    ];
+    const result = await buildMovimientosFiles(FOLDER_ID, scope);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.created).toBe(0);
+      expect(result.value.failed).toEqual([
+        { name: 'BBVA 1234 ARS 2026-01', error: 'Rename quota exceeded' },
+      ]);
+    }
+    // No append should be attempted after the rename failure
+    expect(appendRowsWithLinks).not.toHaveBeenCalled();
+  });
+
+  it('files sorted alphabetically by output filename for predictable folder layout', async () => {
+    vi.mocked(readMovimientosForPeriod).mockResolvedValue(ok([
+      makeBankMovimiento('2026-01-10', 'Pago', 1, 0, 0, ''),
+    ]));
+
+    const scope: MovimientoScopeItem[] = [
+      { kind: 'bank', spreadsheetId: 'src', sheetName: '2026-03', banco: 'BBVA', numeroCuenta: '1234', moneda: 'ARS' },
+      { kind: 'bank', spreadsheetId: 'src', sheetName: '2026-01', banco: 'BBVA', numeroCuenta: '1234', moneda: 'ARS' },
+      { kind: 'bank', spreadsheetId: 'src', sheetName: '2026-02', banco: 'BBVA', numeroCuenta: '1234', moneda: 'ARS' },
+    ];
+    const result = await buildMovimientosFiles(FOLDER_ID, scope);
+    expect(result.ok).toBe(true);
+
+    const names = vi.mocked(createSpreadsheet).mock.calls.map(c => c[1]);
+    expect(names).toEqual([
+      'BBVA 1234 ARS 2026-01',
+      'BBVA 1234 ARS 2026-02',
+      'BBVA 1234 ARS 2026-03',
+    ]);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Periodo normalization (date-serial cells in the Resumenes tab)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('enumerateResumenes — periodo normalization', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  // Sheets serial for 2026-02-01 (Feb 1, 2026, days since 1899-12-30):
+  // Verified by Date.UTC(2026, 1, 1) → 1769904000000 ms → /86_400_000 + 25569 = 46054
+  const SERIAL_2026_02 = 46054;
+  const SERIAL_2026_03 = 46082; // 2026-03-01
+
+  const bancarioHeaders = [
+    'periodo','fechaDesde','fechaHasta','fileId','fileName',
+    'banco','numeroCuenta','moneda','saldoInicial','saldoFinal','balanceOk','balanceDiff',
+  ];
+
+  it('treats a number cell as a Sheets date-serial and normalizes to YYYY-MM', async () => {
+    // Production bug: when a user types "2026-02" into the periodo column,
+    // Sheets may auto-format it as a date and store the underlying value as a
+    // serial number. UNFORMATTED_VALUE rendering then returns the number, and
+    // String(46054) lexicographically exceeds "2026-03", silently dropping the
+    // row from delivery. The fix normalizes both string and number forms.
+    vi.mocked(listByMimeType).mockImplementation(async (id: string) => {
+      if (id === 'root-id') return ok([{ id: 'year-2026', name: '2026', mimeType: 'application/vnd.google-apps.folder' }]);
+      if (id === 'bancos-2026') return ok([{ id: 'acc-1', name: 'BBVA 1234 ARS', mimeType: 'application/vnd.google-apps.folder' }]);
+      return ok([]);
+    });
+    vi.mocked(findByName).mockImplementation(async (parentId: string, name: string) => {
+      if (name === 'Bancos' && parentId === 'year-2026') {
+        return ok({ id: 'bancos-2026', name: 'Bancos', mimeType: 'application/vnd.google-apps.folder' });
+      }
+      if (name === 'Control de Resumenes' && parentId === 'acc-1') {
+        return ok({ id: 'sh-1', name: 'Control de Resumenes', mimeType: 'application/vnd.google-apps.spreadsheet' });
+      }
+      return ok(null);
+    });
+    vi.mocked(getValues).mockResolvedValue(ok([
+      bancarioHeaders,
+      // periodo string (works pre-fix)
+      ['2026-01', '', '', 'fid-jan', 'jan.pdf', '', '', '', 0, 0, true, 0],
+      // periodo as Sheets date-serial (broken pre-fix — silently dropped)
+      [SERIAL_2026_02, '', '', 'fid-feb', 'feb.pdf', '', '', '', 0, 0, true, 0],
+      [SERIAL_2026_03, '', '', 'fid-mar', 'mar.pdf', '', '', '', 0, 0, true, 0],
+    ]));
+
+    const result = await enumerateResumenes('2026-01', '2026-03', 'root-id');
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      const periodos = result.value.map(r => r.periodo).sort();
+      expect(periodos).toEqual(['2026-01', '2026-02', '2026-03']);
+      expect(result.value.find(r => r.fileId === 'fid-feb')?.periodo).toBe('2026-02');
+      expect(result.value.find(r => r.fileId === 'fid-mar')?.periodo).toBe('2026-03');
+    }
+  });
+
+  it('rejects non-positive number serials and out-of-range years (defensive guard)', async () => {
+    // 0 maps to 1899-12-30 and -1 to 1899-12-29 — these are well-formed but
+    // unambiguously not real periodo values. A serial for year 3000 is also
+    // rejected. The guard prevents bogus rows from sneaking past the range
+    // filter due to producing a string that happens to lex-sort plausibly.
+    vi.mocked(listByMimeType).mockImplementation(async (id: string) => {
+      if (id === 'root-id') return ok([{ id: 'year-2026', name: '2026', mimeType: 'application/vnd.google-apps.folder' }]);
+      if (id === 'bancos-2026') return ok([{ id: 'acc-1', name: 'BBVA 1234 ARS', mimeType: 'application/vnd.google-apps.folder' }]);
+      return ok([]);
+    });
+    vi.mocked(findByName).mockImplementation(async (parentId: string, name: string) => {
+      if (name === 'Bancos' && parentId === 'year-2026') {
+        return ok({ id: 'bancos-2026', name: 'Bancos', mimeType: 'application/vnd.google-apps.folder' });
+      }
+      if (name === 'Control de Resumenes' && parentId === 'acc-1') {
+        return ok({ id: 'sh-1', name: 'Control de Resumenes', mimeType: 'application/vnd.google-apps.spreadsheet' });
+      }
+      return ok(null);
+    });
+    // Use a wider range ("0001-01" to "9999-12") so the range filter can't
+    // mask the normalization bug — only the normalizer should reject these.
+    vi.mocked(getValues).mockResolvedValue(ok([
+      bancarioHeaders,
+      [0, '', '', 'fid-zero', 'zero.pdf', '', '', '', 0, 0, true, 0],
+      [-1, '', '', 'fid-neg', 'neg.pdf', '', '', '', 0, 0, true, 0],
+      [401768, '', '', 'fid-far', 'far.pdf', '', '', '', 0, 0, true, 0], // year ~2999
+      [SERIAL_2026_02, '', '', 'fid-feb', 'feb.pdf', '', '', '', 0, 0, true, 0],
+    ]));
+
+    const result = await enumerateResumenes('0001-01', '9999-12', 'root-id');
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      const fileIds = result.value.map(r => r.fileId);
+      expect(fileIds).toEqual(['fid-feb']);
+    }
+  });
+
+  it('skips rows whose periodo is neither a YYYY-MM string nor a finite number', async () => {
+    vi.mocked(listByMimeType).mockImplementation(async (id: string) => {
+      if (id === 'root-id') return ok([{ id: 'year-2026', name: '2026', mimeType: 'application/vnd.google-apps.folder' }]);
+      if (id === 'bancos-2026') return ok([{ id: 'acc-1', name: 'BBVA 1234 ARS', mimeType: 'application/vnd.google-apps.folder' }]);
+      return ok([]);
+    });
+    vi.mocked(findByName).mockImplementation(async (parentId: string, name: string) => {
+      if (name === 'Bancos' && parentId === 'year-2026') {
+        return ok({ id: 'bancos-2026', name: 'Bancos', mimeType: 'application/vnd.google-apps.folder' });
+      }
+      if (name === 'Control de Resumenes' && parentId === 'acc-1') {
+        return ok({ id: 'sh-1', name: 'Control de Resumenes', mimeType: 'application/vnd.google-apps.spreadsheet' });
+      }
+      return ok(null);
+    });
+    vi.mocked(getValues).mockResolvedValue(ok([
+      bancarioHeaders,
+      ['', '', '', 'fid-empty', 'empty.pdf', '', '', '', 0, 0, true, 0],
+      ['garbage', '', '', 'fid-bad', 'bad.pdf', '', '', '', 0, 0, true, 0],
+      ['2026-01', '', '', 'fid-ok', 'ok.pdf', '', '', '', 0, 0, true, 0],
+    ]));
+
+    const result = await enumerateResumenes('2026-01', '2026-03', 'root-id');
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value).toHaveLength(1);
+      expect(result.value[0].fileId).toBe('fid-ok');
+    }
   });
 });

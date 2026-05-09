@@ -13,10 +13,8 @@ import {
 import {
   getValues,
   getSheetMetadata,
-  createSheet,
   appendRowsWithLinks,
   formatSheet,
-  deleteSheet,
   renameSheet,
   columnIndexToLetter,
   type CellDate,
@@ -34,13 +32,15 @@ import {
   renameFile,
 } from './drive.js';
 import { discoverMovimientosSpreadsheets, validateYear } from './folder-structure.js';
-import { readMovimientosForPeriod } from './movimientos-reader.js';
+import { readMovimientosForPeriod, readCardMovimientosForPeriod } from './movimientos-reader.js';
 import { debug, info, warn } from '../utils/logger.js';
 
 const FOLDER_MIME = 'application/vnd.google-apps.folder';
 const SPREADSHEET_MIME = 'application/vnd.google-apps.spreadsheet';
 const BANCOS_FOLDER_NAME = 'Bancos';
 const CONTROL_RESUMENES_SPREADSHEET_NAME = 'Control de Resumenes';
+/** Card-folder type tokens (matches the set accepted by the resumen-tarjeta classifier). */
+const CARD_TYPES = new Set(['Visa', 'Mastercard', 'Amex', 'Naranja', 'Cabal']);
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -55,18 +55,72 @@ export interface ResumenScopeItem {
 }
 
 /**
- * A single movimientos tab entry within the delivery scope
+ * A single movimientos tab entry within the delivery scope.
+ *
+ * `kind: 'bank'` items carry `moneda` (ARS|USD); `kind: 'card'` items carry
+ * `tipoTarjeta` (Visa|Mastercard|Amex|Naranja|Cabal). The two have different
+ * source-row schemas and produce differently named output spreadsheets.
  */
-export interface MovimientoScopeItem {
-  spreadsheetId: string;
-  /** Month tab name in YYYY-MM format */
-  sheetName: string;
-  banco: string;
-  numeroCuenta: string;
-  moneda: string;
-}
+export type MovimientoScopeItem =
+  | {
+      kind: 'bank';
+      spreadsheetId: string;
+      /** Month tab name in YYYY-MM format */
+      sheetName: string;
+      banco: string;
+      numeroCuenta: string;
+      moneda: string;
+    }
+  | {
+      kind: 'card';
+      spreadsheetId: string;
+      /** Month tab name in YYYY-MM format */
+      sheetName: string;
+      banco: string;
+      tipoTarjeta: string;
+      numeroCuenta: string;
+    };
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
+
+/**
+ * Normalizes a `periodo` cell value to canonical YYYY-MM string regardless of
+ * the underlying cell type.
+ *
+ * Why: `getValues()` reads with `valueRenderOption: UNFORMATTED_VALUE` +
+ * `dateTimeRenderOption: SERIAL_NUMBER`. If a user typed "2026-02" into the
+ * periodo column and Sheets auto-formatted it as a date, the underlying value
+ * is a serial number (e.g. 46054 for Feb 2026), not the string "2026-02".
+ * `String(46054)` would not lexicographically compare correctly against
+ * YYYY-MM range bounds and the row would be silently dropped from delivery.
+ *
+ * Returns '' for null/undefined/unrecognized shapes — caller treats empty as
+ * "skip this row".
+ */
+function normalizePeriodo(value: unknown): string {
+  if (value == null) return '';
+  if (typeof value === 'string') {
+    return /^\d{4}-\d{2}$/.test(value) ? value : '';
+  }
+  if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
+    // Sheets serial date: days since 1899-12-30 (UTC). Reject non-positive
+    // serials — they normalize to dates near 1899 that produce valid-looking
+    // YYYY-MM strings but are unambiguously not real periodo values.
+    const ms = (value - 25569) * 86_400_000;
+    const date = new Date(ms);
+    if (Number.isNaN(date.getTime())) return '';
+    const year = date.getUTCFullYear();
+    if (year < 2000 || year > 2100) return '';
+    const month = String(date.getUTCMonth() + 1).padStart(2, '0');
+    return `${year}-${month}`;
+  }
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    const year = value.getUTCFullYear();
+    const month = String(value.getUTCMonth() + 1).padStart(2, '0');
+    return `${year}-${month}`;
+  }
+  return '';
+}
 
 /** Builds an inclusive list of YYYY-MM strings from `from` to `to`. */
 function buildMonthList(from: string, to: string): string[] {
@@ -309,7 +363,7 @@ export async function enumerateResumenes(
 
       for (let i = 1; i < rows.length; i++) {
         const row = rows[i];
-        const periodo = String(row[periodoIdx] ?? '');
+        const periodo = normalizePeriodo(row[periodoIdx]);
         if (!periodo || periodo < from || periodo > to) continue;
 
         const fileId = String(row[fileIdIdx] ?? '');
@@ -367,20 +421,46 @@ export async function enumerateMovimientos(
     const colonIdx = key.indexOf(':');
     const folderName = key.substring(colonIdx + 1);
 
-    // Parse banco / numeroCuenta / moneda from folder name tokens.
-    // Only bank accounts have an ARS/USD suffix. Credit-card and broker folders
-    // also end up with `Movimientos - …` spreadsheets (created by the scanner
-    // for all three types), but their schemas are different and
-    // readMovimientosForPeriod returns [] for them — so without this filter the
-    // delivery workbook would include empty placeholder tabs.
+    // Parse the folder name into a typed scope-item factory.
+    // Bank accounts:  `{Bank} {Account} ARS|USD`        → kind='bank'
+    // Credit cards:   `{Bank} (Visa|Mastercard|...) {Digits}` → kind='card'
+    // Brokers and other folder shapes are ignored — broker movimientos use a
+    // different schema and the user has not requested them in the export.
     const tokens = folderName.split(' ');
     const lastToken = tokens[tokens.length - 1];
-    if (!(tokens.length >= 3 && (lastToken === 'ARS' || lastToken === 'USD'))) {
+    let scopeFactory: ((sheetName: string) => MovimientoScopeItem) | null = null;
+
+    if (tokens.length >= 3 && (lastToken === 'ARS' || lastToken === 'USD')) {
+      const moneda = lastToken;
+      const numeroCuenta = tokens[tokens.length - 2];
+      const banco = tokens.slice(0, tokens.length - 2).join(' ');
+      scopeFactory = (sheetName) => ({
+        kind: 'bank',
+        spreadsheetId,
+        sheetName,
+        banco,
+        numeroCuenta,
+        moneda,
+      });
+    } else if (
+      tokens.length >= 3 &&
+      CARD_TYPES.has(tokens[tokens.length - 2]) &&
+      /^\d+$/.test(lastToken)
+    ) {
+      const numeroCuenta = lastToken;
+      const tipoTarjeta = tokens[tokens.length - 2];
+      const banco = tokens.slice(0, tokens.length - 2).join(' ');
+      scopeFactory = (sheetName) => ({
+        kind: 'card',
+        spreadsheetId,
+        sheetName,
+        banco,
+        tipoTarjeta,
+        numeroCuenta,
+      });
+    } else {
       continue;
     }
-    const moneda = lastToken;
-    const numeroCuenta = tokens[tokens.length - 2];
-    const banco = tokens.slice(0, tokens.length - 2).join(' ');
 
     // Get sheet metadata for this spreadsheet
     const metaResult = await getSheetMetadata(spreadsheetId);
@@ -399,13 +479,7 @@ export async function enumerateMovimientos(
       if (!YYYY_MM.test(sheet.title)) continue;
       if (!months.includes(sheet.title)) continue;
 
-      items.push({
-        spreadsheetId,
-        sheetName: sheet.title,
-        banco,
-        numeroCuenta,
-        moneda,
-      });
+      items.push(scopeFactory(sheet.title));
     }
   }
 
@@ -615,217 +689,252 @@ export async function copyPdfsToDelivery(
   return { ok: true, value: { copied, failed } };
 }
 
-// ── Task 7: buildMovimientosWorkbook ─────────────────────────────────────────
+// ── Task 7: buildMovimientosFiles (one spreadsheet per scope item) ────────────
 
-/** Output column headers for the movimientos workbook */
-const MOVIMIENTOS_OUTPUT_HEADERS = ['fecha', 'concepto', 'debito', 'credito', 'saldo', 'detalle'];
+/** Bank-account movimientos output schema */
+const BANK_OUTPUT_HEADERS = ['fecha', 'concepto', 'debito', 'credito', 'saldo', 'detalle'];
+/** Credit-card movimientos output schema */
+const CARD_OUTPUT_HEADERS = ['fecha', 'descripcion', 'nroCupon', 'pesos', 'dolares', 'detalle'];
 
-/**
- * Replaces characters Google Sheets rejects in sheet titles. Real bank account
- * numbers can contain "/" (e.g. `BBVA 007-009364/1 ARS`); without sanitisation
- * createSheet silently fails and the account is dropped from the workbook.
- */
-function sanitizeTabTitle(title: string): string {
-  return title.replace(/[\\/?*[\]:]/g, '-');
-}
-
-/** Number formats for movimientos workbook columns */
-const MOVIMIENTOS_NUMBER_FORMATS = new Map([
+/** Number formats for the bank movimientos output columns */
+const BANK_NUMBER_FORMATS = new Map([
   [0, { type: 'date' as const }],
   [2, { type: 'currency' as const, decimals: 2 as const }],
   [3, { type: 'currency' as const, decimals: 2 as const }],
   [4, { type: 'currency' as const, decimals: 2 as const }],
 ]);
 
+/** Number formats for the card movimientos output columns */
+const CARD_NUMBER_FORMATS = new Map([
+  [0, { type: 'date' as const }],
+  [3, { type: 'currency' as const, decimals: 2 as const }],
+  [4, { type: 'currency' as const, decimals: 2 as const }],
+]);
+
 /**
- * Renames the default sheet to "Sin Movimientos" and writes the header row.
- * Used both when scope is empty and when every createSheet call in the loop
- * fails — Sheets cannot have zero tabs, so the workbook is left in a
- * consistent placeholder state.
+ * Replaces characters Google Drive / Sheets reject in file or tab titles. Real
+ * bank account numbers can contain "/" (e.g. `BBVA 007-009364/1 ARS`) — without
+ * sanitisation, createSpreadsheet/createSheet silently fails and the file is
+ * dropped.
  */
-async function applySinMovimientosPlaceholder(
-  workbookId: string,
-  defaultSheetId: number
-): Promise<Result<undefined, Error>> {
-  const renameResult = await renameSheet(workbookId, defaultSheetId, 'Sin Movimientos');
-  if (!renameResult.ok) return renameResult;
+function sanitizeFileTitle(title: string): string {
+  return title.replace(/[\\/?*[\]:]/g, '-');
+}
 
-  const appendResult = await appendRowsWithLinks(
-    workbookId,
-    'Sin Movimientos!A:F',
-    [MOVIMIENTOS_OUTPUT_HEADERS]
-  );
-  if (!appendResult.ok) return appendResult;
-
-  return { ok: true, value: undefined };
+/** Builds the output filename for a single scope item. */
+function buildFileName(item: MovimientoScopeItem): string {
+  if (item.kind === 'bank') {
+    return sanitizeFileTitle(`${item.banco} ${item.numeroCuenta} ${item.moneda} ${item.sheetName}`);
+  }
+  return sanitizeFileTitle(`${item.banco} ${item.tipoTarjeta} ${item.numeroCuenta} ${item.sheetName}`);
 }
 
 /**
- * Creates a Google Sheets workbook in the delivery folder with one tab per
- * MovimientoScopeItem. Each tab contains six projected columns from the source:
- * fecha, concepto, debito, credito, saldo (PDF value), detalle.
- *
- * Tab names follow the pattern `YYYY-MM {banco} {numeroCuenta} [{moneda}]`
- * so they sort lexicographically by month.
- *
- * Empty scope: leaves the default Sheet1 renamed to "Sin Movimientos" with
- * only the header row. Returns tabCount: 0.
- *
- * @param folderId - Delivery folder ID to create the workbook in
- * @param scope - List of movimiento tabs to include
- * @returns {workbookId, workbookUrl, tabCount} or error
+ * Reads source movimientos for a scope item and projects them into output
+ * rows. Returns Result.err only on read failure — caller treats that as a
+ * skipped item, not a fatal error.
  */
-export async function buildMovimientosWorkbook(
-  folderId: string,
-  scope: MovimientoScopeItem[]
-): Promise<Result<{ workbookId: string; workbookUrl: string; tabCount: number }, Error>> {
-  // Idempotent retry: if a previous build (or a retried Apps Script call after
-  // a timeout) already left a Movimientos workbook here, delete it first so we
-  // don't accumulate duplicates.
-  const existingResult = await findByName(folderId, 'Movimientos', SPREADSHEET_MIME);
-  if (!existingResult.ok) return existingResult;
-  if (existingResult.value) {
-    const deleteResult = await deleteFileById(existingResult.value.id);
-    if (!deleteResult.ok) return deleteResult;
-  }
-
-  // Create the spreadsheet in the delivery folder
-  const createResult = await createSpreadsheet(folderId, 'Movimientos');
-  if (!createResult.ok) return createResult;
-
-  const workbookId = createResult.value.id;
-  const workbookUrl = `https://docs.google.com/spreadsheets/d/${workbookId}/edit`;
-
-  // Get initial metadata to discover the default Sheet1 tab ID
-  const initMetaResult = await getSheetMetadata(workbookId);
-  if (!initMetaResult.ok) return initMetaResult;
-  const defaultSheet = initMetaResult.value[0];
-
-  // Empty scope: rename default tab and add placeholder headers
-  if (scope.length === 0) {
-    const placeholder = await applySinMovimientosPlaceholder(workbookId, defaultSheet.sheetId);
-    if (!placeholder.ok) return placeholder;
-    return { ok: true, value: { workbookId, workbookUrl, tabCount: 0 } };
-  }
-
-  // Sort scope lexicographically by sheetName (month-major)
-  const sortedScope = [...scope].sort((a, b) => a.sheetName.localeCompare(b.sheetName));
-
-  let tabCount = 0;
-
-  for (const item of sortedScope) {
-    // Build tab name: YYYY-MM {banco} {numeroCuenta} [{moneda}]
-    const tabParts = [item.sheetName, item.banco, item.numeroCuenta];
-    if (item.moneda) tabParts.push(item.moneda);
-    const tabName = sanitizeTabTitle(tabParts.join(' '));
-
-    // Read source first — if a transient Sheets read fails, skip the tab
-    // entirely rather than creating an empty placeholder that would silently
-    // hide missing data behind a successful response.
+async function buildScopeItemRows(
+  item: MovimientoScopeItem
+): Promise<Result<CellValueOrLink[][], Error>> {
+  if (item.kind === 'bank') {
     const rowsResult = await readMovimientosForPeriod(item.spreadsheetId, item.sheetName);
-    if (!rowsResult.ok) {
-      warn('Failed to read movimientos for tab — skipping', {
-        module: 'delivery',
-        phase: 'build-movimientos',
-        sheetName: item.sheetName,
-        spreadsheetId: item.spreadsheetId,
-        error: rowsResult.error.message,
-      });
-      continue;
-    }
-
-    // Create the tab now that we know there's data to write
-    const createTabResult = await createSheet(workbookId, tabName);
-    if (!createTabResult.ok) {
-      warn('Failed to create movimientos tab', {
-        module: 'delivery',
-        phase: 'build-movimientos',
-        tabName,
-        error: createTabResult.error.message,
-      });
-      continue;
-    }
-    const sheetId = createTabResult.value;
-
-    // Build rows: header + data
-    const rows: CellValueOrLink[][] = [MOVIMIENTOS_OUTPUT_HEADERS];
-
+    if (!rowsResult.ok) return rowsResult;
+    const out: CellValueOrLink[][] = [BANK_OUTPUT_HEADERS];
     for (const mov of rowsResult.value) {
-      const row: CellValueOrLink[] = [
+      out.push([
         { type: 'date', value: mov.fecha } as CellDate,
         mov.concepto,
         { type: 'number', value: mov.debito } as CellNumber,
         { type: 'number', value: mov.credito } as CellNumber,
         { type: 'number', value: mov.saldo } as CellNumber,
         mov.detalle,
-      ];
-      rows.push(row);
+      ]);
     }
+    return { ok: true, value: out };
+  }
 
-    // Write rows to tab. If the write fails, remove the empty tab and skip
-    // counting — leaving an empty tab in place would silently omit this
-    // account's data while the route reports success.
-    const appendResult = await appendRowsWithLinks(workbookId, `${tabName}!A:F`, rows);
-    if (!appendResult.ok) {
-      warn('Failed to write movimientos data — removing empty tab', {
+  // Card branch
+  const rowsResult = await readCardMovimientosForPeriod(item.spreadsheetId, item.sheetName);
+  if (!rowsResult.ok) return rowsResult;
+  const out: CellValueOrLink[][] = [CARD_OUTPUT_HEADERS];
+  for (const mov of rowsResult.value) {
+    out.push([
+      { type: 'date', value: mov.fecha } as CellDate,
+      mov.descripcion,
+      mov.nroCupon,
+      { type: 'number', value: mov.pesos } as CellNumber,
+      { type: 'number', value: mov.dolares } as CellNumber,
+      mov.detalle,
+    ]);
+  }
+  return { ok: true, value: out };
+}
+
+/**
+ * Creates one Google Sheets file per `MovimientoScopeItem` directly inside the
+ * delivery folder. Each file is named:
+ *   - bank:  `{banco} {numeroCuenta} {moneda} {YYYY-MM}` (e.g. `BBVA 007-009364-1 ARS 2026-01`)
+ *   - card:  `{banco} {tipoTarjeta} {numeroCuenta} {YYYY-MM}` (e.g. `BBVA Visa 0941198918 2026-01`)
+ *
+ * Why one file per (account × month) instead of a single workbook with N
+ * tabs: accountants asked for files they can grab and forward individually.
+ *
+ * Per-item failures (source read or Sheets API errors) are accumulated into
+ * `failed`; the run never aborts mid-scope. The caller's response surfaces
+ * the count.
+ *
+ * @param folderId - Delivery folder ID to create the files in
+ * @param scope - List of bank+card scope items
+ * @returns {created, failed} where `created` is the number of files written
+ */
+export async function buildMovimientosFiles(
+  folderId: string,
+  scope: MovimientoScopeItem[]
+): Promise<
+  Result<
+    { created: number; failed: Array<{ name: string; error: string }> },
+    Error
+  >
+> {
+  const failed: Array<{ name: string; error: string }> = [];
+  let created = 0;
+
+  // Idempotent retry: a previous run (or an Apps Script timeout-and-retry)
+  // may have left stale spreadsheet files inside this delivery folder.
+  // Delete them all before creating the fresh set — without this, retried
+  // builds accumulate duplicates. PDFs (already copied by /copy-pdfs) are
+  // untouched because we filter by spreadsheet MIME.
+  const existingSheetsResult = await listByMimeType(folderId, SPREADSHEET_MIME);
+  if (!existingSheetsResult.ok) return existingSheetsResult;
+  for (const existing of existingSheetsResult.value) {
+    const deleteResult = await deleteFileById(existing.id);
+    if (!deleteResult.ok) return deleteResult;
+  }
+
+  // Sort by output filename so the resulting folder lists predictably
+  // (account-major, then month within account).
+  const sortedScope = [...scope].sort((a, b) =>
+    buildFileName(a).localeCompare(buildFileName(b))
+  );
+
+  for (const item of sortedScope) {
+    const fileName = buildFileName(item);
+
+    const rowsResult = await buildScopeItemRows(item);
+    if (!rowsResult.ok) {
+      warn('Failed to read movimientos for delivery file — skipping', {
         module: 'delivery',
         phase: 'build-movimientos',
-        tabName,
-        error: appendResult.error.message,
+        fileName,
+        spreadsheetId: item.spreadsheetId,
+        sheetName: item.sheetName,
+        error: rowsResult.error.message,
       });
-      const deleteResult = await deleteSheet(workbookId, sheetId);
-      if (!deleteResult.ok) {
-        warn('Failed to delete empty tab after write failure', {
-          module: 'delivery',
-          phase: 'build-movimientos',
-          tabName,
-          error: deleteResult.error.message,
-        });
-      }
+      failed.push({ name: fileName, error: rowsResult.error.message });
+      continue;
+    }
+    const rows = rowsResult.value;
+
+    // Skip empty months entirely (only header, no data rows). The accountant
+    // doesn't need stub files for accounts without activity.
+    if (rows.length <= 1) {
+      debug('Skipping empty movimientos period', {
+        module: 'delivery',
+        phase: 'build-movimientos',
+        fileName,
+      });
       continue;
     }
 
-    // Format tab: freeze header, number formats for date/currency columns
-    const formatResult = await formatSheet(workbookId, sheetId, {
-      numberFormats: MOVIMIENTOS_NUMBER_FORMATS,
+    const createResult = await createSpreadsheet(folderId, fileName);
+    if (!createResult.ok) {
+      warn('Failed to create movimientos spreadsheet', {
+        module: 'delivery',
+        phase: 'build-movimientos',
+        fileName,
+        error: createResult.error.message,
+      });
+      failed.push({ name: fileName, error: createResult.error.message });
+      continue;
+    }
+    const spreadsheetId = createResult.value.id;
+
+    // Discover the default sheet ID for formatting + rename.
+    const metaResult = await getSheetMetadata(spreadsheetId);
+    if (!metaResult.ok) {
+      warn('Failed to read newly-created spreadsheet metadata', {
+        module: 'delivery',
+        phase: 'build-movimientos',
+        fileName,
+        spreadsheetId,
+        error: metaResult.error.message,
+      });
+      failed.push({ name: fileName, error: metaResult.error.message });
+      continue;
+    }
+    const defaultSheet = metaResult.value[0];
+
+    // Rename Sheet1 → "Movimientos" so the tab name is meaningful. This is
+    // load-bearing: the subsequent append uses 'Movimientos!A:F' as its
+    // range, so a rename failure guarantees the append fails too. Treat the
+    // rename failure as fatal for this item rather than continuing into a
+    // misleading second error.
+    const renameResult = await renameSheet(spreadsheetId, defaultSheet.sheetId, 'Movimientos');
+    if (!renameResult.ok) {
+      warn('Failed to rename default sheet — skipping item', {
+        module: 'delivery',
+        phase: 'build-movimientos',
+        fileName,
+        error: renameResult.error.message,
+      });
+      failed.push({ name: fileName, error: renameResult.error.message });
+      continue;
+    }
+
+    const appendResult = await appendRowsWithLinks(spreadsheetId, 'Movimientos!A:F', rows);
+    if (!appendResult.ok) {
+      warn('Failed to write movimientos rows — file is empty', {
+        module: 'delivery',
+        phase: 'build-movimientos',
+        fileName,
+        error: appendResult.error.message,
+      });
+      failed.push({ name: fileName, error: appendResult.error.message });
+      continue;
+    }
+
+    const numberFormats = item.kind === 'bank' ? BANK_NUMBER_FORMATS : CARD_NUMBER_FORMATS;
+    const formatResult = await formatSheet(spreadsheetId, defaultSheet.sheetId, {
+      numberFormats,
       frozenRows: 1,
     });
     if (!formatResult.ok) {
-      warn('Failed to format movimientos tab', {
+      warn('Failed to format movimientos sheet', {
         module: 'delivery',
         phase: 'build-movimientos',
-        tabName,
+        fileName,
         error: formatResult.error.message,
       });
+      // Non-fatal — file exists with data, just unformatted.
     }
 
-    tabCount++;
+    created++;
+    debug('Movimientos file created', {
+      module: 'delivery',
+      phase: 'build-movimientos',
+      fileName,
+      spreadsheetId,
+    });
   }
 
-  // If every createSheet attempt failed, the workbook still has only the
-  // default Sheet1. Sheets API rejects deleting the only remaining sheet, so
-  // fall back to the Sin Movimientos placeholder treatment instead.
-  if (tabCount === 0) {
-    const placeholder = await applySinMovimientosPlaceholder(workbookId, defaultSheet.sheetId);
-    if (!placeholder.ok) return placeholder;
-  } else {
-    const deleteResult = await deleteSheet(workbookId, defaultSheet.sheetId);
-    if (!deleteResult.ok) {
-      warn('Failed to delete default sheet tab', {
-        module: 'delivery',
-        phase: 'build-movimientos',
-        workbookId,
-        error: deleteResult.error.message,
-      });
-    }
-  }
-
-  info('Movimientos workbook built', {
+  info('Movimientos files built', {
     module: 'delivery',
     phase: 'build-movimientos',
-    workbookId,
-    tabCount,
+    folderId,
+    created,
+    failed: failed.length,
   });
 
-  return { ok: true, value: { workbookId, workbookUrl, tabCount } };
+  return { ok: true, value: { created, failed } };
 }

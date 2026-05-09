@@ -7,6 +7,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
   getRecentMovimientoSheets,
   readMovimientosForPeriod,
+  readCardMovimientosForPeriod,
   getMovimientosToFill,
   isSpecialRow,
 } from './movimientos-reader.js';
@@ -592,5 +593,78 @@ describe('getMovimientosToFill', () => {
     if (result.ok) {
       expect(result.value).toHaveLength(0);
     }
+  });
+});
+
+describe('readCardMovimientosForPeriod', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  // Card movimientos schema (MOVIMIENTOS_TARJETA_SHEET):
+  // fecha, descripcion, nroCupon, pesos, dolares, detalle
+  const cardHeaders = ['fecha', 'descripcion', 'nroCupon', 'pesos', 'dolares', 'detalle'];
+
+  it('returns empty array when only header row is present', async () => {
+    vi.mocked(getValues).mockResolvedValue({
+      ok: true,
+      value: [cardHeaders],
+    });
+
+    const result = await readCardMovimientosForPeriod('ssid', '2026-01');
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value).toEqual([]);
+  });
+
+  it('projects each row into the card schema with parsed numbers', async () => {
+    vi.mocked(getValues).mockResolvedValue({
+      ok: true,
+      value: [
+        cardHeaders,
+        ['2026-01-15', 'COMPRA SUPERMERCADO', '012345', 12500, 0, 'Mercado'],
+        ['2026-01-20', 'COMPRA NETFLIX', '067890', 0, 12.99, ''],
+      ],
+    });
+
+    const result = await readCardMovimientosForPeriod('ssid', '2026-01');
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value).toHaveLength(2);
+      expect(result.value[0]).toMatchObject({
+        fecha: '2026-01-15',
+        descripcion: 'COMPRA SUPERMERCADO',
+        nroCupon: '012345',
+        pesos: 12500,
+        dolares: 0,
+        detalle: 'Mercado',
+      });
+      expect(result.value[1].dolares).toBe(12.99);
+      expect(result.value[1].detalle).toBe('');
+    }
+  });
+
+  it('skips SALDO INICIAL/FINAL rows (driven by descripcion column)', async () => {
+    vi.mocked(getValues).mockResolvedValue({
+      ok: true,
+      value: [
+        cardHeaders,
+        ['2026-01-01', 'SALDO INICIAL', '', 0, 0, ''],
+        ['2026-01-15', 'COMPRA', '012345', 1000, 0, ''],
+        ['2026-01-31', 'SALDO FINAL', '', 0, 0, ''],
+      ],
+    });
+
+    const result = await readCardMovimientosForPeriod('ssid', '2026-01');
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value).toHaveLength(1);
+      expect(result.value[0].descripcion).toBe('COMPRA');
+    }
+  });
+
+  it('returns Result.err when getValues fails', async () => {
+    vi.mocked(getValues).mockResolvedValue({ ok: false, error: new Error('Sheets timeout') });
+    const result = await readCardMovimientosForPeriod('ssid', '2026-01');
+    expect(result.ok).toBe(false);
   });
 });

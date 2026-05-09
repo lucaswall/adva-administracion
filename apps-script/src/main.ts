@@ -186,14 +186,14 @@ export function triggerEnvioContadores(): void {
       failed: Array<{ fileId: string; error: string }>;
     }>(copyUrl, { period: periodo });
 
-    // 8. Progress: building workbook
-    progressToast(`PDFs copiados (${copy.copied}). Generando movimientos...`);
+    // 8. Progress: building per-account movimientos files
+    progressToast(`PDFs copiados (${copy.copied}). Creando archivos de movimientos por cuenta...`);
 
-    // 9. Build movimientos workbook in delivery folder
+    // 9. Build per-(account × month) movimientos spreadsheets in delivery folder
     const buildUrl = getApiUrl('/api/delivery/build-movimientos');
     const build = callDeliveryApi<{
-      workbookUrl: string;
-      tabCount: number;
+      created: number;
+      failed: Array<{ name: string; error: string }>;
     }>(buildUrl, { period: periodo, folderId: copy.folderId });
 
     // 10. Short "done" toast — clears the lingering progress toast
@@ -202,10 +202,13 @@ export function triggerEnvioContadores(): void {
     // 11. Summary modal
     let summary = `Carpeta: ${plan.folderName}\n`;
     summary += `PDFs copiados: ${copy.copied}\n`;
-    summary += `Hojas de movimientos: ${build.tabCount}\n`;
+    summary += `Archivos de movimientos: ${build.created}\n`;
     summary += `\nCarpeta en Drive:\n${copy.folderUrl}`;
     if (copy.failed.length > 0) {
       summary += `\n\n⚠️ ${copy.failed.length} PDF(s) no pudieron copiarse.`;
+    }
+    if (build.failed.length > 0) {
+      summary += `\n⚠️ ${build.failed.length} archivo(s) de movimientos no pudieron crearse.`;
     }
 
     ui.alert('✅ Entrega lista', summary, ui.ButtonSet.OK);
