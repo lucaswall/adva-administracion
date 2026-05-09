@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.8.2] - 2026-05-09
+
+### Fixed
+- Pagos Pendientes and Cobros Pendientes dashboard sheets no longer include blank rows from empty source rows in Facturas Recibidas/Emitidas
+- `fileName` cells in Pagos Pendientes and Cobros Pendientes are now clickable links to the Drive document, matching the rest of the dashboard
+
 ## [1.8.1] - 2026-05-09
 
 ### Fixed
@@ -164,7 +170,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Updated fastify to fix high-severity Content-Type body validation bypass and low-severity DoS vulnerability
 - Updated googleapis to v171, @google/clasp to v3, and resolved 6 npm audit vulnerabilities
 
-[Unreleased]: https://github.com/lucaswall/adva-administracion/compare/v1.8.1...HEAD
+[Unreleased]: https://github.com/lucaswall/adva-administracion/compare/v1.8.2...HEAD
+[1.8.2]: https://github.com/lucaswall/adva-administracion/compare/v1.8.1...v1.8.2
 [1.8.1]: https://github.com/lucaswall/adva-administracion/compare/v1.8.0...v1.8.1
 [1.8.0]: https://github.com/lucaswall/adva-administracion/compare/v1.7.0...v1.8.0
 [1.7.0]: https://github.com/lucaswall/adva-administracion/compare/v1.6.0...v1.7.0
