@@ -33,6 +33,15 @@ vi.mock('../services/folder-structure.js', () => ({
   getCachedFolderStructure: () => mockGetCachedFolderStructure(),
 }));
 
+// Mock drive helpers used by routes (Entregas/ ancestry guard)
+const mockFindByName = vi.fn();
+const mockIsDescendantOf = vi.fn();
+
+vi.mock('../services/drive.js', () => ({
+  findByName: (...args: unknown[]) => mockFindByName(...args),
+  isDescendantOf: (...args: unknown[]) => mockIsDescendantOf(...args),
+}));
+
 // Mock config
 vi.mock('../config.js', () => ({
   getConfig: vi.fn(),
@@ -236,7 +245,7 @@ describe('Delivery routes', () => {
       mockEnumerateMovimientos.mockResolvedValue({
         ok: true,
         value: [
-          { spreadsheetId: 'sp1', sheetName: '2025-01', bankName: 'BBVA ARS' },
+          { spreadsheetId: 'sp1', sheetName: '2025-01', banco: 'BBVA', numeroCuenta: '1234567890', moneda: 'ARS' },
         ],
       });
       mockFormatDeliveryFolderName.mockReturnValue('Entregas 2025-01 - 08-05-2025');
@@ -546,6 +555,16 @@ describe('Delivery routes', () => {
   // ───────────────────────────────────────────────────────────────────────────
 
   describe('POST /api/delivery/build-movimientos', () => {
+    beforeEach(() => {
+      // Default mocks for the IDOR/ancestry guard: Entregas/ exists and the
+      // supplied folderId is a descendant. Individual tests override these.
+      mockFindByName.mockResolvedValue({
+        ok: true,
+        value: { id: 'entregas-id', name: 'Entregas', mimeType: 'application/vnd.google-apps.folder' },
+      });
+      mockIsDescendantOf.mockResolvedValue({ ok: true, value: true });
+    });
+
     it('returns 401 when authorization header is missing', async () => {
       const response = await server.inject({
         method: 'POST',
@@ -650,9 +669,9 @@ describe('Delivery routes', () => {
       mockEnumerateMovimientos.mockResolvedValue({
         ok: true,
         value: [
-          { spreadsheetId: 'sp1', sheetName: '2025-01', bankName: 'BBVA ARS' },
-          { spreadsheetId: 'sp1', sheetName: '2025-02', bankName: 'BBVA ARS' },
-          { spreadsheetId: 'sp2', sheetName: '2025-01', bankName: 'Galicia USD' },
+          { spreadsheetId: 'sp1', sheetName: '2025-01', banco: 'BBVA', numeroCuenta: '1234567890', moneda: 'ARS' },
+          { spreadsheetId: 'sp1', sheetName: '2025-02', banco: 'BBVA', numeroCuenta: '1234567890', moneda: 'ARS' },
+          { spreadsheetId: 'sp2', sheetName: '2025-01', banco: 'Galicia', numeroCuenta: '9876543210', moneda: 'USD' },
         ],
       });
       mockBuildMovimientosWorkbook.mockResolvedValue({
@@ -683,7 +702,7 @@ describe('Delivery routes', () => {
         value: { from: '2025-01', to: '2025-01' },
       });
       const mockScope = [
-        { spreadsheetId: 'sp1', sheetName: '2025-01', bankName: 'BBVA ARS' },
+        { spreadsheetId: 'sp1', sheetName: '2025-01', banco: 'BBVA', numeroCuenta: '1234567890', moneda: 'ARS' },
       ];
       mockEnumerateMovimientos.mockResolvedValue({ ok: true, value: mockScope });
       mockBuildMovimientosWorkbook.mockResolvedValue({
@@ -730,6 +749,91 @@ describe('Delivery routes', () => {
           error: 'Internal spreadsheet ID leaked',
         })
       );
+    });
+
+    // ─── IDOR / Entregas ancestry guard (ADV-238) ────────────────────────────
+
+    it('returns 400 with Spanish message when folderId is not a descendant of Entregas/', async () => {
+      mockParsePeriodRange.mockReturnValue({
+        ok: true,
+        value: { from: '2025-01', to: '2025-01' },
+      });
+      mockIsDescendantOf.mockResolvedValue({ ok: true, value: false });
+
+      const response = await server.inject({
+        method: 'POST',
+        url: '/api/delivery/build-movimientos',
+        headers: { authorization: 'Bearer test-secret-123' },
+        payload: { period: '2025-01', folderId: 'attacker-folder-id' },
+      });
+
+      expect(response.statusCode).toBe(400);
+      const body = JSON.parse(response.payload);
+      expect(body.error).toBe('folderId no pertenece a la carpeta Entregas/');
+      // Validation must happen BEFORE any expensive enumeration / build call
+      expect(mockEnumerateMovimientos).not.toHaveBeenCalled();
+      expect(mockBuildMovimientosWorkbook).not.toHaveBeenCalled();
+    });
+
+    it('proceeds normally when folderId IS a descendant of Entregas/', async () => {
+      mockParsePeriodRange.mockReturnValue({
+        ok: true,
+        value: { from: '2025-01', to: '2025-01' },
+      });
+      mockIsDescendantOf.mockResolvedValue({ ok: true, value: true });
+      mockEnumerateMovimientos.mockResolvedValue({ ok: true, value: [] });
+      mockBuildMovimientosWorkbook.mockResolvedValue({
+        ok: true,
+        value: { workbookId: 'wb1', workbookUrl: 'https://docs.google.com/spreadsheets/d/wb1', tabCount: 0 },
+      });
+
+      const response = await server.inject({
+        method: 'POST',
+        url: '/api/delivery/build-movimientos',
+        headers: { authorization: 'Bearer test-secret-123' },
+        payload: { period: '2025-01', folderId: 'legit-folder-inside-entregas' },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(mockIsDescendantOf).toHaveBeenCalledWith('legit-folder-inside-entregas', 'entregas-id');
+      expect(mockBuildMovimientosWorkbook).toHaveBeenCalled();
+    });
+
+    it('returns 500 when the Entregas/ folder cannot be located', async () => {
+      mockParsePeriodRange.mockReturnValue({
+        ok: true,
+        value: { from: '2025-01', to: '2025-01' },
+      });
+      mockFindByName.mockResolvedValue({ ok: true, value: null });
+
+      const response = await server.inject({
+        method: 'POST',
+        url: '/api/delivery/build-movimientos',
+        headers: { authorization: 'Bearer test-secret-123' },
+        payload: { period: '2025-01', folderId: 'folder-abc' },
+      });
+
+      expect(response.statusCode).toBe(500);
+      expect(mockEnumerateMovimientos).not.toHaveBeenCalled();
+      expect(mockBuildMovimientosWorkbook).not.toHaveBeenCalled();
+    });
+
+    it('returns 500 when the descendant check itself fails', async () => {
+      mockParsePeriodRange.mockReturnValue({
+        ok: true,
+        value: { from: '2025-01', to: '2025-01' },
+      });
+      mockIsDescendantOf.mockResolvedValue({ ok: false, error: new Error('Drive timeout') });
+
+      const response = await server.inject({
+        method: 'POST',
+        url: '/api/delivery/build-movimientos',
+        headers: { authorization: 'Bearer test-secret-123' },
+        payload: { period: '2025-01', folderId: 'folder-abc' },
+      });
+
+      expect(response.statusCode).toBe(500);
+      expect(mockBuildMovimientosWorkbook).not.toHaveBeenCalled();
     });
   });
 });

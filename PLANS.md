@@ -551,3 +551,33 @@ Five fixes, TDD-driven. Order is independent — any ordering works because the 
 After all 5 fixes are implemented:
 1. Run `bug-hunter` agent — confirm no regressions and no new issues introduced by the fixes.
 2. Run `verifier` agent — confirm all tests pass and zero warnings.
+
+---
+
+## Iteration 2
+
+**Implemented:** 2026-05-08
+**Method:** Single-agent (5 fixes × S = 5 effort points across 2 work units, below worker threshold)
+
+### Tasks Completed This Iteration
+- Fix 1 [ADV-237]: prepareDeliveryFolder — replaced `f.name.startsWith(prefix)` with `extractPeriodPrefix(f.name) === prefix` so a single-month re-delivery no longer clobbers an existing multi-month folder.
+- Fix 2 [ADV-238]: build-movimientos route — added IDOR guard validating `folderId` is a descendant of `Entregas/` before any write (`findByName` + `isDescendantOf` from `drive.ts`); rejects with Spanish 400 message.
+- Fix 3 [ADV-239]: buildMovimientosWorkbook — extracted `Sin Movimientos` placeholder into private `applySinMovimientosPlaceholder` helper, used both for empty scope AND when every `createSheet` call fails (guards against orphaned workbook + Sheets-API "cannot delete only sheet" error).
+- Fix 4 [ADV-240]: delivery.test.ts — replaced wrong-shape `bankName` mock fixtures (5 occurrences) with the real `banco`/`numeroCuenta`/`moneda` fields.
+- Fix 5 [ADV-241]: delivery-package.ts — removed local `colLetter` helper, now imports `columnIndexToLetter` from `./sheets.js`. Test mock for `./sheets.js` extended with a real-behavior `columnIndexToLetter` implementation.
+
+### Files Modified
+- `src/services/delivery-package.ts` — predicate fix, helper extraction, import swap
+- `src/services/delivery-package.test.ts` — added prefix-equality, all-fail-branch tests; mock for `columnIndexToLetter`
+- `src/routes/delivery.ts` — IDOR guard import + validation block
+- `src/routes/delivery.test.ts` — drive.js mock; 4 new IDOR tests; fixture shape correction
+
+### Linear Updates
+- ADV-237 → Review · ADV-238 → Review · ADV-239 → Review · ADV-240 → Review · ADV-241 → Review
+
+### Verification
+- bug-hunter: no bugs found in current changes; all 5 fixes verified for logic, security, async, type-safety, CLAUDE.md compliance.
+- verifier: 2256 tests pass, zero warnings on lint, zero warnings on typecheck, server + apps-script bundle build cleanly.
+
+### Continuation Status
+All Fix Plan items completed.

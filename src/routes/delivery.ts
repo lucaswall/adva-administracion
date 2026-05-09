@@ -21,8 +21,11 @@ import {
 } from '../services/delivery-package.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { getCachedFolderStructure } from '../services/folder-structure.js';
+import { findByName, isDescendantOf } from '../services/drive.js';
 import { getConfig } from '../config.js';
 import { respond500, respond503 } from '../utils/error-response.js';
+
+const FOLDER_MIME = 'application/vnd.google-apps.folder';
 
 /**
  * Request body for period-based endpoints
@@ -230,6 +233,25 @@ export async function deliveryRoutes(server: FastifyInstance) {
 
     const config = getConfig();
     const rootFolderId = config.driveRootFolderId;
+
+    // IDOR guard: confirm folderId is inside Entregas/ before any write.
+    // The Apps Script flow always supplies a folderId returned by /copy-pdfs,
+    // so the legitimate path is unaffected — this rejects misuse.
+    const entregasResult = await findByName(rootFolderId, 'Entregas', FOLDER_MIME);
+    if (!entregasResult.ok) {
+      return respond500(reply, entregasResult.error, { module: 'delivery', phase: 'build-movimientos' });
+    }
+    if (!entregasResult.value) {
+      return respond500(reply, new Error('Carpeta Entregas/ no encontrada'), { module: 'delivery', phase: 'build-movimientos' });
+    }
+    const ancestorCheck = await isDescendantOf(folderId, entregasResult.value.id);
+    if (!ancestorCheck.ok) {
+      return respond500(reply, ancestorCheck.error, { module: 'delivery', phase: 'build-movimientos' });
+    }
+    if (!ancestorCheck.value) {
+      reply.status(400);
+      return { error: 'folderId no pertenece a la carpeta Entregas/' };
+    }
 
     // Enumerate movimientos scope
     const movimientosResult = await enumerateMovimientos(from, to, rootFolderId);

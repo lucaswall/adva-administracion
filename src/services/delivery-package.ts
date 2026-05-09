@@ -18,6 +18,7 @@ import {
   formatSheet,
   deleteSheet,
   renameSheet,
+  columnIndexToLetter,
   type CellDate,
   type CellNumber,
   type CellValueOrLink,
@@ -65,11 +66,6 @@ export interface MovimientoScopeItem {
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
-
-/** Converts a 1-based column count to an A1 column letter (supports A–Z). */
-function colLetter(count: number): string {
-  return String.fromCharCode(64 + count);
-}
 
 /** Builds an inclusive list of YYYY-MM strings from `from` to `to`. */
 function buildMonthList(from: string, to: string): string[] {
@@ -203,7 +199,7 @@ function widestResumenesColumn(): string {
     CONTROL_RESUMENES_TARJETA_SHEET.headers.length,
     CONTROL_RESUMENES_BROKER_SHEET.headers.length
   );
-  return colLetter(widest);
+  return columnIndexToLetter(widest);
 }
 
 /**
@@ -511,7 +507,7 @@ export async function prepareDeliveryFolder(
   if (!existingFoldersResult.ok) return existingFoldersResult;
 
   const existing = existingFoldersResult.value.find(
-    f => f.name === folderName || f.name.startsWith(prefix)
+    f => f.name === folderName || extractPeriodPrefix(f.name) === prefix
   );
 
   if (existing) {
@@ -634,6 +630,29 @@ const MOVIMIENTOS_NUMBER_FORMATS = new Map([
 ]);
 
 /**
+ * Renames the default sheet to "Sin Movimientos" and writes the header row.
+ * Used both when scope is empty and when every createSheet call in the loop
+ * fails — Sheets cannot have zero tabs, so the workbook is left in a
+ * consistent placeholder state.
+ */
+async function applySinMovimientosPlaceholder(
+  workbookId: string,
+  defaultSheetId: number
+): Promise<Result<undefined, Error>> {
+  const renameResult = await renameSheet(workbookId, defaultSheetId, 'Sin Movimientos');
+  if (!renameResult.ok) return renameResult;
+
+  const appendResult = await appendRowsWithLinks(
+    workbookId,
+    'Sin Movimientos!A:F',
+    [MOVIMIENTOS_OUTPUT_HEADERS]
+  );
+  if (!appendResult.ok) return appendResult;
+
+  return { ok: true, value: undefined };
+}
+
+/**
  * Creates a Google Sheets workbook in the delivery folder with one tab per
  * MovimientoScopeItem. Each tab contains six projected columns from the source:
  * fecha, concepto, debito, credito, saldo (PDF value), detalle.
@@ -666,16 +685,8 @@ export async function buildMovimientosWorkbook(
 
   // Empty scope: rename default tab and add placeholder headers
   if (scope.length === 0) {
-    const renameResult = await renameSheet(workbookId, defaultSheet.sheetId, 'Sin Movimientos');
-    if (!renameResult.ok) return renameResult;
-
-    const appendResult = await appendRowsWithLinks(
-      workbookId,
-      'Sin Movimientos!A:F',
-      [MOVIMIENTOS_OUTPUT_HEADERS]
-    );
-    if (!appendResult.ok) return appendResult;
-
+    const placeholder = await applySinMovimientosPlaceholder(workbookId, defaultSheet.sheetId);
+    if (!placeholder.ok) return placeholder;
     return { ok: true, value: { workbookId, workbookUrl, tabCount: 0 } };
   }
 
@@ -760,15 +771,22 @@ export async function buildMovimientosWorkbook(
     tabCount++;
   }
 
-  // Delete the default Sheet1 tab (must happen after all real tabs are added)
-  const deleteResult = await deleteSheet(workbookId, defaultSheet.sheetId);
-  if (!deleteResult.ok) {
-    warn('Failed to delete default sheet tab', {
-      module: 'delivery',
-      phase: 'build-movimientos',
-      workbookId,
-      error: deleteResult.error.message,
-    });
+  // If every createSheet attempt failed, the workbook still has only the
+  // default Sheet1. Sheets API rejects deleting the only remaining sheet, so
+  // fall back to the Sin Movimientos placeholder treatment instead.
+  if (tabCount === 0) {
+    const placeholder = await applySinMovimientosPlaceholder(workbookId, defaultSheet.sheetId);
+    if (!placeholder.ok) return placeholder;
+  } else {
+    const deleteResult = await deleteSheet(workbookId, defaultSheet.sheetId);
+    if (!deleteResult.ok) {
+      warn('Failed to delete default sheet tab', {
+        module: 'delivery',
+        phase: 'build-movimientos',
+        workbookId,
+        error: deleteResult.error.message,
+      });
+    }
   }
 
   info('Movimientos workbook built', {

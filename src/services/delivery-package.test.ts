@@ -17,6 +17,16 @@ vi.mock('./sheets.js', () => ({
   formatSheet: vi.fn(),
   deleteSheet: vi.fn(),
   renameSheet: vi.fn(),
+  columnIndexToLetter: (index: number): string => {
+    let result = '';
+    let remaining = index;
+    while (remaining > 0) {
+      const digit = (remaining - 1) % 26;
+      result = String.fromCharCode(65 + digit) + result;
+      remaining = Math.floor((remaining - 1) / 26);
+    }
+    return result;
+  },
 }));
 
 vi.mock('./drive.js', () => ({
@@ -949,6 +959,60 @@ describe('prepareDeliveryFolder', () => {
     expect(deleteFileById).not.toHaveBeenCalledWith('period-id');
   });
 
+  it('does NOT match a multi-month folder when re-delivering a single month with the same starting period', async () => {
+    // BUG: a startsWith("2025-01 ") check would incorrectly match
+    // "2025-01 al 2025-12 (entregado ...)". The fix anchors the comparison
+    // to the full period token via extractPeriodPrefix.
+    vi.mocked(findByName).mockResolvedValueOnce(
+      ok({ id: 'entregas-id', name: 'Entregas', mimeType: FOLDER_MIME })
+    );
+    vi.mocked(listByMimeType).mockResolvedValue(ok([
+      {
+        id: 'multi-month-id',
+        name: '2025-01 al 2025-12 (entregado 2025-05-01)',
+        mimeType: FOLDER_MIME,
+      },
+    ]));
+    vi.mocked(createFolder).mockResolvedValueOnce(
+      ok({ id: 'new-period-id', name: FOLDER_NAME, mimeType: FOLDER_MIME })
+    );
+
+    const result = await prepareDeliveryFolder(ROOT_ID, FOLDER_NAME, DELIVERY_DATE);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.folderId).toBe('new-period-id');
+      expect(result.value.isReuse).toBe(false);
+    }
+    // The multi-month folder must remain untouched
+    expect(deleteFileById).not.toHaveBeenCalled();
+    expect(renameFile).not.toHaveBeenCalled();
+  });
+
+  it('reuses existing single-month folder when re-delivering same month on a different day', async () => {
+    // Complementary to the "no false match" test: confirms the period-prefix
+    // equality check still works for the legitimate same-period re-delivery case.
+    const PRIOR_NAME = '2025-01 (entregado 2025-05-01)';
+    vi.mocked(findByName).mockResolvedValueOnce(
+      ok({ id: 'entregas-id', name: 'Entregas', mimeType: FOLDER_MIME })
+    );
+    vi.mocked(listByMimeType).mockImplementation(async (folderId: string, mime: string) => {
+      if (folderId === 'entregas-id' && mime === FOLDER_MIME) {
+        return ok([{ id: 'period-id', name: PRIOR_NAME, mimeType: FOLDER_MIME }]);
+      }
+      return ok([]);
+    });
+    vi.mocked(deleteFileById).mockResolvedValue(ok(undefined));
+    vi.mocked(renameFile).mockResolvedValue(ok(undefined));
+
+    const result = await prepareDeliveryFolder(ROOT_ID, FOLDER_NAME, DELIVERY_DATE);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.folderId).toBe('period-id');
+      expect(result.value.isReuse).toBe(true);
+    }
+    expect(renameFile).toHaveBeenCalledWith('period-id', FOLDER_NAME);
+  });
+
   it('returns Result.err when Drive error occurs during create', async () => {
     vi.mocked(findByName).mockResolvedValue(ok(null));
     vi.mocked(createFolder).mockResolvedValue(err('Drive API error'));
@@ -1217,5 +1281,33 @@ describe('buildMovimientosWorkbook', () => {
       // Both tabs still counted (tab created, just no data)
       expect(result.value.tabCount).toBe(2);
     }
+  });
+
+  it('all createSheet calls fail → falls back to Sin Movimientos placeholder, deleteSheet not called', async () => {
+    setupCreateSpreadsheet();
+    setupInitialMeta(7);
+    vi.mocked(createSheet).mockResolvedValue(err('Sheet quota exceeded'));
+    vi.mocked(renameSheet).mockResolvedValue(ok(undefined));
+    vi.mocked(appendRowsWithLinks).mockResolvedValue(ok(6));
+    vi.mocked(deleteSheet).mockResolvedValue(ok(undefined));
+
+    const scope = makeScope(
+      { sheetName: '2025-01', banco: 'BBVA', numeroCuenta: '1234', moneda: 'ARS' },
+      { sheetName: '2025-02', banco: 'BBVA', numeroCuenta: '1234', moneda: 'ARS' },
+    );
+    const result = await buildMovimientosWorkbook(FOLDER_ID, scope);
+
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value.tabCount).toBe(0);
+
+    // Default sheet must NOT be deleted (would orphan the workbook)
+    expect(deleteSheet).not.toHaveBeenCalled();
+    // Default sheet renamed to Sin Movimientos and headers written
+    expect(renameSheet).toHaveBeenCalledWith(WORKBOOK_ID, 7, 'Sin Movimientos');
+    expect(appendRowsWithLinks).toHaveBeenCalledWith(
+      WORKBOOK_ID,
+      expect.stringContaining('Sin Movimientos'),
+      [expect.arrayContaining(['fecha', 'concepto', 'debito', 'credito', 'saldo', 'detalle'])]
+    );
   });
 });
