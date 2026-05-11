@@ -151,3 +151,53 @@
 - Lock auto-expiry vs. `withQuotaRetry`: if Google throttles severely and a retry chain runs >60 s, the lock could expire mid-body and a second waiter could enter while the first is still inside. Mitigate by making the auto-expiry generous (60 s) and ensuring the inner body is idempotent (it currently is — `appendCells` always appends to end). Raise expiry to 120 s if concerns surface.
 - Performance: serializing per-sheet adds latency proportional to (concurrency × average appendCells duration). For a 15-factura scan at ~250 ms per call, that's ~3 s of added latency. Negligible against the 100+ s typical scan duration. Acceptable trade-off for correctness.
 - Task 3's response-verification depends on Google's response shape. If `replies[0].appendCells` is empty even on success, the fallback `getValues` round-trip adds one read per append. Mitigation: only verify on the first attempt; skip on retries (we trust the lock).
+
+---
+
+## Iteration 1
+
+**Date:** 2026-05-11
+**Method:** single-agent (5 tasks, 2 independent units, 8 effort points → below worker threshold)
+**Status:** COMPLETE
+
+### Tasks Completed
+
+- **Task 1** — Failing tests for concurrent `appendRowsWithLinks` row loss (`src/services/sheets.test.ts`)
+- **Task 2** — Added `withLockResult` adapter in `src/utils/concurrency.ts`; wrapped `appendRowsWithLinks` with per-sheet `withLock` keyed `sheet-append:${spreadsheetId}:${sheetName}`
+- **Task 3** — Response validation: throw on missing `replies[0]` so `withQuotaRetry` retries
+- **Task 4** — `DuplicateCache.addEntry` now normalizes `CellDate` / `CellNumber` / `CellLink` / `CellFormula` wrappers to primitives via `normalizeForCache`
+- **Task 5** — Added "SHEETS API CONCURRENCY" section to CLAUDE.md; JSDoc on `appendRowsWithLinks` reflects the new contract
+
+### Files Modified
+
+- `src/services/sheets.ts` — appendRowsWithLinks restructured; lock keyed per-sheet; response validated; `withTiming` placed inside lock body to keep durationMs lock-free
+- `src/utils/concurrency.ts` — added `withLockResult`
+- `src/processing/caches/duplicate-cache.ts` — added `normalizeForCache`; `addEntry` now normalizes rows before storing
+- `src/services/sheets.test.ts` — new "appendRowsWithLinks concurrency (ADV-242)" describe with 3 tests; mocks updated to return realistic `replies` array; `quotaThrottle.reset()` added to beforeEach (cross-describe pollution fix)
+- `src/utils/concurrency.test.ts` — 5 tests for `withLockResult`
+- `src/processing/caches/duplicate-cache.test.ts` — 3 tests for wrapper-cell normalization with `CellNumber` shapes
+- `CLAUDE.md` — new SHEETS API CONCURRENCY subsection
+
+### Bug-Hunter Findings (Pre-Merge)
+
+4 issues found and fixed before commit:
+
+1. **HIGH** — Lock auto-expiry was 120 s but `SHEETS_QUOTA_RETRY_CONFIG` can produce ~12-min retry chains, risking re-opening the ADV-242 race after expiry. **Fix:** Raised to 900 s (15 min); the expiry is now intended solely to recover from a crashed holder.
+2. **MEDIUM** — Comments claimed `appendCells` is idempotent "at worst duplicates, never overwrites." **Fix:** Both occurrences (sheets.ts and CLAUDE.md) now state plainly that `appendCells` is NOT idempotent w.r.t. server-side end-of-data detection.
+3. **LOW** — `withTiming` wrapped `withLockResult`, so lock-wait time was logged as API duration and tripped SLOW_CALL_THRESHOLD_MS warnings on every queued append. **Fix:** Moved `withTiming` inside the lock body.
+4. **LOW** — JSDoc referred to `replies[0].appendCells` which doesn't exist in the schema. **Fix:** Updated to reflect that successful responses return `replies[0]` as empty `{}`.
+
+### Verification
+
+- `npm test` → 2281 / 2281 tests passing
+- `npm run build` → clean, zero warnings (Apps Script bundle also generated successfully)
+
+### Cross-Describe Test Pollution (Diagnosed During Implementation)
+
+Older `sheets.test.ts` describes use `vi.useFakeTimers()` while exercising quota-retry paths that call `quotaThrottle.reportQuotaError()`. The throttle is a module-level singleton; its `lastErrorTime` captured under fake time can land in the *future* relative to the real `Date.now()` used by the new concurrency describe — making the auto-reset window never satisfy and forcing a 5 s wait on every API call.
+
+Fix: new describe calls `quotaThrottle.reset()` in `beforeEach`. Documented in CLAUDE.md under "Test hygiene note" so future maintainers writing real-timer specs against the same modules don't repeat the debug session.
+
+### Tasks Remaining
+
+None. Plan complete.

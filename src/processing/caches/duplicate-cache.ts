@@ -4,6 +4,27 @@ import { normalizeSpreadsheetDate } from '../../utils/date.js';
 import { parseNumber } from '../../utils/numbers.js';
 
 /**
+ * Reduces a `CellValueOrLink`-shaped cell to the primitive shape that
+ * `getValues` returns for the same cell. The dupe-check methods compare cache
+ * rows assuming spreadsheet-read shape (string/number primitives), so wrappers
+ * coming from `appendRowsWithLinks` callers must be unwrapped before storing.
+ */
+export function normalizeForCache(cell: unknown): unknown {
+  if (cell && typeof cell === 'object') {
+    if ('type' in cell && 'value' in cell) {
+      const c = cell as { type: unknown; value: unknown };
+      if (c.type === 'date' || c.type === 'number' || c.type === 'formula') {
+        return c.value;
+      }
+    }
+    if ('text' in cell && 'url' in cell) {
+      return (cell as { text: unknown }).text;
+    }
+  }
+  return cell;
+}
+
+/**
  * In-memory cache of sheet data for duplicate detection.
  * Reduces N duplicate checks to ~5 initial loads.
  */
@@ -276,12 +297,18 @@ export class DuplicateCache {
 
   /**
    * Adds entry to cache after successful store.
+   *
+   * Normalizes wrapper cell shapes ({type:'date'|'number'}, {text,url}) to
+   * primitives so subsequent dupe-checks — which call parseNumber(String(...))
+   * and rely on plain-string equality — find the entry. Without this, a row
+   * written by `appendRowsWithLinks` with `CellNumber` importe wrappers would
+   * be invisible to `isDuplicateFactura` etc. on the same scan (ADV-242).
    */
   addEntry(spreadsheetId: string, sheetName: string, fileId: string, row: unknown[]): void {
     const key = `${spreadsheetId}:${sheetName}`;
     const sheetData = this.cache.get(key);
     if (sheetData) {
-      sheetData.set(fileId, row);
+      sheetData.set(fileId, row.map(normalizeForCache));
     }
   }
 

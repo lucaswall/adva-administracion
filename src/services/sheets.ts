@@ -6,7 +6,7 @@
 import { google, sheets_v4 } from 'googleapis';
 import { getGoogleAuthAsync, getDefaultScopes } from './google-auth.js';
 import type { Result } from '../types/index.js';
-import { withQuotaRetry, withLock } from '../utils/concurrency.js';
+import { withQuotaRetry, withLock, withLockResult } from '../utils/concurrency.js';
 import { sanitizeForSpreadsheet } from '../utils/spreadsheet.js';
 import { debug, warn } from '../utils/logger.js';
 
@@ -1079,7 +1079,26 @@ function convertToSheetsCellData(
 }
 
 /**
- * Appends rows to a sheet with support for formatted links
+ * Lock wait/expiry tuning for per-sheet append serialization (ADV-242).
+ *
+ * - Wait timeout = 60 s: a queued caller will give up after this window if the
+ *   holder never releases.
+ * - Auto-expiry = 900 s (15 min): covers worst-case `withQuotaRetry` chains
+ *   under heavy throttling. `SHEETS_QUOTA_RETRY_CONFIG` allows 5 retries with
+ *   per-attempt delays up to 65 s plus up to 60 s `waitForClearance` —
+ *   ~12 min worst case. The expiry is intentionally generous because the
+ *   `appendCells` API is NOT idempotent w.r.t. server-side "end-of-data"
+ *   detection: if the lock expires while a slow retry is still in flight, a
+ *   second waiter entering could reproduce the original ADV-242 race
+ *   (silent overwrite when two requests target the same computed row index).
+ *   The expiry exists only to recover from a crashed holder, not to bound
+ *   normal slow paths.
+ */
+const APPEND_LOCK_WAIT_TIMEOUT_MS = 60_000;
+const APPEND_LOCK_AUTO_EXPIRY_MS = 900_000;
+
+/**
+ * Appends rows to a sheet with support for formatted links.
  *
  * Unlike appendRows which only supports simple values and formulas,
  * this function supports rich text formatting including hyperlinks
@@ -1087,6 +1106,20 @@ function convertToSheetsCellData(
  *
  * ISO timestamp strings (e.g., "2026-01-24T18:30:00.000Z") are automatically
  * converted to datetime cells in the spreadsheet's timezone.
+ *
+ * ## Concurrency (ADV-242)
+ *
+ * Serializes per-(spreadsheetId, sheetName) via an in-memory lock keyed by
+ * `sheet-append:${spreadsheetId}:${sheetName}`. The Google Sheets `appendCells`
+ * request is NOT safe under concurrent execution against the same sheet —
+ * overlapping requests can race on "current end of data" detection and silently
+ * overwrite each other. The lock prevents that. Writes to different sheets,
+ * even within the same workbook, are not serialized.
+ *
+ * The response is validated: a successful `appendCells` request returns
+ * `replies[0]` as an empty `{}` (the response schema carries no structured
+ * `appendCells` payload). A missing or falsy `replies[0]` indicates the
+ * request was not applied and is thrown so `withQuotaRetry` retries.
  *
  * @param spreadsheetId - Spreadsheet ID
  * @param range - A1 notation for target sheet (e.g., 'Sheet1!A:Z')
@@ -1110,55 +1143,75 @@ export async function appendRowsWithLinks(
   timeZone?: string,
   metadataCache?: import('../processing/caches/index.js').MetadataCache
 ): Promise<Result<number, Error>> {
-  // Single retry wrapper for ENTIRE operation, wrapped with timing
-  return withTiming('appendRowsWithLinks', () => withQuotaRetry(async () => {
-    // Parse sheet name from range (e.g., 'Sheet1!A:Z' -> 'Sheet1')
-    const sheetName = range.split('!')[0];
+  // Parse sheet name from range (e.g., 'Sheet1!A:Z' -> 'Sheet1') BEFORE
+  // acquiring the lock so the lock key reflects the actual target.
+  const sheetName = range.split('!')[0];
+  const lockKey = `sheet-append:${spreadsheetId}:${sheetName}`;
 
-    // Step 1: Get metadata (NO retry wrapper)
-    // Use cache if provided, otherwise direct call
-    const metadataResult = metadataCache
-      ? await metadataCache.get(spreadsheetId)
-      : await getSheetMetadataInternal(spreadsheetId);
-    if (!metadataResult.ok) {
-      throw metadataResult.error; // Convert to exception for retry
-    }
+  // withTiming is placed INSIDE withLockResult so the recorded `durationMs`
+  // measures only the actual API operation, not lock-wait time. Otherwise
+  // every queued append would emit a SLOW_CALL_THRESHOLD_MS warning during
+  // contention, drowning out real API latency signals.
+  return withLockResult(
+    lockKey,
+    () => withTiming('appendRowsWithLinks', () => withQuotaRetry(async () => {
+      // Step 1: Get metadata (NO retry wrapper)
+      // Use cache if provided, otherwise direct call
+      const metadataResult = metadataCache
+        ? await metadataCache.get(spreadsheetId)
+        : await getSheetMetadataInternal(spreadsheetId);
+      if (!metadataResult.ok) {
+        throw metadataResult.error; // Convert to exception for retry
+      }
 
-    const sheet = metadataResult.value.find(s => s.title === sheetName);
-    if (!sheet) {
-      throw new Error(`Sheet not found: ${sheetName}`);
-    }
+      const sheet = metadataResult.value.find(s => s.title === sheetName);
+      if (!sheet) {
+        throw new Error(`Sheet not found: ${sheetName}`);
+      }
 
-    // Convert rows to Sheets API format
-    const rows: sheets_v4.Schema$RowData[] = values.map(rowValues => ({
-      values: rowValues.map(value => convertToSheetsCellData(value, timeZone)),
-    }));
+      // Convert rows to Sheets API format
+      const rows: sheets_v4.Schema$RowData[] = values.map(rowValues => ({
+        values: rowValues.map(value => convertToSheetsCellData(value, timeZone)),
+      }));
 
-    // Step 2: Append data (in same retry scope)
-    const sheets = await getSheetsService();
-    await sheets.spreadsheets.batchUpdate({
-      spreadsheetId,
-      requestBody: {
-        requests: [
-          {
-            appendCells: {
-              sheetId: sheet.sheetId,
-              rows,
-              fields: '*',
+      // Step 2: Append data (in same retry scope)
+      const sheets = await getSheetsService();
+      const response = await sheets.spreadsheets.batchUpdate({
+        spreadsheetId,
+        requestBody: {
+          requests: [
+            {
+              appendCells: {
+                sheetId: sheet.sheetId,
+                rows,
+                fields: '*',
+              },
             },
-          },
-        ],
-      },
-    });
+          ],
+        },
+      });
 
-    // Calculate total cells appended (rows * columns)
-    return rows.reduce((total, row) => {
-      return total + (row.values?.length || 0);
-    }, 0);
-  }).then(result => {
-    if (!result.ok) return { ok: false, error: result.error };
-    return { ok: true, value: result.value };
-  }));
+      // Step 3: Validate the response — defence in depth against silent
+      // partial failures from the Sheets API. A successful appendCells
+      // request returns `replies[0]` as `{}` (the response schema has no
+      // structured appendCells payload). A missing or falsy entry indicates
+      // the request was not applied.
+      const replies = response.data?.replies;
+      if (!Array.isArray(replies) || replies.length === 0 || !replies[0]) {
+        throw new Error(
+          `appendCells did not return a confirmation reply for ${sheetName} ` +
+          `(spreadsheetId=${spreadsheetId}, rows=${rows.length})`
+        );
+      }
+
+      // Calculate total cells appended (rows * columns)
+      return rows.reduce((total, row) => {
+        return total + (row.values?.length || 0);
+      }, 0);
+    })),
+    APPEND_LOCK_WAIT_TIMEOUT_MS,
+    APPEND_LOCK_AUTO_EXPIRY_MS,
+  );
 }
 
 /**
