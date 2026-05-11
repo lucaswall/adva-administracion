@@ -201,3 +201,45 @@ Fix: new describe calls `quotaThrottle.reset()` in `beforeEach`. Documented in C
 ### Tasks Remaining
 
 None. Plan complete.
+
+### Review Findings
+
+Reviewed by 3-agent team (security, reliability, quality) on 2026-05-11. 11 total findings: **2 FIX (both S-size — fixed inline)**, **9 DISCARD**.
+
+**Fixed inline (S-size, TDD-verified):**
+
+1. **MEDIUM** `[convention]` `src/processing/caches/duplicate-cache.ts:12` — `normalizeForCache` JSDoc lacked `@param`/`@returns` tags. CLAUDE.md mandates JSDoc on exported functions; rest of the codebase consistently uses both tags. **Fix:** added `@param cell` + `@returns` plus a paragraph documenting which wrapper variants are unwrapped (CellDate/CellNumber/CellFormula → value; CellLink → text; primitives/null/undefined pass through). Tracking: ADV-243 (Merge).
+2. **LOW** `[edge-case]` `src/processing/caches/duplicate-cache.test.ts` — Indirect-only coverage of `normalizeForCache` (via `addEntry`) missed CellFormula, null, undefined, and plain-primitive paths. Function handles them correctly, but no test guards the behavior. **Fix:** added `describe('normalizeForCache (unit)', ...)` block with 9 direct unit tests covering every input variant. Tracking: ADV-244 (Merge).
+
+**Discarded (reasoning preserved here so the user can audit before this file is overwritten):**
+
+- **LOW** `[security]` `src/services/sheets.ts:1202-1203` — spreadsheetId in error message string. **Discarded:** per saved feedback memory, log redaction findings are not flagged for this project; logs are an internal debugging surface, spreadsheetIds are not credentials. Pre-existing pattern across lock-manager `resourceId` logging.
+- **LOW** `[security]` `src/utils/concurrency.ts` (resourceId in WARN logs) — Same reasoning as above. Internal logs only.
+- **MEDIUM** `[async]` `src/services/sheets.ts:1081,1212` — 60s lock wait timeout could expire while a holder is in a long quota-retry chain, sending files to Sin Procesar. **Discarded:** intentional by design (reviewer's own note: "flagging for awareness rather than as a defect requiring change"). Sin Procesar files are recovered automatically by the next scan via `getStaleProcessingFileIds` — no data loss, just graceful degradation under sustained quota pressure.
+- **MEDIUM** `[bug]` `src/services/sheets.ts:1199-1204` — `!replies[0]` validation could trigger a non-idempotent duplicate retry if Google ever returns falsy `replies[0]` after success. **Discarded:** explicitly accepted in CLAUDE.md as defense-in-depth; removing the check reintroduces the silent row-loss bug class this PR exists to fix. The current API reliably returns `{}` (truthy), so the duplicate-on-future-API-change risk is theoretical and bounded.
+- **LOW** `[edge-case]` `src/processing/caches/duplicate-cache.ts:16` — `normalizeForCache` returns the formula string for CellFormula cells, not the computed value. **Discarded:** formula columns (e.g., `saldoCalculado`) are not used in any dupe-check key, so this never affects production behavior. The "semantically correct" value (the computed result) is unknown at write time, so there's no fix to apply.
+- **LOW** `[test]` `src/services/sheets.test.ts:2807-2822` — Malformed-response test spends 3–4s on real-time retry backoff. **Discarded:** test works correctly; "fix" would require API-surface changes for marginal CI speedup. Performance, not bug.
+- **LOW** `[convention]` `src/services/sheets.ts:1148-1149` — Lock key uses `:` as separator without escaping. **Discarded:** Google Drive file IDs never contain `:`, so collision is impossible (reviewer's own conclusion).
+- **LOW** `[convention]` `src/services/sheets.test.ts` — Blanket mock update applies `{ replies: [{ appendCells: {} }] }` to all `batchUpdate` operations including formatSheet/deleteSheet/sortSheet/etc. **Discarded:** tests pass, mock shape is for operations that don't inspect `replies`, no functional impact. Style only.
+- **LOW** `[edge-case]` `src/utils/concurrency.test.ts:~395` — Lock-timeout test uses `setTimeout(10)` instead of `Promise.withResolvers`-based deferred gating used in sheets.test.ts. **Discarded:** reviewer confirms "Not flaky in practice" — synchronous CAS in the happy path makes the 10ms macrotask reliable. Style consistency only.
+
+### Linear Updates
+
+- ADV-242 — **Review → Merge** (review passed; original concurrency-fix issue complete)
+- ADV-243 — **Created in Merge** (inline-fix audit trail: JSDoc convention)
+- ADV-244 — **Created in Merge** (inline-fix audit trail: direct unit tests)
+
+### Inline Fix Verification
+
+- Targeted: `npx vitest run src/processing/caches/duplicate-cache.test.ts` → 36 / 36 passing (9 new)
+- Full suite: `npm test` → all green
+- Build: `npm run build` → clean, zero warnings
+- bug-hunter on the inline diff: "No bugs found" — confirmed JSDoc accuracy and that all 9 new assertions are meaningful and exercise distinct code paths
+
+<!-- REVIEW COMPLETE -->
+
+---
+
+## Status: COMPLETE
+
+All tasks implemented, reviewed, and inline-fixes verified. ADV-242, ADV-243, ADV-244 all in Merge state.

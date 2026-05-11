@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { DuplicateCache } from './duplicate-cache.js';
+import { DuplicateCache, normalizeForCache } from './duplicate-cache.js';
 import * as sheets from '../../services/sheets.js';
 import type { ResumenBancario, ResumenTarjeta, ResumenBroker } from '../../types/index.js';
 
@@ -697,6 +697,46 @@ describe('DuplicateCache', () => {
       );
       expect(result.isDuplicate).toBe(true);
       expect(result.existingFileId).toBe('file-3');
+    });
+  });
+
+  describe('normalizeForCache (unit)', () => {
+    it('unwraps CellDate to its ISO string value', () => {
+      expect(normalizeForCache({ type: 'date', value: '2026-05-11' })).toBe('2026-05-11');
+    });
+
+    it('unwraps CellNumber to its numeric value', () => {
+      expect(normalizeForCache({ type: 'number', value: 25000 })).toBe(25000);
+    });
+
+    it('unwraps CellFormula to its formula string', () => {
+      expect(normalizeForCache({ type: 'formula', value: '=SUM(A1:A10)' })).toBe('=SUM(A1:A10)');
+    });
+
+    it('unwraps CellLink to its display text', () => {
+      expect(
+        normalizeForCache({ text: 'doc.pdf', url: 'https://drive.google.com/file/d/abc/view' }),
+      ).toBe('doc.pdf');
+    });
+
+    it('passes null through unchanged', () => {
+      expect(normalizeForCache(null)).toBeNull();
+    });
+
+    it('passes undefined through unchanged', () => {
+      expect(normalizeForCache(undefined)).toBeUndefined();
+    });
+
+    it('passes plain strings through unchanged', () => {
+      expect(normalizeForCache('plain string')).toBe('plain string');
+    });
+
+    it('passes plain numbers through unchanged', () => {
+      expect(normalizeForCache(42)).toBe(42);
+    });
+
+    it('passes empty string through unchanged', () => {
+      expect(normalizeForCache('')).toBe('');
     });
   });
 

@@ -8,6 +8,13 @@ import { parseNumber } from '../../utils/numbers.js';
  * `getValues` returns for the same cell. The dupe-check methods compare cache
  * rows assuming spreadsheet-read shape (string/number primitives), so wrappers
  * coming from `appendRowsWithLinks` callers must be unwrapped before storing.
+ *
+ * Unwraps `CellDate`/`CellNumber`/`CellFormula` to their `value`, and
+ * `CellLink` to its `text`. Primitives, `null`, and `undefined` pass through
+ * unchanged.
+ *
+ * @param cell - Cell value, possibly wrapped as CellDate/CellNumber/CellFormula/CellLink
+ * @returns Unwrapped primitive value, matching the shape `getValues` returns for the same cell
  */
 export function normalizeForCache(cell: unknown): unknown {
   if (cell && typeof cell === 'object') {
