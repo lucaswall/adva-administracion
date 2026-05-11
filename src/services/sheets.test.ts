@@ -6,6 +6,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { google } from 'googleapis';
 import type { sheets_v4 } from 'googleapis';
 import { debug } from '../utils/logger.js';
+import { clearAllLocks, quotaThrottle } from '../utils/concurrency.js';
 import {
   getValues,
   setValues,
@@ -493,7 +494,7 @@ describe('Google Sheets API wrapper - quota retry tests', () => {
 
   describe('formatSheet', () => {
     it('should succeed on first attempt', async () => {
-      mockSheetsApi.spreadsheets.batchUpdate.mockResolvedValue({ data: {} });
+      mockSheetsApi.spreadsheets.batchUpdate.mockResolvedValue({ data: { replies: [{ appendCells: {} }] } });
 
       const resultPromise = formatSheet('spreadsheet123', 0);
       await vi.runAllTimersAsync();
@@ -506,7 +507,7 @@ describe('Google Sheets API wrapper - quota retry tests', () => {
     it('should retry and succeed after quota error', async () => {
       mockSheetsApi.spreadsheets.batchUpdate
         .mockRejectedValueOnce(new Error('Too many requests'))
-        .mockResolvedValueOnce({ data: {} });
+        .mockResolvedValueOnce({ data: { replies: [{ appendCells: {} }] } });
 
       const resultPromise = formatSheet('spreadsheet123', 0);
       await vi.runAllTimersAsync();
@@ -529,7 +530,7 @@ describe('Google Sheets API wrapper - quota retry tests', () => {
 
   describe('formatStatusSheet', () => {
     it('should succeed on first attempt', async () => {
-      mockSheetsApi.spreadsheets.batchUpdate.mockResolvedValue({ data: {} });
+      mockSheetsApi.spreadsheets.batchUpdate.mockResolvedValue({ data: { replies: [{ appendCells: {} }] } });
 
       const resultPromise = formatStatusSheet('spreadsheet123', 0);
       await vi.runAllTimersAsync();
@@ -542,7 +543,7 @@ describe('Google Sheets API wrapper - quota retry tests', () => {
     it('should retry and succeed after quota error', async () => {
       mockSheetsApi.spreadsheets.batchUpdate
         .mockRejectedValueOnce(new Error('HTTP 429'))
-        .mockResolvedValueOnce({ data: {} });
+        .mockResolvedValueOnce({ data: { replies: [{ appendCells: {} }] } });
 
       const resultPromise = formatStatusSheet('spreadsheet123', 0);
       await vi.runAllTimersAsync();
@@ -565,7 +566,7 @@ describe('Google Sheets API wrapper - quota retry tests', () => {
 
   describe('applyConditionalFormat', () => {
     it('should succeed on first attempt', async () => {
-      mockSheetsApi.spreadsheets.batchUpdate.mockResolvedValue({ data: {} });
+      mockSheetsApi.spreadsheets.batchUpdate.mockResolvedValue({ data: { replies: [{ appendCells: {} }] } });
 
       const resultPromise = applyConditionalFormat('spreadsheet123', [
         {
@@ -589,7 +590,7 @@ describe('Google Sheets API wrapper - quota retry tests', () => {
     it('should retry and succeed after quota error', async () => {
       mockSheetsApi.spreadsheets.batchUpdate
         .mockRejectedValueOnce(new Error('Quota exceeded'))
-        .mockResolvedValueOnce({ data: {} });
+        .mockResolvedValueOnce({ data: { replies: [{ appendCells: {} }] } });
 
       const resultPromise = applyConditionalFormat('spreadsheet123', [
         {
@@ -634,7 +635,7 @@ describe('Google Sheets API wrapper - quota retry tests', () => {
 
   describe('deleteSheet', () => {
     it('should succeed on first attempt', async () => {
-      mockSheetsApi.spreadsheets.batchUpdate.mockResolvedValue({ data: {} });
+      mockSheetsApi.spreadsheets.batchUpdate.mockResolvedValue({ data: { replies: [{ appendCells: {} }] } });
 
       const resultPromise = deleteSheet('spreadsheet123', 123);
       await vi.runAllTimersAsync();
@@ -647,7 +648,7 @@ describe('Google Sheets API wrapper - quota retry tests', () => {
     it('should retry and succeed after quota error', async () => {
       mockSheetsApi.spreadsheets.batchUpdate
         .mockRejectedValueOnce(new Error('Rate limit exceeded'))
-        .mockResolvedValueOnce({ data: {} });
+        .mockResolvedValueOnce({ data: { replies: [{ appendCells: {} }] } });
 
       const resultPromise = deleteSheet('spreadsheet123', 123);
       await vi.runAllTimersAsync();
@@ -683,7 +684,7 @@ describe('Google Sheets API wrapper - quota retry tests', () => {
     it('should retry and succeed after quota error', async () => {
       mockSheetsApi.spreadsheets.values.clear
         .mockRejectedValueOnce(new Error('Too many requests'))
-        .mockResolvedValueOnce({ data: {} });
+        .mockResolvedValueOnce({ data: { replies: [{ appendCells: {} }] } });
 
       const resultPromise = clearSheetData('spreadsheet123', 'Sheet1');
       await vi.runAllTimersAsync();
@@ -714,7 +715,7 @@ describe('Google Sheets API wrapper - quota retry tests', () => {
           ],
         },
       });
-      mockSheetsApi.spreadsheets.batchUpdate.mockResolvedValue({ data: {} });
+      mockSheetsApi.spreadsheets.batchUpdate.mockResolvedValue({ data: { replies: [{ appendCells: {} }] } });
 
       const resultPromise = appendRowsWithLinks(
         'spreadsheet123',
@@ -739,7 +740,7 @@ describe('Google Sheets API wrapper - quota retry tests', () => {
       });
       mockSheetsApi.spreadsheets.batchUpdate
         .mockRejectedValueOnce(new Error('Quota exceeded'))
-        .mockResolvedValueOnce({ data: {} });
+        .mockResolvedValueOnce({ data: { replies: [{ appendCells: {} }] } });
 
       const resultPromise = appendRowsWithLinks(
         'spreadsheet123',
@@ -786,7 +787,7 @@ describe('Google Sheets API wrapper - quota retry tests', () => {
             ],
           },
         });
-      mockSheetsApi.spreadsheets.batchUpdate.mockResolvedValue({ data: {} });
+      mockSheetsApi.spreadsheets.batchUpdate.mockResolvedValue({ data: { replies: [{ appendCells: {} }] } });
 
       const resultPromise = appendRowsWithLinks(
         'spreadsheet123',
@@ -813,7 +814,7 @@ describe('Google Sheets API wrapper - quota retry tests', () => {
       });
       mockSheetsApi.spreadsheets.batchUpdate
         .mockRejectedValueOnce(new Error('Quota exceeded'))
-        .mockResolvedValueOnce({ data: {} });
+        .mockResolvedValueOnce({ data: { replies: [{ appendCells: {} }] } });
 
       const resultPromise = appendRowsWithLinks(
         'spreadsheet123',
@@ -840,7 +841,7 @@ describe('Google Sheets API wrapper - quota retry tests', () => {
           ],
         },
       });
-      mockSheetsApi.spreadsheets.batchUpdate.mockResolvedValue({ data: {} });
+      mockSheetsApi.spreadsheets.batchUpdate.mockResolvedValue({ data: { replies: [{ appendCells: {} }] } });
 
       const resultPromise = sortSheet('spreadsheet123', 'Sheet1', 0, true);
       await vi.runAllTimersAsync();
@@ -861,7 +862,7 @@ describe('Google Sheets API wrapper - quota retry tests', () => {
       });
       mockSheetsApi.spreadsheets.batchUpdate
         .mockRejectedValueOnce(new Error('HTTP 429'))
-        .mockResolvedValueOnce({ data: {} });
+        .mockResolvedValueOnce({ data: { replies: [{ appendCells: {} }] } });
 
       const resultPromise = sortSheet('spreadsheet123', 'Sheet1', 0, true);
       await vi.runAllTimersAsync();
@@ -899,7 +900,7 @@ describe('Google Sheets API wrapper - quota retry tests', () => {
             ],
           },
         });
-      mockSheetsApi.spreadsheets.batchUpdate.mockResolvedValue({ data: {} });
+      mockSheetsApi.spreadsheets.batchUpdate.mockResolvedValue({ data: { replies: [{ appendCells: {} }] } });
 
       const resultPromise = sortSheet('spreadsheet123', 'Sheet1', 0, true);
       await vi.runAllTimersAsync();
@@ -920,7 +921,7 @@ describe('Google Sheets API wrapper - quota retry tests', () => {
       });
       mockSheetsApi.spreadsheets.batchUpdate
         .mockRejectedValueOnce(new Error('Quota exceeded'))
-        .mockResolvedValueOnce({ data: {} });
+        .mockResolvedValueOnce({ data: { replies: [{ appendCells: {} }] } });
 
       const resultPromise = sortSheet('spreadsheet123', 'Sheet1', 0, true);
       await vi.runAllTimersAsync();
@@ -942,7 +943,7 @@ describe('Google Sheets API wrapper - quota retry tests', () => {
           ],
         },
       });
-      mockSheetsApi.spreadsheets.batchUpdate.mockResolvedValue({ data: {} });
+      mockSheetsApi.spreadsheets.batchUpdate.mockResolvedValue({ data: { replies: [{ appendCells: {} }] } });
 
       const resultPromise = moveSheetToFirst('spreadsheet123', 'Sheet1');
       await vi.runAllTimersAsync();
@@ -963,7 +964,7 @@ describe('Google Sheets API wrapper - quota retry tests', () => {
       });
       mockSheetsApi.spreadsheets.batchUpdate
         .mockRejectedValueOnce(new Error('Rate limit exceeded'))
-        .mockResolvedValueOnce({ data: {} });
+        .mockResolvedValueOnce({ data: { replies: [{ appendCells: {} }] } });
 
       const resultPromise = moveSheetToFirst('spreadsheet123', 'Sheet1');
       await vi.runAllTimersAsync();
@@ -1001,7 +1002,7 @@ describe('Google Sheets API wrapper - quota retry tests', () => {
             ],
           },
         });
-      mockSheetsApi.spreadsheets.batchUpdate.mockResolvedValue({ data: {} });
+      mockSheetsApi.spreadsheets.batchUpdate.mockResolvedValue({ data: { replies: [{ appendCells: {} }] } });
 
       const resultPromise = moveSheetToFirst('spreadsheet123', 'Sheet1');
       await vi.runAllTimersAsync();
@@ -1022,7 +1023,7 @@ describe('Google Sheets API wrapper - quota retry tests', () => {
       });
       mockSheetsApi.spreadsheets.batchUpdate
         .mockRejectedValueOnce(new Error('Quota exceeded'))
-        .mockResolvedValueOnce({ data: {} });
+        .mockResolvedValueOnce({ data: { replies: [{ appendCells: {} }] } });
 
       const resultPromise = moveSheetToFirst('spreadsheet123', 'Sheet1');
       await vi.runAllTimersAsync();
@@ -1044,7 +1045,7 @@ describe('Google Sheets API wrapper - quota retry tests', () => {
           ],
         },
       });
-      mockSheetsApi.spreadsheets.batchUpdate.mockResolvedValue({ data: {} });
+      mockSheetsApi.spreadsheets.batchUpdate.mockResolvedValue({ data: { replies: [{ appendCells: {} }] } });
 
       const resultPromise = appendRowsWithFormatting(
         'spreadsheet123',
@@ -1069,7 +1070,7 @@ describe('Google Sheets API wrapper - quota retry tests', () => {
       });
       mockSheetsApi.spreadsheets.batchUpdate
         .mockRejectedValueOnce(new Error('Too many requests'))
-        .mockResolvedValueOnce({ data: {} });
+        .mockResolvedValueOnce({ data: { replies: [{ appendCells: {} }] } });
 
       const resultPromise = appendRowsWithFormatting(
         'spreadsheet123',
@@ -1116,7 +1117,7 @@ describe('Google Sheets API wrapper - quota retry tests', () => {
             ],
           },
         });
-      mockSheetsApi.spreadsheets.batchUpdate.mockResolvedValue({ data: {} });
+      mockSheetsApi.spreadsheets.batchUpdate.mockResolvedValue({ data: { replies: [{ appendCells: {} }] } });
 
       const resultPromise = appendRowsWithFormatting(
         'spreadsheet123',
@@ -1142,7 +1143,7 @@ describe('Google Sheets API wrapper - quota retry tests', () => {
       });
       mockSheetsApi.spreadsheets.batchUpdate
         .mockRejectedValueOnce(new Error('Quota exceeded'))
-        .mockResolvedValueOnce({ data: {} });
+        .mockResolvedValueOnce({ data: { replies: [{ appendCells: {} }] } });
 
       const resultPromise = appendRowsWithFormatting(
         'spreadsheet123',
@@ -1160,7 +1161,7 @@ describe('Google Sheets API wrapper - quota retry tests', () => {
 
   describe('formatEmptyMonthSheet', () => {
     it('should succeed on first attempt', async () => {
-      mockSheetsApi.spreadsheets.batchUpdate.mockResolvedValue({ data: {} });
+      mockSheetsApi.spreadsheets.batchUpdate.mockResolvedValue({ data: { replies: [{ appendCells: {} }] } });
 
       const resultPromise = formatEmptyMonthSheet('spreadsheet123', 0, 5);
       await vi.runAllTimersAsync();
@@ -1173,7 +1174,7 @@ describe('Google Sheets API wrapper - quota retry tests', () => {
     it('should retry and succeed after quota error', async () => {
       mockSheetsApi.spreadsheets.batchUpdate
         .mockRejectedValueOnce(new Error('Quota exceeded'))
-        .mockResolvedValueOnce({ data: {} });
+        .mockResolvedValueOnce({ data: { replies: [{ appendCells: {} }] } });
 
       const resultPromise = formatEmptyMonthSheet('spreadsheet123', 0, 5);
       await vi.runAllTimersAsync();
@@ -1500,7 +1501,7 @@ describe('Google Sheets API wrapper - quota retry tests', () => {
 
     describe('moveSheetToPosition', () => {
       it('should move sheet to specified position', async () => {
-        mockSheetsApi.spreadsheets.batchUpdate.mockResolvedValue({ data: {} });
+        mockSheetsApi.spreadsheets.batchUpdate.mockResolvedValue({ data: { replies: [{ appendCells: {} }] } });
 
         const resultPromise = moveSheetToPosition('spreadsheet123', 456, 2);
         await vi.runAllTimersAsync();
@@ -1528,7 +1529,7 @@ describe('Google Sheets API wrapper - quota retry tests', () => {
       it('should retry and succeed after quota error', async () => {
         mockSheetsApi.spreadsheets.batchUpdate
           .mockRejectedValueOnce(new Error('Quota exceeded'))
-          .mockResolvedValueOnce({ data: {} });
+          .mockResolvedValueOnce({ data: { replies: [{ appendCells: {} }] } });
 
         const resultPromise = moveSheetToPosition('spreadsheet123', 456, 1);
         await vi.runAllTimersAsync();
@@ -1596,7 +1597,7 @@ describe('Google Sheets API wrapper - quota retry tests', () => {
             ],
           },
         });
-        mockSheetsApi.spreadsheets.batchUpdate.mockResolvedValue({ data: {} });
+        mockSheetsApi.spreadsheets.batchUpdate.mockResolvedValue({ data: { replies: [{ appendCells: {} }] } });
 
         const resultPromise = reorderMonthSheets('spreadsheet123');
         await vi.runAllTimersAsync();
@@ -1631,7 +1632,7 @@ describe('Google Sheets API wrapper - quota retry tests', () => {
             ],
           },
         });
-        mockSheetsApi.spreadsheets.batchUpdate.mockResolvedValue({ data: {} });
+        mockSheetsApi.spreadsheets.batchUpdate.mockResolvedValue({ data: { replies: [{ appendCells: {} }] } });
 
         const resultPromise = reorderMonthSheets('spreadsheet123');
         await vi.runAllTimersAsync();
@@ -1673,7 +1674,7 @@ describe('Google Sheets API wrapper - quota retry tests', () => {
             ],
           },
         });
-        mockSheetsApi.spreadsheets.batchUpdate.mockResolvedValue({ data: {} });
+        mockSheetsApi.spreadsheets.batchUpdate.mockResolvedValue({ data: { replies: [{ appendCells: {} }] } });
 
         const resultPromise = reorderMonthSheets('spreadsheet123');
         await vi.runAllTimersAsync();
@@ -1705,7 +1706,7 @@ describe('Google Sheets API wrapper - quota retry tests', () => {
             ],
           },
         });
-        mockSheetsApi.spreadsheets.batchUpdate.mockResolvedValue({ data: {} });
+        mockSheetsApi.spreadsheets.batchUpdate.mockResolvedValue({ data: { replies: [{ appendCells: {} }] } });
 
         const resultPromise = reorderMonthSheets('spreadsheet123');
         await vi.runAllTimersAsync();
@@ -1739,7 +1740,7 @@ describe('Google Sheets API wrapper - quota retry tests', () => {
             ],
           },
         });
-        mockSheetsApi.spreadsheets.batchUpdate.mockResolvedValue({ data: {} });
+        mockSheetsApi.spreadsheets.batchUpdate.mockResolvedValue({ data: { replies: [{ appendCells: {} }] } });
 
         const resultPromise = reorderMonthSheets('spreadsheet123');
         await vi.runAllTimersAsync();
@@ -1805,9 +1806,9 @@ describe('Google Sheets API wrapper - quota retry tests', () => {
             },
           })
           // Mock formatSheet
-          .mockResolvedValueOnce({ data: {} })
+          .mockResolvedValueOnce({ data: { replies: [{ appendCells: {} }] } })
           // Mock moveSheetToPosition
-          .mockResolvedValueOnce({ data: {} });
+          .mockResolvedValueOnce({ data: { replies: [{ appendCells: {} }] } });
 
         mockSheetsApi.spreadsheets.values.update.mockResolvedValue({ data: {} });
 
@@ -1909,9 +1910,9 @@ describe('Google Sheets API wrapper - quota retry tests', () => {
               replies: [{ addSheet: { properties: { sheetId: 101 } } }],
             },
           })
-          .mockResolvedValueOnce({ data: {} }) // Mock formatSheet
-          .mockResolvedValueOnce({ data: {} }) // Mock moveSheetToPosition
-          .mockResolvedValueOnce({ data: {} }); // Mock deleteSheet
+          .mockResolvedValueOnce({ data: { replies: [{ appendCells: {} }] } }) // Mock formatSheet
+          .mockResolvedValueOnce({ data: { replies: [{ appendCells: {} }] } }) // Mock moveSheetToPosition
+          .mockResolvedValueOnce({ data: { replies: [{ appendCells: {} }] } }); // Mock deleteSheet
 
         mockSheetsApi.spreadsheets.values.update.mockResolvedValue({ data: {} });
 
@@ -1985,9 +1986,9 @@ describe('Google Sheets API wrapper - quota retry tests', () => {
               replies: [{ addSheet: { properties: { sheetId: 101 } } }],
             },
           })
-          .mockResolvedValueOnce({ data: {} }) // Mock formatSheet
-          .mockResolvedValueOnce({ data: {} }) // Mock moveSheetToPosition
-          .mockResolvedValueOnce({ data: {} }); // Mock deleteSheet
+          .mockResolvedValueOnce({ data: { replies: [{ appendCells: {} }] } }) // Mock formatSheet
+          .mockResolvedValueOnce({ data: { replies: [{ appendCells: {} }] } }) // Mock moveSheetToPosition
+          .mockResolvedValueOnce({ data: { replies: [{ appendCells: {} }] } }); // Mock deleteSheet
 
         mockSheetsApi.spreadsheets.values.update.mockResolvedValue({ data: {} });
 
@@ -2061,8 +2062,8 @@ describe('Google Sheets API wrapper - quota retry tests', () => {
               replies: [{ addSheet: { properties: { sheetId: 101 } } }],
             },
           })
-          .mockResolvedValueOnce({ data: {} }) // Mock formatSheet
-          .mockResolvedValueOnce({ data: {} }); // Mock moveSheetToPosition
+          .mockResolvedValueOnce({ data: { replies: [{ appendCells: {} }] } }) // Mock formatSheet
+          .mockResolvedValueOnce({ data: { replies: [{ appendCells: {} }] } }); // Mock moveSheetToPosition
 
         mockSheetsApi.spreadsheets.values.update.mockResolvedValue({ data: {} });
 
@@ -2106,7 +2107,7 @@ describe('Google Sheets API wrapper - quota retry tests', () => {
             ],
           },
         });
-        mockSheetsApi.spreadsheets.batchUpdate.mockResolvedValue({ data: {} });
+        mockSheetsApi.spreadsheets.batchUpdate.mockResolvedValue({ data: { replies: [{ appendCells: {} }] } });
       });
 
       it('should insert CellFormula values as formulaValue (not sanitized)', async () => {
@@ -2300,7 +2301,7 @@ describe('Google Sheets API wrapper - quota retry tests', () => {
             ],
           },
         });
-        mockSheetsApi.spreadsheets.batchUpdate.mockResolvedValue({ data: {} });
+        mockSheetsApi.spreadsheets.batchUpdate.mockResolvedValue({ data: { replies: [{ appendCells: {} }] } });
       });
 
       it('should insert CellFormula values as formulaValue (not sanitized)', async () => {
@@ -2447,7 +2448,7 @@ describe('Google Sheets API wrapper - quota retry tests', () => {
           sheets: [{ properties: { title: 'Sheet1', sheetId: 42 } }],
         },
       });
-      mockSheetsApi.spreadsheets.batchUpdate.mockResolvedValue({ data: {} });
+      mockSheetsApi.spreadsheets.batchUpdate.mockResolvedValue({ data: { replies: [{ appendCells: {} }] } });
     });
 
     it('sends updateCells with numberValue + DATE format for CellDate', async () => {
@@ -2636,7 +2637,7 @@ describe('Sheets API timing (ADV-216)', () => {
     mockSheetsApi.spreadsheets.get.mockResolvedValue({
       data: { sheets: [{ properties: { title: 'Sheet1', sheetId: 0 } }] },
     });
-    mockSheetsApi.spreadsheets.batchUpdate.mockResolvedValue({ data: {} });
+    mockSheetsApi.spreadsheets.batchUpdate.mockResolvedValue({ data: { replies: [{ appendCells: {} }] } });
 
     const resultPromise = appendRowsWithLinks(
       'spreadsheet123',
@@ -2656,4 +2657,167 @@ describe('Sheets API timing (ADV-216)', () => {
       })
     );
   });
+});
+
+/**
+ * ADV-242: per-sheet serialization of appendRowsWithLinks
+ *
+ * Uses real timers because we observe concurrency via Promise.withResolvers
+ * deferreds; vi.useFakeTimers() would freeze the event loop and defeat the test.
+ */
+describe('appendRowsWithLinks concurrency (ADV-242)', () => {
+  let mockSheetsApi: {
+    spreadsheets: {
+      values: { get: ReturnType<typeof vi.fn>; update: ReturnType<typeof vi.fn>; append: ReturnType<typeof vi.fn>; batchUpdate: ReturnType<typeof vi.fn>; clear: ReturnType<typeof vi.fn> };
+      get: ReturnType<typeof vi.fn>;
+      batchUpdate: ReturnType<typeof vi.fn>;
+    };
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.useRealTimers();
+    clearSheetsCache();
+    clearTimezoneCache();
+    clearAllLocks();
+    // Older describes use vi.useFakeTimers() while exercising quota-retry paths
+    // that call quotaThrottle.reportQuotaError(). The throttle is a module-level
+    // singleton, so its `lastErrorTime` (captured under fake time) can land in
+    // the *future* relative to the real `Date.now()` this describe uses — which
+    // would make the auto-reset window appear unsatisfied and force a 5s wait
+    // here before every API call. Reset the throttle to a clean baseline.
+    quotaThrottle.reset();
+
+    mockSheetsApi = {
+      spreadsheets: {
+        values: { get: vi.fn(), update: vi.fn(), append: vi.fn(), batchUpdate: vi.fn(), clear: vi.fn() },
+        get: vi.fn(),
+        batchUpdate: vi.fn(),
+      },
+    };
+    vi.mocked(google.sheets).mockReturnValue(mockSheetsApi as unknown as sheets_v4.Sheets);
+
+    // Metadata: two sheets in one spreadsheet; second spreadsheet has one sheet.
+    mockSheetsApi.spreadsheets.get.mockImplementation(async (args: { spreadsheetId?: string }) => {
+      if (args?.spreadsheetId === 'spreadsheetB') {
+        return { data: { sheets: [{ properties: { title: 'SheetX', sheetId: 100 } }] } };
+      }
+      return {
+        data: {
+          sheets: [
+            { properties: { title: 'SheetA', sheetId: 10 } },
+            { properties: { title: 'SheetB', sheetId: 11 } },
+          ],
+        },
+      };
+    });
+  });
+
+  it('serializes concurrent same-sheet appends: second batchUpdate starts only after first resolves', async () => {
+    type Deferred = { promise: Promise<unknown>; resolve: (v: unknown) => void };
+    const newDeferred = (): Deferred => {
+      let resolve: (v: unknown) => void = () => {};
+      const promise = new Promise<unknown>((r) => { resolve = r; });
+      return { promise, resolve };
+    };
+
+    const calls: Array<{ index: number; startedAt: number; resolvedAt?: number; sheetId?: number; deferred: Deferred }> = [];
+    let callCounter = 0;
+
+    mockSheetsApi.spreadsheets.batchUpdate.mockImplementation(async (args: { requestBody?: { requests?: Array<{ appendCells?: { sheetId?: number } }> } }) => {
+      const deferred = newDeferred();
+      const entry = {
+        index: callCounter++,
+        startedAt: Date.now(),
+        sheetId: args?.requestBody?.requests?.[0]?.appendCells?.sheetId,
+        deferred,
+      };
+      calls.push(entry);
+      await deferred.promise;
+      (entry as { resolvedAt?: number }).resolvedAt = Date.now();
+      return { data: { replies: [{ appendCells: {} }] } };
+    });
+
+    // Fire two concurrent appends to the SAME sheet
+    const p1 = appendRowsWithLinks('spreadsheetA', 'SheetA!A:C', [['a1', 'b1', 'c1']]);
+    const p2 = appendRowsWithLinks('spreadsheetA', 'SheetA!A:C', [['a2', 'b2', 'c2']]);
+
+    // Give both promises a chance to enter the lock acquisition path
+    await new Promise((r) => setTimeout(r, 20));
+
+    // Only ONE batchUpdate should be in flight; the second must wait for the lock
+    expect(calls.length).toBe(1);
+    expect(calls[0].sheetId).toBe(10);
+
+    // Resolve the first; the second should now start
+    calls[0].deferred.resolve({});
+    await new Promise((r) => setTimeout(r, 20));
+
+    expect(calls.length).toBe(2);
+    expect(calls[1].sheetId).toBe(10);
+    // Second call must have started strictly after the first resolved
+    expect(calls[0].resolvedAt).toBeDefined();
+    expect(calls[1].startedAt).toBeGreaterThanOrEqual(calls[0].resolvedAt!);
+
+    calls[1].deferred.resolve({});
+
+    const [r1, r2] = await Promise.all([p1, p2]);
+    expect(r1.ok).toBe(true);
+    expect(r2.ok).toBe(true);
+  });
+
+  it('allows concurrent appends to DIFFERENT (spreadsheet, sheet) targets', async () => {
+    type Deferred = { promise: Promise<unknown>; resolve: (v: unknown) => void };
+    const newDeferred = (): Deferred => {
+      let resolve: (v: unknown) => void = () => {};
+      const promise = new Promise<unknown>((r) => { resolve = r; });
+      return { promise, resolve };
+    };
+
+    const calls: Array<{ deferred: Deferred; sheetId?: number }> = [];
+
+    mockSheetsApi.spreadsheets.batchUpdate.mockImplementation(async (args: { requestBody?: { requests?: Array<{ appendCells?: { sheetId?: number } }> } }) => {
+      const deferred = newDeferred();
+      calls.push({ deferred, sheetId: args?.requestBody?.requests?.[0]?.appendCells?.sheetId });
+      await deferred.promise;
+      return { data: { replies: [{ appendCells: {} }] } };
+    });
+
+    // Different sheets within the same spreadsheet
+    const p1 = appendRowsWithLinks('spreadsheetA', 'SheetA!A:C', [['a1', 'b1', 'c1']]);
+    const p2 = appendRowsWithLinks('spreadsheetA', 'SheetB!A:C', [['a2', 'b2', 'c2']]);
+    // Different spreadsheet entirely
+    const p3 = appendRowsWithLinks('spreadsheetB', 'SheetX!A:C', [['a3', 'b3', 'c3']]);
+
+    await new Promise((r) => setTimeout(r, 20));
+
+    // All three batchUpdates must be in flight concurrently (different lock keys)
+    expect(calls.length).toBe(3);
+    expect(new Set(calls.map(c => c.sheetId))).toEqual(new Set([10, 11, 100]));
+
+    // Resolve all
+    for (const c of calls) c.deferred.resolve({});
+
+    const [r1, r2, r3] = await Promise.all([p1, p2, p3]);
+    expect(r1.ok).toBe(true);
+    expect(r2.ok).toBe(true);
+    expect(r3.ok).toBe(true);
+  });
+
+  it('returns ok:false when batchUpdate response is missing the replies array (silent partial failure)', async () => {
+    // Sentinel for the malformed-response path — deliberately omits `replies`
+    mockSheetsApi.spreadsheets.batchUpdate.mockResolvedValue({ data: { /* no replies */ } });
+
+    const result = await appendRowsWithLinks(
+      'spreadsheetA',
+      'SheetA!A:C',
+      [['a', 'b', 'c']]
+    );
+
+    // After all withQuotaRetry attempts, the malformed response must surface as a failure
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.message.toLowerCase()).toContain('append');
+    }
+  }, 15_000);
 });

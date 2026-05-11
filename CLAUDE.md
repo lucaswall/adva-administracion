@@ -502,6 +502,21 @@ Both `/api/scan` and `/api/match-movimientos` use a unified lock (`PROCESSING_LO
 - **Scan state machine**: Uses atomic check-and-set pattern - `scanState` check and update happen in synchronous block (no await between), preventing concurrent scans from both passing the check
 - **JavaScript async caveat**: While JavaScript is single-threaded, `await` yields to the event loop, allowing multiple async operations to interleave. Explicit synchronization (atomic operations, locks) is required for mutual exclusion
 
+## SHEETS API CONCURRENCY
+
+Google Sheets' `appendCells` request is NOT safe under concurrent execution against the same sheet — overlapping requests race on the API's "current end of data" detection and can silently overwrite each other (ADV-242: 9 production facturas lost over ~3 weeks before this fix).
+
+**Enforcement:** `appendRowsWithLinks` in `src/services/sheets.ts` serializes per-`(spreadsheetId, sheetName)` via an in-memory `withLock` keyed by `sheet-append:${spreadsheetId}:${sheetName}`. The lock wraps the entire `withQuotaRetry → metadata fetch → batchUpdate` chain, so even a stale metadata cache read serializes with appends. Writes to *different* sheets — even within the same workbook — still run in parallel.
+
+**Response validation:** Even with the lock, the function inspects `batchUpdate`'s response. A successful `appendCells` request returns `replies[0]` as an empty `{}` (the response schema has no structured `appendCells` payload). A missing or falsy `replies[0]` is thrown so `withQuotaRetry` retries; this is defence-in-depth against future API variants where the lock might fail open.
+
+**Rules for callers and maintainers:**
+- All sheet mutations that could race MUST flow through `appendRowsWithLinks` (or a similarly locked primitive). Do not call `spreadsheets.batchUpdate({requests:[{appendCells:...}]})` directly.
+- The per-sheet lock has 60 s wait timeout and 900 s (15 min) auto-expiry. The expiry is intentionally generous: `appendCells` is NOT idempotent w.r.t. server-side "end-of-data" detection, so an overlapping post-expiry waiter could reproduce the original ADV-242 silent-overwrite race. The expiry exists only to recover from a crashed holder, not to bound normal slow paths.
+- Never "optimize" the lock away. The plain `withQuotaRetry`-only path is what caused ADV-242.
+
+**Test hygiene note:** Older test suites use `vi.useFakeTimers()` while exercising quota-retry paths that call `quotaThrottle.reportQuotaError()`. The throttle is a module-level singleton, so its `lastErrorTime` (captured under fake time) can land in the future relative to real `Date.now()`. New top-level `describe` blocks that use real timers must call `quotaThrottle.reset()` in `beforeEach`, otherwise every API call will block for 5 s.
+
 ## TESTING
 
 **Framework:** Vitest

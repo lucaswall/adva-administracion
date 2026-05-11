@@ -1,604 +1,240 @@
 # Implementation Plan
 
-**Status:** COMPLETE
-**Created:** 2026-05-08
-**Source:** Inline request: "Envío a Contadores" delivery package — Dashboard menu operation that gathers all resumen PDFs (banks, cards, brokers) and a per-month per-bank movimientos workbook into a flat `Entregas/` Drive folder for a chosen period or range.
-**Linear Issues:** [ADV-228](https://linear.app/lw-claude/issue/ADV-228/envio-a-contadores-period-range-parser), [ADV-229](https://linear.app/lw-claude/issue/ADV-229/envio-a-contadores-enumerate-resumenes-for-period-range), [ADV-230](https://linear.app/lw-claude/issue/ADV-230/envio-a-contadores-enumerate-movimientos-for-period-range), [ADV-231](https://linear.app/lw-claude/issue/ADV-231/envio-a-contadores-drive-copyfile-helper), [ADV-232](https://linear.app/lw-claude/issue/ADV-232/envio-a-contadores-prepare-delivery-folder-create-or-clear), [ADV-233](https://linear.app/lw-claude/issue/ADV-233/envio-a-contadores-copy-pdfs-to-delivery-folder), [ADV-234](https://linear.app/lw-claude/issue/ADV-234/envio-a-contadores-build-movimientos-workbook), [ADV-235](https://linear.app/lw-claude/issue/ADV-235/envio-a-contadores-delivery-routes-plan-copy-pdfs-build-movimientos), [ADV-236](https://linear.app/lw-claude/issue/ADV-236/envio-a-contadores-apps-script-menu-integration-with-progress-toasts)
-**Branch:** feat/envio-a-contadores
+**Created:** 2026-05-11
+**Source:** Bug report: 9 facturas emitidas silently lost from `Control de Ingresos / Facturas Emitidas` across three scan batches in April/May 2026; the system logged `Factura stored successfully` for each, marked tracking as `success`, and moved the PDFs into `/2026/Ingresos/MM/`, but no row was ever persisted in the spreadsheet.
+**Linear Issues:** [ADV-242](https://linear.app/lw-claude/issue/ADV-242/storage-concurrent-appendcells-silently-drops-factura-rows-when)
+**Branch:** fix/ADV-242-serialize-sheet-appends
 
 ## Context Gathered
 
 ### Codebase Analysis
 
-- **Apps Script menu** is defined in `apps-script/src/main.ts:39-48` as `createMenu()`. Menu items map to exported handlers and must be registered in the STUBS array in `apps-script/build.js:152-161`. All current items are zero-input — no existing modal/HTML pattern. Backend calls go through `makeApiCall()` (`main.ts:112-189`) using Bearer auth + JSON body, with `ui.alert()` for feedback.
-- **Movimientos sheets** live one-per-bank-account in `{YYYY}/Bancos/{Bank Account}/Movimientos - …`. Each spreadsheet has one tab per month named `YYYY-MM`. Schema is `MOVIMIENTOS_BANCARIO_SHEET` in `src/constants/spreadsheet-headers.ts:230-250` — 9 columns (`fecha`, `concepto`, `debito`, `credito`, `saldo`, `saldoCalculado`, `matchedFileId`, `matchedType`, `detalle`). Discovery via `discoverMovimientosSpreadsheets(rootId)` in `src/services/folder-structure.ts:723-820`. Reading via `readMovimientosForPeriod(spreadsheetId, "YYYY-MM")` in `src/services/movimientos-reader.ts:150-202` — already filters out SALDO INICIAL/FINAL via `isSpecialRow()` (`movimientos-reader.ts:16-34`).
-- **Resumen PDFs** are filed under `{YYYY}/Bancos/{Account|Card|Broker folder}/` with filenames pre-prefixed with `YYYY-MM`. Three Control sheets track them with `periodo` (column A) and `fileId` (column D): `CONTROL_RESUMENES_BANCARIO_SHEET` (12 cols A:L), `CONTROL_RESUMENES_TARJETA_SHEET` (10 cols A:J), `CONTROL_RESUMENES_BROKER_SHEET` (9 cols A:I), all in `src/constants/spreadsheet-headers.ts`.
-- **Drive service** (`src/services/drive.ts`) exposes `createFolder()`, `moveFile()`, `getParents()`, `listFilesInFolder()`, `findByName()`. **No `copyFile()` helper exists** — must add a wrapper around `drive.files.copy`. Same module hosts the `withQuotaRetry()` pattern used everywhere for Drive/Sheets calls.
-- **Sheets service** (`src/services/sheets.ts`) exposes `createSheet()` for new tabs, `appendRowsWithFormatting()` for typed rows (`CellDate`, `CellNumber`), `formatSheet()` for column number formats and frozen header rows, `getValues()` for reads, `batchUpdate()` for bulk writes.
-- **Routes** (`src/routes/scan.ts`) follow the Fastify async-handler shape with `{ onRequest: authMiddleware }`, body schema validation, JSON return, and error responses through `respond500`/`respond503`.
-- **Logger** (`src/utils/logger.ts`) is Pino with `{module, phase, ...}` context.
-- **Result<T,E>** is used everywhere for fallible operations.
-- **Test conventions**: Vitest, tests colocated as `*.test.ts`, fake CUITs from CLAUDE.md TESTING section.
+- **Append path** is `src/services/sheets.ts:1106-1162` — `appendRowsWithLinks` wraps `withTiming → withQuotaRetry → spreadsheets.batchUpdate({requests:[{appendCells}]})`. The function does NOT inspect `response.data.replies`; it returns a *computed* cell count derived from the input array. Any silent partial failure on the API side is invisible to callers.
+- **Concurrency** of file processing is via `src/processing/queue.ts` (PQueue, default concurrency=12, intervalCap=10/sec). On a quota-throttle release event, up to 12 `storeFactura` calls can fire concurrent `appendRowsWithLinks` against the same `(spreadsheetId, sheetName)` pair.
+- **`storeFactura`** at `src/processing/storage/factura-store.ts:171-300` already uses `withLock` (`src/utils/concurrency.ts:291-318`) — but keyed by **business key** (`nroFactura:fechaEmision:importeTotal:cuit`), so different facturas do NOT serialize. The remaining race is one level down: the underlying `appendCells` itself.
+- **Lock manager** (`src/utils/concurrency.ts:77-275`) is in-memory, supports CAS-release, auto-expiry, and `await`-driven wait queues. `withLock` returns `Result<T, Error>` — wrapping a `Result<T, Error>`-returning body would nest: `Result<Result<T,E>,E>`. We'll add a thin `withLockResult` adapter in `sheets.ts` that flattens the outer ok-wrap so the inner Result is propagated as-is.
+- **All callers of `appendRowsWithLinks`** (`grep -rn appendRowsWithLinks src/ | grep -v test`): `factura-store.ts`, `pago-store.ts`, `recibo-store.ts`, `retencion-store.ts`, `resumen-store.ts` (×3), `movimientos-store.ts` (×3), `storage/index.ts` (markFileProcessing), `pagos-pendientes.ts` (×2). Each writes to a known sheet — locking at the `appendRowsWithLinks` layer covers all of them in one fix without touching callers.
+- **Existing tests** for `appendRowsWithLinks` mock `spreadsheets.batchUpdate` (`src/services/sheets.test.ts`). The new tests will install mock implementations that simulate concurrency races (delayed resolution + shared "next row" counter).
+- **Latent secondary bug** at `src/processing/caches/duplicate-cache.ts:280-286`: `addEntry` stores the wrapped cell array (`CellValueOrLink[]` with `{type:'date', value}` / `{type:'number', value}` objects) but the dupe-check functions read the cache assuming raw spreadsheet shapes (`normalizeSpreadsheetDate(row[0])`, `parseNumber(String(row[9]))`). For freshly-added entries the comparisons silently fail. Not the cause of row loss (false negative ≠ overwrite), but it masks bugs and breaks intra-scan duplicate detection. Same-PR fix.
 
 ### MCP Context
 
-- **Linear MCP:** confirmed connected. Team: `ADVA Administracion`. Labels include `Feature`, `Improvement`, `Bug`. No related issues exist for "entrega" / "contadores" / "delivery".
-- **Drive / Gemini / Railway MCPs:** not consulted — codebase already exposes the right helpers; no document-content investigation required.
+- **Railway MCP** consulted: production logs for 2026-05-11 16:30–16:40 UTC retrieved via `railway logs --environment production`. Both `Factura stored successfully` events and per-call `appendRowsWithLinks durationMs=...` events confirm timing.
+- **Google Drive MCP** (`gdrive_list_revisions`): the revision timeline shows no manual edits since 2026-03-04 (every revision in the loss windows is the `railway` service account). Native Sheets revision content is not downloadable via the API — Drive limitation.
+- **Linear MCP**: no existing open issue covers this — ADV-84 (canceled), ADV-126 (lock mocks in tests), ADV-191 (rematch lock), ADV-194 (Gemini RPM cap) are adjacent concurrency fixes but distinct.
 
-### Cross-cutting Requirements Sweep
+### Investigation
 
-| Pattern in plan | Required spec | Where addressed |
-|-----------------|---------------|-----------------|
-| Google API calls (Drive, Sheets) | Wrap in existing `withQuotaRetry()` for rate-limit handling | Tasks 4, 5, 6, 7 (each notes the wrapper) |
-| Error messages exposed in API responses | Spanish-language generic message in body, raw error logged via Pino at `error` | Task 8 |
-| Async ops triggered by HTTP request | Concurrency design | Task 8: documented as "no lock acquired — operation reads as snapshot, writes only into the new Entregas/ subtree" |
-| Write ops to Drive (folder + PDFs + spreadsheet) | Atomicity / retry semantics | Task 5 (delete-then-create, idempotent on retry); Task 6/7 (re-running clears prior partial state) |
-| Repeated triggers (re-delivery same period) | Idempotency via overwrite | Task 5: existing folder contents deleted before re-populating |
+**Bug report:** 9 invoices issued by ADVA between 2026-04-24 and 2026-05-11 are missing from production `Control de Ingresos / Facturas Emitidas` despite the server's own logs/tracking/file-move showing the store succeeded.
 
-No Gemini API calls; no migrations to existing spreadsheet schemas (purely additive); no env var changes.
+**Classification:** Storage / **Critical** (production data loss, silent, customer-facing) / `src/services/sheets.ts` + concurrent write path
+
+**Root cause:** Concurrent `appendCells` API calls to the same sheet race on Google Sheets' "current end of data" detection. Two requests whose execution windows overlap can both pick the *same* target row index; the later commit overwrites the earlier one. `appendRowsWithLinks` doesn't inspect `response.data.replies`, so neither caller observes the loss. `withLock` in `storeFactura` is keyed by business key so distinct facturas don't serialize. Across the May 11 scans, every store whose `appendCells` window did not overlap any other survived; every loss aligns with the earliest-starting member of an overlapping burst.
+
+**Evidence:**
+- `src/services/sheets.ts:1106-1162` — `appendRowsWithLinks` runs `appendCells` per call with no per-sheet serialization and discards `replies`
+- `src/processing/storage/factura-store.ts:183` — `lockKey` includes business key only, so two different facturas never serialize on append
+- `src/processing/queue.ts:34` — PQueue concurrency=12 lets up to 12 stores hit the same sheet in parallel
+- Railway logs 2026-05-11T16:34:51.001-.229Z — concurrent appendCells windows for fileIds `1UELiQ9aEpLnV8af14bC_R1RKjbIsc0ee` (154) and `1cFsRb7MYiaLaQD-eBYx3i7oeWrC78V56` (155); 154 lost
+- Railway logs 2026-05-11T16:36:43.200-.672Z — concurrent appendCells windows for `1rTjmOwq10WnnkNMPDlcbh5nsiQKd7v9X` (181) and `1-TFRnTWFbuswy3mPaTmXIoR_nUR0hThd` (173); 181 lost
+- `Dashboard / Archivos Procesados` rows 671, 723, 735, 736, 748, 756, 778, 860, 866 — all 9 lost facturas tracked `status=success` with non-empty processedAt
+- `Control de Ingresos / Facturas Emitidas` `B:B` and `E:E` cross-checks — zero hits for any of the 9 fileIds or invoice numbers; rows already restored manually as rows 31–32 (154, 181) and prior rows (others)
+- `src/processing/caches/duplicate-cache.ts:280` — `addEntry(sheetId, name, fileId, row)` stores `row` containing `CellDate`/`CellNumber`/`{text,url}` wrapper objects
+- `src/processing/caches/duplicate-cache.ts:65-93` — `isDuplicateFactura` reads cache via `normalizeSpreadsheetDate(row[0])` and `parseNumber(String(row[9]))`, both of which fail silently on wrapper objects
+
+**Impact:** Silent data loss. Lost facturas don't appear in monthly Cobros Pendientes, can't be matched by movimientos, won't be marked `pagada` when payment arrives. ~9 known cases over ~3 weeks; rate roughly proportional to concurrent-store bursts. Restorable today by reading the PDFs and re-appending (already done for the 9). Will recur on every batch upload until fixed.
 
 ## Tasks
 
-### Task 1: Period range parser
-
-**Linear Issue:** [ADV-228](https://linear.app/lw-claude/issue/ADV-228/envio-a-contadores-period-range-parser)
-
+### Task 1: Write failing test for concurrent `appendRowsWithLinks` row loss
+**Linear Issue:** [ADV-242](https://linear.app/lw-claude/issue/ADV-242/storage-concurrent-appendcells-silently-drops-factura-rows-when)
 **Files:**
-- `src/services/delivery-package.ts` (create — first contributor; later tasks extend it)
-- `src/services/delivery-package.test.ts` (create)
-
-**Specification:**
-
-Add `parsePeriodRange(input: string): Result<{from: string, to: string}, Error>`. Accepts `YYYY-MM` (single month) or `YYYY-MM..YYYY-MM` (range). Single month yields `from === to`. Whitespace not tolerated (no leading/trailing/internal whitespace inside the period token). Year must be 2000–2100 inclusive. Month must be 01–12. Range must satisfy `to >= from` (lexicographic compare on `YYYY-MM` is sufficient). All error cases return `Result.err` with a Spanish-language message intended to be surfaced verbatim to the user.
+- `src/services/sheets.test.ts` (modify)
 
 **Steps:**
-1. Write tests in `src/services/delivery-package.test.ts` for `parsePeriodRange`:
-   - Valid single month `'2025-01'` → `{from: '2025-01', to: '2025-01'}`.
-   - Valid range `'2025-01..2025-03'` → `{from: '2025-01', to: '2025-03'}`.
-   - Range crossing year boundary `'2024-11..2025-02'` accepted.
-   - Invalid format (missing month, wrong separator like `'-'` or `' to '`, extra spaces) → `Result.err`.
-   - Invalid month (`'2025-00'`, `'2025-13'`) → `Result.err`.
-   - Invalid year (3-digit, `'9999-01'`) → `Result.err`.
-   - Inverted range (`'2025-03..2025-01'`) → `Result.err` with Spanish message.
-   - Empty / whitespace-only input → `Result.err`.
+1. Add a `describe('appendRowsWithLinks concurrency', ...)` block.
+2. Write a test that fires two `appendRowsWithLinks` calls concurrently against the same `(spreadsheetId, sheetName)` with a mocked `spreadsheets.batchUpdate` that:
+   - Maintains an in-memory "next row" counter shared across calls
+   - Resolves with a small artificial delay
+   - Records each call's `appendCells.sheetId` and the request body for assertion
+3. The test must assert: both calls return ok AND the mock recorded two **non-overlapping** appendCells invocations (i.e., serialization observable from the mock's per-call timing, where the second call begins only after the first resolves).
+4. Add a second test asserting cross-sheet parallelism: two `appendRowsWithLinks` calls against *different* `(spreadsheetId, sheetName)` pairs DO run in parallel (overlapping mock-call windows allowed and expected).
+5. Run verifier (expect fail — current implementation has no per-sheet lock, so both same-sheet calls run in parallel and the test for serialization fails).
+
+**Notes:**
+- Follow the existing `factura-store.test.ts:75-100` pattern for mocking `withLock` (or in this case, NOT mocking it so the production code path runs).
+- Use a Promise.withResolvers / deferred pattern to gate mock resolution and observe overlap deterministically; do NOT depend on wall-clock timing.
+
+### Task 2: Add `withLockResult` adapter and per-sheet lock around `appendRowsWithLinks`
+**Linear Issue:** [ADV-242](https://linear.app/lw-claude/issue/ADV-242/storage-concurrent-appendcells-silently-drops-factura-rows-when)
+**Files:**
+- `src/utils/concurrency.ts` (modify — add `withLockResult` helper) OR `src/services/sheets.ts` (modify — inline adapter)
+- `src/services/sheets.ts:1106-1162` (modify)
+
+**Steps:**
+1. Write a unit test for `withLockResult` (or whatever adapter chosen): given a body that returns `Result<T,E>`, the wrapper returns the same `Result<T,E>` on success, and a synthesized `{ok:false, error}` on lock-acquire timeout.
 2. Run verifier (expect fail).
-3. Implement `parsePeriodRange` using a strict regex `^(\d{4})-(\d{2})(\.\.(\d{4})-(\d{2}))?$`.
+3. Implement: in `src/services/sheets.ts`, derive `sheetName = range.split('!')[0]` (already done at line 1116) and wrap the existing `withTiming → withQuotaRetry → batchUpdate` chain inside a `withLock` call keyed by `sheet-append:${spreadsheetId}:${sheetName}`. Use a 60 s wait timeout and a 60 s auto-expiry (matches the typical `appendCells` SLA under heavy throttle).
+4. Ensure the lock wraps EVERYTHING including the metadata-cache fetch (so a slow metadata read still serializes appends).
+5. Run verifier (expect Task 1's tests now pass).
+
+**Notes:**
+- Pattern reference: `src/processing/storage/factura-store.ts:185` — `withLock(lockKey, async () => { ... }, 10000)`. Apply the same pattern at the `appendRowsWithLinks` boundary instead of inside callers.
+- Do NOT bypass the lock when `metadataCache` is provided — the race is at the API layer, not the metadata layer.
+- Lock key intentionally per-sheet, not per-spreadsheet, so writes to e.g. `Facturas Emitidas` and `Pagos Recibidos` in the same Control de Ingresos workbook can still go in parallel.
+
+### Task 3: Verify API response and surface silent failures
+**Linear Issue:** [ADV-242](https://linear.app/lw-claude/issue/ADV-242/storage-concurrent-appendcells-silently-drops-factura-rows-when)
+**Files:**
+- `src/services/sheets.test.ts` (modify)
+- `src/services/sheets.ts:1106-1162` (modify)
+
+**Steps:**
+1. Write a test that mocks `spreadsheets.batchUpdate` to return a response whose `replies[0].appendCells` is absent or whose `updatedRange` indicates zero rows applied. The test asserts that `appendRowsWithLinks` returns `{ok: false, error}` in this case.
+2. Run verifier (expect fail — current code returns ok regardless).
+3. Implement: after `await sheets.spreadsheets.batchUpdate(...)`, inspect the response. If a confirmation field (`replies[0].appendCells` or `updatedCells`) does not match the input row count, throw a typed `Error('appendCells did not apply expected rows: ...')` so `withQuotaRetry` retries.
 4. Run verifier (expect pass).
 
 **Notes:**
-- Mirror error-construction style from existing parsing helpers in `src/utils/date.ts`.
-- Spanish error messages will be surfaced through the route → Apps Script alert, so they must be user-facing quality.
+- Defence-in-depth: Task 2's lock should already eliminate the race, but Task 3 protects against any future variant.
+- Google's `appendCells` response may be empty by spec. If a confirmation field is not reliably populated, fall back to issuing a `getValues` on the last N rows of the target range to verify our fileId is present. This is one extra round-trip per append but only on first attempts — retries can skip.
 
----
-
-### Task 2: Enumerate resumenes for period range
-
-**Linear Issue:** [ADV-229](https://linear.app/lw-claude/issue/ADV-229/envio-a-contadores-enumerate-resumenes-for-period-range)
-
+### Task 4: Fix `DuplicateCache.addEntry` to store normalized spreadsheet-shape values
+**Linear Issue:** [ADV-242](https://linear.app/lw-claude/issue/ADV-242/storage-concurrent-appendcells-silently-drops-factura-rows-when)
 **Files:**
-- `src/services/delivery-package.ts` (modify)
-- `src/services/delivery-package.test.ts` (modify)
-
-**Specification:**
-
-Add `enumerateResumenes(from: string, to: string, controlResumenesId: string): Promise<Result<ResumenScopeItem[], Error>>` where `ResumenScopeItem = { fileId, fileName, type: 'bancario' | 'tarjeta' | 'broker', periodo }`. Reads the three Control de Resumenes tabs (names taken from the schema constants in `src/constants/spreadsheet-headers.ts` — do NOT hardcode tab names in this file), uses header-based column lookup (pattern in `match-movimientos.ts:281-310`), filters rows where `from <= periodo <= to`, and aggregates results across all three types into a single array.
+- `src/processing/caches/duplicate-cache.test.ts` (modify)
+- `src/processing/caches/duplicate-cache.ts:280-286` (modify)
 
 **Steps:**
-1. Write tests for `enumerateResumenes` mocking `getValues()` for the three tabs:
-   - Empty sheets → empty array.
-   - Periods inside range included; outside range excluded (boundary inclusive on both ends).
-   - Header row skipped via header-based column lookup (not row-index assumptions).
-   - Mixed-type rows aggregated correctly (one bancario + two tarjetas + one broker → 4 items with correct `type`).
-   - Single-month range (`from === to`) returns only that period.
-   - Drive read failure on any one sheet → `Result.err` (do not return partial data on error).
-2. Run verifier (expect fail).
-3. Implement `enumerateResumenes` reading the three tabs in parallel via `Promise.all`, projecting `(periodo, fileId, fileName, type)`, filtering by range.
+1. Write a test for `DuplicateCache.addEntry` followed by `isDuplicateFactura`: after `addEntry(spreadsheetId, sheetName, fileId, wrappedRow)`, calling `isDuplicateFactura(...)` with the same `(nroFactura, fecha, importe, cuit)` must return `{isDuplicate: true, existingFileId: fileId}`. Use a wrapped row mixing `{type:'date',value:'2026-05-11'}`, `{type:'number',value:25000}`, and `{text:'…',url:'…'}` cells.
+2. Run verifier (expect fail — current `addEntry` stores the wrapped row verbatim).
+3. Implement: in `addEntry`, normalize each cell before storing — date wrappers → ISO date string, number wrappers → number, link wrappers → `text`, primitives → pass through. Mirror the shape that `getValues` returns for a just-written row so subsequent dupe checks find it.
 4. Run verifier (expect pass).
 
 **Notes:**
-- The caller (Task 8 route) supplies `controlResumenesId` from the same folder-discovery path scan/match routes already use. Do not re-discover here.
+- Add a `normalizeForCache(cell: CellValueOrLink): unknown` helper so the conversion is unit-testable in isolation.
+- This bug is separate from the row-loss race but lives in the same write path. Fixing both in one PR keeps the audit trail coherent.
 
----
-
-### Task 3: Enumerate movimientos for period range
-
-**Linear Issue:** [ADV-230](https://linear.app/lw-claude/issue/ADV-230/envio-a-contadores-enumerate-movimientos-for-period-range)
-
+### Task 5: Document the API contract and locking strategy
+**Linear Issue:** [ADV-242](https://linear.app/lw-claude/issue/ADV-242/storage-concurrent-appendcells-silently-drops-factura-rows-when)
 **Files:**
-- `src/services/delivery-package.ts` (modify)
-- `src/services/delivery-package.test.ts` (modify)
-
-**Specification:**
-
-Add `enumerateMovimientos(from: string, to: string, rootFolderId: string): Promise<Result<MovimientoScopeItem[], Error>>` where `MovimientoScopeItem = { spreadsheetId, sheetName: 'YYYY-MM', banco, numeroCuenta, moneda }`. This task only enumerates scope; reading rows happens in Task 7.
+- `CLAUDE.md` (modify)
+- `src/services/sheets.ts` (modify — JSDoc on `appendRowsWithLinks`)
 
 **Steps:**
-1. Write tests for `enumerateMovimientos`:
-   - Mock `discoverMovimientosSpreadsheets()` returning two accounts across two years.
-   - Range crossing year boundary (`'2024-11..2025-02'`) walks both year folders.
-   - For each account, only months in `[from, to]` are emitted (boundary inclusive).
-   - Months without a corresponding tab in the source spreadsheet are silently skipped (not an error).
-   - Single-month range yields one tab per account that has data.
-   - One source spreadsheet's tab-list lookup fails → that account's entries are skipped (logged at `warn`); other accounts proceed; overall result is `Result.ok`.
-2. Run verifier (expect fail).
-3. Implement: build month list `[from..to]`, call `discoverMovimientosSpreadsheets(rootFolderId)`, for each `(year:account)` parse `banco / numeroCuenta / moneda` from the discovery key (`"{year}:{banco} {numeroCuenta} {moneda}"`), fetch the spreadsheet's tab list (reuse the YYYY-MM filter pattern from `getRecentMovimientoSheets` in `movimientos-reader.ts:112-141`), intersect with the month list, emit one item per intersection.
-4. Run verifier (expect pass).
+1. In `CLAUDE.md` under a new "SHEETS API CONCURRENCY" subsection (near the existing CONCURRENCY CONTROL block), document: *every* mutation that targets the same sheet must serialize via `sheet-append:${spreadsheetId}:${sheetName}` because Google's `appendCells` is not safe under concurrent execution against the same sheet, and `appendRowsWithLinks` now enforces this internally.
+2. Update the JSDoc on `appendRowsWithLinks` to explicitly state: "Serializes per-sheet via in-memory lock to prevent concurrent-append row loss on the Sheets API."
+3. No test needed for this task — documentation only.
 
 **Notes:**
-- Reuse `discoverMovimientosSpreadsheets()` and the `^\d{4}-\d{2}$` tab-name pattern. Do not duplicate folder-traversal logic here.
-
----
-
-### Task 4: Drive copyFile helper
-
-**Linear Issue:** [ADV-231](https://linear.app/lw-claude/issue/ADV-231/envio-a-contadores-drive-copyfile-helper)
-
-**Files:**
-- `src/services/drive.ts` (modify — append helper)
-- `src/services/drive.test.ts` (modify if it exists; otherwise create)
-
-**Specification:**
-
-Add `copyFile(fileId: string, parentFolderId: string, name?: string): Promise<Result<DriveFileInfo, Error>>` wrapping `drive.files.copy({ fileId, requestBody: { parents: [parentFolderId], name? } })`. Mirror error-handling and logging conventions from `moveFile` (`src/services/drive.ts:834-874`). Wrap the call in `withQuotaRetry()`.
-
-**Steps:**
-1. Write tests for `copyFile`:
-   - Successful copy returns `Result.ok` with `{ id, name, mimeType }`.
-   - Optional `name` parameter renames the copy.
-   - Missing source fileId → `Result.err`.
-   - Quota error path triggers `withQuotaRetry` retry behaviour (mock the same retry semantics other tests use).
-   - Drive API error → `Result.err` with sanitized message.
-2. Run verifier (expect fail).
-3. Implement `copyFile` using the standard `googleapis` Drive client method.
-4. Run verifier (expect pass).
-
-**Notes:**
-- Use `module: 'drive'`, `phase: 'copy-file'` for logging.
-
----
-
-### Task 5: Prepare delivery folder (create-or-clear)
-
-**Linear Issue:** [ADV-232](https://linear.app/lw-claude/issue/ADV-232/envio-a-contadores-prepare-delivery-folder-create-or-clear)
-
-**Files:**
-- `src/services/delivery-package.ts` (modify)
-- `src/services/delivery-package.test.ts` (modify)
-
-**Specification:**
-
-Add `prepareDeliveryFolder(rootFolderId: string, periodLabel: string, deliveryDate: Date): Promise<Result<{folderId: string, folderUrl: string, isReuse: boolean}, Error>>`. Also add a pure helper `formatDeliveryFolderName({from, to, deliveryDate}): string` so the route's plan-only response can show the prospective folder name without creating anything.
-
-Folder naming:
-- Single month (`from === to`): `"YYYY-MM (entregado YYYY-MM-DD)"` — e.g. `"2025-01 (entregado 2025-05-08)"`.
-- Range: `"YYYY-MM al YYYY-MM (entregado YYYY-MM-DD)"`.
-
-Folder URL format: `https://drive.google.com/drive/folders/{folderId}`.
-
-**Steps:**
-1. Write tests:
-   - `formatDeliveryFolderName` produces both single-month and range forms correctly.
-   - First-time delivery: creates `Entregas/` if missing, then creates the period folder inside; returns `isReuse: false`.
-   - Second-time delivery to same period: finds existing folder, deletes its contents (PDFs + spreadsheet + any other), returns same folderId; `isReuse: true`.
-   - Delete-contents step uses `listFilesInFolder` + per-file delete; the delivery folder itself is NOT deleted, only its contents.
-   - `Entregas/` already exists → reused, not duplicated.
-   - Drive error during create or delete → `Result.err` (do not leave partial state silently).
-2. Run verifier (expect fail).
-3. Implement using `findByName` to locate `Entregas/` and the period folder, `createFolder` for new ones, `listFilesInFolder` + Drive `files.delete` for cleanup.
-4. Run verifier (expect pass).
-
-**Notes:**
-- Use `module: 'delivery'`, `phase: 'prepare-folder'`.
-
----
-
-### Task 6: Copy PDFs to delivery folder
-
-**Linear Issue:** [ADV-233](https://linear.app/lw-claude/issue/ADV-233/envio-a-contadores-copy-pdfs-to-delivery-folder)
-
-**Files:**
-- `src/services/delivery-package.ts` (modify)
-- `src/services/delivery-package.test.ts` (modify)
-
-**Specification:**
-
-Add `copyPdfsToDelivery(folderId: string, scope: ResumenScopeItem[]): Promise<Result<{copied: number, failed: Array<{fileId: string, error: string}>}, Error>>`. Iterates the scope sequentially, copying each PDF via `copyFile()`. Sequential iteration is intentional — gentler on Drive quota and easier to reason about. Per-PDF failures are accumulated into `failed`, not thrown — the caller decides whether to escalate.
-
-**Steps:**
-1. Write tests:
-   - Empty scope → `{copied: 0, failed: []}`, overall `Result.ok`.
-   - All copies succeed → `{copied: N, failed: []}`.
-   - One copy fails → `failed` contains it, others still complete, overall `Result.ok`.
-   - All copies fail → still `Result.ok` with `failed.length === N` (route layer logs + decides response).
-2. Run verifier (expect fail).
-3. Implement using `copyFile`. Log per-PDF at `debug` (`module: 'delivery'`, `phase: 'copy-pdfs'`), totals at `info`.
-4. Run verifier (expect pass).
-
----
-
-### Task 7: Build movimientos workbook
-
-**Linear Issue:** [ADV-234](https://linear.app/lw-claude/issue/ADV-234/envio-a-contadores-build-movimientos-workbook)
-
-**Files:**
-- `src/services/delivery-package.ts` (modify)
-- `src/services/delivery-package.test.ts` (modify)
-
-**Specification:**
-
-Add `buildMovimientosWorkbook(folderId: string, scope: MovimientoScopeItem[]): Promise<Result<{workbookId: string, workbookUrl: string, tabCount: number}, Error>>`. Creates a Google Sheets file named `Movimientos` inside the delivery folder via `drive.files.create` with mimeType `application/vnd.google-apps.spreadsheet`. For each scope item, reads the source month's rows via `readMovimientosForPeriod()` (which already filters SALDO INICIAL/FINAL), projects six columns (`fecha`, `concepto`, `debito`, `credito`, `saldo`, `detalle` — `saldo` is the parsed PDF value, NOT `saldoCalculado`), creates a tab named `YYYY-MM {banco} {numeroCuenta} {moneda}` (month-major so tabs sort lexicographically), writes the rows with `CellDate` for `fecha` and `CellNumber` for `debito`/`credito`/`saldo`, and freezes the header row. After all real tabs are added, deletes the default tab via `sheets.spreadsheets.batchUpdate({ deleteSheet })`. Workbook URL format: `https://docs.google.com/spreadsheets/d/{id}/edit`.
-
-Empty-scope handling: a Google Sheets file cannot have zero tabs. When `scope` is empty, leave the default tab in place (rename it to `Sin Movimientos` and include only the six headers as a placeholder). Return `tabCount: 0`.
-
-**Steps:**
-1. Write tests:
-   - Empty scope → workbook is created with one placeholder tab `Sin Movimientos` containing only the six headers; `tabCount: 0`.
-   - One scope item → workbook with one tab named correctly, six columns, header row frozen, types `CellDate` / `CellNumber` / string applied per column. Default tab deleted.
-   - Multiple items across months → tabs sort lexicographically (month-major).
-   - Source has only SALDO rows → tab created with header row only (zero data rows).
-   - Source `readMovimientosForPeriod` returns `Result.err` for one tab → that tab is skipped, error logged at `warn`, others still written, overall `Result.ok`.
-2. Run verifier (expect fail).
-3. Implement using `drive.files.create` for the spreadsheet, then `createSheet` + `appendRowsWithFormatting` + `formatSheet` (with `frozenRows: 1` and per-column number formats) for each tab. Use `sheets.spreadsheets.batchUpdate({ deleteSheet })` to remove the default tab.
-4. Run verifier (expect pass).
-
-**Notes:**
-- `module: 'delivery'`, `phase: 'build-movimientos'`.
-- Source detalle is column I (index 8) in `MOVIMIENTOS_BANCARIO_SHEET`; project to position 6 (zero-indexed 5) in the output.
-- Tabs read sequentially to avoid bursting Sheets quota; revisit only if performance demands it.
-
----
-
-### Task 8: Delivery routes
-
-**Linear Issue:** [ADV-235](https://linear.app/lw-claude/issue/ADV-235/envio-a-contadores-delivery-routes-plan-copy-pdfs-build-movimientos)
-
-**Files:**
-- `src/routes/delivery.ts` (create)
-- `src/routes/delivery.test.ts` (create)
-- `src/server.ts` (modify — register the new route module)
-
-**Specification:**
-
-Three Fastify routes, all protected with `{ onRequest: authMiddleware }`. Each route is independent and idempotent on retry (recomputes scope from `period`):
-
-- `POST /api/delivery/plan` — body `{ period: string }`. Calls `parsePeriodRange`, `enumerateResumenes`, `enumerateMovimientos`, `formatDeliveryFolderName`. Returns `{ folderName, pdfCount, movimientosTabCount, periodLabel }`. Read-only — no Drive mutations.
-- `POST /api/delivery/copy-pdfs` — body `{ period: string }`. Calls `parsePeriodRange` + `enumerateResumenes` + `prepareDeliveryFolder` + `copyPdfsToDelivery`. Returns `{ folderId, folderUrl, copied, failed }`.
-- `POST /api/delivery/build-movimientos` — body `{ period: string, folderId: string }`. Calls `parsePeriodRange` + `enumerateMovimientos` + `buildMovimientosWorkbook`. Returns `{ workbookUrl, tabCount }`.
-
-Error responses are sanitized: Spanish-language generic message in the body (`error`, optionally `details` for parse errors that already produce user-facing strings); raw error logged via Pino at `error` level with `module: 'delivery'`.
-
-**Steps:**
-1. Write tests for the three routes:
-   - Invalid period → 400 with the Spanish message from `parsePeriodRange`.
-   - Auth missing → 401.
-   - Downstream service error → 500 with sanitized message; raw error appears in Pino mock at `error` level.
-   - Happy-path response shapes match spec for each endpoint.
-2. Run verifier (expect fail).
-3. Implement using existing patterns from `src/routes/scan.ts`: schema-validate request bodies, use `respond500`/`respond503` helpers if present, register under `/api` prefix in `src/server.ts`. Look up `controlResumenesId` and `rootFolderId` via the same lookup scan/match routes use.
-4. Run verifier (expect pass).
-
-**Notes:**
-- No `withLock` acquired — documented in Architecture rationale: read-only against existing data, writes only to a new `Entregas/` subtree.
-
----
-
-### Task 9: Apps Script integration
-
-**Linear Issue:** [ADV-236](https://linear.app/lw-claude/issue/ADV-236/envio-a-contadores-apps-script-menu-integration-with-progress-toasts)
-
-**Files:**
-- `apps-script/src/main.ts` (modify)
-- `apps-script/build.js` (modify — STUBS array)
-
-**Specification:**
-
-Add an exported `triggerEnvioContadores()` and a menu entry `📦 Envío a Contadores`. Use the user's documented progress UX:
-- Long-timeout in-progress toasts (300s) replace each other as work advances.
-- Final short-timeout toast `Listo.` (3s) clears any lingering long toast.
-- Modal alert `✅ Entrega lista` after the Done toast, summarizing folder name, counts, and folder URL.
-
-Flow inside `triggerEnvioContadores()`:
-1. `validateConfig()`.
-2. `ui.prompt('Período de entrega', 'YYYY-MM para un mes, o YYYY-MM..YYYY-MM para un rango.', ButtonSet.OK_CANCEL)`. Cancel → return silently.
-3. Client-side validate with regex `^\d{4}-\d{2}(\.\.\d{4}-\d{2})?$`. Mismatch → error alert + return.
-4. Toast `Preparando entrega para {periodo}...` (long).
-5. `POST /api/delivery/plan` → read `pdfCount`, `movimientosTabCount`, `folderName`.
-6. Toast `Encontrados {N} PDFs y {M} hojas. Copiando PDFs...` (long).
-7. `POST /api/delivery/copy-pdfs` → read `folderId`, `folderUrl`, `copied`, `failed`.
-8. Toast `PDFs copiados ({copied}). Generando movimientos...` (long).
-9. `POST /api/delivery/build-movimientos` (with `folderId` from step 7) → read `workbookUrl`, `tabCount`.
-10. Toast `Listo.` (short).
-11. Modal alert with summary.
-
-Add helpers:
-- `progressToast(msg)` — `SpreadsheetApp.getActiveSpreadsheet().toast(msg, 'Envío a Contadores', 300)`.
-- `doneToast()` — `SpreadsheetApp.getActiveSpreadsheet().toast('Listo.', 'Envío a Contadores', 3)`.
-
-Menu insertion: in `createMenu()` at `main.ts:39-48`, after `📝 Completar Detalles de Movimientos` and before the existing `addSeparator()`. Build stubs: append `{ exposed: 'triggerEnvioContadores', topLevel: 'triggerEnvioContadores' }` to STUBS in `apps-script/build.js:152-161`.
-
-**Steps:**
-1. Implement helpers, the trigger function, the menu item, and the STUB.
-2. Run verifier — confirms the Apps Script TS bundle compiles with zero warnings.
-
-**Notes:**
-- No unit tests for Apps Script — verifier runs the bundled-build path which `tsc`-checks `apps-script/src/`. Behaviour is exercised via the manual end-to-end test below.
-- Apps Script `UrlFetchApp.fetch` per-call timeout is 60s. With three endpoints, each call has its own budget. Document the limit in a brief code comment if the build step is at risk for very long ranges.
-- On any HTTP error from a step: surface the backend's Spanish message via `ui.alert('⚠️ Error de la API', ...)`. If `copy-pdfs` returns a non-empty `failed` array, include that count in the final summary alert.
-
----
+- Prevents future maintainers from "optimizing" the lock away or replacing `appendCells` with another concurrent-unsafe API.
 
 ## Post-Implementation Checklist
-
-1. Run `bug-hunter` agent — Review changes for bugs.
+1. Run `bug-hunter` agent — Review changes for bugs, especially around lock auto-expiry interactions with the existing `withQuotaRetry` retry loop (a retry that takes >60 s could fire after the lock expires; need to verify the inner body is idempotent or extend expiry).
 2. Run `verifier` agent — Verify all tests pass and zero warnings.
+3. Post-deploy verification: upload ≥10 cuota-social facturas in one batch to staging, confirm all rows appear in `Facturas Emitidas` and that scan logs show serialized appendCells timestamps for the same sheet (non-overlapping windows in Railway log entries).
 
 ---
 
 ## Plan Summary
 
-**Objective:** Add a Dashboard menu operation `📦 Envío a Contadores` that, given a single month or month range, assembles all resumen PDFs (banks + cards + brokers) plus a per-month per-bank movimientos workbook into a flat `Entregas/{periodLabel} (entregado YYYY-MM-DD)/` Drive folder, ready for the user to download and email to the accounting team.
-
-**Linear Issues:** ADV-228, ADV-229, ADV-230, ADV-231, ADV-232, ADV-233, ADV-234, ADV-235, ADV-236
-
-**Approach:** Three new Fastify endpoints (`plan`, `copy-pdfs`, `build-movimientos`) backed by a new `delivery-package` service that filters Control de Resumenes rows by `periodo`, walks `discoverMovimientosSpreadsheets()` for the in-range months, copies PDFs via a new `drive.files.copy` wrapper, and assembles a 6-column movimientos workbook with one tab per `(month, bank-account)`. Apps Script side adds a single text prompt with regex validation, calls the three endpoints sequentially, and surfaces progress via long-timeout toasts that replace each other, ending with a short `Listo` toast and a summary modal.
-
-**Scope:** 9 tasks; ~4 new source files (`src/services/delivery-package.ts` + test, `src/routes/delivery.ts` + test); ~4 modified files (`src/services/drive.ts` + test, `src/server.ts`, `apps-script/src/main.ts`, `apps-script/build.js`); ~30+ tests covering parsing, enumeration, folder prep, copy, workbook assembly, and route shape.
-
+**Objective:** Eliminate the silent row-loss in `Facturas Emitidas` (and every other sheet written by the system) caused by concurrent `appendCells` calls racing on Google's "end of data" detection — by serializing appends per-(spreadsheet, sheet) at the `appendRowsWithLinks` boundary, verifying API responses, and fixing a latent type-shape bug in `DuplicateCache`.
+**Linear Issues:** ADV-242
+**Approach:** Surgical fix at the lowest write primitive (`appendRowsWithLinks` in `src/services/sheets.ts`). Add a per-sheet `withLock` wrapper keyed by `sheet-append:${spreadsheetId}:${sheetName}`. Validate the Sheets API response and throw on apparent partial-failure so `withQuotaRetry` retries. Same-PR fix for `DuplicateCache.addEntry`'s wrapped-object storage bug. TDD throughout.
+**Scope:** 5 tasks, 4 production files modified, 1 doc file updated, 4 test files extended (with ~6 new tests total)
 **Key Decisions:**
-- Three endpoints, not one, so Apps Script can post progress toasts between phases (each call ≤ 60s timeout).
-- No concurrency lock — operation is read-only against existing data and writes only into the new `Entregas/` subtree.
-- Re-delivery is overwrite (delete existing folder contents, reuse folder), no prompt.
-- Flat folder layout (no subfolders) — user downloads everything to email.
-- Movimientos workbook tab naming is month-major (`YYYY-MM {banco} {cuenta} {moneda}`) for chronological scan.
-- `saldo` column projects the parsed PDF value (column E), not `saldoCalculado`.
-- New `copyFile()` helper in `drive.ts`; rest of Drive/Sheets work uses existing helpers.
-- Empty-scope movimientos workbook keeps the default tab as `Sin Movimientos` placeholder (Sheets cannot have zero tabs).
-
+- Lock per-(spreadsheetId, sheetName), not per-spreadsheet — preserves parallel writes to different sheets in the same workbook.
+- Lock at the `appendRowsWithLinks` boundary, not at callers — single point of enforcement covering all 9 caller modules with one edit.
+- Defence-in-depth: response verification (Task 3) protects against future API changes even if the lock itself ever fails open.
+- Same-PR fix of `DuplicateCache.addEntry` because the two bugs share the write path and reviewing them together is cheaper than two separate audits.
 **Risks:**
-- Very large ranges (year-plus, many accounts) may approach Apps Script's 60s `UrlFetchApp` timeout on the `build-movimientos` step. Initial cut accepts this; chunking can be added if observed in practice.
-- `drive.files.copy` quota: each copy is a single API call. For typical quarter-scale deliveries (≤30 PDFs) this is well under quota; sequential iteration is intentionally quota-gentle.
-- User-placed files inside a re-used delivery folder are deleted on overwrite. Documented as "the folder is owned by the operation."
+- Lock auto-expiry vs. `withQuotaRetry`: if Google throttles severely and a retry chain runs >60 s, the lock could expire mid-body and a second waiter could enter while the first is still inside. Mitigate by making the auto-expiry generous (60 s) and ensuring the inner body is idempotent (it currently is — `appendCells` always appends to end). Raise expiry to 120 s if concerns surface.
+- Performance: serializing per-sheet adds latency proportional to (concurrency × average appendCells duration). For a 15-factura scan at ~250 ms per call, that's ~3 s of added latency. Negligible against the 100+ s typical scan duration. Acceptable trade-off for correctness.
+- Task 3's response-verification depends on Google's response shape. If `replies[0].appendCells` is empty even on success, the fallback `getValues` round-trip adds one read per append. Mitigation: only verify on the first attempt; skip on retries (we trust the lock).
 
 ---
 
 ## Iteration 1
 
-**Implemented:** 2026-05-08
-**Method:** Agent team (3 workers, worktree-isolated)
+**Date:** 2026-05-11
+**Method:** single-agent (5 tasks, 2 independent units, 8 effort points → below worker threshold)
+**Status:** COMPLETE
 
-### Tasks Completed This Iteration
-- Task 1 [ADV-228]: parsePeriodRange — strict YYYY-MM / YYYY-MM..YYYY-MM regex parser, Spanish errors (worker-1)
-- Task 2 [ADV-229]: enumerateResumenes — walks per-account `Control de Resumenes` spreadsheets across `{YYYY}/Bancos/{Account}/`, classifies by header inspection, aggregates rows (worker-1, then architecturally rewritten by lead post-merge — see Architectural Fix below)
-- Task 3 [ADV-230]: enumerateMovimientos — walks discoverMovimientosSpreadsheets, intersects YYYY-MM tabs with month list (worker-1)
-- Task 4 [ADV-231]: copyFile helper in drive.ts (worker-2; worker-1 also added an equivalent version, lead kept worker-1's more defensive impl during merge)
-- Task 5 [ADV-232]: prepareDeliveryFolder + formatDeliveryFolderName — find-or-create Entregas/period folder, idempotent re-delivery via period-prefix matching + rename to current date (worker-1; lead extended re-delivery semantics during bug-fix pass)
-- Task 6 [ADV-233]: copyPdfsToDelivery — sequential per-PDF copy with per-failure accumulation (worker-1)
-- Task 7 [ADV-234]: buildMovimientosWorkbook — creates Sheets workbook, one tab per `(month, bank-account)`, empty-scope renames default tab to `Sin Movimientos` placeholder (worker-1)
-- Task 8 [ADV-235]: 3 Fastify routes (plan, copy-pdfs, build-movimientos) with auth, schema validation, Spanish error messages (worker-3)
-- Task 9 [ADV-236]: Apps Script `triggerEnvioContadores` — menu entry, prompt, progress toasts, modal summary (worker-3)
+### Tasks Completed
+
+- **Task 1** — Failing tests for concurrent `appendRowsWithLinks` row loss (`src/services/sheets.test.ts`)
+- **Task 2** — Added `withLockResult` adapter in `src/utils/concurrency.ts`; wrapped `appendRowsWithLinks` with per-sheet `withLock` keyed `sheet-append:${spreadsheetId}:${sheetName}`
+- **Task 3** — Response validation: throw on missing `replies[0]` so `withQuotaRetry` retries
+- **Task 4** — `DuplicateCache.addEntry` now normalizes `CellDate` / `CellNumber` / `CellLink` / `CellFormula` wrappers to primitives via `normalizeForCache`
+- **Task 5** — Added "SHEETS API CONCURRENCY" section to CLAUDE.md; JSDoc on `appendRowsWithLinks` reflects the new contract
 
 ### Files Modified
-- `src/services/delivery-package.ts` (new — 7 exported functions, ~700 lines)
-- `src/services/delivery-package.test.ts` (new — 64 tests)
-- `src/services/drive.ts` — `copyFile` and `deleteFileById` helpers added
-- `src/services/drive.test.ts` — copyFile + deleteFileById tests
-- `src/services/sheets.ts` — `renameSheet` helper added
-- `src/routes/delivery.ts` (new — 3 routes, ~250 lines)
-- `src/routes/delivery.test.ts` (new — 27 tests)
-- `src/server.ts` — delivery routes registered with `/api` prefix
-- `apps-script/src/main.ts` — `triggerEnvioContadores`, `progressToast`, `doneToast`, `callDeliveryApi`, menu entry
-- `apps-script/build.js` — `triggerEnvioContadores` STUB added
 
-### Linear Updates
-- ADV-228 → Review · ADV-229 → Review · ADV-230 → Review · ADV-231 → Review · ADV-232 → Review · ADV-233 → Review · ADV-234 → Review · ADV-235 → Review · ADV-236 → Review
+- `src/services/sheets.ts` — appendRowsWithLinks restructured; lock keyed per-sheet; response validated; `withTiming` placed inside lock body to keep durationMs lock-free
+- `src/utils/concurrency.ts` — added `withLockResult`
+- `src/processing/caches/duplicate-cache.ts` — added `normalizeForCache`; `addEntry` now normalizes rows before storing
+- `src/services/sheets.test.ts` — new "appendRowsWithLinks concurrency (ADV-242)" describe with 3 tests; mocks updated to return realistic `replies` array; `quotaThrottle.reset()` added to beforeEach (cross-describe pollution fix)
+- `src/utils/concurrency.test.ts` — 5 tests for `withLockResult`
+- `src/processing/caches/duplicate-cache.test.ts` — 3 tests for wrapper-cell normalization with `CellNumber` shapes
+- `CLAUDE.md` — new SHEETS API CONCURRENCY subsection
 
-### Architectural Fix (post-merge)
-The plan assumed a single root-level "Control de Resumenes" spreadsheet with three tabs. The actual codebase has many per-account "Control de Resumenes" spreadsheets — one per `{YYYY}/Bancos/{Account folder}/` — each with one `Resumenes` tab whose schema depends on the account type (bancario / tarjeta / broker). Worker-1 implemented `enumerateResumenes(controlResumenesId)` against the plan's incorrect model; the route's `controlResumenesId ?? ''` fallback would have failed at runtime. Lead rewrote `enumerateResumenes` to walk the actual hierarchy (year folders → Bancos → account folders → Control de Resumenes spreadsheet → Resumenes tab), classify by header inspection (presence of `moneda` / `tipotarjeta` / `broker`), and aggregate. Routes now pass `rootFolderId` directly. Tests rewritten accordingly.
+### Bug-Hunter Findings (Pre-Merge)
 
-### Bug-Hunter Findings (all fixed this iteration)
-- HIGH: `prepareDeliveryFolder` re-delivery used `listFilesInFolder` (PDF+image only) so the Movimientos workbook was never deleted on re-delivery. Switched to explicit `listByMimeType` for PDF and Spreadsheet types.
-- HIGH: Apps Script summary modal reported `plan.pdfCount` as "PDFs copiados" instead of `copy.copied`.
-- MEDIUM: `formatSheet` result silently swallowed in `buildMovimientosWorkbook`. Now warns on failure.
-- MEDIUM: Re-delivery on a different day created a sibling folder because the date suffix changed. `prepareDeliveryFolder` now matches by period prefix and renames the existing folder.
-- MEDIUM: `build-movimientos` route lacked the `getCachedFolderStructure()` guard. Added.
-- LOW: `deleteFileById` had no test coverage. Added 3 tests.
+4 issues found and fixed before commit:
 
-### Pre-commit Verification
-- bug-hunter: 6 bugs found, all fixed before commit.
-- verifier: 2249 tests pass, zero warnings on lint, zero warnings on typecheck, server + apps-script bundle build cleanly.
+1. **HIGH** — Lock auto-expiry was 120 s but `SHEETS_QUOTA_RETRY_CONFIG` can produce ~12-min retry chains, risking re-opening the ADV-242 race after expiry. **Fix:** Raised to 900 s (15 min); the expiry is now intended solely to recover from a crashed holder.
+2. **MEDIUM** — Comments claimed `appendCells` is idempotent "at worst duplicates, never overwrites." **Fix:** Both occurrences (sheets.ts and CLAUDE.md) now state plainly that `appendCells` is NOT idempotent w.r.t. server-side end-of-data detection.
+3. **LOW** — `withTiming` wrapped `withLockResult`, so lock-wait time was logged as API duration and tripped SLOW_CALL_THRESHOLD_MS warnings on every queued append. **Fix:** Moved `withTiming` inside the lock body.
+4. **LOW** — JSDoc referred to `replies[0].appendCells` which doesn't exist in the schema. **Fix:** Updated to reflect that successful responses return `replies[0]` as empty `{}`.
 
-### Work Partition
-- Worker 1: delivery-package core (Tasks 1, 2, 3, 5, 6, 7) — 12 effort points
-- Worker 2: drive copyFile helper (Task 4) — 1 effort point
-- Worker 3: routes + apps script (Tasks 8, 9) — 3 effort points
+### Verification
 
-### Merge Summary
-- Worker 1 → feature: clean merge.
-- Worker 2 → feature: 1 conflict in `drive.ts` (both workers added `copyFile`); kept worker-1's more defensive implementation, accepted worker-2's tests.
-- Worker 3 → feature: clean merge.
-- Post-merge: architectural fix commit + bug-hunter fix commit.
+- `npm test` → 2281 / 2281 tests passing
+- `npm run build` → clean, zero warnings (Apps Script bundle also generated successfully)
 
-### Continuation Status
-All tasks completed.
+### Cross-Describe Test Pollution (Diagnosed During Implementation)
+
+Older `sheets.test.ts` describes use `vi.useFakeTimers()` while exercising quota-retry paths that call `quotaThrottle.reportQuotaError()`. The throttle is a module-level singleton; its `lastErrorTime` captured under fake time can land in the *future* relative to the real `Date.now()` used by the new concurrency describe — making the auto-reset window never satisfy and forcing a 5 s wait on every API call.
+
+Fix: new describe calls `quotaThrottle.reset()` in `beforeEach`. Documented in CLAUDE.md under "Test hygiene note" so future maintainers writing real-timer specs against the same modules don't repeat the debug session.
+
+### Tasks Remaining
+
+None. Plan complete.
 
 ### Review Findings
 
-**Method:** 3-reviewer team (security, reliability, quality) on 10 changed files.
+Reviewed by 3-agent team (security, reliability, quality) on 2026-05-11. 11 total findings: **2 FIX (both S-size — fixed inline)**, **9 DISCARD**.
 
-**FIX (5 — bugs to address in Fix Plan):**
+**Fixed inline (S-size, TDD-verified):**
 
-1. **[high] [bug]** `src/services/delivery-package.ts:513-514` — `prepareDeliveryFolder` re-delivery uses `f.name.startsWith(prefix)`, so a single-month delivery `"2025-01 "` silently matches and clobbers an existing multi-month folder `"2025-01 al 2025-12 (entregado ...)"`. Asymmetric bug. → ADV-237
-2. **[medium] [security]** `src/routes/delivery.ts:200-255` — `POST /api/delivery/build-movimientos` accepts a user-supplied `folderId` and passes it to `buildMovimientosWorkbook` without verifying it lies within `Entregas/`. An authenticated caller could write the workbook into any folder reachable by the service account. The `isDescendantOf` helper already exists in `drive.ts`. → ADV-238
-3. **[medium] [edge-case]** `src/services/delivery-package.ts:763-780` — `buildMovimientosWorkbook` calls `deleteSheet(defaultSheet.sheetId)` even when every `createSheet` in the loop failed (`tabCount === 0`). The Sheets API rejects deleting the only sheet, the failure is only `warn`-logged, and the function returns `{ ok: true, tabCount: 0 }` with the workbook in a broken state. → ADV-239
-4. **[medium] [type]** `src/routes/delivery.test.ts:239,653-655,686` — Mock `MovimientoScopeItem` fixtures use a non-existent `bankName` field. Real type has `banco`, `numeroCuenta`, `moneda`. The "passes correct arguments" assertion only verifies that the same wrong-shape data is passed through, so a future regression on real fields would go undetected. → ADV-240
-5. **[low] [bug]** `src/services/delivery-package.ts:69-72` — Local `colLetter(count)` only handles A-Z. `columnIndexToLetter` already exists in `sheets.ts:49` and supports multi-letter columns. Currently safe (max 12 cols) but silently produces garbage A1 ranges if any schema expands beyond 26 cols. → ADV-241
+1. **MEDIUM** `[convention]` `src/processing/caches/duplicate-cache.ts:12` — `normalizeForCache` JSDoc lacked `@param`/`@returns` tags. CLAUDE.md mandates JSDoc on exported functions; rest of the codebase consistently uses both tags. **Fix:** added `@param cell` + `@returns` plus a paragraph documenting which wrapper variants are unwrapped (CellDate/CellNumber/CellFormula → value; CellLink → text; primitives/null/undefined pass through). Tracking: ADV-243 (Merge).
+2. **LOW** `[edge-case]` `src/processing/caches/duplicate-cache.test.ts` — Indirect-only coverage of `normalizeForCache` (via `addEntry`) missed CellFormula, null, undefined, and plain-primitive paths. Function handles them correctly, but no test guards the behavior. **Fix:** added `describe('normalizeForCache (unit)', ...)` block with 9 direct unit tests covering every input variant. Tracking: ADV-244 (Merge).
 
-**DISCARDED (5 — not real bugs, with reasoning):**
+**Discarded (reasoning preserved here so the user can audit before this file is overwritten):**
 
-1. **[medium] [async] No atomic find-or-create in `prepareDeliveryFolder`** — Plan explicitly documents "no `withLock` acquired" as an architectural decision. Single-user Apps Script UI flow makes concurrent same-period calls unlikely; the worst-case cost is a duplicate folder, not data corruption.
-2. **[medium] [timeout] Apps Script `UrlFetchApp` 60s timeout for large scopes** — Plan Risks section explicitly states: "Initial cut accepts this; chunking can be added if observed in practice."
-3. **[low] [convention] `withTiming` missing on new sheets.ts functions** — Reviewer's premise that "every pre-existing function uses `withTiming`" is incorrect. Many existing functions in `sheets.ts` (`formatStatusSheet`, `applyConditionalFormat`, `insertColumn`, `sortSheet`, `clearSheetData`, `moveSheetToFirst`, `appendRowsWithFormatting`, `formatEmptyMonthSheet`, `updateRowsWithFormatting`) also lack `withTiming`. The new `renameSheet` follows the dominant existing pattern.
-4. **[low] [test] No `createSheet` failure-path test in `buildMovimientosWorkbook`** — Coverage will be added by ADV-239 (the fix asserts the placeholder-tab path covers all-failure cases).
-5. **[low] [edge-case] Tab name 100-char Sheets limit** — Bank folder names follow `{Bank} {Account} {Currency}` (typically ≤30 chars). With YYYY-MM prefix, well under 100. Theoretical, not realistic with current data.
-
-### Linear Updates (review pass)
-- ADV-228..ADV-236 → Merge (review pass; original tasks were completed)
-- ADV-237 (high, bug) — created in Todo for Fix Plan
-- ADV-238 (medium, security) — created in Todo for Fix Plan
-- ADV-239 (medium, bug) — created in Todo for Fix Plan
-- ADV-240 (medium, bug) — created in Todo for Fix Plan
-- ADV-241 (low, bug) — created in Todo for Fix Plan
-
-<!-- REVIEW COMPLETE -->
-
----
-
-## Fix Plan
-
-Five fixes, TDD-driven. Order is independent — any ordering works because the fixes touch disjoint areas (one folder-prep bug, one route validation, one workbook build branch, one test fixture, one helper swap).
-
-### Fix 1: prepareDeliveryFolder prefix-startsWith silently matches multi-month folder
-
-**Linear Issue:** [ADV-237](https://linear.app/lw-claude/issue/ADV-237/envio-a-contadores-preparedeliveryfolder-prefix-startswith-silently)
-
-**Files:**
-- `src/services/delivery-package.ts` (modify)
-- `src/services/delivery-package.test.ts` (modify)
-
-**Steps:**
-1. Add a test in `delivery-package.test.ts`: existing folder `"2025-01 al 2025-12 (entregado 2026-05-01)"` is NOT matched when calling `prepareDeliveryFolder` for single month `2025-01` — instead a new folder is created. Add a complementary test confirming that `"2025-01 (entregado 2026-05-01)"` IS still reused for `2025-01` re-delivery.
-2. Run verifier (expect fail on the new "no false match" test).
-3. Replace the existing predicate at `delivery-package.ts:513-515`:
-   ```ts
-   const existing = existingFoldersResult.value.find(
-     f => f.name === folderName || extractPeriodPrefix(f.name) === prefix
-   );
-   ```
-4. Run verifier (expect pass).
-
----
-
-### Fix 2: IDOR on user-supplied folderId in build-movimientos
-
-**Linear Issue:** [ADV-238](https://linear.app/lw-claude/issue/ADV-238/envio-a-contadores-idor-on-user-supplied-folderid-in-apideliverybuild)
-
-**Files:**
-- `src/routes/delivery.ts` (modify)
-- `src/routes/delivery.test.ts` (modify)
-
-**Steps:**
-1. Add tests for `POST /api/delivery/build-movimientos`:
-   - When `folderId` is not a descendant of `Entregas/` → 400 with Spanish message.
-   - When `folderId` is a descendant of `Entregas/` → proceeds normally.
-   - When the `Entregas/` folder cannot be located → 500.
-2. Run verifier (expect fail).
-3. Add an ancestry check inside the `/delivery/build-movimientos` handler before calling `buildMovimientosWorkbook`:
-   - `findByName(rootFolderId, 'Entregas', 'application/vnd.google-apps.folder')` — if absent, respond 500.
-   - `isDescendantOf(folderId, entregasFolderId)` (from `drive.ts:976`) — if false, respond 400 with `'folderId no pertenece a la carpeta Entregas/'`.
-4. Run verifier (expect pass).
-
----
-
-### Fix 3: buildMovimientosWorkbook leaves broken workbook when all createSheet calls fail
-
-**Linear Issue:** [ADV-239](https://linear.app/lw-claude/issue/ADV-239/envio-a-contadores-buildmovimientosworkbook-leaves-broken-workbook)
-
-**Files:**
-- `src/services/delivery-package.ts` (modify)
-- `src/services/delivery-package.test.ts` (modify)
-
-**Steps:**
-1. Add a test: `scope.length > 0` with `createSheet` mocked to always fail → workbook ends with one tab named `Sin Movimientos` containing only the six-column header row; `tabCount: 0`; overall `Result.ok`. `deleteSheet` must NOT be called.
-2. Run verifier (expect fail).
-3. Refactor the existing empty-scope branch (rename Sheet1 to `Sin Movimientos` + write headers) into a private helper. After the loop, if `tabCount === 0`, invoke that helper instead of calling `deleteSheet(defaultSheet.sheetId)`.
-4. Run verifier (expect pass).
-
----
-
-### Fix 4: delivery.test.ts mocks use non-existent bankName field
-
-**Linear Issue:** [ADV-240](https://linear.app/lw-claude/issue/ADV-240/envio-a-contadores-deliverytestts-mocks-use-non-existent-bankname)
-
-**Files:**
-- `src/routes/delivery.test.ts` (modify)
-
-**Steps:**
-1. Update the three mock fixture spots (lines 239, 653-655, 686) to use the real `MovimientoScopeItem` shape:
-   ```ts
-   { spreadsheetId: 'sp1', sheetName: '2025-01', banco: 'BBVA', numeroCuenta: '1234567890', moneda: 'ARS' }
-   ```
-2. Run verifier — tests must continue to pass with the corrected fixtures (the mocks flow through to mocked services that do not read the fields, so no assertion changes are needed).
-
----
-
-### Fix 5: Replace local colLetter helper with sheets.ts columnIndexToLetter
-
-**Linear Issue:** [ADV-241](https://linear.app/lw-claude/issue/ADV-241/envio-a-contadores-replace-local-colletter-helper-with-sheetsts)
-
-**Files:**
-- `src/services/delivery-package.ts` (modify)
-- `src/services/delivery-package.test.ts` (modify if a regression test is added)
-
-**Steps:**
-1. (Optional) Add a regression test asserting `widestResumenesColumn` paired with `columnIndexToLetter` produces a valid A1 range for ≤12 columns; behavior unchanged for current data.
-2. Run verifier (expect pass — pre-existing behavior).
-3. In `delivery-package.ts`: import `columnIndexToLetter` from `./sheets.js`, remove the local `colLetter` helper at lines 69-72, and update the call site at line 206.
-4. Run verifier (expect pass).
-
----
-
-## Post-Fix Checklist
-
-After all 5 fixes are implemented:
-1. Run `bug-hunter` agent — confirm no regressions and no new issues introduced by the fixes.
-2. Run `verifier` agent — confirm all tests pass and zero warnings.
-
----
-
-## Iteration 2
-
-**Implemented:** 2026-05-08
-**Method:** Single-agent (5 fixes × S = 5 effort points across 2 work units, below worker threshold)
-
-### Tasks Completed This Iteration
-- Fix 1 [ADV-237]: prepareDeliveryFolder — replaced `f.name.startsWith(prefix)` with `extractPeriodPrefix(f.name) === prefix` so a single-month re-delivery no longer clobbers an existing multi-month folder.
-- Fix 2 [ADV-238]: build-movimientos route — added IDOR guard validating `folderId` is a descendant of `Entregas/` before any write (`findByName` + `isDescendantOf` from `drive.ts`); rejects with Spanish 400 message.
-- Fix 3 [ADV-239]: buildMovimientosWorkbook — extracted `Sin Movimientos` placeholder into private `applySinMovimientosPlaceholder` helper, used both for empty scope AND when every `createSheet` call fails (guards against orphaned workbook + Sheets-API "cannot delete only sheet" error).
-- Fix 4 [ADV-240]: delivery.test.ts — replaced wrong-shape `bankName` mock fixtures (5 occurrences) with the real `banco`/`numeroCuenta`/`moneda` fields.
-- Fix 5 [ADV-241]: delivery-package.ts — removed local `colLetter` helper, now imports `columnIndexToLetter` from `./sheets.js`. Test mock for `./sheets.js` extended with a real-behavior `columnIndexToLetter` implementation.
-
-### Files Modified
-- `src/services/delivery-package.ts` — predicate fix, helper extraction, import swap
-- `src/services/delivery-package.test.ts` — added prefix-equality, all-fail-branch tests; mock for `columnIndexToLetter`
-- `src/routes/delivery.ts` — IDOR guard import + validation block
-- `src/routes/delivery.test.ts` — drive.js mock; 4 new IDOR tests; fixture shape correction
+- **LOW** `[security]` `src/services/sheets.ts:1202-1203` — spreadsheetId in error message string. **Discarded:** per saved feedback memory, log redaction findings are not flagged for this project; logs are an internal debugging surface, spreadsheetIds are not credentials. Pre-existing pattern across lock-manager `resourceId` logging.
+- **LOW** `[security]` `src/utils/concurrency.ts` (resourceId in WARN logs) — Same reasoning as above. Internal logs only.
+- **MEDIUM** `[async]` `src/services/sheets.ts:1081,1212` — 60s lock wait timeout could expire while a holder is in a long quota-retry chain, sending files to Sin Procesar. **Discarded:** intentional by design (reviewer's own note: "flagging for awareness rather than as a defect requiring change"). Sin Procesar files are recovered automatically by the next scan via `getStaleProcessingFileIds` — no data loss, just graceful degradation under sustained quota pressure.
+- **MEDIUM** `[bug]` `src/services/sheets.ts:1199-1204` — `!replies[0]` validation could trigger a non-idempotent duplicate retry if Google ever returns falsy `replies[0]` after success. **Discarded:** explicitly accepted in CLAUDE.md as defense-in-depth; removing the check reintroduces the silent row-loss bug class this PR exists to fix. The current API reliably returns `{}` (truthy), so the duplicate-on-future-API-change risk is theoretical and bounded.
+- **LOW** `[edge-case]` `src/processing/caches/duplicate-cache.ts:16` — `normalizeForCache` returns the formula string for CellFormula cells, not the computed value. **Discarded:** formula columns (e.g., `saldoCalculado`) are not used in any dupe-check key, so this never affects production behavior. The "semantically correct" value (the computed result) is unknown at write time, so there's no fix to apply.
+- **LOW** `[test]` `src/services/sheets.test.ts:2807-2822` — Malformed-response test spends 3–4s on real-time retry backoff. **Discarded:** test works correctly; "fix" would require API-surface changes for marginal CI speedup. Performance, not bug.
+- **LOW** `[convention]` `src/services/sheets.ts:1148-1149` — Lock key uses `:` as separator without escaping. **Discarded:** Google Drive file IDs never contain `:`, so collision is impossible (reviewer's own conclusion).
+- **LOW** `[convention]` `src/services/sheets.test.ts` — Blanket mock update applies `{ replies: [{ appendCells: {} }] }` to all `batchUpdate` operations including formatSheet/deleteSheet/sortSheet/etc. **Discarded:** tests pass, mock shape is for operations that don't inspect `replies`, no functional impact. Style only.
+- **LOW** `[edge-case]` `src/utils/concurrency.test.ts:~395` — Lock-timeout test uses `setTimeout(10)` instead of `Promise.withResolvers`-based deferred gating used in sheets.test.ts. **Discarded:** reviewer confirms "Not flaky in practice" — synchronous CAS in the happy path makes the 10ms macrotask reliable. Style consistency only.
 
 ### Linear Updates
-- ADV-237 → Review · ADV-238 → Review · ADV-239 → Review · ADV-240 → Review · ADV-241 → Review
 
-### Verification
-- bug-hunter: no bugs found in current changes; all 5 fixes verified for logic, security, async, type-safety, CLAUDE.md compliance.
-- verifier: 2256 tests pass, zero warnings on lint, zero warnings on typecheck, server + apps-script bundle build cleanly.
+- ADV-242 — **Review → Merge** (review passed; original concurrency-fix issue complete)
+- ADV-243 — **Created in Merge** (inline-fix audit trail: JSDoc convention)
+- ADV-244 — **Created in Merge** (inline-fix audit trail: direct unit tests)
 
-### Continuation Status
-All Fix Plan items completed.
+### Inline Fix Verification
 
-### Review Findings (Iteration 2)
-
-**Method:** Single-agent review (4 changed files, sub-team threshold) with sequential security / reliability / quality / CLAUDE.md passes against `src/services/delivery-package.ts`, `src/services/delivery-package.test.ts`, `src/routes/delivery.ts`, `src/routes/delivery.test.ts`.
-
-**No bugs found.** All 5 fixes implement the Fix Plan correctly:
-
-- Fix 1 [ADV-237]: `extractPeriodPrefix(folderName) === prefix` correctly handles the single-month vs multi-month asymmetry. Preserved trailing-space sentinel inside `extractPeriodPrefix` keeps `"2025-01 "` unambiguous against `"2025-10 …"`. New tests assert both directions (no-false-match and same-period reuse on a different day).
-- Fix 2 [ADV-238]: IDOR guard at `delivery.ts:240-254` anchors to root via `findByName(rootFolderId, 'Entregas')` (direct-children query per `drive.ts:377`), then walks parents via `isDescendantOf` (10s deadline, depth-limited). Guard fires before `enumerateMovimientos` / `buildMovimientosWorkbook`, with all four error paths covered (not-descendant → 400, Entregas missing → 500, descendant-check error → 500, happy path → 200).
-- Fix 3 [ADV-239]: `applySinMovimientosPlaceholder` helper unifies the empty-scope and all-createSheet-fail branches. `tabCount === 0` correctly skips `deleteSheet` (which would fail on the only remaining tab) and falls through to placeholder treatment. Test asserts `deleteSheet` is NOT called in the all-fail branch.
-- Fix 4 [ADV-240]: Five fixture occurrences across `delivery.test.ts` corrected to the real `MovimientoScopeItem` shape (`banco`/`numeroCuenta`/`moneda`).
-- Fix 5 [ADV-241]: `columnIndexToLetter` from `sheets.ts` now supports multi-letter columns; the test mock mirrors the real implementation.
-
-CLAUDE.md compliance verified: ESM `.js` imports, `Result<T,E>` pattern, Pino logger, TDD (each fix has a corresponding test), zero warnings per the iteration's verifier run.
-
-### Linear Updates (review pass)
-- ADV-237..ADV-241 → Merge (all 5 fixes verified, no new issues introduced)
+- Targeted: `npx vitest run src/processing/caches/duplicate-cache.test.ts` → 36 / 36 passing (9 new)
+- Full suite: `npm test` → all green
+- Build: `npm run build` → clean, zero warnings
+- bug-hunter on the inline diff: "No bugs found" — confirmed JSDoc accuracy and that all 9 new assertions are meaningful and exercise distinct code paths
 
 <!-- REVIEW COMPLETE -->
 
@@ -606,8 +242,4 @@ CLAUDE.md compliance verified: ESM `.js` imports, `Result<T,E>` pattern, Pino lo
 
 ## Status: COMPLETE
 
-All tasks implemented and reviewed successfully across 2 iterations:
-- Iteration 1: 9 original tasks (ADV-228..ADV-236) → Merge
-- Iteration 2: 5 fix-plan tasks (ADV-237..ADV-241) → Merge
-
-E2E tests N/A — this is a backend-only Fastify server with no E2E harness; the iteration's full unit-test pass (2256 tests, zero warnings on lint/typecheck/build) is the equivalent gate.
+All tasks implemented, reviewed, and inline-fixes verified. ADV-242, ADV-243, ADV-244 all in Merge state.

@@ -3,7 +3,8 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { isQuotaError, withQuotaRetry, SHEETS_QUOTA_RETRY_CONFIG, withLock, computeVersion, quotaThrottle } from './concurrency.js';
+import { isQuotaError, withQuotaRetry, SHEETS_QUOTA_RETRY_CONFIG, withLock, withLockResult, computeVersion, quotaThrottle, clearAllLocks } from './concurrency.js';
+import type { Result } from '../types/index.js';
 
 describe('isQuotaError', () => {
   it('detects "quota exceeded" message', () => {
@@ -347,6 +348,96 @@ describe('withLock', () => {
 
       expect(overlaps).toEqual([]);
     }
+  });
+});
+
+describe('withLockResult (ADV-242)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    clearAllLocks();
+  });
+
+  it('flattens an ok:true body Result', async () => {
+    const body = async (): Promise<Result<number, Error>> => ({ ok: true, value: 42 });
+    const result = await withLockResult('resource-ok', body);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value).toBe(42);
+    }
+  });
+
+  it('flattens an ok:false body Result (preserves inner error)', async () => {
+    const inner = new Error('inner failure');
+    const body = async (): Promise<Result<number, Error>> => ({ ok: false, error: inner });
+    const result = await withLockResult('resource-fail', body);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toBe(inner);
+    }
+  });
+
+  it('returns ok:false with the thrown error when body throws', async () => {
+    const body = async (): Promise<Result<number, Error>> => {
+      throw new Error('boom');
+    };
+    const result = await withLockResult('resource-throw', body);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.message).toBe('boom');
+    }
+  });
+
+  it('returns ok:false on lock-acquire timeout without invoking the body', async () => {
+    let bodyInvocations = 0;
+
+    // First caller holds the lock for longer than the second's wait timeout
+    const slowBody = async (): Promise<Result<string, Error>> => {
+      await new Promise(resolve => setTimeout(resolve, 200));
+      return { ok: true, value: 'held' };
+    };
+    const trackingBody = async (): Promise<Result<string, Error>> => {
+      bodyInvocations++;
+      return { ok: true, value: 'should-not-run' };
+    };
+
+    const p1 = withLockResult('resource-timeout', slowBody, 5000, 5000);
+    // Give p1 a tick to acquire the lock
+    await new Promise(resolve => setTimeout(resolve, 10));
+
+    // p2 with a very short wait timeout (will give up before p1 releases)
+    const p2 = await withLockResult('resource-timeout', trackingBody, 30, 5000);
+
+    expect(p2.ok).toBe(false);
+    if (!p2.ok) {
+      expect(p2.error.message.toLowerCase()).toContain('lock');
+    }
+    expect(bodyInvocations).toBe(0);
+
+    // Drain p1 so the lock is freed for subsequent tests
+    const r1 = await p1;
+    expect(r1.ok).toBe(true);
+  });
+
+  it('serializes concurrent callers (no body overlap)', async () => {
+    let inFlight = 0;
+    let maxInFlight = 0;
+
+    const body = async (): Promise<Result<number, Error>> => {
+      inFlight++;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+      await new Promise(resolve => setTimeout(resolve, 30));
+      inFlight--;
+      return { ok: true, value: 1 };
+    };
+
+    const results = await Promise.all([
+      withLockResult('resource-serialize', body),
+      withLockResult('resource-serialize', body),
+      withLockResult('resource-serialize', body),
+    ]);
+
+    expect(results.every(r => r.ok)).toBe(true);
+    expect(maxInFlight).toBe(1);
   });
 });
 

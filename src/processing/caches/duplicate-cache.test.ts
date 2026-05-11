@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { DuplicateCache } from './duplicate-cache.js';
+import { DuplicateCache, normalizeForCache } from './duplicate-cache.js';
 import * as sheets from '../../services/sheets.js';
 import type { ResumenBancario, ResumenTarjeta, ResumenBroker } from '../../types/index.js';
 
@@ -594,6 +594,149 @@ describe('DuplicateCache', () => {
 
       expect(result.isDuplicate).toBe(true);
       expect(result.existingFileId).toBe('file-1');
+    });
+  });
+
+  describe('addEntry wrapper-cell normalization (ADV-242)', () => {
+    it('detects a freshly-added factura when importeTotal is wrapped as CellNumber', async () => {
+      // Reproduces the latent bug: storeFactura writes a row containing
+      // { type: 'number', value: N } wrappers for monetary columns, but
+      // isDuplicateFactura reads them via parseNumber(String(row[9])) — which
+      // returns null/0 for an object (String({...}) === '[object Object]').
+      // After the fix, addEntry must normalize wrappers to primitives so the
+      // dupe check finds the entry.
+      const cache = new DuplicateCache();
+      const mockRows = [
+        ['Fecha', 'File ID', 'C', 'D', 'Nro Factura', 'CUIT', 'G', 'H', 'I', 'Importe Total'],
+      ];
+      vi.mocked(sheets.getValues).mockResolvedValue({ ok: true, value: mockRows });
+      await cache.loadSheet('spreadsheet-1', 'Facturas Emitidas', 'A1:Z1000');
+
+      // Production-shape row from buildFacturaRowFormatted:
+      //   A: CellDate, B: fileId (str), C: CellLink, D..G: strings,
+      //   H/I/J: CellNumber wrappers
+      const row = [
+        { type: 'date', value: '2026-05-11' },  // A: fechaEmision
+        'file-1',                                // B: fileId
+        { text: 'doc.pdf', url: 'https://drive.google.com/file/d/file-1/view' }, // C
+        'A',                                     // D
+        '00001-00000214',                        // E: nroFactura
+        '27130780259',                           // F: CUIT
+        'SOCIO SA',                              // G
+        { type: 'number', value: 20661.16 },     // H
+        { type: 'number', value: 4338.84 },      // I
+        { type: 'number', value: 25000 },        // J: importeTotal (THE BUG)
+      ];
+      cache.addEntry('spreadsheet-1', 'Facturas Emitidas', 'file-1', row);
+
+      const result = cache.isDuplicateFactura(
+        'spreadsheet-1',
+        'Facturas Emitidas',
+        '00001-00000214',
+        '2026-05-11',
+        25000,
+        '27130780259'
+      );
+
+      expect(result.isDuplicate).toBe(true);
+      expect(result.existingFileId).toBe('file-1');
+    });
+
+    it('detects a freshly-added pago when importePagado is wrapped as CellNumber', async () => {
+      const cache = new DuplicateCache();
+      const mockRows = [
+        ['Fecha', 'File ID', 'C', 'D', 'Importe Pagado', 'F', 'G', 'CUIT'],
+      ];
+      vi.mocked(sheets.getValues).mockResolvedValue({ ok: true, value: mockRows });
+      await cache.loadSheet('spreadsheet-1', 'Pagos Enviados', 'A1:Z1000');
+
+      cache.addEntry('spreadsheet-1', 'Pagos Enviados', 'file-2', [
+        { type: 'date', value: '2026-05-11' }, // A
+        'file-2',                              // B
+        '', '',
+        { type: 'number', value: 10000 },      // E: importePagado (wrapped)
+        '', '',
+        '20123456786',                         // H: CUIT
+      ]);
+
+      const result = cache.isDuplicatePago(
+        'spreadsheet-1',
+        'Pagos Enviados',
+        '2026-05-11',
+        10000,
+        '20123456786'
+      );
+      expect(result.isDuplicate).toBe(true);
+      expect(result.existingFileId).toBe('file-2');
+    });
+
+    it('detects a freshly-added retencion when montoRetencion is wrapped as CellNumber', async () => {
+      const cache = new DuplicateCache();
+      const mockRows = [
+        ['Fecha', 'File ID', 'C', 'Nro Cert', 'CUIT Agente', 'F', 'G', 'H', 'I', 'Monto'],
+      ];
+      vi.mocked(sheets.getValues).mockResolvedValue({ ok: true, value: mockRows });
+      await cache.loadSheet('spreadsheet-1', 'Retenciones Recibidas', 'A1:Z1000');
+
+      cache.addEntry('spreadsheet-1', 'Retenciones Recibidas', 'file-3', [
+        { type: 'date', value: '2026-05-11' }, // A
+        'file-3',                              // B
+        '',
+        '12345678',                            // D: nroCertificado
+        '20123456786',                         // E: CUIT agente
+        '', '', '', '',
+        { type: 'number', value: 5000 },       // J: montoRetencion (wrapped)
+      ]);
+
+      const result = cache.isDuplicateRetencion(
+        'spreadsheet-1',
+        '12345678',
+        '20123456786',
+        '2026-05-11',
+        5000
+      );
+      expect(result.isDuplicate).toBe(true);
+      expect(result.existingFileId).toBe('file-3');
+    });
+  });
+
+  describe('normalizeForCache (unit)', () => {
+    it('unwraps CellDate to its ISO string value', () => {
+      expect(normalizeForCache({ type: 'date', value: '2026-05-11' })).toBe('2026-05-11');
+    });
+
+    it('unwraps CellNumber to its numeric value', () => {
+      expect(normalizeForCache({ type: 'number', value: 25000 })).toBe(25000);
+    });
+
+    it('unwraps CellFormula to its formula string', () => {
+      expect(normalizeForCache({ type: 'formula', value: '=SUM(A1:A10)' })).toBe('=SUM(A1:A10)');
+    });
+
+    it('unwraps CellLink to its display text', () => {
+      expect(
+        normalizeForCache({ text: 'doc.pdf', url: 'https://drive.google.com/file/d/abc/view' }),
+      ).toBe('doc.pdf');
+    });
+
+    it('passes null through unchanged', () => {
+      expect(normalizeForCache(null)).toBeNull();
+    });
+
+    it('passes undefined through unchanged', () => {
+      expect(normalizeForCache(undefined)).toBeUndefined();
+    });
+
+    it('passes plain strings through unchanged', () => {
+      expect(normalizeForCache('plain string')).toBe('plain string');
+    });
+
+    it('passes plain numbers through unchanged', () => {
+      expect(normalizeForCache(42)).toBe(42);
+    });
+
+    it('passes empty string through unchanged', () => {
+      expect(normalizeForCache('')).toBe('');
     });
   });
 

@@ -318,6 +318,33 @@ export async function withLock<T>(
 }
 
 /**
+ * Like `withLock`, but flattens a `Result<T, E>`-returning body so the caller
+ * does not have to unwrap a nested `Result<Result<T, E>, Error>`.
+ *
+ * - Lock-acquire timeout → returns the outer ok:false (Error).
+ * - Body returns ok:true   → returns the body's Result as-is.
+ * - Body returns ok:false  → returns the body's Result as-is.
+ * - Body throws            → returns ok:false with the thrown error (matches `withLock`).
+ *
+ * @param resourceId - Unique identifier for the resource to lock
+ * @param fn - Body that itself returns a Result
+ * @param timeoutMs - Maximum time to wait for the lock
+ * @param autoExpiryMs - Lock auto-expiry timeout (defaults to LOCK_TIMEOUT_MS)
+ */
+export async function withLockResult<T, E extends Error = Error>(
+  resourceId: string,
+  fn: () => Promise<Result<T, E>>,
+  timeoutMs: number = 5000,
+  autoExpiryMs: number = LOCK_TIMEOUT_MS
+): Promise<Result<T, E | Error>> {
+  const outer = await withLock<Result<T, E>>(resourceId, fn, timeoutMs, autoExpiryMs);
+  if (!outer.ok) {
+    return { ok: false, error: outer.error };
+  }
+  return outer.value;
+}
+
+/**
  * Executes a function with retry on conflict
  * Uses exponential backoff between retries
  *
