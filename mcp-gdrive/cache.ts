@@ -27,8 +27,8 @@ export function getCacheDir(): string {
  * @param fileId Google Drive file ID
  * @returns Path to cached file if exists, null otherwise
  */
-export async function getCachedFilePath(fileId: string): Promise<string | null> {
-  const pattern = new RegExp(`^\\d+_${fileId}_.*\\.pdf$`);
+export async function getCachedFilePath(fileId: string, extension: string = 'pdf'): Promise<string | null> {
+  const pattern = new RegExp(`^\\d+_${fileId}_.*\\.${extension}$`);
 
   try {
     const files = await readdir(CACHE_DIR);
@@ -54,10 +54,10 @@ export async function getCachedFilePath(fileId: string): Promise<string | null> 
  * @param fileName Original file name
  * @returns Full path for the cached file
  */
-export function generateCacheFilePath(fileId: string, fileName: string): string {
+export function generateCacheFilePath(fileId: string, fileName: string, extension: string = 'pdf'): string {
   const sanitizedFileName = fileName.replace(/[^a-zA-Z0-9._-]/g, '_');
   const timestamp = Date.now();
-  return join(CACHE_DIR, `${timestamp}_${fileId}_${sanitizedFileName}.pdf`);
+  return join(CACHE_DIR, `${timestamp}_${fileId}_${sanitizedFileName}.${extension}`);
 }
 
 /**

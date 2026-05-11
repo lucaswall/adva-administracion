@@ -42,6 +42,10 @@ export interface GDriveGetPdfInput {
   fileId: string;
 }
 
+export interface GDriveGetImageInput {
+  fileId: string;
+}
+
 export interface GSheetsReadInput {
   spreadsheetId: string;
   ranges?: string[];

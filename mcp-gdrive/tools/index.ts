@@ -2,6 +2,7 @@ import { schema as gdriveSearchSchema, search } from './gdrive_search.js';
 import { schema as gdriveReadFileSchema, readFile } from './gdrive_read_file.js';
 import { schema as gdriveListFolderSchema, listFolder } from './gdrive_list_folder.js';
 import { schema as gdriveGetPdfSchema, getPdf } from './gdrive_get_pdf.js';
+import { schema as gdriveGetImageSchema, getImage } from './gdrive_get_image.js';
 import { schema as gsheetsReadSchema, readSheet } from './gsheets_read.js';
 import { schema as gsheetsUpdateSchema, updateSheet } from './gsheets_update.js';
 import { schema as gsheetsDeleteRowsSchema, deleteRows } from './gsheets_delete_rows.js';
@@ -19,6 +20,7 @@ import {
   GDriveReadFileInput,
   GDriveListFolderInput,
   GDriveGetPdfInput,
+  GDriveGetImageInput,
   GSheetsReadInput,
   GSheetsUpdateInput,
   GSheetsDeleteRowsInput,
@@ -37,6 +39,7 @@ export const tools: [
   Tool<GDriveReadFileInput>,
   Tool<GDriveListFolderInput>,
   Tool<GDriveGetPdfInput>,
+  Tool<GDriveGetImageInput>,
   Tool<GDriveGetFileInfoInput>,
   Tool<GSheetsReadInput>,
   Tool<GSheetsUpdateInput>,
@@ -64,6 +67,10 @@ export const tools: [
   {
     ...gdriveGetPdfSchema,
     handler: getPdf,
+  },
+  {
+    ...gdriveGetImageSchema,
+    handler: getImage,
   },
   {
     ...gdriveGetFileInfoSchema,

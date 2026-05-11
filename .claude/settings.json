@@ -27,6 +27,7 @@
       "mcp__gdrive__gdrive_read_file",
       "mcp__gdrive__gdrive_list_folder",
       "mcp__gdrive__gdrive_get_pdf",
+      "mcp__gdrive__gdrive_get_image",
       "mcp__gdrive__gsheets_read",
       "mcp__gdrive__gsheets_update",
       "mcp__gdrive__gsheets_delete_rows",
