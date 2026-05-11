@@ -12,6 +12,7 @@ import { schema as gdriveRenameFileSchema, renameFile } from './gdrive_rename_fi
 import { schema as gdriveCopyFileSchema, copyFile } from './gdrive_copy_file.js';
 import { schema as gdriveUploadFileSchema, uploadFile } from './gdrive_upload_file.js';
 import { schema as gdriveGetFileInfoSchema, getFileInfo } from './gdrive_get_file_info.js';
+import { schema as gdriveListRevisionsSchema, listRevisions } from './gdrive_list_revisions.js';
 import { schema as gsheetsMetadataSchema, getMetadata } from './gsheets_metadata.js';
 import { schema as gsheetsQuerySchema, querySheet } from './gsheets_query.js';
 import {
@@ -30,6 +31,7 @@ import {
   GDriveCopyFileInput,
   GDriveUploadFileInput,
   GDriveGetFileInfoInput,
+  GDriveListRevisionsInput,
   GSheetsMetadataInput,
   GSheetsQueryInput,
 } from './types.js';
@@ -41,6 +43,7 @@ export const tools: [
   Tool<GDriveGetPdfInput>,
   Tool<GDriveGetImageInput>,
   Tool<GDriveGetFileInfoInput>,
+  Tool<GDriveListRevisionsInput>,
   Tool<GSheetsReadInput>,
   Tool<GSheetsUpdateInput>,
   Tool<GSheetsDeleteRowsInput>,
@@ -75,6 +78,10 @@ export const tools: [
   {
     ...gdriveGetFileInfoSchema,
     handler: getFileInfo,
+  },
+  {
+    ...gdriveListRevisionsSchema,
+    handler: listRevisions,
   },
   {
     ...gsheetsReadSchema,

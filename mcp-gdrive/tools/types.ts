@@ -87,6 +87,12 @@ export interface GDriveGetFileInfoInput {
   fileId: string;
 }
 
+export interface GDriveListRevisionsInput {
+  fileId: string;
+  pageSize?: number;
+  pageToken?: string;
+}
+
 export interface GDriveCopyFileInput {
   fileId: string;
   newName?: string;
