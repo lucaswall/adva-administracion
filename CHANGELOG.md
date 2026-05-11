@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.8.3] - 2026-05-11
+
+### Fixed
+- Facturas Emitidas (and every other sheet append path) no longer silently drops rows when multiple writes hit the same sheet concurrently — `appendCells` is now serialized per-(spreadsheet, sheet) to prevent the Google Sheets "current end of data" race that lost 9 production facturas over ~3 weeks
+- Sheets API responses are now validated to surface silent partial failures, so an unexpected empty `replies` array triggers an automatic retry instead of returning false success
+- Intra-scan duplicate detection now works for freshly-added entries — `DuplicateCache.addEntry` normalizes wrapped cell values (CellDate/CellNumber/CellLink/CellFormula) before storing so subsequent dupe checks match the spreadsheet shape
+
 ## [1.8.2] - 2026-05-09
 
 ### Fixed
@@ -170,7 +177,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Updated fastify to fix high-severity Content-Type body validation bypass and low-severity DoS vulnerability
 - Updated googleapis to v171, @google/clasp to v3, and resolved 6 npm audit vulnerabilities
 
-[Unreleased]: https://github.com/lucaswall/adva-administracion/compare/v1.8.2...HEAD
+[Unreleased]: https://github.com/lucaswall/adva-administracion/compare/v1.8.3...HEAD
+[1.8.3]: https://github.com/lucaswall/adva-administracion/compare/v1.8.2...v1.8.3
 [1.8.2]: https://github.com/lucaswall/adva-administracion/compare/v1.8.1...v1.8.2
 [1.8.1]: https://github.com/lucaswall/adva-administracion/compare/v1.8.0...v1.8.1
 [1.8.0]: https://github.com/lucaswall/adva-administracion/compare/v1.7.0...v1.8.0
