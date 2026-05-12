@@ -284,18 +284,18 @@ function computeCancellingNCs(allFacturas: Factura[]): Map<string, Factura> {
  *   OR
  *   - recibidoARS + montoRetencion ≈ factura.importeTotal in ARS (within 1)
  */
-function findMatchingRetencion(
+function findMatchingRetenciones(
   factura: Factura,
   retenciones: Retencion[],
   recibidoARS: number | undefined,
   totalARS: number
-): Retencion | null {
-  // Pass 1: authoritative match. retencion-factura-matcher writes
-  // matchedFacturaFileId on the retencion when it links one. Honour it
-  // regardless of amount predicate — the linker has already validated the pair.
-  for (const ret of retenciones) {
-    if (ret.matchedFacturaFileId === factura.fileId) return ret;
-  }
+): Retencion[] {
+  // Pass 1: authoritative matches. retencion-factura-matcher writes
+  // matchedFacturaFileId on every retencion it links, and explicitly allows
+  // multiple certificates per factura (different tax types — Ganancias + IIBB
+  // on the same invoice). Collect them all.
+  const claimed = retenciones.filter((r) => r.matchedFacturaFileId === factura.fileId);
+  if (claimed.length > 0) return claimed;
 
   // Pass 2: amount predicate against unclaimed retenciones only. A retencion
   // already linked to a DIFFERENT factura must not be reused here, even when
@@ -308,17 +308,17 @@ function findMatchingRetencion(
 
     // Primary: montoComprobante matches importeTotal (same currency — retenciones are ARS)
     if (Math.abs(ret.montoComprobante - totalARS) <= tolerance) {
-      return ret;
+      return [ret];
     }
 
     // Secondary: recibido + retencion ≈ total
     if (recibidoARS !== undefined) {
       if (Math.abs(recibidoARS + ret.montoRetencion - totalARS) <= 1) {
-        return ret;
+        return [ret];
       }
     }
   }
-  return null;
+  return [];
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -464,18 +464,12 @@ function composeNotas(opts: {
     }
   }
 
-  // 3. Retencion part
-  if (movimientoAgg) {
-    const ret = findMatchingRetencion(factura, retenciones, movimientoAgg.totalCredito, totalARS);
-    if (ret) {
-      parts.push(`Retencion ${ret.impuesto} ${formatARS(ret.montoRetencion)}`);
-    }
-  } else {
-    // Check even without movimientos (retencion matched by amount on invoice)
-    const ret = findMatchingRetencion(factura, retenciones, undefined, totalARS);
-    if (ret) {
-      parts.push(`Retencion ${ret.impuesto} ${formatARS(ret.montoRetencion)}`);
-    }
+  // 3. Retencion part — a factura can have multiple certificates (Ganancias +
+  // IIBB on the same invoice). Append one note per matched retencion.
+  const recibidoForMatch = movimientoAgg ? movimientoAgg.totalCredito : undefined;
+  const matchedRets = findMatchingRetenciones(factura, retenciones, recibidoForMatch, totalARS);
+  for (const ret of matchedRets) {
+    parts.push(`Retencion ${ret.impuesto} ${formatARS(ret.montoRetencion)}`);
   }
 
   // 4. Multi-cuota part (only when ≥2 distinct movimientos)

@@ -501,6 +501,42 @@ describe('buildSubdiarioRows', () => {
     expect(ncGaps[0].nro).toBe('00005-00000011');
   });
 
+  // ── Test 14g: Multiple retenciones on the same FC are all included ───────
+  // retencion-factura-matcher explicitly allows multiple certificates per FC
+  // (different tax types — Ganancias + IIBB). The Subdiario row's notas must
+  // include all of them. Codex P2 finding on PR 116.
+  it('multiple retenciones matched to same factura: notas includes all', () => {
+    const fc = makeFc({
+      fileId: 'fc-multi-ret',
+      nroFactura: '00010-00000001',
+      importeTotal: 1_000_000,
+      fechaEmision: `${CURRENT_YEAR}-03-01`,
+    });
+    const retGanancias = makeRetCert({
+      fileId: 'ret-gan',
+      impuesto: 'Ganancias',
+      montoRetencion: 50_000,
+      matchedFacturaFileId: 'fc-multi-ret',
+    });
+    const retIIBB = makeRetCert({
+      fileId: 'ret-iibb',
+      impuesto: 'IIBB',
+      montoRetencion: 30_000,
+      matchedFacturaFileId: 'fc-multi-ret',
+    });
+
+    const rows = buildSubdiarioRows(
+      makeInput({
+        facturasEmitidas: [fc],
+        retencionesRecibidas: [retGanancias, retIIBB],
+      })
+    );
+
+    const row = rows.find((r) => r.nro === '00010-00000001');
+    expect(row?.notas).toContain('Retencion Ganancias $50.000');
+    expect(row?.notas).toContain('Retencion IIBB $30.000');
+  });
+
   // ── Test 14f: Retencion respects authoritative matchedFacturaFileId ──────
   // When two facturas share CUIT + importeTotal and a single retencion is
   // already matched (via retencion-factura-matcher) to one of them, the
