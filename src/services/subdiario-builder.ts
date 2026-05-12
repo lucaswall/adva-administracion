@@ -465,12 +465,14 @@ function composeNotas(opts: {
  * The stream floor is the MINIMUM numero observed in that stream (not 1).
  */
 function detectGaps(realRows: SubdiarioRow[]): SubdiarioRow[] {
-  // Group real rows by (puntoVenta, tipo)
+  // Group real rows by (puntoVenta, cod) — AFIP numbering is independent per
+  // cod, so a single PV emitting multiple cods (e.g. FC A + FC B) must yield
+  // separate streams.
   const streams = new Map<string, SubdiarioRow[]>();
 
   for (const row of realRows) {
     const pv = extractPuntoVenta(row.nro);
-    const key = `${pv}|${row.tipo}`;
+    const key = `${pv}|${row.cod}`;
     const existing = streams.get(key);
     if (existing) {
       existing.push(row);

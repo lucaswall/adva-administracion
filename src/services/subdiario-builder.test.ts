@@ -501,6 +501,60 @@ describe('buildSubdiarioRows', () => {
     expect(ncGaps[0].nro).toBe('00005-00000011');
   });
 
+  // ── Test 14b: Same PV, different AFIP cods are independent streams ────────
+  // AFIP numbering is independent per cod, not per (pv, tipo). A single punto
+  // de venta MAY emit multiple cods (e.g. FC A + FC B). The gap-detection key
+  // must include `cod` to avoid merging unrelated sequences.
+  it('same PV with different cods are independent streams (no false FALTA)', () => {
+    // FC A (cod 001) at PV 00003: nros 1, 2, 3
+    const fcA1 = makeFc({
+      fileId: 'fcA1',
+      tipoComprobante: 'A',
+      nroFactura: '00003-00000001',
+      fechaEmision: `${CURRENT_YEAR}-01-10`,
+    });
+    const fcA2 = makeFc({
+      fileId: 'fcA2',
+      tipoComprobante: 'A',
+      nroFactura: '00003-00000002',
+      fechaEmision: `${CURRENT_YEAR}-01-11`,
+    });
+    const fcA3 = makeFc({
+      fileId: 'fcA3',
+      tipoComprobante: 'A',
+      nroFactura: '00003-00000003',
+      fechaEmision: `${CURRENT_YEAR}-01-12`,
+    });
+    // FC B (cod 006) at the SAME PV 00003: nros 5, 6, 7
+    const fcB5 = makeFc({
+      fileId: 'fcB5',
+      tipoComprobante: 'B',
+      nroFactura: '00003-00000005',
+      fechaEmision: `${CURRENT_YEAR}-01-15`,
+    });
+    const fcB6 = makeFc({
+      fileId: 'fcB6',
+      tipoComprobante: 'B',
+      nroFactura: '00003-00000006',
+      fechaEmision: `${CURRENT_YEAR}-01-16`,
+    });
+    const fcB7 = makeFc({
+      fileId: 'fcB7',
+      tipoComprobante: 'B',
+      nroFactura: '00003-00000007',
+      fechaEmision: `${CURRENT_YEAR}-01-17`,
+    });
+
+    const rows = buildSubdiarioRows(
+      makeInput({ facturasEmitidas: [fcA1, fcA2, fcA3, fcB5, fcB6, fcB7] })
+    );
+
+    // No FALTA should be inserted at numero 4 — it's only "missing" if you
+    // mistakenly merge cod 001 and cod 006 into a single 1..7 sequence.
+    const gaps = rows.filter((r) => r.cliente.startsWith('FALTA'));
+    expect(gaps).toHaveLength(0);
+  });
+
   // ── Test 15: FE missing from Facturador ──────────────────────────────────
   it('FE not in Facturador: categoria = "-", condicion from PDF', () => {
     const fc = makeFc({
