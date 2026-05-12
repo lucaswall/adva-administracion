@@ -501,6 +501,73 @@ describe('buildSubdiarioRows', () => {
     expect(ncGaps[0].nro).toBe('00005-00000011');
   });
 
+  // ── Test 14d: Don't emit FALTA for filtered-out source rows ──────────────
+  // Gap detection must consult the FULL source history when deciding what is
+  // truly missing. An out-of-scope prior-year FC (paid before currentYear) is
+  // not a gap — it exists in the source, just outside the Subdiario scope.
+  // Codex P2 finding on PR 116.
+  it('FALTA is not emitted for prior-year FCs that are in source but out of scope', () => {
+    const PRIOR_YEAR = CURRENT_YEAR - 1;
+    const fcPaid1 = makeFc({
+      fileId: 'fc-paid-1',
+      nroFactura: '00001-00000001',
+      fechaEmision: `${PRIOR_YEAR}-06-01`,
+    });
+    const fcPaid2 = makeFc({
+      fileId: 'fc-paid-2',
+      nroFactura: '00001-00000002',
+      fechaEmision: `${PRIOR_YEAR}-06-02`,
+    });
+    // FC #3 is the prior-year unpaid FC kept by scope rule (d)
+    const fcUnpaid = makeFc({
+      fileId: 'fc-unpaid',
+      nroFactura: '00001-00000003',
+      fechaEmision: `${PRIOR_YEAR}-06-10`,
+    });
+    const fcPaid4 = makeFc({
+      fileId: 'fc-paid-4',
+      nroFactura: '00001-00000004',
+      fechaEmision: `${PRIOR_YEAR}-06-15`,
+    });
+    // FC #5 is the current-year FC kept by scope rule (a)
+    const fcCurrent = makeFc({
+      fileId: 'fc-current',
+      nroFactura: '00001-00000005',
+      fechaEmision: `${CURRENT_YEAR}-01-10`,
+    });
+
+    // Match the prior-year FCs to prior-year movimientos so rule (e) drops them
+    const movs = [
+      makeMov({
+        matchedFileId: 'fc-paid-1',
+        credito: 1_000_000,
+        fecha: `${PRIOR_YEAR}-06-05`,
+      }),
+      makeMov({
+        matchedFileId: 'fc-paid-2',
+        credito: 1_000_000,
+        fecha: `${PRIOR_YEAR}-06-06`,
+      }),
+      makeMov({
+        matchedFileId: 'fc-paid-4',
+        credito: 1_000_000,
+        fecha: `${PRIOR_YEAR}-06-20`,
+      }),
+    ];
+
+    const rows = buildSubdiarioRows(
+      makeInput({
+        facturasEmitidas: [fcPaid1, fcPaid2, fcUnpaid, fcPaid4, fcCurrent],
+        movimientos: movs,
+      })
+    );
+
+    // The scope keeps fc-unpaid (#3, rule d) and fc-current (#5, rule a). Naive
+    // gap detection on {#3, #5} would emit FALTA #4 — but #4 is in the source.
+    const gaps = rows.filter((r) => r.cliente.startsWith('FALTA'));
+    expect(gaps).toHaveLength(0);
+  });
+
   // ── Test 14c: NC class must match FC class for cancellation ──────────────
   // An NC B must NOT cancel an FC A even if CUIT/amount/date overlap. AFIP
   // numbering and cancellation legality are per-cod. Codex P2 finding on PR 116.

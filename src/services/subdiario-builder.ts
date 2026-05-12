@@ -487,7 +487,10 @@ function composeNotas(opts: {
  *
  * The stream floor is the MINIMUM numero observed in that stream (not 1).
  */
-function detectGaps(realRows: SubdiarioRow[]): SubdiarioRow[] {
+function detectGaps(
+  realRows: SubdiarioRow[],
+  allFacturas: Factura[]
+): SubdiarioRow[] {
   // Group real rows by (puntoVenta, cod) — AFIP numbering is independent per
   // cod, so a single PV emitting multiple cods (e.g. FC A + FC B) must yield
   // separate streams.
@@ -504,9 +507,29 @@ function detectGaps(realRows: SubdiarioRow[]): SubdiarioRow[] {
     }
   }
 
+  // Build a set of known numeros per stream from the FULL source history.
+  // Out-of-scope rows are not gaps — they exist, just outside the Subdiario.
+  // Without this, a kept prior-year unpaid FC + a kept current-year FC will
+  // emit false FALTA placeholders for every paid prior-year FC in between.
+  const knownNumeros = new Map<string, Set<number>>();
+  for (const f of allFacturas) {
+    const nro = normalizeNro(f.nroFactura);
+    const pv = extractPuntoVenta(nro);
+    const cod = deriveCod(f.tipoComprobante);
+    const key = `${pv}|${cod}`;
+    const num = extractNumero(nro);
+    if (!Number.isFinite(num)) continue;
+    let set = knownNumeros.get(key);
+    if (!set) {
+      set = new Set();
+      knownNumeros.set(key, set);
+    }
+    set.add(num);
+  }
+
   const gapRows: SubdiarioRow[] = [];
 
-  for (const streamRows of streams.values()) {
+  for (const [streamKey, streamRows] of streams) {
     // Sort by numero ascending
     const sorted = [...streamRows].sort(
       (a, b) => extractNumero(a.nro) - extractNumero(b.nro)
@@ -517,6 +540,7 @@ function detectGaps(realRows: SubdiarioRow[]): SubdiarioRow[] {
     const pvStr = sorted[0].nro.split('-')[0]; // already zero-padded to 5
     const tipo = sorted[0].tipo;
     const cod = sorted[0].cod;
+    const knownInStream = knownNumeros.get(streamKey) ?? new Set<number>();
 
     // Index rows by numero for O(1) lookup (ADV-258)
     const byNumero = new Map<number, SubdiarioRow>();
@@ -529,6 +553,10 @@ function detectGaps(realRows: SubdiarioRow[]): SubdiarioRow[] {
       if (found) {
         // Update prevFecha to the actual row's fecha
         prevFecha = found.fecha;
+      } else if (knownInStream.has(n)) {
+        // Source has this numero, but it is filtered out of scope (e.g. paid
+        // in a prior year). Not a gap — skip without emitting a placeholder.
+        continue;
       } else {
         const gapNro = `${pvStr}-${String(n).padStart(8, '0')}`;
         gapRows.push({
@@ -673,8 +701,10 @@ export function buildSubdiarioRows(input: SubdiarioInput): SubdiarioRow[] {
     });
   }
 
-  // Step 3: Gap detection — insert placeholders for missing nros in each stream
-  const gapRows = detectGaps(rows);
+  // Step 3: Gap detection — insert placeholders for missing nros in each
+  // stream. Use the FULL facturasEmitidas (not just scoped rows) as the
+  // known-numero set, so out-of-scope source rows are not flagged as gaps.
+  const gapRows = detectGaps(rows, facturasEmitidas);
   const allRows = [...rows, ...gapRows];
 
   // Step 4: Sort
