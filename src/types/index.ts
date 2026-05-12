@@ -1050,3 +1050,110 @@ export interface WatchManagerStatus {
   /** Last scan triggered timestamp */
   lastScan: Date | null;
 }
+
+/**
+ * A bank movimiento row with matching data, as needed by the Subdiario builder.
+ * Subset of MovimientoRow — only the fields the builder uses.
+ */
+export interface BankMovimiento {
+  /** Transaction date (YYYY-MM-DD) */
+  fecha: string;
+  /** Credit amount (ARS) — null if debit transaction */
+  credito: number | null;
+  /** Debit amount (ARS) — null if credit transaction */
+  debito: number | null;
+  /** Google Drive fileId of matched document ('' if unmatched) */
+  matchedFileId: string;
+  /** Match type: 'AUTO', 'MANUAL', or '' (unmatched) */
+  matchedType: 'AUTO' | 'MANUAL' | '';
+  /** Transaction description/concept */
+  concepto?: string;
+}
+
+/**
+ * Entry from the Facturador de Socios spreadsheet.
+ * Produced by the facturador-reader service (ADV-246).
+ */
+export interface FacturadorEntry {
+  /** Socio number (e.g., '1003') */
+  nroSocio: string;
+  /** Normalized comprobante number (key in the reader map) */
+  comprobante: string;
+  /** Company / legal name (may be empty — caller falls back to representante) */
+  empresa: string;
+  /** Representative name */
+  representante: string;
+  /** Contact email */
+  email: string;
+  /** Membership tier — becomes `categoria` in SubdiarioRow (e.g., 'Micro', 'Empresa') */
+  membresia: string;
+  /** Internal cobro ID */
+  cobroId: string;
+  /** IVA condition of the socio (e.g., 'IVA Responsable Inscripto') */
+  condIVA: string;
+  /** Invoice date in the Facturador */
+  fecha: string;
+  /** Invoice amount in ARS */
+  importe: number;
+  /** Raw value from the Pagado? column (may be an NC number like '0005-00000011') */
+  pagadoCol: string;
+}
+
+/**
+ * A single row in the Subdiario de Ventas workbook.
+ * Output type of buildSubdiarioRows().
+ */
+export interface SubdiarioRow {
+  /** Invoice date (YYYY-MM-DD) */
+  fecha: string;
+  /** AFIP comprobante code: 001, 003, 006, 008, 011, 013, 019, 021 */
+  cod: string;
+  /** 'FC' for facturas, 'NC' for notas de crédito */
+  tipo: 'FC' | 'NC';
+  /** Normalized comprobante number (e.g., '00003-00001956') */
+  nro: string;
+  /** Receptor's legal name from AFIP (razonSocialReceptor) */
+  cliente: string;
+  /** Receptor CUIT */
+  cuit: string;
+  /** Receptor's IVA condition (from PDF or Facturador) */
+  condicion: string;
+  /** Total in ARS (negative for NCs, 0 for placeholders) */
+  total: number;
+  /** Brief description/concept */
+  concepto: string;
+  /** Membership tier for socios ('Micro', 'Empresa', etc.), '-' for non-socios, '' for NCs/placeholders */
+  categoria: string;
+  /**
+   * Date of payment (YYYY-MM-DD), or 'NC 00003-00000140' if cancelled by NC,
+   * or '' if unpaid/placeholder
+   */
+  fechaCobro: string;
+  /**
+   * Sum of matched movimientos credito (positive for FCs, same as total for NCs,
+   * 0 if cancelled by NC or placeholder)
+   */
+  recibido: number;
+  /** Additional annotations: socio info, export TC, retencion, multi-cuota, etc. */
+  notas: string;
+}
+
+/**
+ * Input to the buildSubdiarioRows() pure function.
+ */
+export interface SubdiarioInput {
+  /** The fiscal year being built (e.g., 2026) */
+  currentYear: number;
+  /** All rows from Control de Ingresos / Facturas Emitidas (full history; builder applies scope filter) */
+  facturasEmitidas: Factura[];
+  /** All rows from Control de Ingresos / Pagos Recibidos */
+  pagosRecibidos: Pago[];
+  /** All rows from Control de Ingresos / Retenciones Recibidas */
+  retencionesRecibidas: Retencion[];
+  /** All movimientos from all bank sheets, with matchedFileId/matchedType populated */
+  movimientos: BankMovimiento[];
+  /** Facturador de Socios lookup table, keyed by normalized comprobante (empty Map if env var unset) */
+  facturador: Map<string, FacturadorEntry>;
+  /** Optional: official exchange rate per YYYY-MM period (TC oficial fallback for export FCs) */
+  tipoCambioByPeriodo?: Map<string, number>;
+}
