@@ -363,15 +363,26 @@ function applyScopeFilter(
     return true;
   }
 
-  // Rule e: all payments in prior years → out of scope
+  // Rule e: all payments in prior years → out of scope ONLY IF those payments
+  // actually cover the total. A partial prior-year payment leaves an
+  // outstanding balance, so the FC remains a receivable in currentYear.
   if (matchedMovs.length > 0) {
     const allPaidBeforeCurrentYear = matchedMovs.every(
       (m) => parseInt(m.fecha.substring(0, 4), 10) < currentYear
     );
-    if (allPaidBeforeCurrentYear) return false;
+    if (allPaidBeforeCurrentYear) {
+      const { total: totalARS } = convertTotalToARS(factura);
+      const totalPaid = matchedMovs.reduce((sum, m) => sum + (m.credito ?? 0), 0);
+      // 1% tolerance (or $1 minimum) — matches the retencion-matching predicate
+      // used elsewhere; absorbs rounding/IVA/exchange-rate noise.
+      const tolerance = Math.max(1, totalARS * 0.01);
+      if (totalPaid >= totalARS - tolerance) return false;
+      // Otherwise: partial payment → fall through to rule (d) (still pending).
+    }
   }
 
-  // Rule d: no payment and no cancelling NC → still pending → in scope
+  // Rule d: no payment (or only partial prior-year payment) and no cancelling
+  // NC → still pending → in scope
   return true;
 }
 

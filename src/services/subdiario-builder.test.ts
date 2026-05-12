@@ -501,6 +501,40 @@ describe('buildSubdiarioRows', () => {
     expect(ncGaps[0].nro).toBe('00005-00000011');
   });
 
+  // ── Test 14e: Partially paid prior-year FC stays in scope ────────────────
+  // Rule (e) drops a prior-year FC when all matched movimientos are in prior
+  // years. But that's only correct if those movimientos COVER the total.
+  // A 2025 FC of $1M with a single 2025 credit of $200K still has $800K
+  // outstanding — it must remain in the 2026 scope as a receivable.
+  // Codex P2 finding on PR 116.
+  it('prior-year FC with partial prior-year payment stays in scope', () => {
+    const PRIOR_YEAR = CURRENT_YEAR - 1;
+    const fcPartial = makeFc({
+      fileId: 'fc-partial',
+      nroFactura: '00007-00000050',
+      importeTotal: 1_000_000,
+      fechaEmision: `${PRIOR_YEAR}-08-01`,
+    });
+    // Only a single prior-year movimiento, paying $200K of the $1M total.
+    const partialPayment = makeMov({
+      matchedFileId: 'fc-partial',
+      credito: 200_000,
+      fecha: `${PRIOR_YEAR}-08-10`,
+    });
+
+    const rows = buildSubdiarioRows(
+      makeInput({
+        facturasEmitidas: [fcPartial],
+        movimientos: [partialPayment],
+      })
+    );
+
+    // FC should remain in scope as an unsettled receivable.
+    const realRows = rows.filter((r) => !r.cliente.startsWith('FALTA'));
+    expect(realRows).toHaveLength(1);
+    expect(realRows[0].nro).toBe('00007-00000050');
+  });
+
   // ── Test 14d: Don't emit FALTA for filtered-out source rows ──────────────
   // Gap detection must consult the FULL source history when deciding what is
   // truly missing. An out-of-scope prior-year FC (paid before currentYear) is
