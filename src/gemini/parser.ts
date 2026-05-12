@@ -394,7 +394,17 @@ interface RawFacturaExtraction {
   moneda?: string;
   concepto?: string;
   tipoDeCambio?: number;
+  condicionIVAReceptor?: string;
 }
+
+/** Canonical IVA condition values for invoice receptors */
+const VALID_CONDICION_IVA: readonly string[] = [
+  'IVA Responsable Inscripto',
+  'Consumidor Final',
+  'Responsable Monotributo',
+  'Cliente del Exterior',
+  'IVA Sujeto Exento',
+];
 
 /**
  * Parses a Gemini response for factura data
@@ -452,6 +462,7 @@ export function parseFacturaResponse(
 
     let data: Partial<Factura>;
     let actualDocumentType: 'factura_emitida' | 'factura_recibida' = expectedDocumentType;
+    let hasInvalidCondicionIVA = false;
 
     // Assign CUITs based on ADVA name matching
     const issuerName = rawData.issuerName || '';
@@ -485,6 +496,18 @@ export function parseFacturaResponse(
         tipoDeCambio,
         concepto: rawData.concepto,
       };
+
+      // condicionIVAReceptor: only set for factura_emitida (ADVA's own condition is constant)
+      if (actualDocumentType === 'factura_emitida') {
+        const rawCondicion = rawData.condicionIVAReceptor;
+        if (rawCondicion !== undefined && rawCondicion !== null && rawCondicion !== '') {
+          if (VALID_CONDICION_IVA.includes(rawCondicion)) {
+            data.condicionIVAReceptor = rawCondicion;
+          } else {
+            hasInvalidCondicionIVA = true;
+          }
+        }
+      }
 
       // Log if document type differs from expected
       if (actualDocumentType !== expectedDocumentType) {
@@ -557,6 +580,11 @@ export function parseFacturaResponse(
       needsReview = true;
       // Lower confidence significantly to indicate missing counterparty data
       confidence = Math.min(confidence, 0.3);
+    }
+
+    // Flag for review if condicionIVAReceptor was present but not a canonical value
+    if (hasInvalidCondicionIVA) {
+      needsReview = true;
     }
 
     // Validate ADVA role using the actual document type (may differ from expected)

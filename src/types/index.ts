@@ -113,6 +113,8 @@ export interface Factura {
   cuitReceptor?: string;
   /** Receptor business name (optional) */
   razonSocialReceptor?: string;
+  /** Receptor's IVA condition — factura_emitida only (ADVA's own condition is constant) */
+  condicionIVAReceptor?: string;
 
   // Amounts (in original currency)
   /** Net amount before tax */

@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { validateYear, clearFolderStructureCache, getCachedFolderStructure, checkEnvironmentMarker, migrateArchivosProcesadosHeaders, migrateTipoDeCambioHeaders, migrateFacturasEmitidasPagadaColumn, migrateRecibosHasCuitMatchColumn } from './folder-structure.js';
+import { validateYear, clearFolderStructureCache, getCachedFolderStructure, checkEnvironmentMarker, migrateArchivosProcesadosHeaders, migrateTipoDeCambioHeaders, migrateFacturasEmitidasPagadaColumn, migrateRecibosHasCuitMatchColumn, migrateFacturasEmitidasCondicionIvaColumn } from './folder-structure.js';
 
 // Mock drive.js for environment marker tests
 vi.mock('./drive.js', () => ({
@@ -792,5 +792,126 @@ describe('migrateRecibosHasCuitMatchColumn (ADV-189)', () => {
 
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error.message).toBe('Insert failed');
+  });
+});
+
+describe('migrateFacturasEmitidasCondicionIvaColumn (ADV-245)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('inserts condicionIVAReceptor column at H (index 7) when Facturas Emitidas has 20 columns (post-ADV-167 pagada schema)', async () => {
+    const headers20 = Array.from({ length: 20 }, (_, i) => `col${i}`);
+    vi.mocked(getValues).mockResolvedValue({ ok: true, value: [headers20] });
+    vi.mocked(getSheetMetadata).mockResolvedValue({
+      ok: true,
+      value: [{ title: 'Facturas Emitidas', sheetId: 42, index: 0 }],
+    });
+    vi.mocked(insertColumn).mockResolvedValue({ ok: true, value: undefined });
+    vi.mocked(setValues).mockResolvedValue({ ok: true, value: 1 });
+
+    const result = await migrateFacturasEmitidasCondicionIvaColumn('ingresos-id');
+
+    expect(result.ok).toBe(true);
+    expect(insertColumn).toHaveBeenCalledWith('ingresos-id', 42, 7);
+    expect(setValues).toHaveBeenCalledWith('ingresos-id', 'Facturas Emitidas!H1', [['condicionIVAReceptor']]);
+  });
+
+  it('skips when sheet already has 21 columns (idempotent — condicionIVAReceptor already migrated)', async () => {
+    const headers21 = Array.from({ length: 21 }, (_, i) => `col${i}`);
+    vi.mocked(getValues).mockResolvedValue({ ok: true, value: [headers21] });
+
+    const result = await migrateFacturasEmitidasCondicionIvaColumn('ingresos-id');
+
+    expect(result.ok).toBe(true);
+    expect(insertColumn).not.toHaveBeenCalled();
+    expect(setValues).not.toHaveBeenCalled();
+  });
+
+  it('skips when condicionIVAReceptor header already exists at index 7', async () => {
+    const headers = Array.from({ length: 21 }, (_, i) => `col${i}`);
+    headers[7] = 'condicionIVAReceptor';
+    vi.mocked(getValues).mockResolvedValue({ ok: true, value: [headers] });
+
+    const result = await migrateFacturasEmitidasCondicionIvaColumn('ingresos-id');
+
+    expect(result.ok).toBe(true);
+    expect(insertColumn).not.toHaveBeenCalled();
+    expect(setValues).not.toHaveBeenCalled();
+  });
+
+  it('skips when sheet is empty', async () => {
+    vi.mocked(getValues).mockResolvedValue({ ok: true, value: [] });
+
+    const result = await migrateFacturasEmitidasCondicionIvaColumn('ingresos-id');
+
+    expect(result.ok).toBe(true);
+    expect(insertColumn).not.toHaveBeenCalled();
+    expect(setValues).not.toHaveBeenCalled();
+  });
+
+  it('returns error when getValues fails', async () => {
+    vi.mocked(getValues).mockResolvedValue({ ok: false, error: new Error('API error') });
+
+    const result = await migrateFacturasEmitidasCondicionIvaColumn('ingresos-id');
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.message).toBe('API error');
+  });
+
+  it('returns error when getSheetMetadata fails', async () => {
+    const headers20 = Array.from({ length: 20 }, (_, i) => `col${i}`);
+    vi.mocked(getValues).mockResolvedValue({ ok: true, value: [headers20] });
+    vi.mocked(getSheetMetadata).mockResolvedValue({ ok: false, error: new Error('Metadata error') });
+
+    const result = await migrateFacturasEmitidasCondicionIvaColumn('ingresos-id');
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.message).toBe('Metadata error');
+  });
+
+  it('returns error when Facturas Emitidas sheet not found in metadata', async () => {
+    const headers20 = Array.from({ length: 20 }, (_, i) => `col${i}`);
+    vi.mocked(getValues).mockResolvedValue({ ok: true, value: [headers20] });
+    vi.mocked(getSheetMetadata).mockResolvedValue({
+      ok: true,
+      value: [{ title: 'Other Sheet', sheetId: 1, index: 0 }],
+    });
+
+    const result = await migrateFacturasEmitidasCondicionIvaColumn('ingresos-id');
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.message).toContain('not found');
+  });
+
+  it('returns error when insertColumn fails', async () => {
+    const headers20 = Array.from({ length: 20 }, (_, i) => `col${i}`);
+    vi.mocked(getValues).mockResolvedValue({ ok: true, value: [headers20] });
+    vi.mocked(getSheetMetadata).mockResolvedValue({
+      ok: true,
+      value: [{ title: 'Facturas Emitidas', sheetId: 42, index: 0 }],
+    });
+    vi.mocked(insertColumn).mockResolvedValue({ ok: false, error: new Error('Insert failed') });
+
+    const result = await migrateFacturasEmitidasCondicionIvaColumn('ingresos-id');
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.message).toBe('Insert failed');
+  });
+
+  it('returns error when setValues fails after column insert', async () => {
+    const headers20 = Array.from({ length: 20 }, (_, i) => `col${i}`);
+    vi.mocked(getValues).mockResolvedValue({ ok: true, value: [headers20] });
+    vi.mocked(getSheetMetadata).mockResolvedValue({
+      ok: true,
+      value: [{ title: 'Facturas Emitidas', sheetId: 42, index: 0 }],
+    });
+    vi.mocked(insertColumn).mockResolvedValue({ ok: true, value: undefined });
+    vi.mocked(setValues).mockResolvedValue({ ok: false, error: new Error('Write failed') });
+
+    const result = await migrateFacturasEmitidasCondicionIvaColumn('ingresos-id');
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.message).toBe('Write failed');
   });
 });
