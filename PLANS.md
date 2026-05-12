@@ -319,3 +319,69 @@
 - **Gemini extraction accuracy for `condicionIVAReceptor`.** Five enum-like values; should be high accuracy, but garbled values fall through to `needsReview=YES`. Backfill cost (out of scope): ~1400 PDFs × ~$0.0007 per Gemini call ≈ $1, run via `/api/rematch` after deploy.
 - **Workbook creation race.** Two parallel `matchAllMovimientos` invocations both trying to create the workbook simultaneously. Mitigated by `PROCESSING_LOCK_ID` (mutually exclusive across scan/match/rebuild-subdiario), but the test in Task 4 must verify the second attempt observes the existing workbook.
 - **Cross-year FC E payment TC pago.** When a USD factura issued prior year is paid this year, `TC pago` reflects the current-year bank rate; `TC fact` reflects the prior-year invoice rate. The Notas explicitly shows both — verify the builder doesn't conflate them.
+
+---
+
+## Iteration 1
+
+**Implemented:** 2026-05-12
+**Method:** Agent team (4 workers, worktree-isolated)
+
+### Tasks Completed This Iteration
+- Task 1 (ADV-245): condicionIVAReceptor extraction + Facturas Emitidas schema migration v7 (worker-1)
+- Task 2 (ADV-246): Facturador de Socios reader service (worker-2)
+- Task 3 (ADV-247): Subdiario de Ventas builder pure function — 20 tests covering scope, join, NC linkage, multi-installment, retenciones, gap detection, sort (worker-3)
+- Task 4 (ADV-248): Subdiario writer + lazy workbook creation + sync hook in matchAllMovimientos (worker-4)
+- Task 5 (ADV-249): POST /api/rebuild-subdiario endpoint with auth + PROCESSING_LOCK (worker-4)
+- Task 6 (ADV-250): Apps Script triggerRebuildSubdiario + "Reconstruir Subdiario de Ventas" menu item (worker-4)
+
+### Files Modified
+- `src/gemini/prompts.ts` — added condicionIVAReceptor extraction (5 canonical values)
+- `src/gemini/parser.ts` — validates against canonical strings; emitida-only; unknown → needsReview
+- `src/types/index.ts` — `Factura.condicionIVAReceptor?` + new `BankMovimiento`, `FacturadorEntry`, `SubdiarioRow`, `SubdiarioInput`; `FolderStructure.subdiarioId?`
+- `src/constants/spreadsheet-headers.ts` — FACTURA_EMITIDA_HEADERS 20→21 cols; added SUBDIARIO_COMPROBANTES_HEADERS
+- `src/processing/storage/factura-store.ts` — condicionIVAReceptor at H(7) for emitida; downstream cells shifted
+- `src/services/folder-structure.ts` — migrateFacturasEmitidasCondicionIvaColumn (idempotent insertColumn at index 7); discoverFolderStructure searches for existing Subdiario workbook
+- `src/services/migrations.ts` — CURRENT_SCHEMA_VERSION 6→7 + v7 entry registered
+- `src/services/facturador-reader.ts` — readFacturador(currentYear) returns Map keyed by normalized comprobante
+- `src/services/subdiario-builder.ts` — pure buildSubdiarioRows transform with scope filter, AFIP cod mapping, USD→ARS conversion, Facturador join, NC cancellation lookup, multi-installment aggregation, retencion matching, Notas composition, sort, gap detection
+- `src/services/subdiario-writer.ts` — syncSubdiario orchestrator (lazy workbook resolve/create, init Comprobantes sheet, read sources, parse to typed arrays, delegate to builder, full-rewrite write)
+- `src/routes/subdiario.ts` — POST /api/rebuild-subdiario with authMiddleware + PROCESSING_LOCK
+- `src/server.ts` — registered subdiarioRoutes
+- `src/bank/match-movimientos.ts` — syncSubdiario hook after syncCobrosPendientes; parseFacturasEmitidas + parseRetenciones exports; added includeNcNd option + condicionIVAReceptor read
+- `src/processing/matching/factura-pago-matcher.ts`, `nc-factura-matcher.ts`, `matching/index.ts` — column-shift fixes for Facturas Emitidas (colOffset=1)
+- `apps-script/src/main.ts` — triggerRebuildSubdiario function + menu item
+- `src/config.ts` — FACTURADOR_SPREADSHEET_ID getter
+- `CLAUDE.md`, `README.md` — FACTURADOR_SPREADSHEET_ID env var documented
+- Test files for all of the above
+
+### Linear Updates
+- ADV-245: Todo → In Progress → Review
+- ADV-246: Todo → Review (worker-2 finished before assignment dispatch)
+- ADV-247: Todo → Review (worker-3 finished before assignment dispatch)
+- ADV-248: Todo → Review
+- ADV-249: Todo → Review
+- ADV-250: Todo → Review
+
+### Pre-commit Verification
+- bug-hunter: Found 4 bugs (2 HIGH, 1 MEDIUM, 1 LOW). All 4 fixed before commit:
+  - HIGH 1: Writer read `Facturas Emitidas!A:T` truncated column U — fixed to `A:U`
+  - HIGH 2: parseFacturasEmitidas stripped NCs preventing scope rule (c) — added `includeNcNd` option
+  - MEDIUM 3: parseFacturasEmitidas did not read condicionIVAReceptor — added to colIndex
+  - LOW 4: nc-factura-matcher row length guard used hardcoded 10 — now `10 + colOffset`
+- verifier: 73 test files, 2366 tests pass; TypeScript clean; Apps Script bundle generated; zero warnings
+
+### Work Partition
+- Worker 1: Task 1 (ADV-245) — schema/extraction (foundation, L)
+- Worker 2: Task 2 (ADV-246) — Facturador reader (M)
+- Worker 3: Task 3 (ADV-247) — builder pure function (L, 20 tests)
+- Worker 4: Tasks 4+5+6 (ADV-248/249/250) — writer + route + apps script (L+M+S)
+
+### Merge Summary
+- Worker 1: salvaged uncommitted changes from worktree + main-worktree leak; merged with no further conflicts
+- Worker 2: clean merge
+- Worker 3: 1 conflict in src/types/index.ts (both branches added condicionIVAReceptor — kept worker-1 JSDoc)
+- Worker 4: 2 add/add conflicts in subdiario-builder.ts and facturador-reader.ts (W4 had stubs; kept W2/W3 real implementations). Required additional lead work: rewrote subdiario-writer.ts to use canonical SubdiarioInput/SubdiarioRow types from src/types/index.ts, added BankMovimiento parsing, and refactored gap detection to use placeholder-row marker (`cliente.startsWith('FALTA ')`) instead of W4's boolean `gap` flag.
+
+### Continuation Status
+[All tasks completed.]
