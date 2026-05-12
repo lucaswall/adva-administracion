@@ -42,6 +42,7 @@ export function createMenu(): void {
     .addItem('🔄 Procesar Entrada', 'triggerScan')
     .addItem('🔗 Volver a Vincular Documentos', 'triggerRematch')
     .addItem('📝 Completar Detalles de Movimientos', 'triggerMatchMovimientos')
+    .addItem('📊 Reconstruir Subdiario de Ventas', 'triggerRebuildSubdiario')
     .addItem('📦 Envío a Contadores', 'triggerEnvioContadores')
     .addSeparator()
     .addItem('ℹ️ Acerca de', 'showAbout')
@@ -244,6 +245,61 @@ export function triggerRematch(): void {
 export function triggerMatchMovimientos(): void {
   const url = getApiUrl('/api/match-movimientos');
   makeApiCall(url, 'post', null, 'Completado de detalles iniciado correctamente.');
+}
+
+/**
+ * Triggers a full rebuild of the Subdiario de Ventas workbook.
+ * Shows the number of comprobante rows written on success.
+ */
+export function triggerRebuildSubdiario(): void {
+  const ui = SpreadsheetApp.getUi();
+  const url = getApiUrl('/api/rebuild-subdiario');
+
+  try {
+    const options: GoogleAppsScript.URL_Fetch.URLFetchRequestOptions = {
+      method: 'post',
+      headers: {
+        'Content-Type': 'application/json',
+        'User-Agent': 'ADVA-Spreadsheet',
+        'Authorization': `Bearer ${API_SECRET}`,
+      },
+      payload: JSON.stringify({}),
+      muteHttpExceptions: true,
+    };
+
+    const response = UrlFetchApp.fetch(url, options);
+    const statusCode = response.getResponseCode();
+    const responseText = response.getContentText();
+
+    if (statusCode >= 200 && statusCode < 300) {
+      const data = JSON.parse(responseText) as { rowsWritten: number; gapsDetected: number };
+      ui.alert(
+        '✅ Listo',
+        `Subdiario reconstruido — ${data.rowsWritten} comprobantes`,
+        ui.ButtonSet.OK
+      );
+    } else {
+      let errorMsg = `El servidor devolvió el estado ${statusCode}`;
+      try {
+        const errorData = JSON.parse(responseText) as { error?: string };
+        if (errorData.error) {
+          errorMsg += `\n\n${errorData.error}`;
+        }
+      } catch {
+        if (responseText) {
+          errorMsg += `\n\n${responseText}`;
+        }
+      }
+      ui.alert('⚠️ Error de la API', errorMsg, ui.ButtonSet.OK);
+    }
+  } catch (err) {
+    const errorMessage = err instanceof Error ? err.message : String(err);
+    ui.alert(
+      '❌ Error de conexión',
+      `No se pudo conectar con el servidor.\n\nError: ${errorMessage}`,
+      ui.ButtonSet.OK
+    );
+  }
 }
 
 /**

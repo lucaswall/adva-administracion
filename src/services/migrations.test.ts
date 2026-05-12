@@ -14,6 +14,7 @@ vi.mock('./folder-structure.js', () => ({
   migrateArchivosProcesadosHeaders: vi.fn(),
   migrateRecibosHasCuitMatchColumn: vi.fn(),
   migrateFacturasEmitidasPagadaColumn: vi.fn(),
+  migrateFacturasEmitidasCondicionIvaColumn: vi.fn(),
 }));
 
 vi.mock('./schema-version.js', () => ({
@@ -30,7 +31,7 @@ vi.mock('../utils/logger.js', () => ({
 
 import { migrateMovimientosColumns, migrateDashboardProcessedAt, runStartupMigrations, CURRENT_SCHEMA_VERSION } from './migrations.js';
 import { getValues, batchUpdate, getSheetMetadata, updateRowsWithFormatting, getSpreadsheetTimezone } from './sheets.js';
-import { getCachedFolderStructure, migrateTipoDeCambioHeaders, migrateArchivosProcesadosHeaders, migrateRecibosHasCuitMatchColumn, migrateFacturasEmitidasPagadaColumn } from './folder-structure.js';
+import { getCachedFolderStructure, migrateTipoDeCambioHeaders, migrateArchivosProcesadosHeaders, migrateRecibosHasCuitMatchColumn, migrateFacturasEmitidasPagadaColumn, migrateFacturasEmitidasCondicionIvaColumn } from './folder-structure.js';
 import { readSchemaVersion, writeSchemaVersion } from './schema-version.js';
 
 beforeEach(() => {
@@ -470,6 +471,8 @@ describe('runStartupMigrations', () => {
     vi.mocked(migrateFacturasEmitidasPagadaColumn).mockResolvedValue({ ok: true, value: undefined });
     // v6: recibos hasCuitMatch column migration
     vi.mocked(migrateRecibosHasCuitMatchColumn).mockResolvedValue({ ok: true, value: undefined });
+    // v7: condicionIVAReceptor column migration
+    vi.mocked(migrateFacturasEmitidasCondicionIvaColumn).mockResolvedValue({ ok: true, value: undefined });
     vi.mocked(writeSchemaVersion).mockResolvedValue({ ok: true, value: 'file-id' });
 
     await runStartupMigrations();
@@ -479,6 +482,8 @@ describe('runStartupMigrations', () => {
     expect(migrateArchivosProcesadosHeaders).not.toHaveBeenCalled();
     // Should run v3 (movimientos) — getSheetMetadata is called by migrateMovimientosColumns
     expect(getSheetMetadata).toHaveBeenCalled();
+    // Should run v7 (condicionIVAReceptor column)
+    expect(migrateFacturasEmitidasCondicionIvaColumn).toHaveBeenCalledWith('ingresos-id');
     // Should update version to CURRENT
     expect(writeSchemaVersion).toHaveBeenCalledWith('root-id', CURRENT_SCHEMA_VERSION, 'file-id');
   });
@@ -503,7 +508,7 @@ describe('runStartupMigrations', () => {
     expect(migrateArchivosProcesadosHeaders).not.toHaveBeenCalled();
   });
 
-  it('should run all 6 migrations when version is 0 and fileId exists (explicit run)', async () => {
+  it('should run all 7 migrations when version is 0 and fileId exists (explicit run)', async () => {
     vi.mocked(getCachedFolderStructure).mockReturnValue(mockFolderStructure);
     vi.mocked(readSchemaVersion).mockResolvedValue({
       ok: true,
@@ -528,6 +533,8 @@ describe('runStartupMigrations', () => {
     vi.mocked(migrateFacturasEmitidasPagadaColumn).mockResolvedValue({ ok: true, value: undefined });
     // v6: recibos hasCuitMatch column
     vi.mocked(migrateRecibosHasCuitMatchColumn).mockResolvedValue({ ok: true, value: undefined });
+    // v7: facturas emitidas condicionIVAReceptor column
+    vi.mocked(migrateFacturasEmitidasCondicionIvaColumn).mockResolvedValue({ ok: true, value: undefined });
     vi.mocked(writeSchemaVersion).mockResolvedValue({ ok: true, value: 'file-id' });
 
     await runStartupMigrations();
@@ -542,11 +549,13 @@ describe('runStartupMigrations', () => {
     expect(migrateFacturasEmitidasPagadaColumn).toHaveBeenCalledWith('ingresos-id');
     // v6: recibos hasCuitMatch column migration
     expect(migrateRecibosHasCuitMatchColumn).toHaveBeenCalledWith('egresos-id');
+    // v7: condicionIVAReceptor column migration
+    expect(migrateFacturasEmitidasCondicionIvaColumn).toHaveBeenCalledWith('ingresos-id');
     // Version updated
     expect(writeSchemaVersion).toHaveBeenCalledWith('root-id', CURRENT_SCHEMA_VERSION, 'file-id');
   });
 
-  it('should run only v5 migration when version is 4', async () => {
+  it('should run only v5, v6, v7 migrations when version is 4', async () => {
     vi.mocked(getCachedFolderStructure).mockReturnValue(mockFolderStructure);
     vi.mocked(readSchemaVersion).mockResolvedValue({
       ok: true,
@@ -554,6 +563,7 @@ describe('runStartupMigrations', () => {
     });
     vi.mocked(migrateFacturasEmitidasPagadaColumn).mockResolvedValue({ ok: true, value: undefined });
     vi.mocked(migrateRecibosHasCuitMatchColumn).mockResolvedValue({ ok: true, value: undefined });
+    vi.mocked(migrateFacturasEmitidasCondicionIvaColumn).mockResolvedValue({ ok: true, value: undefined });
     vi.mocked(writeSchemaVersion).mockResolvedValue({ ok: true, value: 'file-id' });
 
     await runStartupMigrations();
@@ -562,6 +572,26 @@ describe('runStartupMigrations', () => {
     expect(migrateArchivosProcesadosHeaders).not.toHaveBeenCalled();
     expect(migrateFacturasEmitidasPagadaColumn).toHaveBeenCalledWith('ingresos-id');
     expect(migrateRecibosHasCuitMatchColumn).toHaveBeenCalledWith('egresos-id');
+    expect(migrateFacturasEmitidasCondicionIvaColumn).toHaveBeenCalledWith('ingresos-id');
+    expect(writeSchemaVersion).toHaveBeenCalledWith('root-id', CURRENT_SCHEMA_VERSION, 'file-id');
+  });
+
+  it('should run only v7 migration when version is 6', async () => {
+    vi.mocked(getCachedFolderStructure).mockReturnValue(mockFolderStructure);
+    vi.mocked(readSchemaVersion).mockResolvedValue({
+      ok: true,
+      value: { version: 6, fileId: 'file-id' },
+    });
+    vi.mocked(migrateFacturasEmitidasCondicionIvaColumn).mockResolvedValue({ ok: true, value: undefined });
+    vi.mocked(writeSchemaVersion).mockResolvedValue({ ok: true, value: 'file-id' });
+
+    await runStartupMigrations();
+
+    expect(migrateTipoDeCambioHeaders).not.toHaveBeenCalled();
+    expect(migrateArchivosProcesadosHeaders).not.toHaveBeenCalled();
+    expect(migrateFacturasEmitidasPagadaColumn).not.toHaveBeenCalled();
+    expect(migrateRecibosHasCuitMatchColumn).not.toHaveBeenCalled();
+    expect(migrateFacturasEmitidasCondicionIvaColumn).toHaveBeenCalledWith('ingresos-id');
     expect(writeSchemaVersion).toHaveBeenCalledWith('root-id', CURRENT_SCHEMA_VERSION, 'file-id');
   });
 

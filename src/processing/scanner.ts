@@ -514,11 +514,12 @@ export async function scanFolder(folderId?: string): Promise<Result<ScanResult, 
       });
 
       await Promise.all([
-        // Control de Ingresos sheets
-        context.duplicateCache.loadSheet(controlIngresosId, 'Facturas Emitidas', 'A:J'),
+        // Control de Ingresos sheets — Facturas Emitidas spans A:K after
+        // ADV-245 (condicionIVAReceptor at H shifted importeTotal to K/idx 10).
+        context.duplicateCache.loadSheet(controlIngresosId, 'Facturas Emitidas', 'A:K'),
         context.duplicateCache.loadSheet(controlIngresosId, 'Pagos Recibidos', 'A:H'),
         context.duplicateCache.loadSheet(controlIngresosId, 'Retenciones Recibidas', 'A:O'),
-        // Control de Egresos sheets
+        // Control de Egresos sheets — Recibidas was not migrated, stays at A:J.
         context.duplicateCache.loadSheet(controlEgresosId, 'Facturas Recibidas', 'A:J'),
         context.duplicateCache.loadSheet(controlEgresosId, 'Pagos Enviados', 'A:H'),
         context.duplicateCache.loadSheet(controlEgresosId, 'Recibos', 'A:R'),

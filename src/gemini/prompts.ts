@@ -258,6 +258,13 @@ Required fields to extract:
 Optional fields:
 - concepto: Brief one-line summary describing what the invoice is for. Analyze the line items/services listed in the invoice and summarize them (e.g., "Desarrollo de software para pagina web de ADVA", "Alojamiento y comidas para viaje a Tierra del Fuego", "Servicios de hosting y dominio para portal institucional"). IMPORTANT: Do NOT use tax category labels like "EXENTO", "GRAVADO", "NO GRAVADO" as the concepto - these are tax classifications, not descriptions.
 - tipoDeCambio: Exchange rate for USD invoices (number). Look for "Exchange Rate:", "Tipo de Cambio:", "T.C." Only extract if moneda is USD.
+- condicionIVAReceptor: The receptor's (clientName's) tax condition ("Condición frente al IVA"). Look for this label in the client/receptor section of the document. Use EXACTLY one of these 5 canonical values:
+  "IVA Responsable Inscripto" (when document shows "Responsable Inscripto" or "IVA Responsable Inscripto")
+  "Consumidor Final" (when document shows "Consumidor Final")
+  "Responsable Monotributo" (when document shows "Monotributo" or "Responsable Monotributo")
+  "Cliente del Exterior" (when document shows "Cliente del Exterior" or "IVA Exento / Exterior")
+  "IVA Sujeto Exento" (when document shows "Exento" or "IVA Exento" for Argentine entities)
+  Omit this field if the receptor's IVA condition is not visible in the document.
 
 Return ONLY valid JSON in this exact format:
 {
@@ -271,7 +278,8 @@ Return ONLY valid JSON in this exact format:
   "importeIva": 210.00,
   "importeTotal": 1210.00,
   "moneda": "ARS",
-  "concepto": "Servicios profesionales"
+  "concepto": "Servicios profesionales",
+  "condicionIVAReceptor": "IVA Responsable Inscripto"
 }
 
 Example with Consumidor Final (Doc. Receptor):
@@ -286,7 +294,8 @@ Example with Consumidor Final (Doc. Receptor):
   "importeIva": 0,
   "importeTotal": 100000.00,
   "moneda": "ARS",
-  "concepto": "Servicios profesionales"
+  "concepto": "Servicios profesionales",
+  "condicionIVAReceptor": "Consumidor Final"
 }
 
 Important:

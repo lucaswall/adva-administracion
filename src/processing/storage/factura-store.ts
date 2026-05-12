@@ -33,26 +33,27 @@ function buildFacturaRowFormatted(
 
   if (documentType === 'factura_emitida') {
     return [
-      fechaEmisionDate,                     // A - proper date cell
-      factura.fileId,                       // B
-      { text: renamedFileName, url: `https://drive.google.com/file/d/${factura.fileId}/view` }, // C
-      factura.tipoComprobante,              // D
-      factura.nroFactura,                   // E
-      factura.cuitReceptor || '',           // F
-      factura.razonSocialReceptor || '',    // G
-      { type: 'number', value: factura.importeNeto } as CellNumber, // H
-      { type: 'number', value: factura.importeIva } as CellNumber,  // I
-      { type: 'number', value: factura.importeTotal } as CellNumber,// J
-      factura.moneda,                       // K
-      factura.concepto || '',               // L
-      factura.processedAt,                  // M
-      factura.confidence,                   // N
-      factura.needsReview ? 'YES' : 'NO',   // O
-      factura.matchedPagoFileId || '',      // P
-      factura.matchConfidence || '',        // Q
-      factura.hasCuitMatch ? 'YES' : 'NO',  // R
-      '',                                   // S - pagada (initially empty)
-      tipoDeCambioCell,                     // T
+      fechaEmisionDate,                     // A (0) - proper date cell
+      factura.fileId,                       // B (1)
+      { text: renamedFileName, url: `https://drive.google.com/file/d/${factura.fileId}/view` }, // C (2)
+      factura.tipoComprobante,              // D (3)
+      factura.nroFactura,                   // E (4)
+      factura.cuitReceptor || '',           // F (5)
+      factura.razonSocialReceptor || '',    // G (6)
+      factura.condicionIVAReceptor || '',   // H (7) - new ADV-245
+      { type: 'number', value: factura.importeNeto } as CellNumber, // I (8)
+      { type: 'number', value: factura.importeIva } as CellNumber,  // J (9)
+      { type: 'number', value: factura.importeTotal } as CellNumber,// K (10)
+      factura.moneda,                       // L (11)
+      factura.concepto || '',               // M (12)
+      factura.processedAt,                  // N (13)
+      factura.confidence,                   // O (14)
+      factura.needsReview ? 'YES' : 'NO',   // P (15)
+      factura.matchedPagoFileId || '',      // Q (16)
+      factura.matchConfidence || '',        // R (17)
+      factura.hasCuitMatch ? 'YES' : 'NO',  // S (18)
+      '',                                   // T (19) - pagada (initially empty)
+      tipoDeCambioCell,                     // U (20)
     ];
   } else {
     return [
@@ -124,9 +125,17 @@ async function isDuplicateFactura(
   nroFactura: string,
   fecha: string,
   importeTotal: number,
-  cuit: string
+  cuit: string,
+  documentType: 'factura_emitida' | 'factura_recibida'
 ): Promise<{ isDuplicate: boolean; existingFileId?: string }> {
-  const rowsResult = await getValues(spreadsheetId, `${sheetName}!A:J`);
+  // factura_emitida has condicionIVAReceptor at H (ADV-245), so importeTotal shifted to K (col 11, idx 10)
+  // factura_recibida is unchanged — importeTotal stays at J (col 10, idx 9)
+  const isEmitida = documentType === 'factura_emitida';
+  const lastCol = isEmitida ? 'K' : 'J';
+  const importeColIdx = isEmitida ? 10 : 9;
+  const minRowLength = importeColIdx + 1;
+
+  const rowsResult = await getValues(spreadsheetId, `${sheetName}!A:${lastCol}`);
   if (!rowsResult.ok || rowsResult.value.length <= 1) {
     return { isDuplicate: false };
   }
@@ -134,13 +143,13 @@ async function isDuplicateFactura(
   // Skip header row
   for (let i = 1; i < rowsResult.value.length; i++) {
     const row = rowsResult.value[i];
-    if (!row || row.length < 10) continue;
+    if (!row || row.length < minRowLength) continue;
 
-    const rowFechaRaw = row[0];     // Column A: fechaEmision (serial number or string)
-    const rowFileId = row[1];       // Column B: fileId
-    const rowNroFactura = row[4];   // Column E: nroFactura
-    const rowCuit = row[5];         // Column F: cuitReceptor/cuitEmisor
-    const rowImporteStr = row[9];   // Column J: importeTotal
+    const rowFechaRaw = row[0];                // Column A: fechaEmision (serial number or string)
+    const rowFileId = row[1];                  // Column B: fileId
+    const rowNroFactura = row[4];              // Column E: nroFactura
+    const rowCuit = row[5];                    // Column F: cuitReceptor/cuitEmisor
+    const rowImporteStr = row[importeColIdx];  // Column J or K: importeTotal
 
     // Convert serial number to date string for comparison
     const rowFecha = normalizeSpreadsheetDate(rowFechaRaw);
@@ -192,7 +201,7 @@ export async function storeFactura(
     if (fileIdCheck.found) {
       const renamedFileName = generateFacturaFileName(factura, documentType);
       const updateRow = buildFacturaRowFormatted(factura, documentType, renamedFileName);
-      const lastCol = 'T';
+      const lastCol = documentType === 'factura_emitida' ? 'U' : 'T';
       const updateResult = await updateRowsWithFormatting(spreadsheetId, [{
         range: `${sheetName}!A${fileIdCheck.rowIndex}:${lastCol}${fileIdCheck.rowIndex}`,
         values: updateRow,
@@ -220,7 +229,9 @@ export async function storeFactura(
       return { stored: true, updated: true };
     }
 
-    // DUPLICATE CHECK (business key): Use cache if available, otherwise API
+    // DUPLICATE CHECK (business key): Use cache if available, otherwise API.
+    // documentType drives the importeTotal column index — Facturas Emitidas
+    // shifted it to K (10) after ADV-245; Recibidas stays at J (9).
     const dupeCheck = context?.duplicateCache
       ? context.duplicateCache.isDuplicateFactura(
           spreadsheetId,
@@ -228,7 +239,8 @@ export async function storeFactura(
           factura.nroFactura,
           factura.fechaEmision,
           factura.importeTotal,
-          counterpartyCuit
+          counterpartyCuit,
+          documentType
         )
       : await isDuplicateFactura(
           spreadsheetId,
@@ -236,7 +248,8 @@ export async function storeFactura(
           factura.nroFactura,
           factura.fechaEmision,
           factura.importeTotal,
-          counterpartyCuit
+          counterpartyCuit,
+          documentType
         );
 
     if (dupeCheck.isDuplicate) {
@@ -258,7 +271,7 @@ export async function storeFactura(
 
     // Build row based on document type - only include counterparty info
     const row = buildFacturaRowFormatted(factura, documentType, renamedFileName);
-    const range = `${sheetName}!A:T`;
+    const range = documentType === 'factura_emitida' ? `${sheetName}!A:U` : `${sheetName}!A:T`;
 
     const result = await appendRowsWithLinks(spreadsheetId, range, [row], timeZone, context?.metadataCache);
     if (!result.ok) {

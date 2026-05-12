@@ -26,6 +26,7 @@ import { updateDetalle, type DetalleUpdate } from '../services/movimientos-detal
 
 import { prefetchExchangeRates } from '../utils/exchange-rate.js';
 import { syncPagosPendientes, syncCobrosPendientes } from '../services/pagos-pendientes.js';
+import { syncSubdiario } from '../services/subdiario-writer.js';
 
 // Re-export MatchQuality for test compatibility
 export type { MatchQuality };
@@ -278,7 +279,10 @@ export function isBetterMatch(
  * Parses Facturas Emitidas from spreadsheet data using header-based lookup.
  * ADVA is the emisor, so counterparty info is cuitReceptor/razonSocialReceptor.
  */
-export function parseFacturasEmitidas(data: CellValue[][]): Array<Factura & { row: number }> {
+export function parseFacturasEmitidas(
+  data: CellValue[][],
+  options: { includeNc?: boolean } = {}
+): Array<Factura & { row: number }> {
   if (data.length < 2) return [];
 
   const headers = data[0].map(h => String(h || '').toLowerCase());
@@ -307,15 +311,22 @@ export function parseFacturasEmitidas(data: CellValue[][]): Array<Factura & { ro
     matchConfidence: headers.indexOf('matchconfidence'),
     hasCuitMatch: headers.indexOf('hascuitmatch'),
     tipoDeCambio: headers.indexOf('tipodecambio'),
+    condicionIVAReceptor: headers.indexOf('condicionivareceptor'),
   };
 
   for (let i = 1; i < data.length; i++) {
     const row = data[i];
     if (!row || !row[colIndex.fileId]) continue;
 
-    // Skip NCs and NDs — they have their own matching pipeline (nc-factura-matcher)
+    // NDs are never useful for downstream consumers (the matcher excludes them
+    // and the Subdiario builder does not model them — they have no AFIP_COD
+    // entry). Always skip. NCs are gated on the opt-in (Subdiario builder
+    // needs them for scope rule c and cancellation lookup).
     const tipo = validateTipoComprobante(row[colIndex.tipoComprobante]);
-    if (tipo === 'NC' || tipo.startsWith('NC ') || tipo === 'ND' || tipo.startsWith('ND ')) continue;
+    if (tipo === 'ND' || tipo.startsWith('ND ')) continue;
+    if (!options.includeNc) {
+      if (tipo === 'NC' || tipo.startsWith('NC ')) continue;
+    }
 
     facturas.push({
       row: i + 1,
@@ -329,6 +340,10 @@ export function parseFacturasEmitidas(data: CellValue[][]): Array<Factura & { ro
       razonSocialEmisor: '',
       cuitReceptor: String(row[colIndex.cuitReceptor] || ''),
       razonSocialReceptor: String(row[colIndex.razonSocialReceptor] || ''),
+      condicionIVAReceptor:
+        colIndex.condicionIVAReceptor >= 0
+          ? String(row[colIndex.condicionIVAReceptor] || '') || undefined
+          : undefined,
       importeNeto: parseNumber(row[colIndex.importeNeto]) || 0,
       importeIva: parseNumber(row[colIndex.importeIva]) || 0,
       importeTotal: parseNumber(row[colIndex.importeTotal]) || 0,
@@ -545,7 +560,7 @@ function parseRecibos(data: CellValue[][]): Array<Recibo & { row: number }> {
 /**
  * Parses Retenciones from spreadsheet data using header-based lookup
  */
-function parseRetenciones(data: CellValue[][]): Array<Retencion & { row: number }> {
+export function parseRetenciones(data: CellValue[][]): Array<Retencion & { row: number }> {
   if (data.length < 2) return [];
 
   const headers = data[0].map(h => String(h || '').toLowerCase());
@@ -605,7 +620,7 @@ function parseRetenciones(data: CellValue[][]): Array<Retencion & { row: number 
 async function loadControlIngresos(spreadsheetId: string): Promise<Result<IngresosData, Error>> {
   try {
     const [facturasResult, pagosResult, retencionesResult] = await Promise.all([
-      getValues(spreadsheetId, 'Facturas Emitidas!A:T'),
+      getValues(spreadsheetId, 'Facturas Emitidas!A:U'),  // 21 cols after ADV-245 added condicionIVAReceptor at H
       getValues(spreadsheetId, 'Pagos Recibidos!A:Q'),
       getValues(spreadsheetId, 'Retenciones Recibidas!A:O'),
     ]);
@@ -1085,7 +1100,9 @@ async function matchBankMovimientos(
             if (matchedDoc.document.matchConfidence !== 'MANUAL') {
               const ssId = matchedDoc.type === 'factura_emitida' ? controlIngresosId : controlEgresosId;
               const sheetName = matchedDoc.type === 'factura_emitida' ? 'Facturas Emitidas' : 'Facturas Recibidas';
-              pagadaUpdates.push({ spreadsheetId: ssId, sheetName, rowNumber: matchedDoc.document.row, columnLetter: 'S' });
+              // pagada column: T for Facturas Emitidas (21 cols, ADV-245), S for Facturas Recibidas (20 cols)
+              const pagadaCol = matchedDoc.type === 'factura_emitida' ? 'T' : 'S';
+              pagadaUpdates.push({ spreadsheetId: ssId, sheetName, rowNumber: matchedDoc.document.row, columnLetter: pagadaCol });
             }
           }
         }
@@ -1287,10 +1304,37 @@ export async function matchAllMovimientos(
       }
 
       // Sync Pagos Pendientes and Cobros Pendientes dashboards after pagada writes
-      const { dashboardOperativoId } = folderStructure;
+      const { dashboardOperativoId, rootId } = folderStructure;
       if (dashboardOperativoId) {
         await syncPagosPendientes(controlEgresosId, dashboardOperativoId);
         await syncCobrosPendientes(controlIngresosId, dashboardOperativoId);
+      }
+
+      // Sync Subdiario de Ventas — runs unconditionally; errors are caught and logged
+      try {
+        const subdiarioResult = await syncSubdiario(
+          rootId,
+          controlIngresosId,
+          controlEgresosId,
+          currentYear,
+          movimientosSpreadsheets
+        );
+        if (subdiarioResult.ok) {
+          info('Subdiario de Ventas sync completed', {
+            module: 'match-movimientos',
+            phase: 'sync-subdiario',
+            rowsWritten: subdiarioResult.value.rowsWritten,
+            gapsDetected: subdiarioResult.value.gapsDetected,
+          });
+        }
+        // ok:false: writer already logged the cause at lib layer; caller does not re-log.
+      } catch (err) {
+        const error = err instanceof Error ? err : new Error(String(err));
+        logError('Subdiario de Ventas sync threw unexpectedly', {
+          module: 'match-movimientos',
+          phase: 'sync-subdiario',
+          error: error.message,
+        });
       }
 
       // Calculate totals

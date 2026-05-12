@@ -166,8 +166,8 @@ export async function runMatching(
     folderStructure.controlIngresosId,
     'Facturas Emitidas',
     'cuitReceptor',
-    'A:T',
-    'S'
+    'A:U',  // 21 cols after ADV-245 added condicionIVAReceptor at H
+    'T'     // pagada shifted from S to T
   );
 
   if (!ncIngresosMatches.ok) {

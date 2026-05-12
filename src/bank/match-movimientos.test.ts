@@ -55,6 +55,10 @@ vi.mock('../services/pagos-pendientes.js', () => ({
   syncCobrosPendientes: vi.fn().mockResolvedValue({ ok: true, value: 0 }),
 }));
 
+vi.mock('../services/subdiario-writer.js', () => ({
+  syncSubdiario: vi.fn().mockResolvedValue({ ok: true, value: { rowsWritten: 0, gapsDetected: 0 } }),
+}));
+
 // Create mockable matcher methods
 let mockMatchMovement = vi.fn();
 let mockMatchCreditMovement = vi.fn();
@@ -94,6 +98,7 @@ import { updateDetalle } from '../services/movimientos-detalle.js';
 import { warn, error } from '../utils/logger.js';
 import { prefetchExchangeRates } from '../utils/exchange-rate.js';
 import { syncPagosPendientes, syncCobrosPendientes } from '../services/pagos-pendientes.js';
+import { syncSubdiario } from '../services/subdiario-writer.js';
 
 describe('getRequiredColumnIndex', () => {
   it('returns correct index when header exists', () => {
@@ -272,6 +277,25 @@ describe('parseFacturasEmitidas', () => {
     expect(result).toHaveLength(2);
     expect(result[0].fileId).toBe('file1');
     expect(result[1].fileId).toBe('file6');
+  });
+
+  it('with includeNc: true includes NCs but still excludes NDs', () => {
+    // Subdiario opts into NCs (needed for scope rule c and cancellation lookup),
+    // but never NDs — the builder does not model ND rows. Codex P2 finding on PR 116.
+    const data = [
+      ['fechaEmision', 'fileId', 'tipoComprobante', 'nroFactura', 'cuitReceptor', 'razonSocialReceptor', 'importeTotal', 'moneda'],
+      ['2025-01-15', 'fc1', 'A', '00001-00000001', '20123456786', 'CLIENTE SA', '1000', 'ARS'],
+      ['2025-01-16', 'nc1', 'NC C', '00003-00000157', '20123456786', 'CLIENTE SA', '500', 'ARS'],
+      ['2025-01-17', 'nd1', 'ND', '00001-00000002', '27234567891', 'OTRO CLIENTE', '200', 'ARS'],
+      ['2025-01-18', 'nd2', 'ND A', '00001-00000003', '20111111119', 'TERCER CLIENTE', '300', 'ARS'],
+      ['2025-01-19', 'nd3', 'ND B', '00001-00000004', '20111111119', 'TERCER CLIENTE', '400', 'ARS'],
+      ['2025-01-20', 'fc2', 'C', '00001-00000006', '27234567891', 'OTRO CLIENTE', '2000', 'ARS'],
+    ];
+
+    const result = parseFacturasEmitidas(data, { includeNc: true });
+
+    expect(result).toHaveLength(3);
+    expect(result.map((f) => f.fileId).sort()).toEqual(['fc1', 'fc2', 'nc1']);
   });
 });
 
@@ -2213,12 +2237,12 @@ describe('exchange rate prefetch', () => {
           ],
         };
       }
-      if (range === 'Facturas Emitidas!A:T') {
+      if (range === 'Facturas Emitidas!A:U') {
         return {
           ok: true,
           value: [
-            ['fechaEmision', 'fileId', 'fileName', 'tipoComprobante', 'nroFactura', 'cuitReceptor', 'razonSocialReceptor', 'importeNeto', 'importeIva', 'importeTotal', 'moneda', 'concepto', 'processedAt', 'confidence', 'needsReview', 'matchedPagoFileId', 'matchConfidence', 'hasCuitMatch', 'pagada', 'tipoDeCambio'],
-            ['2025-10-10', 'fact1', 'fact1.pdf', 'E', '00001-00000001', '20123456786', 'FRITO PLAY', '', '', '6750', 'USD', '', '2025-10-10T10:00:00Z', '0.95', 'NO', '', '', '', '', ''],
+            ['fechaEmision', 'fileId', 'fileName', 'tipoComprobante', 'nroFactura', 'cuitReceptor', 'razonSocialReceptor', 'condicionIVAReceptor', 'importeNeto', 'importeIva', 'importeTotal', 'moneda', 'concepto', 'processedAt', 'confidence', 'needsReview', 'matchedPagoFileId', 'matchConfidence', 'hasCuitMatch', 'pagada', 'tipoDeCambio'],
+            ['2025-10-10', 'fact1', 'fact1.pdf', 'E', '00001-00000001', '20123456786', 'FRITO PLAY', '', '', '', '6750', 'USD', '', '2025-10-10T10:00:00Z', '0.95', 'NO', '', '', '', '', ''],
           ],
         };
       }
@@ -3508,7 +3532,7 @@ describe('pagada updates from movimientos matching', () => {
   });
 
   const FAC_REC_HEADERS = ['fechaemision', 'fileid', 'filename', 'tipocomprobante', 'nrofactura', 'cuitemisor', 'razonsocialemisor', 'importeneto', 'importeiva', 'importetotal', 'moneda', 'concepto', 'processedat', 'confidence', 'needsreview', 'matchedpagofileid', 'matchconfidence', 'hascuitmatch', 'pagada'];
-  const FAC_EMIT_HEADERS = ['fechaemision', 'fileid', 'filename', 'tipocomprobante', 'nrofactura', 'cuitreceptor', 'razonsocialreceptor', 'importeneto', 'importeiva', 'importetotal', 'moneda', 'concepto', 'processedat', 'confidence', 'needsreview', 'matchedpagofileid', 'matchconfidence', 'hascuitmatch', 'pagada', 'tipodecambio'];
+  const FAC_EMIT_HEADERS = ['fechaemision', 'fileid', 'filename', 'tipocomprobante', 'nrofactura', 'cuitreceptor', 'razonsocialreceptor', 'condicionivareceptor', 'importeneto', 'importeiva', 'importetotal', 'moneda', 'concepto', 'processedat', 'confidence', 'needsreview', 'matchedpagofileid', 'matchconfidence', 'hascuitmatch', 'pagada', 'tipodecambio'];
 
   function setupBase() {
     const mockFolderStructure = {
@@ -3573,12 +3597,12 @@ describe('pagada updates from movimientos matching', () => {
     setupBase();
 
     vi.mocked(getValues).mockImplementation(async (_id, range) => {
-      if (range === 'Facturas Emitidas!A:T') {
+      if (range === 'Facturas Emitidas!A:U') {
         return {
           ok: true,
           value: [
             FAC_EMIT_HEADERS,
-            ['2025-01-10', 'fac-emit-1', 'factura.pdf', 'B', '00001-00000001', '20123456786', 'CLIENTE SA', '', '', '1000', 'ARS', '', '', '0.95', 'NO', '', '', '', '', ''],
+            ['2025-01-10', 'fac-emit-1', 'factura.pdf', 'B', '00001-00000001', '20123456786', 'CLIENTE SA', '', '', '', '1000', 'ARS', '', '', '0.95', 'NO', '', '', '', '', ''],
           ],
         };
       }
@@ -3607,7 +3631,7 @@ describe('pagada updates from movimientos matching', () => {
 
     expect(batchUpdate).toHaveBeenCalledWith(
       'ingresos-id',
-      [{ range: 'Facturas Emitidas!S2', values: [['SI']] }]
+      [{ range: 'Facturas Emitidas!T2', values: [['SI']] }]
     );
   });
 
@@ -4039,5 +4063,143 @@ describe('pagadaErrors tracking (ADV-202)', () => {
 
     // batchUpdate must NOT be called when detalle failed
     expect(batchUpdate).not.toHaveBeenCalled();
+  });
+});
+
+describe('syncSubdiario called after syncCobrosPendientes (ADV-248)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.useFakeTimers();
+    mockMatchMovement = vi.fn().mockReturnValue({
+      matchType: 'no_match',
+      description: '',
+      matchedFileId: '',
+      confidence: 'LOW',
+    });
+    mockMatchCreditMovement = vi.fn().mockReturnValue({
+      matchType: 'no_match',
+      description: '',
+      matchedFileId: '',
+      confidence: 'LOW',
+    });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  function setupBase(withDashboard = true) {
+    const mockFolderStructure: Record<string, unknown> = {
+      controlIngresosId: 'ingresos-id',
+      controlEgresosId: 'egresos-id',
+      rootId: 'root-id',
+      bankSpreadsheets: new Map(),
+      movimientosSpreadsheets: new Map([['BBVA', 'bbva-id']]),
+    };
+    if (withDashboard) {
+      mockFolderStructure['dashboardOperativoId'] = 'dashboard-id';
+    }
+
+    vi.mocked(withLock).mockImplementation(async (_id, fn) => {
+      const result = await fn();
+      return { ok: true, value: result };
+    });
+
+    vi.mocked(getCachedFolderStructure).mockReturnValue(mockFolderStructure as any);
+    vi.mocked(getValues).mockResolvedValue({ ok: true, value: [['header']] });
+    vi.mocked(getMovimientosToFill).mockResolvedValue({ ok: true, value: [] });
+    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: 0 });
+  }
+
+  it('calls syncSubdiario after syncPagosPendientes and syncCobrosPendientes', async () => {
+    setupBase();
+
+    const callOrder: string[] = [];
+    vi.mocked(syncPagosPendientes).mockImplementation(async () => {
+      callOrder.push('syncPagosPendientes');
+      return { ok: true, value: 0 };
+    });
+    vi.mocked(syncCobrosPendientes).mockImplementation(async () => {
+      callOrder.push('syncCobrosPendientes');
+      return { ok: true, value: 0 };
+    });
+    vi.mocked(syncSubdiario).mockImplementation(async () => {
+      callOrder.push('syncSubdiario');
+      return { ok: true, value: { rowsWritten: 0, gapsDetected: 0 } };
+    });
+
+    const resultPromise = matchAllMovimientos();
+    await vi.runAllTimersAsync();
+    await resultPromise;
+
+    expect(callOrder.indexOf('syncSubdiario')).toBeGreaterThan(
+      callOrder.indexOf('syncCobrosPendientes')
+    );
+    expect(callOrder.indexOf('syncSubdiario')).toBeGreaterThan(
+      callOrder.indexOf('syncPagosPendientes')
+    );
+  });
+
+  it('calls syncSubdiario with rootId, controlIngresosId, controlEgresosId, movimientosSpreadsheets', async () => {
+    setupBase();
+
+    const resultPromise = matchAllMovimientos();
+    await vi.runAllTimersAsync();
+    await resultPromise;
+
+    expect(syncSubdiario).toHaveBeenCalledWith(
+      'root-id',           // rootFolderId
+      'ingresos-id',       // controlIngresosId
+      'egresos-id',        // controlEgresosId
+      expect.any(Number),  // facturadorYear (current year)
+      expect.any(Map)      // movimientosSpreadsheets
+    );
+  });
+
+  it('match cycle completes even when syncSubdiario returns Result.err', async () => {
+    setupBase();
+    vi.mocked(syncSubdiario).mockResolvedValue({
+      ok: false,
+      error: new Error('Subdiario write failed'),
+    });
+
+    const resultPromise = matchAllMovimientos();
+    await vi.runAllTimersAsync();
+    const result = await resultPromise;
+
+    // Match cycle must succeed despite subdiario error
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.skipped).toBe(false);
+    }
+    // syncSubdiario was still called
+    expect(syncSubdiario).toHaveBeenCalled();
+  });
+
+  it('match cycle completes even when syncSubdiario throws', async () => {
+    setupBase();
+    vi.mocked(syncSubdiario).mockRejectedValue(new Error('Subdiario unexpected error'));
+
+    const resultPromise = matchAllMovimientos();
+    await vi.runAllTimersAsync();
+    const result = await resultPromise;
+
+    // Match cycle must succeed despite subdiario throw
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.skipped).toBe(false);
+    }
+  });
+
+  it('syncSubdiario is still called when dashboardOperativoId is absent (not gated on dashboard)', async () => {
+    setupBase(false); // no dashboardOperativoId
+
+    const resultPromise = matchAllMovimientos();
+    await vi.runAllTimersAsync();
+    await resultPromise;
+
+    // syncSubdiario is always called (it uses rootId, not dashboardId)
+    // but should still run without crashing
+    expect(syncSubdiario).toHaveBeenCalled();
   });
 });

@@ -3,28 +3,29 @@
  * These headers match the SPREADSHEET_FORMAT.md specification
  */
 
-/** Headers for Facturas Emitidas sheet - ADVA is emisor, only store receptor info (columns A:T) */
+/** Headers for Facturas Emitidas sheet - ADVA is emisor, only store receptor info (columns A:U) */
 export const FACTURA_EMITIDA_HEADERS = [
-  'fechaEmision',
-  'fileId',
-  'fileName',
-  'tipoComprobante',
-  'nroFactura',
-  'cuitReceptor',
-  'razonSocialReceptor',
-  'importeNeto',
-  'importeIva',
-  'importeTotal',
-  'moneda',
-  'concepto',
-  'processedAt',
-  'confidence',
-  'needsReview',
-  'matchedPagoFileId',
-  'matchConfidence',
-  'hasCuitMatch',
-  'pagada',
-  'tipoDeCambio',
+  'fechaEmision',         // A (0)
+  'fileId',               // B (1)
+  'fileName',             // C (2)
+  'tipoComprobante',      // D (3)
+  'nroFactura',           // E (4)
+  'cuitReceptor',         // F (5)
+  'razonSocialReceptor',  // G (6)
+  'condicionIVAReceptor', // H (7) — receptor's IVA condition (ADV-245)
+  'importeNeto',          // I (8)
+  'importeIva',           // J (9)
+  'importeTotal',         // K (10)
+  'moneda',               // L (11)
+  'concepto',             // M (12)
+  'processedAt',          // N (13)
+  'confidence',           // O (14)
+  'needsReview',          // P (15)
+  'matchedPagoFileId',    // Q (16)
+  'matchConfidence',      // R (17)
+  'hasCuitMatch',         // S (18)
+  'pagada',               // T (19)
+  'tipoDeCambio',         // U (20)
 ];
 
 /** Headers for Facturas Recibidas sheet - ADVA is receptor, only store emisor info (columns A:T) */
@@ -333,10 +334,10 @@ export const CONTROL_INGRESOS_SHEETS: SheetConfig[] = [
     headers: FACTURA_EMITIDA_HEADERS,
     numberFormats: new Map([
       [0, { type: 'date' }],                    // fechaEmision
-      [7, { type: 'currency', decimals: 2 }],   // importeNeto
-      [8, { type: 'currency', decimals: 2 }],   // importeIva
-      [9, { type: 'currency', decimals: 2 }],   // importeTotal
-      [19, { type: 'number', decimals: 2 }],    // tipoDeCambio
+      [8, { type: 'currency', decimals: 2 }],   // importeNeto (shifted from 7 by ADV-245)
+      [9, { type: 'currency', decimals: 2 }],   // importeIva (shifted from 8)
+      [10, { type: 'currency', decimals: 2 }],  // importeTotal (shifted from 9)
+      [20, { type: 'number', decimals: 2 }],    // tipoDeCambio (shifted from 19)
     ]),
   },
   {
@@ -537,4 +538,25 @@ export const DASHBOARD_OPERATIVO_SHEETS: SheetConfig[] = [
   },
   STATUS_SHEET,
   ARCHIVOS_PROCESADOS_SHEET,
+];
+
+/**
+ * Headers for Subdiario de Ventas — Comprobantes sheet (columns A:M)
+ * 13 columns: fecha, cod, tipo, nro, cliente, cuit, condicion, total, concepto,
+ *             categoria, fechaCobro, recibido, notas
+ */
+export const SUBDIARIO_COMPROBANTES_HEADERS = [
+  'fecha',
+  'cod',
+  'tipo',
+  'nro',
+  'cliente',
+  'cuit',
+  'condicion',
+  'total',
+  'concepto',
+  'categoria',
+  'fechaCobro',
+  'recibido',
+  'notas',
 ];

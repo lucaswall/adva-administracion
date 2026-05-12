@@ -1,240 +1,630 @@
 # Implementation Plan
 
-**Created:** 2026-05-11
-**Source:** Bug report: 9 facturas emitidas silently lost from `Control de Ingresos / Facturas Emitidas` across three scan batches in April/May 2026; the system logged `Factura stored successfully` for each, marked tracking as `success`, and moved the PDFs into `/2026/Ingresos/MM/`, but no row was ever persisted in the spreadsheet.
-**Linear Issues:** [ADV-242](https://linear.app/lw-claude/issue/ADV-242/storage-concurrent-appendcells-silently-drops-factura-rows-when)
-**Branch:** fix/ADV-242-serialize-sheet-appends
+**Status:** COMPLETE
+**Created:** 2026-05-12
+**Source:** Inline request: Build a new Subdiario de Ventas spreadsheet — an auto-synced registry of all comprobantes (FC / NC) emitted by ADVA, joined with the Facturador de Socios for socio metadata and with bank movimientos for cobro data, with AFIP numbering-gap detection and multi-installment support. Replaces the manually-maintained `ADVA SUBDIARIO VENTAS 2025` workbook.
+**Linear Issues:** [ADV-245](https://linear.app/lw-claude/issue/ADV-245/subdiario-extract-condicionivareceptor-for-factura-emitida-schema), [ADV-246](https://linear.app/lw-claude/issue/ADV-246/subdiario-facturador-de-socios-reader-service), [ADV-247](https://linear.app/lw-claude/issue/ADV-247/subdiario-builder-pure-function-scope-join-nc-linkage-gap-detection), [ADV-248](https://linear.app/lw-claude/issue/ADV-248/subdiario-writer-workbook-creation-sync-hook-in-matchallmovimientos), [ADV-249](https://linear.app/lw-claude/issue/ADV-249/subdiario-post-apirebuild-subdiario-endpoint), [ADV-250](https://linear.app/lw-claude/issue/ADV-250/subdiario-apps-script-menu-entry-reconstruir-subdiario-de-ventas)
+**Branch:** feat/subdiario-de-ventas
 
 ## Context Gathered
 
 ### Codebase Analysis
 
-- **Append path** is `src/services/sheets.ts:1106-1162` — `appendRowsWithLinks` wraps `withTiming → withQuotaRetry → spreadsheets.batchUpdate({requests:[{appendCells}]})`. The function does NOT inspect `response.data.replies`; it returns a *computed* cell count derived from the input array. Any silent partial failure on the API side is invisible to callers.
-- **Concurrency** of file processing is via `src/processing/queue.ts` (PQueue, default concurrency=12, intervalCap=10/sec). On a quota-throttle release event, up to 12 `storeFactura` calls can fire concurrent `appendRowsWithLinks` against the same `(spreadsheetId, sheetName)` pair.
-- **`storeFactura`** at `src/processing/storage/factura-store.ts:171-300` already uses `withLock` (`src/utils/concurrency.ts:291-318`) — but keyed by **business key** (`nroFactura:fechaEmision:importeTotal:cuit`), so different facturas do NOT serialize. The remaining race is one level down: the underlying `appendCells` itself.
-- **Lock manager** (`src/utils/concurrency.ts:77-275`) is in-memory, supports CAS-release, auto-expiry, and `await`-driven wait queues. `withLock` returns `Result<T, Error>` — wrapping a `Result<T, Error>`-returning body would nest: `Result<Result<T,E>,E>`. We'll add a thin `withLockResult` adapter in `sheets.ts` that flattens the outer ok-wrap so the inner Result is propagated as-is.
-- **All callers of `appendRowsWithLinks`** (`grep -rn appendRowsWithLinks src/ | grep -v test`): `factura-store.ts`, `pago-store.ts`, `recibo-store.ts`, `retencion-store.ts`, `resumen-store.ts` (×3), `movimientos-store.ts` (×3), `storage/index.ts` (markFileProcessing), `pagos-pendientes.ts` (×2). Each writes to a known sheet — locking at the `appendRowsWithLinks` layer covers all of them in one fix without touching callers.
-- **Existing tests** for `appendRowsWithLinks` mock `spreadsheets.batchUpdate` (`src/services/sheets.test.ts`). The new tests will install mock implementations that simulate concurrency races (delayed resolution + shared "next row" counter).
-- **Latent secondary bug** at `src/processing/caches/duplicate-cache.ts:280-286`: `addEntry` stores the wrapped cell array (`CellValueOrLink[]` with `{type:'date', value}` / `{type:'number', value}` objects) but the dupe-check functions read the cache assuming raw spreadsheet shapes (`normalizeSpreadsheetDate(row[0])`, `parseNumber(String(row[9]))`). For freshly-added entries the comparisons silently fail. Not the cause of row loss (false negative ≠ overwrite), but it masks bugs and breaks intra-scan duplicate detection. Same-PR fix.
+- **Schema migration pattern** — `migrateFacturasEmitidasPagadaColumn` at `src/services/folder-structure.ts:425` (called from `src/services/migrations.ts:355-466` startup orchestrator) is the canonical pattern. Uses `insertColumn(spreadsheetId, sheetId, columnIndex)` which wraps `insertDimension`. Versions tracked via `.schema_version` file (no MIGRATIONS.md in repo).
+- **FACTURA_PROMPT** lives at `src/gemini/prompts.ts:186-304`; JSON schema portion at lines 262-275. New field goes here.
+- **`Factura` interface** at `src/types/index.ts:90+`. New optional field `condicionIVAReceptor?: string` goes here.
+- **Parser plumb-through** at `src/gemini/parser.ts:89-135` (`assignCuitsAndClassify` decides factura_emitida vs factura_recibida).
+- **Schema constants** at `src/constants/spreadsheet-headers.ts:7-28` (`FACTURA_EMITIDA_HEADERS`).
+- **Row builder** at `src/processing/storage/factura-store.ts:24-81` (`buildFacturaRowFormatted`).
+- **Derived-sheet sync pattern** — `syncPagosPendientes` / `syncCobrosPendientes` at `src/services/pagos-pendientes.ts:43-244`. Full clear + rewrite via `clearSheetData` + `appendRowsWithLinks`. **This is the pattern the Subdiario writer follows.**
+- **Sync trigger point** — `src/bank/match-movimientos.ts:1289-1294`. `matchAllMovimientos` calls `syncPagosPendientes` and `syncCobrosPendientes` here, inside the `PROCESSING_LOCK` scope. New `syncSubdiario` call goes alongside.
+- **Endpoint pattern** — `src/routes/scan.ts:44-61` (POST /scan with `authMiddleware`). `PROCESSING_LOCK_ID` at `src/config.ts:42` with 5-min wait via `PROCESSING_LOCK_TIMEOUT_MS`.
+- **Spreadsheet creation** — `createSpreadsheet(parentId, name)` exists at `src/services/drive.ts:1117-1129`. `createSheet` (add tab to existing workbook) at `src/services/sheets.ts:451-460` via `batchUpdate({addSheet})`.
+- **Apps Script menu** — `apps-script/src/main.ts:39-49` (`createMenu` + existing trigger functions: `triggerScan`, `triggerRematch`, `triggerMatchMovimientos`, `triggerEnvioContadores`). Boot sync at `src/bootstrap/apps-script-sync.ts:28-80` pushes the bundle.
+- **NC linkage helper** — `extractReferencedFacturaNumber(concepto: string): string | null` at `src/processing/matching/nc-factura-matcher.ts:75-99`. Reusable from the Subdiario builder for NC→FC linkage without re-running the full matcher.
+- **Folder structure resolution** — `getCachedFolderStructure` / `discoverFolderStructure` at `src/services/folder-structure.ts:78-80, 900-1001`. ROOT folder ID is the parent for the new workbook.
+- **Concurrent sheet appends** — `appendRowsWithLinks` in `src/services/sheets.ts` is already per-sheet-locked (ADV-242). Subdiario writes pick this up automatically.
 
 ### MCP Context
 
-- **Railway MCP** consulted: production logs for 2026-05-11 16:30–16:40 UTC retrieved via `railway logs --environment production`. Both `Factura stored successfully` events and per-call `appendRowsWithLinks durationMs=...` events confirm timing.
-- **Google Drive MCP** (`gdrive_list_revisions`): the revision timeline shows no manual edits since 2026-03-04 (every revision in the loss windows is the `railway` service account). Native Sheets revision content is not downloadable via the API — Drive limitation.
-- **Linear MCP**: no existing open issue covers this — ADV-84 (canceled), ADV-126 (lock mocks in tests), ADV-191 (rematch lock), ADV-194 (Gemini RPM cap) are adjacent concurrency fixes but distinct.
-
-### Investigation
-
-**Bug report:** 9 invoices issued by ADVA between 2026-04-24 and 2026-05-11 are missing from production `Control de Ingresos / Facturas Emitidas` despite the server's own logs/tracking/file-move showing the store succeeded.
-
-**Classification:** Storage / **Critical** (production data loss, silent, customer-facing) / `src/services/sheets.ts` + concurrent write path
-
-**Root cause:** Concurrent `appendCells` API calls to the same sheet race on Google Sheets' "current end of data" detection. Two requests whose execution windows overlap can both pick the *same* target row index; the later commit overwrites the earlier one. `appendRowsWithLinks` doesn't inspect `response.data.replies`, so neither caller observes the loss. `withLock` in `storeFactura` is keyed by business key so distinct facturas don't serialize. Across the May 11 scans, every store whose `appendCells` window did not overlap any other survived; every loss aligns with the earliest-starting member of an overlapping burst.
-
-**Evidence:**
-- `src/services/sheets.ts:1106-1162` — `appendRowsWithLinks` runs `appendCells` per call with no per-sheet serialization and discards `replies`
-- `src/processing/storage/factura-store.ts:183` — `lockKey` includes business key only, so two different facturas never serialize on append
-- `src/processing/queue.ts:34` — PQueue concurrency=12 lets up to 12 stores hit the same sheet in parallel
-- Railway logs 2026-05-11T16:34:51.001-.229Z — concurrent appendCells windows for fileIds `1UELiQ9aEpLnV8af14bC_R1RKjbIsc0ee` (154) and `1cFsRb7MYiaLaQD-eBYx3i7oeWrC78V56` (155); 154 lost
-- Railway logs 2026-05-11T16:36:43.200-.672Z — concurrent appendCells windows for `1rTjmOwq10WnnkNMPDlcbh5nsiQKd7v9X` (181) and `1-TFRnTWFbuswy3mPaTmXIoR_nUR0hThd` (173); 181 lost
-- `Dashboard / Archivos Procesados` rows 671, 723, 735, 736, 748, 756, 778, 860, 866 — all 9 lost facturas tracked `status=success` with non-empty processedAt
-- `Control de Ingresos / Facturas Emitidas` `B:B` and `E:E` cross-checks — zero hits for any of the 9 fileIds or invoice numbers; rows already restored manually as rows 31–32 (154, 181) and prior rows (others)
-- `src/processing/caches/duplicate-cache.ts:280` — `addEntry(sheetId, name, fileId, row)` stores `row` containing `CellDate`/`CellNumber`/`{text,url}` wrapper objects
-- `src/processing/caches/duplicate-cache.ts:65-93` — `isDuplicateFactura` reads cache via `normalizeSpreadsheetDate(row[0])` and `parseNumber(String(row[9]))`, both of which fail silently on wrapper objects
-
-**Impact:** Silent data loss. Lost facturas don't appear in monthly Cobros Pendientes, can't be matched by movimientos, won't be marked `pagada` when payment arrives. ~9 known cases over ~3 weeks; rate roughly proportional to concurrent-store bursts. Restorable today by reading the PDFs and re-appending (already done for the 9). Will recur on every batch upload until fixed.
+- **Google Drive MCP** consulted to read both source spreadsheets:
+  - `ADVA SUBDIARIO VENTAS 2025` (`1L0cE-kssvxYmnSEHpakTfRbmflBGGKaPiuOAfOmr81Y`) — current manual workbook, two sheets `Facturas` (1446 rows) and `Cobros` (1237 rows), heavily formatted, multiple in-sheet section headers. Will be replaced (not modified) by the new auto-synced workbook.
+  - `ADVA - Facturador de Socios` (`1WUEB-8B79-Ma6-yZ5FNS1Nj2cTi7p2P9lUNGMc8R2lU`) — issuance log for socio comprobantes, one tab per year (`2026` is the active tab as of today). Columns: Nro Socio, Comprobante, Empresa, Representante, Email, Membresia, Cobro Id, Cond IVA, Fecha, Importe, Enviado?, Pagado?, Status. This is the canonical enrichment source for socio rows.
+- **Padron de Socios** (`18_9-G0jGa-OrKg7WS4aLmYAVljC8H63GcLuTcXIiKDU`) — read but **intentionally dropped** as a Subdiario input. The Facturador already pre-joins Padron data at issuance time; using both would duplicate logic.
+- **Linear MCP** — created 6 issues in Todo state (ADV-245..250). Previous ADV-244 was the last completed issue (DuplicateCache unit tests inline-fix from ADV-242 review).
+- **Multi-puntoVenta streams observed** in current Subdiario: `00003/FC` (cod 011 main local), `00003/NC` (cod 013, closed Sept 2025), `00004/FC` (cod 019 export), `00004/NC` (cod 021 export), `00005/NC` (cod 013, opened Oct 2025). Gap detection must run per `(puntoVenta, FC|NC)`.
+- **AFIP cod mapping** confirmed from observed data: `A→001`, `B→006`, `C→011`, `E→019`, `NC A→003`, `NC B→008`, `NC C→013`, `NC E→021`.
 
 ## Tasks
 
-### Task 1: Write failing test for concurrent `appendRowsWithLinks` row loss
-**Linear Issue:** [ADV-242](https://linear.app/lw-claude/issue/ADV-242/storage-concurrent-appendcells-silently-drops-factura-rows-when)
+### Task 1: Extract `condicionIVAReceptor` for `factura_emitida` + Facturas Emitidas schema migration
+
+**Linear Issue:** [ADV-245](https://linear.app/lw-claude/issue/ADV-245/subdiario-extract-condicionivareceptor-for-factura-emitida-schema)
 **Files:**
-- `src/services/sheets.test.ts` (modify)
+- `src/gemini/prompts.ts` (modify)
+- `src/gemini/parser.ts` (modify)
+- `src/types/index.ts` (modify)
+- `src/constants/spreadsheet-headers.ts` (modify)
+- `src/services/folder-structure.ts` (modify — add migration)
+- `src/services/migrations.ts` (modify — register migration)
+- `src/processing/storage/factura-store.ts` (modify)
+- `src/gemini/parser.test.ts` (modify)
+- `src/processing/storage/factura-store.test.ts` (modify)
+- New test for the migration in `src/services/folder-structure.test.ts` (modify)
 
 **Steps:**
-1. Add a `describe('appendRowsWithLinks concurrency', ...)` block.
-2. Write a test that fires two `appendRowsWithLinks` calls concurrently against the same `(spreadsheetId, sheetName)` with a mocked `spreadsheets.batchUpdate` that:
-   - Maintains an in-memory "next row" counter shared across calls
-   - Resolves with a small artificial delay
-   - Records each call's `appendCells.sheetId` and the request body for assertion
-3. The test must assert: both calls return ok AND the mock recorded two **non-overlapping** appendCells invocations (i.e., serialization observable from the mock's per-call timing, where the second call begins only after the first resolves).
-4. Add a second test asserting cross-sheet parallelism: two `appendRowsWithLinks` calls against *different* `(spreadsheetId, sheetName)` pairs DO run in parallel (overlapping mock-call windows allowed and expected).
-5. Run verifier (expect fail — current implementation has no per-sheet lock, so both same-sheet calls run in parallel and the test for serialization fails).
 
-**Notes:**
-- Follow the existing `factura-store.test.ts:75-100` pattern for mocking `withLock` (or in this case, NOT mocking it so the production code path runs).
-- Use a Promise.withResolvers / deferred pattern to gate mock resolution and observe overlap deterministically; do NOT depend on wall-clock timing.
-
-### Task 2: Add `withLockResult` adapter and per-sheet lock around `appendRowsWithLinks`
-**Linear Issue:** [ADV-242](https://linear.app/lw-claude/issue/ADV-242/storage-concurrent-appendcells-silently-drops-factura-rows-when)
-**Files:**
-- `src/utils/concurrency.ts` (modify — add `withLockResult` helper) OR `src/services/sheets.ts` (modify — inline adapter)
-- `src/services/sheets.ts:1106-1162` (modify)
-
-**Steps:**
-1. Write a unit test for `withLockResult` (or whatever adapter chosen): given a body that returns `Result<T,E>`, the wrapper returns the same `Result<T,E>` on success, and a synthesized `{ok:false, error}` on lock-acquire timeout.
+1. Write tests in `src/gemini/parser.test.ts`:
+   - A `factura_emitida` PDF response containing receptor with "Responsable Inscripto" → parsed `Factura.condicionIVAReceptor === 'IVA Responsable Inscripto'`
+   - All 5 canonical strings tested (`IVA Responsable Inscripto`, `Consumidor Final`, `Responsable Monotributo`, `Cliente del Exterior`, `IVA Sujeto Exento`)
+   - Unknown/garbled value → field remains empty + `needsReview = true` (uses existing review-flag plumbing)
+   - `factura_recibida` extraction does NOT set `condicionIVAReceptor` (ADVA's own condition is constant)
 2. Run verifier (expect fail).
-3. Implement: in `src/services/sheets.ts`, derive `sheetName = range.split('!')[0]` (already done at line 1116) and wrap the existing `withTiming → withQuotaRetry → batchUpdate` chain inside a `withLock` call keyed by `sheet-append:${spreadsheetId}:${sheetName}`. Use a 60 s wait timeout and a 60 s auto-expiry (matches the typical `appendCells` SLA under heavy throttle).
-4. Ensure the lock wraps EVERYTHING including the metadata-cache fetch (so a slow metadata read still serializes appends).
-5. Run verifier (expect Task 1's tests now pass).
+3. Update `FACTURA_PROMPT` (`src/gemini/prompts.ts:262-275`) to extract receptor's "Condición frente al IVA" as a new JSON key `condicionIVAReceptor`. Include explicit enum guidance for the 5 canonical values exactly as written above. Add to the prompt's instruction section and to the example JSON.
+4. Add `condicionIVAReceptor?: string` to `Factura` interface in `src/types/index.ts` (place near `cuitReceptor` for cohesion).
+5. Plumb through `src/gemini/parser.ts:89-135` — `assignCuitsAndClassify` is the right place to set this field on the `factura_emitida` branch only.
+6. Run verifier (expect Step 1's parser tests pass).
+
+7. Write tests in `src/processing/storage/factura-store.test.ts`:
+   - `buildFacturaRowFormatted` for a factura_emitida with `condicionIVAReceptor='Consumidor Final'` → row[7] (column H position 0-indexed) is `'Consumidor Final'`; column I and onwards shift to match new layout
+   - factura_emitida with empty `condicionIVAReceptor` → row[7] is `''`
+   - factura_recibida is unaffected (no change to its row layout)
+8. Run verifier (expect fail).
+9. Update `FACTURA_EMITIDA_HEADERS` in `src/constants/spreadsheet-headers.ts:7-28`: insert `'condicionIVAReceptor'` at index 7 (between `razonSocialReceptor` and `importeNeto`). Update `FACTURA_RECIBIDA_HEADERS` is **NOT** touched.
+10. Update `buildFacturaRowFormatted` in `src/processing/storage/factura-store.ts:24-81` so the factura_emitida branch writes `condicionIVAReceptor` into the new column position; all downstream cells (importeNeto, importeIva, ...) shift right by one position in the array.
+11. Run verifier (expect Step 7's tests pass).
+
+12. Write tests in `src/services/folder-structure.test.ts` (or a new sibling test file if needed) for the migration:
+    - Old 20-column sheet → `migrateFacturasEmitidasCondicionIvaColumn` inserts a column at index 7, leaving existing data shifted right
+    - Idempotency: running the migration on an already-21-column sheet is a no-op (detect by header at index 7 already being `condicionIVAReceptor`)
+    - Header at the new column is `condicionIVAReceptor`
+13. Run verifier (expect fail).
+14. Implement `migrateFacturasEmitidasCondicionIvaColumn` in `src/services/folder-structure.ts` following the `migrateFacturasEmitidasPagadaColumn` (line 425) pattern. Use `insertColumn(spreadsheetId, sheetId, 7)`. Header write follows the existing migration's `setValues` pattern.
+15. Register the migration in `src/services/migrations.ts:355-466` startup orchestrator (same registration shape as the pagada migration). Order: after pagada migration (so the migration sequence stays append-only).
+16. Run verifier (expect Step 12's tests pass + full suite green).
 
 **Notes:**
-- Pattern reference: `src/processing/storage/factura-store.ts:185` — `withLock(lockKey, async () => { ... }, 10000)`. Apply the same pattern at the `appendRowsWithLinks` boundary instead of inside callers.
-- Do NOT bypass the lock when `metadataCache` is provided — the race is at the API layer, not the metadata layer.
-- Lock key intentionally per-sheet, not per-spreadsheet, so writes to e.g. `Facturas Emitidas` and `Pagos Recibidos` in the same Control de Ingresos workbook can still go in parallel.
+- Pattern reference: `migrateFacturasEmitidasPagadaColumn` at `src/services/folder-structure.ts:425` — copy the structure verbatim, only change the column index and header name.
+- The migration is **fail-closed** (matches existing pattern): if the `insertColumn` API call fails on boot, the server fails startup rather than writing to a misaligned sheet.
+- **Migration note:** This task changes spreadsheet schema (Facturas Emitidas grows from 20 to 21 columns). Existing rows have empty `condicionIVAReceptor`. User will backfill manually post-deploy by reprocessing historical PDFs (out of scope). Migration must be registered in `MIGRATIONS.md` if that file exists; the codebase currently tracks via `.schema_version` instead.
+- Control de Egresos / Facturas Recibidas remains untouched (ADVA's own IVA condition is constant — no value in extracting from PDFs we issue ourselves).
 
-### Task 3: Verify API response and surface silent failures
-**Linear Issue:** [ADV-242](https://linear.app/lw-claude/issue/ADV-242/storage-concurrent-appendcells-silently-drops-factura-rows-when)
+---
+
+### Task 2: Facturador de Socios reader service
+
+**Linear Issue:** [ADV-246](https://linear.app/lw-claude/issue/ADV-246/subdiario-facturador-de-socios-reader-service)
 **Files:**
-- `src/services/sheets.test.ts` (modify)
-- `src/services/sheets.ts:1106-1162` (modify)
+- `src/services/facturador-reader.ts` (create)
+- `src/services/facturador-reader.test.ts` (create)
+- `src/config.ts` (modify — add `FACTURADOR_SPREADSHEET_ID` env var)
+- `README.md` and `CLAUDE.md` ENV VARS table (modify)
 
 **Steps:**
-1. Write a test that mocks `spreadsheets.batchUpdate` to return a response whose `replies[0].appendCells` is absent or whose `updatedRange` indicates zero rows applied. The test asserts that `appendRowsWithLinks` returns `{ok: false, error}` in this case.
-2. Run verifier (expect fail — current code returns ok regardless).
-3. Implement: after `await sheets.spreadsheets.batchUpdate(...)`, inspect the response. If a confirmation field (`replies[0].appendCells` or `updatedCells`) does not match the input row count, throw a typed `Error('appendCells did not apply expected rows: ...')` so `withQuotaRetry` retries.
-4. Run verifier (expect pass).
+
+1. Write tests in `src/services/facturador-reader.test.ts`:
+   - Reads the current-year tab (test uses fixed `currentYear=2026`) and returns a `Map<normalizedComprobante, FacturadorEntry>`
+   - Comprobante normalization: `0005-00000057` (Facturador format) → `00005-00000057` (Facturas Emitidas format). Both `0004-00000020` and `00004-00000020` normalize to the same key.
+   - Multi-row read: a sheet with 3 rows returns a Map of 3 entries
+   - Missing current-year tab → returns empty Map and logs a `warn` (does not throw)
+   - Missing `FACTURADOR_SPREADSHEET_ID` env var → returns empty Map and logs a `warn`
+   - `FacturadorEntry` shape: `{ nroSocio, empresa, representante, email, membresia, cobroId, condIVA, fecha, importe, pagadoCol }` — all strings except `importe` which is a number
+   - Empty Empresa in source → entry's `empresa` field is `''` (reader returns verbatim; caller decides the Empresa-vs-Representante fallback)
+   - `Pagado?` column containing an NC number like `0005-00000011` → preserved in `pagadoCol` verbatim
+2. Run verifier (expect fail).
+3. Implement `readFacturador(currentYear: number): Promise<Result<Map<string, FacturadorEntry>, Error>>` in `src/services/facturador-reader.ts`:
+   - Use existing `gsheets_read` equivalent (Sheets API call) on tab named `String(currentYear)` of the spreadsheet at `process.env.FACTURADOR_SPREADSHEET_ID`
+   - Normalize each row's `Comprobante` value via a private helper `normalizeNroComprobante(raw: string): string` (5-digit pto + dash + 8-digit numero)
+   - Convert `Importe` to number (handle thousands separators / currency format from the sheet)
+   - Skip empty rows (Comprobante empty)
+   - Log warns for missing tab and missing env var; never throw — return empty Map
+   - Use Pino logger from `src/utils/logger.ts`
+4. Add `FACTURADOR_SPREADSHEET_ID` to `src/config.ts` with a getter (optional — empty default).
+5. Update CLAUDE.md and README.md ENV VARS table with the new variable: required for the Subdiario rebuild to enrich socio rows; if unset, the Subdiario builds but with `categoria='-'` for all rows.
+6. Run verifier (expect pass).
 
 **Notes:**
-- Defence-in-depth: Task 2's lock should already eliminate the race, but Task 3 protects against any future variant.
-- Google's `appendCells` response may be empty by spec. If a confirmation field is not reliably populated, fall back to issuing a `getValues` on the last N rows of the target range to verify our fileId is present. This is one extra round-trip per append but only on first attempts — retries can skip.
+- Follow the `Result<T,E>` pattern for the public API (CLAUDE.md rule).
+- This reader does NOT cache across invocations — the builder always gets fresh data. Within a single rebuild call, the result is passed by reference (caller does not re-read).
+- Reader returns BOTH `empresa` AND `representante` so the caller can decide the fallback (Empresa-or-Representante). Reader is dumb.
 
-### Task 4: Fix `DuplicateCache.addEntry` to store normalized spreadsheet-shape values
-**Linear Issue:** [ADV-242](https://linear.app/lw-claude/issue/ADV-242/storage-concurrent-appendcells-silently-drops-factura-rows-when)
+---
+
+### Task 3: Subdiario de Ventas builder (pure function)
+
+**Linear Issue:** [ADV-247](https://linear.app/lw-claude/issue/ADV-247/subdiario-builder-pure-function-scope-join-nc-linkage-gap-detection)
 **Files:**
-- `src/processing/caches/duplicate-cache.test.ts` (modify)
-- `src/processing/caches/duplicate-cache.ts:280-286` (modify)
+- `src/services/subdiario-builder.ts` (create)
+- `src/services/subdiario-builder.test.ts` (create)
+- `src/types/index.ts` (modify — export `SubdiarioRow` type)
 
 **Steps:**
-1. Write a test for `DuplicateCache.addEntry` followed by `isDuplicateFactura`: after `addEntry(spreadsheetId, sheetName, fileId, wrappedRow)`, calling `isDuplicateFactura(...)` with the same `(nroFactura, fecha, importe, cuit)` must return `{isDuplicate: true, existingFileId: fileId}`. Use a wrapped row mixing `{type:'date',value:'2026-05-11'}`, `{type:'number',value:25000}`, and `{text:'…',url:'…'}` cells.
-2. Run verifier (expect fail — current `addEntry` stores the wrapped row verbatim).
-3. Implement: in `addEntry`, normalize each cell before storing — date wrappers → ISO date string, number wrappers → number, link wrappers → `text`, primitives → pass through. Mirror the shape that `getValues` returns for a just-written row so subsequent dupe checks find it.
-4. Run verifier (expect pass).
+
+1. Write tests in `src/services/subdiario-builder.test.ts` covering each behaviour from the issue spec. Each fixture exercises one rule; all 16 cases are independent tests:
+   - **Plain socio FC paid same year**: socio FC matched to a movimiento; row joins Facturador; `categoria='Micro'` (or whatever), `cobro=movimiento.fecha`, `recibido=movimiento.credito`, Notas = `Socio 1003 - An Otter Game Studio S.R.L.`
+   - **Non-socio FC**: not in Facturador → `categoria='-'`, Notas empty
+   - **FC E export with USD, paid**: Notas = `Pago del exterior - USD 10000 - TC fact 1430 - TC pago 1428.5` (bankRate computed when no pagoRecibido row); `total = 10000 * 1430 = 14300000` ARS
+   - **FC E export, unpaid**: Notas = `Pago del exterior - USD 10000 - TC fact 1430`
+   - **NC cancelling current-year FC**: FC row shows `fechaCobro='NC 00003-00000140'`, `recibido=0`; NC row present with negative total
+   - **NC cancelling prior-year FC**: same as above, both rows in scope (rule c)
+   - **Prior-year FC paid this year**: in scope (rule b)
+   - **Prior-year FC still unpaid**: in scope (rule d)
+   - **Prior-year FC paid prior year**: OUT of scope
+   - **Prior-year FC cancelled by prior-year NC**: OUT of scope
+   - **Multi-installment**: 2 movimientos matched to one FC → `recibido = sum`, `fechaCobro = latest`, Notas = `Cobrado en 2 cuotas: $1.000.000 (15/03/2026), $800.000 (22/03/2026)`
+   - **Retencion-adjusted recibido**: `recibido + retencion = total` → Notas includes `Retencion Ganancias $50000`
+   - **Numbering gap mid-stream**: 00003-00001955, 00003-00001957 present → placeholder row for 00003-00001956 with `cliente='FALTA 00003-00001956'`, `total=0`
+   - **Independent gaps across streams**: gap in 00003/FC does not trigger placeholder in 00005/NC and vice versa
+   - **FE missing from Facturador**: `categoria='-'`, `condicion` from PDF extraction
+   - **FE missing condicionIVAReceptor but Facturador has condIVA**: row uses Facturador's `condIVA`
+   - **Combined Notas** (socio FC E): both pieces concatenated with `; ` → `Socio 1029 - UNRaf; Pago del exterior - USD 10000 - TC fact 1430`
+   - **Sort verification**: rows sorted by Fecha ASC then Nro ASC; cross-stream within same date interleaves correctly
+2. Run verifier (expect fail).
+3. Implement `buildSubdiarioRows(input: SubdiarioInput): SubdiarioRow[]` in `src/services/subdiario-builder.ts`:
+   - Pure function — no `await`, no I/O, no Pino logger calls beyond a single optional summary log via injected logger if useful for diagnostics (acceptable: no logger; this is a pure transform)
+   - Decompose into named helpers: `applyScopeFilter`, `deriveCod`, `deriveTipo`, `convertTotalToARS`, `joinFacturador`, `findCancellingNC`, `aggregateMovimientos`, `composeNotas`, `detectGaps`, `sortRows`
+   - Reuse `extractReferencedFacturaNumber` from `src/processing/matching/nc-factura-matcher.ts:75-99` for NC cancellation lookup; combine with same-CUIT + same-`importeTotal` (absolute value) for confirmation
+   - Reuse retencion-matching tolerance logic from `src/matching/matcher.ts` — extract the predicate into a local helper if it's not already exported
+   - Sort: `fecha` ASC, then full `nro` string ASC (lexicographic; the zero-padding ensures correct ordering)
+   - Gap detection: group by `(puntoVenta, tipo)` after sorting; within each stream, iterate min→max numero and emit placeholder rows for missing integers; placeholders carry the previous row's date so they slot in at the right sort position
+4. Run verifier (expect all 17+ tests pass).
 
 **Notes:**
-- Add a `normalizeForCache(cell: CellValueOrLink): unknown` helper so the conversion is unit-testable in isolation.
-- This bug is separate from the row-loss race but lives in the same write path. Fixing both in one PR keeps the audit trail coherent.
+- This is the heart of the feature. The 17 tests are the minimum — add more as needed during implementation to fully cover the rules.
+- Total ARS conversion edge case: if `moneda='USD'` but `tipoDeCambio` is missing/0, emit row with `total=0` AND append `[REVISAR: TC faltante]` to Notas.
+- Cliente column from `Facturas Emitidas.razonSocialReceptor` (NOT from Facturador, which may have a different display name) — the AFIP-issued name is the legal record.
+- For NCs, Cliente comes from the NC's own `razonSocialReceptor` (which equals the cancelled FC's receptor by construction).
 
-### Task 5: Document the API contract and locking strategy
-**Linear Issue:** [ADV-242](https://linear.app/lw-claude/issue/ADV-242/storage-concurrent-appendcells-silently-drops-factura-rows-when)
+---
+
+### Task 4: Subdiario writer + workbook creation + sync hook
+
+**Linear Issue:** [ADV-248](https://linear.app/lw-claude/issue/ADV-248/subdiario-writer-workbook-creation-sync-hook-in-matchallmovimientos)
 **Files:**
-- `CLAUDE.md` (modify)
-- `src/services/sheets.ts` (modify — JSDoc on `appendRowsWithLinks`)
+- `src/services/subdiario-writer.ts` (create)
+- `src/services/subdiario-writer.test.ts` (create)
+- `src/services/folder-structure.ts` (modify — add `subdiarioId` to FolderStructure)
+- `src/bank/match-movimientos.ts` (modify — add `syncSubdiario` call after `syncCobrosPendientes`)
+- `src/bank/match-movimientos.test.ts` (modify — assert the new call)
+- `src/constants/spreadsheet-headers.ts` (modify — add `SUBDIARIO_COMPROBANTES_HEADERS`)
 
 **Steps:**
-1. In `CLAUDE.md` under a new "SHEETS API CONCURRENCY" subsection (near the existing CONCURRENCY CONTROL block), document: *every* mutation that targets the same sheet must serialize via `sheet-append:${spreadsheetId}:${sheetName}` because Google's `appendCells` is not safe under concurrent execution against the same sheet, and `appendRowsWithLinks` now enforces this internally.
-2. Update the JSDoc on `appendRowsWithLinks` to explicitly state: "Serializes per-sheet via in-memory lock to prevent concurrent-append row loss on the Sheets API."
-3. No test needed for this task — documentation only.
+
+1. Write tests in `src/services/subdiario-writer.test.ts` (mock Drive and Sheets APIs):
+   - **First run** (workbook missing): calls `searchFiles('Subdiario de Ventas', rootFolderId)` → empty → `createSpreadsheet(rootFolderId, 'Subdiario de Ventas')` is called → first sheet renamed from `Sheet1` to `Comprobantes` via `batchUpdate` `updateSheetProperties` → header row written → data rows written via `appendRowsWithLinks`
+   - **Subsequent run** (workbook exists): no createSpreadsheet call → sheet is cleared (rows 2 onwards) → data rows written
+   - **Workbook creation failure**: propagates an error result; matchAllMovimientos hook catches and logs (covered in match-movimientos.test.ts)
+   - **Empty rows input**: header row preserved, no data rows; no crash
+   - **Builder throws**: error caught at writer; returns `Result.err`; does not partial-write
+2. Run verifier (expect fail).
+3. Implement `syncSubdiario(rootFolderId, controlIngresosId, facturadorYear, movimientosByBank, ...args): Promise<Result<{ rowsWritten: number, gapsDetected: number }, Error>>` in `src/services/subdiario-writer.ts`:
+   - Step 1: Resolve `subdiarioId` from `FolderStructure` cache; if absent, search Drive for `Subdiario de Ventas` in root folder, or create it via `createSpreadsheet(rootFolderId, 'Subdiario de Ventas')` from `src/services/drive.ts:1117-1129`
+   - Step 2: Ensure the `Comprobantes` sheet exists with header row. If the new spreadsheet was just created, rename `Sheet1` → `Comprobantes` via `batchUpdate` with `updateSheetProperties`. Set frozen row 1 via `updateSheetProperties { gridProperties: { frozenRowCount: 1 } }`. Write headers via `appendRowsWithLinks` on first creation only (detect by checking if header row is present).
+   - Step 3: Read inputs (callers pass them in or this function reads them — keep separation: writer reads `Facturas Emitidas` / `Pagos Recibidos` / `Retenciones Recibidas` / `Facturador` / movimientos itself, then delegates to builder)
+   - Step 4: Call `buildSubdiarioRows(input)` (the pure builder from Task 3)
+   - Step 5: Convert builder output to `CellValueOrLink[][]`: `fecha → {type:'date', value:fecha}`, `total/recibido → {type:'number', value:n}`, strings pass through
+   - Step 6: Clear sheet rows from row 2 to end via existing `clearSheetData` (or equivalent batchUpdate with `range: 'Comprobantes!A2:M'` and `clearedFields: 'userEnteredValue,userEnteredFormat'`)
+   - Step 7: Single `appendRowsWithLinks(subdiarioId, 'Comprobantes', rows, spreadsheetTimezone)` — per-sheet lock comes for free from ADV-242
+   - Return `{ rowsWritten, gapsDetected }`
+4. Add `SUBDIARIO_COMPROBANTES_HEADERS` to `src/constants/spreadsheet-headers.ts`: `['fecha', 'cod', 'tipo', 'nro', 'cliente', 'cuit', 'condicion', 'total', 'concepto', 'categoria', 'fechaCobro', 'recibido', 'notas']`
+5. Extend `FolderStructure` in `src/services/folder-structure.ts` to include `subdiarioId?: string`; populate it during `discoverFolderStructure` by searching Drive for `Subdiario de Ventas` (don't auto-create at discovery time — let the writer create lazily on first sync).
+6. Write tests in `src/bank/match-movimientos.test.ts`:
+   - `matchAllMovimientos` calls `syncSubdiario` after `syncPagosPendientes` and `syncCobrosPendientes`
+   - If `syncSubdiario` throws, the surrounding match cycle still completes (error is caught and logged via Pino)
+   - The whole sequence runs inside the existing `PROCESSING_LOCK_ID` scope (verified by checking the call site is between the lock acquire and release)
+7. Run verifier (expect fail).
+8. Modify `src/bank/match-movimientos.ts:1289-1294` to call `syncSubdiario` right after the existing `syncCobrosPendientes` call. Wrap in a try/catch that logs via Pino and continues.
+9. Run verifier (expect pass).
 
 **Notes:**
-- Prevents future maintainers from "optimizing" the lock away or replacing `appendCells` with another concurrent-unsafe API.
+- **Migration note:** First production deploy will create the new workbook `Subdiario de Ventas.gsheet` in the ROOT folder. No data migration needed — the workbook starts empty and is fully populated on first sync.
+- The writer is the **only** code that creates the workbook. There is no startup-time auto-creation — the workbook is created lazily on first `matchAllMovimientos` after deploy.
+- `clearSheetData` may need a new helper; if `src/services/sheets.ts` doesn't have one, follow the pattern in `pagos-pendientes.ts` for how the existing code clears before re-writing.
+- Pino logger via `src/utils/logger.ts` for all logging.
+
+---
+
+### Task 5: `POST /api/rebuild-subdiario` endpoint
+
+**Linear Issue:** [ADV-249](https://linear.app/lw-claude/issue/ADV-249/subdiario-post-apirebuild-subdiario-endpoint)
+**Files:**
+- `src/routes/subdiario.ts` (create)
+- `src/routes/subdiario.test.ts` (create)
+- `src/server.ts` (modify — register the new route)
+
+**Steps:**
+
+1. Write tests in `src/routes/subdiario.test.ts` with Fastify test harness:
+   - `POST /api/rebuild-subdiario` without Authorization header → 401
+   - `POST /api/rebuild-subdiario` with valid Bearer token → 200 + `{ rowsWritten, gapsDetected, durationMs }` (mock `syncSubdiario`)
+   - `POST /api/rebuild-subdiario` when `PROCESSING_LOCK` already held → 503 (mock the lock manager to immediately fail on acquire)
+   - `POST /api/rebuild-subdiario` when `syncSubdiario` throws → 500 with generic message; raw error logged via Pino only (capture log spy)
+   - `POST /api/rebuild-subdiario` when `FACTURADOR_SPREADSHEET_ID` env var unset → still 200 (graceful degradation; categoria='-' for all rows)
+   - Lock is **released** in both success and error paths (use `withLock` semantics from `src/utils/concurrency.ts`)
+2. Run verifier (expect fail).
+3. Implement the route in `src/routes/subdiario.ts`:
+   - `server.post('/api/rebuild-subdiario', { onRequest: authMiddleware }, async (request, reply) => { ... })`
+   - Acquire `PROCESSING_LOCK_ID` from `src/config.ts:42` via existing `withLock` (waits up to 5 min — same as scan)
+   - Inside lock: read folder structure → call `syncSubdiario(rootFolderId, controlIngresosId, currentYear, ...)`
+   - Response 200: `{ rowsWritten: N, gapsDetected: N, durationMs: N }`
+   - On lock timeout: 503 + `{ error: 'Service busy — try again later' }`; raw error logged via Pino
+   - On syncSubdiario error: 500 + `{ error: 'Subdiario rebuild failed' }`; raw error logged via Pino
+4. Register the route in `src/server.ts` alongside `/api/scan`, `/api/rematch`, etc.
+5. Run verifier (expect pass).
+
+**Notes:**
+- Match the existing `/api/scan` pattern — same auth, same lock, same response shape.
+- Sanitize all error messages in HTTP responses; raw errors are Pino-logged only.
+- The lock release is automatic via `withLock`'s try/finally; tests must confirm via a follow-up acquire attempt.
+
+---
+
+### Task 6: Apps Script menu entry for Subdiario rebuild
+
+**Linear Issue:** [ADV-250](https://linear.app/lw-claude/issue/ADV-250/subdiario-apps-script-menu-entry-reconstruir-subdiario-de-ventas)
+**Files:**
+- `apps-script/src/main.ts` (modify)
+
+**Steps:**
+
+1. Add a `triggerRebuildSubdiario()` function in `apps-script/src/main.ts` near the existing trigger functions (`triggerScan`, `triggerRematch`, `triggerMatchMovimientos`, `triggerEnvioContadores`). Follow the same UrlFetchApp call shape:
+   - POST to `${API_BASE_URL}/api/rebuild-subdiario`
+   - `Authorization: Bearer ${API_SECRET}` header
+   - On 200: SpreadsheetApp toast "Subdiario reconstruido — N comprobantes"
+   - On error: SpreadsheetApp toast with sanitized error message
+2. Add the menu item in `createMenu()` at `apps-script/src/main.ts:39-49`: `addItem('Reconstruir Subdiario de Ventas', 'triggerRebuildSubdiario')`. Place it after the existing match-movimientos item, before Envio Contadores.
+3. Run `npm run build` and inspect `dist/apps-script/Code.js` to confirm the new function and menu item are bundled.
+
+**Notes:**
+- No automated test — Apps Script bundles aren't unit-tested in this repo.
+- Boot sync at `src/bootstrap/apps-script-sync.ts` pushes the new bundle automatically on next Railway deploy.
+- Verifier on the build will catch any syntactic issues; Code.js must remain valid Apps Script JS after bundling.
+
+---
 
 ## Post-Implementation Checklist
-1. Run `bug-hunter` agent — Review changes for bugs, especially around lock auto-expiry interactions with the existing `withQuotaRetry` retry loop (a retry that takes >60 s could fire after the lock expires; need to verify the inner body is idempotent or extend expiry).
+1. Run `bug-hunter` agent — Review changes for bugs across all 6 tasks. Pay particular attention to:
+   - Schema migration idempotency (rerunning the migration on already-migrated sheets must be a no-op)
+   - The `condicionIVAReceptor` column being correctly written ONLY for factura_emitida (not factura_recibida)
+   - Subdiario builder's scope filter correctness on year boundaries (Dec 31 / Jan 1 edge cases)
+   - Gap detection not producing false positives when a stream starts mid-range (the first observed number is the floor, not zero)
+   - Lock release in all error paths of `/api/rebuild-subdiario`
+   - Writer's handling of the "first run" workbook-creation race (two simultaneous matchAllMovimientos invocations both trying to create the workbook — mitigated by `PROCESSING_LOCK` but verify)
 2. Run `verifier` agent — Verify all tests pass and zero warnings.
-3. Post-deploy verification: upload ≥10 cuota-social facturas in one batch to staging, confirm all rows appear in `Facturas Emitidas` and that scan logs show serialized appendCells timestamps for the same sheet (non-overlapping windows in Railway log entries).
 
 ---
 
 ## Plan Summary
 
-**Objective:** Eliminate the silent row-loss in `Facturas Emitidas` (and every other sheet written by the system) caused by concurrent `appendCells` calls racing on Google's "end of data" detection — by serializing appends per-(spreadsheet, sheet) at the `appendRowsWithLinks` boundary, verifying API responses, and fixing a latent type-shape bug in `DuplicateCache`.
-**Linear Issues:** ADV-242
-**Approach:** Surgical fix at the lowest write primitive (`appendRowsWithLinks` in `src/services/sheets.ts`). Add a per-sheet `withLock` wrapper keyed by `sheet-append:${spreadsheetId}:${sheetName}`. Validate the Sheets API response and throw on apparent partial-failure so `withQuotaRetry` retries. Same-PR fix for `DuplicateCache.addEntry`'s wrapped-object storage bug. TDD throughout.
-**Scope:** 5 tasks, 4 production files modified, 1 doc file updated, 4 test files extended (with ~6 new tests total)
+**Objective:** Build an auto-synced `Subdiario de Ventas.gsheet` workbook with a single `Comprobantes` tab containing all FC/NC comprobantes relevant to the current fiscal year (emitted this year, paid this year, cancelled by NC this year, or still unpaid from prior year), joined with the Facturador de Socios for socio metadata and with bank movimientos for cobro data. Replaces the manually-maintained `ADVA SUBDIARIO VENTAS 2025` workbook with a deterministic, source-grounded, AFIP-numbering-gap-aware projection.
+
+**Linear Issues:** ADV-245, ADV-246, ADV-247, ADV-248, ADV-249, ADV-250
+
+**Approach:** Six discrete, sequential tasks under one feature branch. Task 1 lands the new `condicionIVAReceptor` field + Facturas Emitidas schema migration. Task 2 adds the Facturador reader (sole socio enrichment source — Padron intentionally dropped). Task 3 builds the pure-function Subdiario builder (the heart — heavy TDD with 17+ fixture cases covering scope, join, NC linkage, multi-installment, retenciones, gap detection, sort). Task 4 writes the output via the existing Cobros/Pagos Pendientes sync pattern, creates the workbook lazily, and hooks into `matchAllMovimientos`. Task 5 exposes the rebuild via `POST /api/rebuild-subdiario`. Task 6 adds the Apps Script menu item. Heavy TDD throughout; reuses existing patterns (migration via `insertColumn`, lock via ADV-242 per-sheet `appendRowsWithLinks`, sync hook via the existing `pagos-pendientes` trigger point).
+
+**Scope:** 6 tasks, ~12 production files created/modified, ~6 test files created/modified, ~30+ new tests (most concentrated in Task 3).
+
 **Key Decisions:**
-- Lock per-(spreadsheetId, sheetName), not per-spreadsheet — preserves parallel writes to different sheets in the same workbook.
-- Lock at the `appendRowsWithLinks` boundary, not at callers — single point of enforcement covering all 9 caller modules with one edit.
-- Defence-in-depth: response verification (Task 3) protects against future API changes even if the lock itself ever fails open.
-- Same-PR fix of `DuplicateCache.addEntry` because the two bugs share the write path and reviewing them together is cheaper than two separate audits.
+- **Padron dropped entirely** in favour of the Facturador (which already pre-joins Padron data at issuance time). Reduces complexity and removes a stale-data risk surface.
+- **Condicion IVA extracted only for ingresos.** Egresos untouched — ADVA's own condition is constant, so no value in extracting from PDFs we issue ourselves.
+- **Full-rewrite sync pattern.** Same as `syncPagosPendientes` / `syncCobrosPendientes`. Idempotent. No incremental updates. Performance is fine — ~1400 rows × 13 columns is well within Sheets batch limits.
+- **Subdiario builder is a pure function.** All I/O lives in the writer. This makes the builder heavily unit-testable with in-memory fixtures.
+- **Single-tab single-year workbook.** No per-year tabs. The current year tab is the only tab. At year boundary, the previous year's data drops out of scope and the sheet repopulates for the new year. (Tax filings already happened off the live data; the manual 2025 workbook remains as historical reference.)
+- **Workbook created lazily** on first sync, not at startup. Avoids creating workbooks in dev environments that never run a match cycle.
+- **NC cancellation linkage reused from `nc-factura-matcher`.** Don't re-derive the logic; import `extractReferencedFacturaNumber` and combine with same-CUIT + same-amount checks.
+- **Gap detection per `(puntoVenta, FC|NC)` stream.** Five concurrent streams observed in production data — they must be checked independently.
+
 **Risks:**
-- Lock auto-expiry vs. `withQuotaRetry`: if Google throttles severely and a retry chain runs >60 s, the lock could expire mid-body and a second waiter could enter while the first is still inside. Mitigate by making the auto-expiry generous (60 s) and ensuring the inner body is idempotent (it currently is — `appendCells` always appends to end). Raise expiry to 120 s if concerns surface.
-- Performance: serializing per-sheet adds latency proportional to (concurrency × average appendCells duration). For a 15-factura scan at ~250 ms per call, that's ~3 s of added latency. Negligible against the 100+ s typical scan duration. Acceptable trade-off for correctness.
-- Task 3's response-verification depends on Google's response shape. If `replies[0].appendCells` is empty even on success, the fallback `getValues` round-trip adds one read per append. Mitigation: only verify on the first attempt; skip on retries (we trust the lock).
+- **Schema migration timing.** If the `condicionIVAReceptor` migration is registered AFTER an existing `factura-store` write tries to write the new column, the write will fail on the unmigrated sheet. Mitigation: migrations run at startup BEFORE any scan request is served; writes only happen after `matchAllMovimientos` first invocation post-boot. Verify ordering in `src/bootstrap/`.
+- **Facturador env var.** If `FACTURADOR_SPREADSHEET_ID` is unset in production, all rows get `categoria='-'` and Notas without socio info. Tasks 2 and 5 both handle this gracefully (warn + continue), but a missed deploy step would produce a Subdiario without socio enrichment. Mitigation: documentation in CLAUDE.md ENV VARS table + a startup-time warn log when the var is missing.
+- **Gemini extraction accuracy for `condicionIVAReceptor`.** Five enum-like values; should be high accuracy, but garbled values fall through to `needsReview=YES`. Backfill cost (out of scope): ~1400 PDFs × ~$0.0007 per Gemini call ≈ $1, run via `/api/rematch` after deploy.
+- **Workbook creation race.** Two parallel `matchAllMovimientos` invocations both trying to create the workbook simultaneously. Mitigated by `PROCESSING_LOCK_ID` (mutually exclusive across scan/match/rebuild-subdiario), but the test in Task 4 must verify the second attempt observes the existing workbook.
+- **Cross-year FC E payment TC pago.** When a USD factura issued prior year is paid this year, `TC pago` reflects the current-year bank rate; `TC fact` reflects the prior-year invoice rate. The Notas explicitly shows both — verify the builder doesn't conflate them.
 
 ---
 
 ## Iteration 1
 
-**Date:** 2026-05-11
-**Method:** single-agent (5 tasks, 2 independent units, 8 effort points → below worker threshold)
-**Status:** COMPLETE
+**Implemented:** 2026-05-12
+**Method:** Agent team (4 workers, worktree-isolated)
 
-### Tasks Completed
-
-- **Task 1** — Failing tests for concurrent `appendRowsWithLinks` row loss (`src/services/sheets.test.ts`)
-- **Task 2** — Added `withLockResult` adapter in `src/utils/concurrency.ts`; wrapped `appendRowsWithLinks` with per-sheet `withLock` keyed `sheet-append:${spreadsheetId}:${sheetName}`
-- **Task 3** — Response validation: throw on missing `replies[0]` so `withQuotaRetry` retries
-- **Task 4** — `DuplicateCache.addEntry` now normalizes `CellDate` / `CellNumber` / `CellLink` / `CellFormula` wrappers to primitives via `normalizeForCache`
-- **Task 5** — Added "SHEETS API CONCURRENCY" section to CLAUDE.md; JSDoc on `appendRowsWithLinks` reflects the new contract
+### Tasks Completed This Iteration
+- Task 1 (ADV-245): condicionIVAReceptor extraction + Facturas Emitidas schema migration v7 (worker-1)
+- Task 2 (ADV-246): Facturador de Socios reader service (worker-2)
+- Task 3 (ADV-247): Subdiario de Ventas builder pure function — 20 tests covering scope, join, NC linkage, multi-installment, retenciones, gap detection, sort (worker-3)
+- Task 4 (ADV-248): Subdiario writer + lazy workbook creation + sync hook in matchAllMovimientos (worker-4)
+- Task 5 (ADV-249): POST /api/rebuild-subdiario endpoint with auth + PROCESSING_LOCK (worker-4)
+- Task 6 (ADV-250): Apps Script triggerRebuildSubdiario + "Reconstruir Subdiario de Ventas" menu item (worker-4)
 
 ### Files Modified
+- `src/gemini/prompts.ts` — added condicionIVAReceptor extraction (5 canonical values)
+- `src/gemini/parser.ts` — validates against canonical strings; emitida-only; unknown → needsReview
+- `src/types/index.ts` — `Factura.condicionIVAReceptor?` + new `BankMovimiento`, `FacturadorEntry`, `SubdiarioRow`, `SubdiarioInput`; `FolderStructure.subdiarioId?`
+- `src/constants/spreadsheet-headers.ts` — FACTURA_EMITIDA_HEADERS 20→21 cols; added SUBDIARIO_COMPROBANTES_HEADERS
+- `src/processing/storage/factura-store.ts` — condicionIVAReceptor at H(7) for emitida; downstream cells shifted
+- `src/services/folder-structure.ts` — migrateFacturasEmitidasCondicionIvaColumn (idempotent insertColumn at index 7); discoverFolderStructure searches for existing Subdiario workbook
+- `src/services/migrations.ts` — CURRENT_SCHEMA_VERSION 6→7 + v7 entry registered
+- `src/services/facturador-reader.ts` — readFacturador(currentYear) returns Map keyed by normalized comprobante
+- `src/services/subdiario-builder.ts` — pure buildSubdiarioRows transform with scope filter, AFIP cod mapping, USD→ARS conversion, Facturador join, NC cancellation lookup, multi-installment aggregation, retencion matching, Notas composition, sort, gap detection
+- `src/services/subdiario-writer.ts` — syncSubdiario orchestrator (lazy workbook resolve/create, init Comprobantes sheet, read sources, parse to typed arrays, delegate to builder, full-rewrite write)
+- `src/routes/subdiario.ts` — POST /api/rebuild-subdiario with authMiddleware + PROCESSING_LOCK
+- `src/server.ts` — registered subdiarioRoutes
+- `src/bank/match-movimientos.ts` — syncSubdiario hook after syncCobrosPendientes; parseFacturasEmitidas + parseRetenciones exports; added includeNcNd option + condicionIVAReceptor read
+- `src/processing/matching/factura-pago-matcher.ts`, `nc-factura-matcher.ts`, `matching/index.ts` — column-shift fixes for Facturas Emitidas (colOffset=1)
+- `apps-script/src/main.ts` — triggerRebuildSubdiario function + menu item
+- `src/config.ts` — FACTURADOR_SPREADSHEET_ID getter
+- `CLAUDE.md`, `README.md` — FACTURADOR_SPREADSHEET_ID env var documented
+- Test files for all of the above
 
-- `src/services/sheets.ts` — appendRowsWithLinks restructured; lock keyed per-sheet; response validated; `withTiming` placed inside lock body to keep durationMs lock-free
-- `src/utils/concurrency.ts` — added `withLockResult`
-- `src/processing/caches/duplicate-cache.ts` — added `normalizeForCache`; `addEntry` now normalizes rows before storing
-- `src/services/sheets.test.ts` — new "appendRowsWithLinks concurrency (ADV-242)" describe with 3 tests; mocks updated to return realistic `replies` array; `quotaThrottle.reset()` added to beforeEach (cross-describe pollution fix)
-- `src/utils/concurrency.test.ts` — 5 tests for `withLockResult`
-- `src/processing/caches/duplicate-cache.test.ts` — 3 tests for wrapper-cell normalization with `CellNumber` shapes
-- `CLAUDE.md` — new SHEETS API CONCURRENCY subsection
+### Linear Updates
+- ADV-245: Todo → In Progress → Review
+- ADV-246: Todo → Review (worker-2 finished before assignment dispatch)
+- ADV-247: Todo → Review (worker-3 finished before assignment dispatch)
+- ADV-248: Todo → Review
+- ADV-249: Todo → Review
+- ADV-250: Todo → Review
 
-### Bug-Hunter Findings (Pre-Merge)
+### Pre-commit Verification
+- bug-hunter: Found 4 bugs (2 HIGH, 1 MEDIUM, 1 LOW). All 4 fixed before commit:
+  - HIGH 1: Writer read `Facturas Emitidas!A:T` truncated column U — fixed to `A:U`
+  - HIGH 2: parseFacturasEmitidas stripped NCs preventing scope rule (c) — added `includeNcNd` option
+  - MEDIUM 3: parseFacturasEmitidas did not read condicionIVAReceptor — added to colIndex
+  - LOW 4: nc-factura-matcher row length guard used hardcoded 10 — now `10 + colOffset`
+- verifier: 73 test files, 2366 tests pass; TypeScript clean; Apps Script bundle generated; zero warnings
 
-4 issues found and fixed before commit:
+### Work Partition
+- Worker 1: Task 1 (ADV-245) — schema/extraction (foundation, L)
+- Worker 2: Task 2 (ADV-246) — Facturador reader (M)
+- Worker 3: Task 3 (ADV-247) — builder pure function (L, 20 tests)
+- Worker 4: Tasks 4+5+6 (ADV-248/249/250) — writer + route + apps script (L+M+S)
 
-1. **HIGH** — Lock auto-expiry was 120 s but `SHEETS_QUOTA_RETRY_CONFIG` can produce ~12-min retry chains, risking re-opening the ADV-242 race after expiry. **Fix:** Raised to 900 s (15 min); the expiry is now intended solely to recover from a crashed holder.
-2. **MEDIUM** — Comments claimed `appendCells` is idempotent "at worst duplicates, never overwrites." **Fix:** Both occurrences (sheets.ts and CLAUDE.md) now state plainly that `appendCells` is NOT idempotent w.r.t. server-side end-of-data detection.
-3. **LOW** — `withTiming` wrapped `withLockResult`, so lock-wait time was logged as API duration and tripped SLOW_CALL_THRESHOLD_MS warnings on every queued append. **Fix:** Moved `withTiming` inside the lock body.
-4. **LOW** — JSDoc referred to `replies[0].appendCells` which doesn't exist in the schema. **Fix:** Updated to reflect that successful responses return `replies[0]` as empty `{}`.
+### Merge Summary
+- Worker 1: salvaged uncommitted changes from worktree + main-worktree leak; merged with no further conflicts
+- Worker 2: clean merge
+- Worker 3: 1 conflict in src/types/index.ts (both branches added condicionIVAReceptor — kept worker-1 JSDoc)
+- Worker 4: 2 add/add conflicts in subdiario-builder.ts and facturador-reader.ts (W4 had stubs; kept W2/W3 real implementations). Required additional lead work: rewrote subdiario-writer.ts to use canonical SubdiarioInput/SubdiarioRow types from src/types/index.ts, added BankMovimiento parsing, and refactored gap detection to use placeholder-row marker (`cliente.startsWith('FALTA ')`) instead of W4's boolean `gap` flag.
 
-### Verification
-
-- `npm test` → 2281 / 2281 tests passing
-- `npm run build` → clean, zero warnings (Apps Script bundle also generated successfully)
-
-### Cross-Describe Test Pollution (Diagnosed During Implementation)
-
-Older `sheets.test.ts` describes use `vi.useFakeTimers()` while exercising quota-retry paths that call `quotaThrottle.reportQuotaError()`. The throttle is a module-level singleton; its `lastErrorTime` captured under fake time can land in the *future* relative to the real `Date.now()` used by the new concurrency describe — making the auto-reset window never satisfy and forcing a 5 s wait on every API call.
-
-Fix: new describe calls `quotaThrottle.reset()` in `beforeEach`. Documented in CLAUDE.md under "Test hygiene note" so future maintainers writing real-timer specs against the same modules don't repeat the debug session.
-
-### Tasks Remaining
-
-None. Plan complete.
+### Continuation Status
+[All tasks completed.]
 
 ### Review Findings
 
-Reviewed by 3-agent team (security, reliability, quality) on 2026-05-11. 11 total findings: **2 FIX (both S-size — fixed inline)**, **9 DISCARD**.
+**Reviewed:** 2026-05-12 (3 reviewers — security, reliability, quality — parallel)
+**Files reviewed:** 33 changed files (18 production code + 12 tests + 3 docs)
 
-**Fixed inline (S-size, TDD-verified):**
+**FIXES (10 — Linear issues created in Todo):**
 
-1. **MEDIUM** `[convention]` `src/processing/caches/duplicate-cache.ts:12` — `normalizeForCache` JSDoc lacked `@param`/`@returns` tags. CLAUDE.md mandates JSDoc on exported functions; rest of the codebase consistently uses both tags. **Fix:** added `@param cell` + `@returns` plus a paragraph documenting which wrapper variants are unwrapped (CellDate/CellNumber/CellFormula → value; CellLink → text; primitives/null/undefined pass through). Tracking: ADV-243 (Merge).
-2. **LOW** `[edge-case]` `src/processing/caches/duplicate-cache.test.ts` — Indirect-only coverage of `normalizeForCache` (via `addEntry`) missed CellFormula, null, undefined, and plain-primitive paths. Function handles them correctly, but no test guards the behavior. **Fix:** added `describe('normalizeForCache (unit)', ...)` block with 9 direct unit tests covering every input variant. Tracking: ADV-244 (Merge).
+1. **[CRITICAL] [bug]** `src/services/subdiario-writer.ts:194-196` — `readMovimientosRows` swaps credito/debito column indices. Canonical schema in `MOVIMIENTOS_BANCARIO_SHEET.headers` is `[2]=debito, [3]=credito`; writer reads them as `credito=row[2], debito=row[3]`. `aggregateMovimientos` filters `m.credito > 0`, so credit movements (actual receipts) get swapped into `m.debito` and excluded. **Every FC in the Subdiario shows `recibido = 0` and blank `fechaCobro` — core payment data silently zeroed out.** → [ADV-251](https://linear.app/lw-claude/issue/ADV-251)
+2. **[HIGH] [bug]** `src/services/subdiario-builder.ts:374` — `bankRate = totalCredito / importeTotal` divides by zero for USD invoices with `importeTotal=0`, producing `"Infinity"` literal in Notas. → [ADV-252](https://linear.app/lw-claude/issue/ADV-252)
+3. **[MEDIUM] [bug]** `src/services/subdiario-builder.ts:194-215` — `findCancellingNC` does not track consumed NCs. A single NC with generic concepto (no refNro) and matching CUIT+amount can be attributed to multiple FCs, incorrectly marking one as cancelled. → [ADV-253](https://linear.app/lw-claude/issue/ADV-253)
+4. **[MEDIUM] [convention]** `src/services/facturador-reader.ts:16` + `src/types/index.ts:1079` — `FacturadorEntry` interface duplicated; divergence risk. → [ADV-254](https://linear.app/lw-claude/issue/ADV-254)
+5. **[MEDIUM] [convention]** `src/services/facturador-reader.ts:161` — `fecha: String(row[COL.FECHA] || '')` violates CLAUDE.md rule "Always use `normalizeSpreadsheetDate(cellValue)` for date fields, never `String()`". → [ADV-255](https://linear.app/lw-claude/issue/ADV-255)
+6. **[MEDIUM] [error]** `src/routes/subdiario.ts:102-105` + `src/bank/match-movimientos.ts:1319-1323` — Error path double-logs. Writer logs cause at lib layer; callers log again at route/match-movimientos layer. CLAUDE.md flags this anti-pattern. → [ADV-256](https://linear.app/lw-claude/issue/ADV-256)
+7. **[LOW] [test]** `src/services/subdiario-writer.test.ts` — Missing tests for I/O failure paths (`getValues` `{ok:false}`, `clearSheetData` failure, `appendRowsWithLinks` failure). → [ADV-257](https://linear.app/lw-claude/issue/ADV-257)
+8. **[LOW] [perf]** `src/services/subdiario-builder.ts:464-469` — `detectGaps` performs O(N) `sorted.find()` inside an O(range) loop = O(N×range). Replace with `Map<number, SubdiarioRow>` for O(1) lookup. → [ADV-258](https://linear.app/lw-claude/issue/ADV-258)
+9. **[LOW] [test]** `src/services/subdiario-builder.test.ts` — Missing 3 invariant tests: NC `recibido` mirrors `total`, plain `tipoComprobante:'NC'` (no class suffix), `condicionIVAReceptor` priority over Facturador `condIVA`. → [ADV-259](https://linear.app/lw-claude/issue/ADV-259)
 
-**Discarded (reasoning preserved here so the user can audit before this file is overwritten):**
+**DISCARDED (3 — not real bugs):**
 
-- **LOW** `[security]` `src/services/sheets.ts:1202-1203` — spreadsheetId in error message string. **Discarded:** per saved feedback memory, log redaction findings are not flagged for this project; logs are an internal debugging surface, spreadsheetIds are not credentials. Pre-existing pattern across lock-manager `resourceId` logging.
-- **LOW** `[security]` `src/utils/concurrency.ts` (resourceId in WARN logs) — Same reasoning as above. Internal logs only.
-- **MEDIUM** `[async]` `src/services/sheets.ts:1081,1212` — 60s lock wait timeout could expire while a holder is in a long quota-retry chain, sending files to Sin Procesar. **Discarded:** intentional by design (reviewer's own note: "flagging for awareness rather than as a defect requiring change"). Sin Procesar files are recovered automatically by the next scan via `getStaleProcessingFileIds` — no data loss, just graceful degradation under sustained quota pressure.
-- **MEDIUM** `[bug]` `src/services/sheets.ts:1199-1204` — `!replies[0]` validation could trigger a non-idempotent duplicate retry if Google ever returns falsy `replies[0]` after success. **Discarded:** explicitly accepted in CLAUDE.md as defense-in-depth; removing the check reintroduces the silent row-loss bug class this PR exists to fix. The current API reliably returns `{}` (truthy), so the duplicate-on-future-API-change risk is theoretical and bounded.
-- **LOW** `[edge-case]` `src/processing/caches/duplicate-cache.ts:16` — `normalizeForCache` returns the formula string for CellFormula cells, not the computed value. **Discarded:** formula columns (e.g., `saldoCalculado`) are not used in any dupe-check key, so this never affects production behavior. The "semantically correct" value (the computed result) is unknown at write time, so there's no fix to apply.
-- **LOW** `[test]` `src/services/sheets.test.ts:2807-2822` — Malformed-response test spends 3–4s on real-time retry backoff. **Discarded:** test works correctly; "fix" would require API-surface changes for marginal CI speedup. Performance, not bug.
-- **LOW** `[convention]` `src/services/sheets.ts:1148-1149` — Lock key uses `:` as separator without escaping. **Discarded:** Google Drive file IDs never contain `:`, so collision is impossible (reviewer's own conclusion).
-- **LOW** `[convention]` `src/services/sheets.test.ts` — Blanket mock update applies `{ replies: [{ appendCells: {} }] }` to all `batchUpdate` operations including formatSheet/deleteSheet/sortSheet/etc. **Discarded:** tests pass, mock shape is for operations that don't inspect `replies`, no functional impact. Style only.
-- **LOW** `[edge-case]` `src/utils/concurrency.test.ts:~395` — Lock-timeout test uses `setTimeout(10)` instead of `Promise.withResolvers`-based deferred gating used in sheets.test.ts. **Discarded:** reviewer confirms "Not flaky in practice" — synchronous CAS in the happy path makes the 10ms macrotask reliable. Style consistency only.
+- **[low] [security]** `src/routes/subdiario.ts:88-95` (security-reviewer) — `withLock` outer `ok:false` conflates timeout vs unexpected throw, but `getCachedFolderStructure()` is the only call outside the inner try/catch and cannot throw. Documentation/comment edge case only; never fires in practice.
+- **[low] [type]** `src/bank/match-movimientos.test.ts:4089` (quality-reviewer #6) — `mockFolderStructure as any` cast in test. Test-only, no production impact; fixing adds boilerplate without correctness benefit.
+- **[medium] [test]** `src/bank/match-movimientos.test.ts:4053` (quality-reviewer #5) — `vi.useFakeTimers()` without `quotaThrottle.reset()`. CLAUDE.md rule applies to **real-timer** blocks (which read poisoned state); this is a **fake-timer** block with all real API surfaces mocked, so `quotaThrottle.reportQuotaError` is never triggered. No actual poisoning risk.
+
+### Linear Updates (Review → Merge)
+- ADV-245 → Merge (Review complete)
+- ADV-246 → Merge (Review complete)
+- ADV-247 → Merge (Review complete)
+- ADV-248 → Merge (Review complete)
+- ADV-249 → Merge (Review complete)
+- ADV-250 → Merge (Review complete)
+
+### Linear Issues Created (Fix Plan, Todo state)
+- ADV-251 [CRITICAL] credito/debito swap
+- ADV-252 [HIGH] division by zero
+- ADV-253 [MEDIUM] NC double-attribution
+- ADV-254 [MEDIUM] FacturadorEntry duplicate
+- ADV-255 [MEDIUM] fecha String() vs normalizeSpreadsheetDate
+- ADV-256 [MEDIUM] double-logging
+- ADV-257 [LOW] writer I/O test gaps
+- ADV-258 [LOW] detectGaps perf
+- ADV-259 [LOW] builder invariant test gaps
+
+<!-- REVIEW COMPLETE -->
+
+---
+
+## Fix Plan
+
+### Fix 1: Subdiario writer credito/debito swap (CRITICAL)
+
+**Linear Issue:** [ADV-251](https://linear.app/lw-claude/issue/ADV-251)
+**File:** `src/services/subdiario-writer.ts`
+
+1. Add a failing test in `src/services/subdiario-writer.test.ts`: mock `getValues` to return a row with `debito` at index 2 and `credito` at index 3 (canonical schema). Path through `readMovimientosRows` and assert the parsed `BankMovimiento` carries `debito > 0` for outgoing and `credito > 0` for incoming.
+2. Run verifier (expect fail).
+3. Swap the lines in `src/services/subdiario-writer.ts:194-196`:
+   - `debito: parseNumber(row[2]) || null,`
+   - `credito: parseNumber(row[3]) || null,`
+4. Update the schema comment at line 148: `A fecha | B concepto | C debito | D credito | E saldo`
+5. Run verifier (expect pass).
+
+### Fix 2: Subdiario builder division by zero (HIGH)
+
+**Linear Issue:** [ADV-252](https://linear.app/lw-claude/issue/ADV-252)
+**File:** `src/services/subdiario-builder.ts`
+
+1. Add a failing test in `src/services/subdiario-builder.test.ts`: USD factura with `importeTotal=0` + matched movimiento → Notas must NOT contain `"Infinity"`.
+2. Run verifier (expect fail).
+3. Guard the division in `subdiario-builder.ts:374`: if `factura.importeTotal === 0`, omit the `TC pago` segment (substitute the existing `?` placeholder pattern from line 382).
+4. Run verifier (expect pass).
+
+### Fix 3: NC double-attribution in findCancellingNC (MEDIUM)
+
+**Linear Issue:** [ADV-253](https://linear.app/lw-claude/issue/ADV-253)
+**File:** `src/services/subdiario-builder.ts`
+
+1. Add a failing test in `src/services/subdiario-builder.test.ts`: two FCs with same `cuitReceptor` + `importeTotal`; one NC with generic concepto (no refNro) and same amount. Only ONE FC should be marked as cancelled.
+2. Run verifier (expect fail).
+3. Refactor cancelling-NC resolution to a single pass: build a `Map<facturaFileId, Factura>` of `fileId → cancellingNC`, walking FCs once and marking each NC as consumed the first time it matches. Prefer matches with refNro over generic matches. Then per-FC lookup becomes O(1).
+4. Run verifier (expect pass).
+
+### Fix 4: Deduplicate FacturadorEntry interface (MEDIUM)
+
+**Linear Issue:** [ADV-254](https://linear.app/lw-claude/issue/ADV-254)
+**File:** `src/services/facturador-reader.ts`
+
+1. (No new test — interfaces are structurally compatible.)
+2. Delete the local interface at `facturador-reader.ts:16-39`.
+3. Add `FacturadorEntry` to the existing `import type` line: `import type { Result, FacturadorEntry } from '../types/index.js';`
+4. Run verifier (expect pass — no behaviour change).
+
+### Fix 5: facturador-reader fecha normalization (MEDIUM)
+
+**Linear Issue:** [ADV-255](https://linear.app/lw-claude/issue/ADV-255)
+**File:** `src/services/facturador-reader.ts`
+
+1. Add a failing test in `src/services/facturador-reader.test.ts`: row with fecha cell as numeric serial `45993`. Assert `entry.fecha === '2026-01-15'`.
+2. Run verifier (expect fail).
+3. Replace line 161 with `fecha: normalizeSpreadsheetDate(row[COL.FECHA])`. Import `normalizeSpreadsheetDate` from `../utils/date.js`.
+4. Run verifier (expect pass).
+
+### Fix 6: Remove double-logging in Subdiario error paths (MEDIUM)
+
+**Linear Issue:** [ADV-256](https://linear.app/lw-claude/issue/ADV-256)
+**Files:** `src/routes/subdiario.ts`, `src/bank/match-movimientos.ts`
+
+1. Add a test in `src/routes/subdiario.test.ts` using a log spy: when `syncSubdiario` returns `ok:false`, the route does NOT call `logError` with the same `error.message` the writer already logged.
+2. Run verifier (expect fail).
+3. In `src/routes/subdiario.ts:101-108`, remove the `logError('Subdiario rebuild failed', ...)` call for the `!innerResult.ok` path. The writer already logged cause; route only sets status + sanitized response. Keep the outer `catch` log at lines 111-120 (safety net for unexpected throws bypassing the writer's try/catch).
+4. In `src/bank/match-movimientos.ts:1318-1323`, remove the `logError('Subdiario de Ventas sync failed', ...)` for the `!subdiarioResult.ok` branch. Keep the outer `catch` log at lines 1332-1338.
+5. Run verifier (expect pass).
+
+### Fix 7: subdiario-writer I/O failure path tests (LOW)
+
+**Linear Issue:** [ADV-257](https://linear.app/lw-claude/issue/ADV-257)
+**File:** `src/services/subdiario-writer.test.ts`
+
+1. Add failing tests for each I/O propagation path:
+   - `getValues` returns `{ ok: false }` for Facturas Emitidas / Pagos / Retenciones reads → `syncSubdiario` returns `Result.err`
+   - `clearSheetData` fails on subsequent runs → propagates, no `appendRowsWithLinks` call
+   - `appendRowsWithLinks` fails → propagates
+2. Run verifier (expect fail for any path the current implementation doesn't handle).
+3. Fix any propagation bugs surfaced by the tests (missing early-returns, etc.).
+4. Run verifier (expect pass).
+
+### Fix 8: detectGaps O(1) lookup (LOW)
+
+**Linear Issue:** [ADV-258](https://linear.app/lw-claude/issue/ADV-258)
+**File:** `src/services/subdiario-builder.ts`
+
+1. (No new test — existing gap-detection tests cover correctness.)
+2. In `detectGaps`, pre-build a `Map<number, SubdiarioRow>` keyed by `numero` from the stream's sorted rows.
+3. Replace the `sorted.find(...)` lookup in the `for (let n = minNum; n <= maxNum; n++)` body with `map.get(n)`.
+4. Run verifier (expect existing tests pass).
+
+### Fix 9: subdiario-builder invariant tests (LOW)
+
+**Linear Issue:** [ADV-259](https://linear.app/lw-claude/issue/ADV-259)
+**File:** `src/services/subdiario-builder.test.ts`
+
+1. Add 3 tests:
+   - NC fixture: assert `ncRow.recibido === expectedSignedTotal` (mirrors `total`).
+   - Plain `tipoComprobante: 'NC'` fixture: assert `row.cod === '013'` and `row.tipo === 'NC'`.
+   - FC fixture with both `condicionIVAReceptor` AND Facturador `condIVA` (different values): assert PDF value wins.
+2. Run verifier (expect new tests pass; OR expose a real bug → fix it in the source then re-run).
+
+---
+
+## Post-Fix-Plan Checklist
+
+1. Run `bug-hunter` agent — Review fixes for regressions. Pay particular attention to:
+   - The credito/debito swap fix not introducing the opposite bug elsewhere
+   - The single-pass NC resolution preserving all current test invariants (existing 20 tests)
+   - The double-logging removal not silencing legitimate error visibility paths
+2. Run `verifier` agent — Full suite + zero warnings.
+3. Run E2E tests via `verifier "e2e"`.
+
+---
+
+## Iteration 2
+
+**Implemented:** 2026-05-12
+**Method:** Single-agent (effort score 11 across 4 file-domains; per-unit work too small to justify worker overhead)
+
+### Tasks Completed This Iteration
+
+- Fix 1 (ADV-251) [CRITICAL]: subdiario-writer credito/debito swap — `row[2]→debito, row[3]→credito` matches canonical schema
+- Fix 2 (ADV-252) [HIGH]: division-by-zero guard in USD `bankRate` computation — emits `TC pago ?` when `importeTotal === 0`
+- Fix 3 (ADV-253) [MEDIUM]: replaced `findCancellingNC` with `computeCancellingNCs` (two-pass, consumed tracking) — refNro matches in pass 1, generic CUIT+amount in pass 2; each NC consumed at most once
+- Fix 4 (ADV-254) [MEDIUM]: removed duplicate `FacturadorEntry` interface in `facturador-reader.ts`; now imports from `types/index.js`
+- Fix 5 (ADV-255) [MEDIUM]: `facturador-reader` uses `normalizeSpreadsheetDate` for `fecha` field (handles numeric serial dates)
+- Fix 6 (ADV-256) [MEDIUM]: removed double-logging in subdiario-writer error paths — writer is single source for cause logging
+- Fix 7 (ADV-257) [LOW]: added 5 I/O failure propagation tests for `syncSubdiario` (Facturas/Pagos/Retenciones read failures, clearSheetData, appendRowsWithLinks) — all passed on first run, no propagation bugs
+- Fix 8 (ADV-258) [LOW]: `detectGaps` uses `Map<numero, SubdiarioRow>` for O(1) lookup instead of O(N) `sorted.find()`
+- Fix 9 (ADV-259) [LOW]: added 3 invariant tests — NC.recibido mirrors total; plain `tipoComprobante:'NC'` → cod 013; PDF `condicionIVAReceptor` priority over Facturador `condIVA`
+
+### Bug-Hunter Follow-Up
+
+After Fix 6, bug-hunter identified that `clearSheetData` and `appendRowsWithLinks` failure paths were also being silently returned with no log anywhere (writer didn't log them, route was no longer logging). Added `logError` calls in the writer for both paths to preserve the "writer is single source of cause logging" invariant.
+
+### Files Modified
+
+- `src/services/subdiario-writer.ts` — credito/debito swap + comment; added `logError` for clearSheetData and appendRowsWithLinks failure paths
+- `src/services/subdiario-builder.ts` — division-by-zero guard; replaced `findCancellingNC` with two-pass `computeCancellingNCs`; `detectGaps` uses Map lookup
+- `src/services/facturador-reader.ts` — import `FacturadorEntry` from types; use `normalizeSpreadsheetDate` for fecha
+- `src/routes/subdiario.ts` — removed redundant `logError` on `!innerResult.ok` path
+- `src/bank/match-movimientos.ts` — removed redundant `logError` on `!subdiarioResult.ok` path
+- `src/services/subdiario-writer.test.ts` — added column-mapping test + 5 I/O failure path tests
+- `src/services/subdiario-builder.test.ts` — added tests 21–26 (division-by-zero, NC double-attribution, refNro priority, NC.recibido invariant, plain NC cod, condIVA priority)
+- `src/services/facturador-reader.test.ts` — added numeric-serial date test
+- `src/routes/subdiario.test.ts` — flipped logging assertion to enforce no-double-log
 
 ### Linear Updates
 
-- ADV-242 — **Review → Merge** (review passed; original concurrency-fix issue complete)
-- ADV-243 — **Created in Merge** (inline-fix audit trail: JSDoc convention)
-- ADV-244 — **Created in Merge** (inline-fix audit trail: direct unit tests)
+- ADV-251..259: Todo → In Progress → Review
+
+### Pre-commit Verification
+
+- bug-hunter (1st pass): found 1 HIGH bug — ADV-256 over-removed logging for clearSheetData/appendRowsWithLinks failure paths. Fixed by adding writer-level `logError` for both paths.
+- verifier (full): 73 test files, 2379 tests pass; TypeScript clean; Apps Script bundle generated; zero warnings
+
+### Continuation Status
+
+[All Fix Plan tasks completed.]
+
+### Review Findings
+
+**Reviewed:** 2026-05-12 (3 reviewers — security, reliability, quality — parallel; 9 changed files)
+**Files reviewed:** 5 production + 4 test files (subdiario-writer.ts, subdiario-builder.ts, facturador-reader.ts, routes/subdiario.ts, bank/match-movimientos.ts + their .test.ts)
+
+**FIXES (3 — applied inline with TDD; Linear issues created in Merge):**
+
+1. **[medium] [error]** `src/services/subdiario-writer.ts:250,257` — `resolveSubdiarioId` and `initializeComprobantesSheet` failure paths returned `Result.err` with no log anywhere. After ADV-256 removed caller-side logging, these became silent failures invisible at any log level. Drive quota / auth errors would not surface in production. → [ADV-260](https://linear.app/lw-claude/issue/ADV-260) — Fixed inline with 3 new tests asserting `logger.error` is invoked for findByName / createSpreadsheet / renameSheet failures.
+2. **[medium] [convention]** `src/services/subdiario-writer.ts:269,277,286,298` — Four hard-failure read paths (Facturas Emitidas, Pagos Recibidos, Retenciones Recibidas, Facturador) logged at `warn` despite aborting the sync. Per CLAUDE.md `warn`=handled, `error`=failure. Under `LOG_LEVEL=error` these would be invisible. → [ADV-261](https://linear.app/lw-claude/issue/ADV-261) — Fixed inline with 4 new tests asserting `logger.error` (not `logger.warn`) is invoked for each path. The 3 remaining `warn` calls in the file (lines ~161, ~175, ~385) are for soft fall-through paths that `continue` rather than abort, and are correctly kept as `warn`.
+3. **[low] [type]** `src/services/facturador-reader.test.ts:34,233` — `makeRow` helper declared `fecha: string` while `importe` correctly accepted `string | number`. Asymmetry forced an `as unknown as string` cast at line 233. → [ADV-262](https://linear.app/lw-claude/issue/ADV-262) — Fixed inline by widening `fecha` to `string | number` and removing the cast. Pure test-infrastructure cleanup; no production behaviour change.
+
+**DISCARDED (0)** — All findings were real bugs in the reviewed files.
+
+### Linear Updates (Review → Merge)
+- ADV-251 → Merge
+- ADV-252 → Merge
+- ADV-253 → Merge
+- ADV-254 → Merge
+- ADV-255 → Merge
+- ADV-256 → Merge
+- ADV-257 → Merge
+- ADV-258 → Merge
+- ADV-259 → Merge
+
+### Linear Issues Created (inline fixes, Merge state)
+- ADV-260 [medium] resolveSubdiarioId + initializeComprobantesSheet silent failures
+- ADV-261 [medium] hard read failures logged at warn (should be error)
+- ADV-262 [low] facturador-reader.test makeRow.fecha widening
 
 ### Inline Fix Verification
-
-- Targeted: `npx vitest run src/processing/caches/duplicate-cache.test.ts` → 36 / 36 passing (9 new)
-- Full suite: `npm test` → all green
-- Build: `npm run build` → clean, zero warnings
-- bug-hunter on the inline diff: "No bugs found" — confirmed JSDoc accuracy and that all 9 new assertions are meaningful and exercise distinct code paths
+- 7 new tests added in `subdiario-writer.test.ts` under `describe('Error logging — review-iteration-2 follow-up')`; all pass.
+- bug-hunter: no findings on the fix diff.
+- verifier (full mode): 2393 tests pass; TypeScript clean; build clean; zero warnings.
 
 <!-- REVIEW COMPLETE -->
 
@@ -242,4 +632,4 @@ Reviewed by 3-agent team (security, reliability, quality) on 2026-05-11. 11 tota
 
 ## Status: COMPLETE
 
-All tasks implemented, reviewed, and inline-fixes verified. ADV-242, ADV-243, ADV-244 all in Merge state.
+All tasks implemented and reviewed successfully. All Linear issues (ADV-245..262) moved to Merge.

@@ -276,6 +276,7 @@ Set these in Railway dashboard (Variables tab) or via CLI:
 | `MATCH_DAYS_BEFORE` | No | `10` | Days before invoice date to match payments |
 | `MATCH_DAYS_AFTER` | No | `60` | Days after invoice date to match payments |
 | `USD_ARS_TOLERANCE_PERCENT` | No | `5` | Tolerance % for USD/ARS exchange matching |
+| `FACTURADOR_SPREADSHEET_ID` | No | - | Facturador de Socios spreadsheet ID. Required for Subdiario de Ventas to enrich rows with membership category; if unset, Subdiario builds with `categoria='-'` for all rows. |
 
 ### Encoding Service Account Key
 

@@ -63,12 +63,13 @@ function makeRetencionRow(
 }
 
 /**
- * Helper: build a Facturas Emitidas row (A:S, indices 0-18)
+ * Helper: build a Facturas Emitidas row (post-ADV-245, A:U, indices 0-20)
  * 0: fechaEmision, 1: fileId, 2: fileName, 3: tipoComprobante, 4: nroFactura,
- * 5: cuitReceptor, 6: razonSocialReceptor, 7: importeNeto, 8: importeIva,
- * 9: importeTotal, 10: moneda, 11: concepto, 12: processedAt,
- * 13: confidence, 14: needsReview, 15: matchedPagoFileId,
- * 16: matchConfidence, 17: hasCuitMatch, 18: tipoDeCambio
+ * 5: cuitReceptor, 6: razonSocialReceptor, 7: condicionIVAReceptor,
+ * 8: importeNeto, 9: importeIva, 10: importeTotal, 11: moneda,
+ * 12: concepto, 13: processedAt, 14: confidence, 15: needsReview,
+ * 16: matchedPagoFileId, 17: matchConfidence, 18: hasCuitMatch,
+ * 19: pagada, 20: tipoDeCambio
  */
 function makeFacturaRow(
   overrides: {
@@ -87,23 +88,133 @@ function makeFacturaRow(
     '00003-00001957',                              // 4: nroFactura
     overrides.cuitReceptor ?? '20123456786',       // 5: cuitReceptor
     'TEST SA',                                     // 6: razonSocialReceptor
-    '8264.46',                                     // 7: importeNeto
-    '1735.54',                                     // 8: importeIva
-    overrides.importeTotal ?? '10000',             // 9: importeTotal
-    'ARS',                                         // 10: moneda
-    'Servicios',                                   // 11: concepto
-    '2025-01-01T10:00:00Z',                        // 12: processedAt
-    '0.95',                                        // 13: confidence
-    'NO',                                          // 14: needsReview
-    '',                                            // 15: matchedPagoFileId
-    overrides.matchConfidence ?? '',               // 16: matchConfidence
-    '',                                            // 17: hasCuitMatch
-    '',                                            // 18: tipoDeCambio
+    'IVA Responsable Inscripto',                   // 7: condicionIVAReceptor
+    '8264.46',                                     // 8: importeNeto
+    '1735.54',                                     // 9: importeIva
+    overrides.importeTotal ?? '10000',             // 10: importeTotal
+    'ARS',                                         // 11: moneda
+    'Servicios',                                   // 12: concepto
+    '2025-01-01T10:00:00Z',                        // 13: processedAt
+    '0.95',                                        // 14: confidence
+    'NO',                                          // 15: needsReview
+    '',                                            // 16: matchedPagoFileId
+    overrides.matchConfidence ?? '',               // 17: matchConfidence
+    '',                                            // 18: hasCuitMatch
+    '',                                            // 19: pagada
+    '',                                            // 20: tipoDeCambio
   ];
 }
 
 const HEADER_RETENCION = ['fechaEmision', 'fileId', 'fileName', 'nroCertificado', 'cuitAgenteRetencion', 'razonSocialAgenteRetencion', 'impuesto', 'regimen', 'montoComprobante', 'montoRetencion', 'processedAt', 'confidence', 'needsReview', 'matchedFacturaFileId', 'matchConfidence'];
-const HEADER_FACTURA = ['fechaEmision', 'fileId', 'fileName', 'tipoComprobante', 'nroFactura', 'cuitReceptor', 'razonSocialReceptor', 'importeNeto', 'importeIva', 'importeTotal', 'moneda', 'concepto', 'processedAt', 'confidence', 'needsReview', 'matchedPagoFileId', 'matchConfidence', 'hasCuitMatch', 'tipoDeCambio'];
+const HEADER_FACTURA = ['fechaEmision', 'fileId', 'fileName', 'tipoComprobante', 'nroFactura', 'cuitReceptor', 'razonSocialReceptor', 'condicionIVAReceptor', 'importeNeto', 'importeIva', 'importeTotal', 'moneda', 'concepto', 'processedAt', 'confidence', 'needsReview', 'matchedPagoFileId', 'matchConfidence', 'hasCuitMatch', 'pagada', 'tipoDeCambio'];
+
+// Post-migration Facturas Emitidas row (21 cols): condicionIVAReceptor at H/7,
+// importeTotal at K/10, matchConfidence at R/17.
+// Codex P2 finding on PR 116 — added before updating the shared fixtures.
+const HEADER_FACTURA_POSTMIGRATION = [
+  'fechaEmision', 'fileId', 'fileName', 'tipoComprobante', 'nroFactura',
+  'cuitReceptor', 'razonSocialReceptor', 'condicionIVAReceptor',
+  'importeNeto', 'importeIva', 'importeTotal', 'moneda', 'concepto',
+  'processedAt', 'confidence', 'needsReview', 'matchedPagoFileId',
+  'matchConfidence', 'hasCuitMatch', 'pagada', 'tipoDeCambio',
+];
+
+function makeFacturaRowPostMigration(opts: {
+  fileId: string;
+  cuitReceptor: string;
+  importeTotal: string;
+  fechaEmision?: string;
+  matchConfidence?: string;
+}): (string | number)[] {
+  return [
+    opts.fechaEmision ?? '2025-01-01',     // A: fechaEmision
+    opts.fileId,                            // B: fileId
+    'factura.pdf',                          // C: fileName
+    'A',                                    // D: tipoComprobante
+    '00003-00001957',                       // E: nroFactura
+    opts.cuitReceptor,                      // F: cuitReceptor
+    'TEST SA',                              // G: razonSocialReceptor
+    'IVA Responsable Inscripto',            // H: condicionIVAReceptor (NEW)
+    '8264.46',                              // I: importeNeto
+    '1735.54',                              // J: importeIva (where the OLD code read importeTotal)
+    opts.importeTotal,                      // K: importeTotal (NEW position)
+    'ARS',                                  // L: moneda
+    'Servicios',                            // M: concepto
+    '2025-01-01T10:00:00Z',                 // N: processedAt
+    '0.95',                                 // O: confidence
+    'NO',                                   // P: needsReview
+    '',                                     // Q: matchedPagoFileId
+    opts.matchConfidence ?? '',             // R: matchConfidence (was Q/16)
+    '',                                     // S: hasCuitMatch
+    '',                                     // T: pagada
+    '',                                     // U: tipoDeCambio
+  ];
+}
+
+describe('matchRetencionesWithFacturas — post-migration column layout (ADV-245 shift)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('reads importeTotal from K (idx 10) for migrated Facturas Emitidas sheet', async () => {
+    // Retencion for $10,000 against the same CUIT. Without the fix, the matcher
+    // reads importeIva ($1,735.54) at idx 9 as the total — montoComprobante
+    // 10,000 does not match 1,735.54 → 0 matches.
+    vi.mocked(getValues).mockResolvedValueOnce({
+      ok: true,
+      value: [
+        HEADER_RETENCION,
+        makeRetencionRow({ montoComprobante: '10000' }),
+      ],
+    });
+    vi.mocked(getValues).mockResolvedValueOnce({
+      ok: true,
+      value: [
+        HEADER_FACTURA_POSTMIGRATION,
+        makeFacturaRowPostMigration({
+          fileId: 'fact-file-1',
+          cuitReceptor: '20123456786',
+          importeTotal: '10000',
+        }),
+      ],
+    });
+    vi.mocked(setValues).mockResolvedValue({ ok: true, value: 1 });
+
+    const result = await matchRetencionesWithFacturas('test-spreadsheet-id');
+
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value).toBe(1);
+    expect(setValues).toHaveBeenCalled();
+  });
+
+  it('respects MANUAL lock at the post-migration matchConfidence column R (idx 17)', async () => {
+    // Without the fix, the matcher reads col Q (idx 16 = matchedPagoFileId)
+    // instead of matchConfidence — so MANUAL is invisible and the factura is
+    // wrongly considered eligible.
+    vi.mocked(getValues).mockResolvedValueOnce({
+      ok: true,
+      value: [HEADER_RETENCION, makeRetencionRow({ montoComprobante: '10000' })],
+    });
+    vi.mocked(getValues).mockResolvedValueOnce({
+      ok: true,
+      value: [
+        HEADER_FACTURA_POSTMIGRATION,
+        makeFacturaRowPostMigration({
+          fileId: 'fact-manual-1',
+          cuitReceptor: '20123456786',
+          importeTotal: '10000',
+          matchConfidence: 'MANUAL', // factura is MANUAL-locked
+        }),
+      ],
+    });
+    vi.mocked(setValues).mockResolvedValue({ ok: true, value: 1 });
+
+    const result = await matchRetencionesWithFacturas('test-spreadsheet-id');
+
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value).toBe(0); // MANUAL → not matched
+  });
+});
 
 describe('matchRetencionesWithFacturas', () => {
   beforeEach(() => {
