@@ -385,3 +385,160 @@
 
 ### Continuation Status
 [All tasks completed.]
+
+### Review Findings
+
+**Reviewed:** 2026-05-12 (3 reviewers — security, reliability, quality — parallel)
+**Files reviewed:** 33 changed files (18 production code + 12 tests + 3 docs)
+
+**FIXES (10 — Linear issues created in Todo):**
+
+1. **[CRITICAL] [bug]** `src/services/subdiario-writer.ts:194-196` — `readMovimientosRows` swaps credito/debito column indices. Canonical schema in `MOVIMIENTOS_BANCARIO_SHEET.headers` is `[2]=debito, [3]=credito`; writer reads them as `credito=row[2], debito=row[3]`. `aggregateMovimientos` filters `m.credito > 0`, so credit movements (actual receipts) get swapped into `m.debito` and excluded. **Every FC in the Subdiario shows `recibido = 0` and blank `fechaCobro` — core payment data silently zeroed out.** → [ADV-251](https://linear.app/lw-claude/issue/ADV-251)
+2. **[HIGH] [bug]** `src/services/subdiario-builder.ts:374` — `bankRate = totalCredito / importeTotal` divides by zero for USD invoices with `importeTotal=0`, producing `"Infinity"` literal in Notas. → [ADV-252](https://linear.app/lw-claude/issue/ADV-252)
+3. **[MEDIUM] [bug]** `src/services/subdiario-builder.ts:194-215` — `findCancellingNC` does not track consumed NCs. A single NC with generic concepto (no refNro) and matching CUIT+amount can be attributed to multiple FCs, incorrectly marking one as cancelled. → [ADV-253](https://linear.app/lw-claude/issue/ADV-253)
+4. **[MEDIUM] [convention]** `src/services/facturador-reader.ts:16` + `src/types/index.ts:1079` — `FacturadorEntry` interface duplicated; divergence risk. → [ADV-254](https://linear.app/lw-claude/issue/ADV-254)
+5. **[MEDIUM] [convention]** `src/services/facturador-reader.ts:161` — `fecha: String(row[COL.FECHA] || '')` violates CLAUDE.md rule "Always use `normalizeSpreadsheetDate(cellValue)` for date fields, never `String()`". → [ADV-255](https://linear.app/lw-claude/issue/ADV-255)
+6. **[MEDIUM] [error]** `src/routes/subdiario.ts:102-105` + `src/bank/match-movimientos.ts:1319-1323` — Error path double-logs. Writer logs cause at lib layer; callers log again at route/match-movimientos layer. CLAUDE.md flags this anti-pattern. → [ADV-256](https://linear.app/lw-claude/issue/ADV-256)
+7. **[LOW] [test]** `src/services/subdiario-writer.test.ts` — Missing tests for I/O failure paths (`getValues` `{ok:false}`, `clearSheetData` failure, `appendRowsWithLinks` failure). → [ADV-257](https://linear.app/lw-claude/issue/ADV-257)
+8. **[LOW] [perf]** `src/services/subdiario-builder.ts:464-469` — `detectGaps` performs O(N) `sorted.find()` inside an O(range) loop = O(N×range). Replace with `Map<number, SubdiarioRow>` for O(1) lookup. → [ADV-258](https://linear.app/lw-claude/issue/ADV-258)
+9. **[LOW] [test]** `src/services/subdiario-builder.test.ts` — Missing 3 invariant tests: NC `recibido` mirrors `total`, plain `tipoComprobante:'NC'` (no class suffix), `condicionIVAReceptor` priority over Facturador `condIVA`. → [ADV-259](https://linear.app/lw-claude/issue/ADV-259)
+
+**DISCARDED (3 — not real bugs):**
+
+- **[low] [security]** `src/routes/subdiario.ts:88-95` (security-reviewer) — `withLock` outer `ok:false` conflates timeout vs unexpected throw, but `getCachedFolderStructure()` is the only call outside the inner try/catch and cannot throw. Documentation/comment edge case only; never fires in practice.
+- **[low] [type]** `src/bank/match-movimientos.test.ts:4089` (quality-reviewer #6) — `mockFolderStructure as any` cast in test. Test-only, no production impact; fixing adds boilerplate without correctness benefit.
+- **[medium] [test]** `src/bank/match-movimientos.test.ts:4053` (quality-reviewer #5) — `vi.useFakeTimers()` without `quotaThrottle.reset()`. CLAUDE.md rule applies to **real-timer** blocks (which read poisoned state); this is a **fake-timer** block with all real API surfaces mocked, so `quotaThrottle.reportQuotaError` is never triggered. No actual poisoning risk.
+
+### Linear Updates (Review → Merge)
+- ADV-245 → Merge (Review complete)
+- ADV-246 → Merge (Review complete)
+- ADV-247 → Merge (Review complete)
+- ADV-248 → Merge (Review complete)
+- ADV-249 → Merge (Review complete)
+- ADV-250 → Merge (Review complete)
+
+### Linear Issues Created (Fix Plan, Todo state)
+- ADV-251 [CRITICAL] credito/debito swap
+- ADV-252 [HIGH] division by zero
+- ADV-253 [MEDIUM] NC double-attribution
+- ADV-254 [MEDIUM] FacturadorEntry duplicate
+- ADV-255 [MEDIUM] fecha String() vs normalizeSpreadsheetDate
+- ADV-256 [MEDIUM] double-logging
+- ADV-257 [LOW] writer I/O test gaps
+- ADV-258 [LOW] detectGaps perf
+- ADV-259 [LOW] builder invariant test gaps
+
+<!-- REVIEW COMPLETE -->
+
+---
+
+## Fix Plan
+
+### Fix 1: Subdiario writer credito/debito swap (CRITICAL)
+
+**Linear Issue:** [ADV-251](https://linear.app/lw-claude/issue/ADV-251)
+**File:** `src/services/subdiario-writer.ts`
+
+1. Add a failing test in `src/services/subdiario-writer.test.ts`: mock `getValues` to return a row with `debito` at index 2 and `credito` at index 3 (canonical schema). Path through `readMovimientosRows` and assert the parsed `BankMovimiento` carries `debito > 0` for outgoing and `credito > 0` for incoming.
+2. Run verifier (expect fail).
+3. Swap the lines in `src/services/subdiario-writer.ts:194-196`:
+   - `debito: parseNumber(row[2]) || null,`
+   - `credito: parseNumber(row[3]) || null,`
+4. Update the schema comment at line 148: `A fecha | B concepto | C debito | D credito | E saldo`
+5. Run verifier (expect pass).
+
+### Fix 2: Subdiario builder division by zero (HIGH)
+
+**Linear Issue:** [ADV-252](https://linear.app/lw-claude/issue/ADV-252)
+**File:** `src/services/subdiario-builder.ts`
+
+1. Add a failing test in `src/services/subdiario-builder.test.ts`: USD factura with `importeTotal=0` + matched movimiento → Notas must NOT contain `"Infinity"`.
+2. Run verifier (expect fail).
+3. Guard the division in `subdiario-builder.ts:374`: if `factura.importeTotal === 0`, omit the `TC pago` segment (substitute the existing `?` placeholder pattern from line 382).
+4. Run verifier (expect pass).
+
+### Fix 3: NC double-attribution in findCancellingNC (MEDIUM)
+
+**Linear Issue:** [ADV-253](https://linear.app/lw-claude/issue/ADV-253)
+**File:** `src/services/subdiario-builder.ts`
+
+1. Add a failing test in `src/services/subdiario-builder.test.ts`: two FCs with same `cuitReceptor` + `importeTotal`; one NC with generic concepto (no refNro) and same amount. Only ONE FC should be marked as cancelled.
+2. Run verifier (expect fail).
+3. Refactor cancelling-NC resolution to a single pass: build a `Map<facturaFileId, Factura>` of `fileId → cancellingNC`, walking FCs once and marking each NC as consumed the first time it matches. Prefer matches with refNro over generic matches. Then per-FC lookup becomes O(1).
+4. Run verifier (expect pass).
+
+### Fix 4: Deduplicate FacturadorEntry interface (MEDIUM)
+
+**Linear Issue:** [ADV-254](https://linear.app/lw-claude/issue/ADV-254)
+**File:** `src/services/facturador-reader.ts`
+
+1. (No new test — interfaces are structurally compatible.)
+2. Delete the local interface at `facturador-reader.ts:16-39`.
+3. Add `FacturadorEntry` to the existing `import type` line: `import type { Result, FacturadorEntry } from '../types/index.js';`
+4. Run verifier (expect pass — no behaviour change).
+
+### Fix 5: facturador-reader fecha normalization (MEDIUM)
+
+**Linear Issue:** [ADV-255](https://linear.app/lw-claude/issue/ADV-255)
+**File:** `src/services/facturador-reader.ts`
+
+1. Add a failing test in `src/services/facturador-reader.test.ts`: row with fecha cell as numeric serial `45993`. Assert `entry.fecha === '2026-01-15'`.
+2. Run verifier (expect fail).
+3. Replace line 161 with `fecha: normalizeSpreadsheetDate(row[COL.FECHA])`. Import `normalizeSpreadsheetDate` from `../utils/date.js`.
+4. Run verifier (expect pass).
+
+### Fix 6: Remove double-logging in Subdiario error paths (MEDIUM)
+
+**Linear Issue:** [ADV-256](https://linear.app/lw-claude/issue/ADV-256)
+**Files:** `src/routes/subdiario.ts`, `src/bank/match-movimientos.ts`
+
+1. Add a test in `src/routes/subdiario.test.ts` using a log spy: when `syncSubdiario` returns `ok:false`, the route does NOT call `logError` with the same `error.message` the writer already logged.
+2. Run verifier (expect fail).
+3. In `src/routes/subdiario.ts:101-108`, remove the `logError('Subdiario rebuild failed', ...)` call for the `!innerResult.ok` path. The writer already logged cause; route only sets status + sanitized response. Keep the outer `catch` log at lines 111-120 (safety net for unexpected throws bypassing the writer's try/catch).
+4. In `src/bank/match-movimientos.ts:1318-1323`, remove the `logError('Subdiario de Ventas sync failed', ...)` for the `!subdiarioResult.ok` branch. Keep the outer `catch` log at lines 1332-1338.
+5. Run verifier (expect pass).
+
+### Fix 7: subdiario-writer I/O failure path tests (LOW)
+
+**Linear Issue:** [ADV-257](https://linear.app/lw-claude/issue/ADV-257)
+**File:** `src/services/subdiario-writer.test.ts`
+
+1. Add failing tests for each I/O propagation path:
+   - `getValues` returns `{ ok: false }` for Facturas Emitidas / Pagos / Retenciones reads → `syncSubdiario` returns `Result.err`
+   - `clearSheetData` fails on subsequent runs → propagates, no `appendRowsWithLinks` call
+   - `appendRowsWithLinks` fails → propagates
+2. Run verifier (expect fail for any path the current implementation doesn't handle).
+3. Fix any propagation bugs surfaced by the tests (missing early-returns, etc.).
+4. Run verifier (expect pass).
+
+### Fix 8: detectGaps O(1) lookup (LOW)
+
+**Linear Issue:** [ADV-258](https://linear.app/lw-claude/issue/ADV-258)
+**File:** `src/services/subdiario-builder.ts`
+
+1. (No new test — existing gap-detection tests cover correctness.)
+2. In `detectGaps`, pre-build a `Map<number, SubdiarioRow>` keyed by `numero` from the stream's sorted rows.
+3. Replace the `sorted.find(...)` lookup in the `for (let n = minNum; n <= maxNum; n++)` body with `map.get(n)`.
+4. Run verifier (expect existing tests pass).
+
+### Fix 9: subdiario-builder invariant tests (LOW)
+
+**Linear Issue:** [ADV-259](https://linear.app/lw-claude/issue/ADV-259)
+**File:** `src/services/subdiario-builder.test.ts`
+
+1. Add 3 tests:
+   - NC fixture: assert `ncRow.recibido === expectedSignedTotal` (mirrors `total`).
+   - Plain `tipoComprobante: 'NC'` fixture: assert `row.cod === '013'` and `row.tipo === 'NC'`.
+   - FC fixture with both `condicionIVAReceptor` AND Facturador `condIVA` (different values): assert PDF value wins.
+2. Run verifier (expect new tests pass; OR expose a real bug → fix it in the source then re-run).
+
+---
+
+## Post-Fix-Plan Checklist
+
+1. Run `bug-hunter` agent — Review fixes for regressions. Pay particular attention to:
+   - The credito/debito swap fix not introducing the opposite bug elsewhere
+   - The single-pass NC resolution preserving all current test invariants (existing 20 tests)
+   - The double-logging removal not silencing legitimate error visibility paths
+2. Run `verifier` agent — Full suite + zero warnings.
+3. Run E2E tests via `verifier "e2e"`.
