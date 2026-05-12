@@ -9,6 +9,7 @@ import { statusRoutes, setServerStartTime } from './routes/status.js';
 import { scanRoutes } from './routes/scan.js';
 import { webhookRoutes } from './routes/webhooks.js';
 import { deliveryRoutes } from './routes/delivery.js';
+import { subdiarioRoutes } from './routes/subdiario.js';
 import { discoverFolderStructure, getCachedFolderStructure } from './services/folder-structure.js';
 import { runStartupMigrations } from './services/migrations.js';
 import { initWatchManager, startWatching, shutdownWatchManager, updateLastScanTime } from './services/watch-manager.js';
@@ -46,6 +47,7 @@ export async function buildServer() {
   await server.register(statusRoutes);
   await server.register(scanRoutes, { prefix: '/api' });
   await server.register(deliveryRoutes, { prefix: '/api' });
+  await server.register(subdiarioRoutes, { prefix: '/api' });
   await server.register(webhookRoutes, { prefix: '/webhooks' });
 
   return server;

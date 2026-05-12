@@ -998,6 +998,8 @@ export interface FolderStructure {
   bankAccountFolders: Map<string, string>;
   /** Cache of bank account spreadsheets by year:banco:cuenta:moneda key (e.g., "2024:Santander 1234567890 ARS" -> spreadsheet ID) */
   bankAccountSpreadsheets: Map<string, string>;
+  /** Subdiario de Ventas spreadsheet ID (optional — populated lazily by syncSubdiario on first run) */
+  subdiarioId?: string;
   /** When the structure was last refreshed */
   lastRefreshed: Date;
 }

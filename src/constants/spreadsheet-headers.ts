@@ -539,3 +539,24 @@ export const DASHBOARD_OPERATIVO_SHEETS: SheetConfig[] = [
   STATUS_SHEET,
   ARCHIVOS_PROCESADOS_SHEET,
 ];
+
+/**
+ * Headers for Subdiario de Ventas — Comprobantes sheet (columns A:M)
+ * 13 columns: fecha, cod, tipo, nro, cliente, cuit, condicion, total, concepto,
+ *             categoria, fechaCobro, recibido, notas
+ */
+export const SUBDIARIO_COMPROBANTES_HEADERS = [
+  'fecha',
+  'cod',
+  'tipo',
+  'nro',
+  'cliente',
+  'cuit',
+  'condicion',
+  'total',
+  'concepto',
+  'categoria',
+  'fechaCobro',
+  'recibido',
+  'notas',
+];

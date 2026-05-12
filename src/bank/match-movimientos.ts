@@ -26,6 +26,7 @@ import { updateDetalle, type DetalleUpdate } from '../services/movimientos-detal
 
 import { prefetchExchangeRates } from '../utils/exchange-rate.js';
 import { syncPagosPendientes, syncCobrosPendientes } from '../services/pagos-pendientes.js';
+import { syncSubdiario } from '../services/subdiario-writer.js';
 
 // Re-export MatchQuality for test compatibility
 export type { MatchQuality };
@@ -545,7 +546,7 @@ function parseRecibos(data: CellValue[][]): Array<Recibo & { row: number }> {
 /**
  * Parses Retenciones from spreadsheet data using header-based lookup
  */
-function parseRetenciones(data: CellValue[][]): Array<Retencion & { row: number }> {
+export function parseRetenciones(data: CellValue[][]): Array<Retencion & { row: number }> {
   if (data.length < 2) return [];
 
   const headers = data[0].map(h => String(h || '').toLowerCase());
@@ -1289,10 +1290,42 @@ export async function matchAllMovimientos(
       }
 
       // Sync Pagos Pendientes and Cobros Pendientes dashboards after pagada writes
-      const { dashboardOperativoId } = folderStructure;
+      const { dashboardOperativoId, rootId } = folderStructure;
       if (dashboardOperativoId) {
         await syncPagosPendientes(controlEgresosId, dashboardOperativoId);
         await syncCobrosPendientes(controlIngresosId, dashboardOperativoId);
+      }
+
+      // Sync Subdiario de Ventas — runs unconditionally; errors are caught and logged
+      try {
+        const subdiarioResult = await syncSubdiario(
+          rootId,
+          controlIngresosId,
+          controlEgresosId,
+          currentYear,
+          movimientosSpreadsheets
+        );
+        if (!subdiarioResult.ok) {
+          logError('Subdiario de Ventas sync failed', {
+            module: 'match-movimientos',
+            phase: 'sync-subdiario',
+            error: subdiarioResult.error.message,
+          });
+        } else {
+          info('Subdiario de Ventas sync completed', {
+            module: 'match-movimientos',
+            phase: 'sync-subdiario',
+            rowsWritten: subdiarioResult.value.rowsWritten,
+            gapsDetected: subdiarioResult.value.gapsDetected,
+          });
+        }
+      } catch (err) {
+        const error = err instanceof Error ? err : new Error(String(err));
+        logError('Subdiario de Ventas sync threw unexpectedly', {
+          module: 'match-movimientos',
+          phase: 'sync-subdiario',
+          error: error.message,
+        });
       }
 
       // Calculate totals
