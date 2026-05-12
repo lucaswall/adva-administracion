@@ -105,8 +105,8 @@ export function extractReferencedFacturaNumber(concepto: string): string | null 
  * @param spreadsheetId - Spreadsheet ID (Control de Egresos or Control de Ingresos)
  * @param sheetName - Sheet to match against ('Facturas Recibidas' or 'Facturas Emitidas')
  * @param _cuitField - CUIT field label ('cuitEmisor' for Recibidas, 'cuitReceptor' for Emitidas) — documentation only, both sheets store counterparty CUIT at column F/index 5
- * @param readRange - Column range to read ('A:S' for Recibidas with pagada last, 'A:T' for Emitidas with tipoDeCambio after pagada)
- * @param pagadaColumnLetter - Spreadsheet column letter for pagada ('S' for both sheet types)
+ * @param readRange - Column range to read ('A:S' for Recibidas, 'A:U' for Emitidas with condicionIVAReceptor at H)
+ * @param pagadaColumnLetter - Spreadsheet column letter for pagada ('S' for Recibidas, 'T' for Emitidas)
  * @returns Number of NC-Factura pairs matched
  */
 export async function matchNCsWithFacturas(
@@ -127,11 +127,15 @@ export async function matchNCsWithFacturas(
   });
 
   // Read all rows from the sheet
-  // Columns: A=fechaEmision, B=fileId, C=fileName, D=tipoComprobante, E=nroFactura,
-  //          F=cuit (cuitEmisor for Recibidas, cuitReceptor for Emitidas), G=razonSocial,
-  //          H=importeNeto, I=importeIva, J=importeTotal, K=moneda, L=concepto,
-  //          M=processedAt, N=confidence, O=needsReview, P=matchedPagoFileId,
-  //          Q=matchConfidence, R=hasCuitMatch, S=pagada (+ T=tipoDeCambio for Emitidas)
+  // Facturas Recibidas (20 cols): A=fechaEmision, B=fileId, C=fileName, D=tipoComprobante,
+  //   E=nroFactura, F=cuit, G=razonSocial, H=importeNeto, I=importeIva, J=importeTotal(9),
+  //   K=moneda, L=concepto, M=processedAt, N=confidence, O=needsReview, P=matchedPagoFileId,
+  //   Q=matchConfidence(16), R=hasCuitMatch, S=pagada(18), T=tipoDeCambio
+  // Facturas Emitidas (21 cols): same but H=condicionIVAReceptor(7) shifts all subsequent +1:
+  //   I=importeNeto, J=importeIva, K=importeTotal(10), ..., R=matchConfidence(17),
+  //   S=hasCuitMatch, T=pagada(19), U=tipoDeCambio
+  // colOffset=1 for Emitidas compensates for the extra column at index 7
+  const colOffset = sheetName === 'Facturas Emitidas' ? 1 : 0;
   const rowsResult = await getValues(spreadsheetId, `${sheetName}!${readRange}`);
   if (!rowsResult.ok) {
     return { ok: false, error: rowsResult.error };
@@ -159,10 +163,10 @@ export async function matchNCsWithFacturas(
       tipoComprobante: String(row[3] || '').toUpperCase(),
       nroFactura: String(row[4] || ''),
       cuit: String(row[5] || ''),
-      importeTotal: parseNumber(String(row[9] || '0')) ?? 0,
-      concepto: String(row[11] || ''),
-      matchConfidence: row[16] ? String(row[16]).toUpperCase() : undefined,
-      pagada: String(row[18] || '').toUpperCase(),
+      importeTotal: parseNumber(String(row[9 + colOffset] || '0')) ?? 0,
+      concepto: String(row[11 + colOffset] || ''),
+      matchConfidence: row[16 + colOffset] ? String(row[16 + colOffset]).toUpperCase() : undefined,
+      pagada: String(row[18 + colOffset] || '').toUpperCase(),
     };
 
     facturas.push(factura);

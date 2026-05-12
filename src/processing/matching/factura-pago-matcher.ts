@@ -294,9 +294,13 @@ async function doMatchFacturasWithPagos(
   const correlationId = getCorrelationId();
 
   // Determine correct column ranges based on sheet type
-  // Both Facturas Recibidas and Facturas Emitidas now have 20 columns (A:T) with pagada at S
-  const facturasRange = `${facturasSheetName}!A:T`;
+  // Facturas Emitidas has 21 columns (A:U) after ADV-245 added condicionIVAReceptor at H (index 7)
+  // Facturas Recibidas retains 20 columns (A:T)
+  const isEmitida = facturasSheetName === 'Facturas Emitidas';
+  const facturasRange = `${facturasSheetName}!A:${isEmitida ? 'U' : 'T'}`;
   const pagosRange = `${pagosSheetName}!A:Q`; // Both pago sheets use A:Q (includes tipoDeCambio, importeEnPesos)
+  // Column offset for emitidas: condicionIVAReceptor inserted at index 7 shifts all subsequent columns +1
+  const o = isEmitida ? 1 : 0;
 
   // Get all facturas
   const facturasResult = await getValues(spreadsheetId, facturasRange);
@@ -332,17 +336,17 @@ async function doMatchFacturasWithPagos(
         razonSocialEmisor: facturaCuitField === 'cuitEmisor' ? String(row[6] || '') : '',
         cuitReceptor: facturaCuitField === 'cuitReceptor' ? String(row[5] || '') : undefined,
         razonSocialReceptor: facturaCuitField === 'cuitReceptor' ? String(row[6] || '') : undefined,
-        importeNeto: parseNumber(row[7]) || 0,
-        importeIva: parseNumber(row[8]) || 0,
-        importeTotal: parseNumber(row[9]) || 0,
-        moneda: validateMoneda(row[10]),
-        concepto: row[11] ? String(row[11]) : undefined,
-        processedAt: normalizeTimestamp(row[12]),
-        confidence: Number(row[13]) || 0,
-        needsReview: row[14] === 'YES',
-        matchedPagoFileId: row[15] ? String(row[15]) : undefined,
-        matchConfidence: validateMatchConfidence(row[16]),
-        hasCuitMatch: row[17] === 'YES',
+        importeNeto: parseNumber(row[7 + o]) || 0,
+        importeIva: parseNumber(row[8 + o]) || 0,
+        importeTotal: parseNumber(row[9 + o]) || 0,
+        moneda: validateMoneda(row[10 + o]),
+        concepto: row[11 + o] ? String(row[11 + o]) : undefined,
+        processedAt: normalizeTimestamp(row[12 + o]),
+        confidence: Number(row[13 + o]) || 0,
+        needsReview: row[14 + o] === 'YES',
+        matchedPagoFileId: row[15 + o] ? String(row[15 + o]) : undefined,
+        matchConfidence: validateMatchConfidence(row[16 + o]),
+        hasCuitMatch: row[17 + o] === 'YES',
       };
 
       facturas.push(factura);
@@ -565,9 +569,12 @@ async function doMatchFacturasWithPagos(
       matchesFound++;
 
       // Update factura with match info
-      // Both Facturas Recibidas and Facturas Emitidas: columns P:S (includes pagada)
+      // Facturas Emitidas (21 cols): Q:T (matchedPagoFileId=Q, matchConfidence=R, hasCuitMatch=S, pagada=T)
+      // Facturas Recibidas (20 cols): P:S (matchedPagoFileId=P, matchConfidence=Q, hasCuitMatch=R, pagada=S)
+      const matchStart = isEmitida ? 'Q' : 'P';
+      const matchEnd = isEmitida ? 'T' : 'S';
       updates.push({
-        range: `'${facturasSheetName}'!P${update.facturaRow}:S${update.facturaRow}`,
+        range: `'${facturasSheetName}'!${matchStart}${update.facturaRow}:${matchEnd}${update.facturaRow}`,
         values: [[
           update.pagoFileId,
           update.confidence,
@@ -588,10 +595,13 @@ async function doMatchFacturasWithPagos(
         });
       }
     } else if (update.facturaFileId && update.facturaRow && !update.pagoFileId) {
-      // Factura unmatch update — P:R only (3 columns: matchedPagoFileId, matchConfidence, hasCuitMatch)
-      // Column S (pagada) is intentionally left untouched to preserve NC-set 'SI'
+      // Factura unmatch update — 3 columns (matchedPagoFileId, matchConfidence, hasCuitMatch)
+      // pagada is intentionally left untouched to preserve NC-set 'SI'
+      // Facturas Emitidas: Q:S | Facturas Recibidas: P:R
+      const unmatchStart = isEmitida ? 'Q' : 'P';
+      const unmatchEnd = isEmitida ? 'S' : 'R';
       updates.push({
-        range: `'${facturasSheetName}'!P${update.facturaRow}:R${update.facturaRow}`,
+        range: `'${facturasSheetName}'!${unmatchStart}${update.facturaRow}:${unmatchEnd}${update.facturaRow}`,
         values: [['', '', '']],
       });
     }

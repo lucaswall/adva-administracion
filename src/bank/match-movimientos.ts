@@ -605,7 +605,7 @@ function parseRetenciones(data: CellValue[][]): Array<Retencion & { row: number 
 async function loadControlIngresos(spreadsheetId: string): Promise<Result<IngresosData, Error>> {
   try {
     const [facturasResult, pagosResult, retencionesResult] = await Promise.all([
-      getValues(spreadsheetId, 'Facturas Emitidas!A:T'),
+      getValues(spreadsheetId, 'Facturas Emitidas!A:U'),  // 21 cols after ADV-245 added condicionIVAReceptor at H
       getValues(spreadsheetId, 'Pagos Recibidos!A:Q'),
       getValues(spreadsheetId, 'Retenciones Recibidas!A:O'),
     ]);
@@ -1085,7 +1085,9 @@ async function matchBankMovimientos(
             if (matchedDoc.document.matchConfidence !== 'MANUAL') {
               const ssId = matchedDoc.type === 'factura_emitida' ? controlIngresosId : controlEgresosId;
               const sheetName = matchedDoc.type === 'factura_emitida' ? 'Facturas Emitidas' : 'Facturas Recibidas';
-              pagadaUpdates.push({ spreadsheetId: ssId, sheetName, rowNumber: matchedDoc.document.row, columnLetter: 'S' });
+              // pagada column: T for Facturas Emitidas (21 cols, ADV-245), S for Facturas Recibidas (20 cols)
+              const pagadaCol = matchedDoc.type === 'factura_emitida' ? 'T' : 'S';
+              pagadaUpdates.push({ spreadsheetId: ssId, sheetName, rowNumber: matchedDoc.document.row, columnLetter: pagadaCol });
             }
           }
         }

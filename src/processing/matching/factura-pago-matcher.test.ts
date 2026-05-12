@@ -203,12 +203,12 @@ describe('Facturas Emitidas pagada column handling (ADV-170)', () => {
 
   const config = { matchDaysBefore: 10, matchDaysAfter: 60, usdArsTolerancePercent: 5, usdMatchDaysAfter: 90 };
 
-  it('matching Facturas Emitidas writes columns P:S (4 columns including pagada) (ADV-170)', async () => {
+  it('matching Facturas Emitidas writes columns Q:T (4 columns including pagada) (ADV-170)', async () => {
     const { matchFacturasWithPagos, getValues, batchUpdate } = await setupE2E();
 
-    // Factura Emitida: 20 columns (A:T after ADV-169), cuitReceptor='20123456786' at F
-    const facturaHeader = ['fechaEmision', 'fileId', 'fileName', 'tipoComprobante', 'nroFactura', 'cuitReceptor', 'razonSocialReceptor', 'importeNeto', 'importeIva', 'importeTotal', 'moneda', 'concepto', 'processedAt', 'confidence', 'needsReview', 'matchedPagoFileId', 'matchConfidence', 'hasCuitMatch', 'pagada', 'tipoDeCambio'];
-    const facturaRow = ['2025-01-01', 'fact-1', 'factura.pdf', 'A', '00001-00000001', '20123456786', 'TEST SA', '8264.46', '1735.54', '10000', 'ARS', '', '2025-01-01T10:00:00Z', '0.95', 'NO', '', '', 'NO', '', ''];
+    // Factura Emitida: 21 columns (A:U after ADV-245 added condicionIVAReceptor at H), cuitReceptor='20123456786' at F
+    const facturaHeader = ['fechaEmision', 'fileId', 'fileName', 'tipoComprobante', 'nroFactura', 'cuitReceptor', 'razonSocialReceptor', 'condicionIVAReceptor', 'importeNeto', 'importeIva', 'importeTotal', 'moneda', 'concepto', 'processedAt', 'confidence', 'needsReview', 'matchedPagoFileId', 'matchConfidence', 'hasCuitMatch', 'pagada', 'tipoDeCambio'];
+    const facturaRow = ['2025-01-01', 'fact-1', 'factura.pdf', 'A', '00001-00000001', '20123456786', 'TEST SA', '', '8264.46', '1735.54', '10000', 'ARS', '', '2025-01-01T10:00:00Z', '0.95', 'NO', '', '', 'NO', '', ''];
 
     // Pago Recibido: cuitPagador='20123456786' in concepto triggers HIGH confidence (CUIT match)
     const pagoHeader = ['fechaPago', 'fileId', 'fileName', 'banco', 'importePagado', 'moneda', 'referencia', 'cuitPagador', 'nombrePagador', 'concepto', 'processedAt', 'confidence', 'needsReview', 'matchedFacturaFileId', 'matchConfidence', 'tipoDeCambio', 'importeEnPesos'];
@@ -233,23 +233,25 @@ describe('Facturas Emitidas pagada column handling (ADV-170)', () => {
       expect(result.value).toBe(1);
     }
 
-    // Verify batchUpdate called with P:S (4 columns: matchedPagoFileId, matchConfidence, hasCuitMatch, pagada)
+    // Verify batchUpdate called with Q:T (4 columns: matchedPagoFileId, matchConfidence, hasCuitMatch, pagada)
+    // Facturas Emitidas shifted: condicionIVAReceptor at H pushes match cols from P:S → Q:T
     expect(batchUpdate).toHaveBeenCalled();
     const calls = vi.mocked(batchUpdate).mock.calls[0][1];
-    const facturaUpdate = calls.find((u: any) => u.range.includes("'Facturas Emitidas'!P"));
+    const facturaUpdate = calls.find((u: any) => u.range.includes("'Facturas Emitidas'!Q"));
     expect(facturaUpdate).toBeDefined();
     // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-    expect(facturaUpdate!.range).toBe("'Facturas Emitidas'!P2:S2");
+    expect(facturaUpdate!.range).toBe("'Facturas Emitidas'!Q2:T2");
     // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
     expect(facturaUpdate!.values[0]).toHaveLength(4); // 4 columns including pagada
   });
 
-  it('unmatching Facturas Emitidas clears columns P:S (4 empty values) (ADV-170)', async () => {
+  it('unmatching Facturas Emitidas clears columns Q:T (4 empty values) (ADV-170)', async () => {
     const { matchFacturasWithPagos, getValues, batchUpdate } = await setupE2E();
 
     // Factura Emitida at row 2 already matched to pago-a (lower confidence), no CUIT
-    const facturaHeader = ['fechaEmision', 'fileId', 'fileName', 'tipoComprobante', 'nroFactura', 'cuitReceptor', 'razonSocialReceptor', 'importeNeto', 'importeIva', 'importeTotal', 'moneda', 'concepto', 'processedAt', 'confidence', 'needsReview', 'matchedPagoFileId', 'matchConfidence', 'hasCuitMatch', 'pagada', 'tipoDeCambio'];
-    const facturaRow = ['2025-01-01', 'fact-1', 'factura.pdf', 'A', '00001-00000001', '20123456786', 'TEST SA', '8264.46', '1735.54', '10000', 'ARS', '', '2025-01-01T10:00:00Z', '0.95', 'NO', 'pago-a', 'LOW', 'NO', 'NO', ''];
+    // 21 columns (A:U after ADV-245 added condicionIVAReceptor at H)
+    const facturaHeader = ['fechaEmision', 'fileId', 'fileName', 'tipoComprobante', 'nroFactura', 'cuitReceptor', 'razonSocialReceptor', 'condicionIVAReceptor', 'importeNeto', 'importeIva', 'importeTotal', 'moneda', 'concepto', 'processedAt', 'confidence', 'needsReview', 'matchedPagoFileId', 'matchConfidence', 'hasCuitMatch', 'pagada', 'tipoDeCambio'];
+    const facturaRow = ['2025-01-01', 'fact-1', 'factura.pdf', 'A', '00001-00000001', '20123456786', 'TEST SA', '', '8264.46', '1735.54', '10000', 'ARS', '', '2025-01-01T10:00:00Z', '0.95', 'NO', 'pago-a', 'LOW', 'NO', 'NO', ''];
 
     // Pago A: already matched (excluded from unmatched pool) — in sheet so it appears in pagosMap
     // Pago B: unmatched, CUIT in concepto → HIGH confidence → displaces pago-a
@@ -273,13 +275,14 @@ describe('Facturas Emitidas pagada column handling (ADV-170)', () => {
 
     expect(result.ok).toBe(true);
 
-    // Verify the factura update uses P:S (4 columns)
+    // Verify the factura match update uses Q:T (4 columns: matchedPagoFileId, matchConfidence, hasCuitMatch, pagada)
+    // Facturas Emitidas shifted: condicionIVAReceptor at H pushes match cols from P:S → Q:T
     expect(batchUpdate).toHaveBeenCalled();
     const calls = vi.mocked(batchUpdate).mock.calls[0][1];
-    const facturaUpdate = calls.find((u: any) => u.range.includes("'Facturas Emitidas'!P"));
+    const facturaUpdate = calls.find((u: any) => u.range.includes("'Facturas Emitidas'!Q"));
     expect(facturaUpdate).toBeDefined();
     // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-    expect(facturaUpdate!.range).toBe("'Facturas Emitidas'!P2:S2");
+    expect(facturaUpdate!.range).toBe("'Facturas Emitidas'!Q2:T2");
     // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
     expect(facturaUpdate!.values[0]).toHaveLength(4);
   });
@@ -288,8 +291,9 @@ describe('Facturas Emitidas pagada column handling (ADV-170)', () => {
     const { matchFacturasWithPagos, getValues, batchUpdate } = await setupE2E();
 
     // Factura Emitida at row 2 — pagada='SI' (set by NC matcher), matched to pago-a LOW
-    const facturaHeader = ['fechaEmision', 'fileId', 'fileName', 'tipoComprobante', 'nroFactura', 'cuitReceptor', 'razonSocialReceptor', 'importeNeto', 'importeIva', 'importeTotal', 'moneda', 'concepto', 'processedAt', 'confidence', 'needsReview', 'matchedPagoFileId', 'matchConfidence', 'hasCuitMatch', 'pagada', 'tipoDeCambio'];
-    const facturaRow = ['2025-01-01', 'fact-1', 'factura.pdf', 'A', '00001-00000001', '20123456786', 'TEST SA', '8264.46', '1735.54', '10000', 'ARS', '', '2025-01-01T10:00:00Z', '0.95', 'NO', 'pago-a', 'LOW', 'NO', 'SI', ''];
+    // 21 columns (A:U after ADV-245 added condicionIVAReceptor at H)
+    const facturaHeader = ['fechaEmision', 'fileId', 'fileName', 'tipoComprobante', 'nroFactura', 'cuitReceptor', 'razonSocialReceptor', 'condicionIVAReceptor', 'importeNeto', 'importeIva', 'importeTotal', 'moneda', 'concepto', 'processedAt', 'confidence', 'needsReview', 'matchedPagoFileId', 'matchConfidence', 'hasCuitMatch', 'pagada', 'tipoDeCambio'];
+    const facturaRow = ['2025-01-01', 'fact-1', 'factura.pdf', 'A', '00001-00000001', '20123456786', 'TEST SA', '', '8264.46', '1735.54', '10000', 'ARS', '', '2025-01-01T10:00:00Z', '0.95', 'NO', 'pago-a', 'LOW', 'NO', 'SI', ''];
 
     // Pago B displaces pago-a → pago-a has no remaining match → factura gets unmatched
     // The unmatch should NOT clear pagada='SI' at column S
@@ -322,7 +326,7 @@ describe('Facturas Emitidas pagada column handling (ADV-170)', () => {
     const facturaUnmatch = calls.find((u: any) =>
       u.range.includes("'Facturas Emitidas'") && u.values[0].length === 4 && u.values[0].every((v: string) => v === '')
     );
-    // After fix: there should be no 4-column empty unmatch (P:S); only 3-column (P:R) if any
+    // After fix: there should be no 4-column empty unmatch; only 3-column (Q:S) unmatch if any
     expect(facturaUnmatch).toBeUndefined();
   });
 });

@@ -7,7 +7,7 @@
 import type { Result, FolderStructure } from '../types/index.js';
 import type { CellValue, CellValueOrLink } from './sheets.js';
 import { getValues, batchUpdate, updateRowsWithFormatting, getSpreadsheetTimezone, getSheetMetadata } from './sheets.js';
-import { getCachedFolderStructure, migrateTipoDeCambioHeaders, migrateArchivosProcesadosHeaders, migrateFacturasEmitidasPagadaColumn, migrateRecibosHasCuitMatchColumn } from './folder-structure.js';
+import { getCachedFolderStructure, migrateTipoDeCambioHeaders, migrateArchivosProcesadosHeaders, migrateFacturasEmitidasPagadaColumn, migrateRecibosHasCuitMatchColumn, migrateFacturasEmitidasCondicionIvaColumn } from './folder-structure.js';
 import { readSchemaVersion, writeSchemaVersion } from './schema-version.js';
 import { MOVIMIENTOS_BANCARIO_SHEET } from '../constants/spreadsheet-headers.js';
 import { SHEETS_BATCH_UPDATE_LIMIT } from '../config.js';
@@ -16,7 +16,7 @@ import { info, warn, debug, error as logError } from '../utils/logger.js';
 /**
  * Current schema version — increment when adding new migrations
  */
-export const CURRENT_SCHEMA_VERSION = 6;
+export const CURRENT_SCHEMA_VERSION = 7;
 
 /**
  * Migration definition
@@ -86,6 +86,14 @@ const MIGRATIONS: Migration[] = [
     name: 'recibos-hasCuitMatch-column',
     migrate: async (fs: FolderStructure) => {
       const result = await migrateRecibosHasCuitMatchColumn(fs.controlEgresosId);
+      if (!result.ok) throw result.error;
+    },
+  },
+  {
+    version: 7,
+    name: 'facturas-emitidas-condicionIVAReceptor-column',
+    migrate: async (fs: FolderStructure) => {
+      const result = await migrateFacturasEmitidasCondicionIvaColumn(fs.controlIngresosId);
       if (!result.ok) throw result.error;
     },
   },
