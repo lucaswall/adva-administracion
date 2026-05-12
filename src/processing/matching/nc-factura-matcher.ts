@@ -152,9 +152,10 @@ export async function matchNCsWithFacturas(
 
   // Parse rows into typed objects
   const facturas: FacturaRow[] = [];
+  const minRowLength = 10 + colOffset;
   for (let i = 1; i < rowsResult.value.length; i++) {
     const row = rowsResult.value[i];
-    if (!row || row.length < 10) continue;
+    if (!row || row.length < minRowLength) continue;
 
     const factura: FacturaRow = {
       rowNumber: i + 1, // 1-indexed, accounting for header

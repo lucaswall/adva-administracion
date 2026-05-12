@@ -279,7 +279,10 @@ export function isBetterMatch(
  * Parses Facturas Emitidas from spreadsheet data using header-based lookup.
  * ADVA is the emisor, so counterparty info is cuitReceptor/razonSocialReceptor.
  */
-export function parseFacturasEmitidas(data: CellValue[][]): Array<Factura & { row: number }> {
+export function parseFacturasEmitidas(
+  data: CellValue[][],
+  options: { includeNcNd?: boolean } = {}
+): Array<Factura & { row: number }> {
   if (data.length < 2) return [];
 
   const headers = data[0].map(h => String(h || '').toLowerCase());
@@ -308,15 +311,18 @@ export function parseFacturasEmitidas(data: CellValue[][]): Array<Factura & { ro
     matchConfidence: headers.indexOf('matchconfidence'),
     hasCuitMatch: headers.indexOf('hascuitmatch'),
     tipoDeCambio: headers.indexOf('tipodecambio'),
+    condicionIVAReceptor: headers.indexOf('condicionivareceptor'),
   };
 
   for (let i = 1; i < data.length; i++) {
     const row = data[i];
     if (!row || !row[colIndex.fileId]) continue;
 
-    // Skip NCs and NDs — they have their own matching pipeline (nc-factura-matcher)
+    // Skip NCs and NDs unless caller opts in (e.g., Subdiario builder needs them)
     const tipo = validateTipoComprobante(row[colIndex.tipoComprobante]);
-    if (tipo === 'NC' || tipo.startsWith('NC ') || tipo === 'ND' || tipo.startsWith('ND ')) continue;
+    if (!options.includeNcNd) {
+      if (tipo === 'NC' || tipo.startsWith('NC ') || tipo === 'ND' || tipo.startsWith('ND ')) continue;
+    }
 
     facturas.push({
       row: i + 1,
@@ -330,6 +336,10 @@ export function parseFacturasEmitidas(data: CellValue[][]): Array<Factura & { ro
       razonSocialEmisor: '',
       cuitReceptor: String(row[colIndex.cuitReceptor] || ''),
       razonSocialReceptor: String(row[colIndex.razonSocialReceptor] || ''),
+      condicionIVAReceptor:
+        colIndex.condicionIVAReceptor >= 0
+          ? String(row[colIndex.condicionIVAReceptor] || '') || undefined
+          : undefined,
       importeNeto: parseNumber(row[colIndex.importeNeto]) || 0,
       importeIva: parseNumber(row[colIndex.importeIva]) || 0,
       importeTotal: parseNumber(row[colIndex.importeTotal]) || 0,

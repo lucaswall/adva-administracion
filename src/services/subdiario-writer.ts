@@ -258,8 +258,9 @@ export async function syncSubdiario(
     }
 
     // Step 3: Read source data
+    // Facturas Emitidas grew to 21 columns (A:U) after ADV-245 (condicionIVAReceptor at H)
     const [facturasResult, pagosResult, retencionesResult] = await Promise.all([
-      getValues(controlIngresosId, 'Facturas Emitidas!A:T'),
+      getValues(controlIngresosId, 'Facturas Emitidas!A:U'),
       getValues(controlIngresosId, 'Pagos Recibidos!A:Q'),
       getValues(controlIngresosId, 'Retenciones Recibidas!A:O'),
     ]);
@@ -307,7 +308,10 @@ export async function syncSubdiario(
 
     const input: SubdiarioInput = {
       currentYear: facturadorYear,
-      facturasEmitidas: parseFacturasEmitidas(facturasResult.value as CellValue[][]),
+      // Subdiario needs both FCs AND NCs for scope rule (c) and findCancellingNC lookup
+      facturasEmitidas: parseFacturasEmitidas(facturasResult.value as CellValue[][], {
+        includeNcNd: true,
+      }),
       pagosRecibidos: parsePagos(pagosResult.value as CellValue[][]),
       retencionesRecibidas: parseRetenciones(retencionesResult.value as CellValue[][]),
       facturador: facturadorResult.value,
