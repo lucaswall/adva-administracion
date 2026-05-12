@@ -229,7 +229,9 @@ export async function storeFactura(
       return { stored: true, updated: true };
     }
 
-    // DUPLICATE CHECK (business key): Use cache if available, otherwise API
+    // DUPLICATE CHECK (business key): Use cache if available, otherwise API.
+    // documentType drives the importeTotal column index — Facturas Emitidas
+    // shifted it to K (10) after ADV-245; Recibidas stays at J (9).
     const dupeCheck = context?.duplicateCache
       ? context.duplicateCache.isDuplicateFactura(
           spreadsheetId,
@@ -237,7 +239,8 @@ export async function storeFactura(
           factura.nroFactura,
           factura.fechaEmision,
           factura.importeTotal,
-          counterpartyCuit
+          counterpartyCuit,
+          documentType
         )
       : await isDuplicateFactura(
           spreadsheetId,

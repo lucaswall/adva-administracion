@@ -89,6 +89,11 @@ export class DuplicateCache {
 
   /**
    * Checks for duplicate factura in cache.
+   *
+   * After ADV-245 the Facturas Emitidas schema grew by one column
+   * (condicionIVAReceptor at H/7), shifting importeTotal from J (9) to K
+   * (10). Facturas Recibidas is unchanged. Callers MUST pass `documentType`
+   * so the comparison reads the correct column.
    */
   isDuplicateFactura(
     spreadsheetId: string,
@@ -96,16 +101,19 @@ export class DuplicateCache {
     nroFactura: string,
     fecha: string,
     importeTotal: number,
-    cuit: string
+    cuit: string,
+    documentType: 'factura_emitida' | 'factura_recibida'
   ): { isDuplicate: boolean; existingFileId?: string } {
     const key = `${spreadsheetId}:${sheetName}`;
     const sheetData = this.cache.get(key);
     if (!sheetData) return { isDuplicate: false };
 
+    const importeColIdx = documentType === 'factura_emitida' ? 10 : 9;
+
     for (const [fileId, row] of sheetData) {
       const rowNroFactura = row[4];   // Column E
       const rowFecha = normalizeSpreadsheetDate(row[0]); // Column A
-      const rowImporte = parseNumber(String(row[9])) ?? 0; // Column J
+      const rowImporte = parseNumber(String(row[importeColIdx])) ?? 0; // J (recibida) or K (emitida)
       const rowCuit = row[5]; // Column F
 
       if (

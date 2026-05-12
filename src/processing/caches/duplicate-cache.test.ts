@@ -88,7 +88,8 @@ describe('DuplicateCache', () => {
         '0001-00001234',
         '2026-01-25',
         15000.00,
-        '20123456786'
+        '20123456786',
+        'factura_recibida' // legacy 10-col fixture matches recibida shape (importeTotal at J/9)
       );
 
       expect(result.isDuplicate).toBe(true);
@@ -112,7 +113,8 @@ describe('DuplicateCache', () => {
         '0001-00001235', // Different invoice number
         '2026-01-25',
         15000.00,
-        '20123456786'
+        '20123456786',
+        'factura_recibida' // legacy 10-col fixture matches recibida shape
       );
 
       expect(result.isDuplicate).toBe(false);
@@ -127,10 +129,85 @@ describe('DuplicateCache', () => {
         '0001-00001234',
         '2026-01-25',
         15000.00,
-        '20123456786'
+        '20123456786',
+        'factura_recibida'
       );
 
       expect(result.isDuplicate).toBe(false);
+    });
+
+    it('detects duplicate in post-migration Facturas Emitidas schema (importeTotal at K/idx 10)', async () => {
+      // After ADV-245 schema migration the Facturas Emitidas sheet grew from
+      // 10 to 11 columns with importeTotal shifted from J (9) to K (10).
+      // The cache must read the new column index. Codex P2 finding on PR 116.
+      const cache = new DuplicateCache();
+      const mockRows = [
+        // 11-column post-migration header
+        [
+          'fechaEmision', 'fileId', 'fileName', 'tipoComprobante',
+          'nroFactura', 'cuitReceptor', 'razonSocialReceptor',
+          'condicionIVAReceptor', // H (7) — new
+          'importeNeto', 'importeIva', 'importeTotal', // I, J, K (8, 9, 10)
+        ],
+        [
+          '2026-01-25', 'file-1', 'invoice.pdf', 'A',
+          '0001-00001234', '20123456786', 'TEST SA',
+          'IVA Responsable Inscripto',
+          '12396.69', '2603.31', '15000.00', // importeIva=2603.31 at idx 9, importeTotal=15000.00 at idx 10
+        ],
+      ];
+
+      vi.mocked(sheets.getValues).mockResolvedValue({ ok: true, value: mockRows });
+
+      await cache.loadSheet('spreadsheet-1', 'Facturas Emitidas', 'A:K');
+
+      const result = cache.isDuplicateFactura(
+        'spreadsheet-1',
+        'Facturas Emitidas',
+        '0001-00001234',
+        '2026-01-25',
+        15000.00, // matches importeTotal at idx 10, NOT importeIva at idx 9
+        '20123456786',
+        'factura_emitida'
+      );
+
+      expect(result.isDuplicate).toBe(true);
+      expect(result.existingFileId).toBe('file-1');
+    });
+
+    it('Facturas Recibidas still reads importeTotal at J/idx 9 (not migrated)', async () => {
+      // Facturas Recibidas was NOT touched by ADV-245 — importeTotal stays at
+      // J (9). Verify the recibida path remains correct.
+      const cache = new DuplicateCache();
+      const mockRows = [
+        [
+          'fechaEmision', 'fileId', 'fileName', 'tipoComprobante',
+          'nroFactura', 'cuitEmisor', 'razonSocialEmisor',
+          'importeNeto', 'importeIva', 'importeTotal', // J (9)
+        ],
+        [
+          '2026-01-25', 'file-r1', 'recibida.pdf', 'A',
+          '0001-00009999', '20123456786', 'PROVEEDOR SA',
+          '8264.46', '1735.54', '10000.00', // importeTotal=10000 at idx 9
+        ],
+      ];
+
+      vi.mocked(sheets.getValues).mockResolvedValue({ ok: true, value: mockRows });
+
+      await cache.loadSheet('spreadsheet-1', 'Facturas Recibidas', 'A:J');
+
+      const result = cache.isDuplicateFactura(
+        'spreadsheet-1',
+        'Facturas Recibidas',
+        '0001-00009999',
+        '2026-01-25',
+        10000.00,
+        '20123456786',
+        'factura_recibida'
+      );
+
+      expect(result.isDuplicate).toBe(true);
+      expect(result.existingFileId).toBe('file-r1');
     });
   });
 
@@ -389,7 +466,8 @@ describe('DuplicateCache', () => {
         '00001-00000214',
         '2025-11-30',
         500000.00,
-        '27130780259'
+        '27130780259',
+        'factura_recibida' // legacy 10-col fixture (importeTotal at J/9)
       );
 
       expect(result.isDuplicate).toBe(true);
@@ -635,7 +713,8 @@ describe('DuplicateCache', () => {
         '00001-00000214',
         '2026-05-11',
         25000,
-        '27130780259'
+        '27130780259',
+        'factura_recibida' // legacy 10-col fixture (importeTotal at J/9)
       );
 
       expect(result.isDuplicate).toBe(true);
@@ -778,7 +857,8 @@ describe('DuplicateCache', () => {
         'FAC-001',
         '2025-01-15',
         100000,
-        '20123456786'
+        '20123456786',
+        'factura_recibida'
       );
       expect(result1.isDuplicate).toBe(false);
 
@@ -801,7 +881,8 @@ describe('DuplicateCache', () => {
         'FAC-001',
         '2025-01-15',
         100000,
-        '20123456786'
+        '20123456786',
+        'factura_recibida'
       );
 
       // This will fail with current code because the failed promise is cached
