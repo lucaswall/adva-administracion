@@ -203,32 +203,55 @@ function computeCancellingNCs(allFacturas: Factura[]): Map<string, Factura> {
   const fcs = allFacturas.filter((f) => deriveTipo(f.tipoComprobante) === 'FC');
   const ncs = allFacturas.filter((f) => deriveTipo(f.tipoComprobante) === 'NC');
 
-  // Index FCs by normalized nro for refNro lookup
-  const fcByNro = new Map<string, Factura>();
+  // Index FCs by normalized nro. Same nro can appear in multiple AFIP class
+  // streams (e.g. PV 00001 emits both A and B with nro 00001-00000001), so
+  // store an array per key and disambiguate at lookup time via class match.
+  const fcsByNro = new Map<string, Factura[]>();
   for (const fc of fcs) {
-    fcByNro.set(normalizeNro(fc.nroFactura), fc);
+    const key = normalizeNro(fc.nroFactura);
+    const existing = fcsByNro.get(key);
+    if (existing) existing.push(fc);
+    else fcsByNro.set(key, [fc]);
   }
+
+  // Extract the AFIP class letter ('A' | 'B' | 'C' | 'E') from a tipoComprobante.
+  // Returns null for bare 'NC' / 'ND' (class unknown — legacy data).
+  const classLetter = (t: string): string | null => {
+    if (t === 'A' || t === 'B' || t === 'C' || t === 'E') return t;
+    if (t.startsWith('NC ') || t.startsWith('ND ')) {
+      const suffix = t.slice(3);
+      if (suffix === 'A' || suffix === 'B' || suffix === 'C' || suffix === 'E') return suffix;
+    }
+    return null;
+  };
 
   const matches = (nc: Factura, fc: Factura): boolean => {
     if (nc.cuitReceptor !== fc.cuitReceptor) return false;
     if (Math.abs(Math.abs(nc.importeTotal) - fc.importeTotal) > 0.01) return false;
     if (nc.fechaEmision < fc.fechaEmision) return false;
+    // AFIP class must match when both sides have a class letter. An NC B
+    // cannot legally cancel an FC A. When either side is bare 'NC' (no
+    // suffix in legacy data), allow the match.
+    const ncClass = classLetter(nc.tipoComprobante);
+    const fcClass = classLetter(fc.tipoComprobante);
+    if (ncClass !== null && fcClass !== null && ncClass !== fcClass) return false;
     return true;
   };
 
-  // Pass 1: refNro-anchored NCs claim their referenced FC
+  // Pass 1: refNro-anchored NCs claim their referenced FC (disambiguated by class)
   for (const nc of ncs) {
     const refNro = extractReferencedFacturaNumber(nc.concepto ?? '');
     if (refNro === null) continue;
-    const fc = fcByNro.get(refNro);
+    const candidates = fcsByNro.get(refNro);
+    if (!candidates) continue;
+    const fc = candidates.find((c) => matches(nc, c));
     if (!fc) continue;
-    if (!matches(nc, fc)) continue;
     if (result.has(fc.fileId)) continue;
     result.set(fc.fileId, nc);
     consumedNcIds.add(nc.fileId);
   }
 
-  // Pass 2: remaining NCs fall back to CUIT+amount+date match, first unbound FC wins
+  // Pass 2: remaining NCs fall back to CUIT+amount+date+class match, first unbound FC wins
   for (const nc of ncs) {
     if (consumedNcIds.has(nc.fileId)) continue;
     const refNro = extractReferencedFacturaNumber(nc.concepto ?? '');

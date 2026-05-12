@@ -501,6 +501,50 @@ describe('buildSubdiarioRows', () => {
     expect(ncGaps[0].nro).toBe('00005-00000011');
   });
 
+  // ── Test 14c: NC class must match FC class for cancellation ──────────────
+  // An NC B must NOT cancel an FC A even if CUIT/amount/date overlap. AFIP
+  // numbering and cancellation legality are per-cod. Codex P2 finding on PR 116.
+  it('NC class must match FC class for cancellation (no refNro path)', () => {
+    // Two FCs of different classes (A and B) at the same CUIT + amount + year.
+    // Without a class check, the NC's CUIT+amount+date predicate matches both,
+    // and the first FC in iteration order is incorrectly marked cancelled.
+    const fcA = makeFc({
+      fileId: 'fcA-class',
+      tipoComprobante: 'A',
+      nroFactura: '00001-00000001',
+      importeTotal: 500_000,
+      fechaEmision: `${CURRENT_YEAR}-01-10`,
+    });
+    const fcB = makeFc({
+      fileId: 'fcB-class',
+      tipoComprobante: 'B',
+      nroFactura: '00002-00000001',
+      importeTotal: 500_000,
+      fechaEmision: `${CURRENT_YEAR}-01-12`,
+    });
+    // NC B (cod 008) with no refNro in concepto — same CUIT, same amount.
+    const ncB = makeNc({
+      fileId: 'ncB-class',
+      tipoComprobante: 'NC B',
+      nroFactura: '00002-00000050',
+      importeTotal: 500_000,
+      fechaEmision: `${CURRENT_YEAR}-01-20`,
+      concepto: 'Anulación',
+    });
+
+    const rows = buildSubdiarioRows(
+      makeInput({ facturasEmitidas: [fcA, fcB, ncB] })
+    );
+
+    const rowB = rows.find((r) => r.nro === '00002-00000001');
+    const rowA = rows.find((r) => r.nro === '00001-00000001');
+
+    // FC B is cancelled (same class as NC B)
+    expect(rowB?.fechaCobro.startsWith('NC ')).toBe(true);
+    // FC A is NOT cancelled — class mismatch
+    expect(rowA?.fechaCobro).toBe('');
+  });
+
   // ── Test 14b: Same PV, different AFIP cods are independent streams ────────
   // AFIP numbering is independent per cod, not per (pv, tipo). A single punto
   // de venta MAY emit multiple cods (e.g. FC A + FC B). The gap-detection key

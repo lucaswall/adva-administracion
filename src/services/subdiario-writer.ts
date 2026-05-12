@@ -325,9 +325,10 @@ export async function syncSubdiario(
 
     const input: SubdiarioInput = {
       currentYear: facturadorYear,
-      // Subdiario needs both FCs AND NCs for scope rule (c) and findCancellingNC lookup
+      // Subdiario needs both FCs AND NCs for scope rule (c) and findCancellingNC lookup.
+      // NDs are excluded — the builder does not model them.
       facturasEmitidas: parseFacturasEmitidas(facturasResult.value as CellValue[][], {
-        includeNcNd: true,
+        includeNc: true,
       }),
       pagosRecibidos: parsePagos(pagosResult.value as CellValue[][]),
       retencionesRecibidas: parseRetenciones(retencionesResult.value as CellValue[][]),

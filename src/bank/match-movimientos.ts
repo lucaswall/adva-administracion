@@ -281,7 +281,7 @@ export function isBetterMatch(
  */
 export function parseFacturasEmitidas(
   data: CellValue[][],
-  options: { includeNcNd?: boolean } = {}
+  options: { includeNc?: boolean } = {}
 ): Array<Factura & { row: number }> {
   if (data.length < 2) return [];
 
@@ -318,10 +318,14 @@ export function parseFacturasEmitidas(
     const row = data[i];
     if (!row || !row[colIndex.fileId]) continue;
 
-    // Skip NCs and NDs unless caller opts in (e.g., Subdiario builder needs them)
+    // NDs are never useful for downstream consumers (the matcher excludes them
+    // and the Subdiario builder does not model them — they have no AFIP_COD
+    // entry). Always skip. NCs are gated on the opt-in (Subdiario builder
+    // needs them for scope rule c and cancellation lookup).
     const tipo = validateTipoComprobante(row[colIndex.tipoComprobante]);
-    if (!options.includeNcNd) {
-      if (tipo === 'NC' || tipo.startsWith('NC ') || tipo === 'ND' || tipo.startsWith('ND ')) continue;
+    if (tipo === 'ND' || tipo.startsWith('ND ')) continue;
+    if (!options.includeNc) {
+      if (tipo === 'NC' || tipo.startsWith('NC ')) continue;
     }
 
     facturas.push({

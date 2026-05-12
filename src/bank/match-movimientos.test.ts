@@ -278,6 +278,25 @@ describe('parseFacturasEmitidas', () => {
     expect(result[0].fileId).toBe('file1');
     expect(result[1].fileId).toBe('file6');
   });
+
+  it('with includeNc: true includes NCs but still excludes NDs', () => {
+    // Subdiario opts into NCs (needed for scope rule c and cancellation lookup),
+    // but never NDs — the builder does not model ND rows. Codex P2 finding on PR 116.
+    const data = [
+      ['fechaEmision', 'fileId', 'tipoComprobante', 'nroFactura', 'cuitReceptor', 'razonSocialReceptor', 'importeTotal', 'moneda'],
+      ['2025-01-15', 'fc1', 'A', '00001-00000001', '20123456786', 'CLIENTE SA', '1000', 'ARS'],
+      ['2025-01-16', 'nc1', 'NC C', '00003-00000157', '20123456786', 'CLIENTE SA', '500', 'ARS'],
+      ['2025-01-17', 'nd1', 'ND', '00001-00000002', '27234567891', 'OTRO CLIENTE', '200', 'ARS'],
+      ['2025-01-18', 'nd2', 'ND A', '00001-00000003', '20111111119', 'TERCER CLIENTE', '300', 'ARS'],
+      ['2025-01-19', 'nd3', 'ND B', '00001-00000004', '20111111119', 'TERCER CLIENTE', '400', 'ARS'],
+      ['2025-01-20', 'fc2', 'C', '00001-00000006', '27234567891', 'OTRO CLIENTE', '2000', 'ARS'],
+    ];
+
+    const result = parseFacturasEmitidas(data, { includeNc: true });
+
+    expect(result).toHaveLength(3);
+    expect(result.map((f) => f.fileId).sort()).toEqual(['fc1', 'fc2', 'nc1']);
+  });
 });
 
 describe('parseFacturasRecibidas', () => {
