@@ -471,12 +471,15 @@ The Apps Script bundle is produced into `dist/apps-script/{Code.js,appsscript.js
 | MATCH_DAYS_AFTER_USD | No | 90 |
 | DRIVE_ROOT_FOLDER_ID_PRODUCTION | No | - |
 | DRIVE_ROOT_FOLDER_ID_STAGING | No | - |
+| FACTURADOR_SPREADSHEET_ID | No | - |
 
 **Note:** `API_BASE_URL` enables webhooks (URL + `/webhooks/drive`) and Apps Script (domain extracted at build)
 
 **Note:** `ENVIRONMENT` is the server's own identity (`staging` | `production`). Required in production to prevent cross-environment data writes; if unset, treated as staging.
 
 **Note:** `DRIVE_ROOT_FOLDER_ID_PRODUCTION` and `DRIVE_ROOT_FOLDER_ID_STAGING` are used by Claude Code skills only (e.g., `investigate`), not loaded by the server at runtime.
+
+**Note:** `FACTURADOR_SPREADSHEET_ID` is required for the Subdiario de Ventas rebuild to enrich socio rows with membership category. If unset, the Subdiario builds but with `categoria='-'` for all rows.
 
 ## API ENDPOINTS
 
