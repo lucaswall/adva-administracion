@@ -465,6 +465,58 @@ export async function migrateFacturasEmitidasPagadaColumn(
 }
 
 /**
+ * Migrates Facturas Emitidas sheet from 20 columns (A:T, after ADV-167 pagada migration)
+ * to 21 columns (A:U) by inserting `condicionIVAReceptor` at column H (0-based index 7).
+ * All downstream columns (importeNeto through tipoDeCambio) shift right by one position.
+ *
+ * Idempotent: skips if sheet already has 21+ columns or `condicionIVAReceptor` is at index 7.
+ *
+ * @param controlIngresosId - Control de Ingresos spreadsheet ID
+ * @returns Success or error
+ */
+export async function migrateFacturasEmitidasCondicionIvaColumn(
+  controlIngresosId: string
+): Promise<Result<void, Error>> {
+  const headersResult = await getValues(controlIngresosId, 'Facturas Emitidas!A1:U1');
+  if (!headersResult.ok) return headersResult;
+
+  const headerRow = headersResult.value[0] ?? [];
+
+  if (headerRow.length === 0) {
+    // Empty sheet — ensureSheetsExist will write full headers
+    return { ok: true, value: undefined };
+  }
+
+  if (headerRow.length >= 21 || headerRow[7] === 'condicionIVAReceptor') {
+    // Already migrated — skip
+    return { ok: true, value: undefined };
+  }
+
+  // 20-column schema detected — insert condicionIVAReceptor at column H (0-based index 7)
+  const metadataResult = await getSheetMetadata(controlIngresosId);
+  if (!metadataResult.ok) return metadataResult;
+
+  const facturasSheet = metadataResult.value.find(s => s.title === 'Facturas Emitidas');
+  if (!facturasSheet) {
+    return { ok: false, error: new Error('Facturas Emitidas sheet not found in Control de Ingresos') };
+  }
+
+  const insertResult = await insertColumn(controlIngresosId, facturasSheet.sheetId, 7);
+  if (!insertResult.ok) return insertResult;
+
+  const setResult = await setValues(controlIngresosId, 'Facturas Emitidas!H1', [['condicionIVAReceptor']]);
+  if (!setResult.ok) return setResult;
+
+  info('Migrated Facturas Emitidas: inserted condicionIVAReceptor column at H, downstream columns shifted to I-U', {
+    module: 'folder-structure',
+    phase: 'migration',
+    controlIngresosId,
+  });
+
+  return { ok: true, value: undefined };
+}
+
+/**
  * Migrates Recibos sheet from 18 columns (A:R) to 19 columns (A:S) by adding
  * `hasCuitMatch` at column S. Backfills existing rows from `matchConfidence`
  * (HIGH → 'YES', anything else → 'NO') to preserve the previous proxy semantics

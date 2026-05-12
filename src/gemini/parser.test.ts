@@ -2078,6 +2078,94 @@ describe('parseFacturaResponse - tipoComprobante letter variants', () => {
 });
 
 // ---------------------------------------------------------------------------
+// ADV-245: condicionIVAReceptor extraction for factura_emitida
+// ---------------------------------------------------------------------------
+
+describe('parseFacturaResponse - condicionIVAReceptor (ADV-245)', () => {
+  const baseEmitida = {
+    issuerName: 'ASOCIACION CIVIL DE DESARROLLADORES DE VIDEOJUEGOS ARGENTINOS',
+    clientName: 'Empresa Cliente SA',
+    allCuits: ['30709076783', '20123456786'],
+    tipoComprobante: 'A',
+    nroFactura: '00001-00000001',
+    fechaEmision: '2025-01-15',
+    importeNeto: 100000,
+    importeIva: 21000,
+    importeTotal: 121000,
+    moneda: 'ARS',
+  };
+
+  it('parses IVA Responsable Inscripto for factura_emitida with Responsable Inscripto receptor', () => {
+    const response = JSON.stringify({ ...baseEmitida, condicionIVAReceptor: 'IVA Responsable Inscripto' });
+    const result = parseFacturaResponse(response, 'factura_emitida');
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.data.condicionIVAReceptor).toBe('IVA Responsable Inscripto');
+      expect(result.value.needsReview).toBe(false);
+    }
+  });
+
+  it('parses all 5 canonical condicionIVAReceptor values for factura_emitida', () => {
+    const canonicalValues = [
+      'IVA Responsable Inscripto',
+      'Consumidor Final',
+      'Responsable Monotributo',
+      'Cliente del Exterior',
+      'IVA Sujeto Exento',
+    ];
+    for (const value of canonicalValues) {
+      const response = JSON.stringify({ ...baseEmitida, condicionIVAReceptor: value });
+      const result = parseFacturaResponse(response, 'factura_emitida');
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value.data.condicionIVAReceptor).toBe(value);
+      }
+    }
+  });
+
+  it('sets needsReview and clears condicionIVAReceptor for unknown/garbled value', () => {
+    const response = JSON.stringify({ ...baseEmitida, condicionIVAReceptor: 'EXENTO INVALIDO' });
+    const result = parseFacturaResponse(response, 'factura_emitida');
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.data.condicionIVAReceptor).toBeUndefined();
+      expect(result.value.needsReview).toBe(true);
+    }
+  });
+
+  it('does not set condicionIVAReceptor for factura_recibida even when present in raw response', () => {
+    const baseRecibida = {
+      issuerName: 'Empresa Cliente SA',
+      clientName: 'ASOCIACION CIVIL DE DESARROLLADORES DE VIDEOJUEGOS ARGENTINOS',
+      allCuits: ['20123456786', '30709076783'],
+      tipoComprobante: 'A',
+      nroFactura: '00001-00000001',
+      fechaEmision: '2025-01-15',
+      importeNeto: 100000,
+      importeIva: 21000,
+      importeTotal: 121000,
+      moneda: 'ARS',
+      condicionIVAReceptor: 'IVA Responsable Inscripto',
+    };
+    const response = JSON.stringify(baseRecibida);
+    const result = parseFacturaResponse(response, 'factura_recibida');
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.data.condicionIVAReceptor).toBeUndefined();
+    }
+  });
+
+  it('leaves condicionIVAReceptor undefined when not present in Gemini response', () => {
+    const response = JSON.stringify(baseEmitida); // No condicionIVAReceptor field
+    const result = parseFacturaResponse(response, 'factura_emitida');
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.data.condicionIVAReceptor).toBeUndefined();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Task 11: Type-safe validateAdvaRole boundary (ADV-203)
 // validateAdvaRole is private but exercised through parseFacturaResponse /
 // parsePagoResponse. These tests verify the typed error messages in errors[].
