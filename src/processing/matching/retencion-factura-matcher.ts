@@ -32,7 +32,7 @@ interface RetencionRow {
 }
 
 /**
- * Represents a parsed row from Facturas Emitidas sheet (A:S, 0-indexed)
+ * Represents a parsed row from Facturas Emitidas sheet (A:U after ADV-245, 0-indexed)
  */
 interface FacturaEmitidaRow {
   /** Row number (1-indexed, including header) */
@@ -81,29 +81,30 @@ function parseRetencionRows(rows: unknown[][]): RetencionRow[] {
 }
 
 /**
- * Parses Facturas Emitidas sheet rows into typed objects
+ * Parses Facturas Emitidas sheet rows into typed objects.
  *
- * Column layout (0-indexed):
+ * Post-ADV-245 column layout (21 cols, 0-indexed):
  * 0: fechaEmision, 1: fileId, 2: fileName, 3: tipoComprobante, 4: nroFactura,
- * 5: cuitReceptor, 6: razonSocialReceptor, 7: importeNeto, 8: importeIva,
- * 9: importeTotal, 10: moneda, 11: concepto, 12: processedAt,
- * 13: confidence, 14: needsReview, 15: matchedPagoFileId,
- * 16: matchConfidence, 17: hasCuitMatch, 18: tipoDeCambio
+ * 5: cuitReceptor, 6: razonSocialReceptor, 7: condicionIVAReceptor,
+ * 8: importeNeto, 9: importeIva, 10: importeTotal, 11: moneda,
+ * 12: concepto, 13: processedAt, 14: confidence, 15: needsReview,
+ * 16: matchedPagoFileId, 17: matchConfidence, 18: hasCuitMatch,
+ * 19: pagada, 20: tipoDeCambio
  */
 function parseFacturaEmitidaRows(rows: unknown[][]): FacturaEmitidaRow[] {
   const result: FacturaEmitidaRow[] = [];
 
   for (let i = 1; i < rows.length; i++) {
     const row = rows[i];
-    if (!row || row.length < 10) continue;
+    if (!row || row.length < 11) continue;
 
     result.push({
       rowNumber: i + 1, // 1-indexed, accounting for header
       fechaEmision: normalizeSpreadsheetDate(row[0]),
       fileId: String(row[1] || ''),
       cuitReceptor: String(row[5] || ''),
-      importeTotal: parseNumber(String(row[9] || '0')) ?? 0,
-      matchConfidence: String(row[16] || ''),
+      importeTotal: parseNumber(String(row[10] || '0')) ?? 0,
+      matchConfidence: String(row[17] || ''),
     });
   }
 
@@ -146,8 +147,8 @@ export async function matchRetencionesWithFacturas(
     return { ok: false, error: retencionesResult.error };
   }
 
-  // Read Facturas Emitidas (A:S)
-  const facturasResult = await getValues(spreadsheetId, 'Facturas Emitidas!A:S');
+  // Read Facturas Emitidas (A:U after ADV-245 — 21 cols)
+  const facturasResult = await getValues(spreadsheetId, 'Facturas Emitidas!A:U');
   if (!facturasResult.ok) {
     return { ok: false, error: facturasResult.error };
   }
