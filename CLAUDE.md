@@ -479,7 +479,7 @@ The Apps Script bundle is produced into `dist/apps-script/{Code.js,appsscript.js
 
 **Note:** `DRIVE_ROOT_FOLDER_ID_PRODUCTION` and `DRIVE_ROOT_FOLDER_ID_STAGING` are used by Claude Code skills only (e.g., `investigate`), not loaded by the server at runtime.
 
-**Note:** `FACTURADOR_SPREADSHEET_ID` is required for the Subdiario de Ventas rebuild to enrich socio rows with membership category. If unset, the Subdiario builds but with `categoria='-'` for all rows.
+**Note:** `FACTURADOR_SPREADSHEET_ID` is required for the Subdiario de Ventas rebuild to enrich socio rows with membership category. If unset, the Subdiario builds but with `categoria=''` (blank) for all rows.
 
 ## API ENDPOINTS
 

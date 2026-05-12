@@ -154,17 +154,17 @@ describe('buildSubdiarioRows', () => {
   });
 
   // ── Test 2: Non-socio FC ─────────────────────────────────────────────────
-  it('non-socio FC: categoria = "-", notas empty', () => {
+  it('non-socio FC: categoria blank, notas empty, recibido null when unpaid', () => {
     const fc = makeFc({ fileId: 'fc002', nroFactura: '00003-00001956' });
 
     const rows = buildSubdiarioRows(makeInput({ facturasEmitidas: [fc] }));
 
     expect(rows).toHaveLength(1);
     const row = rows[0];
-    expect(row.categoria).toBe('-');
+    expect(row.categoria).toBe('');
     expect(row.notas).toBe('');
     expect(row.fechaCobro).toBe('');
-    expect(row.recibido).toBe(0);
+    expect(row.recibido).toBeNull();
   });
 
   // ── Test 3: FC E export with USD, paid ───────────────────────────────────
@@ -215,11 +215,11 @@ describe('buildSubdiarioRows', () => {
     expect(row.total).toBe(14_300_000);
     expect(row.notas).toBe('Pago del exterior - USD 10000 - TC fact 1430');
     expect(row.fechaCobro).toBe('');
-    expect(row.recibido).toBe(0);
+    expect(row.recibido).toBeNull();
   });
 
   // ── Test 5: NC cancelling current-year FC ────────────────────────────────
-  it('NC cancels current-year FC: FC has fechaCobro=NC nro, recibido=0; NC row has negative total', () => {
+  it('NC cancels current-year FC: FC has fechaCobro=NC nro, recibido=null; NC row has negative total', () => {
     const fc = makeFc({
       fileId: 'fc005',
       nroFactura: '00003-00001957',
@@ -243,7 +243,7 @@ describe('buildSubdiarioRows', () => {
 
     expect(fcRow).toBeDefined();
     expect(fcRow!.fechaCobro).toBe('NC 00003-00000140');
-    expect(fcRow!.recibido).toBe(0);
+    expect(fcRow!.recibido).toBeNull();
 
     expect(ncRow).toBeDefined();
     expect(ncRow!.total).toBeLessThan(0);
@@ -275,7 +275,7 @@ describe('buildSubdiarioRows', () => {
 
     expect(fcRow).toBeDefined();
     expect(fcRow!.fechaCobro).toBe('NC 00003-00000200');
-    expect(fcRow!.recibido).toBe(0);
+    expect(fcRow!.recibido).toBeNull();
 
     expect(ncRow).toBeDefined();
     expect(ncRow!.total).toBe(-800_000);
@@ -319,7 +319,7 @@ describe('buildSubdiarioRows', () => {
     expect(rows).toHaveLength(1);
     expect(rows[0].nro).toBe('00003-00001400');
     expect(rows[0].fechaCobro).toBe('');
-    expect(rows[0].recibido).toBe(0);
+    expect(rows[0].recibido).toBeNull();
   });
 
   // ── Test 9: Prior-year FC paid prior year (OUT of scope) ─────────────────
@@ -778,7 +778,7 @@ describe('buildSubdiarioRows', () => {
   });
 
   // ── Test 15: FE missing from Facturador ──────────────────────────────────
-  it('FE not in Facturador: categoria = "-", condicion from PDF', () => {
+  it('FE not in Facturador: categoria blank, condicion from PDF', () => {
     const fc = makeFc({
       fileId: 'fc015',
       nroFactura: '00003-00001960',
@@ -789,7 +789,7 @@ describe('buildSubdiarioRows', () => {
 
     expect(rows).toHaveLength(1);
     const row = rows[0];
-    expect(row.categoria).toBe('-');
+    expect(row.categoria).toBe('');
     expect(row.condicion).toBe('Consumidor Final');
   });
 

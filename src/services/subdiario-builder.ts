@@ -588,7 +588,7 @@ function detectGaps(
           concepto: '',
           categoria: '',
           fechaCobro: '',
-          recibido: 0,
+          recibido: null,
           notas: '',
         });
       }
@@ -663,23 +663,23 @@ export function buildSubdiarioRows(input: SubdiarioInput): SubdiarioRow[] {
       (factura.condicionIVAReceptor ?? '') ||
       (facturadorEntry?.condIVA ?? '');
 
-    // Categoria: socio membership for FCs, empty for NCs/placeholders
+    // Categoria: socio membership for FCs; blank for NCs and FCs not in Facturador
     const categoria =
-      tipo === 'NC' ? '' : facturadorEntry ? facturadorEntry.membresia : '-';
+      tipo === 'NC' ? '' : facturadorEntry ? facturadorEntry.membresia : '';
 
     // Movimientos aggregation (for FC only)
     const movAgg = tipo === 'FC' ? aggregateMovimientos(factura.fileId, movimientos) : null;
 
-    // fechaCobro and recibido
+    // fechaCobro and recibido — recibido is `null` (blank cell) when nothing
+    // was received: unpaid FC, FC cancelled by NC, or placeholder.
     let fechaCobro = '';
-    let recibido = 0;
+    let recibido: number | null = null;
 
     if (tipo === 'FC') {
       const cancellingNC = cancellingNCs.get(factura.fileId) ?? null;
       if (cancellingNC) {
-        // Cancelled by an NC — show NC nro, no cash received
+        // Cancelled by an NC — show NC nro, no cash received → leave recibido null
         fechaCobro = `NC ${normalizeNro(cancellingNC.nroFactura)}`;
-        recibido = 0;
       } else if (movAgg) {
         fechaCobro = movAgg.latestFecha;
         recibido = movAgg.totalCredito;

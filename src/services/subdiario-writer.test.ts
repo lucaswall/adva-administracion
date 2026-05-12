@@ -92,7 +92,7 @@ const MOCK_ROWS: SubdiarioRow[] = [
     concepto: 'Servicios',
     categoria: 'Ingresos',
     fechaCobro: '',
-    recibido: 0,
+    recibido: null,
     notas: '',
   },
 ];

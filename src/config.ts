@@ -354,7 +354,7 @@ export function resetConfig(): void {
 
 /**
  * Returns the Facturador de Socios spreadsheet ID.
- * Optional — if not set, Subdiario builds but with categoria='-' for all rows.
+ * Optional — if not set, Subdiario builds but with categoria='' for all rows.
  *
  * @returns Spreadsheet ID string, or empty string if unset
  */

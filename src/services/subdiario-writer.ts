@@ -394,7 +394,8 @@ export async function syncSubdiario(
         /^\d{4}-\d{2}-\d{2}$/.test(row.fechaCobro)
           ? { type: 'date' as const, value: row.fechaCobro }
           : row.fechaCobro,
-        { type: 'number' as const, value: row.recibido },
+        // recibido: null → blank cell (unpaid / cancelled by NC / placeholder)
+        row.recibido === null ? '' : { type: 'number' as const, value: row.recibido },
         row.notas,
       ]);
 

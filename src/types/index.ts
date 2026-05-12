@@ -1124,7 +1124,7 @@ export interface SubdiarioRow {
   total: number;
   /** Brief description/concept */
   concepto: string;
-  /** Membership tier for socios ('Micro', 'Empresa', etc.), '-' for non-socios, '' for NCs/placeholders */
+  /** Membership tier for socios ('Micro', 'Empresa', etc.), '' for non-socios/NCs/placeholders */
   categoria: string;
   /**
    * Date of payment (YYYY-MM-DD), or 'NC 00003-00000140' if cancelled by NC,
@@ -1132,10 +1132,10 @@ export interface SubdiarioRow {
    */
   fechaCobro: string;
   /**
-   * Sum of matched movimientos credito (positive for FCs, same as total for NCs,
-   * 0 if cancelled by NC or placeholder)
+   * Sum of matched movimientos credito (positive for FCs, same as total for NCs).
+   * `null` when nothing was received: FC unpaid, FC cancelled by NC, or placeholder.
    */
-  recibido: number;
+  recibido: number | null;
   /** Additional annotations: socio info, export TC, retencion, multi-cuota, etc. */
   notas: string;
 }
