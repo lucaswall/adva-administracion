@@ -55,6 +55,10 @@ vi.mock('../services/pagos-pendientes.js', () => ({
   syncCobrosPendientes: vi.fn().mockResolvedValue({ ok: true, value: 0 }),
 }));
 
+vi.mock('../services/subdiario-writer.js', () => ({
+  syncSubdiario: vi.fn().mockResolvedValue({ ok: true, value: { rowsWritten: 0, gapsDetected: 0 } }),
+}));
+
 // Create mockable matcher methods
 let mockMatchMovement = vi.fn();
 let mockMatchCreditMovement = vi.fn();
@@ -94,6 +98,7 @@ import { updateDetalle } from '../services/movimientos-detalle.js';
 import { warn, error } from '../utils/logger.js';
 import { prefetchExchangeRates } from '../utils/exchange-rate.js';
 import { syncPagosPendientes, syncCobrosPendientes } from '../services/pagos-pendientes.js';
+import { syncSubdiario } from '../services/subdiario-writer.js';
 
 describe('getRequiredColumnIndex', () => {
   it('returns correct index when header exists', () => {
@@ -4039,5 +4044,143 @@ describe('pagadaErrors tracking (ADV-202)', () => {
 
     // batchUpdate must NOT be called when detalle failed
     expect(batchUpdate).not.toHaveBeenCalled();
+  });
+});
+
+describe('syncSubdiario called after syncCobrosPendientes (ADV-248)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.useFakeTimers();
+    mockMatchMovement = vi.fn().mockReturnValue({
+      matchType: 'no_match',
+      description: '',
+      matchedFileId: '',
+      confidence: 'LOW',
+    });
+    mockMatchCreditMovement = vi.fn().mockReturnValue({
+      matchType: 'no_match',
+      description: '',
+      matchedFileId: '',
+      confidence: 'LOW',
+    });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  function setupBase(withDashboard = true) {
+    const mockFolderStructure: Record<string, unknown> = {
+      controlIngresosId: 'ingresos-id',
+      controlEgresosId: 'egresos-id',
+      rootId: 'root-id',
+      bankSpreadsheets: new Map(),
+      movimientosSpreadsheets: new Map([['BBVA', 'bbva-id']]),
+    };
+    if (withDashboard) {
+      mockFolderStructure['dashboardOperativoId'] = 'dashboard-id';
+    }
+
+    vi.mocked(withLock).mockImplementation(async (_id, fn) => {
+      const result = await fn();
+      return { ok: true, value: result };
+    });
+
+    vi.mocked(getCachedFolderStructure).mockReturnValue(mockFolderStructure as any);
+    vi.mocked(getValues).mockResolvedValue({ ok: true, value: [['header']] });
+    vi.mocked(getMovimientosToFill).mockResolvedValue({ ok: true, value: [] });
+    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: 0 });
+  }
+
+  it('calls syncSubdiario after syncPagosPendientes and syncCobrosPendientes', async () => {
+    setupBase();
+
+    const callOrder: string[] = [];
+    vi.mocked(syncPagosPendientes).mockImplementation(async () => {
+      callOrder.push('syncPagosPendientes');
+      return { ok: true, value: 0 };
+    });
+    vi.mocked(syncCobrosPendientes).mockImplementation(async () => {
+      callOrder.push('syncCobrosPendientes');
+      return { ok: true, value: 0 };
+    });
+    vi.mocked(syncSubdiario).mockImplementation(async () => {
+      callOrder.push('syncSubdiario');
+      return { ok: true, value: { rowsWritten: 0, gapsDetected: 0 } };
+    });
+
+    const resultPromise = matchAllMovimientos();
+    await vi.runAllTimersAsync();
+    await resultPromise;
+
+    expect(callOrder.indexOf('syncSubdiario')).toBeGreaterThan(
+      callOrder.indexOf('syncCobrosPendientes')
+    );
+    expect(callOrder.indexOf('syncSubdiario')).toBeGreaterThan(
+      callOrder.indexOf('syncPagosPendientes')
+    );
+  });
+
+  it('calls syncSubdiario with rootId, controlIngresosId, controlEgresosId, movimientosSpreadsheets', async () => {
+    setupBase();
+
+    const resultPromise = matchAllMovimientos();
+    await vi.runAllTimersAsync();
+    await resultPromise;
+
+    expect(syncSubdiario).toHaveBeenCalledWith(
+      'root-id',           // rootFolderId
+      'ingresos-id',       // controlIngresosId
+      'egresos-id',        // controlEgresosId
+      expect.any(Number),  // facturadorYear (current year)
+      expect.any(Map)      // movimientosSpreadsheets
+    );
+  });
+
+  it('match cycle completes even when syncSubdiario returns Result.err', async () => {
+    setupBase();
+    vi.mocked(syncSubdiario).mockResolvedValue({
+      ok: false,
+      error: new Error('Subdiario write failed'),
+    });
+
+    const resultPromise = matchAllMovimientos();
+    await vi.runAllTimersAsync();
+    const result = await resultPromise;
+
+    // Match cycle must succeed despite subdiario error
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.skipped).toBe(false);
+    }
+    // syncSubdiario was still called
+    expect(syncSubdiario).toHaveBeenCalled();
+  });
+
+  it('match cycle completes even when syncSubdiario throws', async () => {
+    setupBase();
+    vi.mocked(syncSubdiario).mockRejectedValue(new Error('Subdiario unexpected error'));
+
+    const resultPromise = matchAllMovimientos();
+    await vi.runAllTimersAsync();
+    const result = await resultPromise;
+
+    // Match cycle must succeed despite subdiario throw
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.skipped).toBe(false);
+    }
+  });
+
+  it('syncSubdiario is still called when dashboardOperativoId is absent (not gated on dashboard)', async () => {
+    setupBase(false); // no dashboardOperativoId
+
+    const resultPromise = matchAllMovimientos();
+    await vi.runAllTimersAsync();
+    await resultPromise;
+
+    // syncSubdiario is always called (it uses rootId, not dashboardId)
+    // but should still run without crashing
+    expect(syncSubdiario).toHaveBeenCalled();
   });
 });

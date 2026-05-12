@@ -66,6 +66,7 @@ const SPREADSHEET_NAMES = {
   controlIngresos: 'Control de Ingresos',
   controlEgresos: 'Control de Egresos',
   dashboardOperativo: 'Dashboard Operativo Contable',
+  subdiarioVentas: 'Subdiario de Ventas',
 } as const;
 
 /** Cached folder structure */
@@ -965,6 +966,18 @@ export async function discoverFolderStructure(): Promise<Result<FolderStructure,
   const movimientosResult = await discoverMovimientosSpreadsheets(rootId);
   if (!movimientosResult.ok) return movimientosResult;
 
+  // Attempt to discover existing Subdiario de Ventas spreadsheet (don't create — writer creates lazily)
+  let subdiarioId: string | undefined;
+  const subdiarioSearchResult = await findByName(rootId, SPREADSHEET_NAMES.subdiarioVentas, SPREADSHEET_MIME);
+  if (subdiarioSearchResult.ok && subdiarioSearchResult.value) {
+    subdiarioId = subdiarioSearchResult.value.id;
+    debug('Found existing Subdiario de Ventas spreadsheet', {
+      module: 'folder-structure',
+      phase: 'discovery',
+      subdiarioId,
+    });
+  }
+
   // Build and cache the structure
   const structure: FolderStructure = {
     rootId,
@@ -981,6 +994,7 @@ export async function discoverFolderStructure(): Promise<Result<FolderStructure,
     monthFolders: new Map(),
     bankAccountFolders: new Map(),
     bankAccountSpreadsheets: new Map(),
+    ...(subdiarioId !== undefined ? { subdiarioId } : {}),
     lastRefreshed: new Date(),
   };
 
