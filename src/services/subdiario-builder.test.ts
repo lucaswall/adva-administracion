@@ -501,6 +501,47 @@ describe('buildSubdiarioRows', () => {
     expect(ncGaps[0].nro).toBe('00005-00000011');
   });
 
+  // ── Test 14f: Retencion respects authoritative matchedFacturaFileId ──────
+  // When two facturas share CUIT + importeTotal and a single retencion is
+  // already matched (via retencion-factura-matcher) to one of them, the
+  // builder must not reuse it for the other factura. Codex P2 finding on PR 116.
+  it('retencion claimed by another factura is not reused by an amount-only match', () => {
+    const fcA = makeFc({
+      fileId: 'fcA-ret',
+      nroFactura: '00009-00000001',
+      importeTotal: 1_000_000,
+      fechaEmision: `${CURRENT_YEAR}-02-01`,
+    });
+    const fcB = makeFc({
+      fileId: 'fcB-ret',
+      nroFactura: '00009-00000002',
+      importeTotal: 1_000_000, // same client, same total
+      fechaEmision: `${CURRENT_YEAR}-02-02`,
+    });
+    // Retencion is authoritatively matched to fcA (by retencion-factura-matcher)
+    const ret = makeRetCert({
+      fileId: 'ret-1',
+      montoComprobante: 1_000_000,
+      montoRetencion: 50_000,
+      matchedFacturaFileId: 'fcA-ret',
+    });
+
+    const rows = buildSubdiarioRows(
+      makeInput({
+        facturasEmitidas: [fcA, fcB],
+        retencionesRecibidas: [ret],
+      })
+    );
+
+    const rowA = rows.find((r) => r.nro === '00009-00000001');
+    const rowB = rows.find((r) => r.nro === '00009-00000002');
+
+    // fcA (claimed by ret): notas mentions the retencion
+    expect(rowA?.notas).toContain('Retencion Ganancias');
+    // fcB (not claimed): notas does NOT mention retencion — no double-use
+    expect(rowB?.notas).not.toContain('Retencion');
+  });
+
   // ── Test 14e: Partially paid prior-year FC stays in scope ────────────────
   // Rule (e) drops a prior-year FC when all matched movimientos are in prior
   // years. But that's only correct if those movimientos COVER the total.

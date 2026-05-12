@@ -290,11 +290,23 @@ function findMatchingRetencion(
   recibidoARS: number | undefined,
   totalARS: number
 ): Retencion | null {
+  // Pass 1: authoritative match. retencion-factura-matcher writes
+  // matchedFacturaFileId on the retencion when it links one. Honour it
+  // regardless of amount predicate — the linker has already validated the pair.
   for (const ret of retenciones) {
+    if (ret.matchedFacturaFileId === factura.fileId) return ret;
+  }
+
+  // Pass 2: amount predicate against unclaimed retenciones only. A retencion
+  // already linked to a DIFFERENT factura must not be reused here, even when
+  // CUIT + total coincide — that would attach the same Retencion note to two
+  // invoices for the same client with the same total.
+  const tolerance = Math.max(1, totalARS * 0.01);
+  for (const ret of retenciones) {
+    if (ret.matchedFacturaFileId && ret.matchedFacturaFileId !== factura.fileId) continue;
     if (ret.cuitAgenteRetencion !== factura.cuitReceptor) continue;
 
     // Primary: montoComprobante matches importeTotal (same currency — retenciones are ARS)
-    const tolerance = Math.max(1, totalARS * 0.01);
     if (Math.abs(ret.montoComprobante - totalARS) <= tolerance) {
       return ret;
     }
