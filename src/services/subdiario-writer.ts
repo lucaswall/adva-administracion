@@ -247,14 +247,31 @@ export async function syncSubdiario(
 
     // Step 1: Resolve subdiarioId
     const resolveResult = await resolveSubdiarioId(rootFolderId);
-    if (!resolveResult.ok) return resolveResult;
+    if (!resolveResult.ok) {
+      logError('Failed to resolve Subdiario workbook', {
+        module: 'subdiario-writer',
+        phase: 'resolve-workbook',
+        error: resolveResult.error.message,
+        correlationId,
+      });
+      return resolveResult;
+    }
 
     const { id: subdiarioId, isNew } = resolveResult.value;
 
     // Step 2: Initialize sheet on first creation
     if (isNew) {
       const initResult = await initializeComprobantesSheet(subdiarioId);
-      if (!initResult.ok) return initResult;
+      if (!initResult.ok) {
+        logError('Failed to initialize Comprobantes sheet', {
+          module: 'subdiario-writer',
+          phase: 'init-sheet',
+          spreadsheetId: subdiarioId,
+          error: initResult.error.message,
+          correlationId,
+        });
+        return initResult;
+      }
     }
 
     // Step 3: Read source data
@@ -266,7 +283,7 @@ export async function syncSubdiario(
     ]);
 
     if (!facturasResult.ok) {
-      warn('Failed to read Facturas Emitidas', {
+      logError('Failed to read Facturas Emitidas', {
         module: 'subdiario-writer',
         phase: 'read-data',
         error: facturasResult.error.message,
@@ -275,7 +292,7 @@ export async function syncSubdiario(
       return facturasResult;
     }
     if (!pagosResult.ok) {
-      warn('Failed to read Pagos Recibidos', {
+      logError('Failed to read Pagos Recibidos', {
         module: 'subdiario-writer',
         phase: 'read-data',
         error: pagosResult.error.message,
@@ -284,7 +301,7 @@ export async function syncSubdiario(
       return pagosResult;
     }
     if (!retencionesResult.ok) {
-      warn('Failed to read Retenciones Recibidas', {
+      logError('Failed to read Retenciones Recibidas', {
         module: 'subdiario-writer',
         phase: 'read-data',
         error: retencionesResult.error.message,
@@ -295,7 +312,7 @@ export async function syncSubdiario(
 
     const facturadorResult = await readFacturador(facturadorYear);
     if (!facturadorResult.ok) {
-      warn('Failed to read Facturador de Socios', {
+      logError('Failed to read Facturador de Socios', {
         module: 'subdiario-writer',
         phase: 'read-data',
         error: facturadorResult.error.message,

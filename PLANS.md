@@ -1,5 +1,6 @@
 # Implementation Plan
 
+**Status:** COMPLETE
 **Created:** 2026-05-12
 **Source:** Inline request: Build a new Subdiario de Ventas spreadsheet — an auto-synced registry of all comprobantes (FC / NC) emitted by ADVA, joined with the Facturador de Socios for socio metadata and with bank movimientos for cobro data, with AFIP numbering-gap detection and multi-installment support. Replaces the manually-maintained `ADVA SUBDIARIO VENTAS 2025` workbook.
 **Linear Issues:** [ADV-245](https://linear.app/lw-claude/issue/ADV-245/subdiario-extract-condicionivareceptor-for-factura-emitida-schema), [ADV-246](https://linear.app/lw-claude/issue/ADV-246/subdiario-facturador-de-socios-reader-service), [ADV-247](https://linear.app/lw-claude/issue/ADV-247/subdiario-builder-pure-function-scope-join-nc-linkage-gap-detection), [ADV-248](https://linear.app/lw-claude/issue/ADV-248/subdiario-writer-workbook-creation-sync-hook-in-matchallmovimientos), [ADV-249](https://linear.app/lw-claude/issue/ADV-249/subdiario-post-apirebuild-subdiario-endpoint), [ADV-250](https://linear.app/lw-claude/issue/ADV-250/subdiario-apps-script-menu-entry-reconstruir-subdiario-de-ventas)
@@ -590,3 +591,45 @@ After Fix 6, bug-hunter identified that `clearSheetData` and `appendRowsWithLink
 ### Continuation Status
 
 [All Fix Plan tasks completed.]
+
+### Review Findings
+
+**Reviewed:** 2026-05-12 (3 reviewers — security, reliability, quality — parallel; 9 changed files)
+**Files reviewed:** 5 production + 4 test files (subdiario-writer.ts, subdiario-builder.ts, facturador-reader.ts, routes/subdiario.ts, bank/match-movimientos.ts + their .test.ts)
+
+**FIXES (3 — applied inline with TDD; Linear issues created in Merge):**
+
+1. **[medium] [error]** `src/services/subdiario-writer.ts:250,257` — `resolveSubdiarioId` and `initializeComprobantesSheet` failure paths returned `Result.err` with no log anywhere. After ADV-256 removed caller-side logging, these became silent failures invisible at any log level. Drive quota / auth errors would not surface in production. → [ADV-260](https://linear.app/lw-claude/issue/ADV-260) — Fixed inline with 3 new tests asserting `logger.error` is invoked for findByName / createSpreadsheet / renameSheet failures.
+2. **[medium] [convention]** `src/services/subdiario-writer.ts:269,277,286,298` — Four hard-failure read paths (Facturas Emitidas, Pagos Recibidos, Retenciones Recibidas, Facturador) logged at `warn` despite aborting the sync. Per CLAUDE.md `warn`=handled, `error`=failure. Under `LOG_LEVEL=error` these would be invisible. → [ADV-261](https://linear.app/lw-claude/issue/ADV-261) — Fixed inline with 4 new tests asserting `logger.error` (not `logger.warn`) is invoked for each path. The 3 remaining `warn` calls in the file (lines ~161, ~175, ~385) are for soft fall-through paths that `continue` rather than abort, and are correctly kept as `warn`.
+3. **[low] [type]** `src/services/facturador-reader.test.ts:34,233` — `makeRow` helper declared `fecha: string` while `importe` correctly accepted `string | number`. Asymmetry forced an `as unknown as string` cast at line 233. → [ADV-262](https://linear.app/lw-claude/issue/ADV-262) — Fixed inline by widening `fecha` to `string | number` and removing the cast. Pure test-infrastructure cleanup; no production behaviour change.
+
+**DISCARDED (0)** — All findings were real bugs in the reviewed files.
+
+### Linear Updates (Review → Merge)
+- ADV-251 → Merge
+- ADV-252 → Merge
+- ADV-253 → Merge
+- ADV-254 → Merge
+- ADV-255 → Merge
+- ADV-256 → Merge
+- ADV-257 → Merge
+- ADV-258 → Merge
+- ADV-259 → Merge
+
+### Linear Issues Created (inline fixes, Merge state)
+- ADV-260 [medium] resolveSubdiarioId + initializeComprobantesSheet silent failures
+- ADV-261 [medium] hard read failures logged at warn (should be error)
+- ADV-262 [low] facturador-reader.test makeRow.fecha widening
+
+### Inline Fix Verification
+- 7 new tests added in `subdiario-writer.test.ts` under `describe('Error logging — review-iteration-2 follow-up')`; all pass.
+- bug-hunter: no findings on the fix diff.
+- verifier (full mode): 2393 tests pass; TypeScript clean; build clean; zero warnings.
+
+<!-- REVIEW COMPLETE -->
+
+---
+
+## Status: COMPLETE
+
+All tasks implemented and reviewed successfully. All Linear issues (ADV-245..262) moved to Merge.

@@ -63,6 +63,7 @@ vi.mock('../utils/correlation.js', () => ({
 
 import * as facturadorReader from './facturador-reader.js';
 import * as subdiarioBuilder from './subdiario-builder.js';
+import * as logger from '../utils/logger.js';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -542,6 +543,227 @@ describe('syncSubdiario', () => {
       if (!result.ok) {
         expect(result.error.message).toContain('Append failed');
       }
+    });
+  });
+
+  describe('Error logging — review-iteration-2 follow-up', () => {
+    // After ADV-256 removed double-logging at the route + match-movimientos layer,
+    // the writer is the single source of cause logging. Verify every Result.err
+    // path emits a logError so failures are visible under LOG_LEVEL=error.
+
+    it('logs error when findByName fails (resolveSubdiarioId)', async () => {
+      vi.mocked(folderStructure.getCachedFolderStructure).mockReturnValue(
+        makeCachedStructure()
+      );
+      vi.mocked(drive.findByName).mockResolvedValue({
+        ok: false,
+        error: new Error('Drive search failed'),
+      });
+
+      const result = await syncSubdiario(
+        ROOT_ID,
+        CONTROL_INGRESOS_ID,
+        CONTROL_EGRESOS_ID,
+        CURRENT_YEAR,
+        new Map()
+      );
+
+      expect(result.ok).toBe(false);
+      const errorCalls = vi.mocked(logger.error).mock.calls;
+      expect(
+        errorCalls.some(([, ctx]) =>
+          (ctx as { error?: string } | undefined)?.error === 'Drive search failed'
+        )
+      ).toBe(true);
+    });
+
+    it('logs error when createSpreadsheet fails (resolveSubdiarioId)', async () => {
+      vi.mocked(folderStructure.getCachedFolderStructure).mockReturnValue(
+        makeCachedStructure()
+      );
+      vi.mocked(drive.findByName).mockResolvedValue({ ok: true, value: null });
+      vi.mocked(drive.createSpreadsheet).mockResolvedValue({
+        ok: false,
+        error: new Error('Drive quota exceeded'),
+      });
+
+      const result = await syncSubdiario(
+        ROOT_ID,
+        CONTROL_INGRESOS_ID,
+        CONTROL_EGRESOS_ID,
+        CURRENT_YEAR,
+        new Map()
+      );
+
+      expect(result.ok).toBe(false);
+      const errorCalls = vi.mocked(logger.error).mock.calls;
+      expect(
+        errorCalls.some(([, ctx]) =>
+          (ctx as { error?: string } | undefined)?.error === 'Drive quota exceeded'
+        )
+      ).toBe(true);
+    });
+
+    it('logs error when initializeComprobantesSheet fails', async () => {
+      vi.mocked(folderStructure.getCachedFolderStructure).mockReturnValue(
+        makeCachedStructure()
+      );
+      vi.mocked(drive.findByName).mockResolvedValue({ ok: true, value: null });
+      vi.mocked(drive.createSpreadsheet).mockResolvedValue({
+        ok: true,
+        value: { id: NEW_SUBDIARIO_ID, name: 'Subdiario de Ventas', mimeType: SPREADSHEET_MIME },
+      });
+      vi.mocked(sheets.renameSheet).mockResolvedValue({
+        ok: false,
+        error: new Error('Rename failed'),
+      });
+
+      const result = await syncSubdiario(
+        ROOT_ID,
+        CONTROL_INGRESOS_ID,
+        CONTROL_EGRESOS_ID,
+        CURRENT_YEAR,
+        new Map()
+      );
+
+      expect(result.ok).toBe(false);
+      const errorCalls = vi.mocked(logger.error).mock.calls;
+      expect(
+        errorCalls.some(([, ctx]) =>
+          (ctx as { error?: string } | undefined)?.error === 'Rename failed'
+        )
+      ).toBe(true);
+    });
+
+    it('logs error (not warn) when Facturas Emitidas read fails', async () => {
+      vi.mocked(folderStructure.getCachedFolderStructure).mockReturnValue(
+        makeCachedStructure({ subdiarioId: SUBDIARIO_ID })
+      );
+      vi.mocked(sheets.getValues).mockImplementation(async (_id: string, range: string) => {
+        if (range.startsWith('Facturas Emitidas')) {
+          return { ok: false, error: new Error('Facturas read failed') };
+        }
+        return { ok: true, value: EMPTY_SHEET_DATA };
+      });
+
+      await syncSubdiario(
+        ROOT_ID,
+        CONTROL_INGRESOS_ID,
+        CONTROL_EGRESOS_ID,
+        CURRENT_YEAR,
+        new Map()
+      );
+
+      const errorCalls = vi.mocked(logger.error).mock.calls;
+      expect(
+        errorCalls.some(([, ctx]) =>
+          (ctx as { error?: string } | undefined)?.error === 'Facturas read failed'
+        )
+      ).toBe(true);
+      // The warn should NOT be the sole log channel for this hard failure
+      const warnCalls = vi.mocked(logger.warn).mock.calls;
+      expect(
+        warnCalls.some(([, ctx]) =>
+          (ctx as { error?: string } | undefined)?.error === 'Facturas read failed'
+        )
+      ).toBe(false);
+    });
+
+    it('logs error (not warn) when Pagos Recibidos read fails', async () => {
+      vi.mocked(folderStructure.getCachedFolderStructure).mockReturnValue(
+        makeCachedStructure({ subdiarioId: SUBDIARIO_ID })
+      );
+      vi.mocked(sheets.getValues).mockImplementation(async (_id: string, range: string) => {
+        if (range.startsWith('Pagos Recibidos')) {
+          return { ok: false, error: new Error('Pagos read failed') };
+        }
+        return { ok: true, value: EMPTY_SHEET_DATA };
+      });
+
+      await syncSubdiario(
+        ROOT_ID,
+        CONTROL_INGRESOS_ID,
+        CONTROL_EGRESOS_ID,
+        CURRENT_YEAR,
+        new Map()
+      );
+
+      const errorCalls = vi.mocked(logger.error).mock.calls;
+      expect(
+        errorCalls.some(([, ctx]) =>
+          (ctx as { error?: string } | undefined)?.error === 'Pagos read failed'
+        )
+      ).toBe(true);
+      const warnCalls = vi.mocked(logger.warn).mock.calls;
+      expect(
+        warnCalls.some(([, ctx]) =>
+          (ctx as { error?: string } | undefined)?.error === 'Pagos read failed'
+        )
+      ).toBe(false);
+    });
+
+    it('logs error (not warn) when Retenciones Recibidas read fails', async () => {
+      vi.mocked(folderStructure.getCachedFolderStructure).mockReturnValue(
+        makeCachedStructure({ subdiarioId: SUBDIARIO_ID })
+      );
+      vi.mocked(sheets.getValues).mockImplementation(async (_id: string, range: string) => {
+        if (range.startsWith('Retenciones Recibidas')) {
+          return { ok: false, error: new Error('Retenciones read failed') };
+        }
+        return { ok: true, value: EMPTY_SHEET_DATA };
+      });
+
+      await syncSubdiario(
+        ROOT_ID,
+        CONTROL_INGRESOS_ID,
+        CONTROL_EGRESOS_ID,
+        CURRENT_YEAR,
+        new Map()
+      );
+
+      const errorCalls = vi.mocked(logger.error).mock.calls;
+      expect(
+        errorCalls.some(([, ctx]) =>
+          (ctx as { error?: string } | undefined)?.error === 'Retenciones read failed'
+        )
+      ).toBe(true);
+      const warnCalls = vi.mocked(logger.warn).mock.calls;
+      expect(
+        warnCalls.some(([, ctx]) =>
+          (ctx as { error?: string } | undefined)?.error === 'Retenciones read failed'
+        )
+      ).toBe(false);
+    });
+
+    it('logs error (not warn) when Facturador read fails', async () => {
+      vi.mocked(folderStructure.getCachedFolderStructure).mockReturnValue(
+        makeCachedStructure({ subdiarioId: SUBDIARIO_ID })
+      );
+      vi.mocked(facturadorReader.readFacturador).mockResolvedValue({
+        ok: false,
+        error: new Error('Facturador read failed'),
+      });
+
+      await syncSubdiario(
+        ROOT_ID,
+        CONTROL_INGRESOS_ID,
+        CONTROL_EGRESOS_ID,
+        CURRENT_YEAR,
+        new Map()
+      );
+
+      const errorCalls = vi.mocked(logger.error).mock.calls;
+      expect(
+        errorCalls.some(([, ctx]) =>
+          (ctx as { error?: string } | undefined)?.error === 'Facturador read failed'
+        )
+      ).toBe(true);
+      const warnCalls = vi.mocked(logger.warn).mock.calls;
+      expect(
+        warnCalls.some(([, ctx]) =>
+          (ctx as { error?: string } | undefined)?.error === 'Facturador read failed'
+        )
+      ).toBe(false);
     });
   });
 

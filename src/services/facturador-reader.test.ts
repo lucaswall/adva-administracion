@@ -40,7 +40,7 @@ function makeRow(
   membresia: string,
   cobroId: string,
   condIVA: string,
-  fecha: string,
+  fecha: string | number,
   importe: string | number,
   enviado: string,
   pagado: string,
@@ -230,7 +230,7 @@ describe('readFacturador', () => {
         value: [
           HEADER_ROW,
           // fecha cell is the numeric serial 45993 (not a string)
-          makeRow('11', '0006-00000011', 'TEST SA', 'Juan', 'j@t.com', 'RI', 'c11', 'RI', 45993 as unknown as string, '500,00', 'SI', '', ''),
+          makeRow('11', '0006-00000011', 'TEST SA', 'Juan', 'j@t.com', 'RI', 'c11', 'RI', 45993, '500,00', 'SI', '', ''),
         ],
       });
 
