@@ -222,6 +222,26 @@ describe('readFacturador', () => {
       }
     });
 
+    it('normalizes numeric serial date to YYYY-MM-DD (ADV-255)', async () => {
+      // Sheets `UNFORMATTED_VALUE` + `SERIAL_NUMBER` returns CellDate columns as numbers.
+      // 45993 corresponds to 2025-12-02.
+      vi.mocked(getValues).mockResolvedValue({
+        ok: true,
+        value: [
+          HEADER_ROW,
+          // fecha cell is the numeric serial 45993 (not a string)
+          makeRow('11', '0006-00000011', 'TEST SA', 'Juan', 'j@t.com', 'RI', 'c11', 'RI', 45993 as unknown as string, '500,00', 'SI', '', ''),
+        ],
+      });
+
+      const result = await readFacturador(2026);
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        const entry = result.value.get('00006-00000011');
+        expect(entry?.fecha).toBe('2025-12-02');
+      }
+    });
+
     it('should preserve NC number in pagadoCol verbatim', async () => {
       vi.mocked(getValues).mockResolvedValue({
         ok: true,

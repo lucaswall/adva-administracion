@@ -232,7 +232,9 @@ describe('POST /api/rebuild-subdiario', () => {
     expect(JSON.stringify(body)).not.toContain('XYZ');
   });
 
-  it('raw error is logged via Pino on syncSubdiario failure', async () => {
+  it('route does not double-log inner error when syncSubdiario returns Result.err (ADV-256)', async () => {
+    // The writer is the single source of truth for cause logging.
+    // The route must NOT re-log the inner error.message that the writer already logged.
     mockSyncSubdiario.mockResolvedValue({
       ok: false,
       error: new Error('Drive quota exceeded: spreadsheet write'),
@@ -244,12 +246,13 @@ describe('POST /api/rebuild-subdiario', () => {
       headers: { authorization: `Bearer ${API_SECRET}` },
     });
 
-    expect(vi.mocked(logger.error)).toHaveBeenCalledWith(
-      expect.any(String),
-      expect.objectContaining({
-        error: expect.stringContaining('Drive quota'),
-      })
-    );
+    // logError must NOT have been called with the writer's inner error message
+    const errorCalls = vi.mocked(logger.error).mock.calls;
+    const calledWithInnerCause = errorCalls.some((args) => {
+      const meta = args[1] as { error?: string } | undefined;
+      return typeof meta?.error === 'string' && meta.error.includes('Drive quota');
+    });
+    expect(calledWithInnerCause).toBe(false);
   });
 
   it('lock is acquired using PROCESSING_LOCK_ID (document-processing)', async () => {

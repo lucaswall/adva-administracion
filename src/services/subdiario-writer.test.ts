@@ -361,6 +361,190 @@ describe('syncSubdiario', () => {
     });
   });
 
+  describe('readMovimientosRows column mapping (ADV-251)', () => {
+    it('maps row[2] to debito and row[3] to credito per canonical schema', async () => {
+      vi.mocked(folderStructure.getCachedFolderStructure).mockReturnValue(
+        makeCachedStructure({ subdiarioId: SUBDIARIO_ID })
+      );
+
+      const movsSpreadsheetId = 'bank-movs-id';
+      const movsMap = new Map<string, string>([['BBVA ARS', movsSpreadsheetId]]);
+
+      // Two rows in canonical order:
+      //   A fecha | B concepto | C debito | D credito | E saldo | F saldoCalc | G fileId | H type | I detalle
+      const outgoingRow: CellValue[] = ['2025-03-15', 'Pago proveedor', 50000, 0, 100000, 100000, '', '', ''];
+      const incomingRow: CellValue[] = ['2025-03-16', 'Cobro cliente', 0, 75000, 175000, 175000, '', '', ''];
+
+      vi.mocked(sheets.getSheetMetadata).mockImplementation(async (id: string) => {
+        if (id === movsSpreadsheetId) {
+          return { ok: true, value: [{ title: '2025-03', sheetId: 1, index: 0 }] };
+        }
+        return { ok: true, value: [{ title: 'Sheet1', sheetId: 0, index: 0 }] };
+      });
+
+      vi.mocked(sheets.getValues).mockImplementation(async (id: string, range: string) => {
+        if (id === movsSpreadsheetId && range.startsWith('2025-03')) {
+          return {
+            ok: true,
+            value: [
+              ['fecha', 'concepto', 'debito', 'credito', 'saldo', 'saldoCalc', 'fileId', 'type', 'detalle'],
+              outgoingRow,
+              incomingRow,
+            ],
+          };
+        }
+        return { ok: true, value: EMPTY_SHEET_DATA };
+      });
+
+      await syncSubdiario(ROOT_ID, CONTROL_INGRESOS_ID, CONTROL_EGRESOS_ID, CURRENT_YEAR, movsMap);
+
+      expect(subdiarioBuilder.buildSubdiarioRows).toHaveBeenCalled();
+      const input = vi.mocked(subdiarioBuilder.buildSubdiarioRows).mock.calls[0]?.[0];
+      expect(input).toBeDefined();
+      expect(input!.movimientos).toHaveLength(2);
+
+      const out = input!.movimientos[0]!;
+      const inc = input!.movimientos[1]!;
+
+      // Outgoing: debito=50000, credito=null/0
+      expect(out.debito).toBe(50000);
+      expect(out.credito).toBeNull();
+      // Incoming: credito=75000, debito=null/0
+      expect(inc.credito).toBe(75000);
+      expect(inc.debito).toBeNull();
+    });
+  });
+
+  describe('I/O failure propagation (ADV-257)', () => {
+    it('returns Result.err when Facturas Emitidas getValues fails', async () => {
+      vi.mocked(folderStructure.getCachedFolderStructure).mockReturnValue(
+        makeCachedStructure({ subdiarioId: SUBDIARIO_ID })
+      );
+      vi.mocked(sheets.getValues).mockImplementation(async (_id: string, range: string) => {
+        if (range.startsWith('Facturas Emitidas')) {
+          return { ok: false, error: new Error('Facturas Emitidas read failed') };
+        }
+        return { ok: true, value: EMPTY_SHEET_DATA };
+      });
+
+      const result = await syncSubdiario(
+        ROOT_ID,
+        CONTROL_INGRESOS_ID,
+        CONTROL_EGRESOS_ID,
+        CURRENT_YEAR,
+        new Map()
+      );
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.error.message).toContain('Facturas Emitidas read failed');
+      }
+      // Must not write after a failed read
+      expect(sheets.appendRowsWithLinks).not.toHaveBeenCalled();
+      expect(sheets.clearSheetData).not.toHaveBeenCalled();
+    });
+
+    it('returns Result.err when Pagos Recibidos getValues fails', async () => {
+      vi.mocked(folderStructure.getCachedFolderStructure).mockReturnValue(
+        makeCachedStructure({ subdiarioId: SUBDIARIO_ID })
+      );
+      vi.mocked(sheets.getValues).mockImplementation(async (_id: string, range: string) => {
+        if (range.startsWith('Pagos Recibidos')) {
+          return { ok: false, error: new Error('Pagos Recibidos read failed') };
+        }
+        return { ok: true, value: EMPTY_SHEET_DATA };
+      });
+
+      const result = await syncSubdiario(
+        ROOT_ID,
+        CONTROL_INGRESOS_ID,
+        CONTROL_EGRESOS_ID,
+        CURRENT_YEAR,
+        new Map()
+      );
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.error.message).toContain('Pagos Recibidos read failed');
+      }
+      expect(sheets.appendRowsWithLinks).not.toHaveBeenCalled();
+    });
+
+    it('returns Result.err when Retenciones Recibidas getValues fails', async () => {
+      vi.mocked(folderStructure.getCachedFolderStructure).mockReturnValue(
+        makeCachedStructure({ subdiarioId: SUBDIARIO_ID })
+      );
+      vi.mocked(sheets.getValues).mockImplementation(async (_id: string, range: string) => {
+        if (range.startsWith('Retenciones Recibidas')) {
+          return { ok: false, error: new Error('Retenciones read failed') };
+        }
+        return { ok: true, value: EMPTY_SHEET_DATA };
+      });
+
+      const result = await syncSubdiario(
+        ROOT_ID,
+        CONTROL_INGRESOS_ID,
+        CONTROL_EGRESOS_ID,
+        CURRENT_YEAR,
+        new Map()
+      );
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.error.message).toContain('Retenciones read failed');
+      }
+      expect(sheets.appendRowsWithLinks).not.toHaveBeenCalled();
+    });
+
+    it('returns Result.err when clearSheetData fails on subsequent run', async () => {
+      vi.mocked(folderStructure.getCachedFolderStructure).mockReturnValue(
+        makeCachedStructure({ subdiarioId: SUBDIARIO_ID })
+      );
+      vi.mocked(sheets.clearSheetData).mockResolvedValue({
+        ok: false,
+        error: new Error('Clear failed'),
+      });
+
+      const result = await syncSubdiario(
+        ROOT_ID,
+        CONTROL_INGRESOS_ID,
+        CONTROL_EGRESOS_ID,
+        CURRENT_YEAR,
+        new Map()
+      );
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.error.message).toContain('Clear failed');
+      }
+      // Must not write rows after clear failed
+      expect(sheets.appendRowsWithLinks).not.toHaveBeenCalled();
+    });
+
+    it('returns Result.err when appendRowsWithLinks fails', async () => {
+      vi.mocked(folderStructure.getCachedFolderStructure).mockReturnValue(
+        makeCachedStructure({ subdiarioId: SUBDIARIO_ID })
+      );
+      vi.mocked(sheets.appendRowsWithLinks).mockResolvedValue({
+        ok: false,
+        error: new Error('Append failed'),
+      });
+
+      const result = await syncSubdiario(
+        ROOT_ID,
+        CONTROL_INGRESOS_ID,
+        CONTROL_EGRESOS_ID,
+        CURRENT_YEAR,
+        new Map()
+      );
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.error.message).toContain('Append failed');
+      }
+    });
+  });
+
   describe('Returns correct rowsWritten and gapsDetected', () => {
     it('counts rows written from builder output', async () => {
       vi.mocked(folderStructure.getCachedFolderStructure).mockReturnValue(

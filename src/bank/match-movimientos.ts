@@ -1315,13 +1315,7 @@ export async function matchAllMovimientos(
           currentYear,
           movimientosSpreadsheets
         );
-        if (!subdiarioResult.ok) {
-          logError('Subdiario de Ventas sync failed', {
-            module: 'match-movimientos',
-            phase: 'sync-subdiario',
-            error: subdiarioResult.error.message,
-          });
-        } else {
+        if (subdiarioResult.ok) {
           info('Subdiario de Ventas sync completed', {
             module: 'match-movimientos',
             phase: 'sync-subdiario',
@@ -1329,6 +1323,7 @@ export async function matchAllMovimientos(
             gapsDetected: subdiarioResult.value.gapsDetected,
           });
         }
+        // ok:false: writer already logged the cause at lib layer; caller does not re-log.
       } catch (err) {
         const error = err instanceof Error ? err : new Error(String(err));
         logError('Subdiario de Ventas sync threw unexpectedly', {

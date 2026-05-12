@@ -655,4 +655,169 @@ describe('buildSubdiarioRows', () => {
     expect(row.total).toBe(0);
     expect(row.notas).toContain('[REVISAR: TC faltante]');
   });
+
+  // ── Test 22: NC consumed by first matching FC, second FC remains active (ADV-253) ──
+  it('generic NC matches only one of two same-CUIT same-amount FCs (no double-attribution)', () => {
+    const fc1 = makeFc({
+      fileId: 'fc022a',
+      nroFactura: '00003-00002001',
+      fechaEmision: `${CURRENT_YEAR}-02-01`,
+      importeTotal: 250_000,
+    });
+    const fc2 = makeFc({
+      fileId: 'fc022b',
+      nroFactura: '00003-00002002',
+      fechaEmision: `${CURRENT_YEAR}-02-02`,
+      importeTotal: 250_000,
+    });
+    // Generic NC with no refNro in concepto, same CUIT, same amount
+    const nc = makeNc({
+      fileId: 'nc022',
+      nroFactura: '00003-00000300',
+      importeTotal: 250_000,
+      fechaEmision: `${CURRENT_YEAR}-02-15`,
+      concepto: 'Ajuste comercial',
+    });
+
+    const rows = buildSubdiarioRows(
+      makeInput({ facturasEmitidas: [fc1, fc2, nc] })
+    );
+
+    const fc1Row = rows.find((r) => r.tipo === 'FC' && r.nro === '00003-00002001');
+    const fc2Row = rows.find((r) => r.tipo === 'FC' && r.nro === '00003-00002002');
+
+    expect(fc1Row).toBeDefined();
+    expect(fc2Row).toBeDefined();
+
+    // Exactly one FC should be marked as cancelled by NC
+    const cancelledRows = [fc1Row, fc2Row].filter(
+      (r) => r!.fechaCobro === 'NC 00003-00000300'
+    );
+    expect(cancelledRows).toHaveLength(1);
+
+    // The other FC must remain active (empty fechaCobro)
+    const activeRows = [fc1Row, fc2Row].filter((r) => r!.fechaCobro === '');
+    expect(activeRows).toHaveLength(1);
+  });
+
+  // ── Test 23: refNro match wins over generic match (ADV-253 priority) ──
+  it('NC with refNro is attributed to that specific FC, not a same-amount sibling', () => {
+    const fc1 = makeFc({
+      fileId: 'fc023a',
+      nroFactura: '00003-00002101',
+      fechaEmision: `${CURRENT_YEAR}-02-01`,
+      importeTotal: 300_000,
+    });
+    const fc2 = makeFc({
+      fileId: 'fc023b',
+      nroFactura: '00003-00002102',
+      fechaEmision: `${CURRENT_YEAR}-02-02`,
+      importeTotal: 300_000,
+    });
+    // NC concepto references fc2 explicitly. Even though fc1 appears first in array order,
+    // the refNro match must win.
+    const nc = makeNc({
+      fileId: 'nc023',
+      nroFactura: '00003-00000310',
+      importeTotal: 300_000,
+      fechaEmision: `${CURRENT_YEAR}-02-15`,
+      concepto: 'NC s/ Factura N° 3-2102',
+    });
+
+    const rows = buildSubdiarioRows(
+      makeInput({ facturasEmitidas: [fc1, fc2, nc] })
+    );
+
+    const fc1Row = rows.find((r) => r.tipo === 'FC' && r.nro === '00003-00002101');
+    const fc2Row = rows.find((r) => r.tipo === 'FC' && r.nro === '00003-00002102');
+
+    // fc1 must remain active; fc2 must be cancelled
+    expect(fc1Row!.fechaCobro).toBe('');
+    expect(fc2Row!.fechaCobro).toBe('NC 00003-00000310');
+  });
+
+  // ── Test 21: USD FC with importeTotal=0 must not produce "Infinity" (ADV-252) ──
+  it('USD FC with importeTotal=0 and matched movimiento: notas does not contain Infinity', () => {
+    const fc = makeFc({
+      fileId: 'fc021',
+      nroFactura: '00004-00000050',
+      tipoComprobante: 'E',
+      moneda: 'USD',
+      tipoDeCambio: 1430,
+      importeTotal: 0,
+      importeNeto: 0,
+      importeIva: 0,
+    });
+    const mov = makeMov({ matchedFileId: 'fc021', credito: 1_000_000 });
+
+    const rows = buildSubdiarioRows(makeInput({ facturasEmitidas: [fc], movimientos: [mov] }));
+
+    expect(rows).toHaveLength(1);
+    const row = rows[0];
+    expect(row.notas).not.toContain('Infinity');
+    // TC pago segment must be omitted or use the '?' placeholder
+    expect(row.notas).toBe('Pago del exterior - USD 0 - TC fact 1430 - TC pago ?');
+  });
+
+  // ── Test 24: NC recibido mirrors total (ADV-259 invariant) ────────────────
+  it('NC row: recibido mirrors total (both negative)', () => {
+    const fc = makeFc({
+      fileId: 'fc024',
+      nroFactura: '00003-00002500',
+      importeTotal: 500_000,
+    });
+    const nc = makeNc({
+      fileId: 'nc024',
+      nroFactura: '00003-00000400',
+      importeTotal: 500_000,
+      fechaEmision: `${CURRENT_YEAR}-03-10`,
+      concepto: 'NC s/ Factura N° 3-2500',
+    });
+
+    const rows = buildSubdiarioRows(makeInput({ facturasEmitidas: [fc, nc] }));
+
+    const ncRow = rows.find((r) => r.tipo === 'NC' && r.nro === '00003-00000400');
+    expect(ncRow).toBeDefined();
+    expect(ncRow!.total).toBe(-500_000);
+    expect(ncRow!.recibido).toBe(-500_000);
+  });
+
+  // ── Test 25: Plain tipoComprobante 'NC' maps to cod 013 (ADV-259 invariant) ──
+  it('plain tipoComprobante "NC" (no class suffix): cod=013, tipo=NC', () => {
+    const nc = makeNc({
+      fileId: 'nc025',
+      nroFactura: '00003-00000500',
+      tipoComprobante: 'NC',
+      fechaEmision: `${CURRENT_YEAR}-04-01`,
+      importeTotal: 100_000,
+    });
+
+    const rows = buildSubdiarioRows(makeInput({ facturasEmitidas: [nc] }));
+
+    const ncRow = rows.find((r) => r.nro === '00003-00000500');
+    expect(ncRow).toBeDefined();
+    expect(ncRow!.tipo).toBe('NC');
+    expect(ncRow!.cod).toBe('013');
+  });
+
+  // ── Test 26: PDF-extracted condicionIVAReceptor wins over Facturador condIVA (ADV-259) ──
+  it('condicionIVAReceptor (PDF) takes priority over Facturador condIVA when both present', () => {
+    const fc = makeFc({
+      fileId: 'fc026',
+      nroFactura: '00003-00002600',
+      condicionIVAReceptor: 'IVA Responsable Inscripto',
+    });
+    const entry = makeFacturadorEntry({
+      comprobante: '00003-00002600',
+      condIVA: 'Consumidor Final',
+    });
+    const facturador = new Map([['00003-00002600', entry]]);
+
+    const rows = buildSubdiarioRows(
+      makeInput({ facturasEmitidas: [fc], facturador })
+    );
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0].condicion).toBe('IVA Responsable Inscripto');
+  });
 });

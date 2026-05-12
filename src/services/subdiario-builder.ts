@@ -180,38 +180,72 @@ function aggregateMovimientos(
 // ────────────────────────────────────────────────────────────────────────────
 
 /**
- * Find the NC that cancels the given FC, if any.
+ * Compute the cancelling-NC map for all FCs in a single pass.
+ * Each NC is consumed by AT MOST ONE FC, preventing double-attribution.
  *
- * Matching criteria (all must hold):
+ * Two-pass resolution (ADV-253):
+ *   Pass 1: NCs with `refNro` in concepto bind to that specific FC (preferred).
+ *   Pass 2: NCs without `refNro` (or refNro that matched nothing) bind to the
+ *           first unbound FC matching CUIT + amount + date constraints.
+ *
+ * Matching criteria (all must hold for either pass):
  *   1. NC tipo
  *   2. Same cuitReceptor
  *   3. Same importeTotal (absolute value comparison, tolerance 0.01)
  *   4. NC fechaEmision >= FC fechaEmision
- *   5. If extractReferencedFacturaNumber(nc.concepto) finds a nro, it must
- *      match the FC's normalized nro (confirming specific FC linkage).
- *      If no nro found in concepto, falls back to CUIT+amount match alone.
+ *
+ * @returns Map keyed by FC `fileId` → cancelling Factura (NC).
  */
-function findCancellingNC(factura: Factura, allFacturas: Factura[]): Factura | null {
-  const normalizedFacNro = normalizeNro(factura.nroFactura);
-  const cuit = factura.cuitReceptor;
+function computeCancellingNCs(allFacturas: Factura[]): Map<string, Factura> {
+  const result = new Map<string, Factura>();
+  const consumedNcIds = new Set<string>();
 
-  for (const nc of allFacturas) {
-    if (deriveTipo(nc.tipoComprobante) !== 'NC') continue;
-    if (nc.cuitReceptor !== cuit) continue;
-    if (Math.abs(Math.abs(nc.importeTotal) - factura.importeTotal) > 0.01) continue;
-    if (nc.fechaEmision < factura.fechaEmision) continue;
+  const fcs = allFacturas.filter((f) => deriveTipo(f.tipoComprobante) === 'FC');
+  const ncs = allFacturas.filter((f) => deriveTipo(f.tipoComprobante) === 'NC');
 
-    const refNro = extractReferencedFacturaNumber(nc.concepto ?? '');
-    if (refNro !== null) {
-      if (refNro === normalizedFacNro) return nc;
-      // concepto references a different FC — skip this NC
-      continue;
-    }
-
-    // No referenced nro in concepto: match on CUIT + amount alone
-    return nc;
+  // Index FCs by normalized nro for refNro lookup
+  const fcByNro = new Map<string, Factura>();
+  for (const fc of fcs) {
+    fcByNro.set(normalizeNro(fc.nroFactura), fc);
   }
-  return null;
+
+  const matches = (nc: Factura, fc: Factura): boolean => {
+    if (nc.cuitReceptor !== fc.cuitReceptor) return false;
+    if (Math.abs(Math.abs(nc.importeTotal) - fc.importeTotal) > 0.01) return false;
+    if (nc.fechaEmision < fc.fechaEmision) return false;
+    return true;
+  };
+
+  // Pass 1: refNro-anchored NCs claim their referenced FC
+  for (const nc of ncs) {
+    const refNro = extractReferencedFacturaNumber(nc.concepto ?? '');
+    if (refNro === null) continue;
+    const fc = fcByNro.get(refNro);
+    if (!fc) continue;
+    if (!matches(nc, fc)) continue;
+    if (result.has(fc.fileId)) continue;
+    result.set(fc.fileId, nc);
+    consumedNcIds.add(nc.fileId);
+  }
+
+  // Pass 2: remaining NCs fall back to CUIT+amount+date match, first unbound FC wins
+  for (const nc of ncs) {
+    if (consumedNcIds.has(nc.fileId)) continue;
+    const refNro = extractReferencedFacturaNumber(nc.concepto ?? '');
+    // refNro-bearing NCs that did NOT find their target in pass 1: do not fall back
+    // (concepto explicitly names a different FC than any we know — skip).
+    if (refNro !== null) continue;
+
+    for (const fc of fcs) {
+      if (result.has(fc.fileId)) continue;
+      if (!matches(nc, fc)) continue;
+      result.set(fc.fileId, nc);
+      consumedNcIds.add(nc.fileId);
+      break;
+    }
+  }
+
+  return result;
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -270,7 +304,7 @@ function findMatchingRetencion(
 function applyScopeFilter(
   factura: Factura,
   currentYear: number,
-  allFacturas: Factura[],
+  cancellingNCs: Map<string, Factura>,
   movimientos: BankMovimiento[]
 ): boolean {
   const yearEmision = parseInt(factura.fechaEmision.substring(0, 4), 10);
@@ -296,7 +330,7 @@ function applyScopeFilter(
   if (hasPaymentThisYear) return true;
 
   // Check for a cancelling NC
-  const cancellingNC = findCancellingNC(factura, allFacturas);
+  const cancellingNC = cancellingNCs.get(factura.fileId) ?? null;
 
   if (cancellingNC) {
     const ncYear = parseInt(cancellingNC.fechaEmision.substring(0, 4), 10);
@@ -366,14 +400,15 @@ function composeNotas(opts: {
         const matchedPago = pagosRecibidos.find(
           (p) => p.matchedFacturaFileId === factura.fileId && p.tipoDeCambio
         );
-        let bankRate: number;
         if (matchedPago?.tipoDeCambio) {
-          bankRate = matchedPago.tipoDeCambio;
-        } else {
+          exportNote += ` - TC pago ${formatRate(matchedPago.tipoDeCambio)}`;
+        } else if (factura.importeTotal > 0) {
           // Compute from movimiento: credito (ARS) / importeTotal (USD)
-          bankRate = movimientoAgg.totalCredito / factura.importeTotal;
+          const bankRate = movimientoAgg.totalCredito / factura.importeTotal;
+          exportNote += ` - TC pago ${formatRate(bankRate)}`;
+        } else {
+          exportNote += ` - TC pago ?`;
         }
-        exportNote += ` - TC pago ${formatRate(bankRate)}`;
       }
 
       parts.push(exportNote);
@@ -458,15 +493,17 @@ function detectGaps(realRows: SubdiarioRow[]): SubdiarioRow[] {
     const tipo = sorted[0].tipo;
     const cod = sorted[0].cod;
 
-    const presentNums = new Set(sorted.map((r) => extractNumero(r.nro)));
+    // Index rows by numero for O(1) lookup (ADV-258)
+    const byNumero = new Map<number, SubdiarioRow>();
+    for (const r of sorted) byNumero.set(extractNumero(r.nro), r);
 
     // Iterate from min to max, emitting gaps
     let prevFecha = sorted[0].fecha;
     for (let n = minNum; n <= maxNum; n++) {
-      if (presentNums.has(n)) {
+      const found = byNumero.get(n);
+      if (found) {
         // Update prevFecha to the actual row's fecha
-        const found = sorted.find((r) => extractNumero(r.nro) === n);
-        if (found) prevFecha = found.fecha;
+        prevFecha = found.fecha;
       } else {
         const gapNro = `${pvStr}-${String(n).padStart(8, '0')}`;
         gapRows.push({
@@ -528,9 +565,12 @@ export function buildSubdiarioRows(input: SubdiarioInput): SubdiarioRow[] {
     facturador,
   } = input;
 
+  // Precompute cancelling-NC map (single pass, no double-attribution — ADV-253)
+  const cancellingNCs = computeCancellingNCs(facturasEmitidas);
+
   // Step 1: Apply scope filter — keep only in-scope rows
   const inScope = facturasEmitidas.filter((f) =>
-    applyScopeFilter(f, currentYear, facturasEmitidas, movimientos)
+    applyScopeFilter(f, currentYear, cancellingNCs, movimientos)
   );
 
   // Step 2: Build one SubdiarioRow per in-scope factura
@@ -565,7 +605,7 @@ export function buildSubdiarioRows(input: SubdiarioInput): SubdiarioRow[] {
     let recibido = 0;
 
     if (tipo === 'FC') {
-      const cancellingNC = findCancellingNC(factura, facturasEmitidas);
+      const cancellingNC = cancellingNCs.get(factura.fileId) ?? null;
       if (cancellingNC) {
         // Cancelled by an NC — show NC nro, no cash received
         fechaCobro = `NC ${normalizeNro(cancellingNC.nroFactura)}`;

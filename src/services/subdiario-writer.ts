@@ -145,7 +145,7 @@ async function initializeComprobantesSheet(
  * and parses them into typed `BankMovimiento` objects.
  *
  * Movimientos sheet schema (9 cols A:I):
- *   A fecha | B descripcion | C credito | D debito | E saldo
+ *   A fecha | B descripcion | C debito | D credito | E saldo
  *   F saldoCalculado | G matchedFileId | H matchedType | I detalle
  */
 async function readMovimientosRows(
@@ -192,8 +192,8 @@ async function readMovimientosRows(
           matchedTypeRaw === 'AUTO' || matchedTypeRaw === 'MANUAL' ? matchedTypeRaw : '';
         allMovs.push({
           fecha,
-          credito: parseNumber(row[2]) || null,
-          debito: parseNumber(row[3]) || null,
+          debito: parseNumber(row[2]) || null,
+          credito: parseNumber(row[3]) || null,
           matchedFileId: String(row[6] ?? ''),
           matchedType,
           concepto: String(row[1] ?? ''),
@@ -343,7 +343,15 @@ export async function syncSubdiario(
     // Step 5: Clear existing data rows (subsequent runs only)
     if (!isNew) {
       const clearResult = await clearSheetData(subdiarioId, COMPROBANTES_SHEET);
-      if (!clearResult.ok) return clearResult;
+      if (!clearResult.ok) {
+        logError('Failed to clear Comprobantes sheet data', {
+          module: 'subdiario-writer',
+          phase: 'clear-sheet',
+          error: clearResult.error.message,
+          correlationId,
+        });
+        return clearResult;
+      }
     }
 
     // Step 6: Write rows
@@ -389,7 +397,15 @@ export async function syncSubdiario(
         cellRows,
         timeZone
       );
-      if (!writeResult.ok) return writeResult;
+      if (!writeResult.ok) {
+        logError('Failed to write Subdiario rows', {
+          module: 'subdiario-writer',
+          phase: 'write-rows',
+          error: writeResult.error.message,
+          correlationId,
+        });
+        return writeResult;
+      }
     }
 
     info('Subdiario de Ventas sync complete', {

@@ -542,3 +542,51 @@
    - The double-logging removal not silencing legitimate error visibility paths
 2. Run `verifier` agent — Full suite + zero warnings.
 3. Run E2E tests via `verifier "e2e"`.
+
+---
+
+## Iteration 2
+
+**Implemented:** 2026-05-12
+**Method:** Single-agent (effort score 11 across 4 file-domains; per-unit work too small to justify worker overhead)
+
+### Tasks Completed This Iteration
+
+- Fix 1 (ADV-251) [CRITICAL]: subdiario-writer credito/debito swap — `row[2]→debito, row[3]→credito` matches canonical schema
+- Fix 2 (ADV-252) [HIGH]: division-by-zero guard in USD `bankRate` computation — emits `TC pago ?` when `importeTotal === 0`
+- Fix 3 (ADV-253) [MEDIUM]: replaced `findCancellingNC` with `computeCancellingNCs` (two-pass, consumed tracking) — refNro matches in pass 1, generic CUIT+amount in pass 2; each NC consumed at most once
+- Fix 4 (ADV-254) [MEDIUM]: removed duplicate `FacturadorEntry` interface in `facturador-reader.ts`; now imports from `types/index.js`
+- Fix 5 (ADV-255) [MEDIUM]: `facturador-reader` uses `normalizeSpreadsheetDate` for `fecha` field (handles numeric serial dates)
+- Fix 6 (ADV-256) [MEDIUM]: removed double-logging in subdiario-writer error paths — writer is single source for cause logging
+- Fix 7 (ADV-257) [LOW]: added 5 I/O failure propagation tests for `syncSubdiario` (Facturas/Pagos/Retenciones read failures, clearSheetData, appendRowsWithLinks) — all passed on first run, no propagation bugs
+- Fix 8 (ADV-258) [LOW]: `detectGaps` uses `Map<numero, SubdiarioRow>` for O(1) lookup instead of O(N) `sorted.find()`
+- Fix 9 (ADV-259) [LOW]: added 3 invariant tests — NC.recibido mirrors total; plain `tipoComprobante:'NC'` → cod 013; PDF `condicionIVAReceptor` priority over Facturador `condIVA`
+
+### Bug-Hunter Follow-Up
+
+After Fix 6, bug-hunter identified that `clearSheetData` and `appendRowsWithLinks` failure paths were also being silently returned with no log anywhere (writer didn't log them, route was no longer logging). Added `logError` calls in the writer for both paths to preserve the "writer is single source of cause logging" invariant.
+
+### Files Modified
+
+- `src/services/subdiario-writer.ts` — credito/debito swap + comment; added `logError` for clearSheetData and appendRowsWithLinks failure paths
+- `src/services/subdiario-builder.ts` — division-by-zero guard; replaced `findCancellingNC` with two-pass `computeCancellingNCs`; `detectGaps` uses Map lookup
+- `src/services/facturador-reader.ts` — import `FacturadorEntry` from types; use `normalizeSpreadsheetDate` for fecha
+- `src/routes/subdiario.ts` — removed redundant `logError` on `!innerResult.ok` path
+- `src/bank/match-movimientos.ts` — removed redundant `logError` on `!subdiarioResult.ok` path
+- `src/services/subdiario-writer.test.ts` — added column-mapping test + 5 I/O failure path tests
+- `src/services/subdiario-builder.test.ts` — added tests 21–26 (division-by-zero, NC double-attribution, refNro priority, NC.recibido invariant, plain NC cod, condIVA priority)
+- `src/services/facturador-reader.test.ts` — added numeric-serial date test
+- `src/routes/subdiario.test.ts` — flipped logging assertion to enforce no-double-log
+
+### Linear Updates
+
+- ADV-251..259: Todo → In Progress → Review
+
+### Pre-commit Verification
+
+- bug-hunter (1st pass): found 1 HIGH bug — ADV-256 over-removed logging for clearSheetData/appendRowsWithLinks failure paths. Fixed by adding writer-level `logError` for both paths.
+- verifier (full): 73 test files, 2379 tests pass; TypeScript clean; Apps Script bundle generated; zero warnings
+
+### Continuation Status
+
+[All Fix Plan tasks completed.]

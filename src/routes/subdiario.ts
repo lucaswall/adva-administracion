@@ -99,10 +99,7 @@ export async function subdiarioRoutes(server: FastifyInstance) {
         const innerResult = lockResult.value;
 
         if (!innerResult.ok) {
-          logError('Subdiario rebuild failed', {
-            module: 'subdiario',
-            error: innerResult.error.message,
-          });
+          // Writer already logged the cause at lib layer; route does not re-log.
           reply.status(500);
           return { error: 'Subdiario rebuild failed' };
         }

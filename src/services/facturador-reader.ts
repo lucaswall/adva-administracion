@@ -3,40 +3,11 @@
  * Reads the Facturador spreadsheet and returns a map of entries keyed by normalized comprobante
  */
 
-import type { Result } from '../types/index.js';
+import type { Result, FacturadorEntry } from '../types/index.js';
 import { getValues } from './sheets.js';
 import { parseNumber } from '../utils/numbers.js';
+import { normalizeSpreadsheetDate } from '../utils/date.js';
 import { warn, debug } from '../utils/logger.js';
-
-/**
- * A single entry from the Facturador de Socios spreadsheet.
- * All fields are strings except importe (number).
- * empresa may be empty — the caller decides the Empresa-vs-Representante fallback.
- */
-export interface FacturadorEntry {
-  /** Número de socio */
-  nroSocio: string;
-  /** Normalized comprobante: 5-digit pto + dash + 8-digit numero (e.g. 00005-00000057) */
-  comprobante: string;
-  /** Razón social de la empresa (may be empty) */
-  empresa: string;
-  /** Representante del socio */
-  representante: string;
-  /** Email del socio */
-  email: string;
-  /** Tipo de membresía */
-  membresia: string;
-  /** Cobro ID */
-  cobroId: string;
-  /** Condición IVA */
-  condIVA: string;
-  /** Fecha de la factura (as-is from sheet) */
-  fecha: string;
-  /** Importe de la factura */
-  importe: number;
-  /** Raw value of Pagado? column (may be blank, 'SI', or an NC number like '0005-00000011') */
-  pagadoCol: string;
-}
 
 /**
  * Source sheet columns (0-indexed):
@@ -158,7 +129,7 @@ export async function readFacturador(
       membresia: String(row[COL.MEMBRESIA] || ''),
       cobroId: String(row[COL.COBRO_ID] || ''),
       condIVA: String(row[COL.COND_IVA] || ''),
-      fecha: String(row[COL.FECHA] || ''),
+      fecha: normalizeSpreadsheetDate(row[COL.FECHA]),
       importe,
       pagadoCol: String(row[COL.PAGADO] || ''),
     };
