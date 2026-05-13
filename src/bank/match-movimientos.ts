@@ -1325,6 +1325,10 @@ export async function matchAllMovimientos(
             phase: 'sync-subdiario',
             rowsWritten: subdiarioResult.value.rowsWritten,
             gapsDetected: subdiarioResult.value.gapsDetected,
+            inserts: subdiarioResult.value.inserts,
+            updates: subdiarioResult.value.updates,
+            deletes: subdiarioResult.value.deletes,
+            sortInvariantFallback: subdiarioResult.value.sortInvariantFallback,
           });
         }
         // ok:false: writer already logged the cause at lib layer; caller does not re-log.

@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { syncSubdiario } from './subdiario-writer.js';
+import { syncSubdiario, readSubdiarioRows } from './subdiario-writer.js';
 import * as drive from './drive.js';
 import * as sheets from './sheets.js';
 import type { CellValue } from './sheets.js';
@@ -28,12 +28,19 @@ vi.mock('./sheets.js', () => ({
   getSheetMetadata: vi.fn(),
   renameSheet: vi.fn(),
   formatSheet: vi.fn(),
+  applySubdiarioDiff: vi.fn(),
 }));
 
 // ─── Mock folder-structure ────────────────────────────────────────────────────
 
 vi.mock('./folder-structure.js', () => ({
   getCachedFolderStructure: vi.fn(),
+}));
+
+// ─── Mock diff module ─────────────────────────────────────────────────────────
+
+vi.mock('./subdiario-diff.js', () => ({
+  diffSubdiarioRows: vi.fn(),
 }));
 
 // ─── Mock cross-worker deps (may not exist yet at merge time) ─────────────────
@@ -64,6 +71,7 @@ vi.mock('../utils/correlation.js', () => ({
 import * as facturadorReader from './facturador-reader.js';
 import * as subdiarioBuilder from './subdiario-builder.js';
 import * as logger from '../utils/logger.js';
+import * as subdiarioDiff from './subdiario-diff.js';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -100,7 +108,14 @@ const MOCK_ROWS: SubdiarioRow[] = [
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function setupDefaultMocks() {
-  vi.mocked(sheets.getValues).mockResolvedValue({ ok: true, value: EMPTY_SHEET_DATA });
+  // getValues: return [] for Comprobantes!A2:M (readSubdiarioRows gets empty existing),
+  // EMPTY_SHEET_DATA for all other ranges (source data reads)
+  vi.mocked(sheets.getValues).mockImplementation(async (_id: string, range: string) => {
+    if (range === 'Comprobantes!A2:M') {
+      return { ok: true, value: [] as CellValue[][] };
+    }
+    return { ok: true, value: EMPTY_SHEET_DATA };
+  });
   vi.mocked(sheets.setValues).mockResolvedValue({ ok: true, value: 1 });
   vi.mocked(sheets.appendRowsWithLinks).mockResolvedValue({ ok: true, value: 1 });
   vi.mocked(sheets.clearSheetData).mockResolvedValue({ ok: true, value: undefined });
@@ -108,12 +123,26 @@ function setupDefaultMocks() {
     ok: true,
     value: 'America/Argentina/Buenos_Aires',
   });
+  // Return Comprobantes sheet with sheetId=42 by default (needed by diff path)
   vi.mocked(sheets.getSheetMetadata).mockResolvedValue({
     ok: true,
-    value: [{ title: 'Sheet1', sheetId: 0, index: 0 }],
+    value: [{ title: 'Comprobantes', sheetId: 42, index: 0 }],
   });
   vi.mocked(sheets.renameSheet).mockResolvedValue({ ok: true, value: undefined });
   vi.mocked(sheets.formatSheet).mockResolvedValue({ ok: true, value: undefined });
+  // applySubdiarioDiff default: 1 insert (MOCK_ROWS has 1 row → all inserts on first sync)
+  vi.mocked(sheets.applySubdiarioDiff).mockResolvedValue({
+    ok: true,
+    value: { updates: 0, inserts: 1, deletes: 0 },
+  });
+  // diffSubdiarioRows default: 1 insert (MOCK_ROWS[0]) — covers most existing-workbook tests
+  vi.mocked(subdiarioDiff.diffSubdiarioRows).mockReturnValue({
+    updates: [],
+    inserts: [{ insertAt: 0, row: MOCK_ROWS[0]! }],
+    deletes: [],
+    sortInvariantViolated: false,
+    duplicateKeysDetected: false,
+  });
   vi.mocked(facturadorReader.readFacturador).mockResolvedValue({
     ok: true,
     value: new Map(),
@@ -163,6 +192,11 @@ describe('syncSubdiario', () => {
         ok: true,
         value: { id: NEW_SUBDIARIO_ID, name: 'Subdiario de Ventas', mimeType: SPREADSHEET_MIME },
       });
+      // First call: initializeComprobantesSheet needs Sheet1 to rename
+      // Second call: diff path needs Comprobantes sheetId
+      vi.mocked(sheets.getSheetMetadata)
+        .mockResolvedValueOnce({ ok: true, value: [{ title: 'Sheet1', sheetId: 0, index: 0 }] })
+        .mockResolvedValue({ ok: true, value: [{ title: 'Comprobantes', sheetId: 42, index: 0 }] });
 
       const movimientosSpreadsheets = new Map<string, string>();
 
@@ -194,8 +228,9 @@ describe('syncSubdiario', () => {
       expect(sheets.setValues).toHaveBeenCalled();
       // Did NOT clear data (first run — brand new sheet)
       expect(sheets.clearSheetData).not.toHaveBeenCalled();
-      // Wrote data rows
-      expect(sheets.appendRowsWithLinks).toHaveBeenCalled();
+      // Diff path wrote rows via applySubdiarioDiff (not appendRowsWithLinks)
+      expect(sheets.applySubdiarioDiff).toHaveBeenCalled();
+      expect(sheets.appendRowsWithLinks).not.toHaveBeenCalled();
     });
 
     it('stores subdiarioId in cached structure', async () => {
@@ -215,7 +250,7 @@ describe('syncSubdiario', () => {
   });
 
   describe('Subsequent run — workbook exists in cache', () => {
-    it('skips Drive search when subdiarioId is cached, clears rows, writes data', async () => {
+    it('skips Drive search when subdiarioId is cached, uses diff path to write data', async () => {
       vi.mocked(folderStructure.getCachedFolderStructure).mockReturnValue(
         makeCachedStructure({ subdiarioId: SUBDIARIO_ID })
       );
@@ -236,10 +271,10 @@ describe('syncSubdiario', () => {
       expect(drive.createSpreadsheet).not.toHaveBeenCalled();
       // No rename (workbook already set up)
       expect(sheets.renameSheet).not.toHaveBeenCalled();
-      // Sheet cleared before writing
-      expect(sheets.clearSheetData).toHaveBeenCalledWith(SUBDIARIO_ID, 'Comprobantes');
-      // Data written
-      expect(sheets.appendRowsWithLinks).toHaveBeenCalled();
+      // Data written via diff path (no clear+append)
+      expect(sheets.applySubdiarioDiff).toHaveBeenCalled();
+      expect(sheets.clearSheetData).not.toHaveBeenCalled();
+      expect(sheets.appendRowsWithLinks).not.toHaveBeenCalled();
     });
   });
 
@@ -273,10 +308,10 @@ describe('syncSubdiario', () => {
       expect(drive.createSpreadsheet).not.toHaveBeenCalled();
       // No rename (already exists)
       expect(sheets.renameSheet).not.toHaveBeenCalled();
-      // Cleared before writing
-      expect(sheets.clearSheetData).toHaveBeenCalledWith(SUBDIARIO_ID, 'Comprobantes');
-      // Data written
-      expect(sheets.appendRowsWithLinks).toHaveBeenCalled();
+      // Data written via diff path (no clear+append)
+      expect(sheets.applySubdiarioDiff).toHaveBeenCalled();
+      expect(sheets.clearSheetData).not.toHaveBeenCalled();
+      expect(sheets.appendRowsWithLinks).not.toHaveBeenCalled();
     });
   });
 
@@ -315,6 +350,14 @@ describe('syncSubdiario', () => {
       );
       // Builder returns no rows
       vi.mocked(subdiarioBuilder.buildSubdiarioRows).mockReturnValue([]);
+      // Diff returns no-op (desired=[] vs existing=[] → no changes)
+      vi.mocked(subdiarioDiff.diffSubdiarioRows).mockReturnValue({
+        updates: [],
+        inserts: [],
+        deletes: [],
+        sortInvariantViolated: false,
+        duplicateKeysDetected: false,
+      });
 
       const result = await syncSubdiario(
         ROOT_ID,
@@ -329,10 +372,10 @@ describe('syncSubdiario', () => {
         expect(result.value.rowsWritten).toBe(0);
         expect(result.value.gapsDetected).toBe(0);
       }
-      // appendRowsWithLinks not called for empty data
+      // No batchUpdate for empty no-op diff
+      expect(sheets.applySubdiarioDiff).not.toHaveBeenCalled();
       expect(sheets.appendRowsWithLinks).not.toHaveBeenCalled();
-      // but clearSheetData still called
-      expect(sheets.clearSheetData).toHaveBeenCalled();
+      expect(sheets.clearSheetData).not.toHaveBeenCalled();
     });
   });
 
@@ -497,13 +540,13 @@ describe('syncSubdiario', () => {
       expect(sheets.appendRowsWithLinks).not.toHaveBeenCalled();
     });
 
-    it('returns Result.err when clearSheetData fails on subsequent run', async () => {
+    it('returns Result.err when applySubdiarioDiff fails on subsequent run', async () => {
       vi.mocked(folderStructure.getCachedFolderStructure).mockReturnValue(
         makeCachedStructure({ subdiarioId: SUBDIARIO_ID })
       );
-      vi.mocked(sheets.clearSheetData).mockResolvedValue({
+      vi.mocked(sheets.applySubdiarioDiff).mockResolvedValue({
         ok: false,
-        error: new Error('Clear failed'),
+        error: new Error('Diff apply failed'),
       });
 
       const result = await syncSubdiario(
@@ -516,19 +559,22 @@ describe('syncSubdiario', () => {
 
       expect(result.ok).toBe(false);
       if (!result.ok) {
-        expect(result.error.message).toContain('Clear failed');
+        expect(result.error.message).toContain('Diff apply failed');
       }
-      // Must not write rows after clear failed
+      // Neither clear nor append path used
+      expect(sheets.clearSheetData).not.toHaveBeenCalled();
       expect(sheets.appendRowsWithLinks).not.toHaveBeenCalled();
     });
 
-    it('returns Result.err when appendRowsWithLinks fails', async () => {
+    it('returns Result.err when readSubdiarioRows (getValues for Comprobantes) fails', async () => {
       vi.mocked(folderStructure.getCachedFolderStructure).mockReturnValue(
         makeCachedStructure({ subdiarioId: SUBDIARIO_ID })
       );
-      vi.mocked(sheets.appendRowsWithLinks).mockResolvedValue({
-        ok: false,
-        error: new Error('Append failed'),
+      vi.mocked(sheets.getValues).mockImplementation(async (_id: string, range: string) => {
+        if (range === 'Comprobantes!A2:M') {
+          return { ok: false, error: new Error('Comprobantes read failed') };
+        }
+        return { ok: true, value: EMPTY_SHEET_DATA };
       });
 
       const result = await syncSubdiario(
@@ -541,8 +587,9 @@ describe('syncSubdiario', () => {
 
       expect(result.ok).toBe(false);
       if (!result.ok) {
-        expect(result.error.message).toContain('Append failed');
+        expect(result.error.message).toContain('Comprobantes read failed');
       }
+      expect(sheets.applySubdiarioDiff).not.toHaveBeenCalled();
     });
   });
 
@@ -773,11 +820,11 @@ describe('syncSubdiario', () => {
         makeCachedStructure({ subdiarioId: SUBDIARIO_ID })
       );
       vi.mocked(subdiarioBuilder.buildSubdiarioRows).mockReturnValue([
-        { ...MOCK_ROWS[0] },
-        { ...MOCK_ROWS[0], nro: '00001-00000002' },
+        { ...MOCK_ROWS[0]! },
+        { ...MOCK_ROWS[0]!, nro: '00001-00000002' },
         // Gap placeholder — builder emits these with cliente='FALTA <nro>'
         {
-          ...MOCK_ROWS[0],
+          ...MOCK_ROWS[0]!,
           nro: '00001-00000003',
           cliente: 'FALTA 00001-00000003',
           total: 0,
@@ -798,5 +845,327 @@ describe('syncSubdiario', () => {
         expect(result.value.gapsDetected).toBe(1);
       }
     });
+  });
+});
+
+// ─── readSubdiarioRows ────────────────────────────────────────────────────────
+
+describe('readSubdiarioRows', () => {
+  // Column indices for Comprobantes!A2:M
+  // A(0)=fecha, B(1)=cod, C(2)=tipo, D(3)=nro, E(4)=cliente, F(5)=cuit,
+  // G(6)=condicion, H(7)=total, I(8)=concepto, J(9)=categoria,
+  // K(10)=fechaCobro, L(11)=recibido, M(12)=notas
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  function makeSheetRow(overrides: Partial<Record<number, CellValue>> = {}): CellValue[] {
+    const base: CellValue[] = [
+      '2025-01-15', // A: fecha
+      '006',        // B: cod
+      'FC',         // C: tipo
+      '00001-00000001', // D: nro
+      'TEST SA',    // E: cliente
+      '20123456786',// F: cuit
+      'IVA Responsable Inscripto', // G: condicion
+      1000,         // H: total
+      'Servicios',  // I: concepto
+      'Micro',      // J: categoria
+      '',           // K: fechaCobro
+      '',           // L: recibido (blank → null)
+      '',           // M: notas
+    ];
+    for (const [i, v] of Object.entries(overrides)) {
+      base[Number(i)] = v;
+    }
+    return base;
+  }
+
+  it('empty sheet (no data rows) → {ok:true, value:[]}', async () => {
+    vi.mocked(sheets.getValues).mockResolvedValue({ ok: true, value: [] });
+
+    const result = await readSubdiarioRows('test-id');
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value).toHaveLength(0);
+    }
+  });
+
+  it('two FC rows + one NC row → parsed correctly; rowIndex 0/1/2; recibido=null for blank col L', async () => {
+    const fc1 = makeSheetRow({ 3: '00001-00000001', 2: 'FC', 11: '' });
+    const fc2 = makeSheetRow({ 3: '00001-00000002', 2: 'FC', 7: 2000, 11: '' });
+    const nc1 = makeSheetRow({ 3: '00003-00000001', 2: 'NC', 1: '003', 7: -1000, 11: '' });
+
+    vi.mocked(sheets.getValues).mockResolvedValue({ ok: true, value: [fc1, fc2, nc1] });
+
+    const result = await readSubdiarioRows('test-id');
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value).toHaveLength(3);
+      expect(result.value[0]!.rowIndex).toBe(0);
+      expect(result.value[1]!.rowIndex).toBe(1);
+      expect(result.value[2]!.rowIndex).toBe(2);
+      expect(result.value[0]!.recibido).toBeNull();
+      expect(result.value[1]!.recibido).toBeNull();
+      expect(result.value[2]!.recibido).toBeNull();
+      expect(result.value[0]!.tipo).toBe('FC');
+      expect(result.value[2]!.tipo).toBe('NC');
+      expect(result.value[2]!.total).toBe(-1000);
+    }
+  });
+
+  it('fecha as serial number (45993) → normalized to "2025-12-02"', async () => {
+    const row = makeSheetRow({ 0: 45993 }); // serial for 2025-12-02
+    vi.mocked(sheets.getValues).mockResolvedValue({ ok: true, value: [row] });
+
+    const result = await readSubdiarioRows('test-id');
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value[0]!.fecha).toBe('2025-12-02');
+    }
+  });
+
+  it('fechaCobro string value ("NC 00003-00000140") is passed through as-is', async () => {
+    const row = makeSheetRow({ 10: 'NC 00003-00000140' });
+    vi.mocked(sheets.getValues).mockResolvedValue({ ok: true, value: [row] });
+
+    const result = await readSubdiarioRows('test-id');
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value[0]!.fechaCobro).toBe('NC 00003-00000140');
+    }
+  });
+
+  it('fechaCobro as serial number → normalized to YYYY-MM-DD', async () => {
+    const row = makeSheetRow({ 10: 45993 }); // serial for 2025-12-02
+    vi.mocked(sheets.getValues).mockResolvedValue({ ok: true, value: [row] });
+
+    const result = await readSubdiarioRows('test-id');
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value[0]!.fechaCobro).toBe('2025-12-02');
+    }
+  });
+
+  it('total as number round-trips numerically', async () => {
+    const row = makeSheetRow({ 7: 1234567.89 });
+    vi.mocked(sheets.getValues).mockResolvedValue({ ok: true, value: [row] });
+
+    const result = await readSubdiarioRows('test-id');
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value[0]!.total).toBe(1234567.89);
+    }
+  });
+
+  it('getValues failure is propagated as ok:false', async () => {
+    vi.mocked(sheets.getValues).mockResolvedValue({
+      ok: false,
+      error: new Error('Sheets API error'),
+    });
+
+    const result = await readSubdiarioRows('test-id');
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.message).toBe('Sheets API error');
+    }
+  });
+
+  it('row with empty fecha is skipped; subsequent rows retain correct rowIndex reflecting sheet position', async () => {
+    const row1 = makeSheetRow({ 0: '2025-01-10', 3: '00001-00000001' });
+    const blankFechaRow = makeSheetRow({ 0: '', 3: '00001-00000002' }); // empty fecha → skip
+    const row3 = makeSheetRow({ 0: '2025-01-20', 3: '00001-00000003', 7: 2000 });
+
+    vi.mocked(sheets.getValues).mockResolvedValue({
+      ok: true,
+      value: [row1, blankFechaRow, row3],
+    });
+
+    const result = await readSubdiarioRows('test-id');
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value).toHaveLength(2); // blankFechaRow is skipped
+      expect(result.value[0]!.rowIndex).toBe(0); // row1 at position 0
+      expect(result.value[1]!.rowIndex).toBe(2); // row3 at position 2 (not 1!)
+      expect(result.value[0]!.nro).toBe('00001-00000001');
+      expect(result.value[1]!.nro).toBe('00001-00000003');
+    }
+  });
+});
+
+// ─── syncSubdiario diff path (Task 3, ADV-265) ────────────────────────────────
+
+describe('syncSubdiario diff path', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    setupDefaultMocks();
+    vi.mocked(folderStructure.getCachedFolderStructure).mockReturnValue(
+      makeCachedStructure({ subdiarioId: SUBDIARIO_ID })
+    );
+  });
+
+  it('happy path: calls applySubdiarioDiff once; lock key includes Comprobantes', async () => {
+    // Default mocks: diff returns 1 insert, applySubdiarioDiff returns success
+    const result = await syncSubdiario(
+      ROOT_ID, CONTROL_INGRESOS_ID, CONTROL_EGRESOS_ID, CURRENT_YEAR, new Map()
+    );
+
+    expect(result.ok).toBe(true);
+    // Exactly one applySubdiarioDiff call (not clear+append)
+    expect(sheets.applySubdiarioDiff).toHaveBeenCalledTimes(1);
+    // getSheetMetadata called to resolve the Comprobantes sheetId
+    expect(sheets.getSheetMetadata).toHaveBeenCalledWith(SUBDIARIO_ID);
+    // diffSubdiarioRows called with existing=[] (readSubdiarioRows returned empty) and desired rows
+    expect(subdiarioDiff.diffSubdiarioRows).toHaveBeenCalledWith([], MOCK_ROWS);
+  });
+
+  it('no-op: when diff is empty → zero applySubdiarioDiff calls; result has all zero diff counts', async () => {
+    vi.mocked(subdiarioDiff.diffSubdiarioRows).mockReturnValue({
+      updates: [],
+      inserts: [],
+      deletes: [],
+      sortInvariantViolated: false,
+      duplicateKeysDetected: false,
+    });
+
+    const result = await syncSubdiario(
+      ROOT_ID, CONTROL_INGRESOS_ID, CONTROL_EGRESOS_ID, CURRENT_YEAR, new Map()
+    );
+
+    expect(result.ok).toBe(true);
+    expect(sheets.applySubdiarioDiff).not.toHaveBeenCalled();
+    if (result.ok) {
+      expect(result.value.inserts).toBe(0);
+      expect(result.value.updates).toBe(0);
+      expect(result.value.deletes).toBe(0);
+      expect(result.value.sortInvariantFallback).toBe(false);
+    }
+  });
+
+  it('sort-invariant fallback: sortInvariantViolated=true → warns; sortInvariantFallback=true in result; inserts=desired.length', async () => {
+    vi.mocked(subdiarioDiff.diffSubdiarioRows).mockReturnValue({
+      updates: [],
+      inserts: [],
+      deletes: [],
+      sortInvariantViolated: true,
+      duplicateKeysDetected: false,
+    });
+    vi.mocked(sheets.applySubdiarioDiff).mockResolvedValue({
+      ok: true,
+      value: { updates: 0, inserts: MOCK_ROWS.length, deletes: 0 },
+    });
+
+    const result = await syncSubdiario(
+      ROOT_ID, CONTROL_INGRESOS_ID, CONTROL_EGRESOS_ID, CURRENT_YEAR, new Map()
+    );
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.sortInvariantFallback).toBe(true);
+      expect(result.value.inserts).toBe(MOCK_ROWS.length);
+    }
+    // A warning must be logged about the sort invariant violation
+    expect(vi.mocked(logger.warn)).toHaveBeenCalled();
+    // applySubdiarioDiff IS called (rewrite path)
+    expect(sheets.applySubdiarioDiff).toHaveBeenCalledTimes(1);
+  });
+
+  it('first-ever sync (isNew=true): skips readSubdiarioRows; all rows are inserts', async () => {
+    // Simulate first-ever sync: workbook just created
+    vi.mocked(folderStructure.getCachedFolderStructure).mockReturnValue(
+      makeCachedStructure() // no subdiarioId
+    );
+    vi.mocked(drive.findByName).mockResolvedValue({ ok: true, value: null });
+    vi.mocked(drive.createSpreadsheet).mockResolvedValue({
+      ok: true,
+      value: { id: NEW_SUBDIARIO_ID, name: 'Subdiario de Ventas', mimeType: SPREADSHEET_MIME },
+    });
+    // Two-call sequence for getSheetMetadata (initializeComprobantesSheet + diff path)
+    vi.mocked(sheets.getSheetMetadata)
+      .mockResolvedValueOnce({ ok: true, value: [{ title: 'Sheet1', sheetId: 0, index: 0 }] })
+      .mockResolvedValue({ ok: true, value: [{ title: 'Comprobantes', sheetId: 42, index: 0 }] });
+
+    const result = await syncSubdiario(
+      ROOT_ID, CONTROL_INGRESOS_ID, CONTROL_EGRESOS_ID, CURRENT_YEAR, new Map()
+    );
+
+    expect(result.ok).toBe(true);
+    // When isNew=true, readSubdiarioRows is skipped → existing=[]
+    // diffSubdiarioRows called with empty existing
+    expect(subdiarioDiff.diffSubdiarioRows).toHaveBeenCalledWith([], MOCK_ROWS);
+    // getValues for Comprobantes not called (skipped when isNew)
+    const getValuesCalls = vi.mocked(sheets.getValues).mock.calls;
+    const comprobantesCall = getValuesCalls.find(([, range]) => range === 'Comprobantes!A2:M');
+    expect(comprobantesCall).toBeUndefined();
+  });
+
+  it('getSheetMetadata failure → Result.err propagated; no applySubdiarioDiff', async () => {
+    vi.mocked(sheets.getSheetMetadata).mockResolvedValue({
+      ok: false,
+      error: new Error('Metadata fetch failed'),
+    });
+
+    const result = await syncSubdiario(
+      ROOT_ID, CONTROL_INGRESOS_ID, CONTROL_EGRESOS_ID, CURRENT_YEAR, new Map()
+    );
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.message).toContain('Metadata fetch failed');
+    }
+    expect(sheets.applySubdiarioDiff).not.toHaveBeenCalled();
+  });
+
+  it('gapsDetected count survives — placeholder rows counted from desired set, independent of diff counts', async () => {
+    const gapRow: SubdiarioRow = {
+      ...MOCK_ROWS[0]!,
+      nro: '00001-00000099',
+      cliente: 'FALTA 00001-00000099',
+      total: 0,
+    };
+    vi.mocked(subdiarioBuilder.buildSubdiarioRows).mockReturnValue([
+      MOCK_ROWS[0]!,
+      gapRow,
+    ]);
+    vi.mocked(subdiarioDiff.diffSubdiarioRows).mockReturnValue({
+      updates: [],
+      inserts: [{ insertAt: 0, row: MOCK_ROWS[0]! }, { insertAt: 1, row: gapRow }],
+      deletes: [],
+      sortInvariantViolated: false,
+      duplicateKeysDetected: false,
+    });
+    vi.mocked(sheets.applySubdiarioDiff).mockResolvedValue({
+      ok: true,
+      value: { updates: 0, inserts: 2, deletes: 0 },
+    });
+
+    const result = await syncSubdiario(
+      ROOT_ID, CONTROL_INGRESOS_ID, CONTROL_EGRESOS_ID, CURRENT_YEAR, new Map()
+    );
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.rowsWritten).toBe(2);
+      expect(result.value.gapsDetected).toBe(1); // FALTA row counted
+    }
+  });
+
+  it('two concurrent syncSubdiario calls on same subdiarioId both complete successfully', async () => {
+    const [result1, result2] = await Promise.all([
+      syncSubdiario(ROOT_ID, CONTROL_INGRESOS_ID, CONTROL_EGRESOS_ID, CURRENT_YEAR, new Map()),
+      syncSubdiario(ROOT_ID, CONTROL_INGRESOS_ID, CONTROL_EGRESOS_ID, CURRENT_YEAR, new Map()),
+    ]);
+
+    expect(result1.ok).toBe(true);
+    expect(result2.ok).toBe(true);
   });
 });
