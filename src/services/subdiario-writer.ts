@@ -84,6 +84,40 @@ export interface SyncSubdiarioResult {
 // ─── Internal helpers ────────────────────────────────────────────────────────
 
 /**
+ * Locates the Subdiario spreadsheet ID without creating one when missing.
+ *
+ * Resolution order: FolderStructure cache → Drive search. Returns `null` when
+ * no workbook exists. This is the create-free variant used by the boot-time
+ * chrome step — that step must never trigger creation, because `resolveSubdiarioId`
+ * caches the new id with `isNew: true` only on the call that created it; a
+ * subsequent `syncSubdiario` would then hit the cache with `isNew: false`,
+ * skip `initializeComprobantesSheet`, and fail to find the Comprobantes tab.
+ *
+ * @param rootFolderId - Root Drive folder ID
+ * @returns Existing workbook id, or `null` when none exists
+ */
+export async function findExistingSubdiarioId(
+  rootFolderId: string
+): Promise<Result<string | null, Error>> {
+  const cached = getCachedFolderStructure();
+
+  if (cached?.subdiarioId) {
+    return { ok: true, value: cached.subdiarioId };
+  }
+
+  const findResult = await findByName(rootFolderId, SUBDIARIO_NAME, SPREADSHEET_MIME);
+  if (!findResult.ok) return findResult;
+
+  if (findResult.value) {
+    const id = findResult.value.id;
+    if (cached) cached.subdiarioId = id;
+    return { ok: true, value: id };
+  }
+
+  return { ok: true, value: null };
+}
+
+/**
  * Resolves the Subdiario spreadsheet ID.
  * Resolution order: FolderStructure cache → Drive search → create.
  *

@@ -216,4 +216,62 @@ describe('diffSubdiarioRows', () => {
 
     expect(result.updates).toHaveLength(0);
   });
+
+  // Codex P1 finding: an in-place update at desiredIndex corrupts data when an
+  // existing row's sort-key (fecha) changes and swaps relative position with
+  // another existing row. Without detection, the writer would overwrite the
+  // other row's cells while leaving the original row stale → duplicate + loss.
+  // Fix: surface relative-order changes via sortInvariantViolated so the writer
+  // falls back to a one-shot rewrite.
+  it('common keys reorder between existing and desired → sortInvariantViolated=true (forces rewrite)', () => {
+    // Existing: A at row 0 (Jan), B at row 1 (Feb)
+    const aOld = makeRow({ cod: '006', nro: '00001-00000001', fecha: '2025-01-10' });
+    const b    = makeRow({ cod: '006', nro: '00001-00000002', fecha: '2025-02-10' });
+    const existing = [withIndex(aOld, 0), withIndex(b, 1)];
+
+    // Desired: A's fecha corrected to April → now after B in chronological order
+    const aNew = { ...aOld, fecha: '2025-04-10' };
+    const desired = [{ ...b }, aNew];
+
+    const result = diffSubdiarioRows(existing, desired);
+
+    // Without the fix, this would be a quiet single-update diff that overwrites
+    // B's row with A's data and leaves A's old data at row 0.
+    expect(result.sortInvariantViolated).toBe(true);
+  });
+
+  it('common keys preserve relative order → sortInvariantViolated=false (incremental path OK)', () => {
+    // Existing: A row 0, B row 1, C row 2 — all in sort order
+    const a = makeRow({ cod: '006', nro: '00001-00000001', fecha: '2025-01-10' });
+    const b = makeRow({ cod: '006', nro: '00001-00000002', fecha: '2025-02-10' });
+    const c = makeRow({ cod: '006', nro: '00001-00000003', fecha: '2025-03-10' });
+    const existing = [withIndex(a, 0), withIndex(b, 1), withIndex(c, 2)];
+
+    // Desired keeps the same relative order; B has a value change (total)
+    const desired = [{ ...a }, { ...b, total: 9999 }, { ...c }];
+
+    const result = diffSubdiarioRows(existing, desired);
+
+    expect(result.sortInvariantViolated).toBe(false);
+    expect(result.updates).toHaveLength(1);
+    expect(result.updates[0]!.rowIndex).toBe(1);
+  });
+
+  it('insert between two common keys does not trigger reorder flag', () => {
+    // Existing: A row 0, C row 1
+    const a = makeRow({ cod: '006', nro: '00001-00000001', fecha: '2025-01-10' });
+    const c = makeRow({ cod: '006', nro: '00001-00000003', fecha: '2025-03-10' });
+    const existing = [withIndex(a, 0), withIndex(c, 1)];
+
+    // Desired: A, then a NEW row B, then C — common keys (A, C) still in order
+    const bNew = makeRow({ cod: '006', nro: '00001-00000002', fecha: '2025-02-10' });
+    const desired = [{ ...a }, bNew, { ...c }];
+
+    const result = diffSubdiarioRows(existing, desired);
+
+    expect(result.sortInvariantViolated).toBe(false);
+    expect(result.inserts).toHaveLength(1);
+    expect(result.deletes).toHaveLength(0);
+    expect(result.updates).toHaveLength(0);
+  });
 });

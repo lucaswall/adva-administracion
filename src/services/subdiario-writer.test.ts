@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { syncSubdiario, readSubdiarioRows } from './subdiario-writer.js';
+import { syncSubdiario, readSubdiarioRows, findExistingSubdiarioId } from './subdiario-writer.js';
 import * as drive from './drive.js';
 import * as sheets from './sheets.js';
 import type { CellValue } from './sheets.js';
@@ -1180,5 +1180,75 @@ describe('syncSubdiario diff path', () => {
 
     expect(result1.ok).toBe(true);
     expect(result2.ok).toBe(true);
+  });
+});
+
+// Codex P1 finding: chrome boot must NEVER create the Subdiario workbook.
+// resolveSubdiarioId creates on miss and caches subdiarioId; the next sync
+// then hits the cache with isNew=false and skips initializeComprobantesSheet,
+// leaving a workbook without the Comprobantes tab. findExistingSubdiarioId is
+// the create-free variant the boot step must use.
+describe('findExistingSubdiarioId', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('returns cached subdiarioId when present', async () => {
+    vi.mocked(folderStructure.getCachedFolderStructure).mockReturnValue({
+      ...makeCachedStructure(),
+      subdiarioId: SUBDIARIO_ID,
+    });
+
+    const result = await findExistingSubdiarioId(ROOT_ID);
+
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value).toBe(SUBDIARIO_ID);
+    expect(drive.findByName).not.toHaveBeenCalled();
+    expect(drive.createSpreadsheet).not.toHaveBeenCalled();
+  });
+
+  it('falls back to Drive search and returns the id when workbook exists', async () => {
+    vi.mocked(folderStructure.getCachedFolderStructure).mockReturnValue(
+      makeCachedStructure()
+    );
+    vi.mocked(drive.findByName).mockResolvedValue({
+      ok: true,
+      value: { id: SUBDIARIO_ID, name: 'Subdiario de Ventas', mimeType: SPREADSHEET_MIME },
+    });
+
+    const result = await findExistingSubdiarioId(ROOT_ID);
+
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value).toBe(SUBDIARIO_ID);
+    expect(drive.createSpreadsheet).not.toHaveBeenCalled();
+  });
+
+  it('returns null when no workbook exists — does NOT create one', async () => {
+    vi.mocked(folderStructure.getCachedFolderStructure).mockReturnValue(
+      makeCachedStructure()
+    );
+    vi.mocked(drive.findByName).mockResolvedValue({ ok: true, value: null });
+
+    const result = await findExistingSubdiarioId(ROOT_ID);
+
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value).toBeNull();
+    expect(drive.createSpreadsheet).not.toHaveBeenCalled();
+  });
+
+  it('propagates Drive search errors', async () => {
+    vi.mocked(folderStructure.getCachedFolderStructure).mockReturnValue(
+      makeCachedStructure()
+    );
+    vi.mocked(drive.findByName).mockResolvedValue({
+      ok: false,
+      error: new Error('Drive search failed'),
+    });
+
+    const result = await findExistingSubdiarioId(ROOT_ID);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.message).toBe('Drive search failed');
+    expect(drive.createSpreadsheet).not.toHaveBeenCalled();
   });
 });

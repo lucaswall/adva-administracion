@@ -16,7 +16,7 @@ import { initWatchManager, startWatching, shutdownWatchManager, updateLastScanTi
 import { scanFolder } from './processing/scanner.js';
 import { updateStatusSheet } from './services/status-sheet.js';
 import { syncAppsScript } from './bootstrap/apps-script-sync.js';
-import { resolveSubdiarioId } from './services/subdiario-writer.js';
+import { findExistingSubdiarioId } from './services/subdiario-writer.js';
 import { ensureSubdiarioChrome } from './services/subdiario-chrome.js';
 import { getSheetMetadata } from './services/sheets.js';
 import { info, warn, error as logError } from './utils/logger.js';
@@ -105,9 +105,9 @@ async function initializeSubdiarioChrome(): Promise<void> {
       return;
     }
 
-    const subdiarioResult = await resolveSubdiarioId(folderStructure.rootId);
+    const subdiarioResult = await findExistingSubdiarioId(folderStructure.rootId);
     if (!subdiarioResult.ok) {
-      warn('Skipping subdiario chrome: could not resolve spreadsheet ID', {
+      warn('Skipping subdiario chrome: could not locate spreadsheet ID', {
         module: 'server',
         phase: 'init',
         error: subdiarioResult.error.message,
@@ -115,7 +115,15 @@ async function initializeSubdiarioChrome(): Promise<void> {
       return;
     }
 
-    const subdiarioId = subdiarioResult.value.id;
+    if (subdiarioResult.value === null) {
+      info('Skipping subdiario chrome: workbook does not exist yet (first sync will create it)', {
+        module: 'server',
+        phase: 'init',
+      });
+      return;
+    }
+
+    const subdiarioId = subdiarioResult.value;
 
     const metadataResult = await getSheetMetadata(subdiarioId);
     if (!metadataResult.ok) {

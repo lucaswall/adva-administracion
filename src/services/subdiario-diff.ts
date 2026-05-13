@@ -106,6 +106,14 @@ export function diffSubdiarioRows(
   const updates: SubdiarioDiff['updates'] = [];
   const inserts: SubdiarioDiff['inserts'] = [];
 
+  // Track relative-order changes of common keys. The writer's in-place
+  // update at `desiredIndex` is only safe when surviving existing rows
+  // appear in desired in the same relative order as in existing. A row whose
+  // sort-key (fecha) changes can swap positions with another existing row,
+  // which would silently overwrite one row and leave the other stale.
+  let lastExistingRowIndex = -1;
+  let commonKeyReordered = false;
+
   for (let i = 0; i < desired.length; i++) {
     const row = desired[i]!;
     const key = rowKey(row);
@@ -113,6 +121,10 @@ export function diffSubdiarioRows(
 
     const existingRow = existingMap.get(key);
     if (existingRow !== undefined) {
+      if (existingRow.rowIndex < lastExistingRowIndex) {
+        commonKeyReordered = true;
+      }
+      lastExistingRowIndex = existingRow.rowIndex;
       if (rowsDiffer(existingRow, row)) {
         updates.push({ rowIndex: existingRow.rowIndex, desiredIndex: i, row });
       }
@@ -120,6 +132,8 @@ export function diffSubdiarioRows(
       inserts.push({ insertAt: i, row });
     }
   }
+
+  if (commonKeyReordered) sortInvariantViolated = true;
 
   // ── 4. Walk existing to find rows no longer in desired ───────────────────
   const deleteIndices: number[] = [];
