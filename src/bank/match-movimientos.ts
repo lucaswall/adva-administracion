@@ -310,6 +310,7 @@ export function parseFacturasEmitidas(
     matchedPagoFileId: headers.indexOf('matchedpagofileid'),
     matchConfidence: headers.indexOf('matchconfidence'),
     hasCuitMatch: headers.indexOf('hascuitmatch'),
+    pagada: headers.indexOf('pagada'),
     tipoDeCambio: headers.indexOf('tipodecambio'),
     condicionIVAReceptor: headers.indexOf('condicionivareceptor'),
   };
@@ -355,6 +356,10 @@ export function parseFacturasEmitidas(
       needsReview: row[colIndex.needsReview] === 'YES',
       matchedPagoFileId: row[colIndex.matchedPagoFileId] ? String(row[colIndex.matchedPagoFileId]) : undefined,
       matchConfidence: validateMatchConfidence(row[colIndex.matchConfidence]),
+      pagada:
+        colIndex.pagada >= 0 && row[colIndex.pagada]
+          ? String(row[colIndex.pagada])
+          : undefined,
     });
   }
 

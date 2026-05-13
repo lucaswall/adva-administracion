@@ -66,6 +66,13 @@ function formatRate(rate: number): string {
   return parseFloat(rate.toFixed(2)).toString();
 }
 
+/**
+ * Soft-paid marker: shown in `notas` when a matched pago_recibido covers an FC
+ * but no Resumen Bancario row has confirmed the credit yet. The marker is
+ * suppressed once a movimiento aggregate exists (hard paid silences soft).
+ */
+const SOFT_PAID_NOTE = 'Pendiente confirmación bancaria';
+
 // ────────────────────────────────────────────────────────────────────────────
 // Nro normalization (5-digit punto de venta + 8-digit numero)
 // ────────────────────────────────────────────────────────────────────────────
@@ -144,8 +151,8 @@ interface MovimientoAgg {
   totalCredito: number;
   /** Latest movement date (YYYY-MM-DD) */
   latestFecha: string;
-  /** Individual items sorted by fecha ASC (for multi-cuota notas) */
-  items: Array<{ credito: number; fecha: string }>;
+  /** Individual items sorted by fecha ASC (for multi-cuota notas + last-item hyperlink) */
+  items: Array<{ credito: number; fecha: string; sourceUrl: string }>;
 }
 
 /**
@@ -166,13 +173,62 @@ function aggregateMovimientos(
   if (matched.length === 0) return null;
 
   const items = matched
-    .map((m) => ({ credito: m.credito as number, fecha: m.fecha }))
+    .map((m) => ({
+      credito: m.credito as number,
+      fecha: m.fecha,
+      sourceUrl: m.sourceUrl,
+    }))
     .sort((a, b) => a.fecha.localeCompare(b.fecha));
 
   const totalCredito = items.reduce((sum, item) => sum + item.credito, 0);
   const latestFecha = items[items.length - 1].fecha;
 
   return { totalCredito, latestFecha, items };
+}
+
+interface PagoAgg {
+  /** Sum of ARS-equivalent amounts across all matched pagos */
+  totalARS: number;
+  /** Latest `fechaPago` (YYYY-MM-DD) — used as the FC's fechaCobro under soft-paid */
+  latestFecha: string;
+  /** Number of matched pagos */
+  count: number;
+}
+
+/**
+ * Aggregate matched pago_recibido documents for a given factura (ADV-271).
+ *
+ * Contributes `importeEnPesos` for USD pagos (when present), else falls back
+ * to `importePagado * factura.tipoDeCambio` for USD pagos with a known invoice
+ * rate. ARS pagos contribute `importePagado` directly. Returns null when no
+ * pago is matched.
+ */
+function aggregatePagosRecibidos(
+  factura: Factura,
+  pagos: Pago[]
+): PagoAgg | null {
+  const matched = pagos.filter((p) => p.matchedFacturaFileId === factura.fileId);
+  if (matched.length === 0) return null;
+
+  let totalARS = 0;
+  let latestFecha = matched[0].fechaPago;
+  for (const p of matched) {
+    if (p.moneda === 'USD') {
+      if (p.importeEnPesos && p.importeEnPesos > 0) {
+        totalARS += p.importeEnPesos;
+      } else if (factura.tipoDeCambio && factura.tipoDeCambio > 0) {
+        totalARS += p.importePagado * factura.tipoDeCambio;
+      }
+      // else: contribute 0 (leave row visibly soft) — no crash on missing TC
+    } else {
+      totalARS += p.importePagado;
+    }
+    if (p.fechaPago.localeCompare(latestFecha) > 0) {
+      latestFecha = p.fechaPago;
+    }
+  }
+
+  return { totalARS, latestFecha, count: matched.length };
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -328,19 +384,26 @@ function findMatchingRetenciones(
 /**
  * Determine whether a factura is in scope for the Subdiario.
  *
- * Scope rules:
+ * Scope rules (ADV-270):
  *   (a) FC emitted in currentYear → IN
  *   (b) FC from prior year, any matched movimiento.fecha in currentYear → IN
  *   (c) NC emitted in currentYear → IN (prior-year NCs → OUT)
- *   (d) FC from prior year, no payment, no cancelling NC → IN (still pending)
- *   (e) FC from prior year, all payments in prior year → OUT
+ *   (d) FC from prior year, pagada != 'SI' → IN (still pending in Cobros)
+ *   (e) FC from prior year, pagada='SI', no currentYear event → OUT (soft-drop)
  *   (f) FC from prior year, cancelled by prior-year NC → OUT
+ *
+ * A "currentYear event" pulls a prior-year `pagada='SI'` FC back into scope so
+ * the 2026-side event has a visible partner row:
+ *   - matched movimiento with fecha in currentYear,
+ *   - cancelling NC with fechaEmision in currentYear (rule c/f already cover),
+ *   - matched pago_recibido with fechaPago in currentYear.
  */
 function applyScopeFilter(
   factura: Factura,
   currentYear: number,
   cancellingNCs: Map<string, Factura>,
-  movimientos: BankMovimiento[]
+  movimientos: BankMovimiento[],
+  pagosRecibidos: Pago[]
 ): boolean {
   const yearEmision = parseInt(factura.fechaEmision.substring(0, 4), 10);
   const isNC = deriveTipo(factura.tipoComprobante) === 'NC';
@@ -353,48 +416,41 @@ function applyScopeFilter(
   // Rule a: FC emitted in currentYear → always in scope
   if (yearEmision === currentYear) return true;
 
-  // Prior-year FC: apply rules b, d, e, f
+  // Prior-year FC: evaluate currentYear events for rules (b), (e), (f).
   const matchedMovs = movimientos.filter(
     (m) => m.matchedFileId === factura.fileId && m.matchedType !== ''
   );
 
-  // Rule b: any payment in currentYear → in scope
+  // Rule b: any matched movimiento in currentYear → in scope
   const hasPaymentThisYear = matchedMovs.some(
     (m) => parseInt(m.fecha.substring(0, 4), 10) === currentYear
   );
   if (hasPaymentThisYear) return true;
 
-  // Check for a cancelling NC
+  // Cancelling NC handling (rules c/f)
   const cancellingNC = cancellingNCs.get(factura.fileId) ?? null;
-
   if (cancellingNC) {
     const ncYear = parseInt(cancellingNC.fechaEmision.substring(0, 4), 10);
     // Rule f: cancelled by prior-year NC → out of scope
     if (ncYear < currentYear) return false;
-    // NC is in currentYear (or later) → FC comes along
+    // NC issued in currentYear (or later) → FC comes along
     return true;
   }
 
-  // Rule e: all payments in prior years → out of scope ONLY IF those payments
-  // actually cover the total. A partial prior-year payment leaves an
-  // outstanding balance, so the FC remains a receivable in currentYear.
-  if (matchedMovs.length > 0) {
-    const allPaidBeforeCurrentYear = matchedMovs.every(
-      (m) => parseInt(m.fecha.substring(0, 4), 10) < currentYear
-    );
-    if (allPaidBeforeCurrentYear) {
-      const { total: totalARS } = convertTotalToARS(factura);
-      const totalPaid = matchedMovs.reduce((sum, m) => sum + (m.credito ?? 0), 0);
-      // 1% tolerance (or $1 minimum) — matches the retencion-matching predicate
-      // used elsewhere; absorbs rounding/IVA/exchange-rate noise.
-      const tolerance = Math.max(1, totalARS * 0.01);
-      if (totalPaid >= totalARS - tolerance) return false;
-      // Otherwise: partial payment → fall through to rule (d) (still pending).
-    }
-  }
+  // Soft-paid currentYear event: matched pago_recibido with fechaPago in currentYear
+  const hasPagoRecibidoThisYear = pagosRecibidos.some(
+    (p) =>
+      p.matchedFacturaFileId === factura.fileId &&
+      parseInt(p.fechaPago.substring(0, 4), 10) === currentYear
+  );
+  if (hasPagoRecibidoThisYear) return true;
 
-  // Rule d: no payment (or only partial prior-year payment) and no cancelling
-  // NC → still pending → in scope
+  // Rule e (soft-drop, ADV-270): prior-year FC with pagada='SI' and no
+  // currentYear event → OUT. Trim+uppercase to mirror pagos-pendientes.ts.
+  const pagadaNorm = (factura.pagada ?? '').trim().toUpperCase();
+  if (pagadaNorm === 'SI') return false;
+
+  // Rule d: prior-year FC without pagada='SI' → still pending → in scope
   return true;
 }
 
@@ -418,16 +474,23 @@ function composeNotas(opts: {
   tipo: 'FC' | 'NC';
   facturadorEntry: FacturadorEntry | undefined;
   movimientoAgg: MovimientoAgg | null;
+  softPaid: boolean;
   pagosRecibidos: Pago[];
   retenciones: Retencion[];
   totalARS: number;
   revisar: boolean;
 }): string {
-  const { factura, tipo, facturadorEntry, movimientoAgg, pagosRecibidos, retenciones, totalARS, revisar } = opts;
+  const { factura, tipo, facturadorEntry, movimientoAgg, softPaid, pagosRecibidos, retenciones, totalARS, revisar } = opts;
 
   if (tipo === 'NC') return '';
 
   const parts: string[] = [];
+
+  // 0. Soft-paid marker (ADV-271): prepend when a pago_recibido matched the FC
+  // but no movimiento confirmed it. Hard paid silences soft (movimientoAgg wins).
+  if (softPaid && !movimientoAgg) {
+    parts.push(SOFT_PAID_NOTE);
+  }
 
   // 1. Socio part
   if (facturadorEntry) {
@@ -589,6 +652,7 @@ function detectGaps(
           categoria: '',
           fechaCobro: '',
           recibido: null,
+          movimiento: '',
           notas: '',
         });
       }
@@ -640,7 +704,7 @@ export function buildSubdiarioRows(input: SubdiarioInput): SubdiarioRow[] {
 
   // Step 1: Apply scope filter — keep only in-scope rows
   const inScope = facturasEmitidas.filter((f) =>
-    applyScopeFilter(f, currentYear, cancellingNCs, movimientos)
+    applyScopeFilter(f, currentYear, cancellingNCs, movimientos, pagosRecibidos)
   );
 
   // Step 2: Build one SubdiarioRow per in-scope factura
@@ -669,11 +733,14 @@ export function buildSubdiarioRows(input: SubdiarioInput): SubdiarioRow[] {
 
     // Movimientos aggregation (for FC only)
     const movAgg = tipo === 'FC' ? aggregateMovimientos(factura.fileId, movimientos) : null;
+    // Pago_recibido aggregation (FC only — soft-paid tier, ADV-271)
+    const pagoAgg = tipo === 'FC' ? aggregatePagosRecibidos(factura, pagosRecibidos) : null;
 
     // fechaCobro and recibido — recibido is `null` (blank cell) when nothing
     // was received: unpaid FC, FC cancelled by NC, or placeholder.
     let fechaCobro = '';
     let recibido: number | null = null;
+    let softPaid = false;
 
     if (tipo === 'FC') {
       const cancellingNC = cancellingNCs.get(factura.fileId) ?? null;
@@ -681,8 +748,14 @@ export function buildSubdiarioRows(input: SubdiarioInput): SubdiarioRow[] {
         // Cancelled by an NC — show NC nro, no cash received → leave recibido null
         fechaCobro = `NC ${normalizeNro(cancellingNC.nroFactura)}`;
       } else if (movAgg) {
+        // Hard paid: bank movimiento confirms credit
         fechaCobro = movAgg.latestFecha;
         recibido = movAgg.totalCredito;
+      } else if (pagoAgg) {
+        // Soft paid: pago_recibido matched but no Resumen Bancario row yet
+        fechaCobro = pagoAgg.latestFecha;
+        recibido = pagoAgg.totalARS;
+        softPaid = true;
       }
     } else {
       // NC row: recibido mirrors total (negative)
@@ -695,11 +768,18 @@ export function buildSubdiarioRows(input: SubdiarioInput): SubdiarioRow[] {
       tipo,
       facturadorEntry,
       movimientoAgg: movAgg,
+      softPaid,
       pagosRecibidos,
       retenciones: retencionesRecibidas,
       totalARS,
       revisar,
     });
+
+    // Movimiento HYPERLINK target (ADV-272): only hard-paid FCs get a URL — soft-paid,
+    // unpaid, NC-cancelled, and NC rows leave the column blank (Resumen Bancario is
+    // the only authoritative target for this column).
+    const movimientoUrl =
+      tipo === 'FC' && movAgg ? movAgg.items[movAgg.items.length - 1]!.sourceUrl : '';
 
     rows.push({
       fecha: factura.fechaEmision,
@@ -714,6 +794,7 @@ export function buildSubdiarioRows(input: SubdiarioInput): SubdiarioRow[] {
       categoria,
       fechaCobro,
       recibido,
+      movimiento: movimientoUrl,
       notas,
     });
   }

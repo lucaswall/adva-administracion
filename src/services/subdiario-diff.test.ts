@@ -22,6 +22,7 @@ function makeRow(overrides: Partial<SubdiarioRow> = {}): SubdiarioRow {
     categoria: 'Micro',
     fechaCobro: '',
     recibido: null,
+    movimiento: '',
     notas: '',
     ...overrides,
   };
@@ -191,6 +192,39 @@ describe('diffSubdiarioRows', () => {
     const result = diffSubdiarioRows(existing, desired);
 
     expect(result.updates).toHaveLength(0);
+  });
+
+  it('movimiento: empty → URL produces exactly one update (ADV-272)', () => {
+    const base = makeRow({ nro: '00001-00000001', movimiento: '' });
+    const existing = [withIndex(base, 0)];
+    const desired = [{ ...base, movimiento: 'https://docs.google.com/spreadsheets/d/x/edit#gid=1&range=A5' }];
+
+    const result = diffSubdiarioRows(existing, desired);
+
+    expect(result.updates).toHaveLength(1);
+    expect(result.inserts).toHaveLength(0);
+    expect(result.deletes).toHaveLength(0);
+  });
+
+  it('movimiento: existing "Mov" (HYPERLINK round-trip) vs desired URL → NO update (semantic presence)', () => {
+    // After a HYPERLINK is written, UNFORMATTED_VALUE returns the displayed text "Mov".
+    // The next diff sees existing.movimiento="Mov" vs desired.movimiento=URL; strict
+    // equality would loop forever. Semantic presence avoids that.
+    const existing = [withIndex(makeRow({ nro: '00001-00000001', movimiento: 'Mov' }), 0)];
+    const desired = [makeRow({ nro: '00001-00000001', movimiento: 'https://docs.google.com/spreadsheets/d/x/edit#gid=1&range=A5' })];
+
+    const result = diffSubdiarioRows(existing, desired);
+
+    expect(result.updates).toHaveLength(0);
+  });
+
+  it('movimiento: URL → empty produces exactly one update (link removed)', () => {
+    const existing = [withIndex(makeRow({ nro: '00001-00000001', movimiento: 'Mov' }), 0)];
+    const desired = [makeRow({ nro: '00001-00000001', movimiento: '' })];
+
+    const result = diffSubdiarioRows(existing, desired);
+
+    expect(result.updates).toHaveLength(1);
   });
 
   it('NC row (tipo=NC, total<0) treated identically to FC under keyed diff', () => {

@@ -256,3 +256,34 @@
 - `pagada=SI` set by mistake (manual edit, bad match) would permanently hide the factura from the Subdiario. Acceptable per the user's "2025 is closed" boundary; worth a quick spot-check of the Cobros Pendientes list before deploy to confirm no obvious-paid-but-actually-unpaid rows would silently disappear.
 - HYPERLINK formula round-trip — Sheets returns the displayed text via `UNFORMATTED_VALUE`, not the underlying formula. `readSubdiarioRows` and the diff equality check need to tolerate this or read with `FORMULA` render option for the `movimiento` column. Mitigation in Task 5 step notes.
 - Migration runs on every container boot until the schema is upgraded. Idempotency is preserved by the existing diff path (no-op after the first run), and the migration log line surfaces if it fires more than once.
+
+---
+
+## Iteration 1 — 2026-05-13
+
+**Method:** single-agent (5 tasks across 2 work units, ~11 effort points, heavy file overlap on `subdiario-builder.ts` and `types/index.ts` — worker overhead would have exceeded the implementation work).
+
+**Tasks completed:**
+
+- **Task 1 (ADV-268):** Added `pagada?: string` to `Factura`; extended `parseFacturasEmitidas` to read column T. 4 new parser tests.
+- **Task 2 (ADV-269):** Added `sourceUrl: string` to `BankMovimiento` (required); built Sheets cell URLs in `readMovimientosRows` using captured `sheet.sheetId` and 1-indexed row number. 2 new reader tests.
+- **Task 3 (ADV-270):** Rewrote `applyScopeFilter` — rule (e) is now soft-drop based on `pagada='SI'` (trim+upper). Added `pagosRecibidos: Pago[]` parameter; "currentYear event" expanded to include matched `pago_recibido` with `fechaPago` in currentYear. Dropped the partial-payment tolerance branch. Updated Tests 9 + 14d to set `pagada: 'SI'`; added 8 new scope tests.
+- **Task 4 (ADV-271):** Added `aggregatePagosRecibidos` next to `aggregateMovimientos`; inserted soft-paid tier into the FC priority chain (NC > movimiento > pago > unpaid). `composeNotas` prepends `"Pendiente confirmación bancaria"` when `softPaid && !movimientoAgg`. `SOFT_PAID_NOTE` constant declared. USD fallback: `importeEnPesos` → `importePagado * factura.tipoDeCambio` → 0. 7 new soft-paid tests.
+- **Task 5 (ADV-272):** Added `movimiento: string` to `SubdiarioRow` (col M, between recibido and notas); extended `MovimientoAgg.items` with `sourceUrl`; builder populates `movimiento` only for hard-paid FCs (latest cuota's URL). Writer bumped to A:N range, parses col M as movimiento and col N as notas. New cell emission in `rowToCellData`: `=HYPERLINK("url","Mov")` formula or blank, with double-quote escaping. Schema migration trigger reads `A1:N1`; if <14 cells (or `M1='notas'` with empty `N1`), overwrites header to 14 cols, reads `A2:N` for old row count, emits full-rewrite diff via `sortInvariantViolated=true`. Diff equality on `movimiento` uses semantic presence (empty ↔ non-empty) to avoid perpetual updates from the HYPERLINK round-trip caveat. 7 new builder tests + 3 new diff tests + 3 new writer migration tests + 3 new sheets cell-emission tests.
+
+**Migration:** Documented in MIGRATIONS.md and SPREADSHEET_FORMAT.md. One-shot full rewrite to 14 cols on first deploy; idempotent on subsequent runs.
+
+**Bugs found and fixed (bug-hunter pass 1):**
+- CRITICAL: `makeTestRow` in `sheets.test.ts` was missing `movimiento: ''` — broke `npm run build`. Fixed.
+- MEDIUM: Migration row counting via `A2:A` would miss rows with manually cleared fecha. Switched to `A2:N`. Fixed.
+- MEDIUM: No coverage for HYPERLINK formula emission/escaping. Added 3 tests. Fixed.
+- MEDIUM: No coverage for header-read failure propagation. Added test. Fixed.
+- LOW: Pre-existing stale doc (Facturas Emitidas: 20→21 cols A:U). Fixed.
+
+Bug-hunter pass 2: clean (0 bugs).
+
+**Verifier (full mode):** all tests pass (74 files, 2473 tests), zero warnings, build passes.
+
+**Linear:** ADV-268, ADV-269, ADV-270, ADV-271, ADV-272 all moved Todo → In Progress → Review.
+
+## Status: COMPLETE

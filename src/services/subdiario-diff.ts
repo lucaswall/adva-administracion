@@ -32,12 +32,23 @@ function numericNullableDiffers(a: number | null, b: number | null): boolean {
  * Equality semantics:
  * - `total`: epsilon 0.005 (ARS floating-point round-trip protection)
  * - `recibido`: null===null → no diff; null vs number → diff; number vs number: same epsilon
- * - All string fields: strict equality after `.trim()`
+ * - `movimiento` (ADV-272): SEMANTIC PRESENCE check (`(a==='') !== (b==='')`).
+ *   Reason: the writer emits a `=HYPERLINK("url","Mov")` formula, but `getValues`
+ *   with `UNFORMATTED_VALUE` returns the formula's *displayed* text ("Mov"), not
+ *   the URL. Strict equality would treat the desired URL and the read-back "Mov"
+ *   as different on every sync and trigger perpetual updates. Comparing presence
+ *   only means we update once (empty ↔ linked) and skip URL-only drift.
+ * - All other string fields: strict equality after `.trim()`.
  */
 function rowsDiffer(a: SubdiarioRow, b: SubdiarioRow): boolean {
   // Numeric fields with epsilon
   if (Math.abs(a.total - b.total) >= MONEY_EPSILON) return true;
   if (numericNullableDiffers(a.recibido, b.recibido)) return true;
+
+  // movimiento — semantic presence (see header comment)
+  const aMov = String(a.movimiento ?? '').trim();
+  const bMov = String(b.movimiento ?? '').trim();
+  if ((aMov === '') !== (bMov === '')) return true;
 
   // String fields — trim before comparing
   const stringFields: (keyof SubdiarioRow)[] = [
