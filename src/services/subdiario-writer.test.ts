@@ -953,6 +953,19 @@ describe('readSubdiarioRows', () => {
     }
   });
 
+  it('fechaCobro serial=0 → treated as blank ("") not "1899-12-30"', async () => {
+    const row = makeSheetRow({ 10: 0 }); // serial 0 = 1899-12-30 epoch — treat as blank
+    vi.mocked(sheets.getValues).mockResolvedValue({ ok: true, value: [row] });
+
+    const result = await readSubdiarioRows('test-id');
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      // Must be '' not '1899-12-30'
+      expect(result.value[0]!.fechaCobro).toBe('');
+    }
+  });
+
   it('total as number round-trips numerically', async () => {
     const row = makeSheetRow({ 7: 1234567.89 });
     vi.mocked(sheets.getValues).mockResolvedValue({ ok: true, value: [row] });

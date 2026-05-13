@@ -170,10 +170,12 @@ export async function readSubdiarioRows(
 
     // Col K: fechaCobro — serial → date string; string → pass through
     // Edge case: serial=0 maps to "1899-12-30" in Sheets — treat as blank instead.
+    // normalizeSpreadsheetDate(0) returns '1899-12-30' (truthy), so `|| ''` cannot
+    // distinguish it from a valid date. Guard on the raw value instead.
     const fechaCobroCell = row[10];
     const fechaCobro =
       typeof fechaCobroCell === 'number'
-        ? (normalizeSpreadsheetDate(fechaCobroCell) || '')
+        ? (fechaCobroCell === 0 ? '' : normalizeSpreadsheetDate(fechaCobroCell))
         : String(fechaCobroCell ?? '').trim();
 
     // Col L: recibido — empty/blank → null; non-empty → parseNumber

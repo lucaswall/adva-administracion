@@ -367,4 +367,56 @@ In `src/server.ts` after line 354 (`await runStartupMigrations();`), call a new 
 - Equality semantics for `total` and `recibido` rely on ε=0.005. If a future feature stores higher-precision values, the threshold may need revisiting.
 - Chrome idempotency depends on accurate state-reads. If `spreadsheets.get` doesn't return `effectiveFormat.wrapStrategy` for empty/never-touched cells, the chrome module may emit a redundant wrap request on every boot. Cheap, but observable in revision history. Monitor on first deploy.
 
-## Status: PENDING
+## Status: COMPLETE
+
+---
+
+## Iteration 1
+
+**Implemented:** 2026-05-13
+**Method:** Agent team (2 workers, worktree-isolated)
+
+### Tasks Completed This Iteration
+- Task 1 (ADV-263): `diffSubdiarioRows` pure function — keyed-diff on `(cod, nro)` with float-ε equality, sort-invariant + duplicate-key detection (worker-1, 12 tests)
+- Task 2 (ADV-264): `readSubdiarioRows` sheet reader — parses `Comprobantes!A2:M` mirroring the writer's emission rules (worker-1, 8 tests)
+- Task 3 (ADV-265): writer diff path — replaces clear+append with single `batchUpdate` (deletes DESC → inserts → updates) under the existing `sheet-append:${id}:Comprobantes` lock; no-op short-circuit; sort-invariant fallback (worker-1, 10+ tests in `subdiario-writer.test.ts` + 6 in `sheets.test.ts`)
+- Task 4 (ADV-266): `ensureSubdiarioChrome` boot step — state-checked idempotent application of widths, wrap, banding, header bg, protected range, locale; failure-isolated (worker-2, 9 tests)
+- Task 5 (ADV-267): surface diff stats in route response + match-hook log — `RebuildSubdiarioResponse` and post-match info log extended with `inserts/updates/deletes/sortInvariantFallback` (worker-1, 4 tests)
+
+### Files Modified
+- `src/services/subdiario-diff.ts` (new) - pure keyed-diff function
+- `src/services/subdiario-diff.test.ts` (new) - 12 tests
+- `src/services/subdiario-chrome.ts` (new) - boot-time chrome with single-read state check
+- `src/services/subdiario-chrome.test.ts` (new) - 9 tests
+- `src/services/subdiario-writer.ts` - `readSubdiarioRows` added; `resolveSubdiarioId` exported; clear+append block replaced with locked diff path; `SyncSubdiarioResult` extended; `fechaCobro` serial=0 guard (bug-hunter fix)
+- `src/services/subdiario-writer.test.ts` - reader tests, writer-diff tests, serial=0 regression test
+- `src/services/sheets.ts` - `applySubdiarioDiff` + `rowToCellData` primitive (single batchUpdate, no internal lock); `getSpreadsheetProperties` and `executeBatchRequests` helpers
+- `src/services/sheets.test.ts` - 6 tests covering applySubdiarioDiff including the mixed-batch index-shift regression
+- `src/types/index.ts` - `SubdiarioRowWithIndex`, `SubdiarioDiff` (with `desiredIndex` on updates)
+- `src/routes/subdiario.ts` - `RebuildSubdiarioResponse` extended with diff fields
+- `src/routes/subdiario.test.ts` - 4 tests for diff-field surface
+- `src/bank/match-movimientos.ts` - post-match info log includes diff counts
+- `src/bank/match-movimientos.test.ts` - log expectations updated
+- `src/server.ts` - `initializeSubdiarioChrome()` boot step after `runStartupMigrations()`, try/catch + warn (non-fatal)
+
+### Linear Updates
+- ADV-263: Todo → In Progress → Review
+- ADV-264: Todo → In Progress → Review
+- ADV-265: Todo → In Progress → Review
+- ADV-266: Todo → In Progress → Review
+- ADV-267: Todo → In Progress → Review
+
+### Pre-commit Verification
+- bug-hunter: 1 MEDIUM bug found and fixed (`fechaCobro` serial=0 in `readSubdiarioRows` produced `'1899-12-30'` instead of `''`, which would have caused spurious updates on every sync for rows with that serial; fixed at the parsing layer with a regression test)
+- verifier: 2442 tests pass across 75 test files, zero build warnings
+
+### Work Partition
+- Worker 1: Tasks 1, 2, 3, 5 — incremental diff pipeline (diff core, sheet reader, writer integration, route/log surfacing). All tightly coupled around `subdiario-writer.ts` + `sheets.ts` + `types/index.ts`.
+- Worker 2: Task 4 — chrome boot step (independent module + boot wiring + tiny additive edits to `sheets.ts` and `subdiario-writer.ts`).
+
+### Merge Summary
+- Worker 1: merge --no-ff, no conflicts; typecheck clean.
+- Worker 2: merge --no-ff, auto-merged `sheets.ts` and `subdiario-writer.ts` (worker-2 additions were strictly additive — single `export` keyword + new helpers appended); typecheck clean.
+
+### Continuation Status
+All 5 tasks completed.
