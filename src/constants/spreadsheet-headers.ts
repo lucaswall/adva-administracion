@@ -541,9 +541,13 @@ export const DASHBOARD_OPERATIVO_SHEETS: SheetConfig[] = [
 ];
 
 /**
- * Headers for Subdiario de Ventas — Comprobantes sheet (columns A:M)
- * 13 columns: fecha, cod, tipo, nro, cliente, cuit, condicion, total, concepto,
- *             categoria, fechaCobro, recibido, notas
+ * Headers for Subdiario de Ventas — Comprobantes sheet (columns A:N)
+ * 14 columns: fecha, cod, tipo, nro, cliente, cuit, condicion, total, concepto,
+ *             categoria, fechaCobro, recibido, movimiento, notas
+ *
+ * `movimiento` (col M) holds a Sheets HYPERLINK formula pointing at the source
+ * bank row for hard-paid FCs. Soft-paid, unpaid, NC-cancelled, and gap rows
+ * leave the cell blank (ADV-272).
  */
 export const SUBDIARIO_COMPROBANTES_HEADERS = [
   'fecha',
@@ -558,5 +562,6 @@ export const SUBDIARIO_COMPROBANTES_HEADERS = [
   'categoria',
   'fechaCobro',
   'recibido',
+  'movimiento',
   'notas',
 ];

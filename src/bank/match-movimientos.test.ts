@@ -297,6 +297,54 @@ describe('parseFacturasEmitidas', () => {
     expect(result).toHaveLength(3);
     expect(result.map((f) => f.fileId).sort()).toEqual(['fc1', 'fc2', 'nc1']);
   });
+
+  it('parses pagada column when present (SI)', () => {
+    const data = [
+      ['fechaEmision', 'fileId', 'tipoComprobante', 'nroFactura', 'cuitReceptor', 'razonSocialReceptor', 'importeTotal', 'moneda', 'pagada'],
+      ['2025-01-15', 'file1', 'A', '00001-00000001', '20123456786', 'CLIENTE SA', '1000', 'ARS', 'SI'],
+    ];
+
+    const result = parseFacturasEmitidas(data);
+
+    expect(result).toHaveLength(1);
+    expect(result[0].pagada).toBe('SI');
+  });
+
+  it('leaves pagada undefined when column value is empty string', () => {
+    const data = [
+      ['fechaEmision', 'fileId', 'tipoComprobante', 'nroFactura', 'cuitReceptor', 'razonSocialReceptor', 'importeTotal', 'moneda', 'pagada'],
+      ['2025-01-15', 'file1', 'A', '00001-00000001', '20123456786', 'CLIENTE SA', '1000', 'ARS', ''],
+    ];
+
+    const result = parseFacturasEmitidas(data);
+
+    expect(result).toHaveLength(1);
+    expect(result[0].pagada).toBeUndefined();
+  });
+
+  it('leaves pagada undefined when column is missing entirely', () => {
+    const data = [
+      ['fechaEmision', 'fileId', 'tipoComprobante', 'nroFactura', 'cuitReceptor', 'razonSocialReceptor', 'importeTotal', 'moneda'],
+      ['2025-01-15', 'file1', 'A', '00001-00000001', '20123456786', 'CLIENTE SA', '1000', 'ARS'],
+    ];
+
+    const result = parseFacturasEmitidas(data);
+
+    expect(result).toHaveLength(1);
+    expect(result[0].pagada).toBeUndefined();
+  });
+
+  it('preserves pagada whitespace and casing (no trim/upper inside parser)', () => {
+    const data = [
+      ['fechaEmision', 'fileId', 'tipoComprobante', 'nroFactura', 'cuitReceptor', 'razonSocialReceptor', 'importeTotal', 'moneda', 'pagada'],
+      ['2025-01-15', 'file1', 'A', '00001-00000001', '20123456786', 'CLIENTE SA', '1000', 'ARS', ' si '],
+    ];
+
+    const result = parseFacturasEmitidas(data);
+
+    expect(result).toHaveLength(1);
+    expect(result[0].pagada).toBe(' si ');
+  });
 });
 
 describe('parseFacturasRecibidas', () => {

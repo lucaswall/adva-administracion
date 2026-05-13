@@ -16,7 +16,7 @@ Dual control spreadsheets based on money flow direction:
 
 Located at root: `Control de Ingresos.gsheet`
 
-### Facturas Emitidas (20 columns, A:T)
+### Facturas Emitidas (21 columns, A:U)
 
 Invoices FROM ADVA (ADVA is emisor). ADVA info is implicit; only receptor (counterparty) stored.
 
@@ -29,23 +29,24 @@ Invoices FROM ADVA (ADVA is emisor). ADVA info is implicit; only receptor (count
 | E | nroFactura | string | Full invoice number (e.g., "00003-00001957") |
 | F | cuitReceptor | string | Client CUIT (11 digits) |
 | G | razonSocialReceptor | string | Client business name |
-| H | importeNeto | currency | Net amount before tax |
-| I | importeIva | currency | IVA/VAT amount |
-| J | importeTotal | currency | Total amount |
-| K | moneda | enum | ARS\|USD |
-| L | concepto | string | Brief description (optional) |
-| M | processedAt | timestamp | Processing timestamp |
-| N | confidence | number | Extraction confidence (0.0-1.0) |
-| O | needsReview | boolean | Manual review needed |
-| P | matchedPagoFileId | string | Linked Pago Recibido fileId |
-| Q | matchConfidence | enum | HIGH\|MEDIUM\|LOW\|MANUAL |
-| R | hasCuitMatch | boolean | Match based on CUIT |
-| S | pagada | enum | SI\|NO - Payment received status |
-| T | tipoDeCambio | number | Exchange rate for USD invoices (optional) |
+| H | condicionIVAReceptor | string | Receptor's IVA condition (ADV-245) |
+| I | importeNeto | currency | Net amount before tax |
+| J | importeIva | currency | IVA/VAT amount |
+| K | importeTotal | currency | Total amount |
+| L | moneda | enum | ARS\|USD |
+| M | concepto | string | Brief description (optional) |
+| N | processedAt | timestamp | Processing timestamp |
+| O | confidence | number | Extraction confidence (0.0-1.0) |
+| P | needsReview | boolean | Manual review needed |
+| Q | matchedPagoFileId | string | Linked Pago Recibido fileId |
+| R | matchConfidence | enum | HIGH\|MEDIUM\|LOW\|MANUAL |
+| S | hasCuitMatch | boolean | Match based on CUIT |
+| T | pagada | enum | SI\|NO - Payment received status |
+| U | tipoDeCambio | number | Exchange rate for USD invoices (optional) |
 
 Rows sorted by `fechaEmision` descending after insert.
 
-**Schema migration:** Column S (`pagada`) was added in ADV-167, shifting `tipoDeCambio` from S to T. The startup migration (`migrateFacturasEmitidasPagadaColumn`) inserts the column automatically using the Sheets API `insertDimension` to preserve existing `tipoDeCambio` values.
+**Schema migrations:** Column T (`pagada`) was added in ADV-167, shifting `tipoDeCambio` to T (then U after ADV-245). Column H (`condicionIVAReceptor`) was added in ADV-245. The startup migrations (`migrateFacturasEmitidasPagadaColumn`, `migrateFacturasEmitidasCondicionIvaColumn`) insert the columns automatically using the Sheets API `insertDimension` to preserve downstream column values.
 
 ### Pagos Recibidos (17 columns, A:Q)
 
@@ -424,6 +425,37 @@ Centralized file tracking to prevent duplicate processing and enable startup rec
 **Current Standard tier pricing:** Input $0.30/1M, Cached $0.03/1M, Output $2.50/1M
 **Source:** https://ai.google.dev/gemini-api/docs/pricing
 **Note:** Cost per token columns (J-L) preserve historical pricing for each request
+
+---
+
+## Subdiario de Ventas
+
+Chronological registry of every FC/NC emitted in the current year. Built by `subdiario-builder.ts` and written by `subdiario-writer.ts`. One sheet (`Comprobantes`) per workbook.
+
+### Comprobantes (14 columns, A:N)
+
+| Column | Field | Type | Description |
+|--------|-------|------|-------------|
+| A | fecha | date | Invoice issue date (`fechaEmision`) |
+| B | cod | string | AFIP comprobante code (`001`, `003`, `006`, `008`, `011`, `013`, `019`, `021`) |
+| C | tipo | enum | `FC` (factura) or `NC` (nota de crédito) |
+| D | nro | string | Normalized comprobante number (`00003-00001956`) |
+| E | cliente | string | Receptor razón social — or `FALTA <nro>` for gap placeholders |
+| F | cuit | string | Receptor CUIT |
+| G | condicion | string | Receptor IVA condition (PDF-extracted, falls back to Facturador) |
+| H | total | number | Total in ARS (negative for NCs; 0 for placeholders) |
+| I | concepto | string | Brief description |
+| J | categoria | string | Socio membresía tier (`Micro`, `Empresa`, ...); blank for non-socios/NCs/placeholders |
+| K | fechaCobro | date / string | Payment date (YYYY-MM-DD), or `NC <nro>` when cancelled by an NC, or `''` when unpaid |
+| L | recibido | number / blank | Sum of received ARS — blank for unpaid, NC-cancelled, and placeholder rows |
+| M | movimiento | formula / blank | `=HYPERLINK("<sheets-url>","Mov")` pointing at the source Resumen Bancario row. Hard-paid FCs only — soft-paid, unpaid, NC-cancelled, NC, and gap rows leave it blank (ADV-272). |
+| N | notas | string | Annotations: socio info, export TC, retencion, multi-cuota breakdown, `Pendiente confirmación bancaria` for soft-paid FCs (ADV-271) |
+
+**Sort invariant:** rows are sorted by `fecha` ASC then `nro` ASC. Violations trigger a one-shot full rewrite.
+
+**Schema migration (ADV-272):** Existing workbooks created before this column have 13 columns (A:M, ending in `notas` at M). On the first sync after deploy, `syncSubdiario` reads `A1:N1`; if fewer than 14 header cells (or M1=`notas` with N1 empty) it overwrites the header and emits a full rewrite to upgrade to 14 columns. The rewrite is idempotent — subsequent syncs no-op via the diff path. The migration logs `Comprobantes schema migration: 13 → 14 cols (added movimiento)`.
+
+**HYPERLINK round-trip caveat:** `getValues` reads with `UNFORMATTED_VALUE`, which returns the formula's *displayed* text (`Mov`) rather than the underlying URL. The diff equality check in `subdiario-diff.ts` therefore compares the `movimiento` column on semantic presence only (empty ↔ non-empty), preventing perpetual updates from URL drift.
 
 ---
 

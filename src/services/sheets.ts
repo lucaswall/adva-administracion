@@ -1329,6 +1329,8 @@ const SUBDIARIO_NUMBER_FORMAT: sheets_v4.Schema$CellFormat = {
  * - total (H): numberValue + NUMBER `#,##0.00` format
  * - fechaCobro (K): serial + DATE format when YYYY-MM-DD, stringValue otherwise
  * - recibido (L): numberValue + NUMBER format when not null; empty userEnteredValue when null (blank cell, NOT 0)
+ * - movimiento (M): `=HYPERLINK("url","Mov")` formula when non-empty URL; empty userEnteredValue otherwise (ADV-272)
+ * - notas (N): string
  * - All other string fields: stringValue (no number format)
  *
  * Date/number formats are emitted per-cell to mirror the convention used by
@@ -1378,7 +1380,18 @@ function rowToCellData(row: SubdiarioRow): sheets_v4.Schema$CellData[] {
           userEnteredFormat: SUBDIARIO_NUMBER_FORMAT,
         }
       : { userEnteredValue: {} },
-    // M: notas → string
+    // M: movimiento → HYPERLINK formula when URL present, blank cell otherwise.
+    // Display text "Mov" keeps the column narrow; date is already in fechaCobro.
+    // URL is escaped (only double-quotes need escaping inside a Sheets formula
+    // string) to defend against malformed input.
+    row.movimiento && row.movimiento.trim() !== ''
+      ? {
+          userEnteredValue: {
+            formulaValue: `=HYPERLINK("${row.movimiento.replace(/"/g, '""')}","Mov")`,
+          },
+        }
+      : { userEnteredValue: {} },
+    // N: notas → string
     { userEnteredValue: { stringValue: row.notas } },
   ];
 }

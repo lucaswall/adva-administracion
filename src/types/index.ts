@@ -145,6 +145,8 @@ export interface Factura {
   matchConfidence?: MatchConfidence;
   /** Whether the match was based on CUIT match */
   hasCuitMatch?: boolean;
+  /** Pagada flag from Control sheet column T ('SI' once any matcher confirms payment; undefined when blank/absent) */
+  pagada?: string;
 }
 
 /**
@@ -1070,6 +1072,13 @@ export interface BankMovimiento {
   matchedType: 'AUTO' | 'MANUAL' | '';
   /** Transaction description/concept */
   concepto?: string;
+  /**
+   * Google Sheets URL pointing at the source bank row.
+   * Format: `https://docs.google.com/spreadsheets/d/{spreadsheetId}/edit#gid={sheetId}&range=A{rowNumber}`.
+   * Used by the Subdiario writer to render the `movimiento` HYPERLINK column.
+   * Identity is per-row (assigned even when `matchedFileId` is empty).
+   */
+  sourceUrl: string;
 }
 
 /**
@@ -1136,6 +1145,13 @@ export interface SubdiarioRow {
    * `null` when nothing was received: FC unpaid, FC cancelled by NC, or placeholder.
    */
   recibido: number | null;
+  /**
+   * Google Sheets URL for the matched bank movimiento (latest cuota's `sourceUrl`)
+   * or empty string. Rendered as a `=HYPERLINK("url","Mov")` formula by the writer.
+   * Hard-paid FCs only — soft-paid, unpaid, NC-cancelled, and gap rows leave it
+   * empty so the column's semantic stays "authoritative bank movement". ADV-272.
+   */
+  movimiento: string;
   /** Additional annotations: socio info, export TC, retencion, multi-cuota, etc. */
   notas: string;
 }

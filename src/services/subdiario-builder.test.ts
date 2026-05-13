@@ -11,6 +11,7 @@ import { describe, it, expect } from 'vitest';
 import { buildSubdiarioRows } from './subdiario-builder.js';
 import type {
   Factura,
+  Pago,
   Retencion,
   BankMovimiento,
   FacturadorEntry,
@@ -65,12 +66,14 @@ function makeMov(overrides: {
   credito: number;
   fecha?: string;
   matchedType?: 'AUTO' | 'MANUAL' | '';
+  sourceUrl?: string;
 }): BankMovimiento {
   return {
     fecha: `${CURRENT_YEAR}-01-20`,
     debito: null,
     matchedType: 'AUTO',
     concepto: 'Acreditación',
+    sourceUrl: `https://docs.google.com/spreadsheets/d/test-bank-id/edit#gid=1&range=A2`,
     ...overrides,
   };
 }
@@ -90,6 +93,22 @@ function makeRetCert(
     montoComprobante: 1_000_000,
     montoRetencion: 50_000,
     processedAt: `${CURRENT_YEAR}-01-25T10:00:00Z`,
+    confidence: 0.95,
+    needsReview: false,
+    ...overrides,
+  };
+}
+
+function makePago(
+  overrides: Partial<Pago> & { fileId: string; matchedFacturaFileId: string }
+): Pago {
+  return {
+    fileName: `pago-${overrides.fileId}.pdf`,
+    banco: 'BBVA',
+    fechaPago: `${CURRENT_YEAR}-01-20`,
+    importePagado: 0,
+    moneda: 'ARS',
+    processedAt: `${CURRENT_YEAR}-01-20T10:00:00Z`,
     confidence: 0.95,
     needsReview: false,
     ...overrides,
@@ -322,12 +341,14 @@ describe('buildSubdiarioRows', () => {
     expect(rows[0].recibido).toBeNull();
   });
 
-  // ── Test 9: Prior-year FC paid prior year (OUT of scope) ─────────────────
-  it('prior-year FC paid in prior year: OUT of scope (rule e)', () => {
+  // ── Test 9: Prior-year FC marked pagada=SI with no currentYear event ─────
+  // Soft-drop scope rule (e — ADV-270): `pagada='SI'` AND no currentYear event → OUT.
+  it('prior-year FC pagada=SI, no currentYear event: OUT of scope (rule e)', () => {
     const fc = makeFc({
       fileId: 'fc009',
       nroFactura: '00003-00001300',
       fechaEmision: '2025-05-01',
+      pagada: 'SI',
     });
     const mov = makeMov({
       matchedFileId: 'fc009',
@@ -612,6 +633,556 @@ describe('buildSubdiarioRows', () => {
     expect(realRows[0].nro).toBe('00007-00000050');
   });
 
+  // ── Soft-drop scope filter (ADV-270) ─────────────────────────────────────
+  // The new rule (e): prior-year FC with `pagada='SI'` is DROPPED, UNLESS a
+  // currentYear event (matched movimiento, cancelling NC, or matched
+  // pago_recibido) pulls it back so the 2026-side event has a partner row.
+
+  it('soft-drop: prior-year FC pagada=SI, zero currentYear events → dropped', () => {
+    const PRIOR_YEAR = CURRENT_YEAR - 1;
+    const fc = makeFc({
+      fileId: 'fc-softdrop-1',
+      nroFactura: '00010-00000001',
+      fechaEmision: `${PRIOR_YEAR}-04-01`,
+      pagada: 'SI',
+    });
+
+    const rows = buildSubdiarioRows(makeInput({ facturasEmitidas: [fc] }));
+
+    expect(rows.filter((r) => !r.cliente.startsWith('FALTA'))).toHaveLength(0);
+  });
+
+  it('soft-drop: prior-year FC pagada=SI kept when a currentYear movimiento matches', () => {
+    const PRIOR_YEAR = CURRENT_YEAR - 1;
+    const fc = makeFc({
+      fileId: 'fc-softdrop-2',
+      nroFactura: '00010-00000002',
+      fechaEmision: `${PRIOR_YEAR}-04-01`,
+      pagada: 'SI',
+      importeTotal: 1_000_000,
+    });
+    const mov = makeMov({
+      matchedFileId: 'fc-softdrop-2',
+      credito: 1_000_000,
+      fecha: `${CURRENT_YEAR}-02-05`,
+    });
+
+    const rows = buildSubdiarioRows(
+      makeInput({ facturasEmitidas: [fc], movimientos: [mov] })
+    );
+
+    const real = rows.filter((r) => !r.cliente.startsWith('FALTA'));
+    expect(real).toHaveLength(1);
+    expect(real[0].nro).toBe('00010-00000002');
+  });
+
+  it('soft-drop: prior-year FC pagada=SI kept when a cancelling NC is issued in currentYear', () => {
+    const PRIOR_YEAR = CURRENT_YEAR - 1;
+    const fc = makeFc({
+      fileId: 'fc-softdrop-3',
+      nroFactura: '00010-00000003',
+      fechaEmision: `${PRIOR_YEAR}-04-01`,
+      importeTotal: 500_000,
+      pagada: 'SI',
+    });
+    const nc = makeNc({
+      fileId: 'nc-softdrop-3',
+      nroFactura: '00010-00000900',
+      fechaEmision: `${CURRENT_YEAR}-03-01`,
+      importeTotal: 500_000,
+      concepto: 'Nota de credito s/ Factura N° 10-3',
+    });
+
+    const rows = buildSubdiarioRows(
+      makeInput({ facturasEmitidas: [fc, nc] })
+    );
+
+    const real = rows.filter((r) => !r.cliente.startsWith('FALTA'));
+    expect(real.map((r) => r.nro).sort()).toEqual([
+      '00010-00000003',
+      '00010-00000900',
+    ]);
+  });
+
+  it('soft-drop: prior-year FC pagada=SI kept when a matched pago_recibido is in currentYear', () => {
+    const PRIOR_YEAR = CURRENT_YEAR - 1;
+    const fc = makeFc({
+      fileId: 'fc-softdrop-4',
+      nroFactura: '00010-00000004',
+      fechaEmision: `${PRIOR_YEAR}-04-01`,
+      pagada: 'SI',
+      importeTotal: 750_000,
+    });
+    const pago = makePago({
+      fileId: 'pago-softdrop-4',
+      matchedFacturaFileId: 'fc-softdrop-4',
+      fechaPago: `${CURRENT_YEAR}-02-15`,
+      importePagado: 750_000,
+    });
+
+    const rows = buildSubdiarioRows(
+      makeInput({
+        facturasEmitidas: [fc],
+        pagosRecibidos: [pago],
+      })
+    );
+
+    const real = rows.filter((r) => !r.cliente.startsWith('FALTA'));
+    expect(real).toHaveLength(1);
+    expect(real[0].nro).toBe('00010-00000004');
+  });
+
+  it('soft-drop: prior-year FC without pagada, no movimiento, no NC → kept (rule d unchanged)', () => {
+    const PRIOR_YEAR = CURRENT_YEAR - 1;
+    const fc = makeFc({
+      fileId: 'fc-softdrop-5',
+      nroFactura: '00010-00000005',
+      fechaEmision: `${PRIOR_YEAR}-04-01`,
+      // pagada intentionally undefined
+    });
+
+    const rows = buildSubdiarioRows(makeInput({ facturasEmitidas: [fc] }));
+
+    const real = rows.filter((r) => !r.cliente.startsWith('FALTA'));
+    expect(real).toHaveLength(1);
+    expect(real[0].nro).toBe('00010-00000005');
+  });
+
+  it('soft-drop: prior-year FC pagada=SI, all matched movimientos in prior year → dropped', () => {
+    const PRIOR_YEAR = CURRENT_YEAR - 1;
+    const fc = makeFc({
+      fileId: 'fc-softdrop-6',
+      nroFactura: '00010-00000006',
+      fechaEmision: `${PRIOR_YEAR}-04-01`,
+      pagada: 'SI',
+      importeTotal: 1_000_000,
+    });
+    const mov = makeMov({
+      matchedFileId: 'fc-softdrop-6',
+      credito: 1_000_000,
+      fecha: `${PRIOR_YEAR}-05-10`,
+    });
+
+    const rows = buildSubdiarioRows(
+      makeInput({ facturasEmitidas: [fc], movimientos: [mov] })
+    );
+
+    expect(rows.filter((r) => !r.cliente.startsWith('FALTA'))).toHaveLength(0);
+  });
+
+  it('soft-drop: currentYear FC always kept regardless of pagada (rule a unchanged)', () => {
+    const fc = makeFc({
+      fileId: 'fc-softdrop-7',
+      nroFactura: '00010-00000007',
+      fechaEmision: `${CURRENT_YEAR}-03-01`,
+      pagada: 'SI',
+    });
+
+    const rows = buildSubdiarioRows(makeInput({ facturasEmitidas: [fc] }));
+
+    const real = rows.filter((r) => !r.cliente.startsWith('FALTA'));
+    expect(real).toHaveLength(1);
+    expect(real[0].nro).toBe('00010-00000007');
+  });
+
+  it('soft-drop: pagada whitespace/casing is normalized (" si " trims+uppercases to SI)', () => {
+    const PRIOR_YEAR = CURRENT_YEAR - 1;
+    const fc = makeFc({
+      fileId: 'fc-softdrop-8',
+      nroFactura: '00010-00000008',
+      fechaEmision: `${PRIOR_YEAR}-04-01`,
+      pagada: ' si ',
+    });
+
+    const rows = buildSubdiarioRows(makeInput({ facturasEmitidas: [fc] }));
+
+    expect(rows.filter((r) => !r.cliente.startsWith('FALTA'))).toHaveLength(0);
+  });
+
+  // ── Soft-paid intermediate status (ADV-271) ──────────────────────────────
+  // A pago_recibido matched to an FC without a confirming bank movimiento
+  // counts as soft-paid: fechaCobro and recibido come from the pago, and
+  // notas prepends "Pendiente confirmación bancaria". Movimiento overrides
+  // soft (hard paid); NC cancellation overrides everything.
+
+  it('soft-paid: matched pago_recibido only → fechaCobro=pago.fechaPago, recibido=importePagado, notas prepends marker', () => {
+    const fc = makeFc({
+      fileId: 'fc-softpaid-1',
+      nroFactura: '00020-00000001',
+      importeTotal: 500_000,
+    });
+    const pago = makePago({
+      fileId: 'pago-softpaid-1',
+      matchedFacturaFileId: 'fc-softpaid-1',
+      fechaPago: `${CURRENT_YEAR}-02-10`,
+      importePagado: 500_000,
+      moneda: 'ARS',
+    });
+
+    const rows = buildSubdiarioRows(
+      makeInput({ facturasEmitidas: [fc], pagosRecibidos: [pago] })
+    );
+
+    const fcRow = rows.find((r) => r.tipo === 'FC' && r.nro === '00020-00000001');
+    expect(fcRow).toBeDefined();
+    expect(fcRow!.fechaCobro).toBe(`${CURRENT_YEAR}-02-10`);
+    expect(fcRow!.recibido).toBe(500_000);
+    expect(fcRow!.notas.startsWith('Pendiente confirmación bancaria')).toBe(true);
+  });
+
+  it('soft-paid: USD pago uses importeEnPesos when present', () => {
+    const fc = makeFc({
+      fileId: 'fc-softpaid-2',
+      nroFactura: '00020-00000002',
+      tipoComprobante: 'E',
+      moneda: 'USD',
+      tipoDeCambio: 1430,
+      importeTotal: 10_000,
+      importeNeto: 10_000,
+      importeIva: 0,
+    });
+    const pago = makePago({
+      fileId: 'pago-softpaid-2',
+      matchedFacturaFileId: 'fc-softpaid-2',
+      fechaPago: `${CURRENT_YEAR}-02-15`,
+      importePagado: 10_000,
+      moneda: 'USD',
+      importeEnPesos: 14_285_000,
+    });
+
+    const rows = buildSubdiarioRows(
+      makeInput({ facturasEmitidas: [fc], pagosRecibidos: [pago] })
+    );
+
+    const fcRow = rows.find((r) => r.tipo === 'FC' && r.nro === '00020-00000002');
+    expect(fcRow).toBeDefined();
+    expect(fcRow!.recibido).toBe(14_285_000);
+    expect(fcRow!.notas.startsWith('Pendiente confirmación bancaria')).toBe(true);
+  });
+
+  it('soft-paid: USD pago falls back to importePagado * factura.tipoDeCambio when importeEnPesos missing', () => {
+    const fc = makeFc({
+      fileId: 'fc-softpaid-3',
+      nroFactura: '00020-00000003',
+      tipoComprobante: 'E',
+      moneda: 'USD',
+      tipoDeCambio: 1400,
+      importeTotal: 10_000,
+      importeNeto: 10_000,
+      importeIva: 0,
+    });
+    const pago = makePago({
+      fileId: 'pago-softpaid-3',
+      matchedFacturaFileId: 'fc-softpaid-3',
+      fechaPago: `${CURRENT_YEAR}-02-20`,
+      importePagado: 10_000,
+      moneda: 'USD',
+      // importeEnPesos intentionally missing
+    });
+
+    const rows = buildSubdiarioRows(
+      makeInput({ facturasEmitidas: [fc], pagosRecibidos: [pago] })
+    );
+
+    const fcRow = rows.find((r) => r.tipo === 'FC' && r.nro === '00020-00000003');
+    expect(fcRow).toBeDefined();
+    expect(fcRow!.recibido).toBe(14_000_000);
+    expect(fcRow!.notas.startsWith('Pendiente confirmación bancaria')).toBe(true);
+  });
+
+  // ADV-274: USD pago with neither importeEnPesos nor factura.tipoDeCambio must
+  // leave the recibido cell BLANK (null) instead of rendering 0.00. The row
+  // still displays as soft-paid via fechaCobro + the "Pendiente confirmación
+  // bancaria" notas marker — but a missing conversion rate should not be
+  // confused with "paid 0 ARS".
+  it('soft-paid: USD pago with no importeEnPesos and no tipoDeCambio → recibido=null (not 0)', () => {
+    const fc = makeFc({
+      fileId: 'fc-softpaid-adv274',
+      nroFactura: '00020-00000274',
+      tipoComprobante: 'E',
+      moneda: 'USD',
+      tipoDeCambio: undefined,
+      importeTotal: 10_000,
+      importeNeto: 10_000,
+      importeIva: 0,
+    });
+    const pago = makePago({
+      fileId: 'pago-softpaid-adv274',
+      matchedFacturaFileId: 'fc-softpaid-adv274',
+      fechaPago: `${CURRENT_YEAR}-02-20`,
+      importePagado: 10_000,
+      moneda: 'USD',
+      // importeEnPesos intentionally missing → totalARS contributes 0
+    });
+
+    const rows = buildSubdiarioRows(
+      makeInput({ facturasEmitidas: [fc], pagosRecibidos: [pago] })
+    );
+
+    const fcRow = rows.find((r) => r.tipo === 'FC' && r.nro === '00020-00000274');
+    expect(fcRow).toBeDefined();
+    expect(fcRow!.fechaCobro).toBe(`${CURRENT_YEAR}-02-20`);
+    expect(fcRow!.recibido).toBeNull();
+    expect(fcRow!.notas.startsWith('Pendiente confirmación bancaria')).toBe(true);
+  });
+
+  it('hard paid silences soft: FC with movimiento AND pago_recibido has no marker', () => {
+    const fc = makeFc({
+      fileId: 'fc-softpaid-4',
+      nroFactura: '00020-00000004',
+      importeTotal: 800_000,
+    });
+    const mov = makeMov({
+      matchedFileId: 'fc-softpaid-4',
+      credito: 800_000,
+      fecha: `${CURRENT_YEAR}-02-25`,
+    });
+    const pago = makePago({
+      fileId: 'pago-softpaid-4',
+      matchedFacturaFileId: 'fc-softpaid-4',
+      fechaPago: `${CURRENT_YEAR}-02-20`,
+      importePagado: 800_000,
+    });
+
+    const rows = buildSubdiarioRows(
+      makeInput({
+        facturasEmitidas: [fc],
+        movimientos: [mov],
+        pagosRecibidos: [pago],
+      })
+    );
+
+    const fcRow = rows.find((r) => r.tipo === 'FC' && r.nro === '00020-00000004');
+    expect(fcRow).toBeDefined();
+    expect(fcRow!.fechaCobro).toBe(`${CURRENT_YEAR}-02-25`);
+    expect(fcRow!.recibido).toBe(800_000);
+    expect(fcRow!.notas).not.toContain('Pendiente confirmación bancaria');
+  });
+
+  it('NC cancellation overrides soft-paid: fechaCobro shows NC nro, no marker', () => {
+    const fc = makeFc({
+      fileId: 'fc-softpaid-5',
+      nroFactura: '00020-00000005',
+      importeTotal: 600_000,
+    });
+    const nc = makeNc({
+      fileId: 'nc-softpaid-5',
+      nroFactura: '00020-00000950',
+      importeTotal: 600_000,
+      fechaEmision: `${CURRENT_YEAR}-03-01`,
+      concepto: 'Nota de credito s/ Factura N° 20-5',
+    });
+    const pago = makePago({
+      fileId: 'pago-softpaid-5',
+      matchedFacturaFileId: 'fc-softpaid-5',
+      fechaPago: `${CURRENT_YEAR}-02-25`,
+      importePagado: 600_000,
+    });
+
+    const rows = buildSubdiarioRows(
+      makeInput({
+        facturasEmitidas: [fc, nc],
+        pagosRecibidos: [pago],
+      })
+    );
+
+    const fcRow = rows.find((r) => r.tipo === 'FC' && r.nro === '00020-00000005');
+    expect(fcRow).toBeDefined();
+    expect(fcRow!.fechaCobro).toBe('NC 00020-00000950');
+    expect(fcRow!.recibido).toBeNull();
+    expect(fcRow!.notas).not.toContain('Pendiente confirmación bancaria');
+  });
+
+  it('soft-paid: multi-pago aggregation — recibido=sum, fechaCobro=latest fechaPago', () => {
+    const fc = makeFc({
+      fileId: 'fc-softpaid-6',
+      nroFactura: '00020-00000006',
+      importeTotal: 1_500_000,
+    });
+    const pago1 = makePago({
+      fileId: 'pago-softpaid-6a',
+      matchedFacturaFileId: 'fc-softpaid-6',
+      fechaPago: `${CURRENT_YEAR}-02-05`,
+      importePagado: 700_000,
+    });
+    const pago2 = makePago({
+      fileId: 'pago-softpaid-6b',
+      matchedFacturaFileId: 'fc-softpaid-6',
+      fechaPago: `${CURRENT_YEAR}-02-22`,
+      importePagado: 800_000,
+    });
+
+    const rows = buildSubdiarioRows(
+      makeInput({
+        facturasEmitidas: [fc],
+        pagosRecibidos: [pago1, pago2],
+      })
+    );
+
+    const fcRow = rows.find((r) => r.tipo === 'FC' && r.nro === '00020-00000006');
+    expect(fcRow).toBeDefined();
+    expect(fcRow!.recibido).toBe(1_500_000);
+    expect(fcRow!.fechaCobro).toBe(`${CURRENT_YEAR}-02-22`);
+    expect(fcRow!.notas.startsWith('Pendiente confirmación bancaria')).toBe(true);
+  });
+
+  it('FC with neither movimiento nor pago_recibido stays unpaid (no marker)', () => {
+    const fc = makeFc({
+      fileId: 'fc-softpaid-7',
+      nroFactura: '00020-00000007',
+      importeTotal: 100_000,
+    });
+
+    const rows = buildSubdiarioRows(makeInput({ facturasEmitidas: [fc] }));
+
+    const fcRow = rows.find((r) => r.tipo === 'FC' && r.nro === '00020-00000007');
+    expect(fcRow).toBeDefined();
+    expect(fcRow!.fechaCobro).toBe('');
+    expect(fcRow!.recibido).toBeNull();
+    expect(fcRow!.notas).not.toContain('Pendiente confirmación bancaria');
+  });
+
+  // ── Movimiento column (ADV-272) ──────────────────────────────────────────
+  // The new `movimiento` column carries a Sheets URL pointing at the source
+  // bank row. Only hard-paid FCs (movimiento aggregate present) populate it;
+  // soft-paid, unpaid, NC-cancelled, NC, and gap rows leave it blank — the
+  // column's semantic is "authoritative bank movement, nothing else".
+
+  it('movimiento column: hard-paid FC uses LATEST matched movimiento sourceUrl', () => {
+    const fc = makeFc({
+      fileId: 'fc-movcol-1',
+      nroFactura: '00030-00000001',
+      importeTotal: 100_000,
+    });
+    const mov = makeMov({
+      matchedFileId: 'fc-movcol-1',
+      credito: 100_000,
+      fecha: `${CURRENT_YEAR}-02-10`,
+      sourceUrl: 'https://docs.google.com/spreadsheets/d/bank1/edit#gid=10&range=A5',
+    });
+
+    const rows = buildSubdiarioRows(
+      makeInput({ facturasEmitidas: [fc], movimientos: [mov] })
+    );
+
+    const fcRow = rows.find((r) => r.tipo === 'FC' && r.nro === '00030-00000001');
+    expect(fcRow).toBeDefined();
+    expect(fcRow!.movimiento).toBe(
+      'https://docs.google.com/spreadsheets/d/bank1/edit#gid=10&range=A5'
+    );
+  });
+
+  it('movimiento column: multi-cuota uses LATEST cuota sourceUrl', () => {
+    const fc = makeFc({
+      fileId: 'fc-movcol-2',
+      nroFactura: '00030-00000002',
+      importeTotal: 1_800_000,
+    });
+    const mov1 = makeMov({
+      matchedFileId: 'fc-movcol-2',
+      credito: 1_000_000,
+      fecha: `${CURRENT_YEAR}-03-15`,
+      sourceUrl: 'https://docs.google.com/spreadsheets/d/bank2/edit#gid=10&range=A5',
+    });
+    const mov2 = makeMov({
+      matchedFileId: 'fc-movcol-2',
+      credito: 800_000,
+      fecha: `${CURRENT_YEAR}-03-22`,
+      sourceUrl: 'https://docs.google.com/spreadsheets/d/bank2/edit#gid=10&range=A12',
+    });
+
+    const rows = buildSubdiarioRows(
+      makeInput({ facturasEmitidas: [fc], movimientos: [mov1, mov2] })
+    );
+
+    const fcRow = rows.find((r) => r.tipo === 'FC' && r.nro === '00030-00000002');
+    expect(fcRow).toBeDefined();
+    expect(fcRow!.movimiento).toBe(
+      'https://docs.google.com/spreadsheets/d/bank2/edit#gid=10&range=A12'
+    );
+  });
+
+  it('movimiento column: soft-paid FC has empty movimiento', () => {
+    const fc = makeFc({
+      fileId: 'fc-movcol-3',
+      nroFactura: '00030-00000003',
+      importeTotal: 100_000,
+    });
+    const pago = makePago({
+      fileId: 'pago-movcol-3',
+      matchedFacturaFileId: 'fc-movcol-3',
+      fechaPago: `${CURRENT_YEAR}-02-10`,
+      importePagado: 100_000,
+    });
+
+    const rows = buildSubdiarioRows(
+      makeInput({ facturasEmitidas: [fc], pagosRecibidos: [pago] })
+    );
+
+    const fcRow = rows.find((r) => r.tipo === 'FC' && r.nro === '00030-00000003');
+    expect(fcRow).toBeDefined();
+    expect(fcRow!.movimiento).toBe('');
+  });
+
+  it('movimiento column: unpaid FC has empty movimiento', () => {
+    const fc = makeFc({
+      fileId: 'fc-movcol-4',
+      nroFactura: '00030-00000004',
+      importeTotal: 100_000,
+    });
+
+    const rows = buildSubdiarioRows(makeInput({ facturasEmitidas: [fc] }));
+
+    const fcRow = rows.find((r) => r.tipo === 'FC' && r.nro === '00030-00000004');
+    expect(fcRow).toBeDefined();
+    expect(fcRow!.movimiento).toBe('');
+  });
+
+  it('movimiento column: NC-cancelled FC has empty movimiento', () => {
+    const fc = makeFc({
+      fileId: 'fc-movcol-5',
+      nroFactura: '00030-00000005',
+      importeTotal: 100_000,
+    });
+    const nc = makeNc({
+      fileId: 'nc-movcol-5',
+      nroFactura: '00030-00000900',
+      importeTotal: 100_000,
+      fechaEmision: `${CURRENT_YEAR}-02-10`,
+      concepto: 'Nota de credito s/ Factura N° 30-5',
+    });
+
+    const rows = buildSubdiarioRows(
+      makeInput({ facturasEmitidas: [fc, nc] })
+    );
+
+    const fcRow = rows.find((r) => r.tipo === 'FC' && r.nro === '00030-00000005');
+    const ncRow = rows.find((r) => r.tipo === 'NC' && r.nro === '00030-00000900');
+    expect(fcRow!.movimiento).toBe('');
+    expect(ncRow!.movimiento).toBe('');
+  });
+
+  it('movimiento column: gap placeholder has empty movimiento', () => {
+    const fc1 = makeFc({
+      fileId: 'fc-movcol-6a',
+      nroFactura: '00030-00000010',
+      fechaEmision: `${CURRENT_YEAR}-01-10`,
+    });
+    const fc2 = makeFc({
+      fileId: 'fc-movcol-6b',
+      nroFactura: '00030-00000012',
+      fechaEmision: `${CURRENT_YEAR}-01-20`,
+    });
+
+    const rows = buildSubdiarioRows(
+      makeInput({ facturasEmitidas: [fc1, fc2] })
+    );
+
+    const gap = rows.find((r) => r.cliente.startsWith('FALTA'));
+    expect(gap).toBeDefined();
+    expect(gap!.movimiento).toBe('');
+  });
+
   // ── Test 14d: Don't emit FALTA for filtered-out source rows ──────────────
   // Gap detection must consult the FULL source history when deciding what is
   // truly missing. An out-of-scope prior-year FC (paid before currentYear) is
@@ -623,11 +1194,13 @@ describe('buildSubdiarioRows', () => {
       fileId: 'fc-paid-1',
       nroFactura: '00001-00000001',
       fechaEmision: `${PRIOR_YEAR}-06-01`,
+      pagada: 'SI',
     });
     const fcPaid2 = makeFc({
       fileId: 'fc-paid-2',
       nroFactura: '00001-00000002',
       fechaEmision: `${PRIOR_YEAR}-06-02`,
+      pagada: 'SI',
     });
     // FC #3 is the prior-year unpaid FC kept by scope rule (d)
     const fcUnpaid = makeFc({
@@ -639,6 +1212,7 @@ describe('buildSubdiarioRows', () => {
       fileId: 'fc-paid-4',
       nroFactura: '00001-00000004',
       fechaEmision: `${PRIOR_YEAR}-06-15`,
+      pagada: 'SI',
     });
     // FC #5 is the current-year FC kept by scope rule (a)
     const fcCurrent = makeFc({

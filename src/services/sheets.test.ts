@@ -2840,6 +2840,7 @@ describe('appendRowsWithLinks concurrency (ADV-242)', () => {
         categoria: 'Micro',
         fechaCobro: '',
         recibido: null,
+        movimiento: '',
         notas: '',
         ...overrides,
       };
@@ -2907,6 +2908,68 @@ describe('appendRowsWithLinks concurrency (ADV-242)', () => {
       // Must be empty userEnteredValue — NOT numberValue: 0
       expect(recibidoCell.userEnteredValue?.numberValue).toBeUndefined();
       expect(Object.keys(recibidoCell.userEnteredValue!)).toHaveLength(0);
+    });
+
+    it('emits movimiento URL (col M, index 12) as =HYPERLINK formula (ADV-272)', async () => {
+      const url = 'https://docs.google.com/spreadsheets/d/abc/edit#gid=1&range=A5';
+      const row = makeTestRow({ movimiento: url });
+      const diff = makeDiff({ inserts: [{ insertAt: 0, row }] });
+
+      const result = await applySubdiarioDiff('spread-id', 42, diff, [row]);
+
+      expect(result.ok).toBe(true);
+
+      const calls = mockSheetsApi.spreadsheets.batchUpdate.mock.calls;
+      const requests = (calls[0]![0] as { requestBody: { requests: import('googleapis').sheets_v4.Schema$Request[] } }).requestBody.requests;
+      const updateReq = requests.find((r) => r.updateCells);
+      expect(updateReq).toBeDefined();
+
+      const cellValues = updateReq!.updateCells!.rows![0]!.values!;
+      const movCell = cellValues[12]!; // col M (0-based index 12)
+
+      expect(movCell.userEnteredValue?.formulaValue).toBe(
+        `=HYPERLINK("${url}","Mov")`
+      );
+    });
+
+    it('emits movimiento empty string (col M, index 12) as empty userEnteredValue (ADV-272)', async () => {
+      const row = makeTestRow({ movimiento: '' });
+      const diff = makeDiff({ inserts: [{ insertAt: 0, row }] });
+
+      const result = await applySubdiarioDiff('spread-id', 42, diff, [row]);
+
+      expect(result.ok).toBe(true);
+
+      const calls = mockSheetsApi.spreadsheets.batchUpdate.mock.calls;
+      const requests = (calls[0]![0] as { requestBody: { requests: import('googleapis').sheets_v4.Schema$Request[] } }).requestBody.requests;
+      const updateReq = requests.find((r) => r.updateCells);
+      const cellValues = updateReq!.updateCells!.rows![0]!.values!;
+      const movCell = cellValues[12]!;
+
+      expect(movCell.userEnteredValue?.formulaValue).toBeUndefined();
+      expect(Object.keys(movCell.userEnteredValue!)).toHaveLength(0);
+    });
+
+    it('escapes double-quotes in movimiento URL for HYPERLINK formula safety (ADV-272)', async () => {
+      // A double-quote in the URL must be escaped to "" inside the formula
+      // string so the formula stays well-formed.
+      const url = 'https://example.com/path?q="injected"';
+      const row = makeTestRow({ movimiento: url });
+      const diff = makeDiff({ inserts: [{ insertAt: 0, row }] });
+
+      const result = await applySubdiarioDiff('spread-id', 42, diff, [row]);
+
+      expect(result.ok).toBe(true);
+
+      const calls = mockSheetsApi.spreadsheets.batchUpdate.mock.calls;
+      const requests = (calls[0]![0] as { requestBody: { requests: import('googleapis').sheets_v4.Schema$Request[] } }).requestBody.requests;
+      const updateReq = requests.find((r) => r.updateCells);
+      const cellValues = updateReq!.updateCells!.rows![0]!.values!;
+      const movCell = cellValues[12]!;
+
+      expect(movCell.userEnteredValue?.formulaValue).toBe(
+        '=HYPERLINK("https://example.com/path?q=""injected""","Mov")'
+      );
     });
 
     it('update after a deletion: sheetRow uses desiredIndex (not rowIndex) so the shifted row is targeted correctly', async () => {

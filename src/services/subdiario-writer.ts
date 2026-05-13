@@ -128,12 +128,17 @@ export async function resolveSubdiarioId(
 /**
  * Reads current rows from the Comprobantes sheet.
  *
- * Parses `Comprobantes!A2:M` (data rows only — header is at A1) and returns
+ * Parses `Comprobantes!A2:N` (data rows only — header is at A1) and returns
  * them as `SubdiarioRowWithIndex` values with 0-based sheet positions.
  *
  * Parsing mirrors the cell-emission rules in `syncSubdiario` exactly so that
  * a row written by this writer round-trips without spurious updates on the
  * first incremental diff after deploy.
+ *
+ * Column M (movimiento) round-trip caveat (ADV-272): `getValues` uses
+ * `UNFORMATTED_VALUE`, which returns the *displayed* text of HYPERLINK formulas
+ * ("Mov"), not the formula or URL. The diff equality check in
+ * `subdiario-diff.ts` therefore compares this column on semantic presence only.
  *
  * @internal Exported for test reach only. Do not call from outside this module.
  *
@@ -142,7 +147,7 @@ export async function resolveSubdiarioId(
 export async function readSubdiarioRows(
   spreadsheetId: string
 ): Promise<Result<SubdiarioRowWithIndex[], Error>> {
-  const valuesResult = await getValues(spreadsheetId, `${COMPROBANTES_SHEET}!A2:M`);
+  const valuesResult = await getValues(spreadsheetId, `${COMPROBANTES_SHEET}!A2:N`);
   if (!valuesResult.ok) return valuesResult;
 
   const rawRows = valuesResult.value;
@@ -198,7 +203,8 @@ export async function readSubdiarioRows(
       categoria: String(row[9] ?? '').trim(),
       fechaCobro,
       recibido,
-      notas:     String(row[12] ?? '').trim(),
+      movimiento: String(row[12] ?? '').trim(),
+      notas:     String(row[13] ?? '').trim(),
     });
   }
 
@@ -301,13 +307,17 @@ async function readMovimientosRows(
       }
 
       const dataRows = rowsResult.value.slice(1);
-      for (const row of dataRows) {
+      for (let i = 0; i < dataRows.length; i++) {
+        const row = dataRows[i];
         if (!row || row.length === 0) continue;
         const fecha = normalizeSpreadsheetDate(row[0]);
         if (!fecha) continue;
         const matchedTypeRaw = String(row[7] ?? '');
         const matchedType: BankMovimiento['matchedType'] =
           matchedTypeRaw === 'AUTO' || matchedTypeRaw === 'MANUAL' ? matchedTypeRaw : '';
+        // rowNumber is 1-indexed: header is row 1, first data row is row 2
+        const rowNumber = i + 2;
+        const sourceUrl = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/edit#gid=${sheet.sheetId}&range=A${rowNumber}`;
         allMovs.push({
           fecha,
           debito: parseNumber(row[2]) || null,
@@ -315,6 +325,7 @@ async function readMovimientosRows(
           matchedFileId: String(row[6] ?? ''),
           matchedType,
           concepto: String(row[1] ?? ''),
+          sourceUrl,
         });
       }
     }
@@ -515,15 +526,78 @@ export async function syncSubdiario(
     const diffResult = await withLockResult(
       lockKey,
       async (): Promise<Result<{ inserts: number; updates: number; deletes: number; sortInvariantFallback: boolean }, Error>> => {
-        // Read existing rows (skip when workbook was just created — it's empty by definition)
-        const existing: SubdiarioRowWithIndex[] = [];
+        // ── Schema migration trigger (ADV-272) ─────────────────────────────
+        // Production / staging workbooks started at 13 cols (A:M). Detect the
+        // old header and force a one-shot full rewrite to 14 cols (A:N). The
+        // migration is idempotent — subsequent runs no-op via the diff path.
+        let schemaMigration = false;
         if (!isNew) {
+          const headerResult = await getValues(subdiarioId, `${COMPROBANTES_SHEET}!A1:N1`);
+          if (!headerResult.ok) return headerResult;
+          const header = headerResult.value[0] ?? [];
+          const m1 = String(header[12] ?? '').trim();
+          const n1 = String(header[13] ?? '').trim();
+          // Old layout: header has < 14 cells, OR M1='notas' AND N1 is empty.
+          //
+          // Crash-recovery ordering (ADV-273): the header rewrite is DEFERRED
+          // until AFTER the data rewrite succeeds. A crash between the two
+          // operations leaves the OLD 13-col header in place, so the next boot
+          // re-triggers the migration → the full-rewrite data step is
+          // idempotent (delete-all + insert-all of the same desired rows) →
+          // the header write retries. The inverse order would leave a NEW
+          // 14-col header on top of OLD 13-col data, which silently bypasses
+          // the migration on next boot and mis-aligns columns indefinitely.
+          if (header.length < 14 || (m1 === 'notas' && n1 === '')) {
+            schemaMigration = true;
+            info('Comprobantes schema migration: 13 → 14 cols (added movimiento)', {
+              module: 'subdiario-writer',
+              phase: 'schema-migration',
+              spreadsheetId: subdiarioId,
+              correlationId,
+            });
+          }
+        }
+
+        // Read existing rows.
+        //   - Workbook just created (isNew) → empty (no data rows yet).
+        //   - Schema migration → fetch ONLY row indices for delete emission, do
+        //     NOT parse 13-col data as 14-col data (column shift would mangle
+        //     notas → movimiento and lose the real notas).
+        //   - Normal path → full parse via readSubdiarioRows.
+        const existing: SubdiarioRowWithIndex[] = [];
+        if (schemaMigration) {
+          // Read the full row range (A:N) for counting only — A2:A would miss
+          // any row where fecha was manually cleared but other cells remain.
+          // The Sheets API still trims fully-empty trailing rows, which is the
+          // correct behavior (a truly empty row should not be re-inserted).
+          const oldDataResult = await getValues(subdiarioId, `${COMPROBANTES_SHEET}!A2:N`);
+          if (!oldDataResult.ok) return oldDataResult;
+          // Index-only stubs — real fields aren't used because we fall through
+          // to the full-rewrite branch below.
+          for (let i = 0; i < oldDataResult.value.length; i++) {
+            existing.push({
+              rowIndex: i,
+              fecha: '', cod: '', tipo: 'FC', nro: '', cliente: '', cuit: '',
+              condicion: '', total: 0, concepto: '', categoria: '',
+              fechaCobro: '', recibido: null, movimiento: '', notas: '',
+            });
+          }
+        } else if (!isNew) {
           const readResult = await readSubdiarioRows(subdiarioId);
           if (!readResult.ok) return readResult;
           existing.push(...readResult.value);
         }
 
-        const diff = diffSubdiarioRows(existing, rows);
+        // On migration, skip the diff entirely and run the full-rewrite branch.
+        const diff = schemaMigration
+          ? {
+              updates: [],
+              inserts: [],
+              deletes: [],
+              sortInvariantViolated: true,
+              duplicateKeysDetected: false,
+            }
+          : diffSubdiarioRows(existing, rows);
 
         // No-op short-circuit: nothing changed
         if (
@@ -542,21 +616,27 @@ export async function syncSubdiario(
 
         // Sort-invariant fallback: emit a one-shot full rewrite
         if (diff.sortInvariantViolated) {
-          const outOfOrderPairs = existing
-            .slice(0, -1)
-            .reduce<string[]>((acc, row, i) => {
-              const next = existing[i + 1]!;
-              if (row.fecha > next.fecha || (row.fecha === next.fecha && row.nro > next.nro)) {
-                if (acc.length < 10) acc.push(`[${row.rowIndex}]${row.fecha}/${row.nro} > [${next.rowIndex}]${next.fecha}/${next.nro}`);
-              }
-              return acc;
-            }, []);
-          warn('Comprobantes sheet is out of order — falling back to full rewrite (one-shot)', {
-            module: 'subdiario-writer',
-            phase: 'diff',
-            outOfOrderPairs,
-            correlationId,
-          });
+          // ADV-275: the schema migration reuses this branch with index-only
+          // stubs, so the out-of-order pair detection would always report []
+          // and the warn would be misleading. Suppress the warn during
+          // migration — the dedicated migration info log already fired above.
+          if (!schemaMigration) {
+            const outOfOrderPairs = existing
+              .slice(0, -1)
+              .reduce<string[]>((acc, row, i) => {
+                const next = existing[i + 1]!;
+                if (row.fecha > next.fecha || (row.fecha === next.fecha && row.nro > next.nro)) {
+                  if (acc.length < 10) acc.push(`[${row.rowIndex}]${row.fecha}/${row.nro} > [${next.rowIndex}]${next.fecha}/${next.nro}`);
+                }
+                return acc;
+              }, []);
+            warn('Comprobantes sheet is out of order — falling back to full rewrite (one-shot)', {
+              module: 'subdiario-writer',
+              phase: 'diff',
+              outOfOrderPairs,
+              correlationId,
+            });
+          }
           const rewriteDiff: SubdiarioDiff = {
             updates: [],
             inserts: rows.map((row, i) => ({ insertAt: i, row })),
@@ -566,6 +646,18 @@ export async function syncSubdiario(
           };
           const rewriteResult = await applySubdiarioDiff(subdiarioId, comprobantesSheet.sheetId, rewriteDiff, rows);
           if (!rewriteResult.ok) return rewriteResult;
+
+          // ADV-273: header rewrite happens AFTER the data rewrite succeeds.
+          // See schema-migration detection above for the crash-recovery rationale.
+          if (schemaMigration) {
+            const headerWriteResult = await setValues(
+              subdiarioId,
+              `${COMPROBANTES_SHEET}!A1:N1`,
+              [SUBDIARIO_COMPROBANTES_HEADERS as unknown as CellValue[]]
+            );
+            if (!headerWriteResult.ok) return headerWriteResult;
+          }
+
           return {
             ok: true,
             value: { ...rewriteResult.value, sortInvariantFallback: true },
