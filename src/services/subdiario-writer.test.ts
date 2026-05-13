@@ -1427,5 +1427,157 @@ describe('syncSubdiario schema migration (ADV-272)', () => {
     }
     expect(sheets.applySubdiarioDiff).not.toHaveBeenCalled();
   });
+
+  // ADV-275: during the schema migration the existing-rows list is built
+  // from index-only stubs, so the "out of order" warn always reports an
+  // empty outOfOrderPairs list — confusing operators. Gate the warn on
+  // !schemaMigration so only the migration info log fires.
+  it('migration: "out of order" warn is suppressed; only migration info log fires', async () => {
+    vi.mocked(sheets.getValues).mockImplementation(async (_id, range) => {
+      if (range === 'Comprobantes!A1:N1') {
+        return { ok: true, value: [OLD_HEADER_13COL] };
+      }
+      if (range === 'Comprobantes!A2:N') {
+        return {
+          ok: true,
+          value: [
+            ['2025-01-10', '006', 'FC', '00001-00000001', 'CLIENTE A', '20123456786', 'IVA RI', 1000, '', 'Micro', '', '', 'note A'],
+          ],
+        };
+      }
+      return { ok: true, value: EMPTY_SHEET_DATA };
+    });
+
+    const result = await syncSubdiario(
+      ROOT_ID, CONTROL_INGRESOS_ID, CONTROL_EGRESOS_ID, CURRENT_YEAR, new Map()
+    );
+    expect(result.ok).toBe(true);
+
+    // The misleading "out of order" warn was NOT emitted during migration
+    const warnCalls = vi.mocked(logger.warn).mock.calls;
+    const outOfOrderWarn = warnCalls.find(
+      ([msg]) => typeof msg === 'string' && msg.includes('out of order')
+    );
+    expect(outOfOrderWarn).toBeUndefined();
+
+    // The migration info log fires exactly once
+    const infoCalls = vi.mocked(logger.info).mock.calls;
+    const migrationInfo = infoCalls.filter(
+      ([msg]) => typeof msg === 'string' && msg.includes('Comprobantes schema migration: 13 → 14 cols')
+    );
+    expect(migrationInfo).toHaveLength(1);
+  });
+
+  // ADV-273: header write must happen AFTER applySubdiarioDiff so a crash
+  // between the two leaves the OLD 13-col header (migration re-triggers on
+  // next boot) rather than NEW 14-col header + OLD 13-col data (silent corruption).
+  it('migration: header rewrite happens AFTER applySubdiarioDiff (crash-recovery order)', async () => {
+    vi.mocked(sheets.getValues).mockImplementation(async (_id, range) => {
+      if (range === 'Comprobantes!A1:N1') {
+        return { ok: true, value: [OLD_HEADER_13COL] };
+      }
+      if (range === 'Comprobantes!A2:N') {
+        return {
+          ok: true,
+          value: [
+            ['2025-01-10', '006', 'FC', '00001-00000001', 'CLIENTE A', '20123456786', 'IVA RI', 1000, '', 'Micro', '', '', 'note A'],
+          ],
+        };
+      }
+      return { ok: true, value: EMPTY_SHEET_DATA };
+    });
+
+    const result = await syncSubdiario(
+      ROOT_ID, CONTROL_INGRESOS_ID, CONTROL_EGRESOS_ID, CURRENT_YEAR, new Map()
+    );
+    expect(result.ok).toBe(true);
+
+    const headerWriteCall = vi.mocked(sheets.setValues).mock.calls.findIndex(
+      ([, range]) => range === 'Comprobantes!A1:N1'
+    );
+    expect(headerWriteCall).toBeGreaterThanOrEqual(0);
+    const headerWriteOrder = vi.mocked(sheets.setValues).mock.invocationCallOrder[headerWriteCall]!;
+    const diffOrder = vi.mocked(sheets.applySubdiarioDiff).mock.invocationCallOrder[0]!;
+    expect(diffOrder).toBeLessThan(headerWriteOrder);
+  });
+
+  it('migration: applySubdiarioDiff failure → header is NOT rewritten (rollback safety)', async () => {
+    vi.mocked(sheets.getValues).mockImplementation(async (_id, range) => {
+      if (range === 'Comprobantes!A1:N1') {
+        return { ok: true, value: [OLD_HEADER_13COL] };
+      }
+      if (range === 'Comprobantes!A2:N') {
+        return {
+          ok: true,
+          value: [
+            ['2025-01-10', '006', 'FC', '00001-00000001', 'CLIENTE A', '20123456786', 'IVA RI', 1000, '', 'Micro', '', '', 'note A'],
+          ],
+        };
+      }
+      return { ok: true, value: EMPTY_SHEET_DATA };
+    });
+    vi.mocked(sheets.applySubdiarioDiff).mockResolvedValue({
+      ok: false,
+      error: new Error('batchUpdate failed'),
+    });
+
+    const result = await syncSubdiario(
+      ROOT_ID, CONTROL_INGRESOS_ID, CONTROL_EGRESOS_ID, CURRENT_YEAR, new Map()
+    );
+    expect(result.ok).toBe(false);
+
+    // The 14-col header was NEVER written. Next boot sees the old 13-col header
+    // and re-triggers the migration → data rewrite retries idempotently.
+    const headerWrite = vi.mocked(sheets.setValues).mock.calls.find(
+      ([, range]) => range === 'Comprobantes!A1:N1'
+    );
+    expect(headerWrite).toBeUndefined();
+  });
+
+  // ADV-273: post-crash recovery. State after crash between data rewrite and
+  // header write = old 13-col header + new 14-col data. Next boot must detect
+  // the migration trigger and re-run the data rewrite (idempotent) + header write.
+  it('migration: post-crash state (13-col header + 14-col data) recovers cleanly', async () => {
+    vi.mocked(sheets.getValues).mockImplementation(async (_id, range) => {
+      if (range === 'Comprobantes!A1:N1') {
+        // Header was never updated (crash before header write)
+        return { ok: true, value: [OLD_HEADER_13COL] };
+      }
+      if (range === 'Comprobantes!A2:N') {
+        // Data is already in 14-col layout from the crashed attempt
+        return {
+          ok: true,
+          value: [
+            ['2025-01-15', '006', 'FC', '00001-00000001', 'TEST SA', '20123456786',
+              'IVA Responsable Inscripto', 1000, 'Servicios', 'Ingresos', '', '',
+              '', ''],
+          ],
+        };
+      }
+      return { ok: true, value: EMPTY_SHEET_DATA };
+    });
+    vi.mocked(sheets.applySubdiarioDiff).mockResolvedValue({
+      ok: true,
+      value: { updates: 0, inserts: MOCK_ROWS.length, deletes: 1 },
+    });
+
+    const result = await syncSubdiario(
+      ROOT_ID, CONTROL_INGRESOS_ID, CONTROL_EGRESOS_ID, CURRENT_YEAR, new Map()
+    );
+
+    expect(result.ok).toBe(true);
+    // Migration re-triggered: full rewrite emitted with delete for the 1 stale row
+    expect(sheets.applySubdiarioDiff).toHaveBeenCalledTimes(1);
+    const [, , diffArg] = vi.mocked(sheets.applySubdiarioDiff).mock.calls[0]!;
+    expect(diffArg.sortInvariantViolated).toBe(true);
+    expect(diffArg.deletes).toEqual([0]);
+    expect(diffArg.inserts).toHaveLength(MOCK_ROWS.length);
+    // Header write retried successfully
+    const headerWrite = vi.mocked(sheets.setValues).mock.calls.find(
+      ([, range]) => range === 'Comprobantes!A1:N1'
+    );
+    expect(headerWrite).toBeDefined();
+    expect(headerWrite![2]).toEqual([NEW_HEADER_14COL]);
+  });
 });
 

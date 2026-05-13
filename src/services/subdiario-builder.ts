@@ -752,9 +752,12 @@ export function buildSubdiarioRows(input: SubdiarioInput): SubdiarioRow[] {
         fechaCobro = movAgg.latestFecha;
         recibido = movAgg.totalCredito;
       } else if (pagoAgg) {
-        // Soft paid: pago_recibido matched but no Resumen Bancario row yet
+        // Soft paid: pago_recibido matched but no Resumen Bancario row yet.
+        // ADV-274: leave `recibido` blank when the pago couldn't be converted
+        // to ARS (USD pago with no importeEnPesos and no factura.tipoDeCambio).
+        // Rendering `0.00` would falsely read as "paid 0 ARS" — blank is honest.
         fechaCobro = pagoAgg.latestFecha;
-        recibido = pagoAgg.totalARS;
+        recibido = pagoAgg.totalARS > 0 ? pagoAgg.totalARS : null;
         softPaid = true;
       }
     } else {

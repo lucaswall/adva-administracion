@@ -385,3 +385,22 @@ Bug-hunter pass 2: clean (0 bugs).
 
 1. Run `bug-hunter` agent — review fix changes for bugs.
 2. Run `verifier` agent — confirm all tests pass and zero warnings.
+
+---
+
+## Iteration 2 — 2026-05-13
+
+**Method:** single-agent (4 fixes across 3 work units — writer.ts twice, builder.ts once, MIGRATIONS.md once; effort score 3 — workers would have been pure overhead for surgical changes).
+
+**Tasks completed:**
+
+- **Fix 1 (ADV-273):** Moved `setValues(A1:N1, NEW_HEADER_14COL)` from BEFORE to AFTER `applySubdiarioDiff` in the migration branch. On crash between the two ops, the old 13-col header survives → migration re-triggers on next boot → data rewrite is idempotent → header write retries. Inverse ordering would silently bypass the migration with a 14-col header + 13-col data. 3 new writer tests: call-order via `invocationCallOrder`, rollback safety on diff failure, post-crash recovery from 13-col-header/14-col-data state.
+- **Fix 2 (ADV-274):** One-line guard in `buildSubdiarioRows` soft-paid branch — `recibido = pagoAgg.totalARS > 0 ? pagoAgg.totalARS : null`. USD pago with no `importeEnPesos` AND no `factura.tipoDeCambio` now renders blank instead of `0.00` (which falsely reads as "paid 0 ARS"). `fechaCobro` + the "Pendiente confirmación bancaria" notas marker still display. 1 new builder test.
+- **Fix 3 (ADV-275):** Wrapped the `outOfOrderPairs` computation and the "Comprobantes sheet is out of order" warn in `if (!schemaMigration)`. During migration `existing` is index-only stubs so `outOfOrderPairs` was always `[]` — the warn was misleading. Migration info log still fires once. 1 new writer test asserts the warn is suppressed during migration but the info log is emitted.
+- **Fix 4 (ADV-276):** Updated `MIGRATIONS.md` — fixed `A2:A` → `A2:N` with the cleared-fecha rationale, AND re-ordered the documented steps to reflect the post-ADV-273 ordering (header rewrite is now last), with a dedicated "Crash recovery" section explaining the ordering invariant.
+
+**Bugs found and fixed (bug-hunter pass):** none. Bug-hunter verified rollback ordering, the `recibido > 0` guard covers both zero and hypothetical negatives, `outOfOrderPairs` scoping is clean (no orphaned state), `invocationCallOrder` semantics are correct for cross-mock ordering assertions, build is warning-free, all CLAUDE.md rules followed.
+
+**Verifier (full mode):** 2478 tests pass (74 files), lint clean, build clean, zero warnings.
+
+**Linear:** ADV-273, ADV-274, ADV-275, ADV-276 all moved Todo → In Progress → Review.

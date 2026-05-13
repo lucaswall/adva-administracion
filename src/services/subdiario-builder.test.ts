@@ -890,6 +890,42 @@ describe('buildSubdiarioRows', () => {
     expect(fcRow!.notas.startsWith('Pendiente confirmación bancaria')).toBe(true);
   });
 
+  // ADV-274: USD pago with neither importeEnPesos nor factura.tipoDeCambio must
+  // leave the recibido cell BLANK (null) instead of rendering 0.00. The row
+  // still displays as soft-paid via fechaCobro + the "Pendiente confirmación
+  // bancaria" notas marker — but a missing conversion rate should not be
+  // confused with "paid 0 ARS".
+  it('soft-paid: USD pago with no importeEnPesos and no tipoDeCambio → recibido=null (not 0)', () => {
+    const fc = makeFc({
+      fileId: 'fc-softpaid-adv274',
+      nroFactura: '00020-00000274',
+      tipoComprobante: 'E',
+      moneda: 'USD',
+      tipoDeCambio: undefined,
+      importeTotal: 10_000,
+      importeNeto: 10_000,
+      importeIva: 0,
+    });
+    const pago = makePago({
+      fileId: 'pago-softpaid-adv274',
+      matchedFacturaFileId: 'fc-softpaid-adv274',
+      fechaPago: `${CURRENT_YEAR}-02-20`,
+      importePagado: 10_000,
+      moneda: 'USD',
+      // importeEnPesos intentionally missing → totalARS contributes 0
+    });
+
+    const rows = buildSubdiarioRows(
+      makeInput({ facturasEmitidas: [fc], pagosRecibidos: [pago] })
+    );
+
+    const fcRow = rows.find((r) => r.tipo === 'FC' && r.nro === '00020-00000274');
+    expect(fcRow).toBeDefined();
+    expect(fcRow!.fechaCobro).toBe(`${CURRENT_YEAR}-02-20`);
+    expect(fcRow!.recibido).toBeNull();
+    expect(fcRow!.notas.startsWith('Pendiente confirmación bancaria')).toBe(true);
+  });
+
   it('hard paid silences soft: FC with movimiento AND pago_recibido has no marker', () => {
     const fc = makeFc({
       fileId: 'fc-softpaid-4',

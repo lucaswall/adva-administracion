@@ -537,7 +537,16 @@ export async function syncSubdiario(
           const header = headerResult.value[0] ?? [];
           const m1 = String(header[12] ?? '').trim();
           const n1 = String(header[13] ?? '').trim();
-          // Old layout: header has < 14 cells, OR M1='notas' AND N1 is empty
+          // Old layout: header has < 14 cells, OR M1='notas' AND N1 is empty.
+          //
+          // Crash-recovery ordering (ADV-273): the header rewrite is DEFERRED
+          // until AFTER the data rewrite succeeds. A crash between the two
+          // operations leaves the OLD 13-col header in place, so the next boot
+          // re-triggers the migration → the full-rewrite data step is
+          // idempotent (delete-all + insert-all of the same desired rows) →
+          // the header write retries. The inverse order would leave a NEW
+          // 14-col header on top of OLD 13-col data, which silently bypasses
+          // the migration on next boot and mis-aligns columns indefinitely.
           if (header.length < 14 || (m1 === 'notas' && n1 === '')) {
             schemaMigration = true;
             info('Comprobantes schema migration: 13 → 14 cols (added movimiento)', {
@@ -546,13 +555,6 @@ export async function syncSubdiario(
               spreadsheetId: subdiarioId,
               correlationId,
             });
-            // Overwrite the header row to the new 14-col layout
-            const headerWriteResult = await setValues(
-              subdiarioId,
-              `${COMPROBANTES_SHEET}!A1:N1`,
-              [SUBDIARIO_COMPROBANTES_HEADERS as unknown as CellValue[]]
-            );
-            if (!headerWriteResult.ok) return headerWriteResult;
           }
         }
 
@@ -614,21 +616,27 @@ export async function syncSubdiario(
 
         // Sort-invariant fallback: emit a one-shot full rewrite
         if (diff.sortInvariantViolated) {
-          const outOfOrderPairs = existing
-            .slice(0, -1)
-            .reduce<string[]>((acc, row, i) => {
-              const next = existing[i + 1]!;
-              if (row.fecha > next.fecha || (row.fecha === next.fecha && row.nro > next.nro)) {
-                if (acc.length < 10) acc.push(`[${row.rowIndex}]${row.fecha}/${row.nro} > [${next.rowIndex}]${next.fecha}/${next.nro}`);
-              }
-              return acc;
-            }, []);
-          warn('Comprobantes sheet is out of order — falling back to full rewrite (one-shot)', {
-            module: 'subdiario-writer',
-            phase: 'diff',
-            outOfOrderPairs,
-            correlationId,
-          });
+          // ADV-275: the schema migration reuses this branch with index-only
+          // stubs, so the out-of-order pair detection would always report []
+          // and the warn would be misleading. Suppress the warn during
+          // migration — the dedicated migration info log already fired above.
+          if (!schemaMigration) {
+            const outOfOrderPairs = existing
+              .slice(0, -1)
+              .reduce<string[]>((acc, row, i) => {
+                const next = existing[i + 1]!;
+                if (row.fecha > next.fecha || (row.fecha === next.fecha && row.nro > next.nro)) {
+                  if (acc.length < 10) acc.push(`[${row.rowIndex}]${row.fecha}/${row.nro} > [${next.rowIndex}]${next.fecha}/${next.nro}`);
+                }
+                return acc;
+              }, []);
+            warn('Comprobantes sheet is out of order — falling back to full rewrite (one-shot)', {
+              module: 'subdiario-writer',
+              phase: 'diff',
+              outOfOrderPairs,
+              correlationId,
+            });
+          }
           const rewriteDiff: SubdiarioDiff = {
             updates: [],
             inserts: rows.map((row, i) => ({ insertAt: i, row })),
@@ -638,6 +646,18 @@ export async function syncSubdiario(
           };
           const rewriteResult = await applySubdiarioDiff(subdiarioId, comprobantesSheet.sheetId, rewriteDiff, rows);
           if (!rewriteResult.ok) return rewriteResult;
+
+          // ADV-273: header rewrite happens AFTER the data rewrite succeeds.
+          // See schema-migration detection above for the crash-recovery rationale.
+          if (schemaMigration) {
+            const headerWriteResult = await setValues(
+              subdiarioId,
+              `${COMPROBANTES_SHEET}!A1:N1`,
+              [SUBDIARIO_COMPROBANTES_HEADERS as unknown as CellValue[]]
+            );
+            if (!headerWriteResult.ok) return headerWriteResult;
+          }
+
           return {
             ok: true,
             value: { ...rewriteResult.value, sortInvariantFallback: true },
