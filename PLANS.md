@@ -286,4 +286,102 @@ Bug-hunter pass 2: clean (0 bugs).
 
 **Linear:** ADV-268, ADV-269, ADV-270, ADV-271, ADV-272 all moved Todo → In Progress → Review.
 
-## Status: COMPLETE
+---
+
+## Review Findings — Iteration 1 — 2026-05-13
+
+**Method:** 3-reviewer team (security, reliability, quality) on the 12 changed code files + 2 doc files (PLANS.md excluded as review artifact).
+
+### Reviewers' raw reports
+
+* **Security** — clean. HYPERLINK formula escaping (`row.movimiento.replace(/"/g, '""')`) verified safe — all inputs (`spreadsheetId`, `sheet.sheetId: number`, `rowNumber: i+2`) are server-trusted. No new routes, no hardcoded secrets, no console.log, no SSRF, no sensitive data in logs.
+* **Reliability** — 4 findings (2 medium, 2 low).
+* **Quality** — 3 findings (all low). One duplicates reliability's USD-zero finding.
+
+### FIX (4 — Fix Plan)
+
+| # | Severity | Tag | Location | Linear |
+|---|----------|-----|----------|--------|
+| 1 | medium | bug | `src/services/subdiario-writer.ts:534-557` — Schema migration writes header BEFORE data rewrite; a crash between the two API calls leaves a 14-col header + 13-col data. On recovery the migration condition is no longer true (header is 14-col), so `readSubdiarioRows` maps old col M (old `notas`) as `movimiento` and empty col N as `notas`. Diff's semantic-presence check on `movimiento` (`(a==='') !== (b==='')`) cannot distinguish "URL" from "old notas text" → row gets stuck with the wrong cell content. Probability is low (~2s window during a one-shot migration) but failure is silent and persistent. | [ADV-273](https://linear.app/lw-claude/issue/ADV-273) |
+| 2 | medium | edge-case | `src/services/subdiario-builder.ts:217-223, 754-758` — `aggregatePagosRecibidos` returns `totalARS=0` when a USD pago has no `importeEnPesos` and no `factura.tipoDeCambio`. The non-null `PagoAgg` propagates to the soft-paid branch and the cell renders as `0.00` (looks like "paid $0") instead of blank ("amount unknown"). Fix: guard `recibido = pagoAgg.totalARS > 0 ? pagoAgg.totalARS : null` at the consumption site. | [ADV-274](https://linear.app/lw-claude/issue/ADV-274) |
+| 3 | low | bug | `src/services/subdiario-writer.ts:616-631` — Migration path falls through to the `sortInvariantViolated` branch which unconditionally emits `warn('out of order', { outOfOrderPairs: [] })`. During migration `existing` is index-only stubs with empty fecha/nro so the pairs list is always empty — operators see a misleading "sheet is out of order" warning. Gate the warn on `!schemaMigration`. | [ADV-275](https://linear.app/lw-claude/issue/ADV-275) |
+| 4 | low | docs | `MIGRATIONS.md:11` — Says "Read `Comprobantes!A2:A`" but code reads `A2:N` (intentional, to count rows with manually-cleared `fecha`). One-line doc fix. | [ADV-276](https://linear.app/lw-claude/issue/ADV-276) |
+
+### DISCARDED (2)
+
+| Finding | Reason |
+|---------|--------|
+| `subdiario-diff.ts:51` — semantic-presence diff for `movimiento` suppresses URL updates if a bank row's row number changes (insertion above the linked row) | **Acknowledged design trade-off.** Documented in the diff function's header comment as intentional: the alternative (strict URL equality) would trigger perpetual updates because `UNFORMATTED_VALUE` returns the formula's displayed text ("Mov"), not the URL. Reviewer explicitly notes "very low probability in practice (bank rows are appended, never inserted mid-sheet)". Not a bug — accepted design boundary. |
+| `subdiario-writer.ts:553` — unnecessary `as unknown as CellValue[]` double cast on `SUBDIARIO_COMPROBANTES_HEADERS` | Style-only with zero correctness impact. `CellValue = string \| number \| boolean \| null \| undefined \| Date`, so `string[]` is directly assignable. The intermediate `as unknown` is redundant but harmless. Not a bug. |
+
+### Linear Updates
+
+* ADV-268, ADV-269, ADV-270, ADV-271, ADV-272 → Review → **Merge**
+* ADV-273, ADV-274, ADV-275, ADV-276 created in **Todo** for the Fix Plan below
+
+<!-- REVIEW COMPLETE -->
+
+---
+
+## Fix Plan
+
+### Fix 1: Atomize Subdiario schema migration — reorder header write to after data rewrite
+
+**Linear Issue:** [ADV-273](https://linear.app/lw-claude/issue/ADV-273)
+
+**Files:**
+- `src/services/subdiario-writer.ts` (modify — move header `setValues` from before to after `applySubdiarioDiff` in the migration branch)
+- `src/services/subdiario-writer.test.ts` (modify — add post-crash recovery test)
+
+**Steps:**
+1. Write a writer test that simulates the post-crash state (14-col header + 13-col data) and asserts the next sync still produces 14-col data with the correct `movimiento` URL.
+2. Run verifier (expect fail).
+3. Refactor `subdiario-writer.ts`:
+   - Remove the `setValues(A1:N1, new-header)` call from inside the migration-detection block (lines ~549-555).
+   - Move it to the `sortInvariantViolated` branch immediately AFTER `applySubdiarioDiff` succeeds, gated on `schemaMigration === true`. On crash between data rewrite and header write, the next boot sees the old 13-col header → migration re-triggers → data rewrite is idempotent → header write retries.
+   - Update the function's docstring/comment to document the new order and the crash-recovery property.
+4. Run verifier (expect pass).
+
+### Fix 2: Guard soft-paid recibido against zero-contribution USD pagos
+
+**Linear Issue:** [ADV-274](https://linear.app/lw-claude/issue/ADV-274)
+
+**Files:**
+- `src/services/subdiario-builder.ts` (modify — soft-paid branch in `buildSubdiarioRows`)
+- `src/services/subdiario-builder.test.ts` (modify — USD-no-TC test)
+
+**Steps:**
+1. Write a builder test: FC with a USD pago that has `importeEnPesos=undefined` AND `factura.tipoDeCambio=undefined`. Expected: `fechaCobro = pago.fechaPago`, `recibido = null`, `notas` starts with `"Pendiente confirmación bancaria"`.
+2. Run verifier (expect fail).
+3. In the soft-paid branch of `buildSubdiarioRows` (line 757), change `recibido = pagoAgg.totalARS;` to `recibido = pagoAgg.totalARS > 0 ? pagoAgg.totalARS : null;`. Leave `softPaid = true` and `fechaCobro = pagoAgg.latestFecha` unchanged.
+4. Run verifier (expect pass).
+
+### Fix 3: Suppress misleading "out of order" warn during schema migration
+
+**Linear Issue:** [ADV-275](https://linear.app/lw-claude/issue/ADV-275)
+
+**Files:**
+- `src/services/subdiario-writer.ts` (modify — gate the warn in the `sortInvariantViolated` branch)
+- `src/services/subdiario-writer.test.ts` (modify — log capture test)
+
+**Steps:**
+1. Write a writer test that captures log emissions during the schema-migration path and asserts the "out of order" `warn` is NOT emitted (only the `"Comprobantes schema migration: 13 → 14 cols (added movimiento)"` info log fires).
+2. Run verifier (expect fail).
+3. In the `if (diff.sortInvariantViolated)` block (lines ~616-631), wrap the existing `warn(...)` call in `if (!schemaMigration) { ... }`. The full-rewrite code path itself stays unchanged.
+4. Run verifier (expect pass).
+
+### Fix 4: Correct stale `A2:A` reference in MIGRATIONS.md
+
+**Linear Issue:** [ADV-276](https://linear.app/lw-claude/issue/ADV-276)
+
+**Files:**
+- `MIGRATIONS.md` (modify — line 11)
+
+**Steps:**
+1. Update `MIGRATIONS.md` step 2 to reference `A2:N` (not `A2:A`) and add a brief rationale matching the code comment (rows with manually-cleared `fecha` would be missed by an A2:A read).
+2. No code or tests change. Run verifier in full mode to confirm nothing else broke.
+
+### Post-Fix Checklist
+
+1. Run `bug-hunter` agent — review fix changes for bugs.
+2. Run `verifier` agent — confirm all tests pass and zero warnings.
