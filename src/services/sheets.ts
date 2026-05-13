@@ -1304,20 +1304,45 @@ export async function clearSheetData(
 // ─── applySubdiarioDiff ──────────────────────────────────────────────────────
 
 /**
+ * Date format applied to date cells in Subdiario rows. Matches the pattern
+ * emitted by `convertToSheetsCellData` for `CellDate` values, so dates render
+ * consistently across all project sheets.
+ */
+const SUBDIARIO_DATE_FORMAT: sheets_v4.Schema$CellFormat = {
+  numberFormat: { type: 'DATE', pattern: 'yyyy-mm-dd' },
+};
+
+/**
+ * Number format applied to money cells (total, recibido). Matches the pattern
+ * emitted by `convertToSheetsCellData` for `CellNumber` values.
+ */
+const SUBDIARIO_NUMBER_FORMAT: sheets_v4.Schema$CellFormat = {
+  numberFormat: { type: 'NUMBER', pattern: '#,##0.00' },
+};
+
+/**
  * Converts a SubdiarioRow into a CellData array for use in `updateCells` requests.
  *
  * Cell emission rules:
- * - fecha (A): serial number via dateStringToSerial
+ * - fecha (A): serial + DATE `yyyy-mm-dd` format
  * - nro (D): ALWAYS stringValue — preserves AFIP leading zeros and dash separator
- * - total (H): numberValue
- * - recibido (L): numberValue when not null; empty userEnteredValue when null (blank cell, NOT 0)
- * - fechaCobro (K): serial when YYYY-MM-DD, stringValue otherwise
- * - All other string fields: stringValue
+ * - total (H): numberValue + NUMBER `#,##0.00` format
+ * - fechaCobro (K): serial + DATE format when YYYY-MM-DD, stringValue otherwise
+ * - recibido (L): numberValue + NUMBER format when not null; empty userEnteredValue when null (blank cell, NOT 0)
+ * - All other string fields: stringValue (no number format)
+ *
+ * Date/number formats are emitted per-cell to mirror the convention used by
+ * `convertToSheetsCellData` (i.e. `CellDate`/`CellNumber` wrappers) elsewhere in
+ * the project. The caller's `updateCells` field mask must include
+ * `userEnteredFormat.numberFormat` so these formats are actually written.
  */
 function rowToCellData(row: SubdiarioRow): sheets_v4.Schema$CellData[] {
   return [
-    // A: fecha → serial number (date cell)
-    { userEnteredValue: { numberValue: dateStringToSerial(row.fecha) } },
+    // A: fecha → serial number with DATE format
+    {
+      userEnteredValue: { numberValue: dateStringToSerial(row.fecha) },
+      userEnteredFormat: SUBDIARIO_DATE_FORMAT,
+    },
     // B: cod → string
     { userEnteredValue: { stringValue: row.cod } },
     // C: tipo → string
@@ -1330,21 +1355,28 @@ function rowToCellData(row: SubdiarioRow): sheets_v4.Schema$CellData[] {
     { userEnteredValue: { stringValue: row.cuit } },
     // G: condicion → string
     { userEnteredValue: { stringValue: row.condicion } },
-    // H: total → number
-    { userEnteredValue: { numberValue: row.total } },
+    // H: total → number with NUMBER format
+    {
+      userEnteredValue: { numberValue: row.total },
+      userEnteredFormat: SUBDIARIO_NUMBER_FORMAT,
+    },
     // I: concepto → string
     { userEnteredValue: { stringValue: row.concepto } },
     // J: categoria → string
     { userEnteredValue: { stringValue: row.categoria } },
-    // K: fechaCobro → serial when YYYY-MM-DD, stringValue otherwise
-    {
-      userEnteredValue: /^\d{4}-\d{2}-\d{2}$/.test(row.fechaCobro)
-        ? { numberValue: dateStringToSerial(row.fechaCobro) }
-        : { stringValue: row.fechaCobro },
-    },
-    // L: recibido → numberValue when not null; empty userEnteredValue when null (blank cell)
+    // K: fechaCobro → serial + DATE format when YYYY-MM-DD, stringValue otherwise
+    /^\d{4}-\d{2}-\d{2}$/.test(row.fechaCobro)
+      ? {
+          userEnteredValue: { numberValue: dateStringToSerial(row.fechaCobro) },
+          userEnteredFormat: SUBDIARIO_DATE_FORMAT,
+        }
+      : { userEnteredValue: { stringValue: row.fechaCobro } },
+    // L: recibido → numberValue + NUMBER format when not null; empty userEnteredValue when null (blank cell)
     row.recibido !== null
-      ? { userEnteredValue: { numberValue: row.recibido } }
+      ? {
+          userEnteredValue: { numberValue: row.recibido },
+          userEnteredFormat: SUBDIARIO_NUMBER_FORMAT,
+        }
       : { userEnteredValue: {} },
     // M: notas → string
     { userEnteredValue: { stringValue: row.notas } },
@@ -1414,7 +1446,7 @@ export async function applySubdiarioDiff(
       updateCells: {
         start: { sheetId, rowIndex: sheetRow, columnIndex: 0 },
         rows: [{ values: rowToCellData(row) }],
-        fields: 'userEnteredValue',
+        fields: 'userEnteredValue,userEnteredFormat.numberFormat',
       },
     });
   }
@@ -1437,7 +1469,7 @@ export async function applySubdiarioDiff(
       updateCells: {
         start: { sheetId, rowIndex: sheetRow, columnIndex: 0 },
         rows: [{ values: rowToCellData(row) }],
-        fields: 'userEnteredValue',
+        fields: 'userEnteredValue,userEnteredFormat.numberFormat',
       },
     });
   }

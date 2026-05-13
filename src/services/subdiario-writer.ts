@@ -23,6 +23,7 @@ import {
   formatSheet,
   applySubdiarioDiff,
   type CellValue,
+  type NumberFormat,
 } from './sheets.js';
 import { findByName, createSpreadsheet } from './drive.js';
 import { getCachedFolderStructure } from './folder-structure.js';
@@ -205,8 +206,14 @@ export async function readSubdiarioRows(
 }
 
 /**
- * Renames Sheet1 → Comprobantes, freezes row 1, and writes the header row.
- * Called only when the workbook was just created.
+ * Renames Sheet1 → Comprobantes, freezes row 1, applies date/number formats
+ * to typed columns, and writes the header row. Called only when the workbook
+ * was just created.
+ *
+ * Visual chrome (column widths, banding, header background, protected range,
+ * locale) is intentionally NOT applied here — those are user-controlled in
+ * the Sheets UI. Only cell-type formats (date pattern + number pattern) are
+ * baked in, matching the convention used by other project sheets.
  *
  * @param spreadsheetId - The newly-created Subdiario spreadsheet ID
  */
@@ -227,8 +234,17 @@ async function initializeComprobantesSheet(
   const renameResult = await renameSheet(spreadsheetId, sheet1.sheetId, COMPROBANTES_SHEET);
   if (!renameResult.ok) return renameResult;
 
-  // Freeze row 1 + bold header
-  const formatResult = await formatSheet(spreadsheetId, sheet1.sheetId, { frozenRows: 1 });
+  // Freeze row 1 + bold header + date/number formats on typed columns.
+  const numberFormats = new Map<number, NumberFormat>([
+    [0,  { type: 'date' }],                // fecha
+    [7,  { type: 'number', decimals: 2 }], // total
+    [10, { type: 'date' }],                // fechaCobro
+    [11, { type: 'number', decimals: 2 }], // recibido
+  ]);
+  const formatResult = await formatSheet(spreadsheetId, sheet1.sheetId, {
+    frozenRows: 1,
+    numberFormats,
+  });
   if (!formatResult.ok) return formatResult;
 
   // Write header row
