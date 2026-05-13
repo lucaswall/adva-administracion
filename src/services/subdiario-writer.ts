@@ -10,25 +10,24 @@
 import type {
   Result,
   SubdiarioRow,
+  SubdiarioRowWithIndex,
+  SubdiarioDiff,
   SubdiarioInput,
   BankMovimiento,
 } from '../types/index.js';
 import {
   getValues,
   setValues,
-  appendRowsWithLinks,
-  clearSheetData,
-  getSpreadsheetTimezone,
   getSheetMetadata,
   renameSheet,
   formatSheet,
+  applySubdiarioDiff,
   type CellValue,
-  type CellValueOrLink,
 } from './sheets.js';
 import { findByName, createSpreadsheet } from './drive.js';
 import { getCachedFolderStructure } from './folder-structure.js';
 import { SUBDIARIO_COMPROBANTES_HEADERS } from '../constants/spreadsheet-headers.js';
-import { info, warn, error as logError } from '../utils/logger.js';
+import { info, warn, debug, error as logError } from '../utils/logger.js';
 import { getCorrelationId } from '../utils/correlation.js';
 import { normalizeSpreadsheetDate } from '../utils/date.js';
 import { parseNumber } from '../utils/numbers.js';
@@ -39,9 +38,24 @@ import {
 } from '../bank/match-movimientos.js';
 import { buildSubdiarioRows } from './subdiario-builder.js';
 import { readFacturador } from './facturador-reader.js';
+import { diffSubdiarioRows } from './subdiario-diff.js';
+import { withLockResult } from '../utils/concurrency.js';
 
 /** MIME type for Google Sheets spreadsheets */
 const SPREADSHEET_MIME = 'application/vnd.google-apps.spreadsheet';
+
+/**
+ * Lock wait timeout for the Comprobantes sheet-append lock.
+ * Matches the constant used by appendRowsWithLinks in sheets.ts (ADV-242).
+ */
+const COMPROBANTES_LOCK_WAIT_MS = 60_000;
+
+/**
+ * Lock auto-expiry for the Comprobantes sheet-append lock.
+ * Generous timeout: covers worst-case withQuotaRetry chains (~12 min).
+ * The lock exists only to recover from a crashed holder, not to bound normal slow paths.
+ */
+const COMPROBANTES_LOCK_EXPIRY_MS = 900_000;
 
 /** Name of the Subdiario workbook in Drive */
 const SUBDIARIO_NAME = 'Subdiario de Ventas';
@@ -53,10 +67,18 @@ const COMPROBANTES_SHEET = 'Comprobantes';
  * Result of the Subdiario sync operation.
  */
 export interface SyncSubdiarioResult {
-  /** Number of data rows written to Comprobantes */
+  /** Number of data rows that SHOULD be in the sheet (desired.length) */
   rowsWritten: number;
   /** Number of rows flagged as payment gaps by the builder */
   gapsDetected: number;
+  /** Number of rows inserted by the incremental diff */
+  inserts: number;
+  /** Number of rows updated in place by the incremental diff */
+  updates: number;
+  /** Number of rows deleted by the incremental diff */
+  deletes: number;
+  /** True when the sort invariant was violated and the diff fell back to a full rewrite */
+  sortInvariantFallback: boolean;
 }
 
 // ─── Internal helpers ────────────────────────────────────────────────────────
@@ -100,6 +122,84 @@ async function resolveSubdiarioId(
     spreadsheetId: id,
   });
   return { ok: true, value: { id, isNew: true } };
+}
+
+/**
+ * Reads current rows from the Comprobantes sheet.
+ *
+ * Parses `Comprobantes!A2:M` (data rows only — header is at A1) and returns
+ * them as `SubdiarioRowWithIndex` values with 0-based sheet positions.
+ *
+ * Parsing mirrors the cell-emission rules in `syncSubdiario` exactly so that
+ * a row written by this writer round-trips without spurious updates on the
+ * first incremental diff after deploy.
+ *
+ * @internal Exported for test reach only. Do not call from outside this module.
+ *
+ * @param spreadsheetId - Subdiario spreadsheet ID
+ */
+export async function readSubdiarioRows(
+  spreadsheetId: string
+): Promise<Result<SubdiarioRowWithIndex[], Error>> {
+  const valuesResult = await getValues(spreadsheetId, `${COMPROBANTES_SHEET}!A2:M`);
+  if (!valuesResult.ok) return valuesResult;
+
+  const rawRows = valuesResult.value;
+  const result: SubdiarioRowWithIndex[] = [];
+
+  for (let sheetPos = 0; sheetPos < rawRows.length; sheetPos++) {
+    const row = rawRows[sheetPos] ?? [];
+
+    // Col A: fecha — skip row if empty after normalization
+    const fecha = normalizeSpreadsheetDate(row[0]);
+    if (!fecha) continue;
+
+    // Col C: tipo — warn if unknown but keep row
+    const tipo = String(row[2] ?? '').trim();
+    if (tipo !== 'FC' && tipo !== 'NC') {
+      warn('readSubdiarioRows: unknown tipo — keeping row', {
+        module: 'subdiario-writer',
+        phase: 'read-comprobantes',
+        sheetPos,
+        tipo,
+      });
+    }
+
+    // Col H: total — parseNumber with 0 fallback (null → 0, NaN impossible from parseNumber)
+    const total = parseNumber(row[7]) ?? 0;
+
+    // Col K: fechaCobro — serial → date string; string → pass through
+    // Edge case: serial=0 maps to "1899-12-30" in Sheets — treat as blank instead.
+    const fechaCobroCell = row[10];
+    const fechaCobro =
+      typeof fechaCobroCell === 'number'
+        ? (normalizeSpreadsheetDate(fechaCobroCell) || '')
+        : String(fechaCobroCell ?? '').trim();
+
+    // Col L: recibido — empty/blank → null; non-empty → parseNumber
+    const recibidoCell = row[11];
+    const recibidoStr = String(recibidoCell ?? '').trim();
+    const recibido = recibidoStr === '' ? null : parseNumber(recibidoCell);
+
+    result.push({
+      rowIndex: sheetPos,
+      fecha,
+      cod:       String(row[1] ?? '').trim(),
+      tipo:      tipo as SubdiarioRow['tipo'],
+      nro:       String(row[3] ?? '').trim(),
+      cliente:   String(row[4] ?? '').trim(),
+      cuit:      String(row[5] ?? '').trim(),
+      condicion: String(row[6] ?? '').trim(),
+      total,
+      concepto:  String(row[8] ?? '').trim(),
+      categoria: String(row[9] ?? '').trim(),
+      fechaCobro,
+      recibido,
+      notas:     String(row[12] ?? '').trim(),
+    });
+  }
+
+  return { ok: true, value: result };
 }
 
 /**
@@ -215,15 +315,20 @@ async function readMovimientosRows(
  *   2. Initialize Comprobantes sheet on first run (rename, freeze, header)
  *   3. Read source data (Facturas Emitidas, Pagos Recibidos, Retenciones, Facturador, Movimientos)
  *   4. Delegate to buildSubdiarioRows
- *   5. Clear Comprobantes data rows (subsequent runs)
- *   6. Write new rows via appendRowsWithLinks
+ *   5. Resolve Comprobantes sheetId (required by batchUpdate for row addressing)
+ *   6. Compute desired row count and gap count from the desired row set
+ *   7. Under sheet-append lock: read existing rows → diff → applySubdiarioDiff (single batchUpdate)
+ *      Sort-invariant fallback: full rewrite (delete-all DESC + insert-all) in one batchUpdate
+ *
+ * Concurrency: step 7 holds the same `sheet-append:${id}:Comprobantes` lock used by
+ * appendRowsWithLinks, serializing all writers to the Comprobantes sheet (ADV-242).
  *
  * @param rootFolderId       - Drive root folder ID
  * @param controlIngresosId  - Control de Ingresos spreadsheet ID
  * @param controlEgresosId   - Control de Egresos spreadsheet ID (reserved for future use)
  * @param facturadorYear     - Year used to read Facturador de Socios data
  * @param movimientosSpreadsheets - Map of (year:bankFolder) → movimientos spreadsheet IDs
- * @returns rowsWritten and gapsDetected counts
+ * @returns rowsWritten, gapsDetected, and incremental diff counts
  */
 export async function syncSubdiario(
   rootFolderId: string,
@@ -358,73 +463,117 @@ export async function syncSubdiario(
       correlationId,
     });
 
-    // Step 5: Clear existing data rows (subsequent runs only)
-    if (!isNew) {
-      const clearResult = await clearSheetData(subdiarioId, COMPROBANTES_SHEET);
-      if (!clearResult.ok) {
-        logError('Failed to clear Comprobantes sheet data', {
-          module: 'subdiario-writer',
-          phase: 'clear-sheet',
-          error: clearResult.error.message,
-          correlationId,
-        });
-        return clearResult;
-      }
+    // Step 5: Resolve Comprobantes sheetId (needed for batchUpdate row addressing)
+    const metaResult = await getSheetMetadata(subdiarioId);
+    if (!metaResult.ok) {
+      logError('Failed to get Comprobantes sheet metadata', {
+        module: 'subdiario-writer',
+        phase: 'resolve-sheet-id',
+        error: metaResult.error.message,
+        correlationId,
+      });
+      return metaResult;
+    }
+    const comprobantesSheet = metaResult.value.find((s) => s.title === COMPROBANTES_SHEET);
+    if (!comprobantesSheet) {
+      const err = new Error(`Sheet '${COMPROBANTES_SHEET}' not found in Subdiario workbook`);
+      logError('Comprobantes sheet not found', {
+        module: 'subdiario-writer',
+        phase: 'resolve-sheet-id',
+        error: err.message,
+        correlationId,
+      });
+      return { ok: false, error: err };
     }
 
-    // Step 6: Write rows
+    // Step 6: Compute stable counts from the desired row set
     const rowsWritten = rows.length;
     // Placeholder rows for AFIP numbering gaps have cliente='FALTA <nro>'
     const gapsDetected = rows.filter((r) => r.cliente.startsWith('FALTA ')).length;
 
-    if (rowsWritten > 0) {
-      // Convert SubdiarioRow[] to CellValueOrLink[][]
-      const cellRows: CellValueOrLink[][] = rows.map((row) => [
-        { type: 'date' as const, value: row.fecha },
-        row.cod,
-        row.tipo,
-        row.nro,
-        row.cliente,
-        row.cuit,
-        row.condicion,
-        { type: 'number' as const, value: row.total },
-        row.concepto,
-        row.categoria,
-        // fechaCobro may be 'YYYY-MM-DD' (date cell), 'NC 00003-...' string, or ''
-        /^\d{4}-\d{2}-\d{2}$/.test(row.fechaCobro)
-          ? { type: 'date' as const, value: row.fechaCobro }
-          : row.fechaCobro,
-        // recibido: null → blank cell (unpaid / cancelled by NC / placeholder)
-        row.recibido === null ? '' : { type: 'number' as const, value: row.recibido },
-        row.notas,
-      ]);
+    // Step 7: Incremental diff + single batchUpdate under the append lock
+    // (same lock key as appendRowsWithLinks — serializes all writers to Comprobantes, ADV-242)
+    const lockKey = `sheet-append:${subdiarioId}:${COMPROBANTES_SHEET}`;
+    const diffResult = await withLockResult(
+      lockKey,
+      async (): Promise<Result<{ inserts: number; updates: number; deletes: number; sortInvariantFallback: boolean }, Error>> => {
+        // Read existing rows (skip when workbook was just created — it's empty by definition)
+        const existing: SubdiarioRowWithIndex[] = [];
+        if (!isNew) {
+          const readResult = await readSubdiarioRows(subdiarioId);
+          if (!readResult.ok) return readResult;
+          existing.push(...readResult.value);
+        }
 
-      const tzResult = await getSpreadsheetTimezone(subdiarioId);
-      if (!tzResult.ok) {
-        warn('Failed to get spreadsheet timezone — timestamps may be in UTC', {
-          module: 'subdiario-writer',
-          phase: 'write-rows',
-          error: tzResult.error.message,
-          correlationId,
-        });
-      }
-      const timeZone = tzResult.ok ? tzResult.value : undefined;
+        const diff = diffSubdiarioRows(existing, rows);
 
-      const writeResult = await appendRowsWithLinks(
-        subdiarioId,
-        `${COMPROBANTES_SHEET}`,
-        cellRows,
-        timeZone
-      );
-      if (!writeResult.ok) {
-        logError('Failed to write Subdiario rows', {
-          module: 'subdiario-writer',
-          phase: 'write-rows',
-          error: writeResult.error.message,
-          correlationId,
-        });
-        return writeResult;
-      }
+        // No-op short-circuit: nothing changed
+        if (
+          diff.updates.length === 0 &&
+          diff.inserts.length === 0 &&
+          diff.deletes.length === 0 &&
+          !diff.sortInvariantViolated
+        ) {
+          debug('Subdiario sync: no changes detected — skipping batchUpdate', {
+            module: 'subdiario-writer',
+            phase: 'diff',
+            correlationId,
+          });
+          return { ok: true, value: { inserts: 0, updates: 0, deletes: 0, sortInvariantFallback: false } };
+        }
+
+        // Sort-invariant fallback: emit a one-shot full rewrite
+        if (diff.sortInvariantViolated) {
+          const outOfOrderPairs = existing
+            .slice(0, -1)
+            .reduce<string[]>((acc, row, i) => {
+              const next = existing[i + 1]!;
+              if (row.fecha > next.fecha || (row.fecha === next.fecha && row.nro > next.nro)) {
+                if (acc.length < 10) acc.push(`[${row.rowIndex}]${row.fecha}/${row.nro} > [${next.rowIndex}]${next.fecha}/${next.nro}`);
+              }
+              return acc;
+            }, []);
+          warn('Comprobantes sheet is out of order — falling back to full rewrite (one-shot)', {
+            module: 'subdiario-writer',
+            phase: 'diff',
+            outOfOrderPairs,
+            correlationId,
+          });
+          const rewriteDiff: SubdiarioDiff = {
+            updates: [],
+            inserts: rows.map((row, i) => ({ insertAt: i, row })),
+            deletes: existing.map((r) => r.rowIndex).sort((a, b) => b - a),
+            sortInvariantViolated: true,
+            duplicateKeysDetected: diff.duplicateKeysDetected,
+          };
+          const rewriteResult = await applySubdiarioDiff(subdiarioId, comprobantesSheet.sheetId, rewriteDiff, rows);
+          if (!rewriteResult.ok) return rewriteResult;
+          return {
+            ok: true,
+            value: { ...rewriteResult.value, sortInvariantFallback: true },
+          };
+        }
+
+        // Normal incremental batchUpdate
+        const applyResult = await applySubdiarioDiff(subdiarioId, comprobantesSheet.sheetId, diff, rows);
+        if (!applyResult.ok) return applyResult;
+        return {
+          ok: true,
+          value: { ...applyResult.value, sortInvariantFallback: false },
+        };
+      },
+      COMPROBANTES_LOCK_WAIT_MS,
+      COMPROBANTES_LOCK_EXPIRY_MS,
+    );
+
+    if (!diffResult.ok) {
+      logError('Subdiario diff/apply failed', {
+        module: 'subdiario-writer',
+        phase: 'diff-apply',
+        error: diffResult.error.message,
+        correlationId,
+      });
+      return diffResult;
     }
 
     info('Subdiario de Ventas sync complete', {
@@ -432,10 +581,21 @@ export async function syncSubdiario(
       phase: 'sync',
       rowsWritten,
       gapsDetected,
+      ...diffResult.value,
       correlationId,
     });
 
-    return { ok: true, value: { rowsWritten, gapsDetected } };
+    return {
+      ok: true,
+      value: {
+        rowsWritten,
+        gapsDetected,
+        inserts: diffResult.value.inserts,
+        updates: diffResult.value.updates,
+        deletes: diffResult.value.deletes,
+        sortInvariantFallback: diffResult.value.sortInvariantFallback,
+      },
+    };
   } catch (err) {
     const error = err instanceof Error ? err : new Error(String(err));
     logError('Subdiario sync failed unexpectedly', {

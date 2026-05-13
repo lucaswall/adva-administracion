@@ -35,7 +35,9 @@ import {
   columnLetterToIndex,
   parseA1Range,
   updateRowsWithFormatting,
+  applySubdiarioDiff,
 } from './sheets.js';
+import type { SubdiarioRow, SubdiarioDiff } from '../types/index.js';
 
 // Mock googleapis
 vi.mock('googleapis', () => ({
@@ -2820,4 +2822,159 @@ describe('appendRowsWithLinks concurrency (ADV-242)', () => {
       expect(result.error.message.toLowerCase()).toContain('append');
     }
   }, 15_000);
+
+  // ─── applySubdiarioDiff cell emission rules ─────────────────────────────────
+
+  describe('applySubdiarioDiff', () => {
+    function makeTestRow(overrides: Partial<SubdiarioRow> = {}): SubdiarioRow {
+      return {
+        fecha: '2025-01-15',
+        cod: '006',
+        tipo: 'FC' as const,
+        nro: '00003-00001234',
+        cliente: 'TEST SA',
+        cuit: '20123456786',
+        condicion: 'IVA RI',
+        total: 1000,
+        concepto: 'Servicios',
+        categoria: 'Micro',
+        fechaCobro: '',
+        recibido: null,
+        notas: '',
+        ...overrides,
+      };
+    }
+
+    function makeDiff(overrides: Partial<SubdiarioDiff> = {}): SubdiarioDiff {
+      return {
+        updates: [],
+        inserts: [],
+        deletes: [],
+        sortInvariantViolated: false,
+        duplicateKeysDetected: false,
+        ...overrides,
+      };
+    }
+
+    beforeEach(() => {
+      // Return a success response for batchUpdate
+      mockSheetsApi.spreadsheets.batchUpdate.mockResolvedValue({
+        data: { replies: [{}] },
+      });
+    });
+
+    it('emits nro (col D, index 3) as stringValue — never numberValue', async () => {
+      const row = makeTestRow({ nro: '00003-00001234' });
+      const diff = makeDiff({ inserts: [{ insertAt: 0, row }] });
+
+      const result = await applySubdiarioDiff('spread-id', 42, diff, [row]);
+
+      expect(result.ok).toBe(true);
+
+      // Inspect batchUpdate call
+      const calls = mockSheetsApi.spreadsheets.batchUpdate.mock.calls;
+      expect(calls.length).toBeGreaterThan(0);
+      const requests = (calls[0]![0] as { requestBody: { requests: import('googleapis').sheets_v4.Schema$Request[] } }).requestBody.requests;
+
+      // Find the updateCells request (follows the insertDimension)
+      const updateReq = requests.find((r) => r.updateCells);
+      expect(updateReq).toBeDefined();
+
+      const cellValues = updateReq!.updateCells!.rows![0]!.values!;
+      const nroCell = cellValues[3]!; // col D (0-based index 3)
+
+      // Must be stringValue — AFIP leading zeros and dashes must survive
+      expect(nroCell.userEnteredValue?.stringValue).toBe('00003-00001234');
+      expect(nroCell.userEnteredValue?.numberValue).toBeUndefined();
+    });
+
+    it('emits recibido=null (col L, index 11) as empty userEnteredValue — not numberValue: 0', async () => {
+      const row = makeTestRow({ recibido: null });
+      const diff = makeDiff({ inserts: [{ insertAt: 0, row }] });
+
+      const result = await applySubdiarioDiff('spread-id', 42, diff, [row]);
+
+      expect(result.ok).toBe(true);
+
+      const calls = mockSheetsApi.spreadsheets.batchUpdate.mock.calls;
+      const requests = (calls[0]![0] as { requestBody: { requests: import('googleapis').sheets_v4.Schema$Request[] } }).requestBody.requests;
+      const updateReq = requests.find((r) => r.updateCells);
+      expect(updateReq).toBeDefined();
+
+      const cellValues = updateReq!.updateCells!.rows![0]!.values!;
+      const recibidoCell = cellValues[11]!; // col L (0-based index 11)
+
+      // Must be empty userEnteredValue — NOT numberValue: 0
+      expect(recibidoCell.userEnteredValue?.numberValue).toBeUndefined();
+      expect(Object.keys(recibidoCell.userEnteredValue!)).toHaveLength(0);
+    });
+
+    it('update after a deletion: sheetRow uses desiredIndex (not rowIndex) so the shifted row is targeted correctly', async () => {
+      // Existing: [A@rowIndex=0, B@rowIndex=1, C@rowIndex=2]
+      // Desired:  [A, C_modified]
+      // Diff: deletes=[1], updates=[{rowIndex:2, desiredIndex:1, C_modified}]
+      //
+      // batchUpdate sequential execution:
+      //   step 1: delete sheetRow=2 (B) → sheet becomes [header, A, C]
+      //   step 2: no inserts
+      //   step 3: update at desiredIndex+1 = 2 → C is correctly at sheetRow=2
+      //
+      // Using rowIndex+1=3 would target a non-existent row (off-end).
+      const rowA = makeTestRow({ nro: '00001-00000001' });
+      const rowC = makeTestRow({ nro: '00001-00000003', total: 9999 });
+      const diff = makeDiff({
+        deletes: [1], // B's rowIndex (DESC — only element)
+        updates: [{ rowIndex: 2, desiredIndex: 1, row: rowC }],
+      });
+
+      const result = await applySubdiarioDiff('spread-id', 42, diff, [rowA, rowC]);
+
+      expect(result.ok).toBe(true);
+
+      const calls = mockSheetsApi.spreadsheets.batchUpdate.mock.calls;
+      expect(calls.length).toBeGreaterThan(0);
+      const requests = (calls[0]![0] as { requestBody: { requests: import('googleapis').sheets_v4.Schema$Request[] } }).requestBody.requests;
+
+      // deleteDimension must come first
+      const deleteReq = requests[0];
+      expect(deleteReq!.deleteDimension).toBeDefined();
+      expect(deleteReq!.deleteDimension!.range!.startIndex).toBe(2); // sheetRow=2 (rowIndex=1+1)
+
+      // updateCells must target sheetRow = desiredIndex+1 = 2 (NOT rowIndex+1=3)
+      const updateReq = requests.find((r) => r.updateCells);
+      expect(updateReq).toBeDefined();
+      expect(updateReq!.updateCells!.start!.rowIndex).toBe(2); // desiredIndex=1 +1 for header
+    });
+
+    it('update after an insertion: sheetRow uses desiredIndex so the insertion-shifted row is targeted correctly', async () => {
+      // Existing: [A@rowIndex=0, B@rowIndex=1, C@rowIndex=2]
+      // Desired:  [A, newX, B, C_modified]
+      // Diff: inserts=[{insertAt:1, newX}], updates=[{rowIndex:2, desiredIndex:3, C_modified}]
+      //
+      // batchUpdate sequential execution:
+      //   step 1: no deletes
+      //   step 2: insert newX at sheetRow=2 → sheet becomes [header, A, newX, B, C]
+      //   step 3: update at desiredIndex+1 = 4 → C is correctly at sheetRow=4
+      //
+      // Using rowIndex+1=3 would update B, not C.
+      const rowNewX = makeTestRow({ nro: '00001-00000099' });
+      const rowC = makeTestRow({ nro: '00001-00000003', total: 7777 });
+      const diff = makeDiff({
+        inserts: [{ insertAt: 1, row: rowNewX }],
+        updates: [{ rowIndex: 2, desiredIndex: 3, row: rowC }],
+      });
+
+      const result = await applySubdiarioDiff('spread-id', 42, diff, [makeTestRow({ nro: '00001-00000001' }), rowNewX, makeTestRow({ nro: '00001-00000002' }), rowC]);
+
+      expect(result.ok).toBe(true);
+
+      const calls = mockSheetsApi.spreadsheets.batchUpdate.mock.calls;
+      const requests = (calls[0]![0] as { requestBody: { requests: import('googleapis').sheets_v4.Schema$Request[] } }).requestBody.requests;
+
+      // updateCells must target sheetRow = desiredIndex+1 = 4 (NOT rowIndex+1=3)
+      const updateReq = requests.find((r) => r.updateCells && r.updateCells.rows![0]!.values![7]?.userEnteredValue?.numberValue === 7777);
+      expect(updateReq).toBeDefined();
+      expect(updateReq!.updateCells!.start!.rowIndex).toBe(4); // desiredIndex=3 +1 for header
+    });
+  });
 });

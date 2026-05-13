@@ -19,6 +19,10 @@ import { error as logError } from '../utils/logger.js';
 interface RebuildSubdiarioResponse {
   rowsWritten: number;
   gapsDetected: number;
+  inserts: number;
+  updates: number;
+  deletes: number;
+  sortInvariantFallback: boolean;
   durationMs: number;
 }
 
