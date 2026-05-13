@@ -420,3 +420,44 @@ In `src/server.ts` after line 354 (`await runStartupMigrations();`), call a new 
 
 ### Continuation Status
 All 5 tasks completed.
+
+### Review Findings
+
+**Reviewed:** 2026-05-13
+**Method:** 3-reviewer team (security, reliability, quality) over 14 changed source files
+**Outcome:** No bugs accepted. All findings discarded with reasoning below.
+
+**FIX (Linear issues created):**
+- None — no real bugs identified.
+
+**DISCARDED FINDINGS:**
+
+1. **[medium] [type] `src/services/subdiario-writer.ts:158-191`** — `tipo as SubdiarioRow['tipo']` cast for rows whose `tipo` is not `'FC' | 'NC'`. **DISCARDED:** spec-endorsed intentional design (PLANS.md line 130: "warn on unknown but keep the row — it'll fail to match anything in desired and end up as a delete"). The cast is contained — `tipo` is only ever compared as a string in `diffSubdiarioRows` and printed in the fallback warning log. No exhaustive switch exists. A mismatched-`tipo` existing row is auto-corrected on next sync because the (cod, nro) match triggers an update that overwrites it with the desired row's correct `tipo`.
+
+2. **[low] [test-quality] `src/services/subdiario-chrome.test.ts:34,36`** — `TARGET_WIDTHS` and `PROTECTED_RANGE_DESCRIPTION` redeclared as literals instead of imported from `./subdiario-chrome.js`. **DISCARDED:** style-only test ergonomics. Drift would still produce a test failure (aligned-state setup would no longer match the source's actual state-check), just with a less direct assertion message.
+
+3. **[low] [test-quality] `src/services/subdiario-writer.test.ts:1175`** — concurrency test only asserts both calls succeed, not that they ran serially. **DISCARDED:** the real `withLockResult` IS exercised (`utils/concurrency.ts` is not mocked in this test file), the lock-key correctness is explicitly asserted in other tests (lines verifying `'sheet-append:${id}:Comprobantes'`), and `applySubdiarioDiff` mock-call ordering is implicit. Adding explicit timing assertions would be nice-to-have, not a correctness bug.
+
+4. **[low] [convention] `src/services/sheets.ts` `applySubdiarioDiff` `_desiredRows` param** — parameter is documented "reserved for future use / logging" but unused. **DISCARDED:** the `_` prefix is the project's convention for intentionally-unused params (matches `_controlEgresosId` in `syncSubdiario`). The parameter is reserved for an explicit logging extension and the JSDoc documents that. Code-smell at worst, not a correctness bug.
+
+5. **[low] [bug] `src/services/subdiario-writer.ts:297-298`** — `parseNumber(row[2]) || null` in `readMovimientosRows` coerces explicit `0` to `null`. **DISCARDED:** pre-existing code (verified via `git show main:src/services/subdiario-writer.ts` — identical pattern on main), and the only case where it differs from `parseNumber(row[2])` is when the cell is explicitly `'0'`. Argentine bank statements never write `'0'` in DÉBITO/CRÉDITO columns — empty cells signal "no movement on this side". Downstream `BankMovimiento` consumers treat `null` and `0` identically (neither indicates a monetary movement on that side). No observable bug under any realistic data.
+
+6. **[low] [edge-case] `src/services/subdiario-writer.ts:154`** — `normalizeSpreadsheetDate(0)` returns `'1899-12-30'` (truthy), so `if (!fecha) continue` would not skip a `fecha` cell containing serial=0 (Sheets epoch). **DISCARDED:** reviewer's own characterization was "theoretical" — Sheets API returns `undefined` for empty cells, not `0`. A serial=0 fecha can only arise from data corruption with no realistic source. Even if it did occur, the row would not match any (cod, nro) in `desired` (which all come from the builder with real fechas) → it would be deleted on the next sync. Self-healing.
+
+7. **[low] [edge-case] `src/services/subdiario-writer.ts:547`** — sort-invariant fallback's `deletes = existing.map((r) => r.rowIndex)` only covers rows tracked by `readSubdiarioRows`; rows with empty `fecha` (skipped by the reader) persist as orphans. **DISCARDED:** the diff path never CREATES empty rows. Legacy clear+append also did not leave trailing empty rows (`clearSheetData` cleared the full data range). The only realistic source of empty rows is manual contador action — which the chrome module's protected range explicitly warns against. The "accumulate" framing is misleading: orphans persist at their existing count, they don't multiply per sync. Cosmetic at worst, requires a self-inflicted precondition.
+
+### Linear Updates
+
+- ADV-263: Review → Merge
+- ADV-264: Review → Merge
+- ADV-265: Review → Merge
+- ADV-266: Review → Merge
+- ADV-267: Review → Merge
+
+<!-- REVIEW COMPLETE -->
+
+---
+
+## Status: COMPLETE
+
+All tasks implemented and reviewed successfully. All Linear issues moved to Merge.
