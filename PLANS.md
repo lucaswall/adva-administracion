@@ -404,3 +404,40 @@ Bug-hunter pass 2: clean (0 bugs).
 **Verifier (full mode):** 2478 tests pass (74 files), lint clean, build clean, zero warnings.
 
 **Linear:** ADV-273, ADV-274, ADV-275, ADV-276 all moved Todo → In Progress → Review.
+
+---
+
+## Review Findings — Iteration 2 — 2026-05-13
+
+**Method:** 3-reviewer team (security, reliability, quality) on the 4 changed code files + 1 doc file (PLANS.md excluded as review artifact).
+
+### Reviewers' raw reports
+
+* **Security** — clean. HYPERLINK formula injection re-verified (no regression in iteration 2's changes — the `recibido` guard touches only the numeric cell, never the URL). No new auth surface, no secrets, no PII in the new `info()` log (only `module`, `phase`, `spreadsheetId`, `correlationId`).
+* **Reliability** — 2 low findings. Crash-recovery ordering, idempotency, lock release, the `recibido > 0` guard semantics, the `outOfOrderPairs` gating, and the `invocationCallOrder` ordering test were all individually verified correct.
+* **Quality** — 2 low findings. All four fixes have meaningful TDD tests; the migration `describe` block uses a fully mocked `sheets.js` so the `quotaThrottle.reset()` rule does not apply; MIGRATIONS.md is consistent with the code.
+
+### FIX (0)
+
+None — all 4 findings are non-bugs.
+
+### DISCARDED (4)
+
+| Finding | Reason |
+|---------|--------|
+| Reliability: `subdiario-builder.ts:760` — `recibido = pagoAgg.totalARS > 0 ? pagoAgg.totalARS : null` silently nulls negative `totalARS` if a refund pago with negative `importePagado` ever existed. | **Impossible in context.** `Pago.importePagado` is always positive — the system has no refund/reversal flow. The reviewer explicitly noted "Not a real-world issue with current data". CLAUDE.md rule: "Don't add error handling, fallbacks, or validation for scenarios that can't happen." If a refund flow is ever introduced, the Pago type and aggregation will need broader changes than this guard. |
+| Reliability: `subdiario-writer.test.ts:1435-1468` — ADV-275 test exercises only a 1-row scenario; multi-row stubs would provide stronger regression signal since `slice(0, -1)` on a 1-element array is always `[]`. | **Style-only / test signal strength.** The test correctly verifies the fix's behaviour (warn suppressed during migration, info log fires). Adding a multi-row stub would not catch any additional bug — the bug being prevented is the misleading warn itself, which fires for ANY non-zero number of stubs. Not a correctness issue. |
+| Quality: `subdiario-writer.ts:656` — `as unknown as CellValue[]` double cast on `SUBDIARIO_COMPROBANTES_HEADERS` (moved, not newly added by ADV-273). | **Same exact finding as Iteration 1 DISCARD #2, same reasoning.** `CellValue = string \| number \| boolean \| null \| undefined \| Date`, so `string[]` is directly assignable; the `as unknown` is redundant but harmless. Style-only with zero correctness impact. |
+| Quality: `subdiario-writer.test.ts:1499-1501` — the "crash-recovery order" test asserts `diffOrder < headerWriteOrder` without first asserting `applySubdiarioDiff` was called; a regression that skipped the diff would produce `undefined < N` which fails with a confusing message. | **Style-only / test clarity.** The test does catch the regression — `expect(undefined).toBeLessThan(headerWriteOrder)` fails. The reviewer's suggestion is purely about clearer failure messages, not detection. The test passes correctly today and a `toHaveBeenCalledTimes(1)` precheck is a nice-to-have, not a bug fix. |
+
+### Linear Updates
+
+* ADV-273, ADV-274, ADV-275, ADV-276 → Review → **Merge**
+
+<!-- REVIEW COMPLETE -->
+
+---
+
+## Status: COMPLETE
+
+All tasks implemented and reviewed successfully across 2 iterations. All Linear issues (ADV-268..ADV-272 and ADV-273..ADV-276) moved to Merge.
