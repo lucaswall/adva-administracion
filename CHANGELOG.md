@@ -7,7 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [1.8.3] - 2026-05-11
+## [1.9.0] - 2026-05-13
+
+### Added
+- New "Subdiario de Ventas" workbook auto-synced after every bank match — a chronological registry of every comprobante emitted (FC/NC) with socio category enrichment, NC↔FC linkage, gap detection in numeración, and per-row payment status from matched bank movements
+- `POST /api/rebuild-subdiario` endpoint and matching "Reconstruir Subdiario de Ventas" entry in the Dashboard ADVA menu for ad-hoc rebuilds without running a full scan
+- Subdiario writes are now incremental — only changed rows are rewritten, so the workbook's revision history stays clean instead of one full overwrite per match
+- `condicionIVAReceptor` is now extracted from `factura_emitida` (Responsable Inscripto / Consumidor Final / Monotributo / etc.) and persisted to Control de Ingresos (automatic schema migration)
+
+### Fixed
+- Minor refinements to factura/pago, NC/factura, recibo/pago, and retención/factura matching
+- Duplicate-cache normalization for wrapped cell values
 
 ### Fixed
 - Facturas Emitidas (and every other sheet append path) no longer silently drops rows when multiple writes hit the same sheet concurrently — `appendCells` is now serialized per-(spreadsheet, sheet) to prevent the Google Sheets "current end of data" race that lost 9 production facturas over ~3 weeks
@@ -177,7 +187,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Updated fastify to fix high-severity Content-Type body validation bypass and low-severity DoS vulnerability
 - Updated googleapis to v171, @google/clasp to v3, and resolved 6 npm audit vulnerabilities
 
-[Unreleased]: https://github.com/lucaswall/adva-administracion/compare/v1.8.3...HEAD
+[Unreleased]: https://github.com/lucaswall/adva-administracion/compare/v1.9.0...HEAD
+[1.9.0]: https://github.com/lucaswall/adva-administracion/compare/v1.8.3...v1.9.0
 [1.8.3]: https://github.com/lucaswall/adva-administracion/compare/v1.8.2...v1.8.3
 [1.8.2]: https://github.com/lucaswall/adva-administracion/compare/v1.8.1...v1.8.2
 [1.8.1]: https://github.com/lucaswall/adva-administracion/compare/v1.8.0...v1.8.1
