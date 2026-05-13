@@ -56,7 +56,7 @@ vi.mock('../services/pagos-pendientes.js', () => ({
 }));
 
 vi.mock('../services/subdiario-writer.js', () => ({
-  syncSubdiario: vi.fn().mockResolvedValue({ ok: true, value: { rowsWritten: 0, gapsDetected: 0 } }),
+  syncSubdiario: vi.fn().mockResolvedValue({ ok: true, value: { rowsWritten: 0, gapsDetected: 0, inserts: 0, updates: 0, deletes: 0, sortInvariantFallback: false } }),
 }));
 
 // Create mockable matcher methods
@@ -4125,7 +4125,7 @@ describe('syncSubdiario called after syncCobrosPendientes (ADV-248)', () => {
     });
     vi.mocked(syncSubdiario).mockImplementation(async () => {
       callOrder.push('syncSubdiario');
-      return { ok: true, value: { rowsWritten: 0, gapsDetected: 0 } };
+      return { ok: true, value: { rowsWritten: 0, gapsDetected: 0, inserts: 0, updates: 0, deletes: 0, sortInvariantFallback: false } };
     });
 
     const resultPromise = matchAllMovimientos();

@@ -118,7 +118,7 @@ describe('POST /api/rebuild-subdiario', () => {
 
     mockSyncSubdiario.mockResolvedValue({
       ok: true,
-      value: { rowsWritten: 42, gapsDetected: 3 },
+      value: { rowsWritten: 42, gapsDetected: 3, inserts: 1, updates: 0, deletes: 0, sortInvariantFallback: false },
     });
 
     server = Fastify({ logger: false });
@@ -298,5 +298,113 @@ describe('POST /api/rebuild-subdiario', () => {
     expect(response.statusCode).toBe(500);
     const body = JSON.parse(response.payload);
     expect(body.error).toBe('Subdiario rebuild failed');
+  });
+
+  // ─── Task 5: diff stats surfaced in response ──────────────────────────────────
+
+  it('successful sync: response body includes inserts/updates/deletes/sortInvariantFallback', async () => {
+    mockSyncSubdiario.mockResolvedValue({
+      ok: true,
+      value: {
+        rowsWritten: 10,
+        gapsDetected: 0,
+        inserts: 3,
+        updates: 2,
+        deletes: 1,
+        sortInvariantFallback: false,
+      },
+    });
+
+    const response = await server.inject({
+      method: 'POST',
+      url: '/api/rebuild-subdiario',
+      headers: { authorization: `Bearer ${API_SECRET}` },
+    });
+
+    expect(response.statusCode).toBe(200);
+    const body = JSON.parse(response.payload);
+    expect(body.rowsWritten).toBe(10);
+    expect(body.gapsDetected).toBe(0);
+    expect(body.inserts).toBe(3);
+    expect(body.updates).toBe(2);
+    expect(body.deletes).toBe(1);
+    expect(body.sortInvariantFallback).toBe(false);
+    expect(typeof body.durationMs).toBe('number');
+  });
+
+  it('no-op sync (all zero counts) passes through correctly', async () => {
+    mockSyncSubdiario.mockResolvedValue({
+      ok: true,
+      value: {
+        rowsWritten: 5,
+        gapsDetected: 0,
+        inserts: 0,
+        updates: 0,
+        deletes: 0,
+        sortInvariantFallback: false,
+      },
+    });
+
+    const response = await server.inject({
+      method: 'POST',
+      url: '/api/rebuild-subdiario',
+      headers: { authorization: `Bearer ${API_SECRET}` },
+    });
+
+    expect(response.statusCode).toBe(200);
+    const body = JSON.parse(response.payload);
+    expect(body.inserts).toBe(0);
+    expect(body.updates).toBe(0);
+    expect(body.deletes).toBe(0);
+    expect(body.sortInvariantFallback).toBe(false);
+  });
+
+  it('sync failure: 500 response has no diff fields in body', async () => {
+    mockSyncSubdiario.mockResolvedValue({
+      ok: false,
+      error: new Error('Sheet write failed'),
+    });
+
+    const response = await server.inject({
+      method: 'POST',
+      url: '/api/rebuild-subdiario',
+      headers: { authorization: `Bearer ${API_SECRET}` },
+    });
+
+    expect(response.statusCode).toBe(500);
+    const body = JSON.parse(response.payload);
+    expect(body.error).toBe('Subdiario rebuild failed');
+    expect(body.inserts).toBeUndefined();
+    expect(body.updates).toBeUndefined();
+    expect(body.deletes).toBeUndefined();
+    expect(body.sortInvariantFallback).toBeUndefined();
+  });
+
+  it('sort-invariant fallback: sortInvariantFallback=true and inserts equals rowsWritten', async () => {
+    const rowsWritten = 8;
+    mockSyncSubdiario.mockResolvedValue({
+      ok: true,
+      value: {
+        rowsWritten,
+        gapsDetected: 1,
+        inserts: rowsWritten, // full rewrite: all rows re-inserted
+        updates: 0,
+        deletes: rowsWritten, // all old rows deleted first
+        sortInvariantFallback: true,
+      },
+    });
+
+    const response = await server.inject({
+      method: 'POST',
+      url: '/api/rebuild-subdiario',
+      headers: { authorization: `Bearer ${API_SECRET}` },
+    });
+
+    expect(response.statusCode).toBe(200);
+    const body = JSON.parse(response.payload);
+    expect(body.sortInvariantFallback).toBe(true);
+    expect(body.inserts).toBe(rowsWritten);
+    expect(body.deletes).toBe(rowsWritten);
+    expect(body.updates).toBe(0);
   });
 });

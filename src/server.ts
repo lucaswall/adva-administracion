@@ -16,6 +16,9 @@ import { initWatchManager, startWatching, shutdownWatchManager, updateLastScanTi
 import { scanFolder } from './processing/scanner.js';
 import { updateStatusSheet } from './services/status-sheet.js';
 import { syncAppsScript } from './bootstrap/apps-script-sync.js';
+import { findExistingSubdiarioId } from './services/subdiario-writer.js';
+import { ensureSubdiarioChrome } from './services/subdiario-chrome.js';
+import { getSheetMetadata } from './services/sheets.js';
 import { info, warn, error as logError } from './utils/logger.js';
 import type { Result } from './types/index.js';
 
@@ -85,6 +88,84 @@ async function initializeFolderStructure(): Promise<void> {
     sinProcesarId: result.value.sinProcesarId,
     bankSpreadsheets: result.value.bankSpreadsheets.size
   });
+}
+
+/**
+ * Apply one-time idempotent sheet chrome to the Subdiario de Ventas Comprobantes sheet.
+ * Runs after runStartupMigrations(). Failures are cosmetic — never fatal.
+ */
+async function initializeSubdiarioChrome(): Promise<void> {
+  try {
+    const folderStructure = getCachedFolderStructure();
+    if (!folderStructure) {
+      warn('Skipping subdiario chrome: folder structure not cached', {
+        module: 'server',
+        phase: 'init',
+      });
+      return;
+    }
+
+    const subdiarioResult = await findExistingSubdiarioId(folderStructure.rootId);
+    if (!subdiarioResult.ok) {
+      warn('Skipping subdiario chrome: could not locate spreadsheet ID', {
+        module: 'server',
+        phase: 'init',
+        error: subdiarioResult.error.message,
+      });
+      return;
+    }
+
+    if (subdiarioResult.value === null) {
+      info('Skipping subdiario chrome: workbook does not exist yet (first sync will create it)', {
+        module: 'server',
+        phase: 'init',
+      });
+      return;
+    }
+
+    const subdiarioId = subdiarioResult.value;
+
+    const metadataResult = await getSheetMetadata(subdiarioId);
+    if (!metadataResult.ok) {
+      warn('Skipping subdiario chrome: could not get sheet metadata', {
+        module: 'server',
+        phase: 'init',
+        error: metadataResult.error.message,
+      });
+      return;
+    }
+
+    const comprobantesSheet = metadataResult.value.find((s) => s.title === 'Comprobantes');
+    if (!comprobantesSheet) {
+      warn('Skipping subdiario chrome: Comprobantes sheet not found', {
+        module: 'server',
+        phase: 'init',
+      });
+      return;
+    }
+
+    const chromeResult = await ensureSubdiarioChrome(subdiarioId, comprobantesSheet.sheetId);
+    if (!chromeResult.ok) {
+      warn('Subdiario chrome failed (non-fatal)', {
+        module: 'server',
+        phase: 'init',
+        error: chromeResult.error.message,
+      });
+      return;
+    }
+
+    info('Subdiario chrome initialized', {
+      module: 'server',
+      phase: 'init',
+      changesApplied: chromeResult.value.changesApplied,
+    });
+  } catch (err) {
+    warn('Subdiario chrome threw unexpectedly (non-fatal)', {
+      module: 'server',
+      phase: 'init',
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
 }
 
 /**
@@ -352,6 +433,9 @@ async function start() {
 
     // Run spreadsheet schema migrations (e.g., add missing column headers)
     await runStartupMigrations();
+
+    // Apply one-time idempotent sheet chrome to Subdiario de Ventas (ADV-266)
+    await initializeSubdiarioChrome();
 
     // Start real-time monitoring (if configured)
     await initializeRealTimeMonitoring();

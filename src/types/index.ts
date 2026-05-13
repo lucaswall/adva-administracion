@@ -1141,6 +1141,37 @@ export interface SubdiarioRow {
 }
 
 /**
+ * A SubdiarioRow with its 0-indexed position in the Comprobantes sheet.
+ * First data row (after the header) has rowIndex=0.
+ */
+export interface SubdiarioRowWithIndex extends SubdiarioRow {
+  /** 0-indexed row position in the sheet (row 0 = first data row, below header) */
+  rowIndex: number;
+}
+
+/**
+ * Result of diffing existing sheet rows against the desired row set.
+ * Produced by diffSubdiarioRows().
+ */
+export interface SubdiarioDiff {
+  /**
+   * Rows to update in place: (cod, nro) matched but at least one field changed.
+   * `rowIndex`: original 0-based existing position (used for ordering only).
+   * `desiredIndex`: 0-based position in the desired array — used by applySubdiarioDiff
+   *   to compute the correct sheetRow AFTER all prior deletions and insertions shift it.
+   */
+  updates: { rowIndex: number; desiredIndex: number; row: SubdiarioRow }[];
+  /** Rows to insert: in desired but not in existing; insertAt = position in desired array */
+  inserts: { insertAt: number; row: SubdiarioRow }[];
+  /** Existing row indices to delete, sorted DESCENDING (bottom-up to avoid index shift) */
+  deletes: number[];
+  /** True when existing rows are not sorted by (fecha ASC, nro ASC); caller falls back to full rewrite */
+  sortInvariantViolated: boolean;
+  /** True when (cod, nro) is non-unique in existing; first occurrence kept, rest emitted as deletes */
+  duplicateKeysDetected: boolean;
+}
+
+/**
  * Input to the buildSubdiarioRows() pure function.
  */
 export interface SubdiarioInput {

@@ -5,7 +5,7 @@
 
 import { google, sheets_v4 } from 'googleapis';
 import { getGoogleAuthAsync, getDefaultScopes } from './google-auth.js';
-import type { Result } from '../types/index.js';
+import type { Result, SubdiarioRow, SubdiarioDiff } from '../types/index.js';
 import { withQuotaRetry, withLock, withLockResult } from '../utils/concurrency.js';
 import { sanitizeForSpreadsheet } from '../utils/spreadsheet.js';
 import { debug, warn } from '../utils/logger.js';
@@ -1301,6 +1301,171 @@ export async function clearSheetData(
   });
 }
 
+// ─── applySubdiarioDiff ──────────────────────────────────────────────────────
+
+/**
+ * Converts a SubdiarioRow into a CellData array for use in `updateCells` requests.
+ *
+ * Cell emission rules:
+ * - fecha (A): serial number via dateStringToSerial
+ * - nro (D): ALWAYS stringValue — preserves AFIP leading zeros and dash separator
+ * - total (H): numberValue
+ * - recibido (L): numberValue when not null; empty userEnteredValue when null (blank cell, NOT 0)
+ * - fechaCobro (K): serial when YYYY-MM-DD, stringValue otherwise
+ * - All other string fields: stringValue
+ */
+function rowToCellData(row: SubdiarioRow): sheets_v4.Schema$CellData[] {
+  return [
+    // A: fecha → serial number (date cell)
+    { userEnteredValue: { numberValue: dateStringToSerial(row.fecha) } },
+    // B: cod → string
+    { userEnteredValue: { stringValue: row.cod } },
+    // C: tipo → string
+    { userEnteredValue: { stringValue: row.tipo } },
+    // D: nro → ALWAYS stringValue — AFIP leading zeros + dash must survive round-trip
+    { userEnteredValue: { stringValue: row.nro } },
+    // E: cliente → string
+    { userEnteredValue: { stringValue: row.cliente } },
+    // F: cuit → string
+    { userEnteredValue: { stringValue: row.cuit } },
+    // G: condicion → string
+    { userEnteredValue: { stringValue: row.condicion } },
+    // H: total → number
+    { userEnteredValue: { numberValue: row.total } },
+    // I: concepto → string
+    { userEnteredValue: { stringValue: row.concepto } },
+    // J: categoria → string
+    { userEnteredValue: { stringValue: row.categoria } },
+    // K: fechaCobro → serial when YYYY-MM-DD, stringValue otherwise
+    {
+      userEnteredValue: /^\d{4}-\d{2}-\d{2}$/.test(row.fechaCobro)
+        ? { numberValue: dateStringToSerial(row.fechaCobro) }
+        : { stringValue: row.fechaCobro },
+    },
+    // L: recibido → numberValue when not null; empty userEnteredValue when null (blank cell)
+    row.recibido !== null
+      ? { userEnteredValue: { numberValue: row.recibido } }
+      : { userEnteredValue: {} },
+    // M: notas → string
+    { userEnteredValue: { stringValue: row.notas } },
+  ];
+}
+
+/**
+ * Applies a SubdiarioDiff to the Comprobantes sheet via a single `batchUpdate`.
+ *
+ * Request order (within the single batch):
+ * 1. `deleteDimension` for each `diff.deletes` (already DESC — bottom-up avoids index shift)
+ * 2. `insertDimension` + `updateCells` pairs for each `diff.inserts`
+ * 3. `updateCells` for each `diff.updates`
+ *
+ * All rowIndex values in the diff are 0-indexed relative to the first DATA row
+ * (header at sheet row 0). Sheet row = diff rowIndex + 1.
+ *
+ * **IMPORTANT:** The caller (subdiario-writer.ts) MUST hold the
+ * `sheet-append:${spreadsheetId}:Comprobantes` lock around the read → diff →
+ * applySubdiarioDiff sequence. This function does NOT acquire the lock itself.
+ * Calling it outside the lock reproduces the ADV-242 silent-overwrite race.
+ *
+ * @param spreadsheetId - Subdiario spreadsheet ID
+ * @param sheetId       - Numeric sheet ID of the Comprobantes sheet
+ * @param diff          - Diff produced by diffSubdiarioRows()
+ * @param _desiredRows  - Full desired row set (reserved for future use / logging)
+ * @returns Counts of applied operations or error
+ */
+export async function applySubdiarioDiff(
+  spreadsheetId: string,
+  sheetId: number,
+  diff: SubdiarioDiff,
+  _desiredRows: SubdiarioRow[]
+): Promise<Result<{ updates: number; inserts: number; deletes: number }, Error>> {
+  const requests: sheets_v4.Schema$Request[] = [];
+
+  // 1. Deletions — DESC order so lower rows are deleted first without shifting upper indices
+  for (const rowIndex of diff.deletes) {
+    const sheetRow = rowIndex + 1; // +1 for header
+    requests.push({
+      deleteDimension: {
+        range: {
+          sheetId,
+          dimension: 'ROWS',
+          startIndex: sheetRow,
+          endIndex: sheetRow + 1,
+        },
+      },
+    });
+  }
+
+  // 2. Insertions — each insert needs a dimension slot + a cell-data write
+  for (const { insertAt, row } of diff.inserts) {
+    const sheetRow = insertAt + 1; // +1 for header
+    requests.push({
+      insertDimension: {
+        range: {
+          sheetId,
+          dimension: 'ROWS',
+          startIndex: sheetRow,
+          endIndex: sheetRow + 1,
+        },
+        inheritFromBefore: false,
+      },
+    });
+    requests.push({
+      updateCells: {
+        start: { sheetId, rowIndex: sheetRow, columnIndex: 0 },
+        rows: [{ values: rowToCellData(row) }],
+        fields: 'userEnteredValue',
+      },
+    });
+  }
+
+  // 3. Updates — overwrite cells at the row's DESIRED position.
+  //
+  // By the time this request runs, all deletions (step 1) and insertions (step 2)
+  // have already been applied sequentially. The surviving row is now located at
+  // its final desired position — desiredIndex in the desired array, which maps
+  // directly to sheetRow = desiredIndex + 1 (accounting for the header).
+  //
+  // Using the original `rowIndex + 1` would be wrong: deletions above it shift
+  // the row up, while insertions at positions ≤ desiredIndex shift it back down.
+  // The net effect is exactly `desiredIndex + 1` — computing adjustments piecemeal
+  // is both fragile and produces incorrect results when both deletes and inserts
+  // are present in the same diff.
+  for (const { desiredIndex, row } of diff.updates) {
+    const sheetRow = desiredIndex + 1; // desired position + 1 for header
+    requests.push({
+      updateCells: {
+        start: { sheetId, rowIndex: sheetRow, columnIndex: 0 },
+        rows: [{ values: rowToCellData(row) }],
+        fields: 'userEnteredValue',
+      },
+    });
+  }
+
+  if (requests.length === 0) {
+    return {
+      ok: true,
+      value: { updates: diff.updates.length, inserts: diff.inserts.length, deletes: diff.deletes.length },
+    };
+  }
+
+  return withQuotaRetry(async () => {
+    const sheets = await getSheetsService();
+    await sheets.spreadsheets.batchUpdate({
+      spreadsheetId,
+      requestBody: { requests },
+    });
+    return {
+      updates: diff.updates.length,
+      inserts: diff.inserts.length,
+      deletes: diff.deletes.length,
+    };
+  }).then(result => {
+    if (!result.ok) return { ok: false as const, error: result.error };
+    return { ok: true as const, value: result.value };
+  });
+}
+
 /**
  * Moves a sheet to the first position (leftmost tab)
  *
@@ -1980,5 +2145,61 @@ export async function renameSheet(
  */
 export function clearSheetsCache(): void {
   sheetsService = null;
+}
+
+// ─── Chrome helpers (subdiario-chrome.ts) ────────────────────────────────────
+
+/**
+ * Gets raw spreadsheet properties via spreadsheets.get with a custom fields mask.
+ * Thin wrapper around the googleapis call — wraps with withQuotaRetry.
+ *
+ * @param spreadsheetId - Spreadsheet ID
+ * @param fieldsMask - Comma-separated fields to fetch (e.g. 'properties.locale,sheets(...)')
+ * @param ranges - Optional A1 notation ranges to scope sheet data
+ * @returns Raw spreadsheet schema or error
+ */
+export async function getSpreadsheetProperties(
+  spreadsheetId: string,
+  fieldsMask: string,
+  ranges?: string[]
+): Promise<Result<sheets_v4.Schema$Spreadsheet, Error>> {
+  return withQuotaRetry(async () => {
+    const sheets = await getSheetsService();
+    const response = await sheets.spreadsheets.get({
+      spreadsheetId,
+      fields: fieldsMask,
+      ranges,
+    });
+    return response.data;
+  }).then((result) => {
+    if (!result.ok) return { ok: false, error: result.error };
+    return { ok: true, value: result.value };
+  });
+}
+
+/**
+ * Executes a list of batch update requests (format/structure operations).
+ * Wraps spreadsheets.batchUpdate with quota retry.
+ *
+ * Used by the chrome module for idempotent sheet formatting.
+ *
+ * @param spreadsheetId - Spreadsheet ID
+ * @param requests - Array of batch update requests to execute
+ * @returns Success or error
+ */
+export async function executeBatchRequests(
+  spreadsheetId: string,
+  requests: sheets_v4.Schema$Request[]
+): Promise<Result<void, Error>> {
+  return withQuotaRetry(async () => {
+    const sheets = await getSheetsService();
+    await sheets.spreadsheets.batchUpdate({
+      spreadsheetId,
+      requestBody: { requests },
+    });
+  }).then((result) => {
+    if (!result.ok) return { ok: false, error: result.error };
+    return { ok: true, value: undefined };
+  });
 }
 
