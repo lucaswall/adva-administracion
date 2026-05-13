@@ -90,7 +90,7 @@ export interface SyncSubdiarioResult {
  * @param rootFolderId - Root Drive folder ID
  * @returns `{ id, isNew }` — isNew=true when the workbook was just created
  */
-async function resolveSubdiarioId(
+export async function resolveSubdiarioId(
   rootFolderId: string
 ): Promise<Result<{ id: string; isNew: boolean }, Error>> {
   const cached = getCachedFolderStructure();
