@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.10.0] - 2026-05-13
+
+### Added
+- Subdiario de Ventas now has a `movimiento` column with a clickable HYPERLINK to the source Resumen Bancario row for every hard-paid FC (automatic schema migration from 13 → 14 columns)
+- Subdiario surfaces a soft-paid intermediate status: FCs with a matched `pago_recibido` but no confirming bank movement are populated with the pago's `fechaCobro` and `recibido` and tagged `"Pendiente confirmación bancaria"` in `notas`
+
+### Changed
+- Subdiario scope filter now trusts `pagada='SI'` to drop prior-year paid FCs, closing the gap with Cobros Pendientes (prior-year paid invoices no longer linger in the registry unless a current-year event references them)
+
+### Fixed
+- Subdiario soft-paid no longer shows `recibido=0` when a USD pago has neither `importeEnPesos` nor a factura `tipoDeCambio` — falls through to unpaid instead of silently masking the row as paid
+- Subdiario schema migration (13 → 14 cols) is now crash-safe — data rewrite completes before the header is widened, preventing a stuck mixed-arity state if the process dies mid-migration
+
 ## [1.9.0] - 2026-05-13
 
 ### Added
@@ -187,7 +200,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Updated fastify to fix high-severity Content-Type body validation bypass and low-severity DoS vulnerability
 - Updated googleapis to v171, @google/clasp to v3, and resolved 6 npm audit vulnerabilities
 
-[Unreleased]: https://github.com/lucaswall/adva-administracion/compare/v1.9.0...HEAD
+[Unreleased]: https://github.com/lucaswall/adva-administracion/compare/v1.10.0...HEAD
+[1.10.0]: https://github.com/lucaswall/adva-administracion/compare/v1.9.0...v1.10.0
 [1.9.0]: https://github.com/lucaswall/adva-administracion/compare/v1.8.3...v1.9.0
 [1.8.3]: https://github.com/lucaswall/adva-administracion/compare/v1.8.2...v1.8.3
 [1.8.2]: https://github.com/lucaswall/adva-administracion/compare/v1.8.1...v1.8.2
