@@ -1075,10 +1075,17 @@ export interface BankMovimiento {
   /**
    * Google Sheets URL pointing at the source bank row.
    * Format: `https://docs.google.com/spreadsheets/d/{spreadsheetId}/edit#gid={sheetId}&range=A{rowNumber}`.
-   * Used by the Subdiario writer to render the `movimiento` HYPERLINK column.
+   * Used by the Subdiario writer to render the `movimiento` text-format link target.
    * Identity is per-row (assigned even when `matchedFileId` is empty).
    */
   sourceUrl: string;
+  /**
+   * Descriptive cell text used by the Subdiario `movimiento` column.
+   * Format: `{bankFolderName} {sheetTitle} #{rowNumber}` (e.g.,
+   * `'BBVA 007-009364/1 ARS 2026-03 #42'`). Always populated for every row,
+   * even unmatched ones (it's row-identity, not match-identity).
+   */
+  label: string;
 }
 
 /**
@@ -1147,11 +1154,30 @@ export interface SubdiarioRow {
   recibido: number | null;
   /**
    * Google Sheets URL for the matched bank movimiento (latest cuota's `sourceUrl`)
-   * or empty string. Rendered as a `=HYPERLINK("url","Mov")` formula by the writer.
-   * Hard-paid FCs only — soft-paid, unpaid, NC-cancelled, and gap rows leave it
-   * empty so the column's semantic stays "authoritative bank movement". ADV-272.
+   * or empty string. Rendered as the URI of the col M textFormatRuns link by the
+   * writer. Hard-paid FCs only — soft-paid, unpaid, NC-cancelled, and gap rows
+   * leave it empty so the column's semantic stays "authoritative bank movement".
+   * ADV-272.
+   *
+   * NOTE (ADV-281): the URL is unknowable from a sheet read (the read side
+   * captures only the displayed text — `movimientoLabel`). The diff equality
+   * therefore SKIPS this field entirely and keys on `movimientoLabel` instead.
    */
   movimiento: string;
+  /**
+   * Displayed text for the col M link (ADV-281). Format:
+   * `{bankFolderName} {YYYY-MM} #{rowNumber}` (e.g., `'BBVA ARS 2026-03 #42'`).
+   * Empty when the row has no matched bank movimiento. This is the field the
+   * diff equality keys on — it round-trips through `getValues`, unlike the URL.
+   */
+  movimientoLabel: string;
+  /**
+   * Source factura's Drive fileId (ADV-280). Rendered as the URI of the col D
+   * textFormatRuns link so operators can click the nro to open the PDF. Empty
+   * for FALTA placeholder rows. Read-side always reports '' — the cell content
+   * does not encode the fileId — so the diff equality skips this field.
+   */
+  facturaFileId: string;
   /** Additional annotations: socio info, export TC, retencion, multi-cuota, etc. */
   notas: string;
 }

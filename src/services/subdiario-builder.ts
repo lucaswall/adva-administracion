@@ -152,31 +152,59 @@ interface MovimientoAgg {
   /** Latest movement date (YYYY-MM-DD) */
   latestFecha: string;
   /** Individual items sorted by fecha ASC (for multi-cuota notas + last-item hyperlink) */
-  items: Array<{ credito: number; fecha: string; sourceUrl: string }>;
+  items: Array<{ credito: number; fecha: string; sourceUrl: string; label: string }>;
 }
 
 /**
- * Aggregate bank movimientos matched to a given factura fileId.
+ * Aggregate bank movimientos matched to a given factura fileId, following the
+ * one-hop pago→factura indirection (ADV-279).
+ *
+ * A movimiento counts as hard-paid for factura F when EITHER:
+ *   - `m.matchedFileId === F.fileId` (direct match), OR
+ *   - `m.matchedFileId === P.fileId` for some pago P where
+ *     `P.matchedFacturaFileId === F.fileId` (one-hop indirect).
+ *
+ * Dedupe by `sourceUrl` so a movimiento that satisfies both branches (or two
+ * pagos that both reach the same movimiento) is counted only once.
+ *
  * Returns null when no matching movimientos exist.
  */
 function aggregateMovimientos(
   fileId: string,
-  movimientos: BankMovimiento[]
+  movimientos: BankMovimiento[],
+  pagosRecibidos: Pago[]
 ): MovimientoAgg | null {
+  // Pagos linked to this factura — their fileIds count as indirect routes.
+  const pagoToFactura = new Set<string>();
+  for (const p of pagosRecibidos) {
+    if (p.matchedFacturaFileId === fileId && p.fileId !== '') {
+      pagoToFactura.add(p.fileId);
+    }
+  }
+
   const matched = movimientos.filter(
     (m) =>
-      m.matchedFileId === fileId &&
       m.matchedType !== '' &&
       m.credito !== null &&
-      m.credito > 0
+      m.credito > 0 &&
+      (m.matchedFileId === fileId || pagoToFactura.has(m.matchedFileId))
   );
   if (matched.length === 0) return null;
 
-  const items = matched
+  // Dedupe by sourceUrl (encodes spreadsheetId + sheetId + row — unique per
+  // movimiento). Without dedupe, a movimiento matched to a pago that is also
+  // linked to the factura could be counted twice.
+  const byUrl = new Map<string, BankMovimiento>();
+  for (const m of matched) {
+    if (!byUrl.has(m.sourceUrl)) byUrl.set(m.sourceUrl, m);
+  }
+
+  const items = [...byUrl.values()]
     .map((m) => ({
       credito: m.credito as number,
       fecha: m.fecha,
       sourceUrl: m.sourceUrl,
+      label: m.label,
     }))
     .sort((a, b) => a.fecha.localeCompare(b.fecha));
 
@@ -417,8 +445,21 @@ function applyScopeFilter(
   if (yearEmision === currentYear) return true;
 
   // Prior-year FC: evaluate currentYear events for rules (b), (e), (f).
+  //
+  // Rule (b) considers BOTH direct and one-hop indirect matches, mirroring the
+  // semantics of `aggregateMovimientos`. Without the indirection, a prior-year
+  // pagada='SI' FC whose currentYear bank credit is matched to a pago (rather
+  // than directly to the factura) would be silently dropped — even though the
+  // payment IS in currentYear, just one hop away.
+  const pagoFileIds = new Set(
+    pagosRecibidos
+      .filter((p) => p.matchedFacturaFileId === factura.fileId && p.fileId !== '')
+      .map((p) => p.fileId)
+  );
   const matchedMovs = movimientos.filter(
-    (m) => m.matchedFileId === factura.fileId && m.matchedType !== ''
+    (m) =>
+      m.matchedType !== '' &&
+      (m.matchedFileId === factura.fileId || pagoFileIds.has(m.matchedFileId))
   );
 
   // Rule b: any matched movimiento in currentYear → in scope
@@ -653,6 +694,8 @@ function detectGaps(
           fechaCobro: '',
           recibido: null,
           movimiento: '',
+          movimientoLabel: '',
+          facturaFileId: '',
           notas: '',
         });
       }
@@ -731,8 +774,9 @@ export function buildSubdiarioRows(input: SubdiarioInput): SubdiarioRow[] {
     const categoria =
       tipo === 'NC' ? '' : facturadorEntry ? facturadorEntry.membresia : '';
 
-    // Movimientos aggregation (for FC only)
-    const movAgg = tipo === 'FC' ? aggregateMovimientos(factura.fileId, movimientos) : null;
+    // Movimientos aggregation (for FC only) — follows one-hop pago→factura
+    // indirection so cuotas matched via pago_recibido still count as hard-paid.
+    const movAgg = tipo === 'FC' ? aggregateMovimientos(factura.fileId, movimientos, pagosRecibidos) : null;
     // Pago_recibido aggregation (FC only — soft-paid tier, ADV-271)
     const pagoAgg = tipo === 'FC' ? aggregatePagosRecibidos(factura, pagosRecibidos) : null;
 
@@ -781,8 +825,10 @@ export function buildSubdiarioRows(input: SubdiarioInput): SubdiarioRow[] {
     // Movimiento HYPERLINK target (ADV-272): only hard-paid FCs get a URL — soft-paid,
     // unpaid, NC-cancelled, and NC rows leave the column blank (Resumen Bancario is
     // the only authoritative target for this column).
-    const movimientoUrl =
-      tipo === 'FC' && movAgg ? movAgg.items[movAgg.items.length - 1]!.sourceUrl : '';
+    const latestMovItem =
+      tipo === 'FC' && movAgg ? movAgg.items[movAgg.items.length - 1]! : null;
+    const movimientoUrl = latestMovItem?.sourceUrl ?? '';
+    const movimientoLabel = latestMovItem?.label ?? '';
 
     rows.push({
       fecha: factura.fechaEmision,
@@ -798,6 +844,8 @@ export function buildSubdiarioRows(input: SubdiarioInput): SubdiarioRow[] {
       fechaCobro,
       recibido,
       movimiento: movimientoUrl,
+      movimientoLabel,
+      facturaFileId: factura.fileId,
       notas,
     });
   }

@@ -21,6 +21,7 @@ vi.mock('./drive.js', () => ({
 
 vi.mock('./sheets.js', () => ({
   getValues: vi.fn(),
+  getCellLinkUris: vi.fn(),
   setValues: vi.fn(),
   appendRowsWithLinks: vi.fn(),
   clearSheetData: vi.fn(),
@@ -102,6 +103,8 @@ const MOCK_ROWS: SubdiarioRow[] = [
     fechaCobro: '',
     recibido: null,
     movimiento: '',
+    movimientoLabel: '',
+    facturaFileId: '',
     notas: '',
   },
 ];
@@ -127,6 +130,9 @@ function setupDefaultMocks() {
     }
     return { ok: true, value: EMPTY_SHEET_DATA };
   });
+  // Default: no col D/M link metadata on existing rows (legacy / pre-deploy).
+  // Tests that exercise link recovery override this with explicit mocks.
+  vi.mocked(sheets.getCellLinkUris).mockResolvedValue({ ok: true, value: [] });
   vi.mocked(sheets.setValues).mockResolvedValue({ ok: true, value: 1 });
   vi.mocked(sheets.appendRowsWithLinks).mockResolvedValue({ ok: true, value: 1 });
   vi.mocked(sheets.clearSheetData).mockResolvedValue({ ok: true, value: undefined });
@@ -576,6 +582,135 @@ describe('syncSubdiario', () => {
     });
   });
 
+  // ADV-278: descriptive label for the Subdiario movimiento column.
+  // Format: `{bankFolderName} {sheet.title} #{rowNumber}`. Key on the
+  // movimientosSpreadsheets map is `"{year}:{bankFolderName}"`.
+  describe('readMovimientosRows label (ADV-278)', () => {
+    it('builds descriptive label from bank folder name + sheet title + row number', async () => {
+      vi.mocked(folderStructure.getCachedFolderStructure).mockReturnValue(
+        makeCachedStructure({ subdiarioId: SUBDIARIO_ID })
+      );
+
+      const movsSpreadsheetId = 'bank-movs-id';
+      const movsMap = new Map<string, string>([['2026:BBVA 007-009364/1 ARS', movsSpreadsheetId]]);
+
+      vi.mocked(sheets.getSheetMetadata).mockImplementation(async (id: string) => {
+        if (id === movsSpreadsheetId) {
+          return { ok: true, value: [{ title: '2026-03', sheetId: 111, index: 0 }] };
+        }
+        return { ok: true, value: [{ title: 'Comprobantes', sheetId: 42, index: 0 }] };
+      });
+
+      vi.mocked(sheets.getValues).mockImplementation(async (id: string, range: string) => {
+        if (id === movsSpreadsheetId && range.startsWith('2026-03')) {
+          const dataRows: CellValue[][] = [];
+          // 41 padding rows so the assertable mov lands on spreadsheet row 42
+          for (let i = 0; i < 40; i++) {
+            dataRows.push([`2026-03-${String((i % 28) + 1).padStart(2, '0')}`, `pad ${i}`, 0, 1, 1, 1, '', '', '']);
+          }
+          dataRows.push(['2026-03-15', 'cobro target', 0, 50000, 100000, 100000, 'fileTarget', 'AUTO', 'd']);
+          return {
+            ok: true,
+            value: [
+              ['fecha', 'concepto', 'debito', 'credito', 'saldo', 'saldoCalc', 'fileId', 'type', 'detalle'],
+              ...dataRows,
+            ],
+          };
+        }
+        return { ok: true, value: EMPTY_SHEET_DATA };
+      });
+
+      await syncSubdiario(ROOT_ID, CONTROL_INGRESOS_ID, CONTROL_EGRESOS_ID, CURRENT_YEAR, movsMap);
+
+      const input = vi.mocked(subdiarioBuilder.buildSubdiarioRows).mock.calls[0]?.[0];
+      expect(input).toBeDefined();
+      expect(input!.movimientos).toHaveLength(41);
+
+      // 41st mov is on data index 40 → spreadsheet row 42 (header is row 1)
+      const target = input!.movimientos[40]!;
+      expect(target.label).toBe('BBVA 007-009364/1 ARS 2026-03 #42');
+    });
+
+    it('preserves bank folder name when it contains colons (split on first colon only)', async () => {
+      vi.mocked(folderStructure.getCachedFolderStructure).mockReturnValue(
+        makeCachedStructure({ subdiarioId: SUBDIARIO_ID })
+      );
+
+      const movsSpreadsheetId = 'bank-movs-id';
+      const movsMap = new Map<string, string>([['2025:Banco Ciudad 0003043/0 ARS', movsSpreadsheetId]]);
+
+      vi.mocked(sheets.getSheetMetadata).mockImplementation(async (id: string) => {
+        if (id === movsSpreadsheetId) {
+          return { ok: true, value: [{ title: '2025-12', sheetId: 7, index: 0 }] };
+        }
+        return { ok: true, value: [{ title: 'Comprobantes', sheetId: 42, index: 0 }] };
+      });
+
+      vi.mocked(sheets.getValues).mockImplementation(async (id: string, range: string) => {
+        if (id === movsSpreadsheetId && range.startsWith('2025-12')) {
+          const dataRows: CellValue[][] = [];
+          for (let i = 0; i < 6; i++) {
+            dataRows.push([`2025-12-${String(i + 1).padStart(2, '0')}`, `mov ${i}`, 0, 1000 * (i + 1), 1000 * (i + 1), 1000 * (i + 1), '', '', '']);
+          }
+          return {
+            ok: true,
+            value: [
+              ['fecha', 'concepto', 'debito', 'credito', 'saldo', 'saldoCalc', 'fileId', 'type', 'detalle'],
+              ...dataRows,
+            ],
+          };
+        }
+        return { ok: true, value: EMPTY_SHEET_DATA };
+      });
+
+      await syncSubdiario(ROOT_ID, CONTROL_INGRESOS_ID, CONTROL_EGRESOS_ID, CURRENT_YEAR, movsMap);
+
+      const input = vi.mocked(subdiarioBuilder.buildSubdiarioRows).mock.calls[0]?.[0];
+      expect(input).toBeDefined();
+      // Sixth movimiento corresponds to data index 5 → spreadsheet row 7 (header is row 1)
+      const sixth = input!.movimientos[5]!;
+      expect(sixth.label).toBe('Banco Ciudad 0003043/0 ARS 2025-12 #7');
+    });
+
+    it('populates label on every emitted movimiento (matched and unmatched)', async () => {
+      vi.mocked(folderStructure.getCachedFolderStructure).mockReturnValue(
+        makeCachedStructure({ subdiarioId: SUBDIARIO_ID })
+      );
+
+      const movsSpreadsheetId = 'bank-movs-id';
+      const movsMap = new Map<string, string>([['2026:BBVA ARS', movsSpreadsheetId]]);
+
+      vi.mocked(sheets.getSheetMetadata).mockImplementation(async (id: string) => {
+        if (id === movsSpreadsheetId) {
+          return { ok: true, value: [{ title: '2026-03', sheetId: 99, index: 0 }] };
+        }
+        return { ok: true, value: [{ title: 'Comprobantes', sheetId: 42, index: 0 }] };
+      });
+
+      vi.mocked(sheets.getValues).mockImplementation(async (id: string, range: string) => {
+        if (id === movsSpreadsheetId && range.startsWith('2026-03')) {
+          return {
+            ok: true,
+            value: [
+              ['fecha', 'concepto', 'debito', 'credito', 'saldo', 'saldoCalc', 'fileId', 'type', 'detalle'],
+              ['2026-03-10', 'matched', 0, 10000, 10000, 10000, 'fileA', 'AUTO', 'd1'],
+              ['2026-03-11', 'unmatched', 0, 20000, 30000, 30000, '', '', ''],
+            ],
+          };
+        }
+        return { ok: true, value: EMPTY_SHEET_DATA };
+      });
+
+      await syncSubdiario(ROOT_ID, CONTROL_INGRESOS_ID, CONTROL_EGRESOS_ID, CURRENT_YEAR, movsMap);
+
+      const input = vi.mocked(subdiarioBuilder.buildSubdiarioRows).mock.calls[0]?.[0];
+      expect(input!.movimientos).toHaveLength(2);
+      expect(input!.movimientos[0]!.label).toBe('BBVA ARS 2026-03 #2');
+      expect(input!.movimientos[1]!.label).toBe('BBVA ARS 2026-03 #3');
+      expect(input!.movimientos[1]!.matchedFileId).toBe('');
+    });
+  });
+
   describe('I/O failure propagation (ADV-257)', () => {
     it('returns Result.err when Facturas Emitidas getValues fails', async () => {
       vi.mocked(folderStructure.getCachedFolderStructure).mockReturnValue(
@@ -978,6 +1113,8 @@ describe('readSubdiarioRows', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    // Default: no link metadata. Tests that exercise link recovery override.
+    vi.mocked(sheets.getCellLinkUris).mockResolvedValue({ ok: true, value: [] });
   });
 
   function makeSheetRow(overrides: Partial<Record<number, CellValue>> = {}): CellValue[] {
@@ -1132,6 +1269,111 @@ describe('readSubdiarioRows', () => {
       expect(result.value[1]!.rowIndex).toBe(2); // row3 at position 2 (not 1!)
       expect(result.value[0]!.nro).toBe('00001-00000001');
       expect(result.value[1]!.nro).toBe('00001-00000003');
+    }
+  });
+
+  // ADV-281: col M textFormatRuns links round-trip the displayed text (label)
+  // through `getValues`, so the read populates `movimientoLabel` directly.
+  // The URL itself is unknowable from the read, so `movimiento` stays empty.
+  it('movimientoLabel rounds-trips from col M displayed text; movimiento URL reads as empty', async () => {
+    const linked = makeSheetRow({ 3: '00001-00000001', 12: 'BBVA ARS 2026-03 #42' });
+    const blank = makeSheetRow({ 3: '00001-00000002', 12: '' });
+
+    vi.mocked(sheets.getValues).mockResolvedValue({ ok: true, value: [linked, blank] });
+
+    const result = await readSubdiarioRows('test-id');
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value).toHaveLength(2);
+      expect(result.value[0]!.movimientoLabel).toBe('BBVA ARS 2026-03 #42');
+      expect(result.value[0]!.movimiento).toBe('');
+      expect(result.value[1]!.movimientoLabel).toBe('');
+      expect(result.value[1]!.movimiento).toBe('');
+    }
+  });
+
+  // Codex PR #119: facturaFileId is now recovered from col D's textFormatRuns
+  // link URI via getCellLinkUris. Rows whose col D has no link (legacy /
+  // pre-deploy, FALTA placeholders) report '' — the diff then treats them as
+  // needing a backfill UPDATE on the next sync.
+  it('facturaFileId is recovered from col D textFormatRuns link URI', async () => {
+    const linkedFc = makeSheetRow({ 3: '00001-00000001' });
+    const unlinkedFc = makeSheetRow({ 3: '00001-00000002' });
+    const linkedNc = makeSheetRow({ 3: '00003-00000001', 2: 'NC', 1: '003', 7: -1000 });
+
+    vi.mocked(sheets.getValues).mockResolvedValue({
+      ok: true,
+      value: [linkedFc, unlinkedFc, linkedNc],
+    });
+    vi.mocked(sheets.getCellLinkUris).mockResolvedValue({
+      ok: true,
+      value: [
+        ['', '', '', 'https://drive.google.com/file/d/fac-abc123/view', '', '', '', '', '', '', '', '', '', ''],
+        ['', '', '', '', '', '', '', '', '', '', '', '', '', ''], // unlinked: no col D URI
+        ['', '', '', 'https://drive.google.com/file/d/nc-xyz789/view', '', '', '', '', '', '', '', '', '', ''],
+      ],
+    });
+
+    const result = await readSubdiarioRows('test-id');
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value).toHaveLength(3);
+      expect(result.value[0]!.facturaFileId).toBe('fac-abc123');
+      expect(result.value[1]!.facturaFileId).toBe('');
+      expect(result.value[2]!.facturaFileId).toBe('nc-xyz789');
+    }
+  });
+
+  it('facturaFileId is empty when col D URI is not a Drive viewer link (foreign / malformed)', async () => {
+    const row = makeSheetRow({ 3: '00001-00000001' });
+    vi.mocked(sheets.getValues).mockResolvedValue({ ok: true, value: [row] });
+    vi.mocked(sheets.getCellLinkUris).mockResolvedValue({
+      ok: true,
+      value: [
+        ['', '', '', 'https://example.com/not-a-drive-link', '', '', '', '', '', '', '', '', '', ''],
+      ],
+    });
+
+    const result = await readSubdiarioRows('test-id');
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value[0]!.facturaFileId).toBe('');
+    }
+  });
+
+  it('facturaFileId is recovered from Drive URIs with a query string (defensive against ?usp=sharing variants)', async () => {
+    const row = makeSheetRow({ 3: '00001-00000001' });
+    vi.mocked(sheets.getValues).mockResolvedValue({ ok: true, value: [row] });
+    vi.mocked(sheets.getCellLinkUris).mockResolvedValue({
+      ok: true,
+      value: [
+        ['', '', '', 'https://drive.google.com/file/d/fac-shared/view?usp=sharing', '', '', '', '', '', '', '', '', '', ''],
+      ],
+    });
+
+    const result = await readSubdiarioRows('test-id');
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value[0]!.facturaFileId).toBe('fac-shared');
+    }
+  });
+
+  it('getCellLinkUris failure is propagated as ok:false', async () => {
+    vi.mocked(sheets.getValues).mockResolvedValue({ ok: true, value: [] });
+    vi.mocked(sheets.getCellLinkUris).mockResolvedValue({
+      ok: false,
+      error: new Error('Sheets metadata API error'),
+    });
+
+    const result = await readSubdiarioRows('test-id');
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.message).toBe('Sheets metadata API error');
     }
   });
 });

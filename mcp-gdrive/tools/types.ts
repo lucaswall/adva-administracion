@@ -122,3 +122,12 @@ export interface GSheetsAppendRowsInput {
   sheetName: string;
   rows: string[][];
 }
+
+export interface GDriveCreateFolderInput {
+  name: string;
+  parentFolderId: string;
+}
+
+export interface GDriveTrashFileInput {
+  fileId: string;
+}

@@ -32,12 +32,19 @@ function numericNullableDiffers(a: number | null, b: number | null): boolean {
  * Equality semantics:
  * - `total`: epsilon 0.005 (ARS floating-point round-trip protection)
  * - `recibido`: null===null → no diff; null vs number → diff; number vs number: same epsilon
- * - `movimiento` (ADV-272): SEMANTIC PRESENCE check (`(a==='') !== (b==='')`).
- *   Reason: the writer emits a `=HYPERLINK("url","Mov")` formula, but `getValues`
- *   with `UNFORMATTED_VALUE` returns the formula's *displayed* text ("Mov"), not
- *   the URL. Strict equality would treat the desired URL and the read-back "Mov"
- *   as different on every sync and trigger perpetual updates. Comparing presence
- *   only means we update once (empty ↔ linked) and skip URL-only drift.
+ * - `movimientoLabel` (ADV-281): strict equality after `.trim()`. The label is
+ *   the displayed text of the col M textFormatRuns link and round-trips through
+ *   `getValues`, so exact equality is safe (no perpetual-update risk).
+ * - `movimiento` URL: EXCLUDED from the diff. The read side cannot recover the
+ *   URL (only the displayed text); comparing strictly would loop forever. The
+ *   builder rewrites it whenever `movimientoLabel` changes, which is sufficient.
+ * - `facturaFileId` (Codex PR #119): strict equality after `.trim()`. The col D
+ *   textFormatRuns link URI is recovered by `readSubdiarioRows` via
+ *   `getCellLinkUris`, so the field round-trips and exact equality is safe.
+ *   Existing rows that lack the col D link return `''`, which differs from any
+ *   builder-side populated fileId — triggering the desired backfill UPDATE on
+ *   the first sync after deploy. Subsequent reads return the same fileId, so
+ *   no perpetual updates.
  * - All other string fields: strict equality after `.trim()`.
  */
 function rowsDiffer(a: SubdiarioRow, b: SubdiarioRow): boolean {
@@ -45,15 +52,12 @@ function rowsDiffer(a: SubdiarioRow, b: SubdiarioRow): boolean {
   if (Math.abs(a.total - b.total) >= MONEY_EPSILON) return true;
   if (numericNullableDiffers(a.recibido, b.recibido)) return true;
 
-  // movimiento — semantic presence (see header comment)
-  const aMov = String(a.movimiento ?? '').trim();
-  const bMov = String(b.movimiento ?? '').trim();
-  if ((aMov === '') !== (bMov === '')) return true;
-
-  // String fields — trim before comparing
+  // String fields — trim before comparing. `movimiento` URL is intentionally
+  // absent (see header).
   const stringFields: (keyof SubdiarioRow)[] = [
     'fecha', 'cod', 'tipo', 'nro', 'cliente', 'cuit',
-    'condicion', 'concepto', 'categoria', 'fechaCobro', 'notas',
+    'condicion', 'concepto', 'categoria', 'fechaCobro', 'movimientoLabel',
+    'facturaFileId', 'notas',
   ];
   for (const field of stringFields) {
     const av = String(a[field] ?? '').trim();

@@ -244,6 +244,51 @@ export async function getValues(
 }
 
 /**
+ * Reads `textFormatRuns` link URIs from a sheet range.
+ *
+ * `spreadsheets.values.get` only returns displayed text — it cannot round-trip
+ * `textFormatRuns` link metadata. This helper uses `spreadsheets.get` with a
+ * field mask to fetch ONLY the link URI of the first `textFormatRuns` entry on
+ * each cell, returning a 2D array of strings (empty when the cell has no link).
+ *
+ * Used by `readSubdiarioRows` to recover the col D `facturaFileId` (parsed
+ * from the Drive viewer URL) so existing rows pick up the col D link on the
+ * first sync after a deploy, even when no other displayed-text field changed.
+ *
+ * Shape: the returned 2D array mirrors the requested range's rows × columns.
+ * Rows the API omits entirely come back as `[]`; missing cells inside a row
+ * come back as `''`. Cells whose `textFormatRuns[0]` has no link contribute
+ * `''` as well.
+ *
+ * @param spreadsheetId - Spreadsheet ID
+ * @param range - A1 notation range (e.g., 'Comprobantes!A2:N')
+ * @returns 2D array of link URIs (empty string when no link on the cell)
+ */
+export async function getCellLinkUris(
+  spreadsheetId: string,
+  range: string
+): Promise<Result<string[][], Error>> {
+  return withTiming('getCellLinkUris', () => withQuotaRetry(async () => {
+    const sheets = await getSheetsService();
+    const response = await sheets.spreadsheets.get({
+      spreadsheetId,
+      ranges: [range],
+      fields: 'sheets.data.rowData.values.textFormatRuns.format.link.uri',
+    });
+    const rowData = response.data.sheets?.[0]?.data?.[0]?.rowData ?? [];
+    return rowData.map((row) =>
+      (row.values ?? []).map((cell) => {
+        const runs = cell.textFormatRuns ?? [];
+        return runs[0]?.format?.link?.uri ?? '';
+      })
+    );
+  }).then(result => {
+    if (!result.ok) return { ok: false, error: result.error };
+    return { ok: true, value: result.value };
+  }));
+}
+
+/**
  * Sets values in a range
  *
  * @param spreadsheetId - Spreadsheet ID
@@ -1325,20 +1370,56 @@ const SUBDIARIO_NUMBER_FORMAT: sheets_v4.Schema$CellFormat = {
  *
  * Cell emission rules:
  * - fecha (A): serial + DATE `yyyy-mm-dd` format
- * - nro (D): ALWAYS stringValue — preserves AFIP leading zeros and dash separator
+ * - nro (D): stringValue. When `facturaFileId !== ''`, additionally a
+ *   `textFormatRuns` link points at the Drive PDF viewer. FALTA rows have no
+ *   link (ADV-282).
  * - total (H): numberValue + NUMBER `#,##0.00` format
  * - fechaCobro (K): serial + DATE format when YYYY-MM-DD, stringValue otherwise
  * - recibido (L): numberValue + NUMBER format when not null; empty userEnteredValue when null (blank cell, NOT 0)
- * - movimiento (M): `=HYPERLINK("url","Mov")` formula when non-empty URL; empty userEnteredValue otherwise (ADV-272)
+ * - movimiento (M): stringValue (`movimientoLabel`) + `textFormatRuns` link to
+ *   the bank movimiento source row. Empty cell when there is no matched
+ *   movimiento. ADV-282 replaces the older `=HYPERLINK("url","Mov")` formula.
  * - notas (N): string
  * - All other string fields: stringValue (no number format)
  *
  * Date/number formats are emitted per-cell to mirror the convention used by
  * `convertToSheetsCellData` (i.e. `CellDate`/`CellNumber` wrappers) elsewhere in
- * the project. The caller's `updateCells` field mask must include
- * `userEnteredFormat.numberFormat` so these formats are actually written.
+ * the project. The caller's `updateCells` field mask MUST include
+ * `userEnteredFormat.numberFormat` AND `textFormatRuns` — the latter is what
+ * carries the col D and col M link targets.
  */
 function rowToCellData(row: SubdiarioRow): sheets_v4.Schema$CellData[] {
+  // D: nro — always stringValue. Link the cell to the source factura PDF when
+  // we know the fileId. FALTA placeholders leave it bare.
+  const nroCell: sheets_v4.Schema$CellData = row.facturaFileId
+    ? {
+        userEnteredValue: { stringValue: row.nro },
+        textFormatRuns: [
+          {
+            format: {
+              link: { uri: `https://drive.google.com/file/d/${row.facturaFileId}/view` },
+            },
+          },
+        ],
+      }
+    : { userEnteredValue: { stringValue: row.nro } };
+
+  // M: movimiento — display text is `movimientoLabel`; the link URI is the URL.
+  // Empty cell when the label is blank (no matched movimiento).
+  const movCell: sheets_v4.Schema$CellData =
+    row.movimientoLabel && row.movimientoLabel.trim() !== ''
+      ? {
+          userEnteredValue: { stringValue: row.movimientoLabel },
+          textFormatRuns: [
+            {
+              format: {
+                link: { uri: row.movimiento },
+              },
+            },
+          ],
+        }
+      : { userEnteredValue: {} };
+
   return [
     // A: fecha → serial number with DATE format
     {
@@ -1349,8 +1430,8 @@ function rowToCellData(row: SubdiarioRow): sheets_v4.Schema$CellData[] {
     { userEnteredValue: { stringValue: row.cod } },
     // C: tipo → string
     { userEnteredValue: { stringValue: row.tipo } },
-    // D: nro → ALWAYS stringValue — AFIP leading zeros + dash must survive round-trip
-    { userEnteredValue: { stringValue: row.nro } },
+    // D: nro — see nroCell above
+    nroCell,
     // E: cliente → string
     { userEnteredValue: { stringValue: row.cliente } },
     // F: cuit → string
@@ -1380,17 +1461,8 @@ function rowToCellData(row: SubdiarioRow): sheets_v4.Schema$CellData[] {
           userEnteredFormat: SUBDIARIO_NUMBER_FORMAT,
         }
       : { userEnteredValue: {} },
-    // M: movimiento → HYPERLINK formula when URL present, blank cell otherwise.
-    // Display text "Mov" keeps the column narrow; date is already in fechaCobro.
-    // URL is escaped (only double-quotes need escaping inside a Sheets formula
-    // string) to defend against malformed input.
-    row.movimiento && row.movimiento.trim() !== ''
-      ? {
-          userEnteredValue: {
-            formulaValue: `=HYPERLINK("${row.movimiento.replace(/"/g, '""')}","Mov")`,
-          },
-        }
-      : { userEnteredValue: {} },
+    // M: movimiento — see movCell above
+    movCell,
     // N: notas → string
     { userEnteredValue: { stringValue: row.notas } },
   ];
@@ -1459,7 +1531,7 @@ export async function applySubdiarioDiff(
       updateCells: {
         start: { sheetId, rowIndex: sheetRow, columnIndex: 0 },
         rows: [{ values: rowToCellData(row) }],
-        fields: 'userEnteredValue,userEnteredFormat.numberFormat',
+        fields: 'userEnteredValue,userEnteredFormat.numberFormat,textFormatRuns',
       },
     });
   }
@@ -1482,7 +1554,7 @@ export async function applySubdiarioDiff(
       updateCells: {
         start: { sheetId, rowIndex: sheetRow, columnIndex: 0 },
         rows: [{ values: rowToCellData(row) }],
-        fields: 'userEnteredValue,userEnteredFormat.numberFormat',
+        fields: 'userEnteredValue,userEnteredFormat.numberFormat,textFormatRuns',
       },
     });
   }

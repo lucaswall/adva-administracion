@@ -17,6 +17,7 @@ import type {
 } from '../types/index.js';
 import {
   getValues,
+  getCellLinkUris,
   setValues,
   getSheetMetadata,
   renameSheet,
@@ -85,6 +86,24 @@ export interface SyncSubdiarioResult {
 // ─── Internal helpers ────────────────────────────────────────────────────────
 
 /**
+ * Parses a Drive `fileId` out of a viewer URI of the form
+ * `https://drive.google.com/file/d/{fileId}/view`. Returns the empty string
+ * when the URI doesn't match (no link, foreign URL, malformed).
+ *
+ * The trailing `/view` is optional, and the URI may end with a query string
+ * (`?usp=sharing`) or fragment — Drive sometimes appends these even though the
+ * Subdiario writer emits bare `/view` URIs. This keeps recovery robust against
+ * a user who manually pasted an alternate share URL.
+ *
+ * Used by `readSubdiarioRows` to round-trip the col D factura-PDF link URI
+ * back into `SubdiarioRow.facturaFileId`.
+ */
+function parseDriveFileIdFromUri(uri: string): string {
+  const match = /^https:\/\/drive\.google\.com\/file\/d\/([^/?#]+)(?:\/view)?(?:[/?#].*)?$/.exec(uri);
+  return match?.[1] ?? '';
+}
+
+/**
  * Resolves the Subdiario spreadsheet ID.
  * Resolution order: FolderStructure cache → Drive search → create.
  *
@@ -135,10 +154,21 @@ export async function resolveSubdiarioId(
  * a row written by this writer round-trips without spurious updates on the
  * first incremental diff after deploy.
  *
- * Column M (movimiento) round-trip caveat (ADV-272): `getValues` uses
- * `UNFORMATTED_VALUE`, which returns the *displayed* text of HYPERLINK formulas
- * ("Mov"), not the formula or URL. The diff equality check in
- * `subdiario-diff.ts` therefore compares this column on semantic presence only.
+ * Column M (movimiento) round-trip caveat (ADV-281): col M is a textFormatRuns
+ * link. `getValues` returns the displayed text (the label, e.g.
+ * `'BBVA ARS 2026-03 #42'`) but never the URL. The read populates
+ * `movimientoLabel` directly and leaves `movimiento` (URL) empty. The diff
+ * equality keys on `movimientoLabel` only — see `subdiario-diff.ts`.
+ *
+ * Column D (nro) link recovery (Codex PR #119): col D is also a textFormatRuns
+ * link to the source factura PDF. A second `getCellLinkUris` call recovers the
+ * link URI for each row and parses out the Drive `fileId`, populating
+ * `facturaFileId`. Without this, existing rows whose displayed strings already
+ * match the desired set would never get the col D link backfilled (the diff
+ * would say "equal" and skip the update). The recovered fileId lets the diff
+ * include `facturaFileId` in equality so first-sync-after-deploy backfills the
+ * link on every row, and subsequent syncs no-op (existing recovered fileId
+ * matches desired).
  *
  * @internal Exported for test reach only. Do not call from outside this module.
  *
@@ -150,11 +180,31 @@ export async function readSubdiarioRows(
   const valuesResult = await getValues(spreadsheetId, `${COMPROBANTES_SHEET}!A2:N`);
   if (!valuesResult.ok) return valuesResult;
 
+  const linksResult = await getCellLinkUris(spreadsheetId, `${COMPROBANTES_SHEET}!A2:N`);
+  if (!linksResult.ok) return linksResult;
+
   const rawRows = valuesResult.value;
+  const linkRows = linksResult.value;
   const result: SubdiarioRowWithIndex[] = [];
+
+  // Both APIs read the same range, so the row arrays should align 1:1. A
+  // mismatch can theoretically arise if a user manually clears a cell's value
+  // but leaves its format intact — `spreadsheets.get` returns the row while
+  // `spreadsheets.values.get` may omit it. Warn so the divergence is
+  // diagnosable; the `?? []` fallback below keeps the read safe regardless.
+  if (linkRows.length > 0 && linkRows.length !== rawRows.length) {
+    warn('readSubdiarioRows: linkRows length differs from rawRows — link recovery may degrade', {
+      module: 'subdiario-writer',
+      phase: 'read-comprobantes',
+      spreadsheetId,
+      rawRowsLength: rawRows.length,
+      linkRowsLength: linkRows.length,
+    });
+  }
 
   for (let sheetPos = 0; sheetPos < rawRows.length; sheetPos++) {
     const row = rawRows[sheetPos] ?? [];
+    const linkRow = linkRows[sheetPos] ?? [];
 
     // Col A: fecha — skip row if empty after normalization
     const fecha = normalizeSpreadsheetDate(row[0]);
@@ -203,7 +253,17 @@ export async function readSubdiarioRows(
       categoria: String(row[9] ?? '').trim(),
       fechaCobro,
       recibido,
-      movimiento: String(row[12] ?? '').trim(),
+      // ADV-281: col M is a textFormatRuns link — `getValues` returns the
+      // displayed text (the label). The URL is unknowable from the read; the
+      // diff keys on `movimientoLabel` instead.
+      movimiento: '',
+      movimientoLabel: String(row[12] ?? '').trim(),
+      // Codex PR #119: recover facturaFileId from col D's textFormatRuns link
+      // URI (https://drive.google.com/file/d/{fileId}/view). Rows without a
+      // link (e.g. FALTA placeholders, pre-deploy legacy rows) return ''. After
+      // the first post-deploy sync writes the link, the read recovers a
+      // matching fileId and subsequent diffs no-op on the field.
+      facturaFileId: parseDriveFileIdFromUri(linkRow[3] ?? ''),
       notas:     String(row[13] ?? '').trim(),
     });
   }
@@ -280,6 +340,12 @@ async function readMovimientosRows(
   const allMovs: BankMovimiento[] = [];
 
   for (const [key, spreadsheetId] of movimientosSpreadsheets) {
+    // Cache key format: `"{year}:{bankFolderName}"`. Split on FIRST colon so
+    // bank folder names that contain ':' round-trip intact. Defensive fallback:
+    // if no colon, treat the whole key as the bank folder name.
+    const colonIdx = key.indexOf(':');
+    const bankFolderName = colonIdx >= 0 ? key.slice(colonIdx + 1) : key;
+
     const metadataResult = await getSheetMetadata(spreadsheetId);
     if (!metadataResult.ok) {
       warn('Failed to get movimientos sheet metadata', {
@@ -318,6 +384,7 @@ async function readMovimientosRows(
         // rowNumber is 1-indexed: header is row 1, first data row is row 2
         const rowNumber = i + 2;
         const sourceUrl = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/edit#gid=${sheet.sheetId}&range=A${rowNumber}`;
+        const label = `${bankFolderName} ${sheet.title} #${rowNumber}`;
         allMovs.push({
           fecha,
           debito: parseNumber(row[2]) || null,
@@ -326,6 +393,7 @@ async function readMovimientosRows(
           matchedType,
           concepto: String(row[1] ?? ''),
           sourceUrl,
+          label,
         });
       }
     }
@@ -579,7 +647,8 @@ export async function syncSubdiario(
               rowIndex: i,
               fecha: '', cod: '', tipo: 'FC', nro: '', cliente: '', cuit: '',
               condicion: '', total: 0, concepto: '', categoria: '',
-              fechaCobro: '', recibido: null, movimiento: '', notas: '',
+              fechaCobro: '', recibido: null, movimiento: '',
+              movimientoLabel: '', facturaFileId: '', notas: '',
             });
           }
         } else if (!isNew) {

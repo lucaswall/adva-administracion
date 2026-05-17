@@ -15,6 +15,8 @@ import { schema as gdriveGetFileInfoSchema, getFileInfo } from './gdrive_get_fil
 import { schema as gdriveListRevisionsSchema, listRevisions } from './gdrive_list_revisions.js';
 import { schema as gsheetsMetadataSchema, getMetadata } from './gsheets_metadata.js';
 import { schema as gsheetsQuerySchema, querySheet } from './gsheets_query.js';
+import { schema as gdriveCreateFolderSchema, createFolder } from './gdrive_create_folder.js';
+import { schema as gdriveTrashFileSchema, trashFile } from './gdrive_trash_file.js';
 import {
   Tool,
   GDriveSearchInput,
@@ -34,6 +36,8 @@ import {
   GDriveListRevisionsInput,
   GSheetsMetadataInput,
   GSheetsQueryInput,
+  GDriveCreateFolderInput,
+  GDriveTrashFileInput,
 } from './types.js';
 
 export const tools: [
@@ -53,7 +57,9 @@ export const tools: [
   Tool<GDriveCopyFileInput>,
   Tool<GDriveUploadFileInput>,
   Tool<GSheetsMetadataInput>,
-  Tool<GSheetsQueryInput>
+  Tool<GSheetsQueryInput>,
+  Tool<GDriveCreateFolderInput>,
+  Tool<GDriveTrashFileInput>
 ] = [
   {
     ...gdriveSearchSchema,
@@ -122,5 +128,13 @@ export const tools: [
   {
     ...gsheetsQuerySchema,
     handler: querySheet,
+  },
+  {
+    ...gdriveCreateFolderSchema,
+    handler: createFolder,
+  },
+  {
+    ...gdriveTrashFileSchema,
+    handler: trashFile,
   },
 ];
