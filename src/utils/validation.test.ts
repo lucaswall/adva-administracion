@@ -633,6 +633,14 @@ describe('validateTipoComprobante', () => {
     expect(validateTipoComprobante('ND C')).toBe('ND C');
   });
 
+  it('returns valid tipo for NC E (export credit note)', () => {
+    expect(validateTipoComprobante('NC E')).toBe('NC E');
+  });
+
+  it('returns valid tipo for ND E (export debit note)', () => {
+    expect(validateTipoComprobante('ND E')).toBe('ND E');
+  });
+
   it('returns default A for invalid string', () => {
     expect(validateTipoComprobante('X')).toBe('A');
   });

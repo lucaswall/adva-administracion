@@ -365,7 +365,7 @@ export function validateTipoComprobante(value: unknown): TipoComprobante {
     return DEFAULT;
   }
 
-  const validTypes: TipoComprobante[] = ['A', 'B', 'C', 'E', 'NC', 'NC A', 'NC B', 'NC C', 'ND', 'ND A', 'ND B', 'ND C', 'LP'];
+  const validTypes: TipoComprobante[] = ['A', 'B', 'C', 'E', 'NC', 'NC A', 'NC B', 'NC C', 'NC E', 'ND', 'ND A', 'ND B', 'ND C', 'ND E', 'LP'];
   if (validTypes.includes(value as TipoComprobante)) {
     return value as TipoComprobante;
   }

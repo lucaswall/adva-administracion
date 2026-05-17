@@ -109,14 +109,12 @@ export function generateFacturaFileName(
   const direction = tipo === 'factura_emitida' ? 'Emitida' : 'Recibida';
   let typeLabel: string;
   const tc = factura.tipoComprobante;
-  if (tc === 'NC') {
-    typeLabel = `Nota de Credito ${direction}`;
-  } else if (tc === 'NC A' || tc === 'NC B' || tc === 'NC C') {
-    typeLabel = `Nota de Credito ${tc.slice(3)} ${direction}`;
-  } else if (tc === 'ND') {
-    typeLabel = `Nota de Debito ${direction}`;
-  } else if (tc === 'ND A' || tc === 'ND B' || tc === 'ND C') {
-    typeLabel = `Nota de Debito ${tc.slice(3)} ${direction}`;
+  if (tc === 'NC' || tc.startsWith('NC ')) {
+    const suffix = tc.slice(3);
+    typeLabel = `Nota de Credito${suffix ? ` ${suffix}` : ''} ${direction}`;
+  } else if (tc === 'ND' || tc.startsWith('ND ')) {
+    const suffix = tc.slice(3);
+    typeLabel = `Nota de Debito${suffix ? ` ${suffix}` : ''} ${direction}`;
   } else if (tc === 'LP') {
     typeLabel = `Liquidacion de Premio ${direction}`;
   } else {

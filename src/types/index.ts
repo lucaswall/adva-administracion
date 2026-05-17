@@ -72,7 +72,7 @@ export type MatchConfidence = 'HIGH' | 'MEDIUM' | 'LOW' | 'MANUAL';
  * ARCA comprobante types
  * LP = Liquidación de Premio (insurance documents)
  */
-export type TipoComprobante = 'A' | 'B' | 'C' | 'E' | 'NC' | 'NC A' | 'NC B' | 'NC C' | 'ND' | 'ND A' | 'ND B' | 'ND C' | 'LP';
+export type TipoComprobante = 'A' | 'B' | 'C' | 'E' | 'NC' | 'NC A' | 'NC B' | 'NC C' | 'NC E' | 'ND' | 'ND A' | 'ND B' | 'ND C' | 'ND E' | 'LP';
 
 /**
  * Currency types

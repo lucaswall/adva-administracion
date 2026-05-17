@@ -187,6 +187,18 @@ describe('generateFacturaFileName', () => {
     expect(result).toBe('2024-01-15 - Nota de Debito A Emitida - 00001-00001234 - CLIENTE SA - Desarrollo de software.pdf');
   });
 
+  it('generates Nota de Credito E Emitida (export credit note)', () => {
+    const factura: Factura = { ...baseFactura, tipoComprobante: 'NC E' };
+    const result = generateFacturaFileName(factura, 'factura_emitida');
+    expect(result).toBe('2024-01-15 - Nota de Credito E Emitida - 00001-00001234 - CLIENTE SA - Desarrollo de software.pdf');
+  });
+
+  it('generates Nota de Debito E Emitida (export debit note)', () => {
+    const factura: Factura = { ...baseFactura, tipoComprobante: 'ND E' };
+    const result = generateFacturaFileName(factura, 'factura_emitida');
+    expect(result).toBe('2024-01-15 - Nota de Debito E Emitida - 00001-00001234 - CLIENTE SA - Desarrollo de software.pdf');
+  });
+
   it('generates Liquidacion de Premio (LP)', () => {
     const factura: Factura = { ...baseFactura, tipoComprobante: 'LP' };
     const result = generateFacturaFileName(factura, 'factura_emitida');
