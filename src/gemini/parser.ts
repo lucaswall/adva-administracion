@@ -404,7 +404,6 @@ const VALID_CONDICION_IVA: readonly string[] = [
   'Responsable Monotributo',
   'Cliente del Exterior',
   'IVA Sujeto Exento',
-  'Exterior',
 ];
 
 /**

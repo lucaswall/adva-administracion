@@ -1,8 +1,9 @@
 # Implementation Plan
 
+**Status:** COMPLETE
 **Created:** 2026-05-17
 **Source:** Inline request: (A) Factura E hardcode `condicion='Exterior'`. (B) Subdiario one-hop pago→factura traversal so bank-confirmed cuotas count as hard-paid. (C) Replace HYPERLINK formulas with project-standard formatted-text links and switch the `movimiento` column label to a descriptive form (`{bankFolder} {YYYY-MM} #{row}`). (E) Add a clickable link to the factura PDF on the `nro` column.
-**Linear Issues:** [ADV-277](https://linear.app/lw-claude/issue/ADV-277), [ADV-278](https://linear.app/lw-claude/issue/ADV-278), [ADV-279](https://linear.app/lw-claude/issue/ADV-279), [ADV-280](https://linear.app/lw-claude/issue/ADV-280), [ADV-281](https://linear.app/lw-claude/issue/ADV-281), [ADV-282](https://linear.app/lw-claude/issue/ADV-282)
+**Linear Issues:** [ADV-277](https://linear.app/lw-claude/issue/ADV-277), [ADV-278](https://linear.app/lw-claude/issue/ADV-278), [ADV-279](https://linear.app/lw-claude/issue/ADV-279), [ADV-280](https://linear.app/lw-claude/issue/ADV-280), [ADV-281](https://linear.app/lw-claude/issue/ADV-281), [ADV-282](https://linear.app/lw-claude/issue/ADV-282), [ADV-283](https://linear.app/lw-claude/issue/ADV-283)
 **Branch:** feat/subdiario-clarity-iter-3
 
 ## Context Gathered
@@ -265,3 +266,39 @@
 - **Task 3 will visibly change the Subdiario on first staging rebuild**: most rows currently flagged "Pendiente confirmación bancaria" will reclassify as hard-paid (bank-confirmed via pago indirection). This is the intended fix; user should expect a large reshuffle.
 - **Task 6 first-sync UPDATE wave**: every row with a populated `nro` (most rows) and/or `movimientoLabel` (the larger new hard-paid set) will UPDATE on the first post-deploy sync. Single batchUpdate handles it; `sortInvariantFallback` does NOT trigger (no inserts/deletes).
 - **Task 1 backfill deferred**: existing Facturas Emitidas rows for Factura E may still show `'Cliente del Exterior'` or empty in column H until rescanned. Subdiario reads from that cell directly, so the new `'Exterior'` value appears only for freshly-processed (or backfilled) rows.
+
+### Review Findings
+
+**Mode:** 3-agent team (security, reliability, quality) on 11 changed files.
+
+**FIX (fixed inline):**
+
+1. **[medium] [type] `src/gemini/parser.ts:407`** — Adding `'Exterior'` to `VALID_CONDICION_IVA` was over-permissive. The Factura E hardcode at lines 506-507 assigns the value directly without consulting the canonical list, so the list entry was redundant for the legitimate path and silently widened acceptance for non-E facturas (A/B/C). If Gemini hallucinated `'Exterior'` on a domestic invoice, it would pass review unflagged.
+   **Linear:** [ADV-283](https://linear.app/lw-claude/issue/ADV-283) (Bug, Merge)
+   **Fix:** Removed `'Exterior'` from `VALID_CONDICION_IVA`; restored test name to "5 canonical values" and dropped `'Exterior'` from the array; added regression test `non-E factura with extracted "Exterior" flags review (not silently accepted)`. Factura E hardcode path unaffected.
+
+**DISCARDED (not bugs):**
+
+1. **[low] `src/services/sheets.ts:1364-1376`** (raised by both reliability and quality reviewers) — `movCell` would emit a link with empty URI if `movimientoLabel` were non-empty but `movimiento` empty. Discarded: `rowToCellData` is only called from `applySubdiarioDiff` on builder-produced rows, and the builder always co-populates both from `latestMovItem`. Impossible in context.
+2. **[low] `src/services/subdiario-builder.ts` (`aggregateMovimientos`)** — If `factura.fileId === ''`, `pagoToFactura` would accumulate all unmatched pagos. Discarded: facturas always have a Drive fileId by invariant; reviewer agreed scenario is impossible.
+3. **[low] `src/services/subdiario-builder.test.ts:64`** — Module-level `movSeq` counter makes default `label` field order-dependent. Discarded: no current test asserts the default label (all assertions use explicit `label:` overrides). Zero correctness impact today; pure test-hygiene preference.
+
+### Linear Updates
+
+- ADV-277..ADV-282: Review → Merge (original task issues, work shipped)
+- ADV-283: Created in Merge (inline fix for parser over-permissiveness)
+
+### Inline Fix Verification
+
+- TDD red→green: new regression test failed (returned `'Exterior'`), passed after removing it from `VALID_CONDICION_IVA`.
+- Full `npm test` clean.
+- `npm run build` clean (zero warnings).
+- bug-hunter post-fix: no remaining bugs.
+
+<!-- REVIEW COMPLETE -->
+
+---
+
+## Status: COMPLETE
+
+All tasks implemented and reviewed successfully. All Linear issues moved to Merge.

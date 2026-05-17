@@ -2105,14 +2105,13 @@ describe('parseFacturaResponse - condicionIVAReceptor (ADV-245)', () => {
     }
   });
 
-  it('parses all 6 canonical condicionIVAReceptor values for factura_emitida', () => {
+  it('parses all 5 canonical condicionIVAReceptor values for factura_emitida', () => {
     const canonicalValues = [
       'IVA Responsable Inscripto',
       'Consumidor Final',
       'Responsable Monotributo',
       'Cliente del Exterior',
       'IVA Sujeto Exento',
-      'Exterior',
     ];
     for (const value of canonicalValues) {
       const response = JSON.stringify({ ...baseEmitida, condicionIVAReceptor: value });
@@ -2126,6 +2125,24 @@ describe('parseFacturaResponse - condicionIVAReceptor (ADV-245)', () => {
 
   it('sets needsReview and clears condicionIVAReceptor for unknown/garbled value', () => {
     const response = JSON.stringify({ ...baseEmitida, condicionIVAReceptor: 'EXENTO INVALIDO' });
+    const result = parseFacturaResponse(response, 'factura_emitida');
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.data.condicionIVAReceptor).toBeUndefined();
+      expect(result.value.needsReview).toBe(true);
+    }
+  });
+
+  // ADV-277 follow-up: 'Exterior' must NOT be canonical for non-E facturas.
+  // It is a valid value ONLY when produced by the tipoComprobante==='E' override.
+  // If Gemini hallucinates 'Exterior' on a domestic invoice (A/B/C), it must
+  // flag for review just like any other non-canonical value.
+  it('non-E factura with extracted "Exterior" flags review (not silently accepted)', () => {
+    const response = JSON.stringify({
+      ...baseEmitida,
+      tipoComprobante: 'A',
+      condicionIVAReceptor: 'Exterior',
+    });
     const result = parseFacturaResponse(response, 'factura_emitida');
     expect(result.ok).toBe(true);
     if (result.ok) {
