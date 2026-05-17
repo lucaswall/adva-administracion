@@ -2227,6 +2227,34 @@ describe('parseFacturaResponse - condicionIVAReceptor (ADV-245)', () => {
     }
   });
 
+  it('NC E (export credit note) hardcodes Exterior regardless of extracted condicionIVAReceptor', () => {
+    const response = JSON.stringify({
+      ...baseEmitida,
+      tipoComprobante: 'NC E',
+      condicionIVAReceptor: 'IVA Responsable Inscripto', // wrong — should be overridden
+    });
+    const result = parseFacturaResponse(response, 'factura_emitida');
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.data.condicionIVAReceptor).toBe('Exterior');
+      expect(result.value.needsReview).toBe(false);
+    }
+  });
+
+  it('ND E (export debit note) hardcodes Exterior regardless of extracted condicionIVAReceptor', () => {
+    const response = JSON.stringify({
+      ...baseEmitida,
+      tipoComprobante: 'ND E',
+      // condicionIVAReceptor omitted — simulates Gemini extraction failure
+    });
+    const result = parseFacturaResponse(response, 'factura_emitida');
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.data.condicionIVAReceptor).toBe('Exterior');
+      expect(result.value.needsReview).toBe(false);
+    }
+  });
+
   it('Non-E factura with "IVA Responsable Inscripto" is unchanged (regression guard for ADV-277)', () => {
     const response = JSON.stringify({
       ...baseEmitida,

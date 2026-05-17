@@ -502,7 +502,9 @@ export function parseFacturaResponse(
         // ADV-277: Factura E (exports) — receptor is by AFIP definition foreign.
         // Hardcode 'Exterior' regardless of Gemini's extraction; the value cannot
         // be trusted on E forms (the extractor latches onto the issuer's condition).
-        if (rawData.tipoComprobante === 'E') {
+        // NC E / ND E (export credit/debit notes) follow the same rule.
+        const tc = rawData.tipoComprobante;
+        if (tc === 'E' || tc === 'NC E' || tc === 'ND E') {
           data.condicionIVAReceptor = 'Exterior';
         } else {
           const rawCondicion = rawData.condicionIVAReceptor;
