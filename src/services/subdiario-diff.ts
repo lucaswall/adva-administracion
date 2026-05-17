@@ -38,8 +38,13 @@ function numericNullableDiffers(a: number | null, b: number | null): boolean {
  * - `movimiento` URL: EXCLUDED from the diff. The read side cannot recover the
  *   URL (only the displayed text); comparing strictly would loop forever. The
  *   builder rewrites it whenever `movimientoLabel` changes, which is sufficient.
- * - `facturaFileId` (ADV-280): EXCLUDED for the same reason — unknowable from a
- *   cell read.
+ * - `facturaFileId` (Codex PR #119): strict equality after `.trim()`. The col D
+ *   textFormatRuns link URI is recovered by `readSubdiarioRows` via
+ *   `getCellLinkUris`, so the field round-trips and exact equality is safe.
+ *   Existing rows that lack the col D link return `''`, which differs from any
+ *   builder-side populated fileId — triggering the desired backfill UPDATE on
+ *   the first sync after deploy. Subsequent reads return the same fileId, so
+ *   no perpetual updates.
  * - All other string fields: strict equality after `.trim()`.
  */
 function rowsDiffer(a: SubdiarioRow, b: SubdiarioRow): boolean {
@@ -47,11 +52,12 @@ function rowsDiffer(a: SubdiarioRow, b: SubdiarioRow): boolean {
   if (Math.abs(a.total - b.total) >= MONEY_EPSILON) return true;
   if (numericNullableDiffers(a.recibido, b.recibido)) return true;
 
-  // String fields — trim before comparing. `movimiento` URL and `facturaFileId`
-  // are intentionally absent (see header).
+  // String fields — trim before comparing. `movimiento` URL is intentionally
+  // absent (see header).
   const stringFields: (keyof SubdiarioRow)[] = [
     'fecha', 'cod', 'tipo', 'nro', 'cliente', 'cuit',
-    'condicion', 'concepto', 'categoria', 'fechaCobro', 'movimientoLabel', 'notas',
+    'condicion', 'concepto', 'categoria', 'fechaCobro', 'movimientoLabel',
+    'facturaFileId', 'notas',
   ];
   for (const field of stringFields) {
     const av = String(a[field] ?? '').trim();

@@ -445,8 +445,21 @@ function applyScopeFilter(
   if (yearEmision === currentYear) return true;
 
   // Prior-year FC: evaluate currentYear events for rules (b), (e), (f).
+  //
+  // Rule (b) considers BOTH direct and one-hop indirect matches, mirroring the
+  // semantics of `aggregateMovimientos`. Without the indirection, a prior-year
+  // pagada='SI' FC whose currentYear bank credit is matched to a pago (rather
+  // than directly to the factura) would be silently dropped — even though the
+  // payment IS in currentYear, just one hop away.
+  const pagoFileIds = new Set(
+    pagosRecibidos
+      .filter((p) => p.matchedFacturaFileId === factura.fileId && p.fileId !== '')
+      .map((p) => p.fileId)
+  );
   const matchedMovs = movimientos.filter(
-    (m) => m.matchedFileId === factura.fileId && m.matchedType !== ''
+    (m) =>
+      m.matchedType !== '' &&
+      (m.matchedFileId === factura.fileId || pagoFileIds.has(m.matchedFileId))
   );
 
   // Rule b: any matched movimiento in currentYear → in scope

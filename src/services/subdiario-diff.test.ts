@@ -350,12 +350,30 @@ describe('diffSubdiarioRows', () => {
     expect(result.updates).toHaveLength(0);
   });
 
-  // ADV-280: facturaFileId is unknowable from a sheet read (the read side
-  // always reports ''). Comparing it strictly would force perpetual updates
-  // against any builder-side row with a populated fileId. Diff must skip it.
-  it('rows differing only by facturaFileId are equal — no update emitted', () => {
+  // Codex PR #119: facturaFileId is now ROUND-TRIPPABLE — `readSubdiarioRows`
+  // recovers it from the col D textFormatRuns link URI via `getCellLinkUris`,
+  // so the diff includes it in equality. Existing rows that lack the link
+  // (read=''), or rows that point at a different fileId, must trigger an
+  // update so the col D link backfills on the first post-deploy sync.
+  it('rows differing only by facturaFileId trigger an update (link backfill)', () => {
     const existing = withIndex(
       makeRow({ nro: '00001-00000001', facturaFileId: '' }),
+      0
+    );
+    const desired = makeRow({ nro: '00001-00000001', facturaFileId: 'fac-abc' });
+
+    const result = diffSubdiarioRows([existing], [desired]);
+
+    expect(result.updates).toHaveLength(1);
+    expect(result.updates[0]).toMatchObject({ rowIndex: 0, desiredIndex: 0 });
+    expect(result.updates[0]!.row.facturaFileId).toBe('fac-abc');
+    expect(result.inserts).toHaveLength(0);
+    expect(result.deletes).toHaveLength(0);
+  });
+
+  it('rows with matching facturaFileId emit no update (no perpetual rewrites)', () => {
+    const existing = withIndex(
+      makeRow({ nro: '00001-00000001', facturaFileId: 'fac-abc' }),
       0
     );
     const desired = makeRow({ nro: '00001-00000001', facturaFileId: 'fac-abc' });

@@ -738,6 +738,49 @@ describe('buildSubdiarioRows', () => {
     expect(real[0].nro).toBe('00010-00000004');
   });
 
+  // Codex PR #119 follow-up: scope filter rule (b) must use the same one-hop
+  // indirection that `aggregateMovimientos` uses. Without it, a prior-year
+  // pagada='SI' FC whose currentYear bank credit is matched to a pago (not
+  // directly to the factura) is silently dropped from scope — even though
+  // there IS a currentYear payment, just one hop away.
+  it('soft-drop: prior-year FC pagada=SI kept when currentYear movimiento is matched via pago (one-hop)', () => {
+    const PRIOR_YEAR = CURRENT_YEAR - 1;
+    const fc = makeFc({
+      fileId: 'fc-softdrop-onehop',
+      nroFactura: '00010-00000040',
+      fechaEmision: `${PRIOR_YEAR}-11-15`,
+      pagada: 'SI',
+      importeTotal: 500_000,
+    });
+    const pago = makePago({
+      fileId: 'pago-onehop',
+      matchedFacturaFileId: 'fc-softdrop-onehop',
+      // Pago's own fechaPago is prior-year — so rule (b-via-pago) at line 469
+      // does NOT save us. Only the one-hop scope rule does.
+      fechaPago: `${PRIOR_YEAR}-12-20`,
+      importePagado: 500_000,
+    });
+    const mov = makeMov({
+      matchedFileId: 'pago-onehop', // matched to pago, NOT directly to fc
+      credito: 500_000,
+      fecha: `${CURRENT_YEAR}-01-10`,
+    });
+
+    const rows = buildSubdiarioRows(
+      makeInput({
+        facturasEmitidas: [fc],
+        pagosRecibidos: [pago],
+        movimientos: [mov],
+      })
+    );
+
+    const real = rows.filter((r) => !r.cliente.startsWith('FALTA'));
+    expect(real).toHaveLength(1);
+    expect(real[0].nro).toBe('00010-00000040');
+    // Hard-paid (movAgg wins) — uses currentYear bank fecha.
+    expect(real[0].fechaCobro).toBe(`${CURRENT_YEAR}-01-10`);
+  });
+
   it('soft-drop: prior-year FC without pagada, no movimiento, no NC → kept (rule d unchanged)', () => {
     const PRIOR_YEAR = CURRENT_YEAR - 1;
     const fc = makeFc({

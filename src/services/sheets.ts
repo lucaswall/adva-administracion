@@ -244,6 +244,51 @@ export async function getValues(
 }
 
 /**
+ * Reads `textFormatRuns` link URIs from a sheet range.
+ *
+ * `spreadsheets.values.get` only returns displayed text — it cannot round-trip
+ * `textFormatRuns` link metadata. This helper uses `spreadsheets.get` with a
+ * field mask to fetch ONLY the link URI of the first `textFormatRuns` entry on
+ * each cell, returning a 2D array of strings (empty when the cell has no link).
+ *
+ * Used by `readSubdiarioRows` to recover the col D `facturaFileId` (parsed
+ * from the Drive viewer URL) so existing rows pick up the col D link on the
+ * first sync after a deploy, even when no other displayed-text field changed.
+ *
+ * Shape: the returned 2D array mirrors the requested range's rows × columns.
+ * Rows the API omits entirely come back as `[]`; missing cells inside a row
+ * come back as `''`. Cells whose `textFormatRuns[0]` has no link contribute
+ * `''` as well.
+ *
+ * @param spreadsheetId - Spreadsheet ID
+ * @param range - A1 notation range (e.g., 'Comprobantes!A2:N')
+ * @returns 2D array of link URIs (empty string when no link on the cell)
+ */
+export async function getCellLinkUris(
+  spreadsheetId: string,
+  range: string
+): Promise<Result<string[][], Error>> {
+  return withTiming('getCellLinkUris', () => withQuotaRetry(async () => {
+    const sheets = await getSheetsService();
+    const response = await sheets.spreadsheets.get({
+      spreadsheetId,
+      ranges: [range],
+      fields: 'sheets.data.rowData.values.textFormatRuns.format.link.uri',
+    });
+    const rowData = response.data.sheets?.[0]?.data?.[0]?.rowData ?? [];
+    return rowData.map((row) =>
+      (row.values ?? []).map((cell) => {
+        const runs = cell.textFormatRuns ?? [];
+        return runs[0]?.format?.link?.uri ?? '';
+      })
+    );
+  }).then(result => {
+    if (!result.ok) return { ok: false, error: result.error };
+    return { ok: true, value: result.value };
+  }));
+}
+
+/**
  * Sets values in a range
  *
  * @param spreadsheetId - Spreadsheet ID

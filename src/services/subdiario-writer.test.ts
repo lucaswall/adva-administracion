@@ -21,6 +21,7 @@ vi.mock('./drive.js', () => ({
 
 vi.mock('./sheets.js', () => ({
   getValues: vi.fn(),
+  getCellLinkUris: vi.fn(),
   setValues: vi.fn(),
   appendRowsWithLinks: vi.fn(),
   clearSheetData: vi.fn(),
@@ -129,6 +130,9 @@ function setupDefaultMocks() {
     }
     return { ok: true, value: EMPTY_SHEET_DATA };
   });
+  // Default: no col D/M link metadata on existing rows (legacy / pre-deploy).
+  // Tests that exercise link recovery override this with explicit mocks.
+  vi.mocked(sheets.getCellLinkUris).mockResolvedValue({ ok: true, value: [] });
   vi.mocked(sheets.setValues).mockResolvedValue({ ok: true, value: 1 });
   vi.mocked(sheets.appendRowsWithLinks).mockResolvedValue({ ok: true, value: 1 });
   vi.mocked(sheets.clearSheetData).mockResolvedValue({ ok: true, value: undefined });
@@ -1109,6 +1113,8 @@ describe('readSubdiarioRows', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    // Default: no link metadata. Tests that exercise link recovery override.
+    vi.mocked(sheets.getCellLinkUris).mockResolvedValue({ ok: true, value: [] });
   });
 
   function makeSheetRow(overrides: Partial<Record<number, CellValue>> = {}): CellValue[] {
@@ -1287,22 +1293,87 @@ describe('readSubdiarioRows', () => {
     }
   });
 
-  // ADV-280: facturaFileId is not recoverable from cell content (the writer
-  // emits a textFormatRuns link, but `getValues` returns the displayed nro
-  // string only). Read-side always reports ''.
-  it('facturaFileId is always empty on read (cell content does not encode the fileId)', async () => {
-    const fc = makeSheetRow({ 3: '00001-00000001' });
-    const nc = makeSheetRow({ 3: '00003-00000001', 2: 'NC', 1: '003', 7: -1000 });
+  // Codex PR #119: facturaFileId is now recovered from col D's textFormatRuns
+  // link URI via getCellLinkUris. Rows whose col D has no link (legacy /
+  // pre-deploy, FALTA placeholders) report '' — the diff then treats them as
+  // needing a backfill UPDATE on the next sync.
+  it('facturaFileId is recovered from col D textFormatRuns link URI', async () => {
+    const linkedFc = makeSheetRow({ 3: '00001-00000001' });
+    const unlinkedFc = makeSheetRow({ 3: '00001-00000002' });
+    const linkedNc = makeSheetRow({ 3: '00003-00000001', 2: 'NC', 1: '003', 7: -1000 });
 
-    vi.mocked(sheets.getValues).mockResolvedValue({ ok: true, value: [fc, nc] });
+    vi.mocked(sheets.getValues).mockResolvedValue({
+      ok: true,
+      value: [linkedFc, unlinkedFc, linkedNc],
+    });
+    vi.mocked(sheets.getCellLinkUris).mockResolvedValue({
+      ok: true,
+      value: [
+        ['', '', '', 'https://drive.google.com/file/d/fac-abc123/view', '', '', '', '', '', '', '', '', '', ''],
+        ['', '', '', '', '', '', '', '', '', '', '', '', '', ''], // unlinked: no col D URI
+        ['', '', '', 'https://drive.google.com/file/d/nc-xyz789/view', '', '', '', '', '', '', '', '', '', ''],
+      ],
+    });
 
     const result = await readSubdiarioRows('test-id');
 
     expect(result.ok).toBe(true);
     if (result.ok) {
-      expect(result.value).toHaveLength(2);
-      expect(result.value[0]!.facturaFileId).toBe('');
+      expect(result.value).toHaveLength(3);
+      expect(result.value[0]!.facturaFileId).toBe('fac-abc123');
       expect(result.value[1]!.facturaFileId).toBe('');
+      expect(result.value[2]!.facturaFileId).toBe('nc-xyz789');
+    }
+  });
+
+  it('facturaFileId is empty when col D URI is not a Drive viewer link (foreign / malformed)', async () => {
+    const row = makeSheetRow({ 3: '00001-00000001' });
+    vi.mocked(sheets.getValues).mockResolvedValue({ ok: true, value: [row] });
+    vi.mocked(sheets.getCellLinkUris).mockResolvedValue({
+      ok: true,
+      value: [
+        ['', '', '', 'https://example.com/not-a-drive-link', '', '', '', '', '', '', '', '', '', ''],
+      ],
+    });
+
+    const result = await readSubdiarioRows('test-id');
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value[0]!.facturaFileId).toBe('');
+    }
+  });
+
+  it('facturaFileId is recovered from Drive URIs with a query string (defensive against ?usp=sharing variants)', async () => {
+    const row = makeSheetRow({ 3: '00001-00000001' });
+    vi.mocked(sheets.getValues).mockResolvedValue({ ok: true, value: [row] });
+    vi.mocked(sheets.getCellLinkUris).mockResolvedValue({
+      ok: true,
+      value: [
+        ['', '', '', 'https://drive.google.com/file/d/fac-shared/view?usp=sharing', '', '', '', '', '', '', '', '', '', ''],
+      ],
+    });
+
+    const result = await readSubdiarioRows('test-id');
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value[0]!.facturaFileId).toBe('fac-shared');
+    }
+  });
+
+  it('getCellLinkUris failure is propagated as ok:false', async () => {
+    vi.mocked(sheets.getValues).mockResolvedValue({ ok: true, value: [] });
+    vi.mocked(sheets.getCellLinkUris).mockResolvedValue({
+      ok: false,
+      error: new Error('Sheets metadata API error'),
+    });
+
+    const result = await readSubdiarioRows('test-id');
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.message).toBe('Sheets metadata API error');
     }
   });
 });

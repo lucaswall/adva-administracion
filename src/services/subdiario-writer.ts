@@ -17,6 +17,7 @@ import type {
 } from '../types/index.js';
 import {
   getValues,
+  getCellLinkUris,
   setValues,
   getSheetMetadata,
   renameSheet,
@@ -85,6 +86,24 @@ export interface SyncSubdiarioResult {
 // ─── Internal helpers ────────────────────────────────────────────────────────
 
 /**
+ * Parses a Drive `fileId` out of a viewer URI of the form
+ * `https://drive.google.com/file/d/{fileId}/view`. Returns the empty string
+ * when the URI doesn't match (no link, foreign URL, malformed).
+ *
+ * The trailing `/view` is optional, and the URI may end with a query string
+ * (`?usp=sharing`) or fragment — Drive sometimes appends these even though the
+ * Subdiario writer emits bare `/view` URIs. This keeps recovery robust against
+ * a user who manually pasted an alternate share URL.
+ *
+ * Used by `readSubdiarioRows` to round-trip the col D factura-PDF link URI
+ * back into `SubdiarioRow.facturaFileId`.
+ */
+function parseDriveFileIdFromUri(uri: string): string {
+  const match = /^https:\/\/drive\.google\.com\/file\/d\/([^/?#]+)(?:\/view)?(?:[/?#].*)?$/.exec(uri);
+  return match?.[1] ?? '';
+}
+
+/**
  * Resolves the Subdiario spreadsheet ID.
  * Resolution order: FolderStructure cache → Drive search → create.
  *
@@ -141,6 +160,16 @@ export async function resolveSubdiarioId(
  * `movimientoLabel` directly and leaves `movimiento` (URL) empty. The diff
  * equality keys on `movimientoLabel` only — see `subdiario-diff.ts`.
  *
+ * Column D (nro) link recovery (Codex PR #119): col D is also a textFormatRuns
+ * link to the source factura PDF. A second `getCellLinkUris` call recovers the
+ * link URI for each row and parses out the Drive `fileId`, populating
+ * `facturaFileId`. Without this, existing rows whose displayed strings already
+ * match the desired set would never get the col D link backfilled (the diff
+ * would say "equal" and skip the update). The recovered fileId lets the diff
+ * include `facturaFileId` in equality so first-sync-after-deploy backfills the
+ * link on every row, and subsequent syncs no-op (existing recovered fileId
+ * matches desired).
+ *
  * @internal Exported for test reach only. Do not call from outside this module.
  *
  * @param spreadsheetId - Subdiario spreadsheet ID
@@ -151,11 +180,31 @@ export async function readSubdiarioRows(
   const valuesResult = await getValues(spreadsheetId, `${COMPROBANTES_SHEET}!A2:N`);
   if (!valuesResult.ok) return valuesResult;
 
+  const linksResult = await getCellLinkUris(spreadsheetId, `${COMPROBANTES_SHEET}!A2:N`);
+  if (!linksResult.ok) return linksResult;
+
   const rawRows = valuesResult.value;
+  const linkRows = linksResult.value;
   const result: SubdiarioRowWithIndex[] = [];
+
+  // Both APIs read the same range, so the row arrays should align 1:1. A
+  // mismatch can theoretically arise if a user manually clears a cell's value
+  // but leaves its format intact — `spreadsheets.get` returns the row while
+  // `spreadsheets.values.get` may omit it. Warn so the divergence is
+  // diagnosable; the `?? []` fallback below keeps the read safe regardless.
+  if (linkRows.length > 0 && linkRows.length !== rawRows.length) {
+    warn('readSubdiarioRows: linkRows length differs from rawRows — link recovery may degrade', {
+      module: 'subdiario-writer',
+      phase: 'read-comprobantes',
+      spreadsheetId,
+      rawRowsLength: rawRows.length,
+      linkRowsLength: linkRows.length,
+    });
+  }
 
   for (let sheetPos = 0; sheetPos < rawRows.length; sheetPos++) {
     const row = rawRows[sheetPos] ?? [];
+    const linkRow = linkRows[sheetPos] ?? [];
 
     // Col A: fecha — skip row if empty after normalization
     const fecha = normalizeSpreadsheetDate(row[0]);
@@ -209,10 +258,12 @@ export async function readSubdiarioRows(
       // diff keys on `movimientoLabel` instead.
       movimiento: '',
       movimientoLabel: String(row[12] ?? '').trim(),
-      // ADV-280: cell content does not encode the source factura's fileId
-      // (only the displayed nro string round-trips), so we report ''.
-      // The diff equality skips this field — see subdiario-diff.ts.
-      facturaFileId: '',
+      // Codex PR #119: recover facturaFileId from col D's textFormatRuns link
+      // URI (https://drive.google.com/file/d/{fileId}/view). Rows without a
+      // link (e.g. FALTA placeholders, pre-deploy legacy rows) return ''. After
+      // the first post-deploy sync writes the link, the read recovers a
+      // matching fileId and subsequent diffs no-op on the field.
+      facturaFileId: parseDriveFileIdFromUri(linkRow[3] ?? ''),
       notas:     String(row[13] ?? '').trim(),
     });
   }
