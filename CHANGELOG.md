@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.11.0] - 2026-05-17
+
+### Added
+- Subdiario `nro` column is now a clickable link to the source factura PDF
+- Subdiario `movimiento` column now shows a descriptive label (`{bank folder} {YYYY-MM} #{row}`) linked to the exact bank movimiento row, replacing the opaque 3-letter "Mov" tag
+
+### Changed
+- Subdiario hard-paid detection now follows one-hop `pago_recibido → factura` indirection — bank-confirmed cuotas that match the pago (not the factura directly) are correctly classified as hard-paid instead of misleadingly tagged "Pendiente confirmación bancaria". Expect a large reshuffle on the first sync after deploy
+- Subdiario link cells (`nro`, `movimiento`) switched from `HYPERLINK` formulas to the project-standard `textFormatRuns` shape used by every other sheet — diff equality is now exact, no more semantic-presence workarounds
+
+### Fixed
+- Factura E (exports) now hardcodes `condicionIVAReceptor='Exterior'`, bypassing unreliable Gemini extraction that was leaving the field blank or with non-canonical values
+- NC E and ND E are now recognized as valid `tipoComprobante` (no longer falsely flagged for review); they inherit the Factura E `condicion='Exterior'` hardcode
+
 ## [1.10.0] - 2026-05-13
 
 ### Added
@@ -200,7 +214,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Updated fastify to fix high-severity Content-Type body validation bypass and low-severity DoS vulnerability
 - Updated googleapis to v171, @google/clasp to v3, and resolved 6 npm audit vulnerabilities
 
-[Unreleased]: https://github.com/lucaswall/adva-administracion/compare/v1.10.0...HEAD
+[Unreleased]: https://github.com/lucaswall/adva-administracion/compare/v1.11.0...HEAD
+[1.11.0]: https://github.com/lucaswall/adva-administracion/compare/v1.10.0...v1.11.0
 [1.10.0]: https://github.com/lucaswall/adva-administracion/compare/v1.9.0...v1.10.0
 [1.9.0]: https://github.com/lucaswall/adva-administracion/compare/v1.8.3...v1.9.0
 [1.8.3]: https://github.com/lucaswall/adva-administracion/compare/v1.8.2...v1.8.3
