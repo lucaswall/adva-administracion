@@ -2841,6 +2841,8 @@ describe('appendRowsWithLinks concurrency (ADV-242)', () => {
         fechaCobro: '',
         recibido: null,
         movimiento: '',
+        movimientoLabel: '',
+        facturaFileId: '',
         notas: '',
         ...overrides,
       };
@@ -2910,9 +2912,13 @@ describe('appendRowsWithLinks concurrency (ADV-242)', () => {
       expect(Object.keys(recibidoCell.userEnteredValue!)).toHaveLength(0);
     });
 
-    it('emits movimiento URL (col M, index 12) as =HYPERLINK formula (ADV-272)', async () => {
+    // ADV-282: col M is now a textFormatRuns link, not a HYPERLINK formula.
+    // The displayed text is `movimientoLabel`; the link target is the URL.
+
+    it('emits col M as textFormatRuns link when movimientoLabel + URL are populated (ADV-282)', async () => {
       const url = 'https://docs.google.com/spreadsheets/d/abc/edit#gid=1&range=A5';
-      const row = makeTestRow({ movimiento: url });
+      const label = 'BBVA ARS 2026-03 #5';
+      const row = makeTestRow({ movimientoLabel: label, movimiento: url });
       const diff = makeDiff({ inserts: [{ insertAt: 0, row }] });
 
       const result = await applySubdiarioDiff('spread-id', 42, diff, [row]);
@@ -2927,13 +2933,15 @@ describe('appendRowsWithLinks concurrency (ADV-242)', () => {
       const cellValues = updateReq!.updateCells!.rows![0]!.values!;
       const movCell = cellValues[12]!; // col M (0-based index 12)
 
-      expect(movCell.userEnteredValue?.formulaValue).toBe(
-        `=HYPERLINK("${url}","Mov")`
-      );
+      expect(movCell.userEnteredValue?.stringValue).toBe(label);
+      expect(movCell.userEnteredValue?.formulaValue).toBeUndefined();
+      expect(movCell.textFormatRuns).toEqual([
+        { format: { link: { uri: url } } },
+      ]);
     });
 
-    it('emits movimiento empty string (col M, index 12) as empty userEnteredValue (ADV-272)', async () => {
-      const row = makeTestRow({ movimiento: '' });
+    it('emits col M as empty userEnteredValue when movimientoLabel is blank (ADV-282)', async () => {
+      const row = makeTestRow({ movimientoLabel: '', movimiento: '' });
       const diff = makeDiff({ inserts: [{ insertAt: 0, row }] });
 
       const result = await applySubdiarioDiff('spread-id', 42, diff, [row]);
@@ -2947,14 +2955,13 @@ describe('appendRowsWithLinks concurrency (ADV-242)', () => {
       const movCell = cellValues[12]!;
 
       expect(movCell.userEnteredValue?.formulaValue).toBeUndefined();
+      expect(movCell.userEnteredValue?.stringValue).toBeUndefined();
       expect(Object.keys(movCell.userEnteredValue!)).toHaveLength(0);
+      expect(movCell.textFormatRuns).toBeUndefined();
     });
 
-    it('escapes double-quotes in movimiento URL for HYPERLINK formula safety (ADV-272)', async () => {
-      // A double-quote in the URL must be escaped to "" inside the formula
-      // string so the formula stays well-formed.
-      const url = 'https://example.com/path?q="injected"';
-      const row = makeTestRow({ movimiento: url });
+    it('emits col D (nro) as textFormatRuns link to Drive PDF when facturaFileId is populated (ADV-282)', async () => {
+      const row = makeTestRow({ nro: '00005-00000042', facturaFileId: 'fac-abc-123' });
       const diff = makeDiff({ inserts: [{ insertAt: 0, row }] });
 
       const result = await applySubdiarioDiff('spread-id', 42, diff, [row]);
@@ -2965,11 +2972,79 @@ describe('appendRowsWithLinks concurrency (ADV-242)', () => {
       const requests = (calls[0]![0] as { requestBody: { requests: import('googleapis').sheets_v4.Schema$Request[] } }).requestBody.requests;
       const updateReq = requests.find((r) => r.updateCells);
       const cellValues = updateReq!.updateCells!.rows![0]!.values!;
-      const movCell = cellValues[12]!;
+      const nroCell = cellValues[3]!; // col D (0-based index 3)
 
-      expect(movCell.userEnteredValue?.formulaValue).toBe(
-        '=HYPERLINK("https://example.com/path?q=""injected""","Mov")'
-      );
+      expect(nroCell.userEnteredValue?.stringValue).toBe('00005-00000042');
+      expect(nroCell.textFormatRuns).toEqual([
+        { format: { link: { uri: 'https://drive.google.com/file/d/fac-abc-123/view' } } },
+      ]);
+    });
+
+    it('emits col D (nro) as plain stringValue with no link when facturaFileId is empty (FALTA rows, ADV-282)', async () => {
+      const row = makeTestRow({ nro: '00005-00000050', facturaFileId: '' });
+      const diff = makeDiff({ inserts: [{ insertAt: 0, row }] });
+
+      const result = await applySubdiarioDiff('spread-id', 42, diff, [row]);
+
+      expect(result.ok).toBe(true);
+
+      const calls = mockSheetsApi.spreadsheets.batchUpdate.mock.calls;
+      const requests = (calls[0]![0] as { requestBody: { requests: import('googleapis').sheets_v4.Schema$Request[] } }).requestBody.requests;
+      const updateReq = requests.find((r) => r.updateCells);
+      const cellValues = updateReq!.updateCells!.rows![0]!.values!;
+      const nroCell = cellValues[3]!;
+
+      expect(nroCell.userEnteredValue?.stringValue).toBe('00005-00000050');
+      expect(nroCell.textFormatRuns).toBeUndefined();
+    });
+
+    it('regression: no emitted cell contains a =HYPERLINK formula (ADV-282 drops HYPERLINK entirely)', async () => {
+      const row = makeTestRow({
+        nro: '00005-00000042',
+        facturaFileId: 'fac-abc',
+        movimientoLabel: 'BBVA ARS 2026-03 #5',
+        movimiento: 'https://docs.google.com/spreadsheets/d/abc/edit#gid=1&range=A5',
+      });
+      const diff = makeDiff({ inserts: [{ insertAt: 0, row }] });
+
+      const result = await applySubdiarioDiff('spread-id', 42, diff, [row]);
+
+      expect(result.ok).toBe(true);
+
+      const calls = mockSheetsApi.spreadsheets.batchUpdate.mock.calls;
+      const requests = (calls[0]![0] as { requestBody: { requests: import('googleapis').sheets_v4.Schema$Request[] } }).requestBody.requests;
+      const updateReq = requests.find((r) => r.updateCells);
+      const cellValues = updateReq!.updateCells!.rows![0]!.values!;
+
+      for (const cell of cellValues) {
+        const formula = cell.userEnteredValue?.formulaValue ?? '';
+        expect(formula.startsWith('=HYPERLINK')).toBe(false);
+      }
+    });
+
+    it('field mask sanity: updateCells `fields` string includes textFormatRuns so links survive the write (ADV-282)', async () => {
+      const row = makeTestRow({
+        facturaFileId: 'fac-abc',
+        movimientoLabel: 'BBVA ARS 2026-03 #5',
+        movimiento: 'https://docs.google.com/spreadsheets/d/abc/edit#gid=1&range=A5',
+      });
+      const insertDiff = makeDiff({ inserts: [{ insertAt: 0, row }] });
+      await applySubdiarioDiff('spread-id', 42, insertDiff, [row]);
+
+      const updateDiff = makeDiff({
+        updates: [{ rowIndex: 0, desiredIndex: 0, row }],
+      });
+      await applySubdiarioDiff('spread-id', 42, updateDiff, [row]);
+
+      const allCalls = mockSheetsApi.spreadsheets.batchUpdate.mock.calls;
+      const allUpdateRequests = allCalls.flatMap((c) => {
+        const reqs = (c[0] as { requestBody: { requests: import('googleapis').sheets_v4.Schema$Request[] } }).requestBody.requests;
+        return reqs.filter((r) => r.updateCells);
+      });
+      expect(allUpdateRequests.length).toBeGreaterThan(0);
+      for (const req of allUpdateRequests) {
+        expect(req.updateCells!.fields).toContain('textFormatRuns');
+      }
     });
 
     it('update after a deletion: sheetRow uses desiredIndex (not rowIndex) so the shifted row is targeted correctly', async () => {

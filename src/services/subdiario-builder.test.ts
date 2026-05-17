@@ -61,19 +61,25 @@ function makeNc(
   });
 }
 
+let movSeq = 0;
 function makeMov(overrides: {
   matchedFileId: string;
   credito: number;
   fecha?: string;
   matchedType?: 'AUTO' | 'MANUAL' | '';
   sourceUrl?: string;
+  label?: string;
 }): BankMovimiento {
+  // Unique default sourceUrl per call so dedupe (which keys on sourceUrl)
+  // doesn't collapse multiple movs that didn't explicitly request the same URL.
+  movSeq += 1;
   return {
     fecha: `${CURRENT_YEAR}-01-20`,
     debito: null,
     matchedType: 'AUTO',
     concepto: 'Acreditación',
-    sourceUrl: `https://docs.google.com/spreadsheets/d/test-bank-id/edit#gid=1&range=A2`,
+    sourceUrl: `https://docs.google.com/spreadsheets/d/test-bank-id/edit#gid=1&range=A${movSeq + 1}`,
+    label: `BBVA ARS 2026-01 #${movSeq + 1}`,
     ...overrides,
   };
 }
@@ -1042,6 +1048,189 @@ describe('buildSubdiarioRows', () => {
     expect(fcRow!.notas).not.toContain('Pendiente confirmación bancaria');
   });
 
+  // ── One-hop pago→factura traversal in aggregateMovimientos (ADV-279) ──────
+  // The bank matcher prefers pago_recibido candidates (tier 1) over direct
+  // factura candidates, so most member cuotas land with m.matchedFileId ===
+  // pago.fileId. Without one-hop traversal these silently misclassify as
+  // soft-paid. After the fix, hard-paid covers BOTH direct (m → factura) AND
+  // indirect (m → pago → factura) matches.
+
+  it('one-hop: m → pago → factura counts as hard-paid', () => {
+    const fc = makeFc({
+      fileId: 'fc-onehop-1',
+      nroFactura: '00040-00000001',
+      importeTotal: 100_000,
+    });
+    const pago = makePago({
+      fileId: 'pago-onehop-1',
+      matchedFacturaFileId: 'fc-onehop-1',
+      fechaPago: `${CURRENT_YEAR}-03-10`,
+      importePagado: 100_000,
+    });
+    const mov = makeMov({
+      matchedFileId: 'pago-onehop-1',
+      credito: 100_000,
+      fecha: `${CURRENT_YEAR}-03-15`,
+      sourceUrl: 'https://docs.google.com/spreadsheets/d/bank/edit#gid=1&range=A10',
+    });
+
+    const rows = buildSubdiarioRows(
+      makeInput({
+        facturasEmitidas: [fc],
+        pagosRecibidos: [pago],
+        movimientos: [mov],
+      })
+    );
+
+    const fcRow = rows.find((r) => r.tipo === 'FC' && r.nro === '00040-00000001');
+    expect(fcRow).toBeDefined();
+    expect(fcRow!.fechaCobro).toBe(`${CURRENT_YEAR}-03-15`);
+    expect(fcRow!.recibido).toBe(100_000);
+    expect(fcRow!.notas.startsWith('Pendiente confirmación bancaria')).toBe(false);
+    expect(fcRow!.movimiento).toBe(
+      'https://docs.google.com/spreadsheets/d/bank/edit#gid=1&range=A10'
+    );
+  });
+
+  it('one-hop: direct match still works (regression guard)', () => {
+    const fc = makeFc({
+      fileId: 'fc-onehop-2',
+      nroFactura: '00040-00000002',
+      importeTotal: 50_000,
+    });
+    const mov = makeMov({
+      matchedFileId: 'fc-onehop-2',
+      credito: 50_000,
+      fecha: `${CURRENT_YEAR}-03-20`,
+      sourceUrl: 'https://docs.google.com/spreadsheets/d/bank/edit#gid=1&range=A11',
+    });
+
+    const rows = buildSubdiarioRows(
+      makeInput({ facturasEmitidas: [fc], movimientos: [mov] })
+    );
+
+    const fcRow = rows.find((r) => r.tipo === 'FC' && r.nro === '00040-00000002');
+    expect(fcRow).toBeDefined();
+    expect(fcRow!.fechaCobro).toBe(`${CURRENT_YEAR}-03-20`);
+    expect(fcRow!.recibido).toBe(50_000);
+    expect(fcRow!.movimiento).toBe(
+      'https://docs.google.com/spreadsheets/d/bank/edit#gid=1&range=A11'
+    );
+  });
+
+  it('one-hop: pago with no matched factura is ignored — factura stays unpaid', () => {
+    const fc = makeFc({
+      fileId: 'fc-onehop-3',
+      nroFactura: '00040-00000003',
+      importeTotal: 75_000,
+    });
+    const orphanPago = makePago({
+      fileId: 'pago-onehop-3',
+      matchedFacturaFileId: '',
+      fechaPago: `${CURRENT_YEAR}-03-25`,
+      importePagado: 75_000,
+    });
+    const mov = makeMov({
+      matchedFileId: 'pago-onehop-3',
+      credito: 75_000,
+      fecha: `${CURRENT_YEAR}-03-26`,
+      sourceUrl: 'https://docs.google.com/spreadsheets/d/bank/edit#gid=1&range=A12',
+    });
+
+    const rows = buildSubdiarioRows(
+      makeInput({
+        facturasEmitidas: [fc],
+        pagosRecibidos: [orphanPago],
+        movimientos: [mov],
+      })
+    );
+
+    const fcRow = rows.find((r) => r.tipo === 'FC' && r.nro === '00040-00000003');
+    expect(fcRow).toBeDefined();
+    expect(fcRow!.fechaCobro).toBe('');
+    expect(fcRow!.recibido).toBeNull();
+    expect(fcRow!.movimiento).toBe('');
+  });
+
+  it('one-hop: direct and indirect on same movimiento dedupes (no double-count)', () => {
+    const fc = makeFc({
+      fileId: 'fc-onehop-4',
+      nroFactura: '00040-00000004',
+      importeTotal: 200_000,
+    });
+    const pago = makePago({
+      fileId: 'pago-onehop-4',
+      matchedFacturaFileId: 'fc-onehop-4',
+      fechaPago: `${CURRENT_YEAR}-04-01`,
+      importePagado: 100_000,
+    });
+    const sharedUrl = 'https://docs.google.com/spreadsheets/d/bank/edit#gid=1&range=A20';
+    // One movimiento credit=100k, simultaneously a direct match to FC and an
+    // indirect match via pago. Should be counted ONCE.
+    const direct = makeMov({
+      matchedFileId: 'fc-onehop-4',
+      credito: 100_000,
+      fecha: `${CURRENT_YEAR}-04-05`,
+      sourceUrl: sharedUrl,
+    });
+    const indirect = makeMov({
+      matchedFileId: 'pago-onehop-4',
+      credito: 100_000,
+      fecha: `${CURRENT_YEAR}-04-05`,
+      sourceUrl: sharedUrl, // same source row — dedupe
+    });
+    // Plus a second distinct movimiento for the rest of the importe
+    const other = makeMov({
+      matchedFileId: 'fc-onehop-4',
+      credito: 100_000,
+      fecha: `${CURRENT_YEAR}-04-10`,
+      sourceUrl: 'https://docs.google.com/spreadsheets/d/bank/edit#gid=1&range=A30',
+    });
+
+    const rows = buildSubdiarioRows(
+      makeInput({
+        facturasEmitidas: [fc],
+        pagosRecibidos: [pago],
+        movimientos: [direct, indirect, other],
+      })
+    );
+
+    const fcRow = rows.find((r) => r.tipo === 'FC' && r.nro === '00040-00000004');
+    expect(fcRow).toBeDefined();
+    // 100k + 100k (dedupe drops the duplicate), NOT 300k
+    expect(fcRow!.recibido).toBe(200_000);
+  });
+
+  it('one-hop: soft-paid only fires when no movimiento reachable (direct or via pago)', () => {
+    const fc = makeFc({
+      fileId: 'fc-onehop-5',
+      nroFactura: '00040-00000005',
+      importeTotal: 60_000,
+    });
+    const pago = makePago({
+      fileId: 'pago-onehop-5',
+      matchedFacturaFileId: 'fc-onehop-5',
+      fechaPago: `${CURRENT_YEAR}-04-15`,
+      importePagado: 60_000,
+    });
+    // No movimiento pointing at fc OR pago → soft-paid branch is preserved
+
+    const rows = buildSubdiarioRows(
+      makeInput({
+        facturasEmitidas: [fc],
+        pagosRecibidos: [pago],
+        movimientos: [],
+      })
+    );
+
+    const fcRow = rows.find((r) => r.tipo === 'FC' && r.nro === '00040-00000005');
+    expect(fcRow).toBeDefined();
+    expect(fcRow!.fechaCobro).toBe(`${CURRENT_YEAR}-04-15`);
+    expect(fcRow!.recibido).toBe(60_000);
+    expect(fcRow!.notas.startsWith('Pendiente confirmación bancaria')).toBe(true);
+    expect(fcRow!.movimiento).toBe('');
+  });
+
   // ── Movimiento column (ADV-272) ──────────────────────────────────────────
   // The new `movimiento` column carries a Sheets URL pointing at the source
   // bank row. Only hard-paid FCs (movimiento aggregate present) populate it;
@@ -1181,6 +1370,180 @@ describe('buildSubdiarioRows', () => {
     const gap = rows.find((r) => r.cliente.startsWith('FALTA'));
     expect(gap).toBeDefined();
     expect(gap!.movimiento).toBe('');
+  });
+
+  // ── facturaFileId plumbing (ADV-280) ─────────────────────────────────────
+  // SubdiarioRow.facturaFileId carries the source factura's Drive fileId so the
+  // writer can render col D (nro) as a link to the PDF. FC and NC rows populate
+  // it from the source factura; FALTA placeholders leave it blank.
+
+  it('facturaFileId: FC row carries factura.fileId', () => {
+    const fc = makeFc({
+      fileId: 'fc-link-1',
+      nroFactura: '00050-00000001',
+    });
+
+    const rows = buildSubdiarioRows(makeInput({ facturasEmitidas: [fc] }));
+
+    const fcRow = rows.find((r) => r.tipo === 'FC' && r.nro === '00050-00000001');
+    expect(fcRow).toBeDefined();
+    expect(fcRow!.facturaFileId).toBe('fc-link-1');
+  });
+
+  it('facturaFileId: NC row carries the NC factura.fileId', () => {
+    const fc = makeFc({
+      fileId: 'fc-link-2',
+      nroFactura: '00050-00000002',
+      importeTotal: 100_000,
+    });
+    const nc = makeNc({
+      fileId: 'nc-link-2',
+      nroFactura: '00050-00000900',
+      importeTotal: 100_000,
+      fechaEmision: `${CURRENT_YEAR}-02-10`,
+      concepto: 'Nota de credito s/ Factura N° 50-2',
+    });
+
+    const rows = buildSubdiarioRows(
+      makeInput({ facturasEmitidas: [fc, nc] })
+    );
+
+    const ncRow = rows.find((r) => r.tipo === 'NC' && r.nro === '00050-00000900');
+    expect(ncRow).toBeDefined();
+    expect(ncRow!.facturaFileId).toBe('nc-link-2');
+  });
+
+  // ── movimientoLabel population (ADV-281) ─────────────────────────────────
+  // The label is the displayed cell text; the URL is what the link points at.
+  // Builder sources the label from the latest cuota's BankMovimiento.label.
+
+  it('movimientoLabel: hard-paid FC carries the latest cuota label', () => {
+    const fc = makeFc({
+      fileId: 'fc-label-1',
+      nroFactura: '00060-00000001',
+      importeTotal: 100_000,
+    });
+    const mov = makeMov({
+      matchedFileId: 'fc-label-1',
+      credito: 100_000,
+      fecha: `${CURRENT_YEAR}-02-10`,
+      sourceUrl: 'https://docs.google.com/spreadsheets/d/bank/edit#gid=10&range=A5',
+      label: 'BBVA ARS 2026-02 #5',
+    });
+
+    const rows = buildSubdiarioRows(
+      makeInput({ facturasEmitidas: [fc], movimientos: [mov] })
+    );
+
+    const fcRow = rows.find((r) => r.tipo === 'FC' && r.nro === '00060-00000001');
+    expect(fcRow).toBeDefined();
+    expect(fcRow!.movimientoLabel).toBe('BBVA ARS 2026-02 #5');
+    expect(fcRow!.movimiento).toBe(
+      'https://docs.google.com/spreadsheets/d/bank/edit#gid=10&range=A5'
+    );
+  });
+
+  it('movimientoLabel: multi-cuota uses LATEST cuota label', () => {
+    const fc = makeFc({
+      fileId: 'fc-label-2',
+      nroFactura: '00060-00000002',
+      importeTotal: 1_800_000,
+    });
+    const mov1 = makeMov({
+      matchedFileId: 'fc-label-2',
+      credito: 1_000_000,
+      fecha: `${CURRENT_YEAR}-03-15`,
+      sourceUrl: 'https://docs.google.com/spreadsheets/d/bank/edit#gid=10&range=A5',
+      label: 'BBVA ARS 2026-03 #5',
+    });
+    const mov2 = makeMov({
+      matchedFileId: 'fc-label-2',
+      credito: 800_000,
+      fecha: `${CURRENT_YEAR}-03-22`,
+      sourceUrl: 'https://docs.google.com/spreadsheets/d/bank/edit#gid=10&range=A12',
+      label: 'BBVA ARS 2026-03 #12',
+    });
+
+    const rows = buildSubdiarioRows(
+      makeInput({ facturasEmitidas: [fc], movimientos: [mov1, mov2] })
+    );
+
+    const fcRow = rows.find((r) => r.tipo === 'FC' && r.nro === '00060-00000002');
+    expect(fcRow).toBeDefined();
+    expect(fcRow!.movimientoLabel).toBe('BBVA ARS 2026-03 #12');
+  });
+
+  it('movimientoLabel: unpaid/soft-paid/NC-cancelled/FALTA rows leave it empty', () => {
+    const fcUnpaid = makeFc({
+      fileId: 'fc-label-unpaid',
+      nroFactura: '00060-00000010',
+      fechaEmision: `${CURRENT_YEAR}-01-05`,
+    });
+    const fcSoft = makeFc({
+      fileId: 'fc-label-soft',
+      nroFactura: '00060-00000011',
+      fechaEmision: `${CURRENT_YEAR}-01-10`,
+      importeTotal: 50_000,
+    });
+    const softPago = makePago({
+      fileId: 'pago-label-soft',
+      matchedFacturaFileId: 'fc-label-soft',
+      fechaPago: `${CURRENT_YEAR}-01-15`,
+      importePagado: 50_000,
+    });
+    const fc2 = makeFc({
+      fileId: 'fc-label-cancelled',
+      nroFactura: '00060-00000013',
+      fechaEmision: `${CURRENT_YEAR}-01-20`,
+      importeTotal: 70_000,
+    });
+    const nc = makeNc({
+      fileId: 'nc-label',
+      nroFactura: '00060-00000900',
+      importeTotal: 70_000,
+      fechaEmision: `${CURRENT_YEAR}-01-25`,
+      concepto: 'Nota de credito s/ Factura N° 60-13',
+    });
+
+    const rows = buildSubdiarioRows(
+      makeInput({
+        facturasEmitidas: [fcUnpaid, fcSoft, fc2, nc],
+        pagosRecibidos: [softPago],
+      })
+    );
+
+    // Unpaid
+    expect(rows.find((r) => r.nro === '00060-00000010')!.movimientoLabel).toBe('');
+    // Soft-paid
+    expect(rows.find((r) => r.nro === '00060-00000011')!.movimientoLabel).toBe('');
+    // NC-cancelled FC + the NC itself
+    expect(rows.find((r) => r.nro === '00060-00000013')!.movimientoLabel).toBe('');
+    expect(rows.find((r) => r.nro === '00060-00000900')!.movimientoLabel).toBe('');
+    // FALTA placeholder (gap between 11 and 13)
+    const gap = rows.find((r) => r.cliente.startsWith('FALTA'));
+    expect(gap).toBeDefined();
+    expect(gap!.movimientoLabel).toBe('');
+  });
+
+  it('facturaFileId: FALTA placeholder has empty facturaFileId', () => {
+    const fc1 = makeFc({
+      fileId: 'fc-link-3a',
+      nroFactura: '00050-00000010',
+      fechaEmision: `${CURRENT_YEAR}-01-10`,
+    });
+    const fc2 = makeFc({
+      fileId: 'fc-link-3b',
+      nroFactura: '00050-00000012',
+      fechaEmision: `${CURRENT_YEAR}-01-20`,
+    });
+
+    const rows = buildSubdiarioRows(
+      makeInput({ facturasEmitidas: [fc1, fc2] })
+    );
+
+    const gap = rows.find((r) => r.cliente.startsWith('FALTA'));
+    expect(gap).toBeDefined();
+    expect(gap!.facturaFileId).toBe('');
   });
 
   // ── Test 14d: Don't emit FALTA for filtered-out source rows ──────────────

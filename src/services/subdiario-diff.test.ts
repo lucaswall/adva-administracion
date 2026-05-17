@@ -23,6 +23,8 @@ function makeRow(overrides: Partial<SubdiarioRow> = {}): SubdiarioRow {
     fechaCobro: '',
     recibido: null,
     movimiento: '',
+    movimientoLabel: '',
+    facturaFileId: '',
     notas: '',
     ...overrides,
   };
@@ -194,10 +196,20 @@ describe('diffSubdiarioRows', () => {
     expect(result.updates).toHaveLength(0);
   });
 
-  it('movimiento: empty → URL produces exactly one update (ADV-272)', () => {
-    const base = makeRow({ nro: '00001-00000001', movimiento: '' });
+  // ADV-281: diff equality on the movimiento column uses EXACT match on
+  // `movimientoLabel` (the displayed text), not on the URL. The URL round-trips
+  // through a textFormatRuns link so the label always survives `getValues`,
+  // while the URL itself is unknowable from the read side. The SEMANTIC
+  // PRESENCE hack on the URL (ADV-272) is retired.
+
+  it('movimientoLabel: empty → "BBVA ARS 2026-03 #42" produces exactly one update', () => {
+    const base = makeRow({ nro: '00001-00000001', movimientoLabel: '', movimiento: '' });
     const existing = [withIndex(base, 0)];
-    const desired = [{ ...base, movimiento: 'https://docs.google.com/spreadsheets/d/x/edit#gid=1&range=A5' }];
+    const desired = [{
+      ...base,
+      movimientoLabel: 'BBVA ARS 2026-03 #42',
+      movimiento: 'https://docs.google.com/spreadsheets/d/x/edit#gid=1&range=A42',
+    }];
 
     const result = diffSubdiarioRows(existing, desired);
 
@@ -206,21 +218,50 @@ describe('diffSubdiarioRows', () => {
     expect(result.deletes).toHaveLength(0);
   });
 
-  it('movimiento: existing "Mov" (HYPERLINK round-trip) vs desired URL → NO update (semantic presence)', () => {
-    // After a HYPERLINK is written, UNFORMATTED_VALUE returns the displayed text "Mov".
-    // The next diff sees existing.movimiento="Mov" vs desired.movimiento=URL; strict
-    // equality would loop forever. Semantic presence avoids that.
-    const existing = [withIndex(makeRow({ nro: '00001-00000001', movimiento: 'Mov' }), 0)];
-    const desired = [makeRow({ nro: '00001-00000001', movimiento: 'https://docs.google.com/spreadsheets/d/x/edit#gid=1&range=A5' })];
+  it('movimientoLabel: same label, different URL → NO update (URL excluded from diff)', () => {
+    // URL is per-row identity but unknowable from the read side. Diff must
+    // ignore it; comparing it strictly would force perpetual updates.
+    const label = 'BBVA ARS 2026-03 #42';
+    const existing = [withIndex(makeRow({
+      nro: '00001-00000001',
+      movimientoLabel: label,
+      movimiento: '',
+    }), 0)];
+    const desired = [makeRow({
+      nro: '00001-00000001',
+      movimientoLabel: label,
+      movimiento: 'https://docs.google.com/spreadsheets/d/x/edit#gid=1&range=A42',
+    })];
 
     const result = diffSubdiarioRows(existing, desired);
 
     expect(result.updates).toHaveLength(0);
   });
 
-  it('movimiento: URL → empty produces exactly one update (link removed)', () => {
-    const existing = [withIndex(makeRow({ nro: '00001-00000001', movimiento: 'Mov' }), 0)];
-    const desired = [makeRow({ nro: '00001-00000001', movimiento: '' })];
+  it('movimientoLabel: different label → exactly one update emitted', () => {
+    const existing = [withIndex(makeRow({
+      nro: '00001-00000001',
+      movimientoLabel: 'BBVA ARS 2026-03 #42',
+    }), 0)];
+    const desired = [makeRow({
+      nro: '00001-00000001',
+      movimientoLabel: 'Banco Ciudad ARS 2026-03 #7',
+    })];
+
+    const result = diffSubdiarioRows(existing, desired);
+
+    expect(result.updates).toHaveLength(1);
+  });
+
+  it('movimientoLabel: populated → empty produces exactly one update (link removed)', () => {
+    const existing = [withIndex(makeRow({
+      nro: '00001-00000001',
+      movimientoLabel: 'BBVA ARS 2026-03 #42',
+    }), 0)];
+    const desired = [makeRow({
+      nro: '00001-00000001',
+      movimientoLabel: '',
+    })];
 
     const result = diffSubdiarioRows(existing, desired);
 
@@ -307,5 +348,22 @@ describe('diffSubdiarioRows', () => {
     expect(result.inserts).toHaveLength(1);
     expect(result.deletes).toHaveLength(0);
     expect(result.updates).toHaveLength(0);
+  });
+
+  // ADV-280: facturaFileId is unknowable from a sheet read (the read side
+  // always reports ''). Comparing it strictly would force perpetual updates
+  // against any builder-side row with a populated fileId. Diff must skip it.
+  it('rows differing only by facturaFileId are equal — no update emitted', () => {
+    const existing = withIndex(
+      makeRow({ nro: '00001-00000001', facturaFileId: '' }),
+      0
+    );
+    const desired = makeRow({ nro: '00001-00000001', facturaFileId: 'fac-abc' });
+
+    const result = diffSubdiarioRows([existing], [desired]);
+
+    expect(result.updates).toHaveLength(0);
+    expect(result.inserts).toHaveLength(0);
+    expect(result.deletes).toHaveLength(0);
   });
 });

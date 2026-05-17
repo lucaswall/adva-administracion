@@ -135,10 +135,11 @@ export async function resolveSubdiarioId(
  * a row written by this writer round-trips without spurious updates on the
  * first incremental diff after deploy.
  *
- * Column M (movimiento) round-trip caveat (ADV-272): `getValues` uses
- * `UNFORMATTED_VALUE`, which returns the *displayed* text of HYPERLINK formulas
- * ("Mov"), not the formula or URL. The diff equality check in
- * `subdiario-diff.ts` therefore compares this column on semantic presence only.
+ * Column M (movimiento) round-trip caveat (ADV-281): col M is a textFormatRuns
+ * link. `getValues` returns the displayed text (the label, e.g.
+ * `'BBVA ARS 2026-03 #42'`) but never the URL. The read populates
+ * `movimientoLabel` directly and leaves `movimiento` (URL) empty. The diff
+ * equality keys on `movimientoLabel` only — see `subdiario-diff.ts`.
  *
  * @internal Exported for test reach only. Do not call from outside this module.
  *
@@ -203,7 +204,15 @@ export async function readSubdiarioRows(
       categoria: String(row[9] ?? '').trim(),
       fechaCobro,
       recibido,
-      movimiento: String(row[12] ?? '').trim(),
+      // ADV-281: col M is a textFormatRuns link — `getValues` returns the
+      // displayed text (the label). The URL is unknowable from the read; the
+      // diff keys on `movimientoLabel` instead.
+      movimiento: '',
+      movimientoLabel: String(row[12] ?? '').trim(),
+      // ADV-280: cell content does not encode the source factura's fileId
+      // (only the displayed nro string round-trips), so we report ''.
+      // The diff equality skips this field — see subdiario-diff.ts.
+      facturaFileId: '',
       notas:     String(row[13] ?? '').trim(),
     });
   }
@@ -280,6 +289,12 @@ async function readMovimientosRows(
   const allMovs: BankMovimiento[] = [];
 
   for (const [key, spreadsheetId] of movimientosSpreadsheets) {
+    // Cache key format: `"{year}:{bankFolderName}"`. Split on FIRST colon so
+    // bank folder names that contain ':' round-trip intact. Defensive fallback:
+    // if no colon, treat the whole key as the bank folder name.
+    const colonIdx = key.indexOf(':');
+    const bankFolderName = colonIdx >= 0 ? key.slice(colonIdx + 1) : key;
+
     const metadataResult = await getSheetMetadata(spreadsheetId);
     if (!metadataResult.ok) {
       warn('Failed to get movimientos sheet metadata', {
@@ -318,6 +333,7 @@ async function readMovimientosRows(
         // rowNumber is 1-indexed: header is row 1, first data row is row 2
         const rowNumber = i + 2;
         const sourceUrl = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/edit#gid=${sheet.sheetId}&range=A${rowNumber}`;
+        const label = `${bankFolderName} ${sheet.title} #${rowNumber}`;
         allMovs.push({
           fecha,
           debito: parseNumber(row[2]) || null,
@@ -326,6 +342,7 @@ async function readMovimientosRows(
           matchedType,
           concepto: String(row[1] ?? ''),
           sourceUrl,
+          label,
         });
       }
     }
@@ -579,7 +596,8 @@ export async function syncSubdiario(
               rowIndex: i,
               fecha: '', cod: '', tipo: 'FC', nro: '', cliente: '', cuit: '',
               condicion: '', total: 0, concepto: '', categoria: '',
-              fechaCobro: '', recibido: null, movimiento: '', notas: '',
+              fechaCobro: '', recibido: null, movimiento: '',
+              movimientoLabel: '', facturaFileId: '', notas: '',
             });
           }
         } else if (!isNew) {

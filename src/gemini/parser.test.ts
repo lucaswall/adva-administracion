@@ -2105,13 +2105,14 @@ describe('parseFacturaResponse - condicionIVAReceptor (ADV-245)', () => {
     }
   });
 
-  it('parses all 5 canonical condicionIVAReceptor values for factura_emitida', () => {
+  it('parses all 6 canonical condicionIVAReceptor values for factura_emitida', () => {
     const canonicalValues = [
       'IVA Responsable Inscripto',
       'Consumidor Final',
       'Responsable Monotributo',
       'Cliente del Exterior',
       'IVA Sujeto Exento',
+      'Exterior',
     ];
     for (const value of canonicalValues) {
       const response = JSON.stringify({ ...baseEmitida, condicionIVAReceptor: value });
@@ -2161,6 +2162,65 @@ describe('parseFacturaResponse - condicionIVAReceptor (ADV-245)', () => {
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.value.data.condicionIVAReceptor).toBeUndefined();
+    }
+  });
+
+  // ADV-277: Factura E (exports) — receptor is by AFIP definition foreign.
+  // The parser hardcodes condicionIVAReceptor='Exterior' regardless of what
+  // Gemini returned, BEFORE the canonical-list needsReview flag fires.
+  it('Factura E with empty condicionIVAReceptor hardcodes Exterior and skips review', () => {
+    const response = JSON.stringify({
+      ...baseEmitida,
+      tipoComprobante: 'E',
+      // condicionIVAReceptor omitted — simulates Gemini extraction failure
+    });
+    const result = parseFacturaResponse(response, 'factura_emitida');
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.data.condicionIVAReceptor).toBe('Exterior');
+      expect(result.value.needsReview).toBe(false);
+    }
+  });
+
+  it('Factura E with extracted "Cliente del Exterior" overrides to "Exterior"', () => {
+    const response = JSON.stringify({
+      ...baseEmitida,
+      tipoComprobante: 'E',
+      condicionIVAReceptor: 'Cliente del Exterior',
+    });
+    const result = parseFacturaResponse(response, 'factura_emitida');
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.data.condicionIVAReceptor).toBe('Exterior');
+      expect(result.value.needsReview).toBe(false);
+    }
+  });
+
+  it('Factura E with garbage condicionIVAReceptor overrides to "Exterior" and silences review flag', () => {
+    const response = JSON.stringify({
+      ...baseEmitida,
+      tipoComprobante: 'E',
+      condicionIVAReceptor: 'foobar',
+    });
+    const result = parseFacturaResponse(response, 'factura_emitida');
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.data.condicionIVAReceptor).toBe('Exterior');
+      expect(result.value.needsReview).toBe(false);
+    }
+  });
+
+  it('Non-E factura with "IVA Responsable Inscripto" is unchanged (regression guard for ADV-277)', () => {
+    const response = JSON.stringify({
+      ...baseEmitida,
+      tipoComprobante: 'A',
+      condicionIVAReceptor: 'IVA Responsable Inscripto',
+    });
+    const result = parseFacturaResponse(response, 'factura_emitida');
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.data.condicionIVAReceptor).toBe('IVA Responsable Inscripto');
+      expect(result.value.needsReview).toBe(false);
     }
   });
 });

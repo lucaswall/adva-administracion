@@ -404,6 +404,7 @@ const VALID_CONDICION_IVA: readonly string[] = [
   'Responsable Monotributo',
   'Cliente del Exterior',
   'IVA Sujeto Exento',
+  'Exterior',
 ];
 
 /**
@@ -499,12 +500,19 @@ export function parseFacturaResponse(
 
       // condicionIVAReceptor: only set for factura_emitida (ADVA's own condition is constant)
       if (actualDocumentType === 'factura_emitida') {
-        const rawCondicion = rawData.condicionIVAReceptor;
-        if (rawCondicion !== undefined && rawCondicion !== null && rawCondicion !== '') {
-          if (VALID_CONDICION_IVA.includes(rawCondicion)) {
-            data.condicionIVAReceptor = rawCondicion;
-          } else {
-            hasInvalidCondicionIVA = true;
+        // ADV-277: Factura E (exports) — receptor is by AFIP definition foreign.
+        // Hardcode 'Exterior' regardless of Gemini's extraction; the value cannot
+        // be trusted on E forms (the extractor latches onto the issuer's condition).
+        if (rawData.tipoComprobante === 'E') {
+          data.condicionIVAReceptor = 'Exterior';
+        } else {
+          const rawCondicion = rawData.condicionIVAReceptor;
+          if (rawCondicion !== undefined && rawCondicion !== null && rawCondicion !== '') {
+            if (VALID_CONDICION_IVA.includes(rawCondicion)) {
+              data.condicionIVAReceptor = rawCondicion;
+            } else {
+              hasInvalidCondicionIVA = true;
+            }
           }
         }
       }
