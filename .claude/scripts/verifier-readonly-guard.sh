@@ -11,7 +11,10 @@
 set -euo pipefail
 
 INPUT=$(cat)
-CMD=$(printf '%s' "$INPUT" | jq -r '.tool_input.command // empty')
+CMD=$(printf '%s' "$INPUT" | jq -r '.tool_input.command // empty' 2>/dev/null) || {
+  echo "verifier-readonly-guard: could not parse hook input (failing closed)" >&2
+  exit 2
+}
 
 if [[ -z "$CMD" ]]; then
   exit 0
@@ -49,9 +52,16 @@ if echo "$CMD" | grep -qiE '\btee\b'; then
   fi
 fi
 
+# Resolve the project root for absolute-path matching. Claude Code exports
+# CLAUDE_PROJECT_DIR to hook commands; fall back to the script's own location.
+PROJECT_DIR="${CLAUDE_PROJECT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
+# Escape regex metacharacters in the path so it can be embedded in grep -E.
+# Note: ']' must be first in the class and '[' last — BSD sed parses '[.' as a collating symbol.
+PROJECT_DIR_RE=$(printf '%s' "$PROJECT_DIR" | sed 's/[].\${}()*+?|^[]/\\&/g')
+
 # File-clobbering redirects targeting the project tree.
 # Allow redirects to /dev/null, /tmp/, /var/tmp/, $HOME outside project, and process substitutions.
-if echo "$CMD" | grep -qE '>>?[[:space:]]*(/home/kthulhu/Projects/|\./|\.\./|src/|test/|tests/|dist/|node_modules/|package\.json|package-lock\.json|tsconfig|vitest\.config|nixpacks\.toml|railway\.json|\.env)'; then
+if echo "$CMD" | grep -qE '>>?[[:space:]]*('"$PROJECT_DIR_RE"'/|\./|\.\./|src/|test/|tests/|dist/|apps-script/|support/|node_modules/|package\.json|package-lock\.json|tsconfig|vitest\.config|railway\.json|railpack\.json|\.env)'; then
   block "writing to project files via redirect is forbidden"
 fi
 
@@ -61,7 +71,7 @@ if echo "$CMD" | grep -qE '\brm[[:space:]]+(-[a-zA-Z]*[rRfF][a-zA-Z]*\b)'; then
 fi
 
 # rm/mv/cp acting on project paths or bare project subdirs.
-if echo "$CMD" | grep -qE '\b(rm|mv|cp)[[:space:]]+(-[a-zA-Z]*[[:space:]]+)*(/home/kthulhu/Projects/|\./|src(/|\b)|tests?(/|\b)|dist(/|\b)|node_modules(/|\b)|package\.json|package-lock\.json|\.claude(/|\b))'; then
+if echo "$CMD" | grep -qE '\b(rm|mv|cp)[[:space:]]+(-[a-zA-Z]*[[:space:]]+)*('"$PROJECT_DIR_RE"'/|\./|src(/|\b)|tests?(/|\b)|dist(/|\b)|apps-script(/|\b)|support(/|\b)|node_modules(/|\b)|package\.json|package-lock\.json|\.claude(/|\b))'; then
   block "rm/mv/cp on project paths is forbidden"
 fi
 

@@ -1,7 +1,7 @@
 ---
 name: bug-hunter
 description: Expert code reviewer that finds bugs in git changes. Use proactively after implementing code changes, before committing. Checks for logic errors, CLAUDE.md violations, security issues (OWASP 2025 + OWASP LLM Top 10 2025), supply chain (slopsquatting), failing-open paths, type safety, resource leaks, async issues, edge cases, and project-specific invariants (spreadsheet schema, MANUAL match locking, processing lock atomicity).
-tools: Bash, Read, Glob, Grep
+tools: Bash, Read, Glob, Grep, Write, Edit
 model: sonnet
 permissionMode: dontAsk
 memory: project
@@ -9,7 +9,7 @@ memory: project
 
 Analyze uncommitted git changes for bugs and project rule violations.
 
-**Memory:** Check your agent memory for known false positives and recurring patterns from previous reviews. After completing a review, update your memory with any new false positives or confirmed patterns worth tracking.
+**Memory:** Check your agent memory for known false positives, confirmed-fixed patterns, and recurring issues from previous reviews. After completing a review, update your memory with any new entries worth tracking. Write and Edit are granted ONLY for your agent-memory directory (`.claude/agent-memory/bug-hunter/`) — never write or edit any other file; you report findings, the main agent fixes them.
 
 ## Workflow
 

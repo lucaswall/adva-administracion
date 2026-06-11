@@ -62,10 +62,10 @@
 | `[improvement]` | Enhancement to existing functionality |
 | `[enhancement]` | Similar to improvement |
 | `[refactor]` | Code restructuring without behavior change |
-| `[docs]` | Documentation updates |
-| `[chore]` | Maintenance tasks |
 
 Non-audit issues are preserved in Linear Backlog without validation.
+
+**Note on `[docs]`/`[chore]`:** when emitted by an audit reviewer they are audit tags mapped to the Technical Debt label (table below); pre-existing Backlog issues already labeled Feature/Improvement are the ones preserved without validation.
 
 ## Linear Label Mapping
 

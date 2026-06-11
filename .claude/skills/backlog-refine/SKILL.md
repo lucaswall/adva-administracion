@@ -1,8 +1,8 @@
 ---
 name: backlog-refine
-description: Refine vague Linear Backlog issues into well-specified, actionable items. Use when user says "refine backlog", "refine ADVA-123", "improve backlog items", or "clarify issues". Fetches Backlog issues, analyzes gaps, asks clarifying questions, and updates Linear after user confirms.
-argument-hint: [ADVA-123 ADVA-124 or blank for picker]
-allowed-tools: Read, Glob, Grep, AskUserQuestion, mcp__linear__list_teams, mcp__linear__list_issues, mcp__linear__get_issue, mcp__linear__update_issue, mcp__linear__create_issue, mcp__linear__create_comment, mcp__linear__list_issue_labels, mcp__linear__list_issue_statuses
+description: Refine vague Linear Backlog issues into well-specified, actionable items. Use when user says "refine backlog", "refine ADV-123", "improve backlog items", or "clarify issues". Fetches Backlog issues, analyzes gaps, asks clarifying questions, and updates Linear after user confirms.
+argument-hint: [ADV-123 ADV-124 or blank for picker]
+allowed-tools: Read, Glob, Grep, AskUserQuestion, mcp__linear__list_teams, mcp__linear__list_issues, mcp__linear__get_issue, mcp__linear__save_issue, mcp__linear__save_comment, mcp__linear__list_issue_labels, mcp__linear__list_issue_statuses
 disable-model-invocation: true
 ---
 
@@ -18,7 +18,7 @@ Refine vague Backlog issues into well-specified, actionable items through intera
 
 ### Mode 1: Specific Issues ($ARGUMENTS contains issue identifiers)
 
-Parse issue identifiers from `$ARGUMENTS` (e.g., `ADVA-123`, `ADVA-124`).
+Parse issue identifiers from `$ARGUMENTS` (e.g., `ADV-123`, `ADV-124`).
 - Fetch each issue using `mcp__linear__get_issue`
 - Continue to Analysis phase
 
@@ -53,7 +53,7 @@ Rate each issue 1-5 based **only** on the data returned from `list_issues` (titl
 - Scope is ambiguous (could mean multiple things) → −1
 - Priority or labels seem mismatched with description → −1
 
-**Truncation rule:** `list_issues` truncates descriptions at ~300-400 chars, which systematically hides acceptance criteria (they come last in the standard template). When the visible description uses the structured template format (`**Problem:**`, `**Context:**`, `**Impact:**`, `**Fix:**` section headers) and is truncated, **assume acceptance criteria are present** — do NOT deduct for them. Only deduct for acceptance criteria when the full description is visible (short enough to not be truncated) and they're genuinely missing.
+**Truncation rule:** `list_issues` truncates descriptions at ~300-400 chars, which systematically hides acceptance criteria (they come last in the standard template). When the visible description uses the structured template format (`**Problem:**`, `**Context:**`, `**Impact:**` section headers) and is truncated, **assume acceptance criteria are present** — do NOT deduct for them. Only deduct for acceptance criteria when the full description is visible (short enough to not be truncated) and they're genuinely missing.
 
 Minimum score is 1. Issues scoring 5 can still be selected — refinement may find minor improvements after reading full details and source code.
 
@@ -100,7 +100,7 @@ Check for these common problems in Backlog issues:
 For each issue, present your analysis to the user:
 
 ```
-## ADVA-123: [Current Title]
+## ADV-123: [Current Title]
 
 **Current state:**
 [Brief summary of what the issue says now]
@@ -136,18 +136,18 @@ Continue the discussion until the user says they're done or confirms the refinem
 When an issue covers multiple distinct problems or its scope is too broad, suggest splitting it. During discussion, propose the split clearly:
 
 ```
-**Suggested split for ADVA-123:**
+**Suggested split for ADV-123:**
 This issue covers both Gemini prompt accuracy and spreadsheet storage format. I'd suggest splitting:
 
-1. **ADVA-123 (updated):** "Gemini prompt fails to extract nota de credito line items"
+1. **ADV-123 (updated):** "Gemini prompt fails to extract nota de credito line items"
    - Label: Bug, Priority: High
 2. **New issue:** "Spreadsheet storage drops decimal precision on nota de credito amounts"
    - Label: Bug, Priority: Medium
 ```
 
 If the user agrees to a split:
-- The **original issue** (ADVA-123) is updated to become the first split item (new title, description, priority, labels)
-- **New issues** are created via `mcp__linear__create_issue` for the remaining split items, all in `state: "Backlog"` with proper labels and priorities
+- The **original issue** (ADV-123) is updated to become the first split item (new title, description, priority, labels)
+- **New issues** are created via `mcp__linear__save_issue` (no `id` = create) for the remaining split items, all in `state: "Backlog"` with proper labels and priorities
 - Each split issue gets a full refined description (using the standard format)
 
 ### Suggesting Cancellation
@@ -164,7 +164,7 @@ During analysis, if the issue shouldn't be done, suggest canceling it. Valid rea
 Present cancellation suggestions clearly during discussion:
 
 ```
-## ADVA-123: [Current Title]
+## ADV-123: [Current Title]
 
 **Recommendation: Cancel this issue**
 
@@ -186,28 +186,28 @@ When the user confirms they're done refining:
 ```
 ## Updates to apply:
 
-### ADVA-123 (update)
+### ADV-123 (update)
 - **Title:** [Original] -> [New title, if changed]
 - **Description:** [Full new description]
 - **Priority:** [Original] -> [New, if changed]
 - **Labels:** [Original] -> [New, if changed]
 
-### New issue (split from ADVA-123)
+### New issue (split from ADV-123)
 - **Title:** [Title]
 - **Description:** [Full description]
 - **Priority:** [Priority]
 - **Labels:** [Labels]
 
-### ADVA-124 (cancel)
+### ADV-124 (cancel)
 - **Reason:** [Specific reason for cancellation]
 
-### ADVA-125 (update)
+### ADV-125 (update)
 ...
 ```
 
 2. **Apply updates immediately:**
-   - Use `mcp__linear__update_issue` for each updated issue (title, description, priority, labels)
-   - Use `mcp__linear__create_issue` for each new split issue with `team: [discovered team name]`, `state: "Backlog"`, and proper labels/priority
+   - Use `mcp__linear__save_issue` with `id: "ADV-xxx"` for each updated issue (title, description, priority, labels)
+   - Use `mcp__linear__save_issue` (no `id`) for each new split issue with `team: [discovered team name]`, `state: "Backlog"`, and proper labels/priority
    - For canceled issues, follow the Cancellation Procedure below
    - For kept issues when other issues in the same session were canceled, follow the Vetted Marker below
 
@@ -218,7 +218,7 @@ For each issue the user agreed to cancel:
 1. **Add a comment** explaining the cancellation reason:
 
 ```
-mcp__linear__create_comment(issueId: "ADVA-xxx", body: "Canceled during refinement: [reason]")
+mcp__linear__save_comment(issueId: "ADV-xxx", body: "Canceled during refinement: [reason]")
 ```
 
 The reason should be specific, e.g.:
@@ -228,7 +228,7 @@ The reason should be specific, e.g.:
 
 2. **Move to Canceled state.**
 
-**CRITICAL: Linear MCP same-type state bug.** "Duplicate" and "Canceled" are both `type: canceled` in Linear. Passing `state: "Canceled"` by name silently no-ops if the issue is already in another canceled-type state. To reliably cancel issues, first fetch the team's statuses to get the Canceled state UUID:
+**Linear MCP same-type state gotcha.** Passing a state by name can silently no-op when the issue already sits in another state of the same `type` (verified for `Done`/`Released`, both `type: completed`). To cancel issues reliably, first fetch the team's statuses to get the Canceled state UUID:
 
 ```
 mcp__linear__list_issue_statuses(team: [discovered team name])
@@ -237,7 +237,7 @@ mcp__linear__list_issue_statuses(team: [discovered team name])
 Find the status with `name: "Canceled"` and use its `id` (UUID) in the update call:
 
 ```
-mcp__linear__update_issue(id: "ADVA-xxx", state: "<canceled-state-uuid>")
+mcp__linear__save_issue(id: "ADV-xxx", state: "<canceled-state-uuid>")
 ```
 
 **Always use the UUID, never the name**, for canceled-type state transitions.
@@ -252,7 +252,7 @@ When a refinement session cancels some issues but keeps others, the kept issues 
 **Refinement:** Reviewed YYYY-MM-DD — confirmed valid. [1-sentence summary of why it was kept]. Do not drop.
 ```
 
-This note is added via `mcp__linear__update_issue` along with any other description changes. If the kept issue's description doesn't need other changes, still update it to add the Refinement note.
+This note is added via `mcp__linear__save_issue` (with `id`) along with any other description changes. If the kept issue's description doesn't need other changes, still update it to add the Refinement note.
 
 ### Refined Description Format
 
@@ -311,20 +311,20 @@ After applying updates, output:
 Refinement complete.
 
 Updated X issues:
-- ADVA-123: [New title] — [brief summary of changes]
-- ADVA-124: [New title] — [brief summary of changes]
+- ADV-123: [New title] — [brief summary of changes]
+- ADV-124: [New title] — [brief summary of changes]
 
 Created Y issues (from splits):
-- ADVA-130: [Title] (split from ADVA-123) — [Label, Priority]
-- ADVA-131: [Title] (split from ADVA-124) — [Label, Priority]
+- ADV-130: [Title] (split from ADV-123) — [Label, Priority]
+- ADV-131: [Title] (split from ADV-124) — [Label, Priority]
 
 Canceled Z issues:
-- ADVA-126: [Title] — [brief cancellation reason]
+- ADV-126: [Title] — [brief cancellation reason]
 
 Unchanged:
-- ADVA-125: Already well-specified
+- ADV-125: Already well-specified
 
-Next step: Use `plan-backlog ADVA-123` to create an implementation plan.
+Next step: Use `plan-backlog ADV-123` to create an implementation plan.
 ```
 
 Do not ask follow-up questions after termination.

@@ -20,9 +20,9 @@
 
 **Keep the roster small.** Anthropic's current guidance is "narrow, specialized, well-described" rather than a hard cap, but in practice 3–4 custom subagents per project is plenty — beyond that, the lead struggles to pick the right one and delegation regresses.
 
-**Subagents cannot spawn other subagents.** If your workflow requires nested delegation, use skills or chain subagents from the main conversation. Exception: an agent running as **main thread** via `claude --agent <name>` *can* spawn via `Agent(type1, type2)`.
+**Nested subagents: supported since v2.1.172** (changelog: "Sub-agents can now spawn their own sub-agents, up to 5 levels deep"). Note the sub-agents docs page may still carry the older "subagents cannot spawn other subagents" wording — the changelog is newer; verify on the installed version before designing around deep nesting. For older versions, chain subagents from the main conversation or use skills.
 
-**Restrict spawnable agents** — Use `Agent(type1, type2)` in the `tools` field to allowlist which agent types can be spawned (only applies when the subagent runs as main thread with `claude --agent`). The Task tool was renamed to **Agent** in v2.1.63.
+**Restrict spawnable agents** — Use `Agent(type1, type2)` in the `tools` field to allowlist which agent types can be spawned (also applies when the subagent runs as main thread with `claude --agent`). The Task tool was renamed to **Agent** in v2.1.63.
 
 **Plugin-installed subagents** ignore their declared `hooks`, `mcpServers`, and `permissionMode` fields — those are loaded only from project/user/CLI scopes for security.
 

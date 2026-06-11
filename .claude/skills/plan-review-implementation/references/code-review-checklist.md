@@ -176,7 +176,7 @@ Reference for plan-review-implementation skill.
 - [ ] Lib modules doing significant work have logging (no blind spots in data layer)
 
 ### Structured Logging
-- [ ] Logs use structured format with `{ action: "..." }` field
+- [ ] Logs use structured fields (`{ module, phase, ... }` per CLAUDE.md LOGGING; `action` where the module uses it)
 - [ ] External API calls log `durationMs` (Gemini, Railway, Google Drive)
 - [ ] No sensitive data in logs (tokens, passwords, API keys, raw file data)
 

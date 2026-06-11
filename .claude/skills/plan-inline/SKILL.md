@@ -2,7 +2,7 @@
 name: plan-inline
 description: Create TDD implementation plans from direct feature requests. Use when user provides a task description like "add X feature", "create Y function", or "implement Z". Creates Linear issues in Todo state. Faster than plan-backlog for ad-hoc requests that don't need backlog tracking.
 argument-hint: <task description>
-allowed-tools: Read, Edit, Write, Glob, Grep, Task, Bash, mcp__linear__list_teams, mcp__linear__list_issues, mcp__linear__get_issue, mcp__linear__create_issue, mcp__linear__update_issue, mcp__linear__list_issue_labels, mcp__linear__list_issue_statuses
+allowed-tools: Read, Edit, Write, Glob, Grep, Agent, Bash, mcp__linear__list_teams, mcp__linear__list_issues, mcp__linear__get_issue, mcp__linear__save_issue, mcp__linear__list_issue_labels, mcp__linear__list_issue_statuses
 effort: high
 disable-model-invocation: true
 ---
@@ -14,7 +14,7 @@ Create a TDD implementation plan directly from inline instructions in $ARGUMENTS
 **Before doing anything else**, verify git state:
 
 1. Check current branch: `git branch --show-current`
-2. If NOT on `main` or `master`:
+2. If NOT on `main`:
    - **STOP** with message: "Not on main branch. Please switch to main before planning: `git checkout main`"
 3. Check for uncommitted changes: `git status --porcelain`
 4. If there are uncommitted changes:
@@ -58,10 +58,9 @@ If PLANS.md is empty or has "Status: COMPLETE" → proceed with planning.
 ## Discovering Team Context
 
 Read CLAUDE.md to find the LINEAR INTEGRATION section. Look for:
-- **Team name** (e.g., "Team: 'ProjectName'")
-- **Issue prefix** (e.g., "Prefix: PROJ-xxx")
-- **State workflow** (e.g., "States: Backlog → Todo → In Progress → Review → Done")
-- **Project-specific URLs** (Linear workspace URL, etc.)
+- **Team name** (e.g., "Team: ADVA Administracion")
+- **Issue prefix** (e.g., "Issue prefix: ADV-")
+- **State workflow** (the State Flow table)
 
 If CLAUDE.md doesn't have a LINEAR INTEGRATION section, call `mcp__linear__list_teams` to discover the team name dynamically.
 
@@ -86,9 +85,9 @@ Example arguments:
 
 1. **Available MCP servers** - Look for the "MCP SERVERS" section to find:
    - Google Drive MCP for file access (`gdrive_search`, `gdrive_read_file`, `gsheets_read`, etc.)
-   - Railway MCP for deployment context (`get-logs`, `list-deployments`, `list-services`, `list-variables`)
+   - Railway MCP for deployment context (`get_logs`, `list_deployments`, `list_services`, `list_variables`)
    - Gemini MCP for prompt testing (`gemini_analyze_pdf`)
-   - Linear MCP for issue tracking (`list_issues`, `get_issue`, `create_issue`, etc.)
+   - Linear MCP for issue tracking (`list_issues`, `get_issue`, `save_issue`, etc.)
 
 2. **Project structure** - Look for "STRUCTURE" section to understand:
    - Source code organization
@@ -107,7 +106,7 @@ Example arguments:
 1. **Read PLANS.md** - Pre-flight check
 2. **Read CLAUDE.md** - Understand TDD workflow, agents, project rules, available MCPs, discover team name
 3. **Parse $ARGUMENTS** - Understand what needs to be implemented
-4. **Explore codebase** - Use Glob/Grep/Task to find relevant files and understand patterns
+4. **Explore codebase** - Use Glob/Grep/Agent to find relevant files and understand patterns
 5. **Gather MCP context** - If the task relates to:
    - Document processing → Check Drive files, spreadsheet schemas
    - Deployment → Check service status, recent logs
@@ -138,7 +137,7 @@ Example arguments:
 **How to explore:**
 - Use Glob for finding files by pattern: `src/**/*.ts`, `**/*.test.ts`
 - Use Grep for finding code: function names, type definitions, error messages
-- Use Task with `subagent_type=Explore` for broader questions about the codebase
+- Use the Agent tool with `subagent_type=Explore` for broader questions about the codebase
 
 **What to discover:**
 - Existing functions that could be reused or extended
@@ -159,14 +158,14 @@ Omit: Investigation subsection, Triage Results subsection.
 
 After writing PLANS.md, create a Linear issue for each task:
 
-1. Use `mcp__linear__create_issue` with:
+1. Use `mcp__linear__save_issue` (no `id` = create) with:
    - `team`: [Discovered team name from CLAUDE.md or `mcp__linear__list_teams`]
    - `title`: Task name
    - `description`: Task details from PLANS.md
    - `state`: "Todo"
    - `labels`: Infer from task type (Feature, Improvement, Bug)
 
-2. Update PLANS.md to add `**Linear Issue:** [ADVA-N](url)` to each task
+2. Update PLANS.md to add `**Linear Issue:** [ADV-N](url)` to each task
 
 ## Task Writing Guidelines
 

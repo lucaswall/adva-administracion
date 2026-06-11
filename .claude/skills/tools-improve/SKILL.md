@@ -99,8 +99,9 @@ You are a specialist in [domain]. When invoked:
 | `arguments` | Named positional args (enables `$name` substitution) |
 | `disable-model-invocation` | `true` = only user can invoke |
 | `user-invocable` | `false` = hidden from `/` menu |
-| `allowed-tools` | Tools without permission prompts |
-| `model` | Model override: sonnet, opus, haiku |
+| `allowed-tools` | Pre-approves listed tools (no permission prompts). Does NOT restrict the tool pool |
+| `disallowed-tools` | Removes tools while the skill is active (v2.1.152+); clears on next user message |
+| `model` | Model override: sonnet, opus, haiku, fable (lasts for the current turn only) |
 | `effort` | Effort level: `low`, `medium`, `high`, `xhigh`, `max` (overrides session) |
 | `context` | `fork` = run in isolated subagent |
 | `agent` | Subagent type when forked |
@@ -116,7 +117,7 @@ You are a specialist in [domain]. When invoked:
 | `description` | **Critical** - when Claude delegates. Required |
 | `tools` | Allowlist (inherits all including MCP if omitted). Use `Agent(type1, type2)` to restrict spawnable agents (Task tool was renamed to Agent in v2.1.63) |
 | `disallowedTools` | Denylist from inherited tools |
-| `model` | sonnet, opus, haiku, inherit (default: inherit) |
+| `model` | sonnet, opus, haiku, fable, full model ID, inherit (default: inherit) |
 | `effort` | `low`, `medium`, `high`, `xhigh`, `max` (overrides session) |
 | `color` | UI badge color: `red`, `blue`, `green`, `yellow`, `purple`, `orange`, `pink`, `cyan` |
 | `permissionMode` | `default`, `acceptEdits`, `auto` (classifier-based), `dontAsk`, `bypassPermissions`, `plan` |
@@ -292,7 +293,7 @@ Design skills with this in mind: keep SKILL.md focused; put large docs in suppor
 
 ### Tool & Permission Restrictions
 
-**Limit tool access** - Grant only what's needed via `tools` or `allowed-tools`.
+**Limit tool access** - Grant only what's needed via `tools` (agents) or `allowed-tools` (skills). Remember: skill `allowed-tools` only pre-approves — it does not restrict. To actually block a tool, use permission deny rules in settings.json, `disallowed-tools`, or a PreToolUse hook.
 
 **Permission modes for subagents:**
 - `default` — Standard prompts

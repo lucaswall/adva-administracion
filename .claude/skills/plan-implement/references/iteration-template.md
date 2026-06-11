@@ -24,8 +24,8 @@ After verification passes, append a new "Iteration N" section to PLANS.md:
 - `src/gemini/parser.ts` - Updated spreadsheet header validation
 
 ### Linear Updates
-- ADVA-9: Todo → In Progress → Review
-- ADVA-10: Todo → In Progress → Review
+- ADV-9: Todo → In Progress → Review
+- ADV-10: Todo → In Progress → Review
 
 ### Pre-commit Verification
 - bug-hunter: [Passed | Found N bugs, fixed before proceeding]

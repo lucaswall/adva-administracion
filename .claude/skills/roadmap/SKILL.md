@@ -2,7 +2,7 @@
 name: roadmap
 description: Deep research and discussion of a roadmap feature or new idea. Gathers extensive context from codebase, web, APIs, MCPs, and project history, then presents a concise analysis report for interactive discussion. After discussion, handles the outcome — write a feature spec to the roadmap, move to backlog, create an inline plan, modify, or drop. Use when user says "roadmap", "pull from roadmap", "push to roadmap", "add to roadmap", "analyze this feature", "research this idea", or wants to evaluate a feature.
 argument-hint: <roadmap item name or new feature description, e.g. "new document type processing", "bank matching improvement">
-allowed-tools: Read, Edit, Write, Glob, Grep, Task, Bash, WebSearch, WebFetch, mcp__linear__list_teams, mcp__linear__list_issues, mcp__linear__get_issue, mcp__linear__create_issue, mcp__linear__update_issue, mcp__linear__list_issue_labels, mcp__linear__list_issue_statuses
+allowed-tools: Read, Edit, Write, Glob, Grep, Agent, Bash, WebSearch, WebFetch, mcp__linear__list_teams, mcp__linear__list_issues, mcp__linear__get_issue, mcp__linear__save_issue, mcp__linear__list_issue_labels, mcp__linear__list_issue_statuses
 disable-model-invocation: true
 ---
 
@@ -30,11 +30,11 @@ ultrathink
 
 ## Phase 2: Deep Research
 
-Launch parallel research to build comprehensive context. Use Task agents for independent research streams. Launch all independent streams simultaneously.
+Launch parallel research to build comprehensive context. Use Agent-tool subagents for independent research streams. Launch all independent streams simultaneously.
 
 ### Research Stream 1: Codebase Analysis
 
-Use Task with `subagent_type=Explore` (thoroughness: "very thorough"). Explore the codebase for everything related to this feature:
+Use the Agent tool with `subagent_type=Explore` (thoroughness: "very thorough"). Explore the codebase for everything related to this feature:
 - **Current implementation** — What exists today that's relevant? What would this feature touch?
 - **Architecture** — How does the current system work in the affected areas? (routes, services, processing pipeline, matching, storage)
 - **Patterns** — What conventions and patterns are established? (Result<T,E>, Pino logger, CellDate/CellNumber, ESM imports, Fastify patterns)
@@ -43,7 +43,7 @@ Use Task with `subagent_type=Explore` (thoroughness: "very thorough"). Explore t
 
 ### Research Stream 2: External Research
 
-Use Task with `subagent_type=general-purpose` and `model=opus`. Search the web for technical context:
+Use the Agent tool with `subagent_type=general-purpose` (inherit the session model). Search the web for technical context:
 - **API feasibility** — If the feature involves external APIs (Google, Gemini, banks, AFIP), research actual capabilities, pricing, limitations, Argentine-specific considerations
 - **Technical approaches** — How have others solved this? What are the trade-offs?
 - **Gotchas** — Known issues, limitations, or surprises others have encountered
@@ -53,7 +53,7 @@ Use Task with `subagent_type=general-purpose` and `model=opus`. Search the web f
 
 ### Research Stream 3: Project Context
 
-Use Task with `subagent_type=Explore` or direct tool calls. Check project state:
+Use the Agent tool with `subagent_type=Explore` or direct tool calls. Check project state:
 - **Linear issues** — Query existing Backlog/Todo/In Progress issues for related or overlapping work (if Linear MCP available)
 - **Roadmap dependencies** — Does this feature depend on or block other roadmap items?
 - **Recent changes** — Any recent commits or PRs that affect this area?
@@ -109,7 +109,7 @@ After presenting the report, the conversation continues naturally:
 - "Drop it" / "not worth it" → proceed to **Drop**
 - "Modify the roadmap item" → proceed to **Modify**
 - "Let me think about it" → stop, no action needed
-- "Actually, add this to the backlog instead" → tell the user to run `/add-to-backlog` with the refined description
+- "Actually, add this to the backlog instead" → proceed to **Pull to Backlog**
 
 ## Phase 5: Action
 
@@ -171,7 +171,7 @@ When the user wants to add a new feature to the roadmap:
 ### Pull to Backlog
 
 1. Verify Linear MCP: call `mcp__linear__list_teams`. If unavailable, STOP: "Linear MCP not connected. Run `/mcp` to reconnect."
-2. Create Backlog issues in the discovered team following the add-to-backlog patterns (problem-focused descriptions, proper labels and priority)
+2. Create Backlog issues via `mcp__linear__save_issue` (no `id` = create) in the discovered team, following the add-to-backlog patterns (problem-focused descriptions, proper labels and priority)
 3. If this was an existing roadmap item, ask: **"Remove this feature from the roadmap file?"**
 4. If confirmed → run roadmap cleanup procedure
 

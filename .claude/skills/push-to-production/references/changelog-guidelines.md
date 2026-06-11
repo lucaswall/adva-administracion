@@ -32,7 +32,7 @@ When in doubt, ask: "Would this change affect how documents are processed or how
 - Skill, tooling, or Claude Code changes
 - Infrastructure changes (Railway config, env vars, internal architecture)
 - Internal implementation details (code cleanup, defensive checks, logging improvements)
-- Linear issue numbers (e.g., ADVA-224) — meaningless to end users
+- Linear issue numbers (e.g., ADV-224) — meaningless to end users
 
 ## Writing Style
 

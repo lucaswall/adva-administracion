@@ -1,7 +1,7 @@
 ---
 name: pr-creator
 description: GitHub PR creator that handles the full workflow - creates branch, commits changes, pushes, and creates PR. Use only when explicitly requested by the user. Analyzes ALL branch commits (not just local changes) for comprehensive PR descriptions.
-tools: Bash
+tools: Bash, Read, Grep
 model: sonnet
 permissionMode: bypassPermissions
 ---
@@ -196,7 +196,7 @@ Closes ADV-123, ADV-124
 
 ## Rules
 
-- Use only git and gh commands
+- Use git and gh commands for all git/GitHub operations; use Read/Grep only to scan PLANS.md for issue IDs
 - Do not include co-author attribution
 - Analyze ALL branch commits for PR description, not just latest
 - If on base branch with unpushed commits, move them to feature branch and reset base

@@ -2,6 +2,20 @@
 
 Cross-domain checklist organized around interaction patterns. Each section requires reasoning about how multiple files work together — not just individual file quality.
 
+## Project-Specific Exemptions (DO NOT FLAG)
+
+Read the **KNOWN ACCEPTED PATTERNS** section in CLAUDE.md before filing any finding. Those patterns are accepted by design (e.g., API_SECRET embedded in the Apps Script bundle, full Gemini raw response logged at ERROR on parse failure). Treat matching call sites as VERIFIED CORRECT — no Linear issue may result from them.
+
+## SSVC Action Mapping
+
+Every issue created by deep-review includes an **Action** verb derived from SSVC (CISA/CMU SEI): a decision, not a score. Decide it from three inputs: **exploitation status** (None / PoC / Active), **mission impact** (Negligible / Degraded / Crippled — does it affect ADVA's ability to process invoices and matches correctly?), and **technical impact** (Partial / Total).
+
+| Action | When | Linear Priority |
+|--------|------|-----------------|
+| **Act** | Active exploitation OR Crippled mission impact OR security with Total technical impact | 1 (Urgent) |
+| **Attend** | Real bug with Degraded mission impact, or PoC exploitation, or Total technical impact without exploitation | 2 (High) or 3 (Medium) |
+| **Track** | Negligible mission impact, no exploitation, Partial technical impact (style, dead code, low-value docs) | 4 (Low) |
+
 This checklist applies the **OWASP Top 10 2025 RC** (especially A03 Supply Chain, A10 Mishandling of Exceptional Conditions / failing-open) and the **OWASP LLM Top 10 2025** (LLM01 prompt injection, LLM02/07 prompt leakage, LLM10 unbounded consumption) at feature scope. Section 11 is the indirect-prompt-injection trace, Section 12 is the failing-open trace, Section 13 is the cost/quota cross-cut — these are the highest-leverage cross-domain checks to add.
 
 ## 1. Data Flow Integrity

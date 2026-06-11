@@ -123,7 +123,7 @@ LOGGING:
 - Wrong log levels (errors at INFO, routine operations at INFO instead of DEBUG)
 - Missing logs in error paths (empty catch blocks)
 - Double-logging (same error at lib layer AND route handler)
-- Missing structured { action: "..." } field on log statements
+- Missing structured fields ({ module, phase } per CLAUDE.md; action where the module uses it) on log statements
 - Missing durationMs on external API calls (Gemini, Railway, Google Drive)
 - Logging inside loops or large objects logged in full
 - Sensitive data in logs (tokens, API keys, raw file data)

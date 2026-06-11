@@ -1,9 +1,8 @@
 ---
 name: investigate
-description: Read-only investigation that reports findings WITHOUT creating plans or modifying code. Use when user says "investigate", "check why", "look into", "diagnose", or wants to understand a problem before deciding on action. Accesses Railway logs, Drive files, Gemini prompts, and codebase.
+description: Read-only investigation that reports findings WITHOUT creating plans or modifying code. Use when the user says "investigate", "check why", "look into", "diagnose", or wants to understand a problem before deciding on action. Accesses Railway logs, Drive files, Gemini prompts, and codebase. Not for fixing or planning — it only reports (chain to plan-fix afterwards).
 argument-hint: <what to investigate>
-allowed-tools: Read, Glob, Grep, Task, Bash, mcp__Railway__*, mcp__gdrive__*, mcp__gemini__*
-disable-model-invocation: true
+allowed-tools: Read, Glob, Grep, Agent, Bash, mcp__Railway__environment_status, mcp__Railway__get_logs, mcp__Railway__list_deployments, mcp__Railway__list_services, mcp__Railway__list_variables, mcp__Railway__get_service_config, mcp__Railway__service_metrics, mcp__Railway__http_requests, mcp__Railway__http_error_rate, mcp__Railway__http_response_time, mcp__gdrive__gdrive_search, mcp__gdrive__gdrive_read_file, mcp__gdrive__gdrive_list_folder, mcp__gdrive__gdrive_get_pdf, mcp__gdrive__gdrive_get_image, mcp__gdrive__gdrive_get_file_info, mcp__gdrive__gdrive_list_revisions, mcp__gdrive__gsheets_read, mcp__gdrive__gsheets_metadata, mcp__gdrive__gsheets_query, mcp__gemini__gemini_analyze_pdf
 ---
 
 Investigate issues and report findings. Does NOT create plans or modify code.
@@ -32,7 +31,6 @@ $ARGUMENTS should describe what to investigate:
 **IMPORTANT: Do NOT hardcode MCP names or folder paths.** Always read CLAUDE.md to discover:
 
 1. **Available MCP servers** - Look for "MCP SERVERS" section to find:
-   - Error tracking MCPs for crash/error investigation (use ToolSearch to load tools before calling them)
    - File/storage MCPs for accessing documents and data (Google Drive)
    - Deployment MCPs for logs and service status (Railway)
    - AI/LLM MCPs for prompt testing (Gemini)
@@ -46,10 +44,9 @@ $ARGUMENTS should describe what to investigate:
    - Data schemas and formats
    - Business rules and validation
 
-4. **Environments** - Look for "ENVIRONMENTS" section to discover:
-   - Environment names (production, staging, etc.)
-   - Associated branches and URLs
-   - Deployment service configurations
+4. **Environments** - Look at the "STATUS" section and the Railway subsection under "MCP SERVERS" to discover:
+   - Environment names (production, staging) and which branch deploys each
+   - Which environment the Railway MCP/CLI is linked to by default
 
 5. **Drive Folder Resolution** - When accessing Google Drive, determine the correct root folder:
    - Check `.env` for `DRIVE_ROOT_FOLDER_ID_PRODUCTION` and `DRIVE_ROOT_FOLDER_ID_STAGING`
@@ -77,15 +74,15 @@ Based on $ARGUMENTS, determine what you're investigating:
 
 **For Codebase Analysis:**
 - Use Grep/Glob for specific searches
-- Use Task tool with `subagent_type=Explore` for broader exploration
+- Use the Agent tool with `subagent_type=Explore` for broader exploration
 - Read relevant source files, configs, and tests
 
 **For Deployment Issues (if deployment MCPs available):**
-1. **Determine target environment** from $ARGUMENTS (consult CLAUDE.md's ENVIRONMENTS section). If unclear, ask user.
+1. **Determine target environment** from $ARGUMENTS (consult CLAUDE.md's STATUS and Railway MCP sections). If unclear, ask user.
 2. Check deployment MCP status
 3. List services to find affected service
-4. List recent deployments with statuses — pass `environment: "<target>"` explicitly if the MCP supports it
-5. Get deployment and build logs — pass `environment: "<target>"` explicitly if the MCP supports it
+4. List recent deployments with statuses — pass `environment_id: "<target>"` explicitly
+5. Get deployment and build logs — pass `environment_id: "<target>"` explicitly (`get_logs` supports `log_type`: build/deploy/http, plus `since`/`search`/`level` filters)
 6. Search logs for errors using filters (e.g., `@level:error`) if the MCP supports it
 
 **For Document/File Issues (if file MCPs available):**
@@ -166,12 +163,12 @@ Example workflow:
 
 When investigating deployment issues (if deployment MCPs available):
 
-1. **Identify target environment** - Determine environment name from CLAUDE.md's ENVIRONMENTS section
+1. **Identify target environment** - Determine environment name from CLAUDE.md (STATUS + Railway MCP subsection)
 2. **Check status first** - Verify MCP/CLI access
-3. **List recent deployments** - Get deployment IDs and statuses (pass `environment` param if supported)
-4. **Get targeted logs** - Search for errors using filters (pass `environment` param if supported)
+3. **List recent deployments** - Get deployment IDs and statuses (pass `environment_id`)
+4. **Get targeted logs** - Search for errors using filters (pass `environment_id`; use `level: "error"` or `search`)
 5. **Look for patterns** - Repeated errors, timing correlations
-6. **Check configuration** - Environment variables, settings (pass `environment` param if supported)
+6. **Check configuration** - Environment variables, settings (pass `environment_id`)
 
 ## File Tracing Guidelines
 
@@ -199,7 +196,7 @@ When investigating file sorting or processing:
 - **Report only** - Do NOT modify source code or files
 - **No plans** - Do NOT write PLANS.md or fix plans
 - **Discover MCPs** - Read CLAUDE.md to find available tools
-- **Explicit environment** - ALWAYS pass the `environment` parameter to deployment MCP tools when supported; never rely on CLI defaults
+- **Explicit environment** - ALWAYS pass the `environment_id` parameter to Railway MCP tools; never rely on CLI defaults (the MCP is linked to staging)
 - **Be thorough** - Check multiple sources before concluding
 - **Be specific** - Include exact values, line numbers, timestamps
 - **Be honest** - If uncertain, say so; if nothing wrong, say so

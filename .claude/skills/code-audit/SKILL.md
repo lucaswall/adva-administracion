@@ -1,8 +1,8 @@
 ---
 name: code-audit
-description: Audits codebase using an agent team with 3 domain-specialized reviewers (security, reliability, quality). Triages open Sentry issues (creates Linear issues for real bugs, resolves/ignores noise). Creates Linear issues in Backlog state for findings. Use when user says "audit", "find bugs", "check security", "review codebase", or "team audit". Higher token cost, faster and deeper analysis. Falls back to single-agent mode if agent teams unavailable.
+description: Audits codebase using an agent team with 3 domain-specialized reviewers (security, reliability, quality). Creates Linear issues in Backlog state for findings. Use when user says "audit", "find bugs", "check security", "review codebase", or "team audit". Higher token cost, faster and deeper analysis. Falls back to single-agent mode if agent teams unavailable.
 argument-hint: [optional: specific area like "services" or "gemini"]
-allowed-tools: Read, Glob, Grep, Task, Bash, TeamCreate, TeamDelete, SendMessage, TaskCreate, TaskUpdate, TaskList, TaskGet, mcp__linear__list_teams, mcp__linear__list_issues, mcp__linear__get_issue, mcp__linear__create_issue, mcp__linear__update_issue, mcp__linear__list_issue_labels, mcp__linear__list_issue_statuses, mcp__sentry__find_organizations, mcp__sentry__find_projects, mcp__sentry__search_issues, mcp__sentry__get_issue_details, mcp__sentry__analyze_issue_with_seer, mcp__sentry__update_issue
+allowed-tools: Read, Glob, Grep, Agent, Bash, TeamCreate, TeamDelete, SendMessage, TaskCreate, TaskUpdate, TaskList, TaskGet, mcp__linear__list_teams, mcp__linear__list_issues, mcp__linear__get_issue, mcp__linear__save_issue, mcp__linear__save_comment, mcp__linear__list_issue_labels, mcp__linear__list_issue_statuses
 disable-model-invocation: true
 ---
 
@@ -25,8 +25,6 @@ Perform a comprehensive code audit using an agent team with domain-specialized r
    - Use Glob with patterns from tsconfig.json `include` to identify source directories
    - If no tsconfig, use conventions: `src/`, `lib/`, `app/`, `packages/`
 5. **Run `npm audit`** — Capture critical/high dependency vulnerabilities for later
-6. **Discover Sentry context** — Call `mcp__sentry__find_organizations` to discover org slug, then `mcp__sentry__find_projects` with org slug to find the project. If Sentry MCP unavailable, skip Sentry triage later (warn user).
-7. **Fetch unresolved Sentry issues** — Call `mcp__sentry__search_issues` with org slug and project slug, query: "unresolved issues". Record each issue's ID, title, URL, event count, user count, last seen date. If none found, skip Sentry Triage phase later.
 
 ## Team Setup
 
@@ -48,9 +46,9 @@ Use `TaskCreate` to create 3 review tasks (these track progress for each reviewe
 
 ### Spawn 3 reviewer teammates
 
-Use the `Task` tool with `team_name: "code-audit"`, `subagent_type: "general-purpose"`, and `model: "sonnet"` to spawn each reviewer. Give each a `name` and a detailed `prompt` (see Reviewer Prompts below).
+Use the `Agent` tool with `team_name: "code-audit"`, `subagent_type: "general-purpose"`, and `model: "sonnet"` to spawn each reviewer. Give each a `name` and a detailed `prompt` (see Reviewer Prompts below).
 
-Spawn all 3 reviewers in parallel (3 concurrent Task calls in one message).
+Spawn all 3 reviewers in parallel (3 concurrent Agent calls in one message).
 
 **IMPORTANT:** Each reviewer prompt MUST include:
 - Their specific domain checklist (copied from the Reviewer Prompts section)
@@ -117,8 +115,8 @@ FINDINGS FORMAT - Send a message to the lead with this structure:
 ---
 DOMAIN: {domain name}
 VALIDATED EXISTING ISSUES:
-- FIXED: ADVA-XX - [reason]
-- STILL EXISTS: ADVA-YY
+- FIXED: ADV-XX - [reason]
+- STILL EXISTS: ADV-YY
 
 NEW FINDINGS:
 1. [category-tag] [priority-tag] [file-path:line] - [description]
@@ -382,7 +380,7 @@ In **single-agent fallback mode**, the verification pass is the same — re-read
 
 ## Create Linear Issues
 
-For each new finding, use `mcp__linear__create_issue`:
+For each new finding, use `mcp__linear__save_issue` (creates when no `id` is passed). To close or update an existing issue, call `mcp__linear__save_issue` with `id: "<issue identifier>"`; add explanatory comments with `mcp__linear__save_comment`.
 
 ```
 team: [discovered team name]
@@ -434,67 +432,9 @@ labels: [Mapped label(s)]
 - Include file paths with line numbers in Context
 - One issue per distinct finding
 
-## Sentry Triage
-
-After creating Linear issues from audit findings, triage all unresolved Sentry issues discovered in pre-flight. The lead handles this directly (not reviewers).
-
-**Skip this section if:** Sentry MCP was unavailable during pre-flight, or no unresolved Sentry issues were found.
-
-### For each unresolved Sentry issue:
-
-1. **Get details** — Call `mcp__sentry__get_issue_details` to get the full stacktrace and context
-2. **Locate in codebase** — Read the referenced files/lines from the stacktrace
-3. **Cross-reference** — Check if:
-   - An audit finding already covers this issue (from the reviewer phase)
-   - A Linear issue already exists for this (from pre-flight backlog query)
-4. **Decide disposition:**
-
-| Disposition | When | Action |
-|---|---|---|
-| **Fix needed** | Real bug in current code, not yet tracked | Create Linear issue with Sentry link (see format below) |
-| **Already tracked** | Linear issue already exists for this | Skip — note in report |
-| **Already covered** | Audit finding already captures this | Skip — audit finding handles it |
-| **Already fixed** | Code has been changed, or a completed plan already addresses it | `mcp__sentry__update_issue` with `status: "resolved"` |
-| **Noise/transient** | One-off error, expected behavior, test data, transient network issue | `mcp__sentry__update_issue` with `status: "ignored"` |
-
-### Linear Issue Format (for fix-needed Sentry issues)
-
-Use `mcp__linear__create_issue` following the add-to-backlog pattern:
-
-```
-team: [discovered team name]
-state: "Backlog"
-title: "[Brief description from Sentry issue]"
-priority: [1|2|3|4] based on event count, user impact, severity
-labels: [Bug]
-```
-
-**Description format:**
-
-```
-**Problem:**
-[What is happening — from Sentry stacktrace and context]
-
-**Sentry Issue:**
-[Sentry issue URL] — [event count] events, [user count] users, last seen [date]
-
-**Context:**
-[Affected file paths with line numbers from stacktrace]
-
-**Impact:**
-[User-facing impact based on event frequency and severity]
-
-**Action:** Act | Attend | Track
-[SSVC outcome based on user count, event count, and operational impact]
-
-**Acceptance Criteria:**
-- [ ] [Specific fix criterion]
-- [ ] Error no longer appears in Sentry after fix deployed
-```
-
 ## Shutdown Team
 
-After all Linear issues are created and Sentry triage is complete:
+After all Linear issues are created:
 1. Send shutdown requests to all 3 reviewers using `SendMessage` with `type: "shutdown_request"`
 2. Wait for shutdown confirmations
 3. Use `TeamDelete` to remove team resources
@@ -505,7 +445,7 @@ If `TeamCreate` fails (agent teams unavailable), perform the audit sequentially 
 
 1. **Inform user:** "Agent teams unavailable. Running audit in single-agent mode."
 2. **Validate existing issues** — For each `pending_validation` issue, check if the referenced code still has the problem. Close fixed issues, carry forward valid ones.
-3. **Systematic exploration** — Use Task tool with `subagent_type=Explore` to examine each discovered area. Apply the full compliance checklist:
+3. **Systematic exploration** — Use the Agent tool with `subagent_type=Explore` to examine each discovered area. Apply the full compliance checklist:
    - **Security** — OWASP Top 10 2025 (especially A03 Supply Chain Failures, A10 Failing-Open) and OWASP LLM Top 10 2025 (LLM01 prompt injection, LLM02/07 leakage, LLM10 unbounded consumption)
    - **Reliability** — Logic errors, null handling, race conditions, async issues, memory/resource leaks, timeout/hang, graceful shutdown, error classification correctness, webhook idempotency
    - **Quality** — Type safety, project conventions (Result<T,E>, ESM .js, Pino logger, spreadsheet schema integrity), logging, test quality
@@ -515,7 +455,6 @@ If `TeamCreate` fails (agent teams unavailable), perform the audit sequentially 
 5. **Merge, deduplicate, reprioritize** — Same process as team mode (multi-issue rollup; consensus boost from corroboration; SSVC Action assignment).
 6. **Verification** — Same process as team mode. Re-read every candidate finding's file:line before creating the Linear issue. Do not skip this in fallback mode — it's where most of the FP reduction comes from.
 7. **Create Linear issues** — Same process as team mode (see Create Linear Issues section)
-8. **Sentry triage** — Same process as team mode (see Sentry Triage section)
 
 ## Error Handling
 
@@ -532,10 +471,6 @@ If `TeamCreate` fails (agent teams unavailable), perform the audit sequentially 
 | Referenced file no longer exists | Mark issue as `fixed`, close in Linear |
 | Cannot determine if issue is fixed | Keep as `still_valid` |
 | Large codebase (>1000 files) | Tell reviewers to focus on `$ARGUMENTS` area or entry points |
-| Sentry MCP not connected | Skip Sentry triage, warn user |
-| No unresolved Sentry issues | Skip Sentry triage phase |
-| Sentry issue references deleted file | Mark as `resolved` |
-| Cannot determine if Sentry issue is fixed | Create Linear issue to investigate |
 
 ## Rules
 
@@ -544,8 +479,6 @@ If `TeamCreate` fails (agent teams unavailable), perform the audit sequentially 
 - **Lead handles all Linear writes** — Reviewers NEVER create issues directly
 - **Deduplicate before creating** — No duplicate issues in Linear
 - **Be thorough** — Every file in scope must be checked
-- **Sentry triage is lead-only** — Reviewers never interact with Sentry; the lead triages all Sentry issues after merging audit findings
-- **Sentry issues that need fixes get Linear issues** — Always include the Sentry issue URL in the description so downstream planning skills can track it
 
 ## Termination
 
@@ -575,23 +508,11 @@ Output this report and STOP:
 
 | # | ID | Action | Priority | Label | Title |
 |---|-----|--------|----------|-------|-------|
-| 1 | ADVA-N1 | Act | Urgent | Security | Brief title |
-| 2 | ADVA-N2 | Attend | High | Bug | Brief title |
+| 1 | ADV-N1 | Act | Urgent | Security | Brief title |
+| 2 | ADV-N2 | Attend | High | Bug | Brief title |
 | ... | ... | ... | ... | ... | ... |
 
 X issues total | Multi-location rollups: R | Consensus-boosted: B | Duplicates merged: M
-
-### Sentry Triage
-
-| # | Sentry Issue | Disposition | Action |
-|---|---|---|---|
-| 1 | ADVA-SENTRY-N | Fix needed | Created ADVA-XX in Backlog |
-| 2 | ADVA-SENTRY-N | Already fixed | Resolved in Sentry |
-| 3 | ADVA-SENTRY-N | Noise | Ignored in Sentry |
-| ... | ... | ... | ... |
-
-[OR: No unresolved Sentry issues found.]
-[OR: Sentry MCP unavailable — triage skipped.]
 
 Next step: Review Backlog in Linear and use `plan-backlog` to create implementation plans.
 ```

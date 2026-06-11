@@ -1,12 +1,13 @@
 ---
 name: deep-review
-description: Deep, focused analysis of a single feature or service area. Combines code correctness, security, data integrity, and performance in one unified Opus pass with cross-domain reasoning. Finds bugs that broad audits miss by tracing full data flows and service interactions. Use when user says "deep review", "deeply analyse", "review this feature", "find all bugs in X", or wants thorough analysis of a specific area. Requires a target area argument.
+description: Deep, focused analysis of a single feature or service area. Combines code correctness, security, data integrity, and performance in one unified high-effort pass with cross-domain reasoning. Finds bugs that broad audits miss by tracing full data flows and service interactions. Use when user says "deep review", "deeply analyse", "review this feature", "find all bugs in X", or wants thorough analysis of a specific area. Requires a target area argument.
 argument-hint: <feature or service area, e.g. "scanner", "matching", "spreadsheet storage", "gemini extraction">
-allowed-tools: Read, Glob, Grep, Bash, mcp__linear__list_teams, mcp__linear__list_issues, mcp__linear__get_issue, mcp__linear__create_issue, mcp__linear__update_issue, mcp__linear__list_issue_labels, mcp__linear__list_issue_statuses
+allowed-tools: Read, Glob, Grep, Bash, mcp__linear__list_teams, mcp__linear__list_issues, mcp__linear__get_issue, mcp__linear__save_issue, mcp__linear__list_issue_labels, mcp__linear__list_issue_statuses
+effort: xhigh
 disable-model-invocation: true
 ---
 
-Deep analysis of a focused area. You are Opus analyzing directly — no delegation, no team. The value is YOUR cross-domain reasoning across all related files in one context.
+Deep analysis of a focused area. You analyze directly — no delegation, no team. The value is YOUR cross-domain reasoning across all related files in one context.
 
 ultrathink
 
@@ -14,7 +15,7 @@ ultrathink
 
 1. **Validate argument** — `$ARGUMENTS` is REQUIRED. If empty, STOP: "Please specify a target area to review. Example: `/deep-review matching`"
 2. **Verify Linear MCP** — Call `mcp__linear__list_teams`. If unavailable, STOP: "Linear MCP is not connected. Run `/mcp` to reconnect, then re-run."
-3. **Read CLAUDE.md** — Load project rules, conventions, and accepted patterns. **Discover team name:** Look for LINEAR INTEGRATION section in CLAUDE.md. If not found, use `mcp__linear__list_teams` to discover the team name dynamically.
+3. **Read CLAUDE.md** — Load project rules, conventions, and the KNOWN ACCEPTED PATTERNS section (patterns that MUST NOT be filed as findings). **Discover team name:** Look for LINEAR INTEGRATION section in CLAUDE.md. If not found, use `mcp__linear__list_teams` to discover the team name dynamically.
 4. **Query existing Backlog issues** — `mcp__linear__list_issues` with team [discovered team name], state "Backlog". Record titles and file paths to avoid creating duplicates.
 
 ## Scope Discovery
@@ -114,7 +115,7 @@ For each finding, record:
 
 ## Verification
 
-Before creating any Linear issues, **re-read every candidate finding's file:line** and confirm the issue exists today. Even a careful Opus pass produces stale references and the occasional hallucinated pattern; the verification step is the single highest-leverage filter for backlog noise.
+Before creating any Linear issues, **re-read every candidate finding's file:line** and confirm the issue exists today. Even a careful deep pass produces stale references and the occasional hallucinated pattern; the verification step is the single highest-leverage filter for backlog noise.
 
 For each candidate:
 
@@ -133,7 +134,7 @@ Multi-issue rollup: if the same issue appears in multiple files (e.g., a missing
 
 For each verified finding, check against existing Backlog issues. Skip if a matching issue already exists.
 
-Use `mcp__linear__create_issue`:
+Use `mcp__linear__save_issue` (omit `id` to create):
 
 ```
 team: [discovered team name]
@@ -157,7 +158,7 @@ description: (format below)
 [Who is affected and how — trace the operational consequence]
 
 **Action:** Act | Attend | Track
-[SSVC outcome — see code-audit/references/category-tags.md for the decision rules. Tells planning skills "what to do" alongside the priority number.]
+[SSVC outcome — see the SSVC Action Mapping section in references/deep-review-checklist.md for the decision rules. Tells planning skills "what to do" alongside the priority number.]
 
 **Acceptance Criteria:**
 - [ ] [Verifiable criterion]
@@ -197,8 +198,8 @@ Output this report and STOP:
 
 | # | ID | Action | Severity | Domain | Title |
 |---|-----|--------|----------|--------|-------|
-| 1 | ADVA-XX | Act | Critical | code | Brief title |
-| 2 | ADVA-XX | Attend | High | data-integrity | Brief title |
+| 1 | ADV-XX | Act | Critical | code | Brief title |
+| 2 | ADV-XX | Attend | High | data-integrity | Brief title |
 | ... | ... | ... | ... | ... | ... |
 
 X issues created | Multi-location rollups: R | Duplicates skipped: N

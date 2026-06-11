@@ -46,9 +46,8 @@ DEFENSIVE CODING (from CLAUDE.md — follow strictly):
 
 RULES:
 - TDD: write failing test → run (expect fail) → implement → run (expect pass). See CLAUDE.md.
-- Tests: `npx vitest run "pattern"` only. NEVER run npm test, npm run build, or E2E tests.
-- **E2E specs** (`e2e/tests/*.spec.ts`): write the spec file but do NOT run it. The lead runs E2E after merging.
-- Report "Starting Task N: [title] [ADVA-XXX]" and "Completed Task N: [title] [ADVA-XXX]" to the lead for each task.
+- Tests: `npx vitest run "pattern"` only. NEVER run npm test or npm run build.
+- Report "Starting Task N: [title] [ADV-XXX]" and "Completed Task N: [title] [ADV-XXX]" to the lead for each task.
 - Do NOT update Linear issues — the lead handles all state transitions.
 - NEVER hand-write generated files (migrations, snapshots). Report as blocker.
 
@@ -58,12 +57,12 @@ WHEN ALL TASKS DONE:
    git add -A -- ':!node_modules' ':!.env' ':!.env.local'
    git commit -m "worker-{N}: [summary]
 
-   Tasks: Task X (ADVA-XXX), Task Y (ADVA-YYY)
+   Tasks: Task X (ADV-XXX), Task Y (ADV-YYY)
    Files: path/to/file.ts, path/to/other.ts"
    Do NOT push.
 3. Send final summary to the lead (MUST send before going idle):
    WORKER: worker-{N} | STATUS: COMPLETE
-   TASKS: [list with ADVA-XXX ids and what was done]
+   TASKS: [list with ADV-XXX ids and what was done]
    FILES: [list of modified files]
    COMMIT: [git log --oneline -1 output]
 

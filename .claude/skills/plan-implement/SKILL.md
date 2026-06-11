@@ -1,7 +1,7 @@
 ---
 name: plan-implement
 description: Execute the pending plan in PLANS.md using an agent team for parallel implementation. Use when user says "implement the plan", "execute the plan", "team implement", or after any plan-* skill creates a plan. Spawns worker agents in isolated git worktrees for full code isolation. Updates Linear issues in real-time. Falls back to single-agent mode if agent teams unavailable.
-allowed-tools: Read, Edit, Write, Glob, Grep, Task, Bash, TeamCreate, TeamDelete, SendMessage, TaskCreate, TaskUpdate, TaskList, TaskGet, mcp__linear__list_teams, mcp__linear__list_issues, mcp__linear__get_issue, mcp__linear__update_issue, mcp__linear__list_issue_statuses
+allowed-tools: Read, Edit, Write, Glob, Grep, Agent, Bash, TeamCreate, TeamDelete, SendMessage, TaskCreate, TaskUpdate, TaskList, TaskGet, mcp__linear__list_teams, mcp__linear__list_issues, mcp__linear__get_issue, mcp__linear__save_issue, mcp__linear__list_issue_statuses
 disable-model-invocation: true
 ---
 
@@ -129,9 +129,9 @@ Use `TaskCreate` for each work unit:
 
 ### Spawn workers
 
-Use `Task` tool with `team_name: "plan-implement"`, `subagent_type: "general-purpose"`, `model: "sonnet"`, and `mode: "bypassPermissions"` for each worker. Name them `worker-1`, `worker-2`, etc.
+Use the `Agent` tool with `team_name: "plan-implement"`, `subagent_type: "general-purpose"`, and `model: "sonnet"` for each worker. Name them `worker-1`, `worker-2`, etc. (Do not pass a `mode` — per-teammate permission modes are ignored at spawn; teammates inherit the lead's permission settings.)
 
-Spawn all workers in parallel (concurrent Task calls in one message).
+Spawn all workers in parallel (concurrent Agent calls in one message).
 
 ### Worker Prompt Template
 
@@ -141,7 +141,7 @@ Read [references/worker-prompt-template.md](references/worker-prompt-template.md
 
 After spawning, for each work unit:
 1. `TaskUpdate` to assign each task to its worker by name
-2. Label Linear issues with worker label using `mcp__linear__update_issue`:
+2. Label Linear issues with worker label using `mcp__linear__save_issue` (pass `id`):
    - Worker 1 → "Worker 1", Worker 2 → "Worker 2", etc.
    - Add label to existing labels (don't replace)
 
@@ -151,14 +151,16 @@ After spawning, for each work unit:
 
 **When a worker REPORTS starting a task:**
 1. Parse the issue ID from the worker's message
-2. IMMEDIATELY move the issue to "In Progress" using `mcp__linear__update_issue`
+2. IMMEDIATELY move the issue to "In Progress" using `mcp__linear__save_issue` (pass `id` and `state`)
 
 **When a worker REPORTS completing a task:**
 1. Parse the issue ID from the worker's message
-2. IMMEDIATELY move the issue to "Review" using `mcp__linear__update_issue`
+2. IMMEDIATELY move the issue to "Review" using `mcp__linear__save_issue` (pass `id` and `state`)
 3. Acknowledge the worker's completion
 
 **If a task has no Linear issue link**, skip state updates for that task.
+
+**Same-type transition gotcha:** In Progress, Review, and Merge are all `type: started`. If a name-based transition does not take effect, retry with the state UUID from `mcp__linear__list_issue_statuses` (see CLAUDE.md LINEAR INTEGRATION).
 
 ## Coordination (while workers work)
 
@@ -268,26 +270,18 @@ npm test
 
 If failures → fix directly, then re-run until all tests pass.
 
-### 7. Run E2E Tests (if workers wrote E2E specs)
-
-Run the `verifier` agent in E2E mode:
-```
-Task tool with subagent_type "verifier" and prompt "e2e"
-```
-If E2E tests fail → fix the specs directly, then re-run.
-
-### 8. Run Full Verification
+### 7. Run Full Verification
 
 **Bug hunter:**
 ```
-Task tool with subagent_type "bug-hunter"
+Agent tool with subagent_type "bug-hunter"
 ```
 
 Fix ALL real bugs — pre-existing or new. Only skip verifiable false positives.
 
 **Verifier (tests + lint + build):**
 ```
-Task tool with subagent_type "verifier"
+Agent tool with subagent_type "verifier"
 ```
 
 If failures → fix directly (workers are shut down by this point).
@@ -317,7 +311,7 @@ If `TeamCreate` fails or worktree setup fails, implement the plan sequentially a
    | Glob, Grep, Edit, MCP call (Linear etc.) | 1 |
    | Read, Write | 2 |
    | Bash (test run, build, git) | 3 |
-   | Task subagent (verifier, bug-hunter) | 5 |
+   | Agent subagent (verifier, bug-hunter) | 5 |
 
    | Cumulative points | Action |
    |-------------------|--------|
@@ -390,8 +384,7 @@ If `TeamCreate` fails or worktree setup fails, implement the plan sequentially a
 - **Cap at 4 workers** — More = more overhead, diminishing returns
 - **Lead does NOT implement** — Delegate all implementation to workers. Lead only coordinates, merges, verifies, and documents. (Exception: single-agent fallback and post-merge fixes.)
 - **Lead runs all CLI generators** — Drizzle-kit, prisma generate, etc. reserved for lead post-merge
-- **Workers test via vitest only** — `npx vitest run "pattern"` in their worktree. No build, no full suite, no E2E.
-- **E2E test tasks are write-only for workers** — Workers write specs but do NOT run them
+- **Workers test via vitest only** — `npx vitest run "pattern"` in their worktree. No build, no full suite.
 - **Foundation-first merge order** — Merge lower-level workers first (types → services → routes → utilities). Typecheck gate (`npm run typecheck`) after each merge. After resolving conflicts, always verify no stray `<<<<<<` markers remain.
 - **Workers commit, don't push** — Workers `git add -A && git commit` in their worktree. Lead merges locally via the shared git object database.
 - **Docs tasks need explicit values** — When a docs-only worker must document another worker's implementation details (column names, status values, etc.), include the exact values in the worker's prompt. Don't rely on the worker inferring them from the plan.

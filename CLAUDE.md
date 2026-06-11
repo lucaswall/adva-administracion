@@ -64,7 +64,7 @@ Task: Add parseResumenBroker function
 | Agent | Purpose | When to Use |
 |-------|---------|-------------|
 | `bug-hunter` (sonnet) | Find bugs in git changes | After implementation, before commit |
-| `verifier` (haiku) | Run tests and build | TDD mode: `verifier "pattern"` (filtered tests, no build). Full mode: `verifier` (all tests + build). E2E mode: `verifier "e2e"` (E2E tests only). Use TDD mode during development, Full mode for final verification. |
+| `verifier` (haiku) | Run tests, lint, and build | TDD mode: `verifier "pattern"` (filtered tests via `npx vitest run`, no lint/build). Full mode: `verifier` (all tests + lint + build). Use TDD mode during development, Full mode for final verification. |
 | `pr-creator` (sonnet) | Branch + commit + push + PR | Only when user requests PR |
 
 **Git agents rule:** Never commit or create PRs unless the user explicitly requests it. When requested, use `pr-creator` agent (handles branch, commit, push, and PR).
@@ -73,26 +73,26 @@ Task: Add parseResumenBroker function
 
 ## SKILLS
 
-Skills are specialized workflows in `.claude/skills/`. Descriptions drive automatic invocation - include action verbs and explicit triggers.
+Skills are specialized workflows in `.claude/skills/`. Most are `disable-model-invocation: true` (side effects — only the user can launch them via `/name`); this table is what routes requests to them, so suggest the matching `/skill` when a request fits. `investigate` (read-only) and `tools-improve` are model-invocable — invoke them directly when triggered.
 
 | Skill | When to Invoke |
 |-------|----------------|
 | `add-to-backlog` | Add issues to Linear Backlog from free-form input. Use when user says "add to backlog", "create backlog issues", "track this", or describes tasks/improvements/bugs to add. |
-| `backlog-refine` | Refine vague Backlog issues into well-specified, actionable items. Use when user says "refine backlog", "refine ADVA-123", "improve backlog items". |
+| `backlog-refine` | Refine vague Backlog issues into well-specified, actionable items. Use when user says "refine backlog", "refine ADV-123", "improve backlog items". |
 | `investigate` | Read-only investigation that reports findings without creating plans. Use when user says "investigate", "check why", "look into", "diagnose". Accesses Railway logs, Drive files, Gemini prompts. |
-| `plan-backlog` | Convert Linear Backlog issues into TDD implementation plans. Use when user says "plan ADVA-123", "plan all bugs", or wants to work on backlog items. Moves planned issues to Todo state. |
+| `plan-backlog` | Convert Linear Backlog issues into TDD implementation plans. Use when user says "plan ADV-123", "plan all bugs", or wants to work on backlog items. Moves planned issues to Todo state. |
 | `plan-inline` | Create TDD plans from direct feature requests. Use when user provides a task description like "add X feature" or "create Y function". Creates Linear issues in Todo state. |
 | `plan-fix` | Investigate bugs and create fix plans. Use when user reports extraction errors, deployment failures, wrong data, or prompt issues. Creates Linear issues in Todo state. |
 | `plan-implement` | Execute the pending plan in PLANS.md using an agent team for parallel implementation. Spawns workers in isolated git worktrees. Updates Linear issues: Todo→In Progress→Review. Falls back to single-agent mode if teams unavailable. |
-| `plan-review-implementation` | QA review using an agent team with 3 domain-specialized reviewers (security, reliability, quality). Moves issues Review→Merge. Creates new issues in Todo for bugs found. Falls back to single-agent mode if teams unavailable. |
+| `plan-review-implementation` | QA review using an agent team with 3 domain-specialized reviewers (security, reliability, quality). Moves issues Review→Merge. Small bugs (≤3 S-size) are fixed inline (issues created in Merge); bigger ones get a Fix Plan with issues in Todo. On plan completion creates the PR and launches a self-terminating Codex-review/CI monitor cron that squash-merges when clean. Falls back to single-agent mode if teams unavailable. |
 | `code-audit` | Audit codebase using an agent team with 3 domain-specialized reviewers. Creates Linear issues in Backlog. Falls back to single-agent mode if teams unavailable. |
-| `data-ops` | Data operations operator. Fix extraction errors, match/unmatch documents and bank movements, correct parsed data, review flagged items, suggest matches, move/rename/copy files. Use when user says "data ops", "fix data", "correct", "manual match", "fix match", "unmatch", "show unmatched", "review matches", "fix extraction", "match movimiento", "move file", "rename file", "copy file", "suggest matches". |
-| `deep-review` | Deep, focused analysis of a single feature or service area. Combines code correctness, security, data integrity, and performance in one unified Opus pass. Use when user says "deep review X". |
+| `data-ops` | Data operations operator. Fix extraction errors, match/unmatch documents and bank movements, correct parsed data, review flagged items, suggest matches, move/rename/copy/upload files. Use when user says "data ops", "fix data", "correct", "manual match", "fix match", "unmatch", "show unmatched", "review matches", "fix extraction", "match movimiento", "move file", "rename file", "copy file", "upload file", "ingest file", "suggest matches". |
+| `deep-review` | Deep, focused analysis of a single feature or service area. Combines code correctness, security, data integrity, and performance in one unified high-effort pass. Use when user says "deep review X". |
 | `roadmap` | Deep research and discussion of a roadmap feature or new idea. Gathers context, presents analysis, discusses, then handles the outcome — write to roadmap, pull to backlog, plan, modify, or drop. Use when user says "roadmap", "pull from roadmap", "push to roadmap", "add to roadmap", "analyze this feature". |
 | `push-to-production` | Release to production: version bump, changelog, push to main + release, verify Railway production deploy, GitHub Release, Linear state transitions. Use when user says "push to production", "release", or "ship it". |
 | `tools-improve` | **REQUIRED before modifying skills/agents.** Contains best practices for `.claude/skills/` and `.claude/agents/`. ALWAYS load this skill FIRST when: creating, editing, or reviewing any SKILL.md or agent .md file. |
 
-**Skill workflow:** `add-to-backlog` or `code-audit` → `plan-backlog` → `plan-implement` → `plan-review-implementation` (repeat until COMPLETE) → `push-to-production`
+**Skill workflow:** `add-to-backlog` or `code-audit` → (`backlog-refine`) → `plan-backlog` → `plan-implement` → `plan-review-implementation` (repeat until COMPLETE) → `push-to-production`
 
 ## MCP SERVERS
 
@@ -102,24 +102,21 @@ Skills are specialized workflows in `.claude/skills/`. Descriptions drive automa
 - **Staging** → auto-deploys from `main` branch
 - **Production** → auto-deploys from `release` branch
 
-The Railway CLI / MCP is linked to **staging**. Always specify `environment: "production"` when querying production deployments or logs.
+The Railway CLI / MCP is linked to **staging**. Always specify `environment_id: "production"` when querying production deployments or logs.
 
-Allowed: `get-logs`, `list-deployments`, `list-services`, `list-variables`, `check-railway-status`
+Allowed (read-only): `get_logs`, `list_deployments`, `list_services`, `list_variables`, `environment_status`, `get_service_config`, `service_metrics`, `http_requests`, `http_error_rate`, `http_response_time`
 
-**FORBIDDEN - NEVER USE:**
-- `deploy`
-- `create-environment`
-- `set-variables`
-- `create-project-and-link`
-- `deploy-template`
-- `link-environment`
-- `link-service`
-- `generate-domain`
+**FORBIDDEN - NEVER USE** (all write/mutating tools; enforced via deny rules in `.claude/settings.json`):
+- `deploy_template`, `create_environment`, `create_project`
+- `create_service`, `remove_service`, `update_service`, `scale_service`
+- `set_variables`, `add_reference_variable`
+- `create_volume`, `remove_volume`, `update_volume`, `create_bucket`, `remove_bucket`
+- `link_environment`, `link_service`, `generate_domain`
 
 ### Google Drive MCP
-`gdrive_search`, `gdrive_read_file`, `gdrive_list_folder`, `gdrive_get_pdf`, `gdrive_get_file_info`, `gsheets_read`, `gsheets_query`, `gsheets_metadata`, `gsheets_update`, `gdrive_move_file`, `gdrive_rename_file`, `gdrive_copy_file`
+Read tools: `gdrive_search`, `gdrive_read_file`, `gdrive_list_folder`, `gdrive_get_pdf`, `gdrive_get_image`, `gdrive_get_file_info`, `gdrive_list_revisions`, `gsheets_read`, `gsheets_query`, `gsheets_metadata`
 
-**Write tools** (`gsheets_update`, `gdrive_move_file`, `gdrive_rename_file`, `gdrive_copy_file`) are restricted to the `data-ops` skill via `allowed-tools`. Do not use them outside that skill.
+**Write tools** (`gsheets_update`, `gdrive_move_file`, `gdrive_rename_file`, `gdrive_copy_file`, `gdrive_upload_file`) are reserved for the `data-ops` skill: only that skill pre-approves them via `allowed-tools`, and they are deliberately NOT in the global allow list in `.claude/settings.json`, so any use outside `data-ops` triggers a permission prompt. Do not use them outside that skill. `gsheets_append_rows`, `gsheets_delete_rows`, `gdrive_trash_file`, and `gdrive_create_folder` exist on the server but are not granted anywhere — rows are never deleted or hand-appended, and files are never trashed.
 
 ### Gemini MCP (PROMPT TESTING ONLY)
 `gemini_analyze_pdf` - **NOT for document analysis.** The agent can read PDFs directly using the Read tool.
@@ -135,9 +132,11 @@ Allowed: `get-logs`, `list-deployments`, `list-services`, `list-variables`, `che
 **NOT for:** Actual document analysis. If the agent needs to analyze a PDF, it should read the file directly with the Read tool.
 
 ### Linear MCP (ISSUE TRACKING)
-Allowed: `list_issues`, `get_issue`, `create_issue`, `update_issue`, `list_issue_labels`, `list_issue_statuses`
+Allowed: `list_issues`, `get_issue`, `save_issue`, `save_comment`, `list_issue_labels`, `list_issue_statuses`, `list_teams`
 
-**Team:** ADVA Administracion
+**Note:** the Linear MCP uses upsert-style tools — `save_issue` creates an issue when called without `id` and updates when `id` is passed (there is no separate `create_issue`/`update_issue`). Same pattern for `save_comment`.
+
+**Team:** ADVA Administracion | **Issue prefix:** ADV-
 
 **Purpose:** Issue tracking and workflow management integrated with skills.
 
@@ -146,7 +145,7 @@ Allowed: `list_issues`, `get_issue`, `create_issue`, `update_issue`, `list_issue
 - `plan-backlog` reads Backlog, moves to Todo
 - `plan-inline`/`plan-fix` creates issues in Todo
 - `plan-implement` moves Todo→In Progress→Review
-- `plan-review-implementation` moves Review→Merge, creates bugs in Todo
+- `plan-review-implementation` moves Review→Merge, creates bugs in Todo (Fix Plan) or Merge (inline fixes)
 - `pr-creator` includes Linear issue IDs in PR body for Merge→Done automation
 
 ## LINEAR INTEGRATION
@@ -154,9 +153,9 @@ Allowed: `list_issues`, `get_issue`, `create_issue`, `update_issue`, `list_issue
 ### State Flow
 
 ```
-Backlog → Todo → In Progress → Review → Merge → Done
-                                          ↑        ↑
-                                    (review OK)  (PR merged)
+Backlog → Todo → In Progress → Review → Merge → Done → Released
+                                          ↑        ↑         ↑
+                                    (review OK)  (PR merged) (production deploy)
 ```
 
 | State | Type | Usage |
@@ -167,18 +166,23 @@ Backlog → Todo → In Progress → Review → Merge → Done
 | Review | started | Implementation complete, awaiting review |
 | Merge | started | Code review passed, awaiting PR merge |
 | Done | completed | PR merged (via Linear GitHub automation) |
+| Released | completed | Live in production (moved by push-to-production) |
+
+**Same-type state transitions may need UUIDs:** passing a state by *name* to `save_issue` can silently no-op when moving between two states of the same `type` (verified for Done → Released, both `type: completed`; In Progress/Review/Merge are all `type: started`). For Done → Released always pass the state UUID from `list_issue_statuses`; for other transitions, if a name-based update doesn't take effect, retry with the UUID.
 
 ### State Transition Triggers
 
 | Transition | Triggered By | When |
 |------------|--------------|------|
-| → Backlog | code-audit, manual | Issue discovered or created |
+| → Backlog | code-audit, deep-review, add-to-backlog, manual | Issue discovered or created |
 | Backlog → Todo | plan-backlog | Issue selected for planning |
-| → Todo | plan-inline, plan-fix, plan-review (bugs) | Task enters PLANS.md |
+| → Todo | plan-inline, plan-fix, plan-review (bugs needing a Fix Plan) | Task enters PLANS.md |
+| → Merge (created) | plan-review-implementation | Small bug fixed inline during review (audit trail only) |
 | Todo → In Progress | plan-implement | Task work **starts** (real-time) |
 | In Progress → Review | plan-implement | Task work **completes** (real-time) |
 | Review → Merge | plan-review-implementation | Task passes review |
 | Merge → Done | Linear GitHub automation | PR is merged (via `Closes ADV-XXX` in PR body) |
+| Done/Merge → Released | push-to-production | Release deployed to production |
 
 ### Linear GitHub Integration
 
@@ -195,8 +199,8 @@ When the PR is merged, Linear's GitHub integration automatically moves the linke
 
 | Linear Label | code-audit Tags |
 |--------------|-----------------|
-| Security | `[security]`, `[dependency]` |
-| Bug | `[bug]`, `[async]`, `[shutdown]`, `[edge-case]`, `[type]` |
+| Security | `[security]`, `[dependency]`, `[supply-chain]`, `[prompt-injection]` |
+| Bug | `[bug]`, `[async]`, `[shutdown]`, `[edge-case]`, `[type]`, `[logging]`, `[failing-open]` |
 | Performance | `[memory-leak]`, `[resource-leak]`, `[timeout]`, `[rate-limit]` |
 | Convention | `[convention]` |
 | Technical Debt | `[dead-code]`, `[duplicate]`, `[test]`, `[practice]`, `[docs]`, `[chore]` |
@@ -218,7 +222,7 @@ Each task in PLANS.md includes a Linear issue link:
 
 ```markdown
 ### Task 1: Add parseResumenBroker function
-**Linear Issue:** [ADVA-123](https://linear.app/...)
+**Linear Issue:** [ADV-123](https://linear.app/...)
 
 1. Write test in src/gemini/parser.test.ts
 2. Run verifier (expect fail)
@@ -442,6 +446,16 @@ server.post('/api/new', { onRequest: authMiddleware }, handler);
 gcloud alpha services api-keys describe <key-id> --project=<project-id> | grep targets
 ```
 The output must list `generativelanguage.googleapis.com`. If `targets` is empty, the key is unrestricted and must be updated immediately.
+
+## KNOWN ACCEPTED PATTERNS
+
+Reviewers (bug-hunter, code-audit, deep-review, plan-review, Codex-finding triage) MUST NOT flag these — they are accepted by design. Full rationale in `.claude/skills/code-audit/references/compliance-checklist.md` ("Project-Specific Exemptions").
+
+1. **API_SECRET embedded in the Apps Script bundle** (`apps-script/build.js`, `dist/apps-script/Code.js`) — same trust principal as the Railway env; threat-model accepted.
+2. **Gemini raw response (first 1000 chars) logged at ERROR on parse failure** (`src/processing/extractor.ts`) — required for production debugging; do not propose redaction, removal, or level-downgrade.
+3. **Gemini prompt/response previews logged at DEBUG** (`src/gemini/client.ts`) — wanted for diagnosis.
+4. **Gemini prompts contain ADVA business identifiers** (CUIT, role rules, document-type enums) — not secrets; not "system prompt leakage".
+5. **Logs may contain CUITs, monetary values, file IDs, document metadata** — internal operator-only Railway logs; not PII exposure.
 
 ## COMMANDS
 

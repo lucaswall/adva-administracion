@@ -16,7 +16,7 @@ OWASP 2025 reshapes the 2021 list — pay attention to `[supply-chain]` (now A03
 These patterns are accepted by design in this project. Reviewers MUST NOT raise audit findings for them.
 
 1. **API_SECRET embedded in the Apps Script bundle** (`apps-script/build.js`, `apps-script/src/config.template.ts`, `dist/apps-script/Code.js`). The bound spreadsheet's script project shares the same trust principal as the Railway env. Threat-model accepted; do not propose extracting to PropertiesService or any out-of-band store.
-2. **Full Gemini raw response logged at ERROR on parse failure** (`src/processing/extractor.ts` `rawResponse: ...substring(0, 1000)`). Production debugging requires the full payload. Do not propose redaction, truncation, level-downgrade, or moving to a non-log channel.
+2. **Gemini raw response (first 1000 chars) logged at ERROR on parse failure** (`src/processing/extractor.ts` `rawResponse: ...substring(0, 1000)`). Production debugging requires this payload. Do not propose redaction, further truncation, level-downgrade, or moving to a non-log channel.
 3. **Gemini prompt/response previews logged at DEBUG** (`src/gemini/client.ts` `promptPreview`, `responsePreview`). Same principle — full information for diagnosis is wanted. Do not propose removal, gating, or redaction.
 4. **Gemini prompts contain ADVA business identifiers** (CUIT, role rules, document-type enums) — these are not secrets. Do not flag as "system prompt leakage" if they appear in logs.
 5. **Logger output may contain CUITs, monetary values, file IDs, and document metadata.** This is internal Railway log content for operators only. Do not flag as PII exposure.
@@ -81,7 +81,7 @@ This is the most consequential 2025 addition. Look specifically for **failing-op
 
 - **Lock acquisition failures.** If `PROCESSING_LOCK_ID` cannot be acquired, scan/match must skip — never run unprotected. Same for the 5-minute auto-expiry path.
 - **Retry exhaustion.** After `MAX_TRANSIENT_RETRIES` Gemini retries, the file moves to *Sin Procesar* — verify there's no path that proceeds with partial / null extraction data.
-- **Missing config.** If `API_BASE_URL` is unset, the system must explicitly disable webhook registration and Apps Script sync — not silently no-op while other code assumes it's set. If `ENVIRONMENT` is unset in production, the server must refuse to start (not default to staging silently).
+- **Missing config.** If `API_BASE_URL` is unset, the system must explicitly disable webhook registration and Apps Script sync — not silently no-op while other code assumes it's set. For `ENVIRONMENT`: unset → treated as staging is the documented, intended behavior (see Environments & Boot below); only flag if a *production* deployment can boot without it set.
 - **Renamed sheet tabs.** Sheet name discovery must fail loudly if a configured tab is missing — not write to whatever tab is at index 0.
 - **Folder reorganization.** When the Drive folder structure has changed (old format vs new format) every code path must handle both or refuse — never silently fall through to a default.
 - **Empty catches and swallowed errors.** `catch (e) {}`, catches that log without rethrowing where the upstream needs the failure signal, error responses that hide the failure from the caller.
@@ -162,7 +162,7 @@ These are project-specific rules. Quality reviewer should grep aggressively; rel
 
 ### Pino Logger
 - **No `console.log`/`warn`/`error` in production code.** Use Pino logger from `utils/logger.ts`.
-- Routes use Fastify's request-bound logger: `request.log.info({ data }, 'message')`.
+- Routes use the Fastify logger (`server.log.info({ data }, 'message')` or the request-bound `request.log` equivalent), matching CLAUDE.md's LOGGING section.
 - Every log call uses `{ action, module?, phase? }` structured fields, not string-only messages.
 - No mixed formats in the same module.
 - External API calls (Gemini, Drive, Sheets, Railway) log `durationMs` on completion.

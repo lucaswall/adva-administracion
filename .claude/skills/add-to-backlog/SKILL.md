@@ -2,7 +2,7 @@
 name: add-to-backlog
 description: Add issues to Linear Backlog from free-form input. Use when user says "add to backlog", "create backlog issues", "track this", or describes tasks/improvements/bugs to add. Interprets user's ideas, investigation findings, or conversation context into well-structured Backlog issues. Can process multiple items at once.
 argument-hint: [description of what to add, or "from conversation", or "from investigation"]
-allowed-tools: Read, Glob, Grep, Task, mcp__linear__list_teams, mcp__linear__list_issues, mcp__linear__get_issue, mcp__linear__create_issue, mcp__linear__list_issue_labels, mcp__linear__list_issue_statuses
+allowed-tools: Read, Glob, Grep, mcp__linear__list_teams, mcp__linear__list_issues, mcp__linear__get_issue, mcp__linear__save_issue, mcp__linear__list_issue_labels, mcp__linear__list_issue_statuses
 disable-model-invocation: true
 ---
 
@@ -41,15 +41,6 @@ User references findings from `investigate` skill:
 /add-to-backlog add the issues found by investigate
 ```
 
-### Mode 4: From Sentry
-User references Sentry crash/error reports:
-```
-/add-to-backlog the Sentry issues we found
-/add-to-backlog track the Sentry crash
-```
-
-When creating issues from Sentry findings, include the Sentry issue URL in the description under a `**Sentry Issue:**` section so downstream planning skills can track it.
-
 ## Pre-flight
 
 **Verify Linear MCP:** Call `mcp__linear__list_teams`. If unavailable, **STOP** and tell the user: "Linear MCP is not connected. Run `/mcp` to reconnect, then re-run this skill."
@@ -84,9 +75,6 @@ Structure:
 ```
 **Problem:**
 [What is wrong or missing - 1-2 sentences]
-
-**Sentry Issue:** (include only if originating from Sentry)
-[Sentry issue URL] — [event count] events, [user count] users, release [version]
 
 **Context:**
 [Where this occurs, affected files/areas - brief]
@@ -162,7 +150,7 @@ Before creating, check existing Backlog:
 
 ## Creating Issues
 
-Use `mcp__linear__create_issue` for each issue (skip duplicates automatically):
+Use `mcp__linear__save_issue` for each issue — omit `id` so it creates (skip duplicates automatically):
 
 ```
 team: [Discovered team name from CLAUDE.md or mcp__linear__list_teams]
@@ -234,17 +222,17 @@ After creating issues, output:
 ```
 Created X issues in Linear Backlog:
 
-- ADVA-123: [Title] (Label, Priority)
-- ADVA-124: [Title] (Label, Priority)
-- ADVA-125: [Title] (Label, Priority)
+- ADV-123: [Title] (Label, Priority)
+- ADV-124: [Title] (Label, Priority)
+- ADV-125: [Title] (Label, Priority)
 
 Skipped:
-- [Description] - duplicate of ADVA-45
+- [Description] - duplicate of ADV-45
 
 Next steps:
 - Review issues in Linear Backlog
 - Use `plan-backlog` to create implementation plans
-- Use `plan-backlog ADVA-123` to plan a specific issue
+- Use `plan-backlog ADV-123` to plan a specific issue
 ```
 
 Do not ask follow-up questions. Do not offer to plan or implement.

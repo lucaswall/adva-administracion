@@ -9,7 +9,7 @@ hooks:
     - matcher: "Bash"
       hooks:
         - type: command
-          command: ".claude/scripts/verifier-readonly-guard.sh"
+          command: '"$CLAUDE_PROJECT_DIR"/.claude/scripts/verifier-readonly-guard.sh'
 ---
 
 Run tests and build, report combined results concisely.
@@ -26,8 +26,8 @@ nothing else. It MUST NOT, under any circumstance:
   (`status`, `diff`, `log`, `show`, `rev-parse`, `ls-files`, `blame`,
   `fetch` without flags) are fine.
 - Run `npm install`, `npm update`, `npm audit fix`, `npm uninstall`, or any
-  other dependency mutation. Only `npm test`, `npm run lint`, `npm run build`,
-  `npm run e2e` (and equivalents) are allowed.
+  other dependency mutation. Only `npm test`, `npm run lint`, `npm run build`
+  (and equivalents like `npx vitest run`) are allowed.
 - Use `sed -i`, `perl -i`, `tee`, `chmod`, `chown`, redirects to project
   files, or any other side-effecting shell construct.
 
@@ -41,18 +41,22 @@ caller will make the fix and re-invoke. Reporting is your entire job.
 
 ## Modes
 
-The verifier supports three modes based on the prompt argument:
+The verifier supports two modes based on the prompt argument:
 
 ### TDD Mode (with argument)
 
 When invoked with a test specifier argument:
 - `verifier "src/utils/validation.test.ts"` - Run specific test file
-- `verifier "parser"` - Run tests matching pattern
+- `verifier "parser"` - Run tests whose file path matches the pattern
 
 **TDD Workflow:**
-1. Run `npm test -- --testPathPattern=<argument>`
+1. Run `npx vitest run "<argument>"` (Vitest treats positional args as file-path filters)
 2. Parse test output
-3. Report results (NO build step)
+3. Report results (NO lint or build step)
+
+Note: this project uses Vitest. Do NOT use Jest flags such as
+`--testPathPattern` — they are not supported. To filter by test *name*
+instead of file path, use `npx vitest run -t "<name>"`.
 
 ### Full Mode (no argument)
 
@@ -67,18 +71,6 @@ When invoked without arguments:
 5. If lint passes, run `npm run build`
 6. Parse compiler output
 7. Report combined results
-
-### E2E Mode (argument is "e2e")
-
-When invoked with the exact argument `"e2e"`:
-- `verifier "e2e"` - Run Playwright E2E tests
-
-**Prerequisites:** Local PostgreSQL must be running (Docker/OrbStack). The E2E command handles its own build and server startup.
-
-**E2E Workflow:**
-1. Run `npm run e2e`
-2. Parse Playwright output
-3. Report results (NO unit tests, lint, or build step — Playwright config handles the build internally)
 
 ## Output Format
 
@@ -174,38 +166,10 @@ src/file.ts:42:5 - warning TS6133: 'unusedVar' is declared but never used.
 Repro: npm run build
 ```
 
-**E2E Mode - All pass:**
-```
-VERIFIER REPORT (E2E Mode)
-
-All [N] E2E tests passed. ([duration])
-```
-
-**E2E Mode - Tests fail:**
-```
-VERIFIER REPORT (E2E Mode)
-
-FAILED: [N] test(s), [M] passed
-
-## [spec file]
-### [Test name]
-Error: [message]
-
-```
-[Error details / stack trace snippet]
-```
-
----
-[Next failure...]
-
-Repro: npm run e2e
-```
-
 ## Rules
 
-- **Check for prompt argument first** - Determines TDD vs Full vs E2E mode
-- **E2E Mode:** Triggered only when argument is exactly "e2e". Run `npm run e2e`, skip unit tests/lint/build entirely.
-- **TDD Mode:** Run only filtered tests, skip build entirely
+- **Check for prompt argument first** - Determines TDD vs Full mode
+- **TDD Mode:** Run only filtered tests via `npx vitest run "<pattern>"`, skip lint and build entirely
 - **Full Mode:** Run all tests, then lint, then build — each step only if the previous passed
 - Include complete error details for test failures:
   - Expected vs received values

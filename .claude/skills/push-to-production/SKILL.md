@@ -1,7 +1,7 @@
 ---
 name: push-to-production
 description: Release to production by pushing to main and release branches, verifying Railway auto-deploy, creating a GitHub Release, and transitioning Linear issues. Use when user says "push to production", "release", "deploy to production", or "ship it". Bumps version, updates changelog, pushes to main + release, verifies Railway deployment, creates GitHub Release, and moves Linear issues to Released.
-allowed-tools: Read, Edit, Write, Glob, Grep, Bash, Task, mcp__linear__list_teams, mcp__linear__list_issues, mcp__linear__update_issue, mcp__linear__get_issue, mcp__linear__list_issue_statuses, mcp__Railway__get-logs, mcp__Railway__list-deployments
+allowed-tools: Read, Edit, Write, Glob, Grep, Bash, Agent, mcp__linear__list_teams, mcp__linear__list_issues, mcp__linear__save_issue, mcp__linear__get_issue, mcp__linear__list_issue_statuses, mcp__Railway__get_logs, mcp__Railway__list_deployments
 argument-hint: [version]
 disable-model-invocation: true
 ---
@@ -10,7 +10,7 @@ Release to production. Two Railway environments auto-deploy from different branc
 - **Staging** auto-deploys from `main`
 - **Production** auto-deploys from `release`
 
-Both branches must be pushed. The Railway MCP is linked to **staging** — always specify `environment: "production"` when checking production deployments.
+Both branches must be pushed. The Railway MCP is linked to **staging** — always specify `environment_id: "production"` when checking production deployments.
 
 ## Phase 1: Pre-flight Checks
 
@@ -45,7 +45,7 @@ If PLANS.md doesn't exist or has no incomplete tasks, continue.
 Run the `verifier` agent (full mode) to confirm unit tests, lint, and build pass:
 
 ```
-Use Task tool with subagent_type "verifier"
+Use the Agent tool with subagent_type "verifier"
 ```
 
 If verifier reports failures, **STOP**. Do not proceed with a broken build.
@@ -158,7 +158,7 @@ If either push fails, **STOP**: "Push failed. Check remote access and try again.
 Wait briefly (30 seconds) then check **production** deployment status:
 
 ```
-Use mcp__Railway__list-deployments with environment: "production"
+Use mcp__Railway__list_deployments with environment_id: "production"
 ```
 
 Look for a deployment that started after the push. Check its status.
@@ -168,8 +168,9 @@ Look for a deployment that started after the push. Check its status.
 Use Railway MCP to verify the **production** deployment succeeded:
 
 ```
-Use mcp__Railway__get-logs with environment: "production"
+Use mcp__Railway__get_logs with environment_id: "production"
 ```
+(`log_type: "deploy"` is the default; use `log_type: "build"` to inspect the build.)
 
 Look for:
 - Successful build completion
@@ -237,16 +238,16 @@ Transition all Linear issues in "Done" to "Released" now that the code is live i
 
 3. For each issue found, transition to Released using the **state UUID** (both Done and Released are `type: completed` — passing by name could silently no-op):
    ```
-   mcp__linear__update_issue with id: <issue-id>, state: "<released-state-uuid>"
+   mcp__linear__save_issue with id: <issue-id>, state: "<released-state-uuid>"
    ```
 
-4. **Batch efficiently:** Call up to 10 `update_issue` calls in parallel. If there are more than 30 issues, update the first 30 and note the remainder in the report for manual transition.
+4. **Batch efficiently:** Call up to 10 `save_issue` calls in parallel. If there are more than 30 issues, update the first 30 and note the remainder in the report for manual transition.
 
 5. Collect the list of moved issues (identifier + title) for the report.
 
 If no issues are in Done, that's fine — skip silently.
 
-### 5.2 Move Merge Issues to Done then Released
+### 5.2 Move Merge Issues to Released
 
 Check for any issues stuck in "Merge" state (PR was merged but Linear automation didn't fire):
 
@@ -270,7 +271,7 @@ If the Linear MCP is unavailable (tools fail), **do not STOP** — log a warning
 **GitHub Release:** [Created | Failed (see warning above)]
 
 ### Issues Released
-[List of ADVA-xxx: title moved to Released, or "None"]
+[List of ADV-xxx: title moved to Released, or "None"]
 
 ### Deployment Verification
 - Production deployment status: [status]
@@ -307,6 +308,6 @@ If the Linear MCP is unavailable (tools fail), **do not STOP** — log a warning
 - **Semantic Versioning 2.0.0** — Version bumps follow semver rules: MAJOR for breaking changes, MINOR for new features, PATCH for bug fixes. Every release gets a CHANGELOG.md entry and matching package.json version
 - **Net-effect changelog** — Changelog describes what changed from production's perspective, not a commit-by-commit replay
 - **Two-branch deploy** — Push to `main` (staging) AND `main:release` (production). Both must succeed.
-- **Verify production** — Always specify `environment: "production"` when checking Railway deployment. The MCP defaults to staging.
+- **Verify production** — Always specify `environment_id: "production"` when checking Railway deployment. The MCP defaults to staging.
 - **Linear is cosmetic** — Issue state transitions are nice-to-have. Never block a release because Linear MCP is down.
 - **Stop on any pre-flight failure** — Better to abort than ship broken code

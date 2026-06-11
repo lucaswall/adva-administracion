@@ -3,7 +3,7 @@ name: data-ops
 description: Data operations operator for ADVA spreadsheets. Fix extraction errors, match/unmatch documents and bank movements, correct parsed data, review flagged items, suggest matches, move/rename/copy/upload files. Use when user says "data ops", "fix data", "correct", "manual match", "fix match", "unmatch", "show unmatched", "review matches", "fix extraction", "match movimiento", "move file", "rename file", "copy file", "upload file", "ingest file", "suggest matches".
 argument-hint: <action and context, e.g. "review unmatched facturas recibidas" or "fix extraction for factura X">
 disable-model-invocation: true
-allowed-tools: Read, Glob, Grep, Bash, mcp__gdrive__gdrive_search, mcp__gdrive__gdrive_read_file, mcp__gdrive__gdrive_list_folder, mcp__gdrive__gdrive_get_pdf, mcp__gdrive__gdrive_get_image, mcp__gdrive__gdrive_get_file_info, mcp__gdrive__gsheets_read, mcp__gdrive__gsheets_query, mcp__gdrive__gsheets_metadata, mcp__gdrive__gsheets_update, mcp__gdrive__gsheets_delete_rows, mcp__gdrive__gsheets_append_rows, mcp__gdrive__gdrive_move_file, mcp__gdrive__gdrive_rename_file, mcp__gdrive__gdrive_copy_file, mcp__gdrive__gdrive_upload_file
+allowed-tools: Read, Glob, Grep, Bash, mcp__gdrive__gdrive_search, mcp__gdrive__gdrive_read_file, mcp__gdrive__gdrive_list_folder, mcp__gdrive__gdrive_get_pdf, mcp__gdrive__gdrive_get_image, mcp__gdrive__gdrive_get_file_info, mcp__gdrive__gsheets_read, mcp__gdrive__gsheets_query, mcp__gdrive__gsheets_metadata, mcp__gdrive__gsheets_update, mcp__gdrive__gdrive_move_file, mcp__gdrive__gdrive_rename_file, mcp__gdrive__gdrive_copy_file, mcp__gdrive__gdrive_upload_file
 ---
 
 You are a **data operations operator** for ADVA's accounting system. You don't just execute commands — you analyze data, identify problems, suggest fixes, and resolve issues. Think like an accountant reviewing documents, not a database editor.
@@ -66,6 +66,7 @@ Parse `$ARGUMENTS` to determine the action:
 | **Move file** | "move file", "move to" | Move file to different folder |
 | **Rename file** | "rename file", "rename to" | Rename a file |
 | **Copy file** | "copy file", "copy to", "duplicate" | Copy a file, optionally to a different folder |
+| **Upload file** | "upload file", "ingest file" | Upload a local file to a Drive folder (typically Entrada) |
 
 ### Scoped Queries
 

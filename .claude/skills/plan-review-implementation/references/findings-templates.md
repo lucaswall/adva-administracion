@@ -18,9 +18,9 @@ Summary: N issue(s) found, fixed inline ([single-agent review | Team: security, 
 - [DISCARDED] ... (if any)
 
 ### Linear Updates
-- ADVA-123: Review → Merge (original task)
-- ADVA-130: Created in Merge (Fix: missing try/catch — fixed inline)
-- ADVA-131: Created in Merge (Fix: missing log action — fixed inline)
+- ADV-123: Review → Merge (original task)
+- ADV-130: Created in Merge (Fix: missing try/catch — fixed inline)
+- ADV-131: Created in Merge (Fix: missing log action — fixed inline)
 
 ### Inline Fix Verification
 - Unit tests: all pass
@@ -51,10 +51,10 @@ Summary: N issue(s) found (Team: security, reliability, quality reviewers)
 - [DISCARDED] EDGE CASE: Unicode in CUIT field (`src/utils/validation.ts:30`) — CUIT fields only contain digits and hyphens by AFIP specification
 
 ### Linear Updates
-- ADVA-123: Review → Merge (original task completed)
-- ADVA-125: Created in Todo (Fix: Missing input validation)
-- ADVA-126: Created in Todo (Fix: Race condition)
-- ADVA-127: Created in Todo (Fix: Parallel test interference)
+- ADV-123: Review → Merge (original task completed)
+- ADV-125: Created in Todo (Fix: Missing input validation)
+- ADV-126: Created in Todo (Fix: Race condition)
+- ADV-127: Created in Todo (Fix: Parallel test interference)
 
 <!-- REVIEW COMPLETE -->
 
@@ -63,22 +63,22 @@ Summary: N issue(s) found (Team: security, reliability, quality reviewers)
 ## Fix Plan
 
 **Source:** Review findings from Iteration N
-**Linear Issues:** [ADVA-125](...), [ADVA-126](...), [ADVA-127](...)
+**Linear Issues:** [ADV-125](...), [ADV-126](...), [ADV-127](...)
 
 ### Fix 1: Missing input validation in CUIT parser
-**Linear Issue:** [ADVA-125](...)
+**Linear Issue:** [ADV-125](...)
 
 1. Write test in `src/utils/validation.test.ts` for malicious input handling
 2. Add input sanitization in `src/utils/validation.ts:45`
 
 ### Fix 2: Race condition in spreadsheet processing
-**Linear Issue:** [ADVA-126](...)
+**Linear Issue:** [ADV-126](...)
 
 1. Write test in `src/services/spreadsheet.test.ts` for concurrent processing
 2. Add mutex/lock in `src/services/spreadsheet.ts:120`
 
 ### Fix 3: Parallel test interference
-**Linear Issue:** [ADVA-127](...)
+**Linear Issue:** [ADV-127](...)
 
 1. Remove fragile assertion after cleanup
 2. Verify state without assuming empty state
@@ -101,8 +101,8 @@ No issues found - all implementations are correct and follow project conventions
 - [DISCARDED] ... (if any findings were raised but classified as not-bugs)
 
 ### Linear Updates
-- ADVA-123: Review → Merge
-- ADVA-124: Review → Merge
+- ADV-123: Review → Merge
+- ADV-124: Review → Merge
 
 <!-- REVIEW COMPLETE -->
 ```

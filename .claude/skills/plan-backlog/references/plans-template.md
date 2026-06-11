@@ -2,13 +2,15 @@
 
 All planning skills (plan-inline, plan-backlog, plan-fix) write PLANS.md using this structure.
 
+**Status lifecycle:** planning skills write `**Status:** IN_PROGRESS` on line 3; `plan-review-implementation` flips it to `COMPLETE` when all iterations pass review. Pre-flight checks in the planning skills read this field.
+
 ```markdown
 # Implementation Plan
 
+**Status:** IN_PROGRESS
 **Created:** YYYY-MM-DD
 **Source:** [see Source Format below]
-**Linear Issues:** [PROJ-123](https://linear.app/...), [PROJ-124](https://linear.app/...)
-**Sentry Issues:** [Sentry issue URLs] (omit if not from Sentry)
+**Linear Issues:** [ADV-123](https://linear.app/...), [ADV-124](https://linear.app/...)
 **Branch:** [type]/[description]
 
 ## Context Gathered
@@ -33,13 +35,13 @@ All planning skills (plan-inline, plan-backlog, plan-fix) write PLANS.md using t
 
 ### Triage Results (plan-backlog only)
 
-**Planned:** PROJ-123, PROJ-456
-**Canceled:** PROJ-789 (reason), PROJ-012 (reason)
+**Planned:** ADV-123, ADV-456
+**Canceled:** ADV-789 (reason), ADV-012 (reason)
 
 ## Tasks
 
 ### Task 1: [Name]
-**Linear Issue:** [PROJ-123](url)
+**Linear Issue:** [ADV-123](url)
 **Files:**
 - `path/to/file` (create | modify)
 - `path/to/test-file` (create | modify)
@@ -66,7 +68,7 @@ All planning skills (plan-inline, plan-backlog, plan-fix) write PLANS.md using t
 ## Plan Summary
 
 **Objective:** [One sentence — what and why]
-**Linear Issues:** [PROJ-123, PROJ-124, ...]
+**Linear Issues:** [ADV-123, ADV-124, ...]
 **Approach:** [2-3 sentences]
 **Scope:** X tasks, Y files, Z tests
 **Key Decisions:** [list, if any]
@@ -78,7 +80,7 @@ All planning skills (plan-inline, plan-backlog, plan-fix) write PLANS.md using t
 | Skill | Source Value |
 |-------|-------------|
 | plan-inline | `Inline request: [summary of request]` |
-| plan-backlog | `Backlog: PROJ-123, PROJ-456` |
+| plan-backlog | `Backlog: ADV-123, ADV-456` |
 | plan-fix | `Bug report: [summary of bug]` |
 
 ## Termination
@@ -87,7 +89,7 @@ After writing PLANS.md and creating/moving Linear issues to Todo, output:
 
 ```
 Plan created in PLANS.md
-Linear issues in Todo: PROJ-123, PROJ-124, ...
+Linear issues in Todo: ADV-123, ADV-124, ...
 
 ## Plan Summary
 **Objective:** [from PLANS.md]

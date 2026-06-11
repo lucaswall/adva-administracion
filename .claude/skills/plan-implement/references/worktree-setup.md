@@ -27,9 +27,9 @@ git worktree add _workers/worker-N -b <FEATURE_BRANCH>-worker-N
 
 **IMPORTANT:** Use a hyphen (`-worker-N`), NOT a slash (`/worker-N`). Git cannot create `refs/heads/feat/foo-123/worker-1` when `refs/heads/feat/foo-123` already exists as a branch ref.
 
-Example: if `FEATURE_BRANCH` is `feat/adva-123-cuit-validation`, worker branches are:
-- `feat/adva-123-cuit-validation-worker-1`
-- `feat/adva-123-cuit-validation-worker-2`
+Example: if `FEATURE_BRANCH` is `feat/adv-123-cuit-validation`, worker branches are:
+- `feat/adv-123-cuit-validation-worker-1`
+- `feat/adv-123-cuit-validation-worker-2`
 
 ## Bootstrap Worktree Environments
 

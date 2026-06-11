@@ -2,7 +2,7 @@
 name: plan-fix
 description: Investigates bugs AND creates actionable TDD fix plans. Creates Linear issues in Todo state. Use when you know you want to fix something - user reports extraction errors, deployment failures, wrong data, missing matches, or prompt issues. Can be chained from investigate skill. Discovers MCPs from CLAUDE.md for debugging (logs, files, prompts).
 argument-hint: <bug description>
-allowed-tools: Read, Edit, Write, Glob, Grep, Task, Bash, mcp__linear__list_teams, mcp__linear__list_issues, mcp__linear__get_issue, mcp__linear__create_issue, mcp__linear__update_issue, mcp__linear__list_issue_labels, mcp__linear__list_issue_statuses, mcp__sentry__find_organizations, mcp__sentry__find_projects, mcp__sentry__search_issues, mcp__sentry__get_issue_details, mcp__sentry__analyze_issue_with_seer, mcp__sentry__search_events, mcp__sentry__search_issue_events, mcp__sentry__get_issue_tag_values
+allowed-tools: Read, Edit, Write, Glob, Grep, Agent, Bash, mcp__linear__list_teams, mcp__linear__list_issues, mcp__linear__get_issue, mcp__linear__save_issue, mcp__linear__list_issue_labels, mcp__linear__list_issue_statuses
 disable-model-invocation: true
 ---
 
@@ -57,8 +57,7 @@ Categorize the reported issue into one of these types:
 | **Storage** | Data not saved, wrong spreadsheet, missing records | Google Drive MCP, Codebase |
 | **Prompt** | Consistent extraction errors on specific doc types | Gemini MCP, current prompts |
 | **API Error** | Backend route failures, 500s, bad responses | Route handlers, middleware, error handling |
-| **Data Issue** | Wrong data, missing data, data corruption | Database queries, API transformations, caching |
-| **Frontend Bug** | UI rendering issues, broken interactions | React components, state management, data fetching |
+| **Data Issue** | Wrong data, missing data, data corruption | Spreadsheet reads/writes, matching logic, data transformations |
 
 ## 6. Gather Evidence
 
@@ -95,22 +94,7 @@ Search Linear for related issues:
 - Check if there are related issues that provide context
 - Look for previously attempted fixes
 
-### 6.5 Sentry Context
-
-If the bug involves production crashes, errors, or runtime issues, search Sentry for related issues. Use ToolSearch to load Sentry tools before calling them.
-
-1. **Find the org/project** — Use `mcp__sentry__find_organizations` then `mcp__sentry__find_projects` to get slugs
-2. **Search for issues** — Use `mcp__sentry__search_issues` with natural language (e.g., "unresolved crashes from last week")
-3. **Get issue details** — Use `mcp__sentry__get_issue_details` for full stack traces and metadata
-4. **Analyze root cause** — Use `mcp__sentry__analyze_issue_with_seer` for AI-powered analysis
-5. **Check distributions** — Use `mcp__sentry__get_issue_tag_values` for environment/release breakdown
-
-If Sentry issues are found:
-- Document the Sentry issue ID and URL in the PLANS.md `**Sentry:**` field
-- Note frequency, affected users, and releases in Evidence section
-- Include the Sentry issue reference in the Linear issue description (see Section 8)
-
-### 6.6 Reproduce the Issue
+### 6.5 Reproduce the Issue
 
 When possible, try to reproduce:
 
@@ -152,16 +136,12 @@ Create a Linear issue in the discovered team with status "Todo":
 
 3. Create the issue:
    ```
-   mcp__linear__create_issue with:
+   mcp__linear__save_issue with:
    - team: [Discovered team name]
    - title: "[Bug Type] Brief description of the fix needed"
    - description: |
      ## Bug Report
      [Summary of the issue]
-
-     ## Sentry Issue (if applicable)
-     [Sentry issue URL] — [event count] events, [user count] users, release [version]
-     **Action:** Resolve this Sentry issue after fix is merged and released.
 
      ## Root Cause
      [What was found during investigation]
@@ -178,14 +158,13 @@ Create a Linear issue in the discovered team with status "Todo":
      - [ ] All existing tests pass
      - [ ] No TypeScript errors
      - [ ] Deployed successfully
-     - [ ] Sentry issue resolved (if applicable)
-   - status: "Todo"
+   - state: "Todo"
    - Apply relevant labels (bug, etc.)
    ```
 
-   Omit the "Sentry Issue" section if the bug did not originate from Sentry.
+   (Do NOT pass `id` — omitting it makes `save_issue` create a new issue.)
 
-4. Update PLANS.md with the created issue key (ADVA-xxx).
+4. Update PLANS.md with the created issue key (ADV-xxx).
 
 ## Prompt/AI Testing Guidelines
 
@@ -238,7 +217,7 @@ When investigating deployment issues (if deployment MCPs available):
 - **ALWAYS use TDD approach** in fix plans - tests first, then implementation.
 - **ALWAYS check for existing Linear issues** before creating new ones to avoid duplicates.
 - **ALWAYS include file paths and line numbers** in evidence and fix plans.
-- **ALWAYS propose a branch name** following the pattern `fix/ADVA-xxx-brief-description`.
+- **ALWAYS propose a branch name** following the pattern `fix/ADV-xxx-brief-description`.
 - **Discover MCPs from CLAUDE.md** - don't hardcode MCP names or paths
 - **Keep fix plans actionable** - another developer (or AI agent) should be able to follow the plan without additional context.
 - **Severity guidelines:**

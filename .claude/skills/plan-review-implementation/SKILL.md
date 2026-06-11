@@ -1,7 +1,7 @@
 ---
 name: plan-review-implementation
-description: QA review of completed implementation using an agent team with 3 domain-specialized reviewers (security, reliability, quality). Use after plan-implement finishes, or when user says "review the implementation". Moves Linear issues Review→Merge. Creates new issues in Todo for bugs found. After PR creation, launches a 3-min Codex monitor that auto-fixes findings, watches CI, and squash-merges + cleans up when both are clean. Falls back to single-agent mode if agent teams unavailable.
-allowed-tools: Read, Edit, Write, Glob, Grep, Bash, Task, TeamCreate, TeamDelete, SendMessage, TaskCreate, TaskUpdate, TaskList, TaskGet, CronCreate, CronList, CronDelete, mcp__linear__list_teams, mcp__linear__list_issues, mcp__linear__get_issue, mcp__linear__create_issue, mcp__linear__update_issue, mcp__linear__list_issue_labels, mcp__linear__list_issue_statuses
+description: QA review of completed implementation using an agent team with 3 domain-specialized reviewers (security, reliability, quality). Use after plan-implement finishes, or when user says "review the implementation". Moves Linear issues Review→Merge. Bugs needing a Fix Plan get issues in Todo; small bugs fixed inline get issues in Merge. After PR creation, launches a 3-min Codex monitor that auto-fixes findings, watches CI, and squash-merges + cleans up when both are clean. Falls back to single-agent mode if agent teams unavailable.
+allowed-tools: Read, Edit, Write, Glob, Grep, Bash, Agent, TeamCreate, TeamDelete, SendMessage, TaskCreate, TaskUpdate, TaskList, TaskGet, CronCreate, CronList, CronDelete, mcp__linear__list_teams, mcp__linear__list_issues, mcp__linear__get_issue, mcp__linear__save_issue, mcp__linear__list_issue_labels, mcp__linear__list_issue_statuses
 disable-model-invocation: true
 ---
 
@@ -22,12 +22,14 @@ Review **ALL** implementation iterations that need review using an agent team wi
 
 This skill moves issues from **Review → Merge** (preparing for PR).
 
+**Same-type transition gotcha:** Review and Merge are both `type: started`. If a name-based transition does not take effect, retry with the state UUID from `mcp__linear__list_issue_statuses` (see CLAUDE.md LINEAR INTEGRATION).
+
 **If task passes review (no issues):**
-- Move issue from "Review" to "Merge" using `mcp__linear__update_issue`
+- Move issue from "Review" to "Merge" using `mcp__linear__save_issue` (pass `id` and `state`)
 
 **If task needs fixes (Fix Plan path):**
 - Move original issue from "Review" to "Merge" (the original task was completed)
-- Create NEW Linear issue(s) in "Todo" for each bug/fix using `mcp__linear__create_issue`:
+- Create NEW Linear issue(s) in "Todo" for each bug/fix using `mcp__linear__save_issue` (no `id`):
   - `team`: "ADVA Administracion"
   - `state`: "Todo" (will enter PLANS.md via Fix Plan)
   - `labels`: Bug
@@ -37,7 +39,7 @@ This skill moves issues from **Review → Merge** (preparing for PR).
 **If task needs fixes (inline fix path — ≤3 S-size bugs):**
 - Move original issue from "Review" to "Merge" (the original task was completed)
 - Fix bugs inline with TDD (see Inline Fix Assessment)
-- Create NEW Linear issue(s) in "Merge" state for traceability using `mcp__linear__create_issue`:
+- Create NEW Linear issue(s) in "Merge" state for traceability using `mcp__linear__save_issue` (no `id`):
   - `team`: "ADVA Administracion"
   - `state`: "Merge" (already fixed)
   - `labels`: Bug
@@ -110,7 +112,7 @@ Use `TaskCreate` to create 3 review tasks:
 
 ### Spawn 3 reviewer teammates
 
-Use the `Task` tool with `team_name: "plan-review"`, `subagent_type: "general-purpose"`, and `model: "sonnet"` to spawn each reviewer. Spawn all 3 in parallel (3 concurrent Task calls in one message).
+Use the `Agent` tool with `team_name: "plan-review"`, `subagent_type: "general-purpose"`, and `model: "sonnet"` to spawn each reviewer. Spawn all 3 in parallel (3 concurrent Agent calls in one message).
 
 Each reviewer prompt MUST include:
 - The common preamble and their domain checklist from [references/reviewer-prompts.md](references/reviewer-prompts.md)
@@ -216,7 +218,7 @@ Announce: "N fix(es), all S-size — fixing inline." or "N fix(es) including M/L
 ### Linear Handling for Inline Fixes
 
 Create Linear issues for traceability, but in "Merge" state (already fixed):
-- `mcp__linear__create_issue` with `team: "ADVA Administracion"`, `state: "Merge"`, `labels: ["Bug"]`
+- `mcp__linear__save_issue` with `team: "ADVA Administracion"`, `state: "Merge"`, `labels: ["Bug"]` (no `id`)
 
 This preserves the audit trail without triggering the Todo → In Progress → Review workflow.
 
@@ -248,8 +250,8 @@ Reviewers should already be shut down individually during the Coordination phase
 Review complete for [N] iteration(s). [M] files reviewed.
 
 BUGS FIXED (Linear issues created):
-- [CRITICAL] SECURITY: Missing input validation in CUIT parser (ADVA-125)
-- [HIGH] BUG: Race condition in spreadsheet processing (ADVA-126)
+- [CRITICAL] SECURITY: Missing input validation in CUIT parser (ADV-125)
+- [HIGH] BUG: Race condition in spreadsheet processing (ADV-126)
 
 DISCARDED FINDINGS (not bugs):
 - EDGE CASE: Unicode in CUIT field — CUIT fields only contain digits and hyphens by AFIP specification
@@ -266,14 +268,9 @@ If there were no findings at all (clean review), a brief "No issues found" summa
   1. **Commit and push** (see Termination section)
   2. Inform user: "Review complete. Changes committed and pushed. Run `/plan-implement` to continue implementation."
 
-- **If all tasks complete and no fix plans needed** (includes iterations where all bugs were fixed inline) → Run E2E tests, update header status, append final status, then create PR:
-  1. **Run E2E tests** using the verifier agent in E2E mode (as a standalone subagent, NOT a teammate — do NOT pass `team_name`):
-     ```
-     Use Agent tool with subagent_type "verifier" with prompt "e2e"
-     ```
-     If E2E tests fail, do NOT mark complete — create new Linear issues in Todo for the failures (same as review findings), add a Fix Plan, commit/push, and inform user to run `/plan-implement`.
-  2. **Update the header** on line 3: change `**Status:** IN_PROGRESS` to `**Status:** COMPLETE`
-  3. **Append** the final status section at the bottom of the file:
+- **If all tasks complete and no fix plans needed** (includes iterations where all bugs were fixed inline) → update header status, append final status, then create PR:
+  1. **Update the header** on line 3: change `**Status:** IN_PROGRESS` to `**Status:** COMPLETE`
+  2. **Append** the final status section at the bottom of the file:
 
 ```markdown
 ---
@@ -362,8 +359,8 @@ If the scope assessment chose single-agent mode (≤4 changed files) OR `TeamCre
    - Issues moved Review → Merge during review
    - Inline-fix issues created in Merge state
    - Fix-plan issues that completed and were moved to Merge
-   Deduplicate and sort numerically. Format as: `ADVA-123, ADVA-124, ...`
-5. Create PR using the `pr-creator` subagent. **Include in the prompt:** `Linear issues to close: ADVA-123, ADVA-124, ...` with the full list from step 4. This overrides PLANS.md scanning and ensures no inline-fix issues are missed.
+   Deduplicate and sort numerically. Format as: `ADV-123, ADV-124, ...`
+5. Create PR using the `pr-creator` subagent. **Include in the prompt:** `Linear issues to close: ADV-123, ADV-124, ...` with the full list from step 4. This overrides PLANS.md scanning and ensures no inline-fix issues are missed.
 6. Inform user with PR URL.
 7. **Launch the post-PR Codex monitor cron** (only after `pr-creator` reports success):
    - Capture the PR number from the pr-creator output (e.g., `112`).

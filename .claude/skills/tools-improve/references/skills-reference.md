@@ -253,11 +253,19 @@ Syntax: `Skill(name)` exact, `Skill(name *)` prefix match
 
 ## Context Budget
 
-Skill descriptions budget scales dynamically at **1% of the context window**, with a fallback of **8,000 characters**.
+Skill descriptions budget scales dynamically at **1% of the context window**, with a fallback of **8,000 characters**. Caveat: the 1% is computed against a fixed ~200K-token baseline, NOT the model's actual window — on 1M-context models the effective budget is ~5× smaller than expected (raise `skillListingBudgetFraction`, e.g. `0.05`, if descriptions get dropped).
 
-Check: `/context` — shows warning if skills excluded.
+Check: `/context` and `/doctor` — show warnings if skill descriptions were dropped.
 
-Override: `SLASH_COMMAND_TOOL_CHAR_BUDGET=30000`
+Override: `SLASH_COMMAND_TOOL_CHAR_BUDGET=30000` or the `skillListingBudgetFraction` setting.
+
+## Tool Access Semantics (important)
+
+- `allowed-tools` **GRANTS** (pre-approves, no permission prompt) the listed tools while the skill is active. It does **NOT** restrict the tool pool — every other tool remains callable under normal permission rules. Never describe allowed-tools as a restriction; enforce restrictions with permission **deny rules** in settings.json or PreToolUse hooks.
+- `disallowed-tools` (v2.1.152+) removes tools from the model while the skill is active; the restriction clears on the next user message.
+- Literal `$` before a digit, `ARGUMENTS`, or a declared argument name must be escaped as `\$` (v2.1.163+), e.g. `\$1.00`.
+- `/reload-skills` (v2.1.152+) re-scans skill directories without restarting; SKILL.md text changes also hot-reload automatically. Agent `.md` files do NOT hot-reload — they need a session restart (or the `/agents` UI).
+- Keep descriptions on a single YAML line — multi-line block scalars can make a skill silently vanish from the listing.
 
 ## Nested Discovery
 
