@@ -288,8 +288,8 @@ describe('Credential gate — fail-closed outside test mode (ADV-200)', () => {
   });
 
   // GOOGLE_SERVICE_ACCOUNT_KEY
-  it('throws when GOOGLE_SERVICE_ACCOUNT_KEY is missing in staging mode', async () => {
-    process.env.NODE_ENV = 'staging';
+  it('throws when GOOGLE_SERVICE_ACCOUNT_KEY is missing in non-test mode (development)', async () => {
+    process.env.NODE_ENV = 'development';
     delete process.env.GOOGLE_SERVICE_ACCOUNT_KEY;
     process.env.GEMINI_API_KEY = 'gemini-key';
     process.env.DRIVE_ROOT_FOLDER_ID = 'folder-id';
@@ -298,7 +298,7 @@ describe('Credential gate — fail-closed outside test mode (ADV-200)', () => {
     expect(() => getConfig()).toThrow('GOOGLE_SERVICE_ACCOUNT_KEY is required');
   });
 
-  it('throws when GOOGLE_SERVICE_ACCOUNT_KEY is missing in development mode', async () => {
+  it('throws when GOOGLE_SERVICE_ACCOUNT_KEY is missing in non-test mode (also development)', async () => {
     process.env.NODE_ENV = 'development';
     delete process.env.GOOGLE_SERVICE_ACCOUNT_KEY;
     process.env.GEMINI_API_KEY = 'gemini-key';
@@ -319,8 +319,8 @@ describe('Credential gate — fail-closed outside test mode (ADV-200)', () => {
   });
 
   // GEMINI_API_KEY
-  it('throws when GEMINI_API_KEY is missing in staging mode', async () => {
-    process.env.NODE_ENV = 'staging';
+  it('throws when GEMINI_API_KEY is missing in non-test mode (development)', async () => {
+    process.env.NODE_ENV = 'development';
     process.env.GOOGLE_SERVICE_ACCOUNT_KEY = 'google-key';
     delete process.env.GEMINI_API_KEY;
     process.env.DRIVE_ROOT_FOLDER_ID = 'folder-id';
@@ -340,8 +340,8 @@ describe('Credential gate — fail-closed outside test mode (ADV-200)', () => {
   });
 
   // DRIVE_ROOT_FOLDER_ID
-  it('throws when DRIVE_ROOT_FOLDER_ID is missing in staging mode', async () => {
-    process.env.NODE_ENV = 'staging';
+  it('throws when DRIVE_ROOT_FOLDER_ID is missing in non-test mode (development)', async () => {
+    process.env.NODE_ENV = 'development';
     process.env.GOOGLE_SERVICE_ACCOUNT_KEY = 'google-key';
     process.env.GEMINI_API_KEY = 'gemini-key';
     delete process.env.DRIVE_ROOT_FOLDER_ID;
@@ -394,18 +394,18 @@ describe('ENVIRONMENT validation', () => {
     expect(loadConfig().environment).toBe('production');
   });
 
-  it('defaults to "development" when ENVIRONMENT is not set and NODE_ENV is not production', async () => {
+  it('defaults to "staging" when ENVIRONMENT is not set and NODE_ENV is not production', async () => {
     delete process.env.ENVIRONMENT;
     process.env.NODE_ENV = 'development';
     const { loadConfig } = await import('./config.js');
-    expect(loadConfig().environment).toBe('development');
+    expect(loadConfig().environment).toBe('staging');
   });
 
-  it('defaults to "development" when ENVIRONMENT is not set and NODE_ENV is test', async () => {
+  it('defaults to "staging" when ENVIRONMENT is not set and NODE_ENV is test', async () => {
     delete process.env.ENVIRONMENT;
     process.env.NODE_ENV = 'test';
     const { loadConfig } = await import('./config.js');
-    expect(loadConfig().environment).toBe('development');
+    expect(loadConfig().environment).toBe('staging');
   });
 
   it('throws when ENVIRONMENT is missing in production mode', async () => {
@@ -436,5 +436,58 @@ describe('ADV-289: GOOGLE_API_TIMEOUT_MS constant', () => {
     vi.resetModules();
     const { GOOGLE_API_TIMEOUT_MS } = await import('./config.js');
     expect(GOOGLE_API_TIMEOUT_MS).toBe(60_000);
+  });
+});
+
+describe('ADV-346: ENVIRONMENT defaults and NODE_ENV validation', () => {
+  const originalEnv = process.env;
+
+  beforeEach(() => {
+    vi.resetModules();
+    process.env = { ...originalEnv };
+    process.env.API_SECRET = 'test-secret';
+    process.env.NODE_ENV = 'development';
+    process.env.GOOGLE_SERVICE_ACCOUNT_KEY = 'test-key';
+    process.env.GEMINI_API_KEY = 'test-key';
+    process.env.DRIVE_ROOT_FOLDER_ID = 'test-folder';
+  });
+
+  afterEach(() => {
+    process.env = originalEnv;
+  });
+
+  it('ENVIRONMENT unset and NODE_ENV=development yields environment === staging', async () => {
+    delete process.env.ENVIRONMENT;
+    process.env.NODE_ENV = 'development';
+    const { loadConfig } = await import('./config.js');
+    expect(loadConfig().environment).toBe('staging');
+  });
+
+  it('ENVIRONMENT unset and NODE_ENV=test yields environment === staging', async () => {
+    delete process.env.ENVIRONMENT;
+    process.env.NODE_ENV = 'test';
+    const { loadConfig } = await import('./config.js');
+    expect(loadConfig().environment).toBe('staging');
+  });
+
+  it('throws when NODE_ENV is miscased (Production)', async () => {
+    process.env.NODE_ENV = 'Production';
+    process.env.ENVIRONMENT = 'staging';
+    const { loadConfig } = await import('./config.js');
+    expect(() => loadConfig()).toThrow('NODE_ENV');
+  });
+
+  it('throws when NODE_ENV is an unknown value', async () => {
+    process.env.NODE_ENV = 'unknown';
+    process.env.ENVIRONMENT = 'staging';
+    const { loadConfig } = await import('./config.js');
+    expect(() => loadConfig()).toThrow('NODE_ENV');
+  });
+
+  it('ENVIRONMENT=prod still throws (not a valid value)', async () => {
+    process.env.ENVIRONMENT = 'prod';
+    process.env.NODE_ENV = 'development';
+    const { loadConfig } = await import('./config.js');
+    expect(() => loadConfig()).toThrow('ENVIRONMENT must be "staging" or "production"');
   });
 });

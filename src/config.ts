@@ -222,7 +222,7 @@ export interface Config {
   maxDocumentBytes: number;
 
   // Environment identity (which Drive folder this server owns)
-  environment: 'development' | 'staging' | 'production';
+  environment: 'staging' | 'production';
 }
 
 /**
@@ -258,7 +258,17 @@ function validateNumericEnv(name: string, value: number, min?: number, max?: num
 export function loadConfig(): Config {
   const port = parseInt(process.env.PORT || '3000', 10);
   validateNumericEnv('PORT', port, 1, 65535);
-  const nodeEnv = (process.env.NODE_ENV || 'development') as Config['nodeEnv'];
+
+  // Validate NODE_ENV — only known values are accepted; unknown values could
+  // silently bypass the credential gate or the ENVIRONMENT default logic.
+  const rawNodeEnv = process.env.NODE_ENV || 'development';
+  const validNodeEnvs = ['development', 'production', 'test'] as const;
+  if (!validNodeEnvs.includes(rawNodeEnv as typeof validNodeEnvs[number])) {
+    throw new Error(
+      `NODE_ENV must be "development", "production", or "test", got "${rawNodeEnv}"`
+    );
+  }
+  const nodeEnv = rawNodeEnv as Config['nodeEnv'];
   const logLevel = (process.env.LOG_LEVEL || 'INFO') as LogLevel;
 
   // API Secret - required in all environments
@@ -285,7 +295,11 @@ export function loadConfig(): Config {
     throw new Error('DRIVE_ROOT_FOLDER_ID is required');
   }
 
-  // Environment identity - which Drive folder this server owns
+  // Environment identity - which Drive folder this server owns.
+  // Railway sets ENVIRONMENT explicitly in both staging and production envs.
+  // When unset (local dev / test runs) we default to 'staging' so that
+  // checkEnvironmentMarker runs the full marker check — fail-closed by design.
+  // Production requires ENVIRONMENT to be set explicitly; omitting it throws.
   const validEnvironments = ['staging', 'production'] as const;
   const rawEnvironment = process.env.ENVIRONMENT;
   let environment: Config['environment'];
@@ -293,7 +307,7 @@ export function loadConfig(): Config {
     if (nodeEnv === 'production') {
       throw new Error('ENVIRONMENT is required in production (must be "staging" or "production")');
     }
-    environment = 'development';
+    environment = 'staging';
   } else if (!validEnvironments.includes(rawEnvironment as typeof validEnvironments[number])) {
     throw new Error(`ENVIRONMENT must be "staging" or "production", got "${rawEnvironment}"`);
   } else {

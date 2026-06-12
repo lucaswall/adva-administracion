@@ -138,9 +138,10 @@ export async function processFile(
           errorMessage: data.errorMessage || '',
         };
 
-        // If tokenBatch available, add to batch; otherwise log immediately
+        // If tokenBatch available, add to batch (with dashboardId for auto-flush, ADV-298);
+        // otherwise log immediately.
         if (context?.tokenBatch) {
-          await context.tokenBatch.add(entry);
+          await context.tokenBatch.add(entry, context.dashboardId);
         } else {
           // Log usage to Dashboard Operativo Contable
           // Note: Fire and forget - don't await to avoid slowing down processing

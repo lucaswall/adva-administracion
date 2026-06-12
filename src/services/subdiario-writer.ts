@@ -791,7 +791,7 @@ export async function syncSubdiario(
             const headerWriteResult = await setValues(
               subdiarioId,
               `${COMPROBANTES_SHEET}!A1:N1`,
-              [SUBDIARIO_COMPROBANTES_HEADERS as unknown as CellValue[]]
+              [SUBDIARIO_COMPROBANTES_HEADERS]
             );
             if (!headerWriteResult.ok) return headerWriteResult;
           }
