@@ -17,6 +17,7 @@ import { extractCuitFromText } from '../utils/validation.js';
 import { amountsMatch } from '../utils/numbers.js';
 import { amountsMatchCrossCurrency } from '../utils/exchange-rate.js';
 import { warn } from '../utils/logger.js';
+import { isAdvaCuit } from '../config.js';
 
 /**
  * Default tolerance percentage for cross-currency matching
@@ -347,7 +348,10 @@ export class BankMovementMatcher {
     }
 
     // Phase 1: Extract identity
-    const extractedCuit = extractCuitFromConcepto(movement.concepto);
+    // Skip ADVA's own CUITs — they appear in concepto of internal transfers but do not
+    // identify a counterparty and must not trigger a hard identity filter.
+    const rawExtractedCuit = extractCuitFromConcepto(movement.concepto);
+    const extractedCuit = rawExtractedCuit && !isAdvaCuit(rawExtractedCuit) ? rawExtractedCuit : undefined;
     const extractedRef = extractReferencia(movement.concepto);
 
     const bankFecha = parseArgDate(movement.fecha);
@@ -512,19 +516,24 @@ export class BankMovementMatcher {
       if (!reciboDate) continue;
       if (!isWithinDays(reciboDate, bankFecha, FACTURA_DATE_RANGE_BEFORE, FACTURA_DATE_RANGE_AFTER)) continue;
 
-      // Hard CUIT filter — recibos don't have a counterparty CUIT to match
-      if (hasCuitFilter) continue;
+      // CUIL filter for recibos: if CUIL extracted from concepto, only match recibos
+      // where the employee's CUIL matches (tier 2). If no CUIL filter, match at tier 5.
+      const hasCuilMatch = hasCuitFilter && extractedCuit === recibo.cuilEmpleado;
+      if (hasCuitFilter && !hasCuilMatch) continue;
 
+      const tier: BankMatchTier = hasCuilMatch ? 2 : 5;
       const dateDiff = dateDiffDays(bankFecha, reciboDate);
       const description = `Sueldo ${recibo.periodoAbonado} - ${recibo.nombreEmpleado}`;
+      const reasons = [`Amount match: ${amount}`, `Date match: Recibo ${recibo.fechaPago}`, `Employee: ${recibo.nombreEmpleado}`];
+      if (hasCuilMatch) reasons.push('Employee CUIL match');
 
       candidates.push({
-        tier: 5,
+        tier,
         matchType: 'recibo',
         fileId: recibo.fileId,
         description,
-        confidence: tierToConfidence(5, false),
-        reasons: [`Amount match: ${amount}`, `Date match: Recibo ${recibo.fechaPago}`, `Employee: ${recibo.nombreEmpleado}`],
+        confidence: tierToConfidence(tier, false),
+        reasons,
         dateDiff,
         isExactAmount: true,
       });
@@ -593,7 +602,9 @@ export class BankMovementMatcher {
     }
 
     // Phase 1: Extract identity
-    const extractedCuit = extractCuitFromConcepto(movement.concepto);
+    // Skip ADVA's own CUITs — they must not trigger a hard identity filter.
+    const rawExtractedCuitCredit = extractCuitFromConcepto(movement.concepto);
+    const extractedCuit = rawExtractedCuitCredit && !isAdvaCuit(rawExtractedCuitCredit) ? rawExtractedCuitCredit : undefined;
     const extractedRef = extractReferencia(movement.concepto);
 
     const bankFecha = parseArgDate(movement.fecha);
@@ -802,13 +813,8 @@ export class BankMovementMatcher {
         }
       }
 
-      // Confidence
-      let confidence: 'HIGH' | 'MEDIUM' | 'LOW';
-      if (isCrossCurrency) {
-        confidence = (hasCuit || hasImplicitCuitMatch) ? 'MEDIUM' : 'LOW';
-      } else {
-        confidence = (hasCuit || hasImplicitCuitMatch) ? 'HIGH' : 'MEDIUM';
-      }
+      // Confidence: use tierToConfidence for consistent tier→confidence mapping
+      const confidence = tierToConfidence(tier, isCrossCurrency);
 
       candidates.push({
         tier,

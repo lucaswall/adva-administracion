@@ -6,7 +6,7 @@
 import type { Result } from '../../types/index.js';
 import { getValues, setValues } from '../../services/sheets.js';
 import { parseNumber } from '../../utils/numbers.js';
-import { normalizeSpreadsheetDate } from '../../utils/date.js';
+import { normalizeSpreadsheetDate, parseArgDate } from '../../utils/date.js';
 import { debug, info, warn } from '../../utils/logger.js';
 import { getCorrelationId } from '../../utils/correlation.js';
 
@@ -241,8 +241,15 @@ export async function matchNCsWithFacturas(
         }
       }
 
-      // NC date must be after or equal to factura date
-      if (nc.fechaEmision < factura.fechaEmision) {
+      // NC date must be after or equal to factura date — parse both to Date objects
+      // so that mixed formats (e.g. '15/03/2025' vs '2025-03-01') compare correctly.
+      // Skip if either date is unparseable (defensive: can't determine ordering).
+      const ncDate = parseArgDate(nc.fechaEmision);
+      const facturaDate = parseArgDate(factura.fechaEmision);
+      if (!ncDate || !facturaDate) {
+        continue;
+      }
+      if (ncDate < facturaDate) {
         continue;
       }
 

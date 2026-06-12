@@ -5,7 +5,7 @@
 
 import { createHash } from 'crypto';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { updateDetalle, type DetalleUpdate } from './movimientos-detalle.js';
+import { updateDetalle, normalizeMatchedType, type DetalleUpdate } from './movimientos-detalle.js';
 
 // Mock dependencies
 vi.mock('./sheets.js', () => ({
@@ -32,7 +32,9 @@ describe('updateDetalle', () => {
 
     expect(result.ok).toBe(true);
     if (result.ok) {
-      expect(result.value).toBe(0);
+      expect(result.value.appliedCount).toBe(0);
+      expect(result.value.skippedCount).toBe(0);
+      expect(result.value.appliedKeys.size).toBe(0);
     }
     expect(batchUpdate).not.toHaveBeenCalled();
   });
@@ -54,7 +56,7 @@ describe('updateDetalle', () => {
 
     expect(result.ok).toBe(true);
     if (result.ok) {
-      expect(result.value).toBe(1);
+      expect(result.value.appliedCount).toBe(1);
     }
 
     expect(batchUpdate).toHaveBeenCalledWith('spreadsheet-id', [
@@ -78,7 +80,7 @@ describe('updateDetalle', () => {
 
     expect(result.ok).toBe(true);
     if (result.ok) {
-      expect(result.value).toBe(3);
+      expect(result.value.appliedCount).toBe(3);
     }
 
     expect(batchUpdate).toHaveBeenCalledWith('spreadsheet-id', [
@@ -106,7 +108,7 @@ describe('updateDetalle', () => {
 
     expect(result.ok).toBe(true);
     if (result.ok) {
-      expect(result.value).toBe(600);
+      expect(result.value.appliedCount).toBe(600);
     }
 
     // Should have been called twice (500 + 100)
@@ -139,7 +141,7 @@ describe('updateDetalle', () => {
 
     expect(result.ok).toBe(true);
     if (result.ok) {
-      expect(result.value).toBe(1500);
+      expect(result.value.appliedCount).toBe(1500);
     }
 
     // Should have been called three times (500 + 500 + 500)
@@ -333,7 +335,7 @@ describe('updateDetalle', () => {
     // the version check passes and batchUpdate is called
     expect(result.ok).toBe(true);
     if (result.ok) {
-      expect(result.value).toBe(1);
+      expect(result.value.appliedCount).toBe(1);
     }
     expect(batchUpdate).toHaveBeenCalled();
   });
@@ -375,9 +377,178 @@ describe('updateDetalle', () => {
     // Version mismatch → update skipped, but still "ok" (just 0 rows updated)
     expect(result.ok).toBe(true);
     if (result.ok) {
-      expect(result.value).toBe(0);
+      expect(result.value.appliedCount).toBe(0);
     }
     // batchUpdate should NOT be called since all updates were skipped
+    expect(batchUpdate).not.toHaveBeenCalled();
+  });
+});
+
+describe('ADV-323: normalizeMatchedType export and row-version hash normalization', () => {
+  it('normalizes lowercase to uppercase', () => {
+    expect(normalizeMatchedType('auto')).toBe('AUTO');
+    expect(normalizeMatchedType('manual')).toBe('MANUAL');
+    expect(normalizeMatchedType('AUTO')).toBe('AUTO');
+    expect(normalizeMatchedType('MANUAL')).toBe('MANUAL');
+  });
+
+  it('normalizes unknown values to empty string', () => {
+    expect(normalizeMatchedType('garbage')).toBe('');
+    expect(normalizeMatchedType('unknown')).toBe('');
+    expect(normalizeMatchedType('')).toBe('');
+    expect(normalizeMatchedType('  ')).toBe('');
+  });
+
+  it('trims whitespace before checking', () => {
+    expect(normalizeMatchedType(' AUTO ')).toBe('AUTO');
+    expect(normalizeMatchedType(' MANUAL ')).toBe('MANUAL');
+    expect(normalizeMatchedType('  manual  ')).toBe('MANUAL');
+  });
+
+  it('round-trip: row with matchedType=manual produces same version hash as computeRowVersion with MANUAL', () => {
+    // Import computeRowVersion from match-movimientos (we test via hash equality)
+    // The hash is computed identically by both functions when matchedType is normalized.
+    // We verify this by checking that normalizeMatchedType('manual') === 'MANUAL'
+    // so both hash functions would produce the same value.
+    // This is the key invariant: computeVersionFromRow normalizes 'manual' → 'MANUAL',
+    // same as how computeRowVersion uses the typed 'MANUAL' value.
+    expect(normalizeMatchedType('manual')).toBe('MANUAL');
+    expect(normalizeMatchedType('MANUAL')).toBe('MANUAL');
+    // Both produce 'MANUAL', so hash inputs match and round-trip works.
+  });
+
+  it('version-check succeeds with lowercase matchedType in sheet when updateDetalle normalizes it', async () => {
+    // Sheet has 'manual' (lowercase) in column H.
+    // updateDetalle should compute the same hash as computeRowVersion which uses 'MANUAL'.
+    // Import computeRowVersion via the hash equality check.
+    const { createHash } = await import('crypto');
+
+    const computeHash = (data: string) =>
+      createHash('md5').update(data).digest('hex').slice(0, 16);
+
+    // Hash that computeRowVersion would compute for a row with matchedType='MANUAL'
+    const rowVersionHash = computeHash([
+      '2025-01-15',
+      'TRANSFERENCIA',
+      '1000',
+      '',
+      'file-old',
+      'Old Detalle',
+      'MANUAL',
+    ].join('|'));
+
+    // Simulate: sheet stores 'manual' (lowercase) in column H.
+    // computeVersionFromRow must normalize it to 'MANUAL' to match rowVersionHash.
+    vi.mocked(getValues).mockResolvedValue({
+      ok: true,
+      value: [
+        ['fecha', 'concepto', 'debito', 'credito', 'saldo', 'saldoCalculado', 'matchedFileId', 'matchedType', 'detalle'],
+        ['2025-01-15', 'TRANSFERENCIA', 1000, null, null, null, 'file-old', 'manual', 'Old Detalle'],
+      ],
+    });
+    vi.mocked(batchUpdate).mockResolvedValue({ ok: true, value: 1 });
+
+    const updates: DetalleUpdate[] = [{
+      sheetName: '2025-01',
+      rowNumber: 2,
+      matchedFileId: 'file-new',
+      detalle: 'New Detalle',
+      expectedVersion: rowVersionHash,
+    }];
+
+    const result = await updateDetalle('spreadsheet-id', updates);
+
+    // Version should match (after normalization) → update applied
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.appliedCount).toBe(1);
+    }
+    expect(batchUpdate).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('ADV-343: updateDetalle returns applied keys set', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('returns appliedKeys containing the key for an update without expectedVersion (always applied)', async () => {
+    vi.mocked(batchUpdate).mockResolvedValue({ ok: true, value: 1 });
+
+    const updates: DetalleUpdate[] = [{
+      sheetName: '2025-01',
+      rowNumber: 5,
+      matchedFileId: 'file1',
+      detalle: 'Match 1',
+      // no expectedVersion → always applied
+    }];
+
+    const result = await updateDetalle('spreadsheet-id', updates);
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value).toMatchObject({
+        appliedCount: 1,
+        skippedCount: 0,
+      });
+      expect((result.value as { appliedKeys: Set<string> }).appliedKeys.has('2025-01:5')).toBe(true);
+    }
+  });
+
+  it('version-match includes key in appliedKeys, version-mismatch excludes it', async () => {
+    const matchingVersion = createHash('md5').update([
+      '2025-01-15', 'PAGO A', '1000', '', 'file-a', 'Detalle A', 'AUTO',
+    ].join('|')).digest('hex').slice(0, 16);
+
+    vi.mocked(getValues).mockResolvedValue({
+      ok: true,
+      value: [
+        ['fecha', 'concepto', 'debito', 'credito', 'saldo', 'sc', 'matchedFileId', 'matchedType', 'detalle'],
+        ['2025-01-15', 'PAGO A', 1000, null, null, null, 'file-a', 'AUTO', 'Detalle A'], // row 2 → matches
+        ['2025-01-16', 'OTRO', 500, null, null, null, '', '', ''],                         // row 3 → mismatch
+      ],
+    });
+    vi.mocked(batchUpdate).mockResolvedValue({ ok: true, value: 1 });
+
+    const updates: DetalleUpdate[] = [
+      { sheetName: '2025-01', rowNumber: 2, matchedFileId: 'new-a', detalle: 'New A', expectedVersion: matchingVersion },
+      { sheetName: '2025-01', rowNumber: 3, matchedFileId: 'new-b', detalle: 'New B', expectedVersion: 'wrong-version' },
+    ];
+
+    const result = await updateDetalle('spreadsheet-id', updates);
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      const val = result.value as { appliedCount: number; skippedCount: number; appliedKeys: Set<string> };
+      expect(val.appliedCount).toBe(1);
+      expect(val.skippedCount).toBe(1);
+      expect(val.appliedKeys.has('2025-01:2')).toBe(true);
+      expect(val.appliedKeys.has('2025-01:3')).toBe(false);
+    }
+  });
+
+  it('sheet read failure during verification produces empty appliedKeys and no batchUpdate', async () => {
+    vi.mocked(getValues).mockResolvedValue({
+      ok: false,
+      error: new Error('sheets read failed'),
+    });
+
+    const updates: DetalleUpdate[] = [{
+      sheetName: '2025-01',
+      rowNumber: 2,
+      matchedFileId: 'file1',
+      detalle: 'Match',
+      expectedVersion: 'some-version',
+    }];
+
+    const result = await updateDetalle('spreadsheet-id', updates);
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      const val = result.value as { appliedCount: number; skippedCount: number; appliedKeys: Set<string> };
+      expect(val.appliedCount).toBe(0);
+      expect(val.appliedKeys.size).toBe(0);
+    }
     expect(batchUpdate).not.toHaveBeenCalled();
   });
 });

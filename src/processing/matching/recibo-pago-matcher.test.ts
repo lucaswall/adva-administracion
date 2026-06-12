@@ -2,19 +2,42 @@
  * Tests for recibo-pago matching
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { parseNumber } from '../../utils/numbers.js';
 import { normalizeSpreadsheetDate } from '../../utils/date.js';
 import { buildUnmatchUpdate, isBetterMatch } from '../../matching/cascade-matcher.js';
 import { ReciboPagoMatcher, type MatchQuality } from '../../matching/matcher.js';
 import type { Pago, Recibo, MatchConfidence } from '../../types/index.js';
 
+// Mocks for integration tests of matchRecibosWithPagos
+vi.mock('../../services/sheets.js', () => ({
+  getValues: vi.fn(),
+  batchUpdate: vi.fn(),
+}));
+vi.mock('../../utils/concurrency.js', () => ({
+  withLock: vi.fn(),
+  withRetry: vi.fn(),
+}));
+vi.mock('../../utils/logger.js', () => ({
+  debug: vi.fn(),
+  info: vi.fn(),
+  warn: vi.fn(),
+  error: vi.fn(),
+}));
+vi.mock('../../utils/correlation.js', () => ({
+  getCorrelationId: () => 'test-correlation-id',
+}));
+
+beforeEach(() => {
+  vi.clearAllMocks();
+});
+
 describe('recibo-pago-matcher', () => {
-  describe('Bug #1: CUIT field assignment', () => {
-    it('should parse pagos with correct cuitPagador from column H', () => {
+  describe('ADV-304: CUIT field assignment (cuitBeneficiario for pagos enviados)', () => {
+    it('should parse pagos enviados with cuitBeneficiario from column H (not cuitPagador)', () => {
       // Test data simulating a row from Pagos Enviados sheet
-      // Columns: A:fechaPago, B:fileId, C:fileName, D:banco, E:importePagado
-      //          F:moneda, G:referencia, H:cuitPagador, I:nombrePagador
+      // PAGO_ENVIADO_HEADERS: A:fechaPago, B:fileId, C:fileName, D:banco, E:importePagado
+      //          F:moneda, G:referencia, H:cuitBeneficiario (employee receives payment), I:nombreBeneficiario
       //          J:concepto, K:processedAt, L:confidence, M:needsReview
       //          N:matchedFacturaFileId, O:matchConfidence
       const row = [
@@ -25,8 +48,8 @@ describe('recibo-pago-matcher', () => {
         100000,                     // E: importePagado
         'ARS',                      // F: moneda
         'Ref-123',                  // G: referencia
-        '30709076783',              // H: cuitPagador (ADVA)
-        'ADVA SA',                  // I: nombrePagador
+        '20123456786',              // H: cuitBeneficiario (employee CUIL)
+        'Juan Perez',               // I: nombreBeneficiario
         'Pago de sueldo',           // J: concepto
         '2025-01-15T10:00:00.000Z', // K: processedAt
         95,                         // L: confidence
@@ -35,7 +58,7 @@ describe('recibo-pago-matcher', () => {
         '',                         // O: matchConfidence
       ];
 
-      // Parse the pago using the same logic as in recibo-pago-matcher.ts
+      // Parse using correct field names (after ADV-304 fix)
       const pago: Pago & { row: number } = {
         row: 2,
         fechaPago: String(row[0] || ''),
@@ -45,8 +68,8 @@ describe('recibo-pago-matcher', () => {
         importePagado: parseNumber(row[4]) || 0,
         moneda: (String(row[5]) as 'ARS' | 'USD') || 'ARS',
         referencia: row[6] ? String(row[6]) : undefined,
-        cuitPagador: row[7] ? String(row[7]) : undefined,
-        nombrePagador: row[8] ? String(row[8]) : undefined,
+        cuitBeneficiario: row[7] ? String(row[7]) : undefined,   // CORRECT: beneficiario
+        nombreBeneficiario: row[8] ? String(row[8]) : undefined, // CORRECT: beneficiario
         concepto: row[9] ? String(row[9]) : undefined,
         processedAt: String(row[10] || ''),
         confidence: Number(row[11]) || 0,
@@ -55,16 +78,14 @@ describe('recibo-pago-matcher', () => {
         matchConfidence: row[14] ? (String(row[14]) as MatchConfidence) : undefined,
       };
 
-      // Verify correct parsing
-      expect(pago.cuitPagador).toBe('30709076783');
-      expect(pago.nombrePagador).toBe('ADVA SA');
+      // Verify correct parsing: beneficiario fields set (not pagador)
+      expect(pago.cuitBeneficiario).toBe('20123456786');
+      expect(pago.nombreBeneficiario).toBe('Juan Perez');
       expect(pago.fileId).toBe('pago-file-id-123');
 
-      // Verify that cuitBeneficiario and nombreBeneficiario are NOT set
-      // The Pago type may have these fields, but they should not be populated
-      // from the Pagos Enviados sheet - they come from matched Recibo
-      expect('cuitBeneficiario' in pago).toBe(false);
-      expect('nombreBeneficiario' in pago).toBe(false);
+      // cuitPagador and nombrePagador should NOT be set (ADVA is the pagador)
+      expect(pago.cuitPagador).toBeUndefined();
+      expect(pago.nombrePagador).toBeUndefined();
     });
   });
 
@@ -133,8 +154,8 @@ describe('recibo-pago-matcher', () => {
         80000,                        // E: importePagado
         'ARS',                        // F: moneda
         'REF-001',                    // G: referencia
-        '30709076783',                // H: cuitPagador
-        'ADVA SA',                    // I: nombrePagador
+        '20123456786',                // H: cuitBeneficiario (employee CUIL)
+        'Juan Perez',                 // I: nombreBeneficiario
         'Pago sueldo',                // J: concepto
         '2025-01-15T10:00:00.000Z',   // K: processedAt
         95,                           // L: confidence
@@ -152,8 +173,8 @@ describe('recibo-pago-matcher', () => {
         importePagado: parseNumber(row[4]) || 0,
         moneda: (String(row[5]) as 'ARS' | 'USD') || 'ARS',
         referencia: row[6] ? String(row[6]) : undefined,
-        cuitPagador: row[7] ? String(row[7]) : undefined,
-        nombrePagador: row[8] ? String(row[8]) : undefined,
+        cuitBeneficiario: row[7] ? String(row[7]) : undefined,
+        nombreBeneficiario: row[8] ? String(row[8]) : undefined,
         concepto: row[9] ? String(row[9]) : undefined,
         processedAt: String(row[10] || ''),
         confidence: Number(row[11]) || 0,
@@ -447,5 +468,62 @@ describe('hasCuitMatch asymmetry fix (ADV-183)', () => {
     expect(computeHasCuitMatch(false)).toBe(false);
     // Unset/legacy rows — false (the migration backfills HIGH→YES so this is rare)
     expect(computeHasCuitMatch(undefined)).toBe(false);
+  });
+});
+
+describe('ADV-304: cuitBeneficiario field mapping in matchRecibosWithPagos', () => {
+  async function setupE2E() {
+    const { matchRecibosWithPagos } = await import('./recibo-pago-matcher.js');
+    const { getValues, batchUpdate } = await import('../../services/sheets.js');
+    const { withLock, withRetry } = await import('../../utils/concurrency.js');
+
+    vi.mocked(withLock).mockImplementation(async (_key: string, fn: () => Promise<any>) => {
+      try { return { ok: true as const, value: await fn() }; }
+      catch (e) { return { ok: false as const, error: e instanceof Error ? e : new Error(String(e)) }; }
+    });
+    vi.mocked(withRetry).mockImplementation(async (fn: () => Promise<any>) => {
+      try { return { ok: true as const, value: await fn() }; }
+      catch (e) { return { ok: false as const, error: e instanceof Error ? e : new Error(String(e)) }; }
+    });
+    return { matchRecibosWithPagos, getValues, batchUpdate };
+  }
+
+  const config = { matchDaysBefore: 10, matchDaysAfter: 60, usdArsTolerancePercent: 5, usdMatchDaysAfter: 90 };
+
+  it('column H in Pagos Enviados should produce cuitBeneficiario (not cuitPagador) → hasCuitMatch=YES in Recibos sheet', async () => {
+    const { matchRecibosWithPagos, getValues, batchUpdate } = await setupE2E();
+
+    // Recibo sheet: employee Juan Perez with CUIL 20123456786 at column F (index 5), totalNeto=80000 at column M (index 12)
+    const reciboHeader = ['fechaPago', 'fileId', 'fileName', 'tipoRecibo', 'nombreEmpleado', 'cuilEmpleado', 'legajo', 'tareaDesempenada', 'cuitEmpleador', 'periodoAbonado', 'subtotalRemuneraciones', 'subtotalDescuentos', 'totalNeto', 'processedAt', 'confidence', 'needsReview', 'matchedPagoFileId', 'matchConfidence', 'hasCuitMatch'];
+    const reciboRow = ['2025-01-10', 'recibo-1', 'recibo.pdf', 'sueldo', 'Juan Perez', '20123456786', '001', '', '30709076783', 'enero/2025', '100000', '20000', '80000', '2025-01-10T10:00:00Z', '0.95', 'NO', '', '', 'NO'];
+
+    // Pagos Enviados sheet: pago with CUIL 20123456786 at column H (index 7)
+    // PAGO_ENVIADO_HEADERS: A=fechaPago, B=fileId, C=fileName, D=banco, E=importePagado, F=moneda, G=referencia, H=cuitBeneficiario (BUG: parser uses cuitPagador)
+    const pagoHeader = ['fechaPago', 'fileId', 'fileName', 'banco', 'importePagado', 'moneda', 'referencia', 'cuitBeneficiario', 'nombreBeneficiario', 'concepto', 'processedAt', 'confidence', 'needsReview', 'matchedFacturaFileId', 'matchConfidence'];
+    const pagoRow = ['2025-01-12', 'pago-1', 'pago.pdf', 'BBVA', '80000', 'ARS', '', '20123456786', 'Juan Perez', 'Pago sueldo enero', '2025-01-12T10:00:00Z', '0.95', 'NO', '', ''];
+
+    vi.mocked(getValues)
+      .mockResolvedValueOnce({ ok: true, value: [reciboHeader, reciboRow] })
+      .mockResolvedValueOnce({ ok: true, value: [pagoHeader, pagoRow] });
+    vi.mocked(batchUpdate).mockResolvedValue({ ok: true, value: 0 });
+
+    const result = await matchRecibosWithPagos('test-spreadsheet', config as any);
+
+    expect(result.ok).toBe(true);
+
+    // Verify batchUpdate was called
+    expect(batchUpdate).toHaveBeenCalled();
+    const allCalls = vi.mocked(batchUpdate).mock.calls;
+    // Flatten all updates
+    const allUpdates = allCalls.flatMap((call: any[]) => call[1] as Array<{ range: string; values: (string | number)[][] }>);
+
+    // Find the Recibos Q:S update (matchedPagoFileId, matchConfidence, hasCuitMatch)
+    const reciboUpdate = allUpdates.find((u) => u.range.includes("'Recibos'!Q"));
+    expect(reciboUpdate).toBeDefined();
+
+    // hasCuitMatch column (S, 3rd value in the update) MUST be 'YES' when CUIL matches
+    // BUG: currently 'NO' because parser sets cuitPagador (not cuitBeneficiario), so matcher can't find CUIL
+    // FIX: parser sets cuitBeneficiario, matcher finds CUIL → hasCuitMatch = YES
+    expect(reciboUpdate!.values[0][2]).toBe('YES'); // RED: currently 'NO' due to cuitPagador bug
   });
 });
