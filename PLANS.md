@@ -3,7 +3,7 @@
 **Status:** IN_PROGRESS
 **Created:** 2026-06-12
 **Source:** Inline request: Mercadopago payments ingestion via API — monthly server process with manual trigger endpoint, idempotent; builds "Mercado Pago {collectorId} ARS" Movimientos workbook with monthly tabs (gross credit + fee debit rows) and resumen rows; matching to facturas emitidas via CUIT with CUIT↔DNI equivalence and an MP-specific forward date window.
-**Linear Issues:** [ADV-365](https://linear.app/lw-claude/issue/ADV-365/mercadopago-api-client-with-pagination-timeout-and-429-backoff), [ADV-366](https://linear.app/lw-claude/issue/ADV-366/transform-mp-payments-into-movimientobancario-rows-gross-credit-fee), [ADV-367](https://linear.app/lw-claude/issue/ADV-367/idempotent-mp-movimientos-writer-incremental-month-tab-appends), [ADV-368](https://linear.app/lw-claude/issue/ADV-368/mp-resumen-row-for-closed-periods-synthetic-running-balance), [ADV-369](https://linear.app/lw-claude/issue/ADV-369/mp-sync-orchestrator-with-processing-lock-and-match-auto-trigger), [ADV-370](https://linear.app/lw-claude/issue/ADV-370/post-apimp-sync-route-manual-trigger), [ADV-371](https://linear.app/lw-claude/issue/ADV-371/mp-monthly-cron-boot-time-catch-up-scheduler), [ADV-372](https://linear.app/lw-claude/issue/ADV-372/matcher-cuitdni-equivalence-in-identity-comparisons), [ADV-373](https://linear.app/lw-claude/issue/ADV-373/matcher-mp-specific-forward-factura-date-window-25-days), [ADV-374](https://linear.app/lw-claude/issue/ADV-374/mp-ingestion-documentation-claudemd-spreadsheet-formatmd-envexample)
+**Linear Issues:** [ADV-365](https://linear.app/lw-claude/issue/ADV-365/mercadopago-api-client-with-pagination-timeout-and-429-backoff), [ADV-366](https://linear.app/lw-claude/issue/ADV-366/transform-mp-payments-into-movimientobancario-rows-gross-credit-fee), [ADV-367](https://linear.app/lw-claude/issue/ADV-367/idempotent-mp-movimientos-writer-incremental-month-tab-appends), [ADV-368](https://linear.app/lw-claude/issue/ADV-368/mp-resumen-row-for-closed-periods-synthetic-running-balance), [ADV-369](https://linear.app/lw-claude/issue/ADV-369/mp-sync-orchestrator-with-processing-lock-and-match-auto-trigger), [ADV-370](https://linear.app/lw-claude/issue/ADV-370/post-apimp-sync-route-manual-trigger), [ADV-371](https://linear.app/lw-claude/issue/ADV-371/mp-monthly-cron-boot-time-catch-up-scheduler), [ADV-372](https://linear.app/lw-claude/issue/ADV-372/matcher-cuitdni-equivalence-in-identity-comparisons), [ADV-373](https://linear.app/lw-claude/issue/ADV-373/matcher-mp-specific-forward-factura-date-window-25-days), [ADV-374](https://linear.app/lw-claude/issue/ADV-374/mp-ingestion-documentation-claudemd-spreadsheet-formatmd-envexample), [ADV-375](https://linear.app/lw-claude/issue/ADV-375/delivery-copy-pdfs-skip-non-pdf-resumen-fileids-mp-spreadsheet-backed)
 **Branch:** feat/mercadopago-sync
 
 ## Context Gathered
@@ -38,7 +38,7 @@
 
 ## Tasks
 
-Tasks 1-7 are sequential (each builds on the previous). Tasks 8-9 (matcher) are independent of 1-7 but Task 9 should land after Task 8 (same matcher files). Task 10 (docs) last.
+Tasks 1-7 are sequential (each builds on the previous). Tasks 8-9 (matcher) are independent of 1-7 but Task 9 should land after Task 8 (same matcher files). Task 11 (delivery) is independent of 1-9. Task 10 (docs) last.
 
 ### Task 1: Mercadopago API client with pagination, timeout, and 429 backoff
 **Linear Issue:** [ADV-365](https://linear.app/lw-claude/issue/ADV-365/mercadopago-api-client-with-pagination-timeout-and-429-backoff)
@@ -57,7 +57,7 @@ Tasks 1-7 are sequential (each builds on the previous). Tasks 8-9 (matcher) are 
    - Malformed JSON body → `ok: false`, no throw.
    - The access token NEVER appears in any log call (assert via logger mock).
 2. Run verifier (expect fail)
-3. Implement `searchApprovedPayments` in `src/mercadopago/client.ts` returning `Result<MpPayment[], Error>`. Define an `MpPayment` interface with only the consumed fields: `id`, `status`, `date_approved`, `operation_type`, `description`, `external_reference`, `currency_id`, `transaction_amount`, `transaction_details.net_received_amount`, `payer.identification.{type,number}`, `payer.email`, `card.cardholder.identification` (optional), `collector_id`, `amount_refunded`. Read `MP_ACCESS_TOKEN` from env in `src/config.ts` (optional — absence disables the feature, see Task 5). Follow the exchange-rate fetch pattern; log request metadata (period, page, count) at debug, never the token.
+3. Implement `searchApprovedPayments` in `src/mercadopago/client.ts` returning `Result<MpPayment[], Error>`. Define an `MpPayment` interface with only the consumed fields: `id`, `status`, `date_approved`, `operation_type`, `description`, `external_reference`, `currency_id`, `transaction_amount`, `transaction_details.net_received_amount`, `payer.identification.{type,number}`, `payer.email`, `card.cardholder.identification` (optional), `collector_id`, `amount_refunded`, `charges_details[]` (`name`, `type`, `amounts.{original,refunded}`, `accounts.{from,to}` — needed by Task 2 to itemize fee/tax debit rows for the accountants). Read `MP_ACCESS_TOKEN` from env in `src/config.ts` (optional — absence disables the feature, see Task 5). Follow the exchange-rate fetch pattern; log request metadata (period, page, count) at debug, never the token.
 4. Run verifier (expect pass)
 
 **Notes:**
@@ -72,8 +72,11 @@ Tasks 1-7 are sequential (each builds on the previous). Tasks 8-9 (matcher) are 
 
 **Steps:**
 1. Write tests for `paymentsToMovimientos(payments: MpPayment[]): { movimientos: MovimientoBancario[]; skipped: number }`:
-   - An approved ARS payment (gross 25000, net 23350, payer CUIT `20123456786`, description "Unipersonal", id 158805080384) produces TWO rows in order: a credit row `{ fecha: <approval date in AR timezone>, concepto: 'MP 158805080384 - CUIT 20123456786 - Unipersonal', credito: 25000, debito: null, saldo: null }` and a fee debit row `{ concepto: 'MP 158805080384 - Comisiones e impuestos Mercado Pago', debito: 1650, credito: null }`.
-   - Fee row omitted when `transaction_amount === net_received_amount`.
+   - An approved ARS payment (gross 25000, net 23350, payer CUIT `20123456786`, description "Unipersonal", id 158805080384, charges: `mercadopago_fee` 450, `tax_withholding_collector-debitos_creditos` 150, `tax_withholding_sirtac-caba` 425, `tax_withholding-caba` 625) produces a credit row `{ fecha: <approval date in AR timezone>, concepto: 'MP 158805080384 - CUIT 20123456786 - Unipersonal', credito: 25000, debito: null, saldo: null }` followed by ONE DEBIT ROW PER CHARGE with human-readable conceptos: `'MP 158805080384 - Comisión Mercado Pago'` (450), `'MP 158805080384 - Imp. Débitos y Créditos'` (150), `'MP 158805080384 - Retención SIRTAC CABA'` (425), `'MP 158805080384 - Retención IIBB CABA'` (625). The accountants need the comisión (expense with IVA) separated from each tax withholding (jurisdiction-specific IIBB/SIRTAC credits and Ley 25.413 credit).
+   - Only charges with `accounts.from === 'collector'` produce debit rows; charge amounts are net of `amounts.refunded`.
+   - Charge-name mapping: `mercadopago_fee` → `Comisión Mercado Pago`; `tax_withholding_collector-debitos_creditos` → `Imp. Débitos y Créditos`; `tax_withholding_sirtac-{jurisdiccion}` → `Retención SIRTAC {Jurisdicción}`; `tax_withholding-{jurisdiccion}` → `Retención IIBB {Jurisdicción}`; unknown names fall back to the raw name (still itemized, never dropped).
+   - **Reconciliation guard:** when `Σ(charge debits) !== transaction_amount − net_received_amount` (beyond 0.01), fall back to a single combined debit row `'MP {id} - Comisiones e impuestos Mercado Pago'` for the full difference and log a warn (never let itemization drift the running balance).
+   - No charges and `transaction_amount === net_received_amount` → credit row only, no debit rows.
    - CUIL identification renders as `CUIL {number}` (must remain extractable by `extractCuitFromText`).
    - Payer identification missing/empty → credit concepto omits the identity segment (no "CUIT undefined"), row still produced.
    - **Timezone edge:** `date_approved = '2026-05-31T23:15:00.000-04:00'` (= June 1 00:15 ART) yields fecha `2026-06-01`; `'2026-05-11T13:07:57.000-04:00'` yields `2026-05-11`.
@@ -81,7 +84,7 @@ Tasks 1-7 are sequential (each builds on the previous). Tasks 8-9 (matcher) are 
    - `amount_refunded > 0` → row still produced, warn logged.
    - Rows sorted by fecha ascending; deterministic order for same-day payments (by id).
 2. Run verifier (expect fail)
-3. Implement in `src/mercadopago/transform.ts`. The fee debit row must NOT contain any payer identity (it would mis-feed the matcher's hard CUIT filter on the debit side). Fee amount = `transaction_amount − net_received_amount` rounded to 2 decimals. Use `Intl.DateTimeFormat` with `America/Argentina/Buenos_Aires` (or existing date utils) for the date conversion — never naive ISO substring.
+3. Implement in `src/mercadopago/transform.ts`. Debit rows must NOT contain any payer identity (it would mis-feed the matcher's hard CUIT filter on the debit side). Use `Intl.DateTimeFormat` with `America/Argentina/Buenos_Aires` (or existing date utils) for the date conversion — never naive ISO substring.
 4. Run verifier (expect pass)
 
 **Notes:**
@@ -255,6 +258,24 @@ Tasks 1-7 are sequential (each builds on the previous). Tasks 8-9 (matcher) are 
 
 **Notes:**
 - No code; no TDD cycle (docs-only, like dependency-bump tasks). Keep KNOWN ACCEPTED PATTERNS untouched.
+- Also document the Entrega behavior for MP: no PDF is copied (Task 11); the per-account-month movimientos files carry the data.
+
+### Task 11: Delivery copy-pdfs skips non-PDF resumen fileIds
+**Linear Issue:** [ADV-375](https://linear.app/lw-claude/issue/ADV-375/delivery-copy-pdfs-skip-non-pdf-resumen-fileids-mp-spreadsheet-backed)
+**Files:**
+- `src/services/delivery-package.ts` (modify)
+- `src/services/delivery-package.test.ts` (modify)
+- `src/routes/delivery.ts` (modify — surface `skippedNonPdf` in response)
+
+**Steps:**
+1. Write tests: an enumerated resumen item whose file is a Google Sheet (MP case — `fileId` points at the movimientos spreadsheet) is NOT copied by `copyPdfsToDelivery` (`delivery-package.ts:661-691`), is counted in a new `skippedNonPdf` result field, and produces an info log — not a `failed` entry; PDF items copy exactly as before; the copy-pdfs route response includes the new count.
+2. Run verifier (expect fail)
+3. Implement: carry/lookup the file mimeType during enumeration (`enumerateResumenes`) or before copy; skip non-`application/pdf` items. Without this, the Entrega would copy the ENTIRE MP movimientos workbook (all months) into the delivery folder under the resumen's name.
+4. Run verifier (expect pass)
+
+**Notes:**
+- The MP account still reaches the accountants through `buildMovimientosFiles` (per-account-month files with fecha, concepto incl. payer CUIT + op id, debito/credito, matched detalle) — verified the delivery discovery enumerates `{YYYY}/Bancos/` folders generically, so `Mercado Pago {collectorId} ARS` is auto-included.
+- Independent of Tasks 1-9 (different files); conceptually pairs with Task 4's fileId convention.
 
 ## Post-Implementation Checklist
 1. Run `bug-hunter` agent — Review changes for bugs
@@ -265,8 +286,8 @@ Tasks 1-7 are sequential (each builds on the previous). Tasks 8-9 (matcher) are 
 ## Plan Summary
 
 **Objective:** Ingest Mercadopago collections via the payments API as a bank-account-style Movimientos workbook with monthly resumen rows, automatically matched to facturas emitidas — replacing a nonexistent MP "resumen bancario" PDF with an idempotent monthly server process plus a manual trigger endpoint.
-**Linear Issues:** ADV-365, ADV-366, ADV-367, ADV-368, ADV-369, ADV-370, ADV-371, ADV-372, ADV-373, ADV-374
+**Linear Issues:** ADV-365, ADV-366, ADV-367, ADV-368, ADV-369, ADV-370, ADV-371, ADV-372, ADV-373, ADV-374, ADV-375
 **Approach:** New `src/mercadopago/` module (client → transform → idempotent writers → orchestrator) reusing the existing bank folder/workbook/resumen primitives, the unified PROCESSING_LOCK, and the auto-match trigger; two surgical matcher upgrades (CUIT↔DNI equivalence via the existing `cuitOrDniMatch`, MP-specific +25-day forward factura window) make matching deterministic at tier 2/HIGH — verified 23/23 against production May data.
-**Scope:** 10 tasks, ~14 files (9 new), ~45 test scenarios.
-**Key Decisions:** API-based ingestion (no XLSX parsing — the collection report is manual-only, the settlement report lacks payer identity); fees as separate identity-free debit rows so credits stay at gross for matching; `MP {operationId}` concepto prefix as the idempotency key; resumen rows only for closed periods with synthetic running-net saldos (balanceOk = SI by construction); monthly cron (1st, 06:00) + idempotent boot catch-up instead of state-tracking missed-run logic.
+**Scope:** 11 tasks, ~17 files (9 new), ~50 test scenarios.
+**Key Decisions:** API-based ingestion (no XLSX parsing — the collection report is manual-only, the settlement report lacks payer identity); deductions itemized as one identity-free debit row per MP charge (comisión, Imp. Débitos y Créditos, SIRTAC/IIBB withholdings per jurisdiction — the accountants need each tax credit separated) with a reconciliation-guard fallback to a combined row; credits stay at gross for matching; `MP {operationId}` concepto prefix as the idempotency key; resumen rows only for closed periods with synthetic running-net saldos (balanceOk = SI by construction); monthly cron (1st, 06:00) + idempotent boot catch-up instead of state-tracking missed-run logic; Entrega copies no PDF for MP (skip non-PDF resumen fileIds) — the per-account-month movimientos files carry the data.
 **Risks:** MP could mask payer PII in the future (mitigation documented: subscriptions' `external_reference` + member registry; current data verified clean); fee debit rows could occasionally amount-match unrelated documents (low impact — debit side carries no identity, tier 5 LOW at worst); `date_approved` GMT-4 vs ART date-bucketing handled explicitly in transform tests.
