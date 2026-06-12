@@ -23,6 +23,8 @@ import {
   getOrCreateBankAccountFolder,
   getOrCreateMovimientosSpreadsheet,
   getOrCreateBankAccountSpreadsheet,
+  getCachedFolderStructure,
+  findBankAccountControlSpreadsheet,
 } from '../services/folder-structure.js';
 import { matchAllMovimientos } from '../bank/match-movimientos.js';
 
@@ -268,12 +270,35 @@ export async function syncMercadopago(
         stats.skippedExisting += writeResult.value.skippedExisting;
 
         // --- Write resumen (non-critical — don't halt on failure) ---
+        // Cross-year saldo carry: for January periods the previous period's
+        // resumen lives in the PRIOR year's control sheet (folders are
+        // per-year). Resolve it find-only — never create prior-year folders.
+        let prevPeriodoControlSpreadsheetId: string | undefined;
+        if (periodo.slice(5, 7) === '01') {
+          const structure = getCachedFolderStructure();
+          if (structure) {
+            const prevYear = String(parseInt(year, 10) - 1);
+            const findResult = await findBankAccountControlSpreadsheet(
+              structure.rootId, prevYear, BANCO, collectorId, MONEDA
+            );
+            if (findResult.ok && findResult.value) {
+              prevPeriodoControlSpreadsheetId = findResult.value;
+            } else if (!findResult.ok) {
+              warn('Could not resolve prior-year control sheet for January saldo carry', {
+                module: 'mp-sync',
+                periodo,
+                error: findResult.error.message,
+              });
+            }
+          }
+        }
         const resumenResult = await writeMpResumenIfClosed(
           controlSpreadsheetId,
           movimientosSpreadsheetId,
           periodo,
           { collectorId },
-          businessDateString()
+          businessDateString(),
+          prevPeriodoControlSpreadsheetId
         );
         if (!resumenResult.ok) {
           logError(`Failed to write MP resumen for ${periodo}`, {

@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { validateYear, clearFolderStructureCache, getCachedFolderStructure, checkEnvironmentMarker, migrateArchivosProcesadosHeaders, migrateTipoDeCambioHeaders, migrateFacturasEmitidasPagadaColumn, migrateRecibosHasCuitMatchColumn, migrateFacturasEmitidasCondicionIvaColumn } from './folder-structure.js';
+import { validateYear, clearFolderStructureCache, getCachedFolderStructure, checkEnvironmentMarker, migrateArchivosProcesadosHeaders, migrateTipoDeCambioHeaders, migrateFacturasEmitidasPagadaColumn, migrateRecibosHasCuitMatchColumn, migrateFacturasEmitidasCondicionIvaColumn, findBankAccountControlSpreadsheet } from './folder-structure.js';
 
 // Mock drive.js for environment marker tests
 vi.mock('./drive.js', () => ({
@@ -21,7 +21,7 @@ vi.mock('./drive.js', () => ({
   trashFile: vi.fn(),
 }));
 
-import { findByName, createFile, listAllChildren } from './drive.js';
+import { findByName, createFile, listAllChildren, createFolder } from './drive.js';
 
 // Mock sheets.js so migration tests can control getValues/setValues
 vi.mock('./sheets.js', () => ({
@@ -973,5 +973,50 @@ describe('migrateFacturasEmitidasCondicionIvaColumn (ADV-245)', () => {
 
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error.message).toBe('Write failed');
+  });
+});
+
+describe('findBankAccountControlSpreadsheet', () => {
+  const FOLDER_MIME = 'application/vnd.google-apps.folder';
+  const SPREADSHEET_MIME = 'application/vnd.google-apps.spreadsheet';
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('finds the control spreadsheet through year → Bancos → account folder (no creation)', async () => {
+    vi.mocked(findByName)
+      .mockResolvedValueOnce({ ok: true, value: { id: 'year-id', name: '2025', mimeType: FOLDER_MIME } })
+      .mockResolvedValueOnce({ ok: true, value: { id: 'bancos-id', name: 'Bancos', mimeType: FOLDER_MIME } })
+      .mockResolvedValueOnce({ ok: true, value: { id: 'account-id', name: 'Mercado Pago 987654 ARS', mimeType: FOLDER_MIME } })
+      .mockResolvedValueOnce({ ok: true, value: { id: 'ctrl-id', name: 'Control de Resumenes', mimeType: SPREADSHEET_MIME } });
+
+    const result = await findBankAccountControlSpreadsheet('root-id', '2025', 'Mercado Pago', '987654', 'ARS');
+
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value).toBe('ctrl-id');
+    expect(findByName).toHaveBeenNthCalledWith(1, 'root-id', '2025', FOLDER_MIME);
+    expect(findByName).toHaveBeenNthCalledWith(2, 'year-id', 'Bancos', FOLDER_MIME);
+    expect(findByName).toHaveBeenNthCalledWith(3, 'bancos-id', 'Mercado Pago 987654 ARS', FOLDER_MIME);
+    expect(findByName).toHaveBeenNthCalledWith(4, 'account-id', 'Control de Resumenes', SPREADSHEET_MIME);
+  });
+
+  it('returns null when any level of the chain is missing — never creates folders', async () => {
+    vi.mocked(findByName).mockResolvedValueOnce({ ok: true, value: null }); // no year folder
+
+    const result = await findBankAccountControlSpreadsheet('root-id', '2024', 'Mercado Pago', '987654', 'ARS');
+
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value).toBeNull();
+    expect(findByName).toHaveBeenCalledTimes(1);
+    expect(createFolder).not.toHaveBeenCalled();
+  });
+
+  it('propagates Drive errors', async () => {
+    vi.mocked(findByName).mockResolvedValueOnce({ ok: false, error: new Error('drive boom') });
+
+    const result = await findBankAccountControlSpreadsheet('root-id', '2025', 'Mercado Pago', '987654', 'ARS');
+
+    expect(result.ok).toBe(false);
   });
 });

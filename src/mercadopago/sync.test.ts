@@ -60,10 +60,14 @@ vi.mock('./resumen-writer.js', () => ({
 const mockGetOrCreateBankAccountFolder = vi.fn();
 const mockGetOrCreateMovimientosSpreadsheet = vi.fn();
 const mockGetOrCreateBankAccountSpreadsheet = vi.fn();
+const mockGetCachedFolderStructure = vi.fn();
+const mockFindBankAccountControlSpreadsheet = vi.fn();
 vi.mock('../services/folder-structure.js', () => ({
   getOrCreateBankAccountFolder: (...args: unknown[]) => mockGetOrCreateBankAccountFolder(...args),
   getOrCreateMovimientosSpreadsheet: (...args: unknown[]) => mockGetOrCreateMovimientosSpreadsheet(...args),
   getOrCreateBankAccountSpreadsheet: (...args: unknown[]) => mockGetOrCreateBankAccountSpreadsheet(...args),
+  getCachedFolderStructure: (...args: unknown[]) => mockGetCachedFolderStructure(...args),
+  findBankAccountControlSpreadsheet: (...args: unknown[]) => mockFindBankAccountControlSpreadsheet(...args),
 }));
 
 // Mock match-movimientos
@@ -116,6 +120,8 @@ describe('syncMercadopago', () => {
     mockGetOrCreateBankAccountFolder.mockResolvedValue({ ok: true, value: 'folder-id' });
     mockGetOrCreateMovimientosSpreadsheet.mockResolvedValue({ ok: true, value: 'movimientos-id' });
     mockGetOrCreateBankAccountSpreadsheet.mockResolvedValue({ ok: true, value: 'control-id' });
+    mockGetCachedFolderStructure.mockReturnValue({ rootId: 'root-id' });
+    mockFindBankAccountControlSpreadsheet.mockResolvedValue({ ok: true, value: null });
     // Default writers
     mockWriteMpMovimientos.mockResolvedValue({ ok: true, value: { appended: 0, skippedExisting: 0 } });
     mockWriteMpResumenIfClosed.mockResolvedValue({ ok: true, value: { written: false } });
@@ -289,7 +295,53 @@ describe('syncMercadopago', () => {
         'movimientos-id',
         '2025-05',
         { collectorId: '987654' },
-        '2025-06-12'
+        '2025-06-12',
+        undefined
+      );
+    });
+
+    it('does not look up a prior-year control sheet for non-January periods', async () => {
+      await syncMercadopago(['2025-05']);
+
+      expect(mockFindBankAccountControlSpreadsheet).not.toHaveBeenCalled();
+    });
+
+    it('January period: resolves the prior-year control sheet and threads it to writeMpResumenIfClosed', async () => {
+      mockBusinessDateString.mockReturnValue('2025-02-10');
+      mockFindBankAccountControlSpreadsheet.mockResolvedValue({ ok: true, value: 'prev-ctrl-id' });
+
+      await syncMercadopago(['2025-01']);
+
+      expect(mockFindBankAccountControlSpreadsheet).toHaveBeenCalledWith(
+        'root-id',
+        '2024',
+        'Mercado Pago',
+        '987654',
+        'ARS'
+      );
+      expect(mockWriteMpResumenIfClosed).toHaveBeenCalledWith(
+        'control-id',
+        'movimientos-id',
+        '2025-01',
+        { collectorId: '987654' },
+        '2025-02-10',
+        'prev-ctrl-id'
+      );
+    });
+
+    it('January period: missing prior-year control sheet falls back to undefined (saldo 0)', async () => {
+      mockBusinessDateString.mockReturnValue('2025-02-10');
+      mockFindBankAccountControlSpreadsheet.mockResolvedValue({ ok: true, value: null });
+
+      await syncMercadopago(['2025-01']);
+
+      expect(mockWriteMpResumenIfClosed).toHaveBeenCalledWith(
+        'control-id',
+        'movimientos-id',
+        '2025-01',
+        { collectorId: '987654' },
+        '2025-02-10',
+        undefined
       );
     });
 

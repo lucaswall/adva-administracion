@@ -99,13 +99,18 @@ async function getPrevSaldoFinal(
  * @param periodo - Target period in YYYY-MM format
  * @param accountInfo - MP account metadata
  * @param today - Current date as YYYY-MM-DD (used for open/closed check)
+ * @param prevPeriodoControlSpreadsheetId - Control sheet holding the PREVIOUS
+ *   period's resumen row, when it differs from controlSpreadsheetId. January
+ *   periods need this: the folder structure is per-year, so December's resumen
+ *   lives in the prior year's control sheet (cross-year saldo carry).
  */
 export async function writeMpResumenIfClosed(
   controlSpreadsheetId: string,
   movimientosSpreadsheetId: string,
   periodo: string,
   accountInfo: MpAccountInfo,
-  today: string
+  today: string,
+  prevPeriodoControlSpreadsheetId?: string
 ): Promise<Result<{ written: boolean }, Error>> {
   try {
     // Open period guard — do not write a partial resumen for the current month
@@ -118,9 +123,15 @@ export async function writeMpResumenIfClosed(
     const month = parseInt(periodo.substring(5, 7), 10);
     const { collectorId } = accountInfo;
 
-    // Get saldoInicial from previous period's resumen (0 if none found)
+    // Get saldoInicial from previous period's resumen (0 if none found).
+    // The previous period's row may live in a different (prior-year) control
+    // sheet — January periods pass it explicitly.
     const prevPeriodo = getPreviousPeriodo(periodo);
-    const saldoInicial = await getPrevSaldoFinal(controlSpreadsheetId, prevPeriodo, collectorId);
+    const saldoInicial = await getPrevSaldoFinal(
+      prevPeriodoControlSpreadsheetId ?? controlSpreadsheetId,
+      prevPeriodo,
+      collectorId
+    );
 
     // Read all transaction rows for this period
     const movimientosResult = await readMovimientosForPeriod(movimientosSpreadsheetId, periodo);

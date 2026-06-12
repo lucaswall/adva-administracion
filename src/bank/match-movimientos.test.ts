@@ -1413,6 +1413,7 @@ describe('matchAllMovimientos', () => {
       ]),
       expect.anything(),
       expect.anything(),
+      expect.anything(),
       expect.anything()
     );
   });
@@ -1725,6 +1726,7 @@ describe('matchAllMovimientos', () => {
       expect.arrayContaining([
         expect.objectContaining({ cuitEmisor: '123', importeTotal: 0 }),
       ]),
+      expect.anything(),
       expect.anything(),
       expect.anything(),
       expect.anything()

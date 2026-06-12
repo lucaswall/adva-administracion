@@ -1704,6 +1704,51 @@ export async function getOrCreateBrokerFolder(
 }
 
 /**
+ * Finds an existing Control de Resumenes spreadsheet for a bank account WITHOUT
+ * creating any folder or file. Traverses {year}/Bancos/{banco} {numeroCuenta} {moneda}/
+ * via find-only Drive lookups and returns null when any level of the chain
+ * does not exist.
+ *
+ * Used by the MP sync to read the prior year's closing balance when writing a
+ * January resumen (cross-year saldo carry) — a get-or-create lookup would
+ * provision empty prior-year folders for brand-new accounts.
+ *
+ * @param rootId - Drive root folder ID
+ * @param year - Year string (e.g., "2025")
+ * @param banco - Bank name
+ * @param numeroCuenta - Account number / collector id
+ * @param moneda - Currency (ARS or USD)
+ * @returns Spreadsheet ID, or null when the account has no control sheet for that year
+ */
+export async function findBankAccountControlSpreadsheet(
+  rootId: string,
+  year: string,
+  banco: string,
+  numeroCuenta: string,
+  moneda: string
+): Promise<Result<string | null, Error>> {
+  const yearFolder = await findByName(rootId, year, FOLDER_MIME);
+  if (!yearFolder.ok) return yearFolder;
+  if (!yearFolder.value) return { ok: true, value: null };
+
+  const bancosFolder = await findByName(yearFolder.value.id, FOLDER_NAMES.bancos, FOLDER_MIME);
+  if (!bancosFolder.ok) return bancosFolder;
+  if (!bancosFolder.value) return { ok: true, value: null };
+
+  const accountFolder = await findByName(
+    bancosFolder.value.id,
+    `${banco} ${numeroCuenta} ${moneda}`,
+    FOLDER_MIME
+  );
+  if (!accountFolder.ok) return accountFolder;
+  if (!accountFolder.value) return { ok: true, value: null };
+
+  const controlFile = await findByName(accountFolder.value.id, 'Control de Resumenes', SPREADSHEET_MIME);
+  if (!controlFile.ok) return controlFile;
+  return { ok: true, value: controlFile.value?.id ?? null };
+}
+
+/**
  * Gets or creates a Control de Resumenes spreadsheet for a bank account
  * Creates the spreadsheet in the bank account folder if it doesn't exist
  *

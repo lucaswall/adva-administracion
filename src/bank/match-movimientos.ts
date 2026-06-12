@@ -1040,16 +1040,17 @@ async function matchBankMovimientos(
     const currentExcludeFileIds = new Set(excludeFileIds);
 
     // Route to appropriate matcher based on debit/credit
+    const isMercadoPago = isMercadoPagoAccount(bankName);
     if (mov.debito !== null && mov.debito > 0) {
       matchResult = matcher.matchMovement(
         mov,
         egresosData.facturasRecibidas,
         egresosData.recibos,
         egresosData.pagosEnviados,
-        currentExcludeFileIds
+        currentExcludeFileIds,
+        isMercadoPago
       );
     } else if (mov.credito !== null && mov.credito > 0) {
-      const isMercadoPago = isMercadoPagoAccount(bankName);
       matchResult = matcher.matchCreditMovement(
         mov,
         ingresosData.facturasEmitidas,

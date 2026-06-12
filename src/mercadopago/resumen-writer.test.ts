@@ -652,6 +652,73 @@ describe('writeMpResumenIfClosed', () => {
 
   // ─── Unexpected errors ────────────────────────────────────────────────────
 
+  // ─── Cross-year saldo carry (January periods) ─────────────────────────────
+
+  describe('cross-year saldo carry', () => {
+    const prevYearRow = [
+      '2025-12', '2025-12-01', '2025-12-31', 'mov-2025-id',
+      '2025-12 - Resumen - Mercado Pago - 123 ARS',
+      'Mercado Pago', '123', 'ARS', 2000, 5000,
+    ];
+
+    it('reads the previous period saldo from prevPeriodoControlSpreadsheetId when provided (January)', async () => {
+      vi.mocked(getValues).mockImplementation(async (spreadsheetId: string) => {
+        if (spreadsheetId === 'prev-ctrl-id') {
+          return { ok: true, value: [['periodo'], prevYearRow] };
+        }
+        return { ok: true, value: [['periodo']] };
+      });
+      vi.mocked(readMovimientosForPeriod).mockResolvedValue({
+        ok: true,
+        value: [makeMovimientoRow({ credito: 100, debito: null })],
+      });
+      vi.mocked(storeResumenBancario).mockResolvedValue({
+        ok: true,
+        value: { stored: true },
+      });
+
+      const result = await writeMpResumenIfClosed(
+        'ctrl-2026-id',
+        'mov-2026-id',
+        '2026-01',
+        { collectorId: '123' },
+        '2026-02-10',
+        'prev-ctrl-id'
+      );
+
+      expect(result.ok).toBe(true);
+      // The previous period (2025-12) is looked up in the PRIOR year's control sheet
+      expect(getValues).toHaveBeenCalledWith('prev-ctrl-id', 'Resumenes!A:L');
+      const storedResumen = vi.mocked(storeResumenBancario).mock.calls[0][0];
+      expect(storedResumen.saldoInicial).toBe(5000);
+      expect(storedResumen.saldoFinal).toBe(5100);
+    });
+
+    it('falls back to the period control sheet (saldoInicial 0) when no prev sheet is provided', async () => {
+      vi.mocked(getValues).mockResolvedValue({ ok: true, value: [['periodo']] });
+      vi.mocked(readMovimientosForPeriod).mockResolvedValue({
+        ok: true,
+        value: [makeMovimientoRow({ credito: 100, debito: null })],
+      });
+      vi.mocked(storeResumenBancario).mockResolvedValue({
+        ok: true,
+        value: { stored: true },
+      });
+
+      await writeMpResumenIfClosed(
+        'ctrl-2026-id',
+        'mov-2026-id',
+        '2026-01',
+        { collectorId: '123' },
+        '2026-02-10'
+      );
+
+      expect(getValues).toHaveBeenCalledWith('ctrl-2026-id', 'Resumenes!A:L');
+      const storedResumen = vi.mocked(storeResumenBancario).mock.calls[0][0];
+      expect(storedResumen.saldoInicial).toBe(0);
+    });
+  });
+
   describe('unexpected errors', () => {
     it('logs at error level (not warn) and returns ok:false when a dependency throws', async () => {
       vi.mocked(getValues).mockRejectedValue(new Error('boom'));

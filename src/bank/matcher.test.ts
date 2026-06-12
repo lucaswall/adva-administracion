@@ -3209,3 +3209,69 @@ describe('MP-specific forward factura date window (ADV-373)', () => {
     expect(result.matchType).toBe('no_match');
   });
 });
+
+describe('MP charge debit rows excluded from document matching (Codex P2)', () => {
+  let matcher: BankMovementMatcher;
+
+  beforeEach(() => {
+    matcher = new BankMovementMatcher(5);
+  });
+
+  // A pago enviado that coincides in amount and date with an MP commission —
+  // without the exclusion it would be a tier-5 candidate
+  const coincidentPago: Pago & { row: number } = {
+    fileId: 'pago-coincident',
+    fileName: 'pago-coincident.pdf',
+    banco: 'BBVA',
+    fechaPago: '2026-05-25',
+    importePagado: 450,
+    moneda: 'ARS',
+    cuitBeneficiario: '20111111119',
+    processedAt: '2026-05-25T10:00:00Z',
+    needsReview: false,
+    confidence: 0.95,
+    row: 2
+  };
+
+  it('debit MP charge row in an MP account is classified as bank_fee, never document-matched', () => {
+    const movement = makeMovimiento({
+      fecha: '2026-05-25',
+      concepto: 'MP 158805080384 - Comisión Mercado Pago',
+      debito: 450,
+      credito: null
+    });
+
+    const result = matcher.matchMovement(movement, [], [], [coincidentPago], undefined, true);
+
+    expect(result.matchType).toBe('bank_fee');
+    expect(result.description).toBe('Comisiones e impuestos Mercado Pago');
+    expect(result.matchedFileId).toBe('');
+  });
+
+  it('unknown charge labels are excluded too — the MP {id} prefix is the signal', () => {
+    const movement = makeMovimiento({
+      fecha: '2026-05-25',
+      concepto: 'MP 158805080384 - some_future_charge_type',
+      debito: 450,
+      credito: null
+    });
+
+    const result = matcher.matchMovement(movement, [], [], [coincidentPago], undefined, true);
+
+    expect(result.matchType).toBe('bank_fee');
+  });
+
+  it('same concepto without the MP account flag is unaffected (regression guard)', () => {
+    const movement = makeMovimiento({
+      fecha: '2026-05-25',
+      concepto: 'MP 158805080384 - Comisión Mercado Pago',
+      debito: 450,
+      credito: null
+    });
+
+    const result = matcher.matchMovement(movement, [], [], [coincidentPago]);
+
+    // Non-MP accounts keep existing behavior: the pago is a normal candidate
+    expect(result.matchType).not.toBe('bank_fee');
+  });
+});
