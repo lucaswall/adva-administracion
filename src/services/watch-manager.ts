@@ -28,6 +28,8 @@ let statusUpdateJob: cron.ScheduledTask | null = null;
 let cleanupJob: cron.ScheduledTask | null = null;
 let runningScan: Promise<void> | null = null;
 let pendingScanFolderIds: Set<string | undefined> = new Set();
+/** ADV-359: handle for a pending deferred-scan retry timer (only one allowed at a time) */
+let deferredScanRetryTimer: ReturnType<typeof setTimeout> | null = null;
 
 // Configuration
 const CHANNEL_EXPIRATION_MS = 3600000; // 1 hour
@@ -35,6 +37,8 @@ const RENEWAL_THRESHOLD_MS = 600000; // Renew if expires within 10 minutes
 const MAX_NOTIFICATION_AGE_MS = 3600000; // Keep notifications for 1 hour
 const MAX_NOTIFICATIONS_PER_CHANNEL = 1000;
 const MAX_CONSECUTIVE_FAILURES = 3; // Stop triggering scans after this many consecutive failures (ADV-18)
+/** ADV-359: backoff before retrying a scan that was deferred because the scanner was busy */
+const DEFERRED_SCAN_RETRY_DELAY_MS = 10_000; // 10 seconds
 
 /**
  * Consecutive scan failure counter (ADV-18)
@@ -524,19 +528,33 @@ export function triggerScan(folderId?: string): void {
         // Get first pending folder ID from the set
         const queuedFolderIds = Array.from(pendingScanFolderIds);
         const nextFolderId = queuedFolderIds[0];
-        pendingScanFolderIds.delete(nextFolderId);
-
-        info('Starting pending scan', {
-          module: 'watch-manager',
-          phase: 'scan-trigger',
-          folderId: nextFolderId
-        });
 
         if (scanWasSkipped) {
-          // ADV-312: yield to event loop before retrying to avoid tight busy-loop
-          // while an external scan is still running in the scanner
-          setTimeout(() => triggerScan(nextFolderId), 0);
+          // ADV-312/ADV-359: when the scanner was busy (skipped result), wait before
+          // retrying to avoid a tight CPU-burning busy-loop.
+          // Only one deferred retry timer may be pending at a time — if a timer is already
+          // scheduled, leave the pending item in the set so the existing timer's scan
+          // picks it up when it completes.
+          if (!deferredScanRetryTimer) {
+            pendingScanFolderIds.delete(nextFolderId);
+            info('Starting pending scan', {
+              module: 'watch-manager',
+              phase: 'scan-trigger',
+              folderId: nextFolderId
+            });
+            deferredScanRetryTimer = setTimeout(() => {
+              deferredScanRetryTimer = null;
+              triggerScan(nextFolderId);
+            }, DEFERRED_SCAN_RETRY_DELAY_MS);
+          }
+          // else: leave item in pendingScanFolderIds for the pending timer
         } else {
+          pendingScanFolderIds.delete(nextFolderId);
+          info('Starting pending scan', {
+            module: 'watch-manager',
+            phase: 'scan-trigger',
+            folderId: nextFolderId
+          });
           triggerScan(nextFolderId);
         }
       }
@@ -685,6 +703,10 @@ export async function shutdownWatchManager(): Promise<void> {
   runningScan = null;
   pendingScanFolderIds.clear();
   consecutiveFailures = 0;
+  if (deferredScanRetryTimer) {
+    clearTimeout(deferredScanRetryTimer);
+    deferredScanRetryTimer = null;
+  }
 
   info('Watch manager shutdown complete', {
     module: 'watch-manager',

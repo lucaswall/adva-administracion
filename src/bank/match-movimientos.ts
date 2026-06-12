@@ -1300,6 +1300,7 @@ async function matchBankMovimientos(
           pagadaErrors++;
           logError('Failed to write pagada updates', {
             module: 'match-movimientos',
+            phase: 'pagada-sync',
             bankName,
             error: pagadaResult.error.message,
           });
@@ -1338,6 +1339,7 @@ async function matchBankMovimientos(
       if (!revertResult.ok) {
         warn('Failed to revert pagada for cleared facturas', {
           module: 'match-movimientos',
+          phase: 'pagada-revert',
           bankName,
           error: revertResult.error.message,
         });
