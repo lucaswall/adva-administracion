@@ -1,6 +1,6 @@
 # Implementation Plan
 
-**Status:** IN_PROGRESS
+**Status:** COMPLETE
 **Created:** 2026-06-11
 **Source:** Backlog: ADV-284, ADV-285, ADV-286, ADV-287, ADV-288, ADV-289, ADV-290, ADV-291, ADV-294, ADV-296, ADV-297, ADV-298, ADV-299, ADV-300, ADV-301, ADV-302, ADV-303, ADV-304, ADV-305, ADV-306, ADV-307, ADV-308, ADV-309, ADV-310, ADV-311, ADV-312, ADV-313, ADV-314, ADV-315, ADV-316, ADV-317, ADV-318, ADV-319, ADV-320, ADV-321, ADV-322, ADV-323, ADV-324, ADV-326, ADV-327, ADV-328, ADV-329, ADV-330, ADV-331, ADV-332, ADV-333, ADV-334, ADV-335, ADV-336, ADV-337, ADV-338, ADV-339, ADV-340, ADV-341, ADV-342, ADV-343, ADV-344, ADV-345, ADV-346, ADV-347, ADV-348, ADV-349, ADV-350, ADV-351, ADV-352, ADV-353, ADV-354, ADV-355, ADV-356, ADV-357
 **Linear Issues:** 70 issues — links are in each task below
@@ -1311,3 +1311,35 @@ Bugs found during review of Iteration 1. Each fix follows TDD.
 
 ### Continuation Status
 All tasks completed.
+
+### Review Findings
+
+**Reviewed:** 2026-06-12 — agent team (security, reliability, quality reviewers; 12 changed files)
+
+**FIXED INLINE (2 — all S-size, threshold met):**
+
+1. **[medium] [bug]** `src/services/watch-manager.ts` — the ADV-359 `deferredScanRetryTimer` was not cleared in the two early-return pause paths of `triggerScan`'s `.finally()` block (auth failure, max consecutive failures). `triggerScan` has no entry guard for `consecutiveFailures`/auth state, so an orphaned timer fired ~10 s after the pause decision and bypassed the ADV-18 pause. Fixed with a `clearDeferredScanRetryTimer()` helper called in both branches and in `shutdownWatchManager`; 3 new fake-timer tests (red→green on the two pause paths). Folded in the quality reviewer's two same-root-cause test gaps (shutdown-clears-timer, full-advance single-fire). → [ADV-363](https://linear.app/lw-claude/issue/ADV-363) (Merge)
+2. **[medium] [test]** `src/processing/storage/pago-store.test.ts` — ADV-362 header-derived carry-forward block covered only `pago_recibido`; a future schema divergence between pago schemas would be undetected. Added `pago_enviado` variants (header-drift loud failure + MANUAL carry-forward via `PAGO_ENVIADO_HEADERS`-derived indices). → [ADV-364](https://linear.app/lw-claude/issue/ADV-364) (Merge)
+
+**DISCARDED:** none.
+
+**Security review:** clean (no auth/injection/secrets findings; the 10 s retry backoff is a net quota-safety improvement).
+
+### Linear Updates (review)
+
+- ADV-358, ADV-359, ADV-360, ADV-361, ADV-362: Review → Merge (state UUID used per same-type transition gotcha)
+- New inline-fix issues created in Merge: ADV-363, ADV-364
+
+### Inline Fix Verification
+
+- TDD: 2 new watch-manager pause tests failed red (orphaned timer fired), green after fix; 28/28 watch-manager, 32/32 pago-store
+- bug-hunter (standalone): no bugs found in the inline fixes
+- verifier (full mode): all 2779 tests pass, lint clean, build zero warnings
+
+<!-- REVIEW COMPLETE -->
+
+---
+
+## Status: COMPLETE
+
+All tasks implemented and reviewed successfully. All Linear issues moved to Merge.

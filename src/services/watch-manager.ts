@@ -31,6 +31,18 @@ let pendingScanFolderIds: Set<string | undefined> = new Set();
 /** ADV-359: handle for a pending deferred-scan retry timer (only one allowed at a time) */
 let deferredScanRetryTimer: ReturnType<typeof setTimeout> | null = null;
 
+/**
+ * Cancels a pending deferred-scan retry timer (ADV-359).
+ * Must be called wherever scanning is paused (auth failure, failure threshold,
+ * shutdown) — an orphaned timer would fire later and bypass the pause.
+ */
+function clearDeferredScanRetryTimer(): void {
+  if (deferredScanRetryTimer) {
+    clearTimeout(deferredScanRetryTimer);
+    deferredScanRetryTimer = null;
+  }
+}
+
 // Configuration
 const CHANNEL_EXPIRATION_MS = 3600000; // 1 hour
 const RENEWAL_THRESHOLD_MS = 600000; // Renew if expires within 10 minutes
@@ -506,6 +518,7 @@ export function triggerScan(folderId?: string): void {
           phase: 'scan-trigger',
           pendingScans: pendingScanFolderIds.size
         });
+        clearDeferredScanRetryTimer();
         pendingScanFolderIds.clear();
         return;
       }
@@ -518,6 +531,7 @@ export function triggerScan(folderId?: string): void {
           maxConsecutiveFailures: MAX_CONSECUTIVE_FAILURES,
           pendingScans: pendingScanFolderIds.size
         });
+        clearDeferredScanRetryTimer();
         pendingScanFolderIds.clear();
         return;
       }
@@ -703,10 +717,7 @@ export async function shutdownWatchManager(): Promise<void> {
   runningScan = null;
   pendingScanFolderIds.clear();
   consecutiveFailures = 0;
-  if (deferredScanRetryTimer) {
-    clearTimeout(deferredScanRetryTimer);
-    deferredScanRetryTimer = null;
-  }
+  clearDeferredScanRetryTimer();
 
   info('Watch manager shutdown complete', {
     module: 'watch-manager',

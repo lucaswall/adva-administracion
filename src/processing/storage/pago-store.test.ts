@@ -61,7 +61,7 @@ vi.mock('../../utils/concurrency.js', () => ({
 
 import { appendRowsWithLinks, sortSheet, getValues, batchUpdate, updateRowsWithFormatting } from '../../services/sheets.js';
 import { withLock } from '../../utils/concurrency.js';
-import { PAGO_RECIBIDO_HEADERS } from '../../constants/spreadsheet-headers.js';
+import { PAGO_RECIBIDO_HEADERS, PAGO_ENVIADO_HEADERS } from '../../constants/spreadsheet-headers.js';
 
 const createTestPago = (overrides: Partial<Pago> = {}): Pago => ({
   fileId: 'test-file-id',
@@ -695,6 +695,46 @@ describe('storePago', () => {
       const updateRow = updateCall[1][0].values as unknown[];
       expect(updateRow[14]).toBe('MANUAL');
       expect(updateRow[13]).toBe('factura-derived');
+    });
+
+    it('returns ok:false when reprocessed sheet header is missing expected match column (pago_enviado)', async () => {
+      vi.mocked(getValues).mockResolvedValueOnce({
+        ok: true,
+        value: [
+          ['fechaPago', 'fileId', 'fileName'],  // Truncated header — missing matchedFacturaFileId, matchConfidence
+          ['2025-01-15', 'test-file-id', 'file.pdf'],
+        ],
+      });
+
+      const pago = createTestPago();
+      const result = await storePago(pago, 'spreadsheet-id', 'Pagos Enviados', 'pago_enviado');
+
+      expect(result.ok).toBe(false);
+      expect(updateRowsWithFormatting).not.toHaveBeenCalled();
+      expect(appendRowsWithLinks).not.toHaveBeenCalled();
+    });
+
+    it('preserves MANUAL lock using header-derived indices (pago_enviado, current schema)', async () => {
+      const existingRow = Array(17).fill('') as string[];
+      existingRow[1] = 'test-file-id';
+      existingRow[PAGO_ENVIADO_HEADERS.indexOf('matchedFacturaFileId')] = 'factura-derived';
+      existingRow[PAGO_ENVIADO_HEADERS.indexOf('matchConfidence')] = 'MANUAL';
+
+      vi.mocked(getValues).mockResolvedValueOnce({
+        ok: true,
+        value: [PAGO_ENVIADO_HEADERS, existingRow],
+      });
+      vi.mocked(updateRowsWithFormatting).mockResolvedValue({ ok: true, value: undefined });
+      vi.mocked(sortSheet).mockResolvedValue({ ok: true, value: undefined });
+
+      const pago = createTestPago();
+      const result = await storePago(pago, 'spreadsheet-id', 'Pagos Enviados', 'pago_enviado');
+
+      expect(result.ok).toBe(true);
+      const updateCall = vi.mocked(updateRowsWithFormatting).mock.calls[0];
+      const updateRow = updateCall[1][0].values as unknown[];
+      expect(updateRow[PAGO_ENVIADO_HEADERS.indexOf('matchConfidence')]).toBe('MANUAL');
+      expect(updateRow[PAGO_ENVIADO_HEADERS.indexOf('matchedFacturaFileId')]).toBe('factura-derived');
     });
   });
 

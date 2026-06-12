@@ -786,6 +786,130 @@ describe('triggerScan - failure handling (ADV-18)', () => {
 
       expect(mockScanFolder).toHaveBeenCalledTimes(2);
     });
+
+    it('clears a pending deferred retry timer when an auth failure pauses scanning', async () => {
+      const { scanFolder } = await import('../processing/scanner.js');
+      const mockScanFolder = vi.mocked(scanFolder);
+      resetConsecutiveFailures();
+
+      // First call: skipped (scanner busy) — sets the deferred retry timer
+      mockScanFolder
+        .mockResolvedValueOnce({
+          ok: true,
+          value: {
+            skipped: true,
+            reason: 'scan_running',
+            filesProcessed: 0, facturasAdded: 0, pagosAdded: 0,
+            recibosAdded: 0, matchesFound: 0, errors: 0, duration: 0,
+          },
+        })
+        // Second call: permanent auth failure — must clear the pending timer
+        .mockResolvedValueOnce({
+          ok: false,
+          error: new Error('Invalid Credentials'),
+        });
+
+      // Skipped scan sets a 10 s deferred retry timer
+      triggerScan('test-folder');
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      // Auth-failure scan — its finally block pauses scanning and must also
+      // cancel the orphaned deferred timer
+      triggerScan('other-folder');
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      // Advance well past the backoff — the orphaned timer must NOT fire
+      await vi.advanceTimersByTimeAsync(30_000);
+
+      expect(mockScanFolder).toHaveBeenCalledTimes(2);
+    });
+
+    it('clears a pending deferred retry timer when max consecutive failures pause scanning', async () => {
+      const { scanFolder } = await import('../processing/scanner.js');
+      const mockScanFolder = vi.mocked(scanFolder);
+      resetConsecutiveFailures();
+
+      // First call: skipped — sets the deferred retry timer.
+      // Next three calls: failures — third one reaches MAX_CONSECUTIVE_FAILURES (3).
+      mockScanFolder
+        .mockResolvedValueOnce({
+          ok: true,
+          value: {
+            skipped: true,
+            reason: 'scan_running',
+            filesProcessed: 0, facturasAdded: 0, pagosAdded: 0,
+            recibosAdded: 0, matchesFound: 0, errors: 0, duration: 0,
+          },
+        })
+        .mockResolvedValue({
+          ok: false,
+          error: new Error('Simulated scan failure'),
+        });
+
+      // Skipped scan sets a 10 s deferred retry timer
+      triggerScan('test-folder');
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      // Three consecutive failures reach the pause threshold
+      for (const folder of ['f1', 'f2', 'f3']) {
+        triggerScan(folder);
+        await Promise.resolve();
+        await Promise.resolve();
+        await Promise.resolve();
+        await Promise.resolve();
+        await Promise.resolve();
+      }
+
+      expect(mockScanFolder).toHaveBeenCalledTimes(4);
+
+      // Advance well past the backoff — the orphaned timer must NOT fire
+      // (the pause decision would otherwise be bypassed)
+      await vi.advanceTimersByTimeAsync(30_000);
+
+      expect(mockScanFolder).toHaveBeenCalledTimes(4);
+    });
+
+    it('shutdownWatchManager clears a pending deferred retry timer', async () => {
+      const { scanFolder } = await import('../processing/scanner.js');
+      const mockScanFolder = vi.mocked(scanFolder);
+
+      // Skipped scan sets the deferred retry timer
+      mockScanFolder.mockResolvedValueOnce({
+        ok: true,
+        value: {
+          skipped: true,
+          reason: 'scan_running',
+          filesProcessed: 0, facturasAdded: 0, pagosAdded: 0,
+          recibosAdded: 0, matchesFound: 0, errors: 0, duration: 0,
+        },
+      });
+
+      triggerScan('test-folder');
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      await shutdownWatchManager();
+
+      // Advance past the backoff — the cleared timer must not fire
+      await vi.advanceTimersByTimeAsync(30_000);
+
+      expect(mockScanFolder).toHaveBeenCalledTimes(1);
+    });
   });
 
   describe('checkAndMarkNotification - concurrent calls', () => {
