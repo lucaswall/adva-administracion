@@ -42,7 +42,20 @@ vi.mock('../../utils/file-naming.js', () => ({
   ),
 }));
 
+// Mock concurrency module — transparent withLock that runs callback directly
+vi.mock('../../utils/concurrency.js', () => ({
+  withLock: vi.fn(async (_key: string, fn: () => Promise<unknown>) => {
+    try {
+      const result = await fn();
+      return { ok: true, value: result };
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error : new Error(String(error)) };
+    }
+  }),
+}));
+
 import { appendRowsWithLinks, sortSheet, getValues } from '../../services/sheets.js';
+import { withLock } from '../../utils/concurrency.js';
 import { info, warn } from '../../utils/logger.js';
 
 const createTestResumen = (overrides: Partial<ResumenBancario> = {}): ResumenBancario => ({
@@ -512,6 +525,58 @@ describe('storeResumenBancario (bank accounts)', () => {
     });
   });
 
+  describe('reprocessing by fileId (ADV-308)', () => {
+    it('returns { stored: true, updated: true } when same fileId already in Resumenes sheet', async () => {
+      // findResumenRowByFileId reads Resumenes!A:D and finds fileId at row[3]
+      vi.mocked(getValues).mockResolvedValueOnce({
+        ok: true,
+        value: [
+          ['periodo', 'fechaDesde', 'fechaHasta', 'fileId'],
+          ['2024-01', '2024-01-01', '2024-01-31', 'test-file-id'],
+        ],
+      });
+
+      const resumen = createTestResumen(); // fileId: 'test-file-id'
+      const result = await storeResumenBancario(resumen, 'spreadsheet-id');
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value.stored).toBe(true);
+        expect(result.value.updated).toBe(true);
+      }
+      // Must NOT append a new row or call isDuplicate
+      expect(vi.mocked(appendRowsWithLinks)).not.toHaveBeenCalled();
+    });
+
+    it('falls through to duplicate check when fileId is NOT found', async () => {
+      // findResumenRowByFileId: different fileId at row[3]
+      vi.mocked(getValues).mockResolvedValueOnce({
+        ok: true,
+        value: [
+          ['periodo', 'fechaDesde', 'fechaHasta', 'fileId'],
+          ['2024-01', '2024-01-01', '2024-01-31', 'different-file-id'],
+        ],
+      });
+      // isDuplicateResumenBancario: no match
+      vi.mocked(getValues).mockResolvedValueOnce({
+        ok: true,
+        value: [['Header']],
+      });
+      vi.mocked(appendRowsWithLinks).mockResolvedValue({ ok: true, value: 1 });
+      vi.mocked(sortSheet).mockResolvedValue({ ok: true, value: undefined });
+
+      const resumen = createTestResumen();
+      const result = await storeResumenBancario(resumen, 'spreadsheet-id');
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value.stored).toBe(true);
+        expect(result.value.updated).toBeUndefined();
+      }
+      expect(vi.mocked(appendRowsWithLinks)).toHaveBeenCalled();
+    });
+  });
+
   describe('duplicate log level (ADV-182)', () => {
     it('logs at info level (not warn) when duplicate is detected', async () => {
       const existingFileId = 'existing-file-id';
@@ -600,6 +665,26 @@ describe('storeResumenTarjeta (credit cards)', () => {
     expect(vi.mocked(appendRowsWithLinks)).not.toHaveBeenCalled();
   });
 
+  it('returns { stored: true, updated: true } when same fileId already in Resumenes sheet (ADV-308)', async () => {
+    vi.mocked(getValues).mockResolvedValueOnce({
+      ok: true,
+      value: [
+        ['periodo', 'fechaDesde', 'fechaHasta', 'fileId'],
+        ['2024-01', '2024-01-01', '2024-01-31', 'tarjeta-file-id'],
+      ],
+    });
+
+    const resumen = createTestResumenTarjeta(); // fileId: 'tarjeta-file-id'
+    const result = await storeResumenTarjeta(resumen, 'spreadsheet-id');
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.stored).toBe(true);
+      expect(result.value.updated).toBe(true);
+    }
+    expect(vi.mocked(appendRowsWithLinks)).not.toHaveBeenCalled();
+  });
+
   it('logs at info level (not warn) when duplicate tarjeta is detected', async () => {
     const existingFileId = 'existing-tarjeta-id';
     vi.mocked(getValues).mockResolvedValue({
@@ -684,6 +769,26 @@ describe('storeResumenBroker (brokers)', () => {
     expect(vi.mocked(appendRowsWithLinks)).not.toHaveBeenCalled();
   });
 
+  it('returns { stored: true, updated: true } when same fileId already in Resumenes sheet (ADV-308)', async () => {
+    vi.mocked(getValues).mockResolvedValueOnce({
+      ok: true,
+      value: [
+        ['periodo', 'fechaDesde', 'fechaHasta', 'fileId'],
+        ['2024-01', '2024-01-01', '2024-01-31', 'broker-file-id'],
+      ],
+    });
+
+    const resumen = createTestResumenBroker(); // fileId: 'broker-file-id'
+    const result = await storeResumenBroker(resumen, 'spreadsheet-id');
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.stored).toBe(true);
+      expect(result.value.updated).toBe(true);
+    }
+    expect(vi.mocked(appendRowsWithLinks)).not.toHaveBeenCalled();
+  });
+
   it('logs at info level (not warn) when duplicate broker is detected', async () => {
     const existingFileId = 'existing-broker-id';
     vi.mocked(getValues).mockResolvedValue({
@@ -708,5 +813,47 @@ describe('storeResumenBroker (brokers)', () => {
       expect.stringContaining('Duplicate'),
       expect.anything()
     );
+  });
+});
+
+describe('store lock auto-expiry (ADV-344)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('storeResumenBancario uses STORE_LOCK_AUTO_EXPIRY_MS (900 000 ms) as 4th withLock argument', async () => {
+    vi.mocked(getValues).mockResolvedValue({ ok: true, value: [['Header']] });
+    vi.mocked(appendRowsWithLinks).mockResolvedValue({ ok: true, value: 1 });
+    vi.mocked(sortSheet).mockResolvedValue({ ok: true, value: undefined });
+
+    await storeResumenBancario(createTestResumen(), 'spreadsheet-id');
+
+    const calls = vi.mocked(withLock).mock.calls;
+    expect(calls.length).toBeGreaterThan(0);
+    expect(calls[calls.length - 1][3]).toBe(900000); // STORE_LOCK_AUTO_EXPIRY_MS
+  });
+
+  it('storeResumenTarjeta uses STORE_LOCK_AUTO_EXPIRY_MS (900 000 ms) as 4th withLock argument', async () => {
+    vi.mocked(getValues).mockResolvedValue({ ok: true, value: [['Header']] });
+    vi.mocked(appendRowsWithLinks).mockResolvedValue({ ok: true, value: 1 });
+    vi.mocked(sortSheet).mockResolvedValue({ ok: true, value: undefined });
+
+    await storeResumenTarjeta(createTestResumenTarjeta(), 'spreadsheet-id');
+
+    const calls = vi.mocked(withLock).mock.calls;
+    expect(calls.length).toBeGreaterThan(0);
+    expect(calls[calls.length - 1][3]).toBe(900000); // STORE_LOCK_AUTO_EXPIRY_MS
+  });
+
+  it('storeResumenBroker uses STORE_LOCK_AUTO_EXPIRY_MS (900 000 ms) as 4th withLock argument', async () => {
+    vi.mocked(getValues).mockResolvedValue({ ok: true, value: [['Header']] });
+    vi.mocked(appendRowsWithLinks).mockResolvedValue({ ok: true, value: 1 });
+    vi.mocked(sortSheet).mockResolvedValue({ ok: true, value: undefined });
+
+    await storeResumenBroker(createTestResumenBroker(), 'spreadsheet-id');
+
+    const calls = vi.mocked(withLock).mock.calls;
+    expect(calls.length).toBeGreaterThan(0);
+    expect(calls[calls.length - 1][3]).toBe(900000); // STORE_LOCK_AUTO_EXPIRY_MS
   });
 });

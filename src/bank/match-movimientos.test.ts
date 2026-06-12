@@ -753,9 +753,27 @@ describe('matchAllMovimientos', () => {
     expect(withLock).toHaveBeenCalledWith(
       'document-processing',  // PROCESSING_LOCK_ID
       expect.any(Function),
-      300000,  // PROCESSING_LOCK_TIMEOUT_MS
-      300000   // Auto-expiry
+      300000,  // PROCESSING_LOCK_TIMEOUT_MS — waiter wait budget
+      900000   // PROCESSING_LOCK_EXPIRY_MS  — crash-recovery expiry (ADV-302)
     );
+  });
+
+  it('lock expiry used by matchAllMovimientos covers inner Comprobantes lock budget (ADV-351)', async () => {
+    // PROCESSING_LOCK_EXPIRY_MS must be >= COMPROBANTES_LOCK_EXPIRY_MS (900 000 ms) so that
+    // the outer processing lock does not expire while the inner subdiario Comprobantes lock
+    // is still legitimately held, preventing force-acquire during normal (slow) operation.
+    vi.mocked(withLock).mockResolvedValue({ ok: true, value: { matched: 0, skipped: 0 } as any });
+    await matchAllMovimientos();
+
+    const calls = vi.mocked(withLock).mock.calls;
+    expect(calls.length).toBeGreaterThan(0);
+    const lastCall = calls[calls.length - 1];
+    const expiryMs = lastCall[3] as number; // 4th arg = autoExpiryMs
+    // Must cover COMPROBANTES_LOCK_EXPIRY_MS = 900 000 ms
+    expect(expiryMs).toBeGreaterThanOrEqual(900000);
+    // Must be strictly greater than the waiter timeout
+    const timeoutMs = lastCall[2] as number; // 3rd arg = timeoutMs
+    expect(expiryMs).toBeGreaterThan(timeoutMs);
   });
 
   it('should return error when folder structure is not cached', async () => {

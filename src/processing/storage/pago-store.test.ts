@@ -60,6 +60,7 @@ vi.mock('../../utils/concurrency.js', () => ({
 }));
 
 import { appendRowsWithLinks, sortSheet, getValues, batchUpdate, updateRowsWithFormatting } from '../../services/sheets.js';
+import { withLock } from '../../utils/concurrency.js';
 
 const createTestPago = (overrides: Partial<Pago> = {}): Pago => ({
   fileId: 'test-file-id',
@@ -389,12 +390,12 @@ describe('storePago', () => {
 
   describe('reprocessing (same fileId already in sheet)', () => {
     it('updates existing row when fileId already exists in sheet', async () => {
-      // First getValues call (findRowByFileId → B:B): fileId found at row 2
+      // First getValues call (findRowByFileId → A:Q): fileId found at row 2 (col B = index 1)
       vi.mocked(getValues).mockResolvedValueOnce({
         ok: true,
         value: [
-          ['fileId'],
-          ['test-file-id'], // matching fileId
+          ['fechaPago', 'fileId', 'fileName', 'banco', 'importePagado', 'moneda', 'referencia', 'cuit', 'nombre', 'concepto', 'processedAt', 'confidence', 'needsReview', 'matchedFacturaFileId', 'matchConfidence', 'tipoDeCambio', 'importeEnPesos'],
+          ['2025-01-15', 'test-file-id', 'file.pdf', 'BBVA', '1,210.00', 'ARS', 'REF-001', '27234567891', 'PAGADOR SA', 'concepto', '2025-01-15T10:00:00Z', '0.95', 'NO', '', '', '', ''],
         ],
       });
       vi.mocked(updateRowsWithFormatting).mockResolvedValue({ ok: true, value: undefined });
@@ -470,7 +471,7 @@ describe('storePago', () => {
     it('uses CellNumber for importePagado in reprocessing path', async () => {
       vi.mocked(getValues).mockResolvedValueOnce({
         ok: true,
-        value: [['fileId'], ['test-file-id']],
+        value: [['header'], ['', 'test-file-id']],
       });
       vi.mocked(updateRowsWithFormatting).mockResolvedValue({ ok: true, value: undefined });
       vi.mocked(sortSheet).mockResolvedValue({ ok: true, value: undefined });
@@ -487,7 +488,7 @@ describe('storePago', () => {
     it('uses CellLink for fileName in reprocessing path', async () => {
       vi.mocked(getValues).mockResolvedValueOnce({
         ok: true,
-        value: [['fileId'], ['test-file-id']],
+        value: [['header'], ['', 'test-file-id']],
       });
       vi.mocked(updateRowsWithFormatting).mockResolvedValue({ ok: true, value: undefined });
       vi.mocked(sortSheet).mockResolvedValue({ ok: true, value: undefined });
@@ -504,7 +505,7 @@ describe('storePago', () => {
     it('passes raw ISO processedAt in reprocessing path', async () => {
       vi.mocked(getValues).mockResolvedValueOnce({
         ok: true,
-        value: [['fileId'], ['test-file-id']],
+        value: [['header'], ['', 'test-file-id']],
       });
       vi.mocked(updateRowsWithFormatting).mockResolvedValue({ ok: true, value: undefined });
       vi.mocked(sortSheet).mockResolvedValue({ ok: true, value: undefined });
@@ -625,6 +626,50 @@ describe('storePago', () => {
         expect(result.value.existingFileId).toBe(existingFileId);
       }
       expect(batchUpdate).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('reprocessing preserves match columns (ADV-307)', () => {
+    it('preserves MANUAL matchConfidence on reprocess', async () => {
+      // Pago row: 17 cols A:Q. N=col13=matchedFacturaFileId, O=col14=matchConfidence
+      const existingRow = Array(17).fill('') as string[];
+      existingRow[1] = 'test-file-id';    // B: fileId
+      existingRow[13] = 'factura-abc';    // N: matchedFacturaFileId
+      existingRow[14] = 'MANUAL';         // O: matchConfidence (MANUAL lock)
+
+      vi.mocked(getValues).mockResolvedValueOnce({
+        ok: true,
+        value: [['header'], existingRow],
+      });
+      vi.mocked(updateRowsWithFormatting).mockResolvedValue({ ok: true, value: undefined });
+
+      const pago = createTestPago();  // no match data
+      await storePago(pago, 'spreadsheet-id', 'Pagos Recibidos', 'pago_recibido');
+
+      const updateCall = vi.mocked(updateRowsWithFormatting).mock.calls[0];
+      const updateRow = updateCall[1][0].values as unknown[];
+
+      // MANUAL lock must be preserved
+      expect(updateRow[14]).toBe('MANUAL');       // O: matchConfidence
+      expect(updateRow[13]).toBe('factura-abc');  // N: matchedFacturaFileId
+    });
+  });
+
+  describe('lock auto-expiry (ADV-344)', () => {
+    it('uses STORE_LOCK_AUTO_EXPIRY_MS (900 000 ms) as 4th withLock argument', async () => {
+      // The business-key lock expiry must cover worst-case withQuotaRetry chains
+      // (~12 min) so the lock is not force-acquired while the sheet write is still in progress.
+      vi.mocked(appendRowsWithLinks).mockResolvedValue({ ok: true, value: 1 });
+      vi.mocked(sortSheet).mockResolvedValue({ ok: true, value: undefined });
+      vi.mocked(getValues).mockResolvedValue({ ok: true, value: [['Header']] });
+
+      const pago = createTestPago();
+      await storePago(pago, 'spreadsheet-id', 'Pagos Recibidos', 'pago_recibido');
+
+      const calls = vi.mocked(withLock).mock.calls;
+      expect(calls.length).toBeGreaterThan(0);
+      const lastCall = calls[calls.length - 1];
+      expect(lastCall[3]).toBe(900000); // STORE_LOCK_AUTO_EXPIRY_MS
     });
   });
 });

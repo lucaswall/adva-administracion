@@ -1025,35 +1025,73 @@ describe('File Tracking Functions', () => {
       }
     });
 
-    it('handles serial number processedAt from appendRowsWithLinks (ADV-105)', async () => {
-      // appendRowsWithLinks converts ISO timestamps to serial numbers with DATE_TIME formatting
-      // getValues with SERIAL_NUMBER render returns these as numbers (e.g., 46123.5)
-      // getStaleProcessingFileIds must handle both formats
+    it('handles serial number processedAt from appendRowsWithLinks with timezone decode (ADV-105, ADV-306)', async () => {
+      // appendRowsWithLinks converts timestamps to serials using the spreadsheet timezone
+      // (dateToSerialInTimezone). getValues returns these as numbers (e.g., 46123.5).
+      // getStaleProcessingFileIds must decode the serial using the same timezone to recover
+      // the correct UTC instant — treating the serial as UTC gives a time that is off by
+      // the UTC offset (3 hours for Argentina), which falsely ages recent files (ADV-306).
       const now = Date.now();
       const EXCEL_EPOCH = new Date(Date.UTC(1899, 11, 30)).getTime();
+      // Argentina is UTC-3: local time = UTC - 3 h
+      const TZ_OFFSET_MS = -3 * 60 * 60 * 1000; // -10800000
 
-      // 10 minutes ago as serial number — should be stale
-      const staleSerial = (now - 10 * 60 * 1000 - EXCEL_EPOCH) / 86400000;
-      // 2 minutes ago as serial number — should be recent
-      const recentSerial = (now - 2 * 60 * 1000 - EXCEL_EPOCH) / 86400000;
+      // Compute the serial the way appendRowsWithLinks does: dateToSerialInTimezone stores
+      // the LOCAL time components as if they were UTC.
+      // local_at_stale = UTC_10min_ago + TZ_OFFSET = now - 10min - 3h
+      // serial = (local_at_stale - EPOCH) / MS_PER_DAY
+      const staleSerial = (now - 10 * 60 * 1000 + TZ_OFFSET_MS - EXCEL_EPOCH) / 86400000;
+      const recentSerial = (now - 2 * 60 * 1000 + TZ_OFFSET_MS - EXCEL_EPOCH) / 86400000;
 
       vi.mocked(getValues).mockResolvedValue({
         ok: true,
         value: [
           ['fileId', 'fileName', 'processedAt', 'documentType', 'status'],
-          ['file-1', 'doc1.pdf', staleSerial, 'factura_emitida', 'processing'], // Stale (serial number)
-          ['file-2', 'doc2.pdf', recentSerial, 'pago_enviado', 'processing'], // Recent (serial number)
+          ['file-1', 'doc1.pdf', staleSerial, 'factura_emitida', 'processing'],
+          ['file-2', 'doc2.pdf', recentSerial, 'pago_enviado', 'processing'],
         ],
       });
+      vi.mocked(getSpreadsheetTimezone).mockResolvedValue({ ok: true, value: 'America/Argentina/Buenos_Aires' });
 
       const { getStaleProcessingFileIds } = await import('./index.js');
       const result = await getStaleProcessingFileIds('dashboard-id', 5 * 60 * 1000);
 
       expect(result.ok).toBe(true);
       if (result.ok) {
-        expect(result.value.has('file-1')).toBe(true); // Stale serial number detected
-        expect(result.value.has('file-2')).toBe(false); // Recent serial number not stale
+        expect(result.value.has('file-1')).toBe(true);  // 10 min old → stale
+        expect(result.value.has('file-2')).toBe(false); // 2 min old → NOT stale
         expect(result.value.size).toBe(1);
+      }
+    });
+
+    it('Argentina serial 1 minute old is NOT stale with 5-minute threshold (ADV-306)', async () => {
+      // Regression test for the UTC-vs-timezone bug:
+      // A file processed 1 minute ago whose processedAt was encoded using Buenos Aires local time
+      // would be decoded as 3h+1min old under the buggy UTC path — falsely marked stale.
+      const now = Date.now();
+      const EXCEL_EPOCH = new Date(Date.UTC(1899, 11, 30)).getTime();
+      const TZ_OFFSET_MS = -3 * 60 * 60 * 1000;
+
+      // Serial for "1 minute ago" in Buenos Aires
+      const recentSerial = (now - 1 * 60 * 1000 + TZ_OFFSET_MS - EXCEL_EPOCH) / 86400000;
+
+      vi.mocked(getValues).mockResolvedValue({
+        ok: true,
+        value: [
+          ['fileId', 'fileName', 'processedAt', 'documentType', 'status'],
+          ['file-recent', 'doc.pdf', recentSerial, 'factura_emitida', 'processing'],
+        ],
+      });
+      vi.mocked(getSpreadsheetTimezone).mockResolvedValue({ ok: true, value: 'America/Argentina/Buenos_Aires' });
+
+      const { getStaleProcessingFileIds } = await import('./index.js');
+      const result = await getStaleProcessingFileIds('dashboard-id', 5 * 60 * 1000);
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        // Must NOT be flagged as stale — file was processed only 1 minute ago
+        expect(result.value.has('file-recent')).toBe(false);
+        expect(result.value.size).toBe(0);
       }
     });
 
@@ -1254,6 +1292,27 @@ describe('File Tracking Functions', () => {
       }
     });
 
+    it('returns files with "movimientos storage failed" in status (ADV-308)', async () => {
+      vi.mocked(getValues).mockResolvedValue({
+        ok: true,
+        value: [
+          ['fileId', 'fileName', 'processedAt', 'documentType', 'status'],
+          ['file-1', 'doc1.pdf', '2025-01-15T10:00:00Z', 'resumen_bancario', 'failed: movimientos storage failed'],
+          ['file-2', 'doc2.pdf', '2025-01-15T11:00:00Z', 'resumen_tarjeta', 'failed: movimientos storage failed: getOrCreateMovimientosSpreadsheet failed'],
+        ],
+      });
+
+      const { getRetryableFailedFileIds } = await import('./index.js');
+      const result = await getRetryableFailedFileIds('dashboard-id');
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value.has('file-1')).toBe(true);
+        expect(result.value.has('file-2')).toBe(true);
+        expect(result.value.size).toBe(2);
+      }
+    });
+
     it('does NOT return successful files', async () => {
       vi.mocked(getValues).mockResolvedValue({
         ok: true,
@@ -1281,6 +1340,65 @@ describe('File Tracking Functions', () => {
 
       const { getRetryableFailedFileIds } = await import('./index.js');
       const result = await getRetryableFailedFileIds('dashboard-id');
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.error.message).toBe('Sheets API error');
+      }
+    });
+  });
+
+  describe('getAllTrackedFileIds (ADV-311)', () => {
+    it('returns all fileIds regardless of status', async () => {
+      vi.mocked(getValues).mockResolvedValue({
+        ok: true,
+        value: [
+          ['fileId', 'fileName', 'processedAt', 'documentType', 'status'],
+          ['file-success', 'doc1.pdf', '2025-01-15T10:00:00Z', 'factura_emitida', 'success'],
+          ['file-failed', 'doc2.pdf', '2025-01-15T11:00:00Z', 'factura_recibida', 'failed: some error'],
+          ['file-processing', 'doc3.pdf', '2025-01-15T12:00:00Z', 'pago_enviado', 'processing'],
+          ['file-duplicate', 'doc4.pdf', '2025-01-15T13:00:00Z', 'pago_recibido', 'duplicate'],
+        ],
+      });
+
+      const { getAllTrackedFileIds } = await import('./index.js');
+      const result = await getAllTrackedFileIds('dashboard-id');
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value.size).toBe(4);
+        expect(result.value.has('file-success')).toBe(true);
+        expect(result.value.has('file-failed')).toBe(true);
+        expect(result.value.has('file-processing')).toBe(true);
+        expect(result.value.has('file-duplicate')).toBe(true);
+      }
+    });
+
+    it('returns empty set when only header row exists', async () => {
+      vi.mocked(getValues).mockResolvedValue({
+        ok: true,
+        value: [
+          ['fileId', 'fileName', 'processedAt', 'documentType', 'status'],
+        ],
+      });
+
+      const { getAllTrackedFileIds } = await import('./index.js');
+      const result = await getAllTrackedFileIds('dashboard-id');
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value.size).toBe(0);
+      }
+    });
+
+    it('returns error when getValues fails', async () => {
+      vi.mocked(getValues).mockResolvedValue({
+        ok: false,
+        error: new Error('Sheets API error'),
+      });
+
+      const { getAllTrackedFileIds } = await import('./index.js');
+      const result = await getAllTrackedFileIds('dashboard-id');
 
       expect(result.ok).toBe(false);
       if (!result.ok) {

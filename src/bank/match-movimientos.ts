@@ -12,7 +12,7 @@ import type {
   Recibo,
   Retencion,
 } from '../types/index.js';
-import { PROCESSING_LOCK_ID, PROCESSING_LOCK_TIMEOUT_MS, ADVA_CUITS } from '../config.js';
+import { PROCESSING_LOCK_ID, PROCESSING_LOCK_TIMEOUT_MS, PROCESSING_LOCK_EXPIRY_MS, ADVA_CUITS } from '../config.js';
 import { withLock } from '../utils/concurrency.js';
 import { info, warn, debug, error as logError } from '../utils/logger.js';
 import { getCachedFolderStructure } from '../services/folder-structure.js';
@@ -1368,7 +1368,7 @@ export async function matchAllMovimientos(
       };
     },
     PROCESSING_LOCK_TIMEOUT_MS,
-    PROCESSING_LOCK_TIMEOUT_MS
+    PROCESSING_LOCK_EXPIRY_MS   // ADV-302
   );
 
   // `withLock` returns ok:false for two distinct cases:

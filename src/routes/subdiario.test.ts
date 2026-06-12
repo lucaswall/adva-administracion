@@ -36,6 +36,7 @@ vi.mock('../config.js', () => ({
   getConfig: vi.fn(),
   PROCESSING_LOCK_ID: 'document-processing',
   PROCESSING_LOCK_TIMEOUT_MS: 300000,
+  PROCESSING_LOCK_EXPIRY_MS: 900000,
 }));
 
 // ─── Mock logger ──────────────────────────────────────────────────────────────
@@ -268,6 +269,44 @@ describe('POST /api/rebuild-subdiario', () => {
       expect.any(Number),
       expect.any(Number)
     );
+  });
+
+  it('lock uses separate timeout (PROCESSING_LOCK_TIMEOUT_MS) and expiry (PROCESSING_LOCK_EXPIRY_MS) (ADV-302)', async () => {
+    // The waiter timeout (3rd arg) must equal PROCESSING_LOCK_TIMEOUT_MS (5 min),
+    // and the auto-expiry (4th arg) must equal PROCESSING_LOCK_EXPIRY_MS (15 min).
+    // These must be different values — expiry > timeout — to prevent slow-but-valid scans
+    // from being displaced by waiters.
+    await server.inject({
+      method: 'POST',
+      url: '/api/rebuild-subdiario',
+      headers: { authorization: `Bearer ${API_SECRET}` },
+    });
+
+    expect(mockWithLock).toHaveBeenCalledWith(
+      'document-processing',
+      expect.any(Function),
+      300000,  // PROCESSING_LOCK_TIMEOUT_MS — waiter wait budget
+      900000   // PROCESSING_LOCK_EXPIRY_MS  — crash-recovery expiry
+    );
+  });
+
+  it('lock expiry covers inner Comprobantes lock budget (ADV-351)', async () => {
+    // PROCESSING_LOCK_EXPIRY_MS must be >= COMPROBANTES_LOCK_EXPIRY_MS (900 000 ms) so
+    // the outer processing lock cannot expire mid-sync while the inner Comprobantes
+    // sheet-append lock is still legitimately held.
+    await server.inject({
+      method: 'POST',
+      url: '/api/rebuild-subdiario',
+      headers: { authorization: `Bearer ${API_SECRET}` },
+    });
+
+    const calls = mockWithLock.mock.calls;
+    expect(calls.length).toBeGreaterThan(0);
+    const lastCall = calls[calls.length - 1];
+    const expiryMs = lastCall[3] as number; // 4th arg = autoExpiryMs
+    expect(expiryMs).toBeGreaterThanOrEqual(900000);
+    const timeoutMs = lastCall[2] as number; // 3rd arg = timeoutMs
+    expect(expiryMs).toBeGreaterThan(timeoutMs);
   });
 
   it('lock is released on error path (withLock still called on failure)', async () => {

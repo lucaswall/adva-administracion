@@ -42,11 +42,21 @@ export const CASCADE_TIMEOUT_MS = 30000;
 export const PROCESSING_LOCK_ID = 'document-processing';
 
 /**
- * Processing lock timeout in milliseconds
- * Used for both wait timeout and auto-expiry in scan/match operations
- * Set to 5 minutes to allow for large batch processing
+ * Processing lock wait-timeout in milliseconds
+ * How long a waiter (scan/match/subdiario) blocks before giving up and returning ok:false.
+ * Set to 5 minutes to accommodate large batch back-log.
  */
 export const PROCESSING_LOCK_TIMEOUT_MS = 300000;  // 5 minutes
+
+/**
+ * Processing lock auto-expiry in milliseconds
+ * How long a lock can be held before it is considered stale (crash recovery).
+ * Must be strictly greater than PROCESSING_LOCK_TIMEOUT_MS so that a slow-but-valid
+ * scan running between 5 and 15 minutes is NOT force-acquired by a waiter that times out.
+ * Set to 15 minutes to match the inner Comprobantes lock expiry in subdiario-writer.ts.
+ * ADV-302: decoupled from PROCESSING_LOCK_TIMEOUT_MS.
+ */
+export const PROCESSING_LOCK_EXPIRY_MS = 900000;  // 15 minutes
 
 /**
  * Spreadsheet lock timeout in milliseconds
@@ -62,6 +72,18 @@ export const SPREADSHEET_LOCK_TIMEOUT_MS = 30000;  // 30 seconds
  * ADV-22: Explicit timeout prevents indefinite wait if lock is held
  */
 export const FILE_STATUS_LOCK_TIMEOUT_MS = 30000;  // 30 seconds
+
+/**
+ * Business-key store lock auto-expiry in milliseconds
+ * Used as the 4th argument to withLock for all store operations
+ * (factura-store, pago-store, recibo-store, retencion-store, resumen-store, storage/index.ts).
+ *
+ * Must cover worst-case withQuotaRetry chains (~12 min per the sheet-append rationale in ADV-242).
+ * A lock held past this timeout is assumed crashed and may be force-acquired for recovery.
+ * Set to 15 minutes — same as PROCESSING_LOCK_EXPIRY_MS and the sheet-append lock expiry.
+ * ADV-344: decoupled from the short 10 s / 30 s wait timeouts.
+ */
+export const STORE_LOCK_AUTO_EXPIRY_MS = 900000;  // 15 minutes
 
 /**
  * Google Sheets batch update limit

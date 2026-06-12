@@ -10,7 +10,7 @@ import { authMiddleware } from '../middleware/auth.js';
 import { withLock } from '../utils/concurrency.js';
 import { getCachedFolderStructure } from '../services/folder-structure.js';
 import { syncSubdiario } from '../services/subdiario-writer.js';
-import { PROCESSING_LOCK_ID, PROCESSING_LOCK_TIMEOUT_MS } from '../config.js';
+import { PROCESSING_LOCK_ID, PROCESSING_LOCK_TIMEOUT_MS, PROCESSING_LOCK_EXPIRY_MS } from '../config.js';
 import { error as logError } from '../utils/logger.js';
 
 /**
@@ -84,7 +84,7 @@ export async function subdiarioRoutes(server: FastifyInstance) {
             }
           },
           PROCESSING_LOCK_TIMEOUT_MS,
-          PROCESSING_LOCK_TIMEOUT_MS,
+          PROCESSING_LOCK_EXPIRY_MS,
         );
 
         durationMs = Date.now() - start;

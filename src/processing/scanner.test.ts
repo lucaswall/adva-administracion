@@ -26,6 +26,7 @@ vi.mock('./extractor.js', () => ({
 
 vi.mock('./storage/index.js', () => ({
   getProcessedFileIds: vi.fn(async () => ({ ok: true, value: new Set() })),
+  getAllTrackedFileIds: vi.fn(async () => ({ ok: true, value: new Set() })),
   getStaleProcessingFileIds: vi.fn(async () => ({ ok: true, value: new Set() })),
   getRetryableFailedFileIds: vi.fn(async () => ({ ok: true, value: new Set() })),
   markFileProcessing: vi.fn(async () => ({ ok: true, value: undefined })),
@@ -1946,6 +1947,113 @@ describe('scanner', () => {
         undefined,
         'existing-broker-id'
       );
+    });
+  });
+
+  describe('scan queue recovery gate filtering (ADV-311)', () => {
+    it('non-retryable failed file is excluded from scan queue', async () => {
+      const { getAllTrackedFileIds, getProcessedFileIds, getRetryableFailedFileIds } = await import('./storage/index.js');
+
+      const failedFile = {
+        id: 'failed-file',
+        name: 'failed-document.pdf',
+        mimeType: 'application/pdf',
+        parents: ['entrada'],
+      };
+
+      mockListFiles.mockResolvedValue({ ok: true, value: [failedFile] });
+
+      // File is tracked (has any status)
+      vi.mocked(getAllTrackedFileIds).mockResolvedValue({
+        ok: true,
+        value: new Set(['failed-file']),
+      });
+      // File is not in success/duplicate set
+      vi.mocked(getProcessedFileIds).mockResolvedValue({
+        ok: true,
+        value: new Set(),
+      });
+      // File is NOT retryable (e.g., exceeded max retries)
+      vi.mocked(getRetryableFailedFileIds).mockResolvedValue({
+        ok: true,
+        value: new Set(),
+      });
+
+      await scanFolder('entrada');
+
+      // Non-retryable failed file must NOT be reprocessed (ADV-311)
+      expect(mockProcessFile).not.toHaveBeenCalled();
+    });
+
+    it('non-stale processing file is excluded from scan queue', async () => {
+      const { getAllTrackedFileIds, getProcessedFileIds, getStaleProcessingFileIds } = await import('./storage/index.js');
+
+      const processingFile = {
+        id: 'in-progress-file',
+        name: 'processing-document.pdf',
+        mimeType: 'application/pdf',
+        parents: ['entrada'],
+      };
+
+      mockListFiles.mockResolvedValue({ ok: true, value: [processingFile] });
+
+      // File is tracked (currently being processed by another worker)
+      vi.mocked(getAllTrackedFileIds).mockResolvedValue({
+        ok: true,
+        value: new Set(['in-progress-file']),
+      });
+      vi.mocked(getProcessedFileIds).mockResolvedValue({
+        ok: true,
+        value: new Set(),
+      });
+      // File is NOT stale (processing started recently)
+      vi.mocked(getStaleProcessingFileIds).mockResolvedValue({
+        ok: true,
+        value: new Set(),
+      });
+
+      await scanFolder('entrada');
+
+      // Non-stale processing file must NOT be reprocessed (ADV-311)
+      expect(mockProcessFile).not.toHaveBeenCalled();
+    });
+
+    it('retryable failed file IS included via recovery gate', async () => {
+      const { getAllTrackedFileIds, getProcessedFileIds, getRetryableFailedFileIds } = await import('./storage/index.js');
+
+      const retryableFile = {
+        id: 'retryable-file',
+        name: 'retryable-document.pdf',
+        mimeType: 'application/pdf',
+        parents: ['entrada'],
+      };
+
+      mockListFiles.mockResolvedValue({ ok: true, value: [retryableFile] });
+
+      // File is tracked
+      vi.mocked(getAllTrackedFileIds).mockResolvedValue({
+        ok: true,
+        value: new Set(['retryable-file']),
+      });
+      vi.mocked(getProcessedFileIds).mockResolvedValue({
+        ok: true,
+        value: new Set(),
+      });
+      // File IS retryable (transient lock error, under retry limit)
+      vi.mocked(getRetryableFailedFileIds).mockResolvedValue({
+        ok: true,
+        value: new Set(['retryable-file']),
+      });
+
+      mockProcessFile.mockResolvedValue({
+        ok: true,
+        value: { documentType: 'factura_emitida', document: { fechaEmision: '2024-01-01' } },
+      });
+
+      await scanFolder('entrada');
+
+      // Retryable failed file MUST be reprocessed via recovery gate (ADV-311)
+      expect(mockProcessFile).toHaveBeenCalled();
     });
   });
 });

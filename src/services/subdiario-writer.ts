@@ -56,6 +56,10 @@ const COMPROBANTES_LOCK_WAIT_MS = 60_000;
  * Lock auto-expiry for the Comprobantes sheet-append lock.
  * Generous timeout: covers worst-case withQuotaRetry chains (~12 min).
  * The lock exists only to recover from a crashed holder, not to bound normal slow paths.
+ *
+ * INVARIANT (ADV-351): the outer PROCESSING_LOCK_EXPIRY_MS in config.ts MUST be >=
+ * this value so the outer processing lock does not expire and trigger a force-acquire
+ * while this inner lock is still legitimately held during a slow-but-valid sync.
  */
 const COMPROBANTES_LOCK_EXPIRY_MS = 900_000;
 

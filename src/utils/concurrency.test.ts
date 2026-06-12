@@ -981,3 +981,96 @@ describe('withQuotaRetry abort signal (ADV-224)', () => {
     expect(fn).not.toHaveBeenCalled();
   });
 });
+
+describe('PROCESSING_LOCK expiry/timeout decoupling (ADV-302)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.useFakeTimers();
+    clearAllLocks();
+  });
+
+  afterEach(() => {
+    clearAllLocks();
+    vi.useRealTimers();
+  });
+
+  it('waiter times out (ok:false) when holder is past wait-timeout but before auto-expiry', async () => {
+    // Contract: timeoutMs controls how long a waiter waits before giving up;
+    // autoExpiryMs controls crash-recovery force-acquire. They are independent.
+    // A holder running past timeoutMs but before autoExpiryMs must NOT be displaced —
+    // the waiter must receive ok:false (timeout) rather than force-acquiring.
+    //
+    // This corresponds to PROCESSING_LOCK_TIMEOUT_MS=300 000 / PROCESSING_LOCK_EXPIRY_MS=900 000.
+
+    const holderFinished: string[] = [];
+
+    const holder = vi.fn().mockImplementation(async () => {
+      await new Promise<void>(resolve => setTimeout(resolve, 200));
+      holderFinished.push('done');
+      return 'holder-result';
+    });
+
+    // Holder acquires with wait=100ms, expiry=500ms
+    const holderPromise = withLock('adv302-waiter-timeout', holder, 100, 500);
+
+    // Advance past waiter-timeout (100ms) but well before auto-expiry (500ms)
+    await vi.advanceTimersByTimeAsync(10); // holder has lock
+
+    const waiter = vi.fn().mockResolvedValue('waiter-result');
+    // waiter also uses wait=100ms, expiry=500ms
+    const waiterPromise = withLock('adv302-waiter-timeout', waiter, 100, 500);
+
+    // Advance 100ms — waiter timeout fires
+    await vi.advanceTimersByTimeAsync(100);
+    const waiterResult = await waiterPromise;
+
+    // Waiter must have timed out, NOT force-acquired while holder runs
+    expect(waiterResult.ok).toBe(false);
+    // waiter fn must NOT have been called (lock was never acquired)
+    expect(waiter).not.toHaveBeenCalled();
+
+    // Drain holder
+    await vi.runAllTimersAsync();
+    await holderPromise;
+    expect(holderFinished).toContain('done');
+  });
+
+  it('force-acquire succeeds when holder is past auto-expiry (crash recovery)', async () => {
+    // Contract: a holder that is older than autoExpiryMs is treated as crashed.
+    // A new caller CAN acquire the lock (crash recovery) even though the old fn is still running.
+    //
+    // This corresponds to the 15-minute PROCESSING_LOCK_EXPIRY_MS — if a scan hangs for
+    // 15+ minutes we assume it crashed and allow recovery.
+
+    const crashedHolder = vi.fn().mockImplementation(async () => {
+      await new Promise<void>(resolve => setTimeout(resolve, 9999)); // simulated hang
+      return 'never-completes-normally';
+    });
+
+    // Holder acquires with wait=5000ms, expiry=100ms (will expire quickly)
+    const crashedPromise = withLock('adv302-crash-recovery', crashedHolder, 5000, 100);
+
+    // Advance 10ms so holder acquires the lock
+    await vi.advanceTimersByTimeAsync(10);
+
+    // Advance past auto-expiry (100ms) — holder is now "crashed"
+    await vi.advanceTimersByTimeAsync(150);
+
+    // Recovery caller should be able to force-acquire the expired lock
+    const recovered = vi.fn().mockResolvedValue('recovery-result');
+    const recoveryPromise = withLock('adv302-crash-recovery', recovered, 5000, 1000);
+
+    await vi.advanceTimersByTimeAsync(20);
+    const recoveryResult = await recoveryPromise;
+
+    expect(recoveryResult.ok).toBe(true);
+    if (recoveryResult.ok) {
+      expect(recoveryResult.value).toBe('recovery-result');
+    }
+    expect(recovered).toHaveBeenCalledOnce();
+
+    // Drain crashed holder (runs its finally)
+    await vi.runAllTimersAsync();
+    await crashedPromise;
+  });
+});

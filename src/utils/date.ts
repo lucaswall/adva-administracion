@@ -221,6 +221,64 @@ export function normalizeTimestamp(value: unknown): string {
 }
 
 /**
+ * Converts a Google Sheets serial number (written in a given timezone) to a UTC timestamp.
+ *
+ * Background: Google Sheets stores datetime serial numbers relative to the *spreadsheet's
+ * timezone*. A serial of 45993.5 in a Buenos-Aires spreadsheet means "noon, local time" —
+ * i.e. 2025-12-02T15:00:00Z (UTC+3h offset). The naïve decode `EPOCH + serial * 86400000`
+ * treats the number as UTC and produces 2025-12-02T12:00:00Z, which is 3 hours too early.
+ *
+ * Algorithm:
+ *   1. Compute `localAsUtcMs = EXCEL_EPOCH + serial * 86400000`   (naïve, "local as if UTC")
+ *   2. Find `tzOffsetMs` — the offset `Intl` says the `timezone` was at that local wall-clock time
+ *   3. Return `localAsUtcMs - tzOffsetMs`
+ *
+ * For Argentina (UTC−3, no DST): tzOffsetMs = −10 800 000 ms → subtracting it adds 3 h.
+ *
+ * @param serial   - Google Sheets serial number (may include fractional time)
+ * @param timezone - IANA timezone string (e.g. 'America/Argentina/Buenos_Aires')
+ * @returns UTC timestamp in milliseconds
+ */
+export function decodeSerialInTimezone(serial: number, timezone: string): number {
+  const EXCEL_EPOCH = new Date(Date.UTC(1899, 11, 30)).getTime();
+  const localAsUtcMs = EXCEL_EPOCH + serial * 86400000;
+
+  // Use Intl to interpret localAsUtcMs as a wall-clock instant in `timezone`.
+  // formatToParts returns the local date/time parts — reconstruct them as a UTC
+  // Date to get "what UTC moment matches this local clock reading".
+  const formatter = new Intl.DateTimeFormat('en-US', {
+    timeZone: timezone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  });
+
+  const parts: Record<string, string> = {};
+  for (const p of formatter.formatToParts(new Date(localAsUtcMs))) {
+    parts[p.type] = p.value;
+  }
+
+  // Reconstruct what the local wall clock shows as a UTC instant
+  const localInterpretedAsUtcMs = Date.UTC(
+    parseInt(parts['year'] ?? '0', 10),
+    parseInt(parts['month'] ?? '1', 10) - 1,
+    parseInt(parts['day'] ?? '1', 10),
+    parseInt(parts['hour'] ?? '0', 10),
+    parseInt(parts['minute'] ?? '0', 10),
+    parseInt(parts['second'] ?? '0', 10),
+  );
+
+  // tzOffsetMs = how far localAsUtcMs is from the actual local reading
+  // Subtract to shift naïve-UTC → true UTC
+  const tzOffsetMs = localInterpretedAsUtcMs - localAsUtcMs;
+  return localAsUtcMs - tzOffsetMs;
+}
+
+/**
  * Normalizes a spreadsheet date value to a date string
  *
  * Handles both serial numbers (from UNFORMATTED_VALUE reads) and
