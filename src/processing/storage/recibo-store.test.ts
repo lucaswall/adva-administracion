@@ -67,7 +67,7 @@ const createTestRecibo = (overrides: Partial<Recibo> = {}): Recibo => ({
   fileName: 'test-recibo.pdf',
   tipoRecibo: 'sueldo',
   nombreEmpleado: 'Juan Perez',
-  cuilEmpleado: '20123456789',
+  cuilEmpleado: '20123456786',
   legajo: '001',
   tareaDesempenada: 'Desarrollador',
   cuitEmpleador: '30709076783',
@@ -200,7 +200,7 @@ describe('storeRecibo', () => {
         ok: true,
         value: [
           ['fechaPago', 'fileId', 'fileName', 'tipoRecibo', 'nombreEmpleado', 'cuilEmpleado', 'legajo', 'tareaDesempenada', 'cuitEmpleador', 'periodoAbonado', 'subtotalRemuneraciones', 'subtotalDescuentos', 'totalNeto'],
-          ['2025-01-31', existingFileId, 'old.pdf', 'Mensual', 'Juan Perez', '20123456789', '001', 'Desarrollador', '30709076783', '2025-01', '500,000.00', '100,000.00', '400,000.00'],
+          ['2025-01-31', existingFileId, 'old.pdf', 'Mensual', 'Juan Perez', '20123456786', '001', 'Desarrollador', '30709076783', '2025-01', '500,000.00', '100,000.00', '400,000.00'],
         ],
       });
 
@@ -225,7 +225,7 @@ describe('storeRecibo', () => {
         ok: true,
         value: [
           ['fechaPago', 'fileId', 'fileName', 'tipoRecibo', 'nombreEmpleado', 'cuilEmpleado', 'legajo', 'tareaDesempenada', 'cuitEmpleador', 'periodoAbonado', 'subtotalRemuneraciones', 'subtotalDescuentos', 'totalNeto'],
-          ['2025-01-31', 'existing-file-id', 'old.pdf', 'Mensual', 'Juan Perez', '20123456789', '001', 'Desarrollador', '30709076783', '2025-01', '500,000.00', '100,000.00', '400,000.00'],
+          ['2025-01-31', 'existing-file-id', 'old.pdf', 'Mensual', 'Juan Perez', '20123456786', '001', 'Desarrollador', '30709076783', '2025-01', '500,000.00', '100,000.00', '400,000.00'],
         ],
       });
       vi.mocked(appendRowsWithLinks).mockResolvedValue({ ok: true, value: 1 });
@@ -251,7 +251,7 @@ describe('storeRecibo', () => {
         ok: true,
         value: [
           ['fechaPago', 'fileId', 'fileName', 'tipoRecibo', 'nombreEmpleado', 'cuilEmpleado', 'legajo', 'tareaDesempenada', 'cuitEmpleador', 'periodoAbonado', 'subtotalRemuneraciones', 'subtotalDescuentos', 'totalNeto'],
-          ['2025-01-31', 'existing-file-id', 'old.pdf', 'Mensual', 'Juan Perez', '20123456789', '001', 'Desarrollador', '30709076783', '2025-01', '500,000.00', '100,000.00', '400,000.00'],
+          ['2025-01-31', 'existing-file-id', 'old.pdf', 'Mensual', 'Juan Perez', '20123456786', '001', 'Desarrollador', '30709076783', '2025-01', '500,000.00', '100,000.00', '400,000.00'],
         ],
       });
       vi.mocked(appendRowsWithLinks).mockResolvedValue({ ok: true, value: 1 });
@@ -277,7 +277,7 @@ describe('storeRecibo', () => {
         ok: true,
         value: [
           ['fechaPago', 'fileId', 'fileName', 'tipoRecibo', 'nombreEmpleado', 'cuilEmpleado', 'legajo', 'tareaDesempenada', 'cuitEmpleador', 'periodoAbonado', 'subtotalRemuneraciones', 'subtotalDescuentos', 'totalNeto'],
-          ['2025-01-31', 'existing-file-id', 'old.pdf', 'Mensual', 'Juan Perez', '20123456789', '001', 'Desarrollador', '30709076783', '2025-01', '500,000.00', '100,000.00', '400,000.00'],
+          ['2025-01-31', 'existing-file-id', 'old.pdf', 'Mensual', 'Juan Perez', '20123456786', '001', 'Desarrollador', '30709076783', '2025-01', '500,000.00', '100,000.00', '400,000.00'],
         ],
       });
       vi.mocked(appendRowsWithLinks).mockResolvedValue({ ok: true, value: 1 });
@@ -300,7 +300,7 @@ describe('storeRecibo', () => {
         ok: true,
         value: [
           ['fechaPago', 'fileId', 'fileName', 'tipoRecibo', 'nombreEmpleado', 'cuilEmpleado', 'legajo', 'tareaDesempenada', 'cuitEmpleador', 'periodoAbonado', 'subtotalRemuneraciones', 'subtotalDescuentos', 'totalNeto', 'processedAt', 'confidence', 'needsReview', 'matchedPagoFileId', 'matchConfidence', 'hasCuitMatch'],
-          ['2025-01-31', 'test-file-id', 'file.pdf', 'Mensual', 'Juan Perez', '20123456789', '001', 'Dev', '30709076783', '2025-01', '500000', '100000', '400000', '2025-01-31T10:00:00Z', '0.95', 'NO', '', '', 'NO'],
+          ['2025-01-31', 'test-file-id', 'file.pdf', 'Mensual', 'Juan Perez', '20123456786', '001', 'Dev', '30709076783', '2025-01', '500000', '100000', '400000', '2025-01-31T10:00:00Z', '0.95', 'NO', '', '', 'NO'],
         ],
       });
       vi.mocked(updateRowsWithFormatting).mockResolvedValue({ ok: true, value: undefined });

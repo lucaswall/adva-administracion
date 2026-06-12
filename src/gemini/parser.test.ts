@@ -849,33 +849,24 @@ describe('Parser - Movimiento Validation', () => {
       }
     });
 
-    it('rejects NaN debito with needsReview flag', () => {
-      const response = JSON.stringify({
-        banco: 'BBVA',
-        numeroCuenta: '007-009364/1',
-        fechaDesde: '2024-01-01',
-        fechaHasta: '2024-01-31',
-        saldoInicial: 100000,
-        saldoFinal: 90000,
-        moneda: 'ARS',
-        cantidadMovimientos: 1,
-        movimientos: [
-          {
-            fecha: '2024-01-02',
-            concepto: 'TRANSFERENCIA',
-            debito: NaN, // NaN is invalid
-            credito: null,
-            saldo: 90000,
-          }
-        ]
-      });
+    it('rejects non-finite debito (Infinity via 1e999 JSON) with needsReview flag (ADV-357)', () => {
+      // JSON.stringify(NaN) silently converts NaN → null, so it never exercises the
+      // !Number.isFinite() branch. Instead, use a raw JSON string with 1e999, which
+      // JSON.parse() in V8 produces as Infinity (double-precision overflow).
+      // This mirrors what Gemini might return for a hallucinated very large number.
+      const response = '{"banco":"BBVA","numeroCuenta":"007-009364/1","fechaDesde":"2024-01-01","fechaHasta":"2024-01-31","saldoInicial":100000,"saldoFinal":90000,"moneda":"ARS","cantidadMovimientos":1,"movimientos":[{"fecha":"2024-01-02","concepto":"TRANSFERENCIA","debito":1e999,"credito":null,"saldo":90000}]}';
 
-      // Note: NaN becomes null in JSON.stringify, so test with manually crafted invalid scenario
-      // In practice, Gemini might return garbage that parses to NaN after parseFloat
+      // Sanity-check: V8 JSON.parse does produce Infinity for 1e999
+      expect(JSON.parse('{"n":1e999}').n).toBe(Infinity);
+
       const result = parseResumenBancarioResponse(response);
 
       expect(result.ok).toBe(true);
-      // JSON.stringify converts NaN to null, so this tests null handling
+      if (result.ok) {
+        // isInvalidNumericValue checks !Number.isFinite(value); Infinity fails that check
+        // → validateMovimientosBancario sets hasIssues=true → needsReview=true
+        expect(result.value.needsReview).toBe(true);
+      }
     });
 
     it('rejects extremely large values (> 1e15) with needsReview flag', () => {

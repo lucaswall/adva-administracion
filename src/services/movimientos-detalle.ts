@@ -10,6 +10,7 @@ import { batchUpdate, getValues, type CellValue } from './sheets.js';
 import { debug, warn } from '../utils/logger.js';
 import { parseNumber } from '../utils/numbers.js';
 import { normalizeSpreadsheetDate } from '../utils/date.js';
+import { buildHeaderIndex, MOVIMIENTOS_BANCARIO_SHEET } from '../constants/spreadsheet-headers.js';
 
 /**
  * Represents an update to the matchedFileId and detalle columns
@@ -62,21 +63,24 @@ export function normalizeMatchedType(value: string): 'AUTO' | 'MANUAL' | '' {
   return '';
 }
 
+// Header-derived indices for bank movimientos rows (ADV-332)
+const movCol = buildHeaderIndex(MOVIMIENTOS_BANCARIO_SHEET.headers);
+
 /**
- * Computes version hash from raw row data (columns A-I)
+ * Computes version hash from raw row data (columns A-I) using header-derived indices.
  * Must match the algorithm in match-movimientos.ts computeRowVersion
  *
- * @param row - Raw cell values [fecha, concepto, debito, credito, saldo, saldoCalculado, matchedFileId, matchedType, detalle]
+ * @param row - Raw cell values matching MOVIMIENTOS_BANCARIO_SHEET.headers order
  * @returns Hex string hash (16 chars)
  */
 function computeVersionFromRow(row: CellValue[]): string {
-  const fecha = normalizeSpreadsheetDate(row[0]);
-  const concepto = String(row[1] || '');
-  const debito = parseNumber(row[2]);
-  const credito = parseNumber(row[3]);
-  const matchedFileId = String(row[6] || '');
-  const matchedType = normalizeMatchedType(String(row[7] || ''));
-  const detalle = String(row[8] || '');
+  const fecha = normalizeSpreadsheetDate(row[movCol('fecha')]);
+  const concepto = String(row[movCol('concepto')] || '');
+  const debito = parseNumber(row[movCol('debito')]);
+  const credito = parseNumber(row[movCol('credito')]);
+  const matchedFileId = String(row[movCol('matchedFileId')] || '');
+  const matchedType = normalizeMatchedType(String(row[movCol('matchedType')] || ''));
+  const detalle = String(row[movCol('detalle')] || '');
 
   const data = [
     fecha,

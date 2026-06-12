@@ -138,33 +138,6 @@ export function formatISODate(date: Date): string {
 }
 
 /**
- * Converts a cell value to a date string
- *
- * Google Sheets returns Date objects for date-formatted cells.
- * This function normalizes both Date objects and strings to ISO format.
- *
- * @param value - Cell value (Date object or string)
- * @returns ISO date string (YYYY-MM-DD) or empty string if invalid
- */
-export function toDateString(value: unknown): string {
-  if (!value) return '';
-
-  // If it's a Date object, format it as ISO
-  if (value instanceof Date) {
-    if (isNaN(value.getTime())) return '';
-    return formatISODate(value);
-  }
-
-  // If it's already a string, return it
-  if (typeof value === 'string') {
-    return value;
-  }
-
-  // Fallback to String conversion
-  return String(value);
-}
-
-/**
  * Converts a Google Sheets serial number to date string (YYYY-MM-DD)
  *
  * Google Sheets uses December 30, 1899 as day 0 (epoch).

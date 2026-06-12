@@ -1354,9 +1354,11 @@ describe('matchAllMovimientos', () => {
         return {
           ok: true,
           value: [
+            // 19-col Facturas Recibidas header (A:S, tipoDeCambio column excluded from this mock)
             ['fechaemision', 'fileid', 'filename', 'tipocomprobante', 'nrofactura', 'cuitemisor', 'razonsocialemisor', 'importeneto', 'importeiva', 'importetotal', 'moneda', 'concepto', 'processedat', 'confidence', 'needsreview', 'matchedpagofileid', 'matchconfidence', 'hascuitmatch', 'pagada'],
-            ['2025-01-10', 'factura-a', 'a.pdf', 'B', '1', '123', '20123456786', 'PROVEEDOR SA', '30709076783', 'ADVA', '1000', 'ARS', '', '', '2025-01-10T10:00:00Z', '0.95', 'NO', '', ''],
-            ['2025-01-20', 'factura-b', 'b.pdf', 'B', '1', '124', '20123456786', 'PROVEEDOR SA', '30709076783', 'ADVA', '1000', 'ARS', '', '', '2025-01-20T10:00:00Z', '0.95', 'NO', '', ''],
+            // cuitEmisor at index 5 = '20123456786', importeTotal at index 9 = '1000'
+            ['2025-01-10', 'factura-a', 'a.pdf', 'B', '00001-00000001', '20123456786', 'PROVEEDOR SA', '826.45', '173.55', '1000', 'ARS', '', '2025-01-10T10:00:00Z', '0.95', 'NO', '', '', 'NO', 'NO'],
+            ['2025-01-20', 'factura-b', 'b.pdf', 'B', '00001-00000002', '20123456786', 'PROVEEDOR SA', '826.45', '173.55', '1000', 'ARS', '', '2025-01-20T10:00:00Z', '0.95', 'NO', '', '', 'NO', 'NO'],
           ],
         };
       }
@@ -1400,6 +1402,18 @@ describe('matchAllMovimientos', () => {
     expect(result.ok).toBe(true);
     // Should NOT replace - equal quality, keep existing (no churn)
     expect(updateDetalle).toHaveBeenCalledWith('bbva-id', []);
+
+    // Fixture alignment check (ADV-356): documents parsed from the correctly-aligned
+    // 19-col rows must carry cuitEmisor='20123456786' and importeTotal=1000.
+    expect(mockMatchMovement).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.arrayContaining([
+        expect.objectContaining({ cuitEmisor: '20123456786', importeTotal: 1000 }),
+      ]),
+      expect.anything(),
+      expect.anything(),
+      expect.anything()
+    );
   });
 
   it('keeps existing Tier 3 (referencia) match when new candidate is Tier 5 with closer date (ADV-120)', async () => {
@@ -1577,8 +1591,9 @@ describe('matchAllMovimientos', () => {
         return {
           ok: true,
           value: [
+            // 19-col header; cuitEmisor at index 5, importeTotal at index 9 (ADV-356)
             ['fechaemision', 'fileid', 'filename', 'tipocomprobante', 'nrofactura', 'cuitemisor', 'razonsocialemisor', 'importeneto', 'importeiva', 'importetotal', 'moneda', 'concepto', 'processedat', 'confidence', 'needsreview', 'matchedpagofileid', 'matchconfidence', 'hascuitmatch', 'pagada'],
-            ['2025-01-20', 'factura-b', 'b.pdf', 'B', '1', '124', '20123456786', 'PROVEEDOR SA', '30709076783', 'ADVA', '1000', 'ARS', '', '', '2025-01-20T10:00:00Z', '0.95', 'NO', '', ''],
+            ['2025-01-20', 'factura-b', 'b.pdf', 'B', '00001-00000002', '20123456786', 'PROVEEDOR SA', '826.45', '173.55', '1000', 'ARS', '', '2025-01-20T10:00:00Z', '0.95', 'NO', '', '', 'NO', 'NO'],
           ],
         };
       }
@@ -1633,6 +1648,86 @@ describe('matchAllMovimientos', () => {
 
     // Should NOT replace the match
     expect(updateDetalle).toHaveBeenCalledWith('bbva-id', []);
+  });
+
+  it('regression (ADV-356): misaligned 19-col fixture reads cuitEmisor as junk and importeTotal as 0, producing no candidate documents', async () => {
+    // This test documents the ADV-356 bug: the old misaligned fixture rows put garbage
+    // in the cuitEmisor and importeTotal slots, so the parser produced documents with
+    // cuitEmisor='' and importeTotal=0. The matcher got no viable candidates and the
+    // movement was left unmatched even though the document did exist in the sheet.
+    const mockFolderStructure = {
+      controlIngresosId: 'ingresos-id',
+      controlEgresosId: 'egresos-id',
+      bankSpreadsheets: new Map(),
+      movimientosSpreadsheets: new Map([['BBVA', 'bbva-id']]),
+    };
+
+    vi.mocked(withLock).mockImplementation(async (_id, fn) => {
+      const result = await fn();
+      return { ok: true, value: result };
+    });
+
+    vi.mocked(getCachedFolderStructure).mockReturnValue(mockFolderStructure as any);
+
+    // Intentionally misaligned row (the old bug): '123' at cuitemisor slot, 'ADVA' at importetotal slot
+    vi.mocked(getValues).mockImplementation(async (_spreadsheetId, range) => {
+      if (range === 'Facturas Recibidas!A:T') {
+        return {
+          ok: true,
+          value: [
+            ['fechaemision', 'fileid', 'filename', 'tipocomprobante', 'nrofactura', 'cuitemisor', 'razonsocialemisor', 'importeneto', 'importeiva', 'importetotal', 'moneda', 'concepto', 'processedat', 'confidence', 'needsreview', 'matchedpagofileid', 'matchconfidence', 'hascuitmatch', 'pagada'],
+            // Misaligned: extra junk columns shift cuitEmisor→'123', importeTotal→'ADVA'
+            ['2025-01-10', 'factura-a', 'a.pdf', 'B', '1', '123', '20123456786', 'PROVEEDOR SA', '30709076783', 'ADVA', '1000', 'ARS', '', '', '2025-01-10T10:00:00Z', '0.95', 'NO', '', ''],
+          ],
+        };
+      }
+      return { ok: true, value: [['header']] };
+    });
+
+    vi.mocked(getMovimientosToFill).mockResolvedValue({
+      ok: true,
+      value: [
+        {
+          sheetName: '2025-01',
+          rowNumber: 2,
+          fecha: '2025-01-15',
+          concepto: 'PAGO 20123456786',
+          debito: 1000,
+          credito: null,
+          saldo: 9000,
+          saldoCalculado: 9000,
+          matchedFileId: '',
+          detalle: '',
+          matchedType: '',
+        },
+      ],
+    });
+
+    // Mock matchMovement to capture what documents it was called with
+    mockMatchMovement.mockReturnValue({
+      matchType: 'no_match',
+      description: '',
+      matchedFileId: '',
+      confidence: 'LOW',
+    });
+
+    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: { appliedCount: 0, skippedCount: 0, appliedKeys: new Set<string>() } as { appliedCount: number; skippedCount: number; appliedKeys: Set<string> } });
+
+    const resultPromise = matchAllMovimientos();
+    await vi.runAllTimersAsync();
+    await resultPromise;
+
+    // The misaligned row produces a document with cuitEmisor='123' and importeTotal=0.
+    // This demonstrates the damage: the fixture alignment error silently corrupts the parsed data.
+    expect(mockMatchMovement).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.arrayContaining([
+        expect.objectContaining({ cuitEmisor: '123', importeTotal: 0 }),
+      ]),
+      expect.anything(),
+      expect.anything(),
+      expect.anything()
+    );
   });
 });
 

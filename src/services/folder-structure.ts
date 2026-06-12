@@ -7,7 +7,7 @@ import { getConfig, SPREADSHEET_LOCK_TIMEOUT_MS } from '../config.js';
 import { findByName, listByMimeType, listAllChildren, createFolder, createSpreadsheet, createFile } from './drive.js';
 import { getSheetMetadata, createSheet, setValues, getValues, formatSheet, formatStatusSheet, deleteSheet, moveSheetToFirst, applyConditionalFormat, insertColumn } from './sheets.js';
 import { formatMonthFolder } from '../utils/spanish-date.js';
-import { CONTROL_INGRESOS_SHEETS, CONTROL_EGRESOS_SHEETS, DASHBOARD_OPERATIVO_SHEETS, CONTROL_RESUMENES_BANCARIO_SHEET, CONTROL_RESUMENES_TARJETA_SHEET, CONTROL_RESUMENES_BROKER_SHEET, type SheetConfig } from '../constants/spreadsheet-headers.js';
+import { CONTROL_INGRESOS_SHEETS, CONTROL_EGRESOS_SHEETS, DASHBOARD_OPERATIVO_SHEETS, CONTROL_RESUMENES_BANCARIO_SHEET, CONTROL_RESUMENES_TARJETA_SHEET, CONTROL_RESUMENES_BROKER_SHEET, RECIBO_HEADERS, buildHeaderIndex, type SheetConfig } from '../constants/spreadsheet-headers.js';
 import type { FolderStructure, Result, SortDestination } from '../types/index.js';
 import { debug, info, error as logError } from '../utils/logger.js';
 import { withLock } from '../utils/concurrency.js';
@@ -560,12 +560,15 @@ export async function migrateRecibosHasCuitMatchColumn(
   if (!headerWriteResult.ok) return headerWriteResult;
 
   // Backfill data rows: HIGH matchConfidence → 'YES', everything else → 'NO'
+  // matchConfidence is at the same position in the pre-migration schema (17)
+  // as in RECIBO_HEADERS (hasCuitMatch was added after it at index 18).
+  const reciboCol = buildHeaderIndex(RECIBO_HEADERS);
   const dataRowCount = rows.length - 1;
   if (dataRowCount > 0) {
     const backfillValues: string[][] = [];
     for (let i = 1; i < rows.length; i++) {
       const row = rows[i] ?? [];
-      const matchConfidence = String(row[17] ?? '');
+      const matchConfidence = String(row[reciboCol('matchConfidence')] ?? '');
       backfillValues.push([matchConfidence === 'HIGH' ? 'YES' : 'NO']);
     }
     const backfillResult = await setValues(

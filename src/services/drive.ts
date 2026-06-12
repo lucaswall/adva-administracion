@@ -219,39 +219,6 @@ export async function downloadFile(fileId: string): Promise<Result<Buffer, Error
 }
 
 /**
- * Gets complete file info including content
- *
- * @param fileId - Google Drive file ID
- * @param name - File name
- * @param mimeType - MIME type
- * @param lastUpdated - Last modified date
- * @returns Complete FileInfo with content
- */
-export async function getFileWithContent(
-  fileId: string,
-  name: string,
-  mimeType: string,
-  lastUpdated: Date
-): Promise<Result<FileInfo, Error>> {
-  const downloadResult = await downloadFile(fileId);
-
-  if (!downloadResult.ok) {
-    return downloadResult;
-  }
-
-  return {
-    ok: true,
-    value: {
-      id: fileId,
-      name,
-      mimeType,
-      lastUpdated,
-      content: downloadResult.value,
-    },
-  };
-}
-
-/**
  * Sets up a push notification channel for a folder
  *
  * @param folderId - Folder to watch

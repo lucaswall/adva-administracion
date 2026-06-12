@@ -412,8 +412,9 @@ describe('MANUAL matchConfidence locking (Fix 5 - ADV-131)', () => {
     });
 
     // Factura that would match the pago by CUIT and amount
-    const facturaHeader = ['fechaEmision', 'fileId', 'fileName', 'tipoComprobante', 'nroFactura', 'cuitReceptor', 'razonSocialReceptor', 'importeNeto', 'importeIva', 'importeTotal', 'moneda', 'concepto', 'processedAt', 'confidence', 'needsReview', 'matchedPagoFileId', 'matchConfidence', 'hasCuitMatch', 'pagada', 'tipoDeCambio'];
-    const facturaRow = ['2025-01-01', 'fact-1', 'factura.pdf', 'A', '00003-00001957', '20123456786', 'TEST SA', '8264.46', '1735.54', '10000', 'ARS', '', '2025-01-01T10:00:00Z', '0.95', 'NO', '', '', '', '', ''];
+    // 21-col schema (ADV-245): condicionIVAReceptor at H (index 7) shifts importeTotal to K (index 10)
+    const facturaHeader = ['fechaEmision', 'fileId', 'fileName', 'tipoComprobante', 'nroFactura', 'cuitReceptor', 'razonSocialReceptor', 'condicionIVAReceptor', 'importeNeto', 'importeIva', 'importeTotal', 'moneda', 'concepto', 'processedAt', 'confidence', 'needsReview', 'matchedPagoFileId', 'matchConfidence', 'hasCuitMatch', 'pagada', 'tipoDeCambio'];
+    const facturaRow = ['2025-01-01', 'fact-1', 'factura.pdf', 'A', '00003-00001957', '20123456786', 'TEST SA', 'RESPONSABLE INSCRIPTO', '8264.46', '1735.54', '10000', 'ARS', '', '2025-01-01T10:00:00Z', '0.95', 'NO', '', '', '', '', ''];
 
     // Pago with MANUAL matchConfidence — should NOT be re-matched
     const pagoHeader = ['fechaPago', 'fileId', 'fileName', 'banco', 'importePagado', 'moneda', 'referencia', 'cuitPagador', 'nombrePagador', 'concepto', 'processedAt', 'confidence', 'needsReview', 'matchedFacturaFileId', 'matchConfidence', 'tipoDeCambio', 'importeEnPesos'];
@@ -446,6 +447,105 @@ describe('MANUAL matchConfidence locking (Fix 5 - ADV-131)', () => {
     }
 
     // batchUpdate should NOT have been called — MANUAL pago was excluded
+    expect(batchUpdate).not.toHaveBeenCalled();
+  });
+
+  it('non-MANUAL factura produces a match (importeTotal read from index 10 in 21-col schema) (ADV-291)', async () => {
+    const { matchFacturasWithPagos } = await import('./factura-pago-matcher.js');
+    const { getValues, batchUpdate } = await import('../../services/sheets.js');
+    const { withLock, withRetry } = await import('../../utils/concurrency.js');
+
+    vi.mocked(withLock).mockImplementation(async (_key: string, fn: () => Promise<any>) => {
+      try { return { ok: true as const, value: await fn() }; }
+      catch (e) { return { ok: false as const, error: e instanceof Error ? e : new Error(String(e)) }; }
+    });
+    vi.mocked(withRetry).mockImplementation(async (fn: () => Promise<any>) => {
+      try { return { ok: true as const, value: await fn() }; }
+      catch (e) { return { ok: false as const, error: e instanceof Error ? e : new Error(String(e)) }; }
+    });
+
+    // 21-col schema: importeTotal at index 10 (K). Row value '10000' at that position → match.
+    const facturaHeader = ['fechaEmision', 'fileId', 'fileName', 'tipoComprobante', 'nroFactura', 'cuitReceptor', 'razonSocialReceptor', 'condicionIVAReceptor', 'importeNeto', 'importeIva', 'importeTotal', 'moneda', 'concepto', 'processedAt', 'confidence', 'needsReview', 'matchedPagoFileId', 'matchConfidence', 'hasCuitMatch', 'pagada', 'tipoDeCambio'];
+    const facturaRow = ['2025-01-01', 'fact-1', 'factura.pdf', 'A', '00003-00001957', '20123456786', 'TEST SA', 'RESPONSABLE INSCRIPTO', '8264.46', '1735.54', '10000', 'ARS', '', '2025-01-01T10:00:00Z', '0.95', 'NO', '', '', '', '', ''];
+
+    const pagoHeader = ['fechaPago', 'fileId', 'fileName', 'banco', 'importePagado', 'moneda', 'referencia', 'cuitPagador', 'nombrePagador', 'concepto', 'processedAt', 'confidence', 'needsReview', 'matchedFacturaFileId', 'matchConfidence', 'tipoDeCambio', 'importeEnPesos'];
+    // Non-MANUAL pago with same CUIT and amount
+    const pagoRow = ['2025-01-05', 'pago-auto', 'pago.pdf', 'BBVA', '10000', 'ARS', '', '20123456786', 'TEST SA', '', '2025-01-05T10:00:00Z', '0.95', 'NO', '', '', '', ''];
+
+    vi.mocked(getValues)
+      .mockResolvedValueOnce({ ok: true, value: [facturaHeader, facturaRow] })
+      .mockResolvedValueOnce({ ok: true, value: [pagoHeader, pagoRow] });
+
+    vi.mocked(batchUpdate).mockResolvedValue({ ok: true, value: undefined });
+
+    const result = await matchFacturasWithPagos(
+      'test-spreadsheet',
+      'Facturas Emitidas',
+      'Pagos Recibidos',
+      'cuitReceptor',
+      'cuitPagador',
+      { matchDaysBefore: 10, matchDaysAfter: 60, usdArsTolerancePercent: 5, usdMatchDaysAfter: 90 } as any,
+    );
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      // Non-MANUAL factura with matching CUIT and amount → 1 match
+      expect(result.value).toBe(1);
+    }
+    // batchUpdate was called to write the match
+    expect(batchUpdate).toHaveBeenCalled();
+  });
+
+  it('20-col fixture misalignment would misread importeTotal → no match (proves alignment matters) (ADV-291)', async () => {
+    const { matchFacturasWithPagos } = await import('./factura-pago-matcher.js');
+    const { getValues, batchUpdate } = await import('../../services/sheets.js');
+    const { withLock, withRetry } = await import('../../utils/concurrency.js');
+
+    vi.mocked(withLock).mockImplementation(async (_key: string, fn: () => Promise<any>) => {
+      try { return { ok: true as const, value: await fn() }; }
+      catch (e) { return { ok: false as const, error: e instanceof Error ? e : new Error(String(e)) }; }
+    });
+    vi.mocked(withRetry).mockImplementation(async (fn: () => Promise<any>) => {
+      try { return { ok: true as const, value: await fn() }; }
+      catch (e) { return { ok: false as const, error: e instanceof Error ? e : new Error(String(e)) }; }
+    });
+
+    // 20-col header (missing condicionIVAReceptor at index 7) — misaligned!
+    // importeTotal ends up at index 9 (J) in this 20-col schema.
+    // The row has '10000' at index 9 of this 20-col data, but the header-index
+    // function is built from FACTURA_EMITIDA_HEADERS (21 cols), so it reads
+    // index 10 — which in this truncated row holds 'ARS' (moneda), not '10000'.
+    // That causes importeTotal to parse as 0, and the amount match fails.
+    const misalignedFacturaHeader = ['fechaEmision', 'fileId', 'fileName', 'tipoComprobante', 'nroFactura', 'cuitReceptor', 'razonSocialReceptor', /* no condicionIVAReceptor */ 'importeNeto', 'importeIva', 'importeTotal', 'moneda', 'concepto', 'processedAt', 'confidence', 'needsReview', 'matchedPagoFileId', 'matchConfidence', 'hasCuitMatch', 'pagada', 'tipoDeCambio'];
+    // Row values match the 20-col header positions: importeTotal='10000' at index 9
+    const misalignedFacturaRow = ['2025-01-01', 'fact-1', 'factura.pdf', 'A', '00003-00001957', '20123456786', 'TEST SA', '8264.46', '1735.54', '10000', 'ARS', '', '2025-01-01T10:00:00Z', '0.95', 'NO', '', '', '', '', ''];
+
+    const pagoHeader = ['fechaPago', 'fileId', 'fileName', 'banco', 'importePagado', 'moneda', 'referencia', 'cuitPagador', 'nombrePagador', 'concepto', 'processedAt', 'confidence', 'needsReview', 'matchedFacturaFileId', 'matchConfidence', 'tipoDeCambio', 'importeEnPesos'];
+    const pagoRow = ['2025-01-05', 'pago-auto', 'pago.pdf', 'BBVA', '10000', 'ARS', '', '20123456786', 'TEST SA', '', '2025-01-05T10:00:00Z', '0.95', 'NO', '', '', '', ''];
+
+    vi.mocked(getValues)
+      .mockResolvedValueOnce({ ok: true, value: [misalignedFacturaHeader, misalignedFacturaRow] })
+      .mockResolvedValueOnce({ ok: true, value: [pagoHeader, pagoRow] });
+
+    vi.mocked(batchUpdate).mockResolvedValue({ ok: true, value: undefined });
+
+    const result = await matchFacturasWithPagos(
+      'test-spreadsheet',
+      'Facturas Emitidas',
+      'Pagos Recibidos',
+      'cuitReceptor',
+      'cuitPagador',
+      { matchDaysBefore: 10, matchDaysAfter: 60, usdArsTolerancePercent: 5, usdMatchDaysAfter: 90 } as any,
+    );
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      // With 20-col misaligned header, the matcher is built from
+      // FACTURA_EMITIDA_HEADERS (21-col), so it reads row[10] for importeTotal.
+      // row[10] in the misaligned data is 'ARS' → parseNumber('ARS') = null → 0.
+      // Amount 0 ≠ 10000 → no match produced.
+      expect(result.value).toBe(0);
+    }
     expect(batchUpdate).not.toHaveBeenCalled();
   });
 });

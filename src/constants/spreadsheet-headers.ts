@@ -3,6 +3,35 @@
  * These headers match the SPREADSHEET_FORMAT.md specification
  */
 
+/**
+ * Builds a header-name → column-index lookup function from a headers array.
+ *
+ * The returned function throws for any header name not present in the array,
+ * acting as a drift guard: if a column is renamed or removed in the schema,
+ * every call site that references the old name fails immediately at runtime
+ * rather than silently reading the wrong data (ADV-332, ADV-304).
+ *
+ * Usage:
+ *   const col = buildHeaderIndex(FACTURA_RECIBIDA_HEADERS);
+ *   const total = parseNumber(row[col('importeTotal')]);
+ *
+ * @param headers - Ordered array of column names (0-indexed)
+ * @returns Function that maps a header name to its 0-based column index
+ * @throws Error if the requested name is not in the headers array
+ */
+export function buildHeaderIndex(headers: readonly string[]): (name: string) => number {
+  const map = new Map<string, number>(headers.map((h, i) => [h, i]));
+  return (name: string): number => {
+    const idx = map.get(name);
+    if (idx === undefined) {
+      throw new Error(
+        `Header "${name}" not found in schema [${headers.slice(0, 5).join(', ')}${headers.length > 5 ? ', ...' : ''}]`
+      );
+    }
+    return idx;
+  };
+}
+
 /** Headers for Facturas Emitidas sheet - ADVA is emisor, only store receptor info (columns A:U) */
 export const FACTURA_EMITIDA_HEADERS = [
   'fechaEmision',         // A (0)

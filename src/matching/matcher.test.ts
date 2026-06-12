@@ -918,7 +918,7 @@ describe('ReciboPagoMatcher.findMatches', () => {
       fileName: 'recibo1.pdf',
       tipoRecibo: 'sueldo',
       nombreEmpleado: 'Juan Pérez',
-      cuilEmpleado: '20123456789',
+      cuilEmpleado: '20123456786',
       legajo: '001',
       cuitEmpleador: '30709076783',
       periodoAbonado: 'enero/2024',
@@ -936,7 +936,7 @@ describe('ReciboPagoMatcher.findMatches', () => {
       fileName: 'recibo2.pdf',
       tipoRecibo: 'liquidacion_final',
       nombreEmpleado: 'María García',
-      cuilEmpleado: '27987654321',
+      cuilEmpleado: '27234567891',
       legajo: '002',
       tareaDesempenada: 'Contador',
       cuitEmpleador: '30709076783',
@@ -969,7 +969,7 @@ describe('ReciboPagoMatcher.findMatches', () => {
     const matches = matcher.findMatches(pago, recibos);
     expect(matches.length).toBe(1);
     if (matches.length > 0) {
-      expect(matches[0].recibo.cuilEmpleado).toBe('20123456789');
+      expect(matches[0].recibo.cuilEmpleado).toBe('20123456786');
       expect(matches[0].reciboFileId).toBe('recibo1');
       expect(matches[0].confidence).toBe('MEDIUM');
     }
@@ -983,7 +983,7 @@ describe('ReciboPagoMatcher.findMatches', () => {
       fechaPago: '2024-01-07',
       importePagado: 150000,
       moneda: 'ARS',
-      cuitBeneficiario: '20123456789', // matches recibo1 employee CUIL
+      cuitBeneficiario: '20123456786', // matches recibo1 employee CUIL
       processedAt: '2024-01-07T10:00:00Z',
       confidence: 1.0,
       needsReview: false
@@ -1085,7 +1085,7 @@ describe('ReciboPagoMatcher.findMatches', () => {
       fechaPago: '2024-02-20', // 46 days after recibo1, outside MEDIUM +30, within LOW +60
       importePagado: 150000,
       moneda: 'ARS',
-      cuitBeneficiario: '20123456789', // CUIL matches but date is outside MEDIUM range
+      cuitBeneficiario: '20123456786', // CUIL matches but date is outside MEDIUM range
       processedAt: '2024-02-20T10:00:00Z',
       confidence: 1.0,
       needsReview: false
@@ -1260,7 +1260,7 @@ describe('ReciboPagoMatcher.findMatches', () => {
       fechaPago: '2024-01-07',
       importePagado: 150000,
       moneda: 'ARS',
-      cuitBeneficiario: '20123456789',
+      cuitBeneficiario: '20123456786',
       nombreBeneficiario: 'Juan Pérez',
       processedAt: '2024-01-07T10:00:00Z',
       confidence: 1.0,
@@ -1306,7 +1306,7 @@ describe('ReciboPagoMatcher.findMatches', () => {
       fechaPago: '2024-01-07',
       importePagado: 150000,
       moneda: 'ARS',
-      cuitPagador: '20123456789', // Employee CUIL in payer field (wrong)
+      cuitPagador: '20123456786', // Employee CUIL in payer field (wrong)
       nombrePagador: 'Juan Pérez', // Employee name in payer field (wrong)
       // No beneficiary fields
       processedAt: '2024-01-07T10:00:00Z',

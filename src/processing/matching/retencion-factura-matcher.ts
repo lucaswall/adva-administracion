@@ -10,6 +10,7 @@ import { parseNumber, amountsMatch } from '../../utils/numbers.js';
 import { normalizeSpreadsheetDate, parseArgDate, isWithinDays } from '../../utils/date.js';
 import { debug, info, warn } from '../../utils/logger.js';
 import { getCorrelationId } from '../../utils/correlation.js';
+import { buildHeaderIndex, RETENCIONES_RECIBIDAS_HEADERS, FACTURA_EMITIDA_HEADERS } from '../../constants/spreadsheet-headers.js';
 
 /**
  * Represents a parsed row from Retenciones Recibidas sheet (A:O, 0-indexed)
@@ -49,31 +50,29 @@ interface FacturaEmitidaRow {
   matchConfidence: string;
 }
 
+// Header-derived index lookups (ADV-332)
+const retCol = buildHeaderIndex(RETENCIONES_RECIBIDAS_HEADERS);
+const femitCol = buildHeaderIndex(FACTURA_EMITIDA_HEADERS);
+
 /**
- * Parses Retenciones Recibidas sheet rows into typed objects
- *
- * Column layout (0-indexed):
- * 0: fechaEmision, 1: fileId, 2: fileName, 3: nroCertificado,
- * 4: cuitAgenteRetencion, 5: razonSocialAgenteRetencion,
- * 6: impuesto, 7: regimen, 8: montoComprobante, 9: montoRetencion,
- * 10: processedAt, 11: confidence, 12: needsReview,
- * 13: matchedFacturaFileId, 14: matchConfidence
+ * Parses Retenciones Recibidas sheet rows into typed objects using header-derived indices.
  */
 function parseRetencionRows(rows: unknown[][]): RetencionRow[] {
   const result: RetencionRow[] = [];
+  const minLen = retCol('montoComprobante') + 1;
 
   for (let i = 1; i < rows.length; i++) {
     const row = rows[i];
-    if (!row || row.length < 9) continue;
+    if (!row || row.length < minLen) continue;
 
     result.push({
       rowNumber: i + 1, // 1-indexed, accounting for header
-      fechaEmision: normalizeSpreadsheetDate(row[0]),
-      fileId: String(row[1] || ''),
-      cuitAgenteRetencion: String(row[4] || ''),
-      montoComprobante: parseNumber(String(row[8] || '0')) ?? 0,
-      matchedFacturaFileId: String(row[13] || ''),
-      matchConfidence: String(row[14] || ''),
+      fechaEmision: normalizeSpreadsheetDate(row[retCol('fechaEmision')]),
+      fileId: String(row[retCol('fileId')] || ''),
+      cuitAgenteRetencion: String(row[retCol('cuitAgenteRetencion')] || ''),
+      montoComprobante: parseNumber(String(row[retCol('montoComprobante')] || '0')) ?? 0,
+      matchedFacturaFileId: String(row[retCol('matchedFacturaFileId')] || ''),
+      matchConfidence: String(row[retCol('matchConfidence')] || ''),
     });
   }
 
@@ -81,30 +80,25 @@ function parseRetencionRows(rows: unknown[][]): RetencionRow[] {
 }
 
 /**
- * Parses Facturas Emitidas sheet rows into typed objects.
+ * Parses Facturas Emitidas sheet rows into typed objects using header-derived indices.
  *
- * Post-ADV-245 column layout (21 cols, 0-indexed):
- * 0: fechaEmision, 1: fileId, 2: fileName, 3: tipoComprobante, 4: nroFactura,
- * 5: cuitReceptor, 6: razonSocialReceptor, 7: condicionIVAReceptor,
- * 8: importeNeto, 9: importeIva, 10: importeTotal, 11: moneda,
- * 12: concepto, 13: processedAt, 14: confidence, 15: needsReview,
- * 16: matchedPagoFileId, 17: matchConfidence, 18: hasCuitMatch,
- * 19: pagada, 20: tipoDeCambio
+ * Post-ADV-245 schema (21 cols, A:U) — indices come from FACTURA_EMITIDA_HEADERS.
  */
 function parseFacturaEmitidaRows(rows: unknown[][]): FacturaEmitidaRow[] {
   const result: FacturaEmitidaRow[] = [];
+  const minLen = femitCol('importeTotal') + 1;
 
   for (let i = 1; i < rows.length; i++) {
     const row = rows[i];
-    if (!row || row.length < 11) continue;
+    if (!row || row.length < minLen) continue;
 
     result.push({
       rowNumber: i + 1, // 1-indexed, accounting for header
-      fechaEmision: normalizeSpreadsheetDate(row[0]),
-      fileId: String(row[1] || ''),
-      cuitReceptor: String(row[5] || ''),
-      importeTotal: parseNumber(String(row[10] || '0')) ?? 0,
-      matchConfidence: String(row[17] || ''),
+      fechaEmision: normalizeSpreadsheetDate(row[femitCol('fechaEmision')]),
+      fileId: String(row[femitCol('fileId')] || ''),
+      cuitReceptor: String(row[femitCol('cuitReceptor')] || ''),
+      importeTotal: parseNumber(String(row[femitCol('importeTotal')] || '0')) ?? 0,
+      matchConfidence: String(row[femitCol('matchConfidence')] || ''),
     });
   }
 

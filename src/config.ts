@@ -395,13 +395,3 @@ export function getConfig(): Config {
 export function resetConfig(): void {
   configInstance = null;
 }
-
-/**
- * Returns the Facturador de Socios spreadsheet ID.
- * Optional — if not set, Subdiario builds but with categoria='' for all rows.
- *
- * @returns Spreadsheet ID string, or empty string if unset
- */
-export function getFacturadorSpreadsheetId(): string {
-  return process.env.FACTURADOR_SPREADSHEET_ID || '';
-}
