@@ -58,10 +58,13 @@ async function findRowByFileId(
   spreadsheetId: string,
   sheetName: string,
   fileId: string
-): Promise<{ found: true; rowIndex: number; rowData: unknown[] } | { found: false }> {
+): Promise<{ found: true; rowIndex: number; rowData: unknown[] } | { found: false } | { error: Error }> {
   // Read A:O (full retencion schema, 15 cols). fileId is column B = index 1 in A:O range.
   const rowsResult = await getValues(spreadsheetId, `${sheetName}!A:O`);
-  if (!rowsResult.ok || rowsResult.value.length <= 1) {
+  if (!rowsResult.ok) {
+    return { error: rowsResult.error }; // ADV-358: propagate read error
+  }
+  if (rowsResult.value.length <= 1) {
     return { found: false };
   }
   // Skip header row (index 0 = row 1 in spreadsheet)
@@ -145,6 +148,7 @@ export async function storeRetencion(
 
     // REPROCESSING CHECK: If same fileId already exists, update the row in place
     const fileIdCheck = await findRowByFileId(spreadsheetId, sheetName, retencion.fileId);
+    if ('error' in fileIdCheck) throw fileIdCheck.error; // ADV-358: propagate read error
     if (fileIdCheck.found) {
       const renamedFileName = generateRetencionFileName(retencion);
       const updateRow = buildRetencionRowFormatted(retencion, renamedFileName);

@@ -4,7 +4,7 @@
  */
 
 import type { Result, MovimientoBancario, MovimientoTarjeta, MovimientoBroker } from '../../types/index.js';
-import { getOrCreateMonthSheet, formatEmptyMonthSheet, appendRowsWithLinks, getValues, type CellDate, type CellNumber, type CellFormula } from '../../services/sheets.js';
+import { getOrCreateMonthSheet, formatEmptyMonthSheet, appendRowsWithLinks, getValues, type CellDate, type CellNumber, type CellFormula, type CellValueOrLink } from '../../services/sheets.js';
 import { MOVIMIENTOS_BANCARIO_SHEET, MOVIMIENTOS_TARJETA_SHEET, MOVIMIENTOS_BROKER_SHEET } from '../../constants/spreadsheet-headers.js';
 import { info } from '../../utils/logger.js';
 import type { SheetOrderBatch } from '../caches/index.js';
@@ -81,7 +81,7 @@ export async function storeMovimientosBancario(
     // 1. Initial balance row (SALDO INICIAL)
     // 2. Transaction rows with running balance formulas
     // 3. Final balance row (SALDO FINAL)
-    const rows: any[] = [];
+    const rows: CellValueOrLink[][] = [];
 
     // Row 0 (sheet row 1): SALDO INICIAL
     const initialRow = generateInitialBalanceRow(saldoInicial, targetMonth);

@@ -391,6 +391,42 @@ describe('storeRetencion', () => {
     });
   });
 
+  describe('findRowByFileId error propagation (ADV-358)', () => {
+    it('returns ok:false with the Sheets error when getValues fails during fileId lookup', async () => {
+      vi.mocked(getValues).mockResolvedValueOnce({
+        ok: false,
+        error: new Error('Sheets API read error'),
+      });
+
+      const retencion = createTestRetencion();
+      const result = await storeRetencion(retencion, 'spreadsheet-id');
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.error.message).toBe('Sheets API read error');
+      }
+      expect(appendRowsWithLinks).not.toHaveBeenCalled();
+      expect(updateRowsWithFormatting).not.toHaveBeenCalled();
+    });
+
+    it('treats header-only sheet as not-found (does not error)', async () => {
+      vi.mocked(getValues).mockResolvedValueOnce({ ok: true, value: [['Header']] });
+      // isDuplicateRetencion also calls getValues
+      vi.mocked(getValues).mockResolvedValueOnce({ ok: true, value: [['Header']] });
+      vi.mocked(appendRowsWithLinks).mockResolvedValue({ ok: true, value: 1 });
+      vi.mocked(sortSheet).mockResolvedValue({ ok: true, value: undefined });
+
+      const retencion = createTestRetencion();
+      const result = await storeRetencion(retencion, 'spreadsheet-id');
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value.stored).toBe(true);
+      }
+      expect(appendRowsWithLinks).toHaveBeenCalled();
+    });
+  });
+
   describe('lock auto-expiry (ADV-344)', () => {
     it('uses STORE_LOCK_AUTO_EXPIRY_MS (900 000 ms) as 4th withLock argument', async () => {
       vi.mocked(getValues).mockResolvedValue({ ok: true, value: [['Header']] });

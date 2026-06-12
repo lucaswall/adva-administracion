@@ -61,6 +61,7 @@ vi.mock('../../utils/concurrency.js', () => ({
 
 import { appendRowsWithLinks, sortSheet, getValues, batchUpdate, updateRowsWithFormatting } from '../../services/sheets.js';
 import { withLock } from '../../utils/concurrency.js';
+import { PAGO_RECIBIDO_HEADERS } from '../../constants/spreadsheet-headers.js';
 
 const createTestPago = (overrides: Partial<Pago> = {}): Pago => ({
   fileId: 'test-file-id',
@@ -471,7 +472,7 @@ describe('storePago', () => {
     it('uses CellNumber for importePagado in reprocessing path', async () => {
       vi.mocked(getValues).mockResolvedValueOnce({
         ok: true,
-        value: [['header'], ['', 'test-file-id']],
+        value: [PAGO_RECIBIDO_HEADERS, ['', 'test-file-id']],
       });
       vi.mocked(updateRowsWithFormatting).mockResolvedValue({ ok: true, value: undefined });
       vi.mocked(sortSheet).mockResolvedValue({ ok: true, value: undefined });
@@ -488,7 +489,7 @@ describe('storePago', () => {
     it('uses CellLink for fileName in reprocessing path', async () => {
       vi.mocked(getValues).mockResolvedValueOnce({
         ok: true,
-        value: [['header'], ['', 'test-file-id']],
+        value: [PAGO_RECIBIDO_HEADERS, ['', 'test-file-id']],
       });
       vi.mocked(updateRowsWithFormatting).mockResolvedValue({ ok: true, value: undefined });
       vi.mocked(sortSheet).mockResolvedValue({ ok: true, value: undefined });
@@ -505,7 +506,7 @@ describe('storePago', () => {
     it('passes raw ISO processedAt in reprocessing path', async () => {
       vi.mocked(getValues).mockResolvedValueOnce({
         ok: true,
-        value: [['header'], ['', 'test-file-id']],
+        value: [PAGO_RECIBIDO_HEADERS, ['', 'test-file-id']],
       });
       vi.mocked(updateRowsWithFormatting).mockResolvedValue({ ok: true, value: undefined });
       vi.mocked(sortSheet).mockResolvedValue({ ok: true, value: undefined });
@@ -639,7 +640,7 @@ describe('storePago', () => {
 
       vi.mocked(getValues).mockResolvedValueOnce({
         ok: true,
-        value: [['header'], existingRow],
+        value: [PAGO_RECIBIDO_HEADERS, existingRow],
       });
       vi.mocked(updateRowsWithFormatting).mockResolvedValue({ ok: true, value: undefined });
 
@@ -652,6 +653,83 @@ describe('storePago', () => {
       // MANUAL lock must be preserved
       expect(updateRow[14]).toBe('MANUAL');       // O: matchConfidence
       expect(updateRow[13]).toBe('factura-abc');  // N: matchedFacturaFileId
+    });
+  });
+
+  describe('header-derived carry-forward indices (ADV-362)', () => {
+    it('returns ok:false when reprocessed sheet header is missing expected match column (pago_recibido)', async () => {
+      vi.mocked(getValues).mockResolvedValueOnce({
+        ok: true,
+        value: [
+          ['fechaPago', 'fileId', 'fileName'],  // Truncated header — missing matchedFacturaFileId, matchConfidence
+          ['2025-01-15', 'test-file-id', 'file.pdf'],
+        ],
+      });
+
+      const pago = createTestPago();
+      const result = await storePago(pago, 'spreadsheet-id', 'Pagos Recibidos', 'pago_recibido');
+
+      expect(result.ok).toBe(false);
+      expect(updateRowsWithFormatting).not.toHaveBeenCalled();
+      expect(appendRowsWithLinks).not.toHaveBeenCalled();
+    });
+
+    it('preserves MANUAL lock using header-derived indices (current schema)', async () => {
+      const existingRow = Array(17).fill('') as string[];
+      existingRow[1] = 'test-file-id';
+      existingRow[13] = 'factura-derived';
+      existingRow[14] = 'MANUAL';
+
+      vi.mocked(getValues).mockResolvedValueOnce({
+        ok: true,
+        value: [PAGO_RECIBIDO_HEADERS, existingRow],
+      });
+      vi.mocked(updateRowsWithFormatting).mockResolvedValue({ ok: true, value: undefined });
+      vi.mocked(sortSheet).mockResolvedValue({ ok: true, value: undefined });
+
+      const pago = createTestPago();
+      const result = await storePago(pago, 'spreadsheet-id', 'Pagos Recibidos', 'pago_recibido');
+
+      expect(result.ok).toBe(true);
+      const updateCall = vi.mocked(updateRowsWithFormatting).mock.calls[0];
+      const updateRow = updateCall[1][0].values as unknown[];
+      expect(updateRow[14]).toBe('MANUAL');
+      expect(updateRow[13]).toBe('factura-derived');
+    });
+  });
+
+  describe('findRowByFileId error propagation (ADV-358)', () => {
+    it('returns ok:false with the Sheets error when getValues fails during fileId lookup', async () => {
+      vi.mocked(getValues).mockResolvedValueOnce({
+        ok: false,
+        error: new Error('Sheets API read error'),
+      });
+
+      const pago = createTestPago();
+      const result = await storePago(pago, 'spreadsheet-id', 'Pagos Recibidos', 'pago_recibido');
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.error.message).toBe('Sheets API read error');
+      }
+      expect(appendRowsWithLinks).not.toHaveBeenCalled();
+      expect(updateRowsWithFormatting).not.toHaveBeenCalled();
+    });
+
+    it('treats header-only sheet as not-found (does not error)', async () => {
+      vi.mocked(getValues).mockResolvedValueOnce({ ok: true, value: [['Header']] }); // findRowByFileId
+      vi.mocked(getValues).mockResolvedValueOnce({ ok: true, value: [['Header']] }); // isDuplicatePago
+      vi.mocked(appendRowsWithLinks).mockResolvedValue({ ok: true, value: 1 });
+      vi.mocked(sortSheet).mockResolvedValue({ ok: true, value: undefined });
+
+      const pago = createTestPago();
+      const result = await storePago(pago, 'spreadsheet-id', 'Pagos Recibidos', 'pago_recibido');
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value.stored).toBe(true);
+      }
+      expect(appendRowsWithLinks).toHaveBeenCalled();
     });
   });
 

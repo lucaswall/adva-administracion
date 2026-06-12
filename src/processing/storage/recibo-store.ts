@@ -12,6 +12,7 @@ import { info, warn } from '../../utils/logger.js';
 import { getCorrelationId } from '../../utils/correlation.js';
 import { withLock } from '../../utils/concurrency.js';
 import { STORE_LOCK_AUTO_EXPIRY_MS } from '../../config.js';
+import { buildHeaderIndex } from '../../constants/spreadsheet-headers.js';
 
 /**
  * Builds a CellValueOrLink[] row for updateRowsWithFormatting (reprocessing) and appendRowsWithLinks (insert)
@@ -61,17 +62,21 @@ async function findRowByFileId(
   spreadsheetId: string,
   sheetName: string,
   fileId: string
-): Promise<{ found: true; rowIndex: number; rowData: unknown[] } | { found: false }> {
+): Promise<{ found: true; rowIndex: number; rowData: unknown[]; headerRow: unknown[] } | { found: false } | { error: Error }> {
   // Read A:S (full recibo schema, 19 cols). fileId is column B = index 1 in A:S range.
   const rowsResult = await getValues(spreadsheetId, `${sheetName}!A:S`);
-  if (!rowsResult.ok || rowsResult.value.length <= 1) {
+  if (!rowsResult.ok) {
+    return { error: rowsResult.error }; // ADV-358: propagate read error
+  }
+  if (rowsResult.value.length <= 1) {
     return { found: false };
   }
+  const headerRow = rowsResult.value[0]; // ADV-362: capture header for index derivation
   // Skip header row (index 0 = row 1 in spreadsheet)
   for (let i = 1; i < rowsResult.value.length; i++) {
     const row = rowsResult.value[i];
     if (row && String(row[1]) === fileId) {
-      return { found: true, rowIndex: i + 1, rowData: row }; // 1-indexed spreadsheet row
+      return { found: true, rowIndex: i + 1, rowData: row, headerRow }; // 1-indexed spreadsheet row
     }
   }
   return { found: false };
@@ -142,16 +147,23 @@ export async function storeRecibo(
 
     // REPROCESSING CHECK: If same fileId already exists, update the row in place
     const fileIdCheck = await findRowByFileId(spreadsheetId, sheetName, recibo.fileId);
+    if ('error' in fileIdCheck) throw fileIdCheck.error; // ADV-358: propagate read error
     if (fileIdCheck.found) {
       const renamedFileName = generateReciboFileName(recibo);
       const updateRow = buildReciboRowFormatted(recibo, renamedFileName);
 
-      // ADV-307: Preserve match columns — Q(16)=matchedPagoFileId, R(17)=matchConfidence, S(18)=hasCuitMatch
+      // ADV-307 / ADV-362: Preserve match columns using header-derived indices so schema
+      // drift causes a loud failure instead of silently carrying forward the wrong column.
       const existing = fileIdCheck.rowData;
-      if (String(existing[17]) === 'MANUAL') {
-        updateRow[16] = existing[16] as CellValueOrLink; // matchedPagoFileId
-        updateRow[17] = existing[17] as CellValueOrLink; // matchConfidence (MANUAL lock)
-        updateRow[18] = existing[18] as CellValueOrLink; // hasCuitMatch
+      const col = buildHeaderIndex(fileIdCheck.headerRow.map(h => String(h ?? '')));
+      const matchedPagoFileIdIdx = col('matchedPagoFileId');
+      const matchConfidenceIdx = col('matchConfidence');
+      const hasCuitMatchIdx = col('hasCuitMatch');
+
+      if (String(existing[matchConfidenceIdx]) === 'MANUAL') {
+        updateRow[matchedPagoFileIdIdx] = existing[matchedPagoFileIdIdx] as CellValueOrLink;
+        updateRow[matchConfidenceIdx] = existing[matchConfidenceIdx] as CellValueOrLink;
+        updateRow[hasCuitMatchIdx] = existing[hasCuitMatchIdx] as CellValueOrLink;
       }
 
       const updateResult = await updateRowsWithFormatting(spreadsheetId, [{

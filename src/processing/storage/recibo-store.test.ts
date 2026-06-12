@@ -61,6 +61,7 @@ vi.mock('../../utils/concurrency.js', () => ({
 
 import { appendRowsWithLinks, sortSheet, getValues, batchUpdate, updateRowsWithFormatting } from '../../services/sheets.js';
 import { withLock } from '../../utils/concurrency.js';
+import { RECIBO_HEADERS } from '../../constants/spreadsheet-headers.js';
 
 const createTestRecibo = (overrides: Partial<Recibo> = {}): Recibo => ({
   fileId: 'test-file-id',
@@ -154,7 +155,7 @@ describe('storeRecibo', () => {
     it('writes hasCuitMatch at index 18 in reprocessing (existing fileId) path with A:S range', async () => {
       vi.mocked(getValues).mockResolvedValueOnce({
         ok: true,
-        value: [['header'], ['', 'test-file-id']],
+        value: [RECIBO_HEADERS, ['', 'test-file-id']],
       });
       vi.mocked(updateRowsWithFormatting).mockResolvedValue({ ok: true, value: undefined });
       vi.mocked(sortSheet).mockResolvedValue({ ok: true, value: undefined });
@@ -329,7 +330,7 @@ describe('storeRecibo', () => {
     it('uses CellNumber for monetary fields in reprocessing row', async () => {
       vi.mocked(getValues).mockResolvedValueOnce({
         ok: true,
-        value: [['header'], ['', 'test-file-id']],
+        value: [RECIBO_HEADERS, ['', 'test-file-id']],
       });
       vi.mocked(updateRowsWithFormatting).mockResolvedValue({ ok: true, value: undefined });
       vi.mocked(sortSheet).mockResolvedValue({ ok: true, value: undefined });
@@ -348,7 +349,7 @@ describe('storeRecibo', () => {
     it('uses CellLink for fileName in reprocessing row', async () => {
       vi.mocked(getValues).mockResolvedValueOnce({
         ok: true,
-        value: [['header'], ['', 'test-file-id']],
+        value: [RECIBO_HEADERS, ['', 'test-file-id']],
       });
       vi.mocked(updateRowsWithFormatting).mockResolvedValue({ ok: true, value: undefined });
       vi.mocked(sortSheet).mockResolvedValue({ ok: true, value: undefined });
@@ -365,7 +366,7 @@ describe('storeRecibo', () => {
     it('passes raw ISO processedAt in reprocessing row', async () => {
       vi.mocked(getValues).mockResolvedValueOnce({
         ok: true,
-        value: [['header'], ['', 'test-file-id']],
+        value: [RECIBO_HEADERS, ['', 'test-file-id']],
       });
       vi.mocked(updateRowsWithFormatting).mockResolvedValue({ ok: true, value: undefined });
       vi.mocked(sortSheet).mockResolvedValue({ ok: true, value: undefined });
@@ -417,7 +418,7 @@ describe('storeRecibo', () => {
 
       vi.mocked(getValues).mockResolvedValueOnce({
         ok: true,
-        value: [['header'], existingRow],
+        value: [RECIBO_HEADERS, existingRow],
       });
       vi.mocked(updateRowsWithFormatting).mockResolvedValue({ ok: true, value: undefined });
 
@@ -431,6 +432,86 @@ describe('storeRecibo', () => {
       expect(updateRow[17]).toBe('MANUAL');     // R: matchConfidence
       expect(updateRow[16]).toBe('pago-xyz');   // Q: matchedPagoFileId
       expect(updateRow[18]).toBe('YES');        // S: hasCuitMatch
+    });
+  });
+
+  describe('header-derived carry-forward indices (ADV-362)', () => {
+    it('returns ok:false when reprocessed sheet header is missing expected match column', async () => {
+      vi.mocked(getValues).mockResolvedValueOnce({
+        ok: true,
+        value: [
+          ['fechaPago', 'fileId', 'fileName'],  // Truncated header — missing matchedPagoFileId etc.
+          ['2025-01-31', 'test-file-id', 'file.pdf'],
+        ],
+      });
+
+      const recibo = createTestRecibo();
+      const result = await storeRecibo(recibo, 'spreadsheet-id');
+
+      expect(result.ok).toBe(false);
+      expect(updateRowsWithFormatting).not.toHaveBeenCalled();
+      expect(appendRowsWithLinks).not.toHaveBeenCalled();
+    });
+
+    it('preserves MANUAL lock using header-derived indices (current schema)', async () => {
+      const existingRow = Array(19).fill('') as string[];
+      existingRow[1] = 'test-file-id';
+      existingRow[16] = 'pago-derived';
+      existingRow[17] = 'MANUAL';
+      existingRow[18] = 'YES';
+
+      vi.mocked(getValues).mockResolvedValueOnce({
+        ok: true,
+        value: [RECIBO_HEADERS, existingRow],
+      });
+      vi.mocked(updateRowsWithFormatting).mockResolvedValue({ ok: true, value: undefined });
+      vi.mocked(sortSheet).mockResolvedValue({ ok: true, value: undefined });
+
+      const recibo = createTestRecibo();
+      const result = await storeRecibo(recibo, 'spreadsheet-id');
+
+      expect(result.ok).toBe(true);
+      const updateCall = vi.mocked(updateRowsWithFormatting).mock.calls[0];
+      const updateRow = updateCall[1][0].values as unknown[];
+      expect(updateRow[17]).toBe('MANUAL');
+      expect(updateRow[16]).toBe('pago-derived');
+      expect(updateRow[18]).toBe('YES');
+    });
+  });
+
+  describe('findRowByFileId error propagation (ADV-358)', () => {
+    it('returns ok:false with the Sheets error when getValues fails during fileId lookup', async () => {
+      vi.mocked(getValues).mockResolvedValueOnce({
+        ok: false,
+        error: new Error('Sheets API read error'),
+      });
+
+      const recibo = createTestRecibo();
+      const result = await storeRecibo(recibo, 'spreadsheet-id');
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.error.message).toBe('Sheets API read error');
+      }
+      expect(appendRowsWithLinks).not.toHaveBeenCalled();
+      expect(updateRowsWithFormatting).not.toHaveBeenCalled();
+    });
+
+    it('treats header-only sheet as not-found (does not error)', async () => {
+      vi.mocked(getValues).mockResolvedValueOnce({ ok: true, value: [['Header']] });
+      // isDuplicateRecibo also calls getValues
+      vi.mocked(getValues).mockResolvedValueOnce({ ok: true, value: [['Header']] });
+      vi.mocked(appendRowsWithLinks).mockResolvedValue({ ok: true, value: 1 });
+      vi.mocked(sortSheet).mockResolvedValue({ ok: true, value: undefined });
+
+      const recibo = createTestRecibo();
+      const result = await storeRecibo(recibo, 'spreadsheet-id');
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value.stored).toBe(true);
+      }
+      expect(appendRowsWithLinks).toHaveBeenCalled();
     });
   });
 

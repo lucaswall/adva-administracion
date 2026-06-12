@@ -13,6 +13,7 @@ import { info, warn } from '../../utils/logger.js';
 import { getCorrelationId } from '../../utils/correlation.js';
 import { withLock } from '../../utils/concurrency.js';
 import { STORE_LOCK_AUTO_EXPIRY_MS } from '../../config.js';
+import { buildHeaderIndex } from '../../constants/spreadsheet-headers.js';
 
 /**
  * Builds a CellValueOrLink[] row for updateRowsWithFormatting (reprocessing) and appendRowsWithLinks (insert)
@@ -95,18 +96,22 @@ async function findRowByFileId(
   spreadsheetId: string,
   sheetName: string,
   fileId: string
-): Promise<{ found: true; rowIndex: number; rowData: unknown[] } | { found: false }> {
+): Promise<{ found: true; rowIndex: number; rowData: unknown[]; headerRow: unknown[] } | { found: false } | { error: Error }> {
   // Read A:U (widest factura schema, covers both emitida 21-col and recibida 20-col).
   // fileId is column B = index 1 in this range.
   const rowsResult = await getValues(spreadsheetId, `${sheetName}!A:U`);
-  if (!rowsResult.ok || rowsResult.value.length <= 1) {
+  if (!rowsResult.ok) {
+    return { error: rowsResult.error }; // ADV-358: propagate read error
+  }
+  if (rowsResult.value.length <= 1) {
     return { found: false };
   }
+  const headerRow = rowsResult.value[0]; // ADV-362: capture header for index derivation
   // Skip header row (index 0 = row 1 in spreadsheet)
   for (let i = 1; i < rowsResult.value.length; i++) {
     const row = rowsResult.value[i];
     if (row && String(row[1]) === fileId) {
-      return { found: true, rowIndex: i + 1, rowData: row }; // 1-indexed spreadsheet row
+      return { found: true, rowIndex: i + 1, rowData: row, headerRow }; // 1-indexed spreadsheet row
     }
   }
   return { found: false };
@@ -202,30 +207,28 @@ export async function storeFactura(
 
     // REPROCESSING CHECK: If the same fileId already exists in sheet, update it in place
     const fileIdCheck = await findRowByFileId(spreadsheetId, sheetName, factura.fileId);
+    if ('error' in fileIdCheck) throw fileIdCheck.error; // ADV-358: propagate read error
     if (fileIdCheck.found) {
       const renamedFileName = generateFacturaFileName(factura, documentType);
       const updateRow = buildFacturaRowFormatted(factura, documentType, renamedFileName);
 
-      // ADV-307: Preserve match columns from existing row so that MANUAL locks and
+      // ADV-307 / ADV-362: Preserve match columns from existing row so that MANUAL locks and
       // pagada=SI are never clobbered by a re-extraction of the same file.
+      // Use header-derived indices (ADV-362) so schema drift causes a loud failure, not silent
+      // carry-forward of the wrong column.
       const existing = fileIdCheck.rowData;
-      if (documentType === 'factura_emitida') {
-        // Emitida: Q(16)=matchedPagoFileId, R(17)=matchConfidence, S(18)=hasCuitMatch, T(19)=pagada
-        if (String(existing[17]) === 'MANUAL') {
-          updateRow[16] = existing[16] as CellValueOrLink; // matchedPagoFileId
-          updateRow[17] = existing[17] as CellValueOrLink; // matchConfidence (MANUAL lock)
-          updateRow[18] = existing[18] as CellValueOrLink; // hasCuitMatch
-        }
-        if (String(existing[19]) === 'SI') updateRow[19] = 'SI'; // pagada
-      } else {
-        // Recibida: P(15)=matchedPagoFileId, Q(16)=matchConfidence, R(17)=hasCuitMatch, S(18)=pagada
-        if (String(existing[16]) === 'MANUAL') {
-          updateRow[15] = existing[15] as CellValueOrLink; // matchedPagoFileId
-          updateRow[16] = existing[16] as CellValueOrLink; // matchConfidence (MANUAL lock)
-          updateRow[17] = existing[17] as CellValueOrLink; // hasCuitMatch
-        }
-        if (String(existing[18]) === 'SI') updateRow[18] = 'SI'; // pagada
+      const col = buildHeaderIndex(fileIdCheck.headerRow.map(h => String(h ?? '')));
+      const matchedPagoFileIdIdx = col('matchedPagoFileId');
+      const matchConfidenceIdx = col('matchConfidence');
+      const hasCuitMatchIdx = col('hasCuitMatch');
+      const pagadaIdx = col('pagada');
+
+      if (String(existing[matchConfidenceIdx]) === 'MANUAL') {
+        updateRow[matchedPagoFileIdIdx] = existing[matchedPagoFileIdIdx] as CellValueOrLink;
+        updateRow[matchConfidenceIdx] = existing[matchConfidenceIdx] as CellValueOrLink;
+        updateRow[hasCuitMatchIdx] = existing[hasCuitMatchIdx] as CellValueOrLink;
       }
+      if (String(existing[pagadaIdx]) === 'SI') updateRow[pagadaIdx] = 'SI';
 
       const lastCol = documentType === 'factura_emitida' ? 'U' : 'T';
       const updateResult = await updateRowsWithFormatting(spreadsheetId, [{

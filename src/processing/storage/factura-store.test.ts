@@ -49,6 +49,7 @@ vi.mock('../../services/status-sheet.js', () => ({
 }));
 
 import { appendRowsWithLinks, sortSheet, getValues, batchUpdate, updateRowsWithFormatting } from '../../services/sheets.js';
+import { FACTURA_EMITIDA_HEADERS, FACTURA_RECIBIDA_HEADERS } from '../../constants/spreadsheet-headers.js';
 
 const createTestFactura = (overrides: Partial<Factura> = {}): Factura => ({
   fileId: 'test-file-id',
@@ -538,7 +539,7 @@ describe('storeFactura', () => {
     it('uses CellNumber for monetary fields in reprocessing path (factura_emitida, ADV-245: shifted)', async () => {
       vi.mocked(getValues).mockResolvedValueOnce({
         ok: true,
-        value: [['header'], ['', 'test-file-id']],
+        value: [FACTURA_EMITIDA_HEADERS, ['', 'test-file-id']],
       });
       vi.mocked(updateRowsWithFormatting).mockResolvedValue({ ok: true, value: undefined });
       vi.mocked(sortSheet).mockResolvedValue({ ok: true, value: undefined });
@@ -557,7 +558,7 @@ describe('storeFactura', () => {
     it('uses CellNumber for monetary fields in reprocessing path (factura_recibida)', async () => {
       vi.mocked(getValues).mockResolvedValueOnce({
         ok: true,
-        value: [['header'], ['', 'test-file-id']],
+        value: [FACTURA_RECIBIDA_HEADERS, ['', 'test-file-id']],
       });
       vi.mocked(updateRowsWithFormatting).mockResolvedValue({ ok: true, value: undefined });
       vi.mocked(sortSheet).mockResolvedValue({ ok: true, value: undefined });
@@ -575,7 +576,7 @@ describe('storeFactura', () => {
     it('uses CellLink for fileName in reprocessing path', async () => {
       vi.mocked(getValues).mockResolvedValueOnce({
         ok: true,
-        value: [['header'], ['', 'test-file-id']],
+        value: [FACTURA_EMITIDA_HEADERS, ['', 'test-file-id']],
       });
       vi.mocked(updateRowsWithFormatting).mockResolvedValue({ ok: true, value: undefined });
       vi.mocked(sortSheet).mockResolvedValue({ ok: true, value: undefined });
@@ -592,7 +593,7 @@ describe('storeFactura', () => {
     it('passes raw ISO processedAt string in reprocessing path (timezone handled by updateRowsWithFormatting)', async () => {
       vi.mocked(getValues).mockResolvedValueOnce({
         ok: true,
-        value: [['header'], ['', 'test-file-id']],
+        value: [FACTURA_EMITIDA_HEADERS, ['', 'test-file-id']],
       });
       vi.mocked(updateRowsWithFormatting).mockResolvedValue({ ok: true, value: undefined });
       vi.mocked(sortSheet).mockResolvedValue({ ok: true, value: undefined });
@@ -609,7 +610,7 @@ describe('storeFactura', () => {
     it('uses CellDate for fechaEmision in reprocessing path', async () => {
       vi.mocked(getValues).mockResolvedValueOnce({
         ok: true,
-        value: [['header'], ['', 'test-file-id']],
+        value: [FACTURA_EMITIDA_HEADERS, ['', 'test-file-id']],
       });
       vi.mocked(updateRowsWithFormatting).mockResolvedValue({ ok: true, value: undefined });
       vi.mocked(sortSheet).mockResolvedValue({ ok: true, value: undefined });
@@ -732,7 +733,7 @@ describe('storeFactura', () => {
 
       vi.mocked(getValues).mockResolvedValueOnce({
         ok: true,
-        value: [['header'], existingRow],
+        value: [FACTURA_EMITIDA_HEADERS, existingRow],
       });
       vi.mocked(updateRowsWithFormatting).mockResolvedValue({ ok: true, value: undefined });
 
@@ -759,7 +760,7 @@ describe('storeFactura', () => {
 
       vi.mocked(getValues).mockResolvedValueOnce({
         ok: true,
-        value: [['header'], existingRow],
+        value: [FACTURA_EMITIDA_HEADERS, existingRow],
       });
       vi.mocked(updateRowsWithFormatting).mockResolvedValue({ ok: true, value: undefined });
 
@@ -784,7 +785,7 @@ describe('storeFactura', () => {
 
       vi.mocked(getValues).mockResolvedValueOnce({
         ok: true,
-        value: [['header'], existingRow],
+        value: [FACTURA_RECIBIDA_HEADERS, existingRow],
       });
       vi.mocked(updateRowsWithFormatting).mockResolvedValue({ ok: true, value: undefined });
 
@@ -797,6 +798,105 @@ describe('storeFactura', () => {
       expect(updateRow[16]).toBe('MANUAL');    // Q: matchConfidence preserved
       expect(updateRow[15]).toBe('pago-789'); // P: matchedPagoFileId preserved
       expect(updateRow[18]).toBe('SI');        // S: pagada preserved
+    });
+  });
+
+  describe('header-derived carry-forward indices (ADV-362)', () => {
+    it('returns ok:false when reprocessed sheet header is missing expected match column (factura_emitida)', async () => {
+      // Header row truncated — missing 'matchedPagoFileId', 'matchConfidence', etc.
+      vi.mocked(getValues).mockResolvedValueOnce({
+        ok: true,
+        value: [
+          ['fechaEmision', 'fileId', 'fileName', 'tipoComprobante'],
+          ['2025-01-15', 'test-file-id', 'file.pdf', 'A'],
+        ],
+      });
+
+      const factura = createTestFactura();
+      const result = await storeFactura(factura, 'spreadsheet-id', 'Facturas Emitidas', 'factura_emitida');
+
+      expect(result.ok).toBe(false);
+      expect(updateRowsWithFormatting).not.toHaveBeenCalled();
+      expect(appendRowsWithLinks).not.toHaveBeenCalled();
+    });
+
+    it('returns ok:false when reprocessed sheet header is missing expected match column (factura_recibida)', async () => {
+      vi.mocked(getValues).mockResolvedValueOnce({
+        ok: true,
+        value: [
+          ['fechaEmision', 'fileId', 'fileName'],
+          ['2025-01-15', 'test-file-id', 'file.pdf'],
+        ],
+      });
+
+      const factura = createTestFactura();
+      const result = await storeFactura(factura, 'spreadsheet-id', 'Facturas Recibidas', 'factura_recibida');
+
+      expect(result.ok).toBe(false);
+      expect(updateRowsWithFormatting).not.toHaveBeenCalled();
+    });
+
+    it('preserves MANUAL lock + pagada using header-derived indices (current schema, factura_emitida)', async () => {
+      // Same as existing ADV-307 test but now verifies header-based lookup works correctly
+      const existingRow = Array(21).fill('') as string[];
+      existingRow[1] = 'test-file-id';
+      existingRow[16] = 'pago-derived';
+      existingRow[17] = 'MANUAL';
+      existingRow[18] = 'YES';
+      existingRow[19] = 'SI';
+
+      vi.mocked(getValues).mockResolvedValueOnce({
+        ok: true,
+        value: [FACTURA_EMITIDA_HEADERS, existingRow],
+      });
+      vi.mocked(updateRowsWithFormatting).mockResolvedValue({ ok: true, value: undefined });
+      vi.mocked(sortSheet).mockResolvedValue({ ok: true, value: undefined });
+
+      const factura = createTestFactura();
+      const result = await storeFactura(factura, 'spreadsheet-id', 'Facturas Emitidas', 'factura_emitida');
+
+      expect(result.ok).toBe(true);
+      const updateCall = vi.mocked(updateRowsWithFormatting).mock.calls[0];
+      const updateRow = updateCall[1][0].values as unknown[];
+      expect(updateRow[17]).toBe('MANUAL');
+      expect(updateRow[16]).toBe('pago-derived');
+      expect(updateRow[19]).toBe('SI');
+    });
+  });
+
+  describe('findRowByFileId error propagation (ADV-358)', () => {
+    it('returns ok:false with the Sheets error when getValues fails during fileId lookup', async () => {
+      vi.mocked(getValues).mockResolvedValueOnce({
+        ok: false,
+        error: new Error('Sheets API read error'),
+      });
+
+      const factura = createTestFactura();
+      const result = await storeFactura(factura, 'spreadsheet-id', 'Facturas Emitidas', 'factura_emitida');
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.error.message).toBe('Sheets API read error');
+      }
+      expect(appendRowsWithLinks).not.toHaveBeenCalled();
+      expect(updateRowsWithFormatting).not.toHaveBeenCalled();
+    });
+
+    it('treats header-only sheet as not-found (does not error)', async () => {
+      // Length <= 1 → not-found, NOT an error — distinct from read failure
+      vi.mocked(getValues).mockResolvedValueOnce({ ok: true, value: [['Header']] }); // findRowByFileId
+      vi.mocked(getValues).mockResolvedValueOnce({ ok: true, value: [['Header']] }); // isDuplicateFactura
+      vi.mocked(appendRowsWithLinks).mockResolvedValue({ ok: true, value: 1 });
+      vi.mocked(sortSheet).mockResolvedValue({ ok: true, value: undefined });
+
+      const factura = createTestFactura();
+      const result = await storeFactura(factura, 'spreadsheet-id', 'Facturas Emitidas', 'factura_emitida');
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value.stored).toBe(true);
+      }
+      expect(appendRowsWithLinks).toHaveBeenCalled();
     });
   });
 
