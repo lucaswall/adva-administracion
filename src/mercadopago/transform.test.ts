@@ -241,6 +241,21 @@ describe('paymentsToMovimientos', () => {
       const { movimientos } = paymentsToMovimientos([payment]);
       expect(movimientos[0].concepto).toBe('MP 158805080384 - CUIL 27234567891 - Unipersonal');
     });
+
+    it('renders DNI prefix for type=DNI — never mislabels a DNI as CUIT', () => {
+      const payment = makePayment({
+        payer: {
+          identification: { type: 'DNI', number: '12345678' },
+          email: 'dni@example.com',
+        },
+        charges_details: [],
+        transaction_amount: 500,
+        transaction_details: { net_received_amount: 500 },
+      });
+
+      const { movimientos } = paymentsToMovimientos([payment]);
+      expect(movimientos[0].concepto).toBe('MP 158805080384 - DNI 12345678 - Unipersonal');
+    });
   });
 
   // -------------------------------------------------------------------------

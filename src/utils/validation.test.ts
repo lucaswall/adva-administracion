@@ -13,6 +13,7 @@ import {
   extractDniFromCuit,
   cuitContainsDni,
   cuitOrDniMatch,
+  extractCuitFromText,
   validateFactura,
   validatePago,
   validateRecibo,
@@ -304,6 +305,26 @@ describe('cuitOrDniMatch', () => {
     // Factura: CUIT emisor 20123456786
     // Pago: beneficiary 12345678 (DNI)
     expect(cuitOrDniMatch('20123456786', '12345678')).toBe(true);
+  });
+});
+
+describe('extractCuitFromText — explicit DNI label', () => {
+  it('extracts an explicitly DNI-labelled 7-8 digit number', () => {
+    expect(extractCuitFromText('MP 158805080384 - DNI 12345678 - Unipersonal')).toBe('12345678');
+    expect(extractCuitFromText('DNI: 1234567')).toBe('1234567');
+  });
+
+  it('prefers a valid 11-digit CUIT over a DNI label when both are present', () => {
+    expect(extractCuitFromText('CUIT 20123456786 DNI 23456789')).toBe('20123456786');
+  });
+
+  it('does not extract an unlabelled 7-8 digit number', () => {
+    // No DNI/CUIT/CUIL label — bare short digit runs stay ambiguous (account numbers, references)
+    expect(extractCuitFromText('TRANSFERENCIA 12345678 VARIOS')).toBeUndefined();
+  });
+
+  it('does not treat a DNI-labelled number outside 7-8 digits as identity', () => {
+    expect(extractCuitFromText('DNI 123456')).toBeUndefined();
   });
 });
 

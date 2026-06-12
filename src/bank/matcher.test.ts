@@ -2947,6 +2947,44 @@ describe('CUIT↔DNI equivalence in identity comparisons (ADV-372)', () => {
     expect(result.matchedFileId).toBe('factura1');
   });
 
+  it('credit: concepto with explicit DNI label matches factura whose CUIT embeds that DNI (tier 2 HIGH)', () => {
+    // MP DNI-typed payers render as "DNI {number}" in the concepto; the
+    // extracted DNI must reach the identity comparisons via cuitOrDniMatch
+    const factura: Factura & { row: number } = {
+      fileId: 'factura-dni',
+      fileName: 'factura-dni.pdf',
+      tipoComprobante: 'B',
+      nroFactura: '00001-00000002',
+      fechaEmision: '2024-01-10',
+      cuitEmisor: '30709076783',
+      razonSocialEmisor: 'ADVA',
+      cuitReceptor: '20123456786', // full CUIT embedding DNI 12345678
+      razonSocialReceptor: 'CLIENTE SA',
+      importeNeto: 90000,
+      importeIva: 10000,
+      importeTotal: 100000,
+      moneda: 'ARS',
+      processedAt: '2024-01-10T10:00:00Z',
+      needsReview: false,
+      confidence: 0.95,
+      row: 2
+    };
+
+    const movement = makeMovimiento({
+      fecha: '2024-01-15',
+      concepto: 'MP 158805080384 - DNI 12345678 - Unipersonal',
+      debito: null,
+      credito: 100000
+    });
+
+    const result = matcher.matchCreditMovement(movement, [factura], [], []);
+
+    expect(result.matchType).toBe('direct_factura');
+    expect(result.tier).toBe(2);
+    expect(result.confidence).toBe('HIGH');
+    expect(result.matchedFileId).toBe('factura-dni');
+  });
+
   it('credit: hard filter excludes factura whose DNI does not match the concepto CUIT (no false positives)', () => {
     // Factura has DNI 12345678 (embedded in CUIT 20123456786)
     // Movement concepto carries a DIFFERENT valid CUIT 27-23456789-1 (DNI 23456789)

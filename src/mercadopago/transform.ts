@@ -56,16 +56,19 @@ function getChargeLabel(name: string): string {
 // ---------------------------------------------------------------------------
 
 /**
- * Returns "CUIT {number}" / "CUIL {number}" / "" depending on payer info.
+ * Returns "CUIT {number}" / "CUIL {number}" / "DNI {number}" / "" depending on payer info.
  * Empty string means the identity segment should be omitted from concepto.
- * The prefix format is required so that extractCuitFromText() can find the number.
+ * The prefix format is required so that extractCuitFromText() can find the number
+ * (it recognizes CUIT/CUIL 11-digit identities and explicitly DNI-labelled 7-8
+ * digit numbers; cuitOrDniMatch handles DNI-vs-CUIT comparisons downstream).
  */
 function renderPayerIdentity(payer: MpPayment['payer'] | undefined): string {
   if (!payer) return '';
   const { type, number } = payer.identification ?? {};
   if (!number || !type) return '';
 
-  const prefix = type.toUpperCase() === 'CUIL' ? 'CUIL' : 'CUIT';
+  const upperType = type.toUpperCase();
+  const prefix = upperType === 'CUIL' || upperType === 'DNI' ? upperType : 'CUIT';
   return `${prefix} ${number}`;
 }
 
