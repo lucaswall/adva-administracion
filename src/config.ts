@@ -156,6 +156,36 @@ export const FETCH_TIMEOUT_MS = 300000;
 export const EXCHANGE_RATE_TIMEOUT_MS = 30000;
 
 /**
+ * Mercado Pago API base URL
+ */
+export const MP_API_BASE_URL = 'https://api.mercadopago.com';
+
+/**
+ * Mercado Pago API fetch timeout in milliseconds
+ * Set to 30 seconds — same as exchange rate API
+ */
+export const MP_API_TIMEOUT_MS = 30_000;
+
+/**
+ * Mercado Pago API maximum retry attempts on 429 / 5xx / network errors
+ */
+export const MP_MAX_RETRIES = 3;
+
+/**
+ * Mercado Pago API retry delays for exponential backoff (milliseconds)
+ * [1s, 2s, 4s] — one entry per retry attempt (MP_MAX_RETRIES must equal length)
+ */
+export const MP_RETRY_DELAYS_MS = [1000, 2000, 4000] as const;
+
+/**
+ * Returns the Mercado Pago access token from environment, or null when absent.
+ * Absence disables the MP sync feature without an error.
+ */
+export function getMpAccessToken(): string | null {
+  return process.env.MP_ACCESS_TOKEN || null;
+}
+
+/**
  * Default maximum document size in bytes before Gemini processing.
  * Documents exceeding this limit are routed to Sin Procesar without an API call.
  * Override via MAX_DOCUMENT_BYTES env var (must be a positive integer).

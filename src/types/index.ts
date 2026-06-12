@@ -284,8 +284,11 @@ export interface MovimientoBancario {
   debito: number | null;
   /** Credit amount (null if debit transaction) */
   credito: number | null;
-  /** Balance after this transaction */
-  saldo: number;
+  /**
+   * Balance after this transaction.
+   * Null when no balance is available (e.g. MP-generated rows without a PDF source).
+   */
+  saldo: number | null;
 }
 
 /**
