@@ -1192,3 +1192,80 @@ All 70 tasks. By work unit:
 ### Continuation Status
 
 All tasks completed.
+
+### Review Findings
+
+**Reviewed:** 2026-06-12 — agent team (security, reliability, quality reviewers; ~100 changed files)
+
+**FIX (5 — Fix Plan created; M-size fixes present, inline threshold not met):**
+
+1. **[high] [bug]** `src/processing/storage/{factura,pago,recibo,retencion}-store.ts` — `findRowByFileId` returns `{found:false}` on a Sheets API read error, conflating "not present" with "read failed". The reprocess path then bypasses ADV-307 carry-forward and can append a duplicate row. Violates the Task 7 plan requirement "read failure → ok:false". → [ADV-358](https://linear.app/lw-claude/issue/ADV-358)
+2. **[medium] [async]** `src/services/watch-manager.ts:538` — ADV-312 deferred-scan retry uses `setTimeout(..., 0)`; while an external scan holds the scanner, the skip→re-queue→retry cycle spins at event-loop speed (CPU burn + log flood). → [ADV-359](https://linear.app/lw-claude/issue/ADV-359)
+3. **[medium] [type]** `src/processing/storage/movimientos-store.ts:84` — row accumulator declared `any[]`, silently bypassing `CellValueOrLink[][]` checking on the Movimientos write path. → [ADV-360](https://linear.app/lw-claude/issue/ADV-360)
+4. **[low] [convention]** `src/bank/match-movimientos.ts:1301-1305, 1339-1343` — two ADV-320 pagada log calls missing the `phase` structured field. → [ADV-361](https://linear.app/lw-claude/issue/ADV-361)
+5. **[low] [convention]** factura/pago/recibo stores — ADV-307 carry-forward reads `existing[16..19]` etc. via hardcoded indices instead of the ADV-332 `buildHeaderIndex` drift-guard pattern introduced in this same branch. → [ADV-362](https://linear.app/lw-claude/issue/ADV-362)
+
+**DISCARDED (1 — not a bug):**
+
+- **[edge-case]** `movimientos-store.ts` "duplicate SALDO INICIAL blocks when two resumens share a month" — intentional ADV-322 design: each statement batch is a self-contained block with its own PDF-sourced opening balance, and the `startRowOffset` logic exists precisely to support appending a second block with correct formulas. The iteration's migration notes already document multi-batch sheets as the anticipated scenario.
+
+**Security review:** clean (auth, IDOR guards, input validation, PDF sanitizer hardening, template-injection escaping all verified; no real personal CUITs added by this branch).
+
+### Linear Updates (review)
+
+- All 70 plan issues: Review → Merge (state UUID used per same-type transition gotcha)
+- New bug issues created in Todo: ADV-358, ADV-359, ADV-360, ADV-361, ADV-362
+
+<!-- REVIEW COMPLETE -->
+
+---
+
+## Fix Plan
+
+Bugs found during review of Iteration 1. Each fix follows TDD.
+
+### Fix 1: Propagate Sheets read errors from findRowByFileId (all four stores)
+**Linear Issue:** [ADV-358](https://linear.app/lw-claude/issue/ADV-358)
+**Files:** `src/processing/storage/factura-store.ts`, `pago-store.ts`, `recibo-store.ts`, `retencion-store.ts` + colocated tests
+
+1. Write tests per store: `getValues` returning `ok:false` during the fileId lookup → store returns `ok:false`, no append, no update; empty/header-only sheet still treated as not-found (first store succeeds); found path unchanged.
+2. Run verifier (expect fail)
+3. Change `findRowByFileId` to a three-state result (e.g. `{ found: true, ... } | { found: false } | { error: Error }` or `Result`-wrapped); on `!rowsResult.ok` return the error variant; callers return `ok:false` with the read error instead of falling through to the new-document path.
+4. Run verifier (expect pass)
+
+### Fix 2: Backoff delay for deferred-scan retry
+**Linear Issue:** [ADV-359](https://linear.app/lw-claude/issue/ADV-359)
+**Files:** `src/services/watch-manager.ts`, `src/services/watch-manager.test.ts`
+
+1. Write test (fake timers): a skipped scan is NOT retried immediately — only after the backoff delay elapses; repeated skips do not stack extra timers.
+2. Run verifier (expect fail)
+3. Replace `setTimeout(..., 0)` at `watch-manager.ts:538` with a named backoff constant (5–30 s); ensure only one retry timer is pending at a time.
+4. Run verifier (expect pass)
+
+### Fix 3: Type the movimientos-store row accumulators
+**Linear Issue:** [ADV-360](https://linear.app/lw-claude/issue/ADV-360)
+**Files:** `src/processing/storage/movimientos-store.ts` (+ test only if a type fix changes behavior)
+
+1. Change `const rows: any[]` to `CellValueOrLink[][]` in `storeMovimientosBancario` and the tarjeta/broker functions if they share the pattern.
+2. Run verifier full mode — zero build warnings; fix any surfaced type errors properly (no casts).
+
+### Fix 4: Add phase field to pagada log calls
+**Linear Issue:** [ADV-361](https://linear.app/lw-claude/issue/ADV-361)
+**Files:** `src/bank/match-movimientos.ts` (+ tests if they assert log args)
+
+1. Add `phase` to the `logError` at `:1301` and `warn` at `:1339`, matching the file's existing phase naming.
+2. Run verifier (expect pass).
+
+### Fix 5: Header-derived carry-forward indices
+**Linear Issue:** [ADV-362](https://linear.app/lw-claude/issue/ADV-362)
+**Files:** `src/processing/storage/factura-store.ts`, `pago-store.ts`, `recibo-store.ts` + colocated tests
+
+1. Write tests: carry-forward still preserves MANUAL lock + pagada with the current schema; a sheet whose header row is missing an expected column → store returns `ok:false` (loud failure) instead of carrying wrong cells.
+2. Run verifier (expect fail)
+3. Derive the match-column indices from the header row already fetched by `findRowByFileId` (or the canonical constants in `spreadsheet-headers.ts`), replacing the hardcoded literals in all three stores.
+4. Run verifier (expect pass)
+
+### Post-Implementation Checklist
+
+1. `bug-hunter` — review git changes, fix any issues found
+2. `verifier` (full mode) — all tests pass, lint clean, zero warnings
