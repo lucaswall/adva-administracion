@@ -351,6 +351,8 @@ export interface ScanContext {
   metadataCache: MetadataCache;
   tokenBatch: TokenUsageBatch;
   sheetOrderBatch: SheetOrderBatch;
+  /** Dashboard Operativo spreadsheet ID — passed to tokenBatch.add() for auto-flush (ADV-298) */
+  dashboardId?: string;
 }
 
 /**
@@ -493,6 +495,7 @@ export async function scanFolder(folderId?: string): Promise<Result<ScanResult, 
       metadataCache: new MetadataCache(),
       tokenBatch: new TokenUsageBatch(),
       sheetOrderBatch: new SheetOrderBatch(),
+      dashboardId: dashboardOperativoId,
     };
 
     info('Scan configuration', {
