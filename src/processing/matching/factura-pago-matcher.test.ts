@@ -476,7 +476,7 @@ describe('MANUAL matchConfidence locking (Fix 5 - ADV-131)', () => {
       .mockResolvedValueOnce({ ok: true, value: [facturaHeader, facturaRow] })
       .mockResolvedValueOnce({ ok: true, value: [pagoHeader, pagoRow] });
 
-    vi.mocked(batchUpdate).mockResolvedValue({ ok: true, value: undefined });
+    vi.mocked(batchUpdate).mockResolvedValue({ ok: true, value: 0 });
 
     const result = await matchFacturasWithPagos(
       'test-spreadsheet',
@@ -527,7 +527,7 @@ describe('MANUAL matchConfidence locking (Fix 5 - ADV-131)', () => {
       .mockResolvedValueOnce({ ok: true, value: [misalignedFacturaHeader, misalignedFacturaRow] })
       .mockResolvedValueOnce({ ok: true, value: [pagoHeader, pagoRow] });
 
-    vi.mocked(batchUpdate).mockResolvedValue({ ok: true, value: undefined });
+    vi.mocked(batchUpdate).mockResolvedValue({ ok: true, value: 0 });
 
     const result = await matchFacturasWithPagos(
       'test-spreadsheet',
