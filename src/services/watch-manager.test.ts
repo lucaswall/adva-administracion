@@ -6,12 +6,16 @@ import {
   markNotificationProcessedWithTimestamp,
   getNotificationCount,
   getChannelCount,
+  startWatching,
+  getActiveChannels,
   triggerScan,
   checkAndMarkNotification,
   resetConsecutiveFailures,
 } from './watch-manager.js';
 import * as cron from 'node-cron';
 import * as logger from '../utils/logger.js';
+import { watchFolder } from './drive.js';
+import { scanFolder } from '../processing/scanner.js';
 
 // Mock node-cron
 vi.mock('node-cron', () => ({
@@ -615,6 +619,68 @@ describe('triggerScan - failure handling (ADV-18)', () => {
       process.off('unhandledRejection', rejectionListener);
 
       expect(hadUnhandledRejection).toBe(false);
+    });
+  });
+
+  describe('channel renewal failure (ADV-303)', () => {
+    it('keeps channel in activeChannels when startWatching fails during renewal', async () => {
+      // Arrange: add a channel with an expiration in the past so renewal triggers
+      vi.mocked(watchFolder).mockResolvedValueOnce({
+        ok: true,
+        value: { resourceId: 'old-resource', expiration: String(Date.now() - 1000) },
+      });
+      initWatchManager('http://localhost:3000/webhook');
+      await startWatching('test-folder');
+      expect(getActiveChannels()).toHaveLength(1);
+
+      // Act: make the next startWatching call (during renewal) fail
+      vi.mocked(watchFolder).mockResolvedValueOnce({
+        ok: false,
+        error: new Error('Drive API error'),
+      });
+
+      // Trigger the renewal cron callback (index 0 = renewal job)
+      const cronScheduleMock = vi.mocked(cron.schedule);
+      const renewalFn = cronScheduleMock.mock.calls[0][1] as () => void;
+      renewalFn();
+      await new Promise(resolve => setTimeout(resolve, 20));
+
+      // Assert: channel must still be present so fallback polling continues
+      // and the next renewal cycle can retry (ADV-303)
+      expect(getActiveChannels()).toHaveLength(1);
+    });
+  });
+
+  describe('skipped scan re-queue (ADV-312)', () => {
+    it('triggers follow-up scan when scanFolder returns skipped due to concurrent scan', async () => {
+      initWatchManager('http://localhost:3000/webhook');
+
+      // First call: scan is skipped (another scan already running)
+      vi.mocked(scanFolder).mockResolvedValueOnce({
+        ok: true,
+        value: {
+          skipped: true,
+          reason: 'scan_running',
+          filesProcessed: 0, facturasAdded: 0, pagosAdded: 0,
+          recibosAdded: 0, matchesFound: 0, errors: 0, duration: 0,
+        },
+      });
+      // Second call: succeeds
+      vi.mocked(scanFolder).mockResolvedValueOnce({
+        ok: true,
+        value: {
+          filesProcessed: 1, facturasAdded: 0, pagosAdded: 0,
+          recibosAdded: 0, matchesFound: 0, errors: 0, duration: 50,
+        },
+      });
+
+      triggerScan('test-folder');
+
+      // Wait for both the initial deferred call and the follow-up retry
+      await new Promise(resolve => setTimeout(resolve, 200));
+
+      // scanFolder must be called twice: once (skipped) + once (follow-up)
+      expect(vi.mocked(scanFolder)).toHaveBeenCalledTimes(2);
     });
   });
 

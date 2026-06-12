@@ -1,4 +1,3 @@
-import type { ResumenBancario, ResumenTarjeta, ResumenBroker } from '../../types/index.js';
 import { getValues } from '../../services/sheets.js';
 import { normalizeSpreadsheetDate } from '../../utils/date.js';
 import { parseNumber } from '../../utils/numbers.js';
@@ -220,94 +219,19 @@ export class DuplicateCache {
   }
 
   /**
-   * Checks for duplicate bank account resumen in cache.
+   * Reports whether a sheet's data has been successfully loaded into cache.
+   *
+   * Callers MUST check this before using `isDuplicate*` methods — an unloaded
+   * cache returns `{ isDuplicate: false }` for every query (fail-open).
+   * When `isLoaded()` returns `false`, callers should fall back to the
+   * API-based duplicate check to avoid accepting real duplicates (ADV-297).
+   *
+   * @param spreadsheetId - Spreadsheet ID
+   * @param sheetName - Sheet name
+   * @returns true if data was successfully loaded and is available for querying
    */
-  isDuplicateResumenBancario(
-    spreadsheetId: string,
-    resumen: ResumenBancario
-  ): { isDuplicate: boolean; existingFileId?: string } {
-    const key = `${spreadsheetId}:Resumenes`;
-    const sheetData = this.cache.get(key);
-    if (!sheetData) return { isDuplicate: false };
-
-    for (const [fileId, row] of sheetData) {
-      const rowFechaDesde = normalizeSpreadsheetDate(row[0]); // Column A
-      const rowFechaHasta = normalizeSpreadsheetDate(row[1]); // Column B
-      const rowBanco = row[4]; // Column E
-      const rowNumeroCuenta = row[5]; // Column F
-      const rowMoneda = row[6]; // Column G
-
-      if (
-        rowBanco === resumen.banco &&
-        rowFechaDesde === resumen.fechaDesde &&
-        rowFechaHasta === resumen.fechaHasta &&
-        rowNumeroCuenta === resumen.numeroCuenta &&
-        rowMoneda === resumen.moneda
-      ) {
-        return { isDuplicate: true, existingFileId: fileId };
-      }
-    }
-    return { isDuplicate: false };
-  }
-
-  /**
-   * Checks for duplicate credit card resumen in cache.
-   */
-  isDuplicateResumenTarjeta(
-    spreadsheetId: string,
-    resumen: ResumenTarjeta
-  ): { isDuplicate: boolean; existingFileId?: string } {
-    const key = `${spreadsheetId}:Resumenes`;
-    const sheetData = this.cache.get(key);
-    if (!sheetData) return { isDuplicate: false };
-
-    for (const [fileId, row] of sheetData) {
-      const rowFechaDesde = normalizeSpreadsheetDate(row[0]); // Column A
-      const rowFechaHasta = normalizeSpreadsheetDate(row[1]); // Column B
-      const rowBanco = row[4]; // Column E
-      const rowNumeroCuenta = row[5]; // Column F
-      const rowTipoTarjeta = row[6]; // Column G
-
-      if (
-        rowBanco === resumen.banco &&
-        rowFechaDesde === resumen.fechaDesde &&
-        rowFechaHasta === resumen.fechaHasta &&
-        rowNumeroCuenta === resumen.numeroCuenta &&
-        rowTipoTarjeta === resumen.tipoTarjeta
-      ) {
-        return { isDuplicate: true, existingFileId: fileId };
-      }
-    }
-    return { isDuplicate: false };
-  }
-
-  /**
-   * Checks for duplicate broker resumen in cache.
-   */
-  isDuplicateResumenBroker(
-    spreadsheetId: string,
-    resumen: ResumenBroker
-  ): { isDuplicate: boolean; existingFileId?: string } {
-    const key = `${spreadsheetId}:Resumenes`;
-    const sheetData = this.cache.get(key);
-    if (!sheetData) return { isDuplicate: false };
-
-    for (const [fileId, row] of sheetData) {
-      const rowFechaDesde = normalizeSpreadsheetDate(row[0]); // Column A
-      const rowFechaHasta = normalizeSpreadsheetDate(row[1]); // Column B
-      const rowBroker = row[4]; // Column E
-      const rowNumeroCuenta = row[5]; // Column F
-
-      if (
-        rowBroker === resumen.broker &&
-        rowFechaDesde === resumen.fechaDesde &&
-        rowFechaHasta === resumen.fechaHasta &&
-        rowNumeroCuenta === resumen.numeroCuenta
-      ) {
-        return { isDuplicate: true, existingFileId: fileId };
-      }
-    }
-    return { isDuplicate: false };
+  isLoaded(spreadsheetId: string, sheetName: string): boolean {
+    return this.cache.has(`${spreadsheetId}:${sheetName}`);
   }
 
   /**

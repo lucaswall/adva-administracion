@@ -3,11 +3,12 @@
  */
 
 import { getValues, appendRowsWithLinks, batchUpdate, updateRowsWithFormatting, getSpreadsheetTimezone } from '../../services/sheets.js';
+import { decodeSerialInTimezone } from '../../utils/date.js';
 import type { Result, DocumentType } from '../../types/index.js';
 import { info as logInfo, error as logError } from '../../utils/logger.js';
 import { getCorrelationId } from '../../utils/correlation.js';
 import { withQuotaRetry, withLock } from '../../utils/concurrency.js';
-import { MAX_FAILED_FILE_RETRIES, FILE_STATUS_LOCK_TIMEOUT_MS } from '../../config.js';
+import { MAX_FAILED_FILE_RETRIES, FILE_STATUS_LOCK_TIMEOUT_MS, STORE_LOCK_AUTO_EXPIRY_MS } from '../../config.js';
 
 /**
  * In-memory cache for file row indexes
@@ -140,7 +141,7 @@ export async function markFileProcessing(
       });
 
       return undefined;
-    }, FILE_STATUS_LOCK_TIMEOUT_MS, FILE_STATUS_LOCK_TIMEOUT_MS);
+    }, FILE_STATUS_LOCK_TIMEOUT_MS, STORE_LOCK_AUTO_EXPIRY_MS); // ADV-344
 
     if (!lockResult.ok) {
       throw lockResult.error;
@@ -269,7 +270,39 @@ export async function updateFileStatus(
     });
 
     return undefined;
-  }, FILE_STATUS_LOCK_TIMEOUT_MS, FILE_STATUS_LOCK_TIMEOUT_MS);
+  }, FILE_STATUS_LOCK_TIMEOUT_MS, STORE_LOCK_AUTO_EXPIRY_MS); // ADV-344
+}
+
+/**
+ * Gets all tracked file IDs from the centralized tracking sheet, regardless of status.
+ *
+ * Used by the scanner to build the base exclusion set for `newFiles` (ADV-311):
+ * all tracked files are excluded from new processing; only files explicitly added back
+ * by the stale/retryable recovery gates will be re-queued.
+ *
+ * @param dashboardId - Dashboard Operativo Contable spreadsheet ID
+ */
+export async function getAllTrackedFileIds(dashboardId: string): Promise<Result<Set<string>, Error>> {
+  const trackedIds = new Set<string>();
+
+  // Read only column A (fileId) — we don't need status here
+  const result = await getValues(dashboardId, 'Archivos Procesados!A:A');
+
+  if (!result.ok) {
+    return result;
+  }
+
+  if (result.value.length > 1) {
+    // Skip header row (index 0)
+    for (let i = 1; i < result.value.length; i++) {
+      const row = result.value[i];
+      if (row && row[0]) {
+        trackedIds.add(String(row[0]));
+      }
+    }
+  }
+
+  return { ok: true, value: trackedIds };
 }
 
 /**
@@ -324,6 +357,10 @@ export async function getStaleProcessingFileIds(
     return result;
   }
 
+  // ADV-306: resolve spreadsheet timezone so serial-number decode is timezone-aware
+  const timezoneResult = await getSpreadsheetTimezone(dashboardId);
+  const timeZone = timezoneResult.ok ? timezoneResult.value : 'UTC';
+
   const now = Date.now();
 
   if (result.value.length > 1) {
@@ -346,13 +383,13 @@ export async function getStaleProcessingFileIds(
         continue;
       }
 
-      // ADV-105: processedAt may be a serial number (from appendRowsWithLinks + SERIAL_NUMBER render)
+      // ADV-105/ADV-306: processedAt may be a serial number (from appendRowsWithLinks + SERIAL_NUMBER render)
       // or an ISO string (from batchUpdate). Handle both formats.
+      // Serial numbers are timezone-relative — use decodeSerialInTimezone for correct UTC conversion.
       let timestamp: number;
       if (typeof processedAt === 'number') {
-        // Excel serial number — convert to JS timestamp
-        const EXCEL_EPOCH = new Date(Date.UTC(1899, 11, 30)).getTime();
-        timestamp = EXCEL_EPOCH + processedAt * 86400000;
+        // Excel serial number — decode with timezone awareness (ADV-306)
+        timestamp = decodeSerialInTimezone(processedAt, timeZone);
       } else {
         timestamp = new Date(String(processedAt)).getTime();
       }
@@ -398,6 +435,7 @@ export async function getRetryableFailedFileIds(
     'Quota exceeded',
     'rate limit',
     'timeout',
+    'movimientos',  // ADV-308: movimientos storage failures are retryable
   ];
 
   if (result.value.length > 1) {

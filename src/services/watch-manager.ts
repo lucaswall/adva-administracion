@@ -428,12 +428,27 @@ export function triggerScan(folderId?: string): void {
   // Track whether this scan failed (for ADV-18 failure handling)
   let scanFailed = false;
   let wasAuthFailure = false;
+  let scanWasSkipped = false; // ADV-312: track if scan was deferred
 
   // Run scan directly (not in queue) to avoid deadlock
   // The scanFolder function will use the queue for individual file processing
   runningScan = scanFolder(folderId)
     .then(async result => {
       if (result.ok) {
+        // ADV-312: scan was deferred because the scanner was already busy
+        // Re-queue so it runs when the current scan finishes
+        if (result.value.skipped) {
+          info('Scan deferred (scanner busy), re-queuing for follow-up', {
+            module: 'watch-manager',
+            phase: 'scan-trigger',
+            folderId,
+            reason: result.value.reason,
+          });
+          scanWasSkipped = true;
+          pendingScanFolderIds.add(folderId);
+          return;
+        }
+
         // Reset failure counter on success (ADV-18)
         consecutiveFailures = 0;
         lastScanTime = new Date();
@@ -516,7 +531,14 @@ export function triggerScan(folderId?: string): void {
           phase: 'scan-trigger',
           folderId: nextFolderId
         });
-        triggerScan(nextFolderId);
+
+        if (scanWasSkipped) {
+          // ADV-312: yield to event loop before retrying to avoid tight busy-loop
+          // while an external scan is still running in the scanner
+          setTimeout(() => triggerScan(nextFolderId), 0);
+        } else {
+          triggerScan(nextFolderId);
+        }
       }
     });
 }
@@ -589,6 +611,10 @@ async function renewChannels(): Promise<void> {
           folderId: channel.folderId,
           error: startResult.error.message
         });
+        // ADV-303: Restore old channel so fallback polling continues and renewal
+        // can retry on the next cycle. Without this, the folder is permanently
+        // dropped from activeChannels and no more scans are triggered for it.
+        activeChannels.set(channel.folderId, channel);
       }
     }
   }

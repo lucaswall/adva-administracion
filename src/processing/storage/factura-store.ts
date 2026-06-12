@@ -12,6 +12,7 @@ import { normalizeSpreadsheetDate } from '../../utils/date.js';
 import { info, warn } from '../../utils/logger.js';
 import { getCorrelationId } from '../../utils/correlation.js';
 import { withLock } from '../../utils/concurrency.js';
+import { STORE_LOCK_AUTO_EXPIRY_MS } from '../../config.js';
 
 /**
  * Builds a CellValueOrLink[] row for updateRowsWithFormatting (reprocessing) and appendRowsWithLinks (insert)
@@ -82,27 +83,30 @@ function buildFacturaRowFormatted(
 }
 
 /**
- * Finds the spreadsheet row index of a document by its fileId (column B)
+ * Finds the spreadsheet row index of a document by its fileId (column B),
+ * returning the full row data for match-column preservation on reprocess (ADV-307).
  *
  * @param spreadsheetId - The spreadsheet ID
  * @param sheetName - The sheet name
  * @param fileId - Google Drive file ID to search for
- * @returns Row found result with 1-indexed rowIndex, or not found
+ * @returns Row found result with 1-indexed rowIndex and full rowData, or not found
  */
 async function findRowByFileId(
   spreadsheetId: string,
   sheetName: string,
   fileId: string
-): Promise<{ found: true; rowIndex: number } | { found: false }> {
-  const rowsResult = await getValues(spreadsheetId, `${sheetName}!B:B`);
+): Promise<{ found: true; rowIndex: number; rowData: unknown[] } | { found: false }> {
+  // Read A:U (widest factura schema, covers both emitida 21-col and recibida 20-col).
+  // fileId is column B = index 1 in this range.
+  const rowsResult = await getValues(spreadsheetId, `${sheetName}!A:U`);
   if (!rowsResult.ok || rowsResult.value.length <= 1) {
     return { found: false };
   }
   // Skip header row (index 0 = row 1 in spreadsheet)
   for (let i = 1; i < rowsResult.value.length; i++) {
     const row = rowsResult.value[i];
-    if (row && String(row[0]) === fileId) {
-      return { found: true, rowIndex: i + 1 }; // 1-indexed spreadsheet row
+    if (row && String(row[1]) === fileId) {
+      return { found: true, rowIndex: i + 1, rowData: row }; // 1-indexed spreadsheet row
     }
   }
   return { found: false };
@@ -201,6 +205,28 @@ export async function storeFactura(
     if (fileIdCheck.found) {
       const renamedFileName = generateFacturaFileName(factura, documentType);
       const updateRow = buildFacturaRowFormatted(factura, documentType, renamedFileName);
+
+      // ADV-307: Preserve match columns from existing row so that MANUAL locks and
+      // pagada=SI are never clobbered by a re-extraction of the same file.
+      const existing = fileIdCheck.rowData;
+      if (documentType === 'factura_emitida') {
+        // Emitida: Q(16)=matchedPagoFileId, R(17)=matchConfidence, S(18)=hasCuitMatch, T(19)=pagada
+        if (String(existing[17]) === 'MANUAL') {
+          updateRow[16] = existing[16] as CellValueOrLink; // matchedPagoFileId
+          updateRow[17] = existing[17] as CellValueOrLink; // matchConfidence (MANUAL lock)
+          updateRow[18] = existing[18] as CellValueOrLink; // hasCuitMatch
+        }
+        if (String(existing[19]) === 'SI') updateRow[19] = 'SI'; // pagada
+      } else {
+        // Recibida: P(15)=matchedPagoFileId, Q(16)=matchConfidence, R(17)=hasCuitMatch, S(18)=pagada
+        if (String(existing[16]) === 'MANUAL') {
+          updateRow[15] = existing[15] as CellValueOrLink; // matchedPagoFileId
+          updateRow[16] = existing[16] as CellValueOrLink; // matchConfidence (MANUAL lock)
+          updateRow[17] = existing[17] as CellValueOrLink; // hasCuitMatch
+        }
+        if (String(existing[18]) === 'SI') updateRow[18] = 'SI'; // pagada
+      }
+
       const lastCol = documentType === 'factura_emitida' ? 'U' : 'T';
       const updateResult = await updateRowsWithFormatting(spreadsheetId, [{
         range: `${sheetName}!A${fileIdCheck.rowIndex}:${lastCol}${fileIdCheck.rowIndex}`,
@@ -229,10 +255,12 @@ export async function storeFactura(
       return { stored: true, updated: true };
     }
 
-    // DUPLICATE CHECK (business key): Use cache if available, otherwise API.
+    // DUPLICATE CHECK (business key): Use cache if loaded, otherwise API.
+    // ADV-297: Check isLoaded() first — an unloaded cache returns isDuplicate:false for
+    // every query (fail-open). Only use the cache when preload actually succeeded.
     // documentType drives the importeTotal column index — Facturas Emitidas
     // shifted it to K (10) after ADV-245; Recibidas stays at J (9).
-    const dupeCheck = context?.duplicateCache
+    const dupeCheck = context?.duplicateCache?.isLoaded(spreadsheetId, sheetName)
       ? context.duplicateCache.isDuplicateFactura(
           spreadsheetId,
           sheetName,
@@ -309,5 +337,5 @@ export async function storeFactura(
     }
 
     return { stored: true };
-  }, 10000); // 10 second timeout for lock
+  }, 10000, STORE_LOCK_AUTO_EXPIRY_MS); // 10 s wait; 15 min expiry for crash recovery (ADV-344)
 }

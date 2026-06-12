@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { moveToDuplicadoFolder, getDocumentDate } from './document-sorter.js';
+import { sortAndRenameDocument, moveToDuplicadoFolder, getDocumentDate } from './document-sorter.js';
 import type { Factura, Pago, Recibo, ResumenBancario } from '../types/index.js';
 
 // Mock dependencies
@@ -18,8 +18,8 @@ vi.mock('./folder-structure.js', () => ({
   getOrCreateMonthFolder: vi.fn(),
 }));
 
-import { moveFile, getParents } from './drive.js';
-import { getCachedFolderStructure } from './folder-structure.js';
+import { moveFile, getParents, renameFile } from './drive.js';
+import { getCachedFolderStructure, getOrCreateMonthFolder } from './folder-structure.js';
 
 describe('moveToDuplicadoFolder', () => {
   beforeEach(() => {
@@ -283,5 +283,61 @@ describe('getDocumentDate', () => {
     if (!result.ok) {
       expect(result.error.message).toContain('Invalid date format');
     }
+  });
+});
+
+describe('sortAndRenameDocument rename failure (ADV-348)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('returns success:true with renameWarning when rename fails after successful move', async () => {
+    vi.mocked(getCachedFolderStructure).mockReturnValue({
+      rootId: 'root-id',
+      entradaId: 'entrada-id',
+      sinProcesarId: 'sin-procesar-id',
+      duplicadoId: 'duplicado-id',
+      controlIngresosId: 'ingresos-id',
+      controlEgresosId: 'egresos-id',
+      dashboardOperativoId: 'dashboard-id',
+      bankSpreadsheets: new Map(),
+      movimientosSpreadsheets: new Map(),
+      yearFolders: new Map(),
+      classificationFolders: new Map(),
+      monthFolders: new Map(),
+      bankAccountFolders: new Map(),
+      bankAccountSpreadsheets: new Map(),
+      lastRefreshed: new Date(),
+    });
+    vi.mocked(getParents).mockResolvedValue({ ok: true, value: ['entrada-id'] });
+    vi.mocked(moveFile).mockResolvedValue({ ok: true, value: undefined });
+    vi.mocked(getOrCreateMonthFolder).mockResolvedValue({ ok: true, value: 'target-folder-id' });
+    vi.mocked(renameFile).mockResolvedValue({ ok: false, error: new Error('Drive rename API error') });
+
+    const factura: Partial<Factura> = {
+      fileId: 'test-file-id',
+      fileName: 'test-invoice.pdf',
+      fechaEmision: '2025-11-01',
+      tipoComprobante: 'A',
+      nroFactura: '00003-00000001',
+      cuitEmisor: '30709076783',
+      razonSocialEmisor: 'TEST SA',
+      cuitReceptor: '20123456786',
+      razonSocialReceptor: 'EMPRESA UNO SA',
+      importeNeto: 1000,
+      importeIva: 210,
+      importeTotal: 1210,
+      moneda: 'ARS',
+      processedAt: '2025-11-01T10:00:00Z',
+      confidence: 0.95,
+      needsReview: false,
+    };
+
+    const result = await sortAndRenameDocument(factura as Factura, 'ingresos', 'factura_emitida');
+
+    expect(result.success).toBe(true);
+    expect(result.renameWarning).toBeDefined();
+    expect(result.renameWarning).toContain('Drive rename API error');
+    expect(result.error).toBeUndefined();
   });
 });
