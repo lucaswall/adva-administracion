@@ -404,6 +404,14 @@ export function loadConfig(): Config {
 }
 
 /**
+ * Mercado Pago access token, captured at module load (Railway sets env before boot).
+ * Optional — if unset, MP sync/scheduler are disabled (reason 'mp_disabled').
+ * The client reads the env dynamically via getMpAccessToken() instead.
+ * NEVER log this value.
+ */
+export const MP_ACCESS_TOKEN: string | undefined = process.env.MP_ACCESS_TOKEN;
+
+/**
  * Singleton config instance
  */
 let configInstance: Config | null = null;

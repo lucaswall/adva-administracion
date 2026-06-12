@@ -10,9 +10,11 @@ import { scanRoutes } from './routes/scan.js';
 import { webhookRoutes } from './routes/webhooks.js';
 import { deliveryRoutes } from './routes/delivery.js';
 import { subdiarioRoutes } from './routes/subdiario.js';
+import { mpSyncRoutes } from './routes/mp-sync.js';
 import { discoverFolderStructure, getCachedFolderStructure } from './services/folder-structure.js';
 import { runStartupMigrations } from './services/migrations.js';
 import { initWatchManager, startWatching, shutdownWatchManager, updateLastScanTime } from './services/watch-manager.js';
+import { initMpScheduler, stopMpScheduler } from './mercadopago/scheduler.js';
 import { scanFolder } from './processing/scanner.js';
 import { updateStatusSheet } from './services/status-sheet.js';
 import { syncAppsScript } from './bootstrap/apps-script-sync.js';
@@ -48,6 +50,7 @@ export async function buildServer() {
   await server.register(scanRoutes, { prefix: '/api' });
   await server.register(deliveryRoutes, { prefix: '/api' });
   await server.register(subdiarioRoutes, { prefix: '/api' });
+  await server.register(mpSyncRoutes, { prefix: '/api' });
   await server.register(webhookRoutes, { prefix: '/webhooks' });
 
   return server;
@@ -356,6 +359,12 @@ async function start() {
     // Start real-time monitoring (if configured)
     await initializeRealTimeMonitoring();
 
+    // Init Mercado Pago scheduler (monthly cron + boot catch-up)
+    // Runs after watch-manager init; boot sync acquires PROCESSING_LOCK, which is
+    // serialised with the startup scan below — both are idempotent and the shared
+    // lock ensures they run one at a time.
+    initMpScheduler();
+
     // Update status sheet with initial server state
     const folderStructure = getCachedFolderStructure();
     if (folderStructure?.dashboardOperativoId) {
@@ -375,7 +384,11 @@ async function start() {
 
     // Graceful shutdown handler - ADV-7: Properly await shutdown operations
     const shutdown = createShutdownHandler(
-      shutdownWatchManager,
+      async () => {
+        // Stop MP scheduler (cron) before tearing down watch-manager channels
+        stopMpScheduler();
+        await shutdownWatchManager();
+      },
       () => server.close(),
       (code) => process.exit(code)
     );
