@@ -289,7 +289,7 @@ describe('syncMercadopago', () => {
         'movimientos-id',
         '2025-05',
         { collectorId: '987654' },
-        expect.any(Date)
+        '2025-06-12'
       );
     });
 

@@ -270,7 +270,7 @@ export async function syncMercadopago(
           movimientosSpreadsheetId,
           periodo,
           { collectorId },
-          new Date()
+          businessDateString()
         );
         if (!resumenResult.ok) {
           logError(`Failed to write MP resumen for ${periodo}`, {
