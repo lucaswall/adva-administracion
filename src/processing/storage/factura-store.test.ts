@@ -860,6 +860,7 @@ describe('storeFactura', () => {
       const updateRow = updateCall[1][0].values as unknown[];
       expect(updateRow[17]).toBe('MANUAL');
       expect(updateRow[16]).toBe('pago-derived');
+      expect(updateRow[18]).toBe('YES');
       expect(updateRow[19]).toBe('SI');
     });
   });

@@ -1269,3 +1269,45 @@ Bugs found during review of Iteration 1. Each fix follows TDD.
 
 1. `bug-hunter` — review git changes, fix any issues found
 2. `verifier` (full mode) — all tests pass, lint clean, zero warnings
+
+---
+
+## Iteration 2
+
+**Implemented:** 2026-06-12
+**Method:** Agent team (2 workers, worktree-isolated)
+
+### Tasks Completed This Iteration
+- Fix 1 (ADV-358): `findRowByFileId` three-state result (`found:true | found:false | error`) in all four stores — Sheets read failure now propagates as `ok:false` (no append, no update) instead of failing open into the new-document path; empty/header-only sheets still treated as not-found (worker-1)
+- Fix 2 (ADV-359): deferred-scan retry backoff — `setTimeout(0)` replaced with `DEFERRED_SCAN_RETRY_DELAY_MS = 10_000` plus a single-pending-timer guard (`deferredScanRetryTimer`), cleared in `shutdownWatchManager`; fake-timer tests prove no immediate retry and no stacked timers (worker-2)
+- Fix 3 (ADV-360): movimientos-store row accumulators typed `CellValueOrLink[][]` instead of `any[]` (worker-1)
+- Fix 4 (ADV-361): `phase: 'pagada-sync'` / `phase: 'pagada-revert'` added to the two ADV-320 pagada log calls in match-movimientos.ts (worker-2)
+- Fix 5 (ADV-362): carry-forward column indices in factura/pago/recibo stores derived from the sheet header row via `buildHeaderIndex` (header drift now fails loudly with `ok:false`); retencion-store intentionally excluded per issue scope (worker-1)
+
+### Files Modified
+- `src/processing/storage/factura-store.ts` (+test) - three-state findRowByFileId, header-derived carry-forward
+- `src/processing/storage/pago-store.ts` (+test) - same
+- `src/processing/storage/recibo-store.ts` (+test) - same
+- `src/processing/storage/retencion-store.ts` (+test) - three-state findRowByFileId (error propagation only)
+- `src/processing/storage/movimientos-store.ts` - typed row accumulators
+- `src/services/watch-manager.ts` (+test) - retry backoff + timer guard
+- `src/bank/match-movimientos.ts` - phase log fields
+
+### Linear Updates
+- ADV-358, ADV-359, ADV-360, ADV-361, ADV-362: Todo → In Progress → Review (real-time per worker report)
+- Worker labels applied: ADV-358/360/362 → "Worker 1"; ADV-359/361 → "Worker 2"
+
+### Pre-commit Verification
+- bug-hunter: Found 1 LOW bug (missing `hasCuitMatch` assertion in the new factura MANUAL-lock test — implementation correct, test coverage incomplete), fixed by lead
+- verifier (full mode): All tests pass (2774), lint clean, zero build warnings
+
+### Work Partition
+- Worker 1: storage domain — Fix 1 (ADV-358), Fix 3 (ADV-360), Fix 5 (ADV-362)
+- Worker 2: reliability/logging — Fix 2 (ADV-359), Fix 4 (ADV-361)
+
+### Merge Summary
+- Worker 1: fast-forward (no conflicts)
+- Worker 2: merged via ort strategy, no conflicts; typecheck gate clean
+
+### Continuation Status
+All tasks completed.
