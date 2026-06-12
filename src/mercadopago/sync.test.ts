@@ -323,6 +323,26 @@ describe('syncMercadopago', () => {
       expect(stats.skippedExisting).toBe(2); // 1 per period
       expect(stats.resumenesWritten).toBe(0); // written=false both times
     });
+
+    it('warns when non-ARS payments are skipped by the transform', async () => {
+      mockPaymentsToMovimientos.mockReturnValue({ movimientos: [movimiento], skipped: 2 });
+
+      await syncMercadopago(['2025-05']);
+
+      expect(mockWarn).toHaveBeenCalledWith(
+        expect.stringContaining('Non-ARS'),
+        expect.objectContaining({ module: 'mp-sync', periodo: '2025-05', skipped: 2 })
+      );
+    });
+
+    it('does not warn when no payments are skipped by the transform', async () => {
+      await syncMercadopago(['2025-05']);
+
+      expect(mockWarn).not.toHaveBeenCalledWith(
+        expect.stringContaining('Non-ARS'),
+        expect.anything()
+      );
+    });
   });
 
   // --- Zero payments path ---
@@ -392,6 +412,36 @@ describe('syncMercadopago', () => {
       const result = await syncMercadopago(['2025-05']);
 
       expect(result.ok).toBe(false);
+    });
+
+    it('logs lock-acquisition message for withLock timeout errors', async () => {
+      mockWithLockFn.mockResolvedValue({
+        ok: false,
+        error: new Error('Failed to acquire lock for document-processing within 300000ms'),
+      });
+
+      const result = await syncMercadopago(['2025-05']);
+
+      expect(result.ok).toBe(false);
+      expect(mockLogError).toHaveBeenCalledWith(
+        'MP sync failed to acquire processing lock',
+        expect.objectContaining({ module: 'mp-sync' })
+      );
+    });
+
+    it('logs unexpected-error message when the lock callback throws', async () => {
+      mockWithLockFn.mockResolvedValue({
+        ok: false,
+        error: new Error('boom from inside callback'),
+      });
+
+      const result = await syncMercadopago(['2025-05']);
+
+      expect(result.ok).toBe(false);
+      expect(mockLogError).toHaveBeenCalledWith(
+        'MP sync failed unexpectedly under processing lock',
+        expect.objectContaining({ module: 'mp-sync' })
+      );
     });
   });
 

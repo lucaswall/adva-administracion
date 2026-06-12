@@ -198,7 +198,10 @@ export async function syncMercadopago(
         }
 
         // --- Transform ---
-        const { movimientos } = paymentsToMovimientos(payments);
+        const { movimientos, skipped } = paymentsToMovimientos(payments);
+        if (skipped > 0) {
+          warn('Non-ARS MP payments skipped by transform', { module: 'mp-sync', periodo, skipped });
+        }
 
         // Account info from the first payment (all payments share the same collector)
         const collectorId = String(payments[0].collector_id ?? '');
@@ -300,12 +303,18 @@ export async function syncMercadopago(
     PROCESSING_LOCK_EXPIRY_MS
   );
 
-  // Lock acquisition failed (timeout)
+  // Outer failure: lock-acquisition timeout, or (defensively) a throw escaping the callback
   if (!lockResult.ok) {
-    logError('MP sync failed to acquire processing lock', {
-      module: 'mp-sync',
-      error: lockResult.error.message,
-    });
+    const isLockTimeout = lockResult.error.message.includes('Failed to acquire lock');
+    logError(
+      isLockTimeout
+        ? 'MP sync failed to acquire processing lock'
+        : 'MP sync failed unexpectedly under processing lock',
+      {
+        module: 'mp-sync',
+        error: lockResult.error.message,
+      }
+    );
     return { ok: false, error: lockResult.error };
   }
 

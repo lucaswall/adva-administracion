@@ -288,6 +288,22 @@ interface EgresosData {
 }
 
 /**
+ * Returns true if a movimientos discovery key belongs to a Mercado Pago account.
+ *
+ * Keys produced by discoverMovimientosSpreadsheets are year-prefixed
+ * (`{YYYY}:{folderName}`, e.g. `2026:Mercado Pago 987654 ARS`) to avoid
+ * cross-year collisions — the year prefix must be stripped before checking
+ * the folder name (ADV-373).
+ *
+ * @param bankName - Discovery map key (`{YYYY}:{folderName}`) or bare folder name
+ */
+export function isMercadoPagoAccount(bankName: string): boolean {
+  const colonIndex = bankName.indexOf(':');
+  const folderName = colonIndex === -1 ? bankName : bankName.slice(colonIndex + 1);
+  return folderName.startsWith(MERCADO_PAGO_BANK_NAME);
+}
+
+/**
  * Returns true if candidate match is strictly better than existing match.
  * Uses tier-based comparison: lower tier wins, then closer date, then exact amount.
  */
@@ -1033,7 +1049,7 @@ async function matchBankMovimientos(
         currentExcludeFileIds
       );
     } else if (mov.credito !== null && mov.credito > 0) {
-      const isMercadoPago = bankName.startsWith(MERCADO_PAGO_BANK_NAME);
+      const isMercadoPago = isMercadoPagoAccount(bankName);
       matchResult = matcher.matchCreditMovement(
         mov,
         ingresosData.facturasEmitidas,
