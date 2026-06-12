@@ -12,14 +12,14 @@ import type {
   Recibo,
   Retencion,
 } from '../types/index.js';
-import { PROCESSING_LOCK_ID, PROCESSING_LOCK_TIMEOUT_MS, PROCESSING_LOCK_EXPIRY_MS, ADVA_CUITS } from '../config.js';
+import { PROCESSING_LOCK_ID, PROCESSING_LOCK_TIMEOUT_MS, PROCESSING_LOCK_EXPIRY_MS, ADVA_CUITS, MERCADO_PAGO_BANK_NAME } from '../config.js';
 import { withLock } from '../utils/concurrency.js';
 import { info, warn, debug, error as logError } from '../utils/logger.js';
 import { getCachedFolderStructure } from '../services/folder-structure.js';
 import { getValues, batchUpdate, type CellValue } from '../services/sheets.js';
 import { parseNumber } from '../utils/numbers.js';
 import { parseArgDate, normalizeSpreadsheetDate, businessYear } from '../utils/date.js';
-import { validateMoneda, validateMatchConfidence, validateTipoComprobante, extractCuitFromText } from '../utils/validation.js';
+import { validateMoneda, validateMatchConfidence, validateTipoComprobante, extractCuitFromText, cuitOrDniMatch } from '../utils/validation.js';
 import { BankMovementMatcher, calculateKeywordMatchScore, extractReferencia, type MatchQuality } from './matcher.js';
 import { getMovimientosToFill } from '../services/movimientos-reader.js';
 import { updateDetalle, type DetalleUpdate } from '../services/movimientos-detalle.js';
@@ -743,7 +743,7 @@ function buildMatchQuality(
   // Compute tier from context
   // Use extractCuitFromText to handle dashed/separated CUIT formats (e.g. "20-12345678-6")
   const extractedCuit = extractCuitFromText(conceptoMovimiento);
-  const hasCuitMatch = cuitDocumento ? extractedCuit === cuitDocumento : false;
+  const hasCuitMatch = !!(cuitDocumento && extractedCuit && cuitOrDniMatch(extractedCuit, cuitDocumento));
   let tier: BankMatchTier;
   // Tier 1 only for pagos (pago_recibido / pago_enviado) with a linked factura —
   // a factura_recibida/emitida that merely has matchedPagoFileId set does NOT qualify
@@ -1033,12 +1033,14 @@ async function matchBankMovimientos(
         currentExcludeFileIds
       );
     } else if (mov.credito !== null && mov.credito > 0) {
+      const isMercadoPago = bankName.startsWith(MERCADO_PAGO_BANK_NAME);
       matchResult = matcher.matchCreditMovement(
         mov,
         ingresosData.facturasEmitidas,
         ingresosData.pagosRecibidos,
         ingresosData.retenciones,
-        currentExcludeFileIds
+        currentExcludeFileIds,
+        isMercadoPago
       );
     } else {
       // No amount - skip, but restore ownFileId that was temporarily removed

@@ -181,6 +181,21 @@ export const GEMINI_PRICING = {
 export const USD_SAME_CURRENCY_TOLERANCE = 30;
 
 /**
+ * Bank name prefix used to identify Mercado Pago movements.
+ * Used in match-movimientos.ts to enable the extended forward factura date window.
+ */
+export const MERCADO_PAGO_BANK_NAME = 'Mercado Pago';
+
+/**
+ * Extended forward factura date window (days) for Mercado Pago accounts (ADV-373).
+ *
+ * MP charges on ~25th of the month but the factura is issued ~11th of the NEXT month
+ * — a gap of up to 17 days. The standard 5-day forward window (FACTURA_DATE_RANGE_BEFORE
+ * in matcher.ts) is too narrow; this constant extends it to 25 days for MP credit movements.
+ */
+export const MP_FACTURA_DATE_RANGE_AFTER_DAYS = 25;
+
+/**
  * Application configuration loaded from environment
  */
 export interface Config {

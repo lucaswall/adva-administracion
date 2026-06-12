@@ -13,11 +13,11 @@ import type {
   Retencion
 } from '../types/index.js';
 import { parseArgDate, isWithinDays } from '../utils/date.js';
-import { extractCuitFromText } from '../utils/validation.js';
+import { extractCuitFromText, cuitOrDniMatch } from '../utils/validation.js';
 import { amountsMatch } from '../utils/numbers.js';
 import { amountsMatchCrossCurrency } from '../utils/exchange-rate.js';
 import { warn } from '../utils/logger.js';
-import { isAdvaCuit } from '../config.js';
+import { isAdvaCuit, MP_FACTURA_DATE_RANGE_AFTER_DAYS } from '../config.js';
 
 /**
  * Default tolerance percentage for cross-currency matching
@@ -388,7 +388,7 @@ export class BankMovementMatcher {
       if (!isWithinDays(bankFecha, pagoDate, PAGO_DATE_RANGE, PAGO_DATE_RANGE)) continue;
 
       // Hard CUIT filter
-      if (hasCuitFilter && pago.cuitBeneficiario !== extractedCuit) continue;
+      if (hasCuitFilter && !cuitOrDniMatch(pago.cuitBeneficiario ?? '', extractedCuit)) continue;
 
       const dateDiff = dateDiffDays(bankFecha, pagoDate);
       const reasons = [`Amount match: ${amount}`, `Date match: Pago ${pago.fechaPago}`];
@@ -425,7 +425,7 @@ export class BankMovementMatcher {
 
       // Pago without linked factura — determine tier
       let tier: BankMatchTier;
-      if (extractedCuit && pago.cuitBeneficiario === extractedCuit) {
+      if (extractedCuit && cuitOrDniMatch(pago.cuitBeneficiario ?? '', extractedCuit)) {
         tier = 2;
       } else if (extractedRef && pago.referencia === extractedRef) {
         tier = 3;
@@ -463,7 +463,7 @@ export class BankMovementMatcher {
       if (!isWithinDays(facturaDate, bankFecha, FACTURA_DATE_RANGE_BEFORE, FACTURA_DATE_RANGE_AFTER)) continue;
 
       // Hard CUIT filter
-      if (hasCuitFilter && factura.cuitEmisor !== extractedCuit) continue;
+      if (hasCuitFilter && !cuitOrDniMatch(factura.cuitEmisor, extractedCuit)) continue;
 
       const dateDiff = dateDiffDays(bankFecha, facturaDate);
       const isCrossCurrency = factura.moneda === 'USD';
@@ -478,7 +478,7 @@ export class BankMovementMatcher {
 
       // Determine tier
       let tier: BankMatchTier;
-      if (extractedCuit && factura.cuitEmisor === extractedCuit) {
+      if (extractedCuit && cuitOrDniMatch(factura.cuitEmisor, extractedCuit)) {
         tier = 2;
         reasons.push('CUIT match with emisor');
       } else {
@@ -518,7 +518,7 @@ export class BankMovementMatcher {
 
       // CUIL filter for recibos: if CUIL extracted from concepto, only match recibos
       // where the employee's CUIL matches (tier 2). If no CUIL filter, match at tier 5.
-      const hasCuilMatch = hasCuitFilter && extractedCuit === recibo.cuilEmpleado;
+      const hasCuilMatch = hasCuitFilter && cuitOrDniMatch(recibo.cuilEmpleado, extractedCuit);
       if (hasCuitFilter && !hasCuilMatch) continue;
 
       const tier: BankMatchTier = hasCuilMatch ? 2 : 5;
@@ -585,7 +585,8 @@ export class BankMovementMatcher {
     facturasEmitidas: Array<Factura & { row: number }>,
     pagosRecibidos: Array<Pago & { row: number }>,
     retenciones: Array<Retencion & { row: number }>,
-    excludeFileIds?: Set<string>
+    excludeFileIds?: Set<string>,
+    isMercadoPago?: boolean
   ): BankMovementMatchResult {
     // Phase 0: Auto-detect
     if (isBankFee(movement.concepto)) {
@@ -636,11 +637,11 @@ export class BankMovementMatcher {
       if (!amountOk.matches) continue;
 
       // Hard CUIT filter
-      if (hasCuitFilter && pago.cuitPagador !== extractedCuit) continue;
+      if (hasCuitFilter && !cuitOrDniMatch(pago.cuitPagador ?? '', extractedCuit)) continue;
 
       const dateDiff = dateDiffDays(bankFecha, pagoFecha);
       const reasons = ['Amount match', `Date within ±${PAGO_DATE_RANGE} days`];
-      if (extractedCuit && pago.cuitPagador === extractedCuit) {
+      if (extractedCuit && cuitOrDniMatch(pago.cuitPagador ?? '', extractedCuit)) {
         reasons.push('CUIT match');
       }
 
@@ -692,7 +693,7 @@ export class BankMovementMatcher {
       const pagador = pago.nombrePagador || 'Desconocido';
       const description = `REVISAR! Cobro de ${pagador}`;
       let tier: BankMatchTier;
-      if (extractedCuit && pago.cuitPagador === extractedCuit) {
+      if (extractedCuit && cuitOrDniMatch(pago.cuitPagador ?? '', extractedCuit)) {
         tier = 2;
       } else if (extractedRef && pago.referencia === extractedRef) {
         tier = 3;
@@ -714,13 +715,15 @@ export class BankMovementMatcher {
     }
 
     // --- Facturas Emitidas (with retencion tolerance) ---
+    // MP accounts may issue facturas up to 25 days after the bank movement (ADV-373)
+    const facturaDateRangeBefore = isMercadoPago ? MP_FACTURA_DATE_RANGE_AFTER_DAYS : FACTURA_DATE_RANGE_BEFORE;
     for (const factura of facturasEmitidas) {
       const facturaFecha = parseArgDate(factura.fechaEmision);
       if (!facturaFecha) continue;
-      if (!isWithinDays(facturaFecha, bankFecha, FACTURA_DATE_RANGE_BEFORE, FACTURA_DATE_RANGE_AFTER)) continue;
+      if (!isWithinDays(facturaFecha, bankFecha, facturaDateRangeBefore, FACTURA_DATE_RANGE_AFTER)) continue;
 
       // Hard CUIT filter
-      if (hasCuitFilter && factura.cuitReceptor !== extractedCuit) continue;
+      if (hasCuitFilter && !cuitOrDniMatch(factura.cuitReceptor ?? '', extractedCuit)) continue;
 
       // Find related retenciones
       const relatedRetenciones = this.findRelatedRetenciones(factura, facturaFecha, retenciones);
@@ -768,7 +771,7 @@ export class BankMovementMatcher {
       }
 
       // CUIT match check
-      const hasCuit = !!(extractedCuit && factura.cuitReceptor === extractedCuit);
+      const hasCuit = !!(extractedCuit && cuitOrDniMatch(factura.cuitReceptor ?? '', extractedCuit));
       if (hasCuit) reasons.push('CUIT match');
       const hasImplicitCuitMatch = usedRetenciones.length > 0;
 

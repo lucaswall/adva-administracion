@@ -53,6 +53,8 @@ export interface ResumenScopeItem {
   fileName: string;
   type: 'bancario' | 'tarjeta' | 'broker';
   periodo: string;
+  /** MIME type of the Drive file, populated by enumerateResumenes via listAllChildren */
+  mimeType?: string;
 }
 
 /**
@@ -362,6 +364,22 @@ export async function enumerateResumenes(
       const fileNameIdx = headerRow.indexOf('filename');
       if (periodoIdx < 0 || fileIdIdx < 0 || fileNameIdx < 0) continue;
 
+      // Build mimeType lookup for files in this account folder (ADV-375)
+      const childrenResult = await listAllChildren(accountFolder.id);
+      const mimeTypeMap = new Map<string, string>();
+      if (childrenResult.ok) {
+        for (const child of childrenResult.value) {
+          mimeTypeMap.set(child.id, child.mimeType);
+        }
+      } else {
+        warn('Failed to fetch mimeTypes for account folder; non-PDF items will not be skipped', {
+          module: 'delivery',
+          phase: 'enumerate-resumenes',
+          accountFolderId: accountFolder.id,
+          error: childrenResult.error.message,
+        });
+      }
+
       for (let i = 1; i < rows.length; i++) {
         const row = rows[i];
         const periodo = normalizePeriodo(row[periodoIdx]);
@@ -375,6 +393,7 @@ export async function enumerateResumenes(
           fileName: String(row[fileNameIdx] ?? ''),
           type,
           periodo,
+          mimeType: mimeTypeMap.get(fileId),
         });
       }
     }
@@ -661,11 +680,25 @@ export async function prepareDeliveryFolder(
 export async function copyPdfsToDelivery(
   folderId: string,
   scope: ResumenScopeItem[]
-): Promise<Result<{ copied: number; failed: Array<{ fileId: string; error: string }> }, Error>> {
+): Promise<Result<{ copied: number; failed: Array<{ fileId: string; error: string }>; skippedNonPdf: number }, Error>> {
   const failed: Array<{ fileId: string; error: string }> = [];
   let copied = 0;
+  let skippedNonPdf = 0;
 
   for (const item of scope) {
+    // Skip non-PDF files (e.g. .gsheet entries stored alongside PDFs) (ADV-375)
+    if (item.mimeType && item.mimeType !== 'application/pdf') {
+      skippedNonPdf++;
+      info('Skipping non-PDF resumen item', {
+        module: 'delivery',
+        phase: 'copy-pdfs',
+        fileId: item.fileId,
+        fileName: item.fileName,
+        mimeType: item.mimeType,
+      });
+      continue;
+    }
+
     const result = await copyFile(item.fileId, folderId);
     if (result.ok) {
       copied++;
@@ -685,9 +718,10 @@ export async function copyPdfsToDelivery(
     phase: 'copy-pdfs',
     copied,
     failed: failed.length,
+    skippedNonPdf,
   });
 
-  return { ok: true, value: { copied, failed } };
+  return { ok: true, value: { copied, failed, skippedNonPdf } };
 }
 
 // ── Task 7: buildMovimientosFiles (one spreadsheet per scope item) ────────────
