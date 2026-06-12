@@ -430,3 +430,11 @@ describe('ENVIRONMENT validation', () => {
     expect(() => loadConfig()).toThrow('ENVIRONMENT must be "staging" or "production", got "development"');
   });
 });
+
+describe('ADV-289: GOOGLE_API_TIMEOUT_MS constant', () => {
+  it('exports GOOGLE_API_TIMEOUT_MS set to 60 seconds', async () => {
+    vi.resetModules();
+    const { GOOGLE_API_TIMEOUT_MS } = await import('./config.js');
+    expect(GOOGLE_API_TIMEOUT_MS).toBe(60_000);
+  });
+});

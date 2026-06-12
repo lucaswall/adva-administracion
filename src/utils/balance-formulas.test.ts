@@ -140,6 +140,59 @@ describe('Balance Formula Utilities', () => {
     });
   });
 
+  describe('ADV-322: startRowOffset parameter', () => {
+    const mockMovimiento: MovimientoBancario = {
+      fecha: '2025-01-15',
+      concepto: 'Transfer',
+      debito: null,
+      credito: 5000,
+      saldo: 15000,
+    };
+
+    describe('generateMovimientoRowWithFormula with startRowOffset', () => {
+      it('offsets formula rows when startRowOffset > 0', () => {
+        // startRowOffset=3, rowIndex=1 → prev=S+1+1=5, curr=S+1+2=6
+        const result = generateMovimientoRowWithFormula(mockMovimiento, 1, 3);
+        expect(result[5]).toBe('=F5+D6-C6');
+      });
+
+      it('offsets formula rows for rowIndex=2 with startRowOffset=3', () => {
+        // startRowOffset=3, rowIndex=2 → prev=3+2+1=6, curr=3+2+2=7
+        const result = generateMovimientoRowWithFormula(mockMovimiento, 2, 3);
+        expect(result[5]).toBe('=F6+D7-C7');
+      });
+
+      it('preserves default behavior when startRowOffset=0', () => {
+        // Same as no-offset: rowIndex=1 → prev=2, curr=3
+        const result = generateMovimientoRowWithFormula(mockMovimiento, 1, 0);
+        expect(result[5]).toBe('=F2+D3-C3');
+      });
+
+      it('preserves existing no-offset behavior when omitted', () => {
+        const result = generateMovimientoRowWithFormula(mockMovimiento, 1);
+        expect(result[5]).toBe('=F2+D3-C3');
+      });
+    });
+
+    describe('generateFinalBalanceRow with startRowOffset', () => {
+      it('offsets final balance reference when startRowOffset > 0', () => {
+        // startRowOffset=3, lastRowIndex=10 → sheet row = 3+10+2 = 15
+        const result = generateFinalBalanceRow(10, 3);
+        expect(result[5]).toBe('=F15');
+      });
+
+      it('preserves default behavior when startRowOffset=0', () => {
+        const result = generateFinalBalanceRow(10, 0);
+        expect(result[5]).toBe('=F12');
+      });
+
+      it('preserves existing no-offset behavior when omitted', () => {
+        const result = generateFinalBalanceRow(10);
+        expect(result[5]).toBe('=F12');
+      });
+    });
+  });
+
   describe('generateBalanceOkFormula', () => {
     it('should generate formula comparing SALDO FINAL to reported saldoFinal', () => {
       // movimientosSheetId: spreadsheet ID where Movimientos are stored

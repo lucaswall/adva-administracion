@@ -367,17 +367,25 @@ function computeCancellingNCs(allFacturas: Factura[]): Map<string, Factura> {
  *   - montoComprobante ≈ factura.importeTotal (within 1% tolerance)
  *   OR
  *   - recibidoARS + montoRetencion ≈ factura.importeTotal in ARS (within 1)
+ *
+ * @param consumedRetencionIds - Shared set of retencion fileIds already
+ *   consumed by pass-2 across the caller's factura loop (ADV-329). Pass-2
+ *   matches are recorded here to prevent the same unclaimed retencion from
+ *   being attached to multiple facturas. Pass-1 (authoritative) matches are
+ *   exempt — they are deterministic and cannot double-attach.
  */
 function findMatchingRetenciones(
   factura: Factura,
   retenciones: Retencion[],
   recibidoARS: number | undefined,
-  totalARS: number
+  totalARS: number,
+  consumedRetencionIds: Set<string>
 ): Retencion[] {
   // Pass 1: authoritative matches. retencion-factura-matcher writes
   // matchedFacturaFileId on every retencion it links, and explicitly allows
   // multiple certificates per factura (different tax types — Ganancias + IIBB
-  // on the same invoice). Collect them all.
+  // on the same invoice). Collect them all. Pass 1 is unaffected by
+  // consumedRetencionIds — authoritative links cannot double-attach.
   const claimed = retenciones.filter((r) => r.matchedFacturaFileId === factura.fileId);
   if (claimed.length > 0) return claimed;
 
@@ -385,19 +393,24 @@ function findMatchingRetenciones(
   // already linked to a DIFFERENT factura must not be reused here, even when
   // CUIT + total coincide — that would attach the same Retencion note to two
   // invoices for the same client with the same total.
+  // consumedRetencionIds prevents a pass-2 match from being reused across
+  // multiple facturas in the same build (ADV-329).
   const tolerance = Math.max(1, totalARS * 0.01);
   for (const ret of retenciones) {
+    if (consumedRetencionIds.has(ret.fileId)) continue;
     if (ret.matchedFacturaFileId && ret.matchedFacturaFileId !== factura.fileId) continue;
     if (ret.cuitAgenteRetencion !== factura.cuitReceptor) continue;
 
     // Primary: montoComprobante matches importeTotal (same currency — retenciones are ARS)
     if (Math.abs(ret.montoComprobante - totalARS) <= tolerance) {
+      consumedRetencionIds.add(ret.fileId);
       return [ret];
     }
 
     // Secondary: recibido + retencion ≈ total
     if (recibidoARS !== undefined) {
       if (Math.abs(recibidoARS + ret.montoRetencion - totalARS) <= 1) {
+        consumedRetencionIds.add(ret.fileId);
         return [ret];
       }
     }
@@ -520,10 +533,17 @@ function composeNotas(opts: {
   retenciones: Retencion[];
   totalARS: number;
   revisar: boolean;
+  /** Shared set tracking pass-2-consumed retencion fileIds across the build loop (ADV-329). */
+  consumedRetencionIds: Set<string>;
 }): string {
-  const { factura, tipo, facturadorEntry, movimientoAgg, softPaid, pagosRecibidos, retenciones, totalARS, revisar } = opts;
+  const { factura, tipo, facturadorEntry, movimientoAgg, softPaid, pagosRecibidos, retenciones, totalARS, revisar, consumedRetencionIds } = opts;
 
-  if (tipo === 'NC') return '';
+  if (tipo === 'NC') {
+    // NC rows suppress all FC-specific note parts, but still emit the TC-faltante
+    // review marker when tipoDeCambio is missing/zero (ADV-327).
+    if (revisar) return '[REVISAR: TC faltante]';
+    return '';
+  }
 
   const parts: string[] = [];
 
@@ -571,7 +591,7 @@ function composeNotas(opts: {
   // 3. Retencion part — a factura can have multiple certificates (Ganancias +
   // IIBB on the same invoice). Append one note per matched retencion.
   const recibidoForMatch = movimientoAgg ? movimientoAgg.totalCredito : undefined;
-  const matchedRets = findMatchingRetenciones(factura, retenciones, recibidoForMatch, totalARS);
+  const matchedRets = findMatchingRetenciones(factura, retenciones, recibidoForMatch, totalARS, consumedRetencionIds);
   for (const ret of matchedRets) {
     parts.push(`Retencion ${ret.impuesto} ${formatARS(ret.montoRetencion)}`);
   }
@@ -750,6 +770,11 @@ export function buildSubdiarioRows(input: SubdiarioInput): SubdiarioRow[] {
     applyScopeFilter(f, currentYear, cancellingNCs, movimientos, pagosRecibidos)
   );
 
+  // Shared set for pass-2 retencion deduplication across the factura loop.
+  // Prevents the same unclaimed retencion from being attached to multiple
+  // FCs with the same CUIT+amount (ADV-329).
+  const consumedRetencionIds = new Set<string>();
+
   // Step 2: Build one SubdiarioRow per in-scope factura
   const rows: SubdiarioRow[] = [];
 
@@ -820,6 +845,7 @@ export function buildSubdiarioRows(input: SubdiarioInput): SubdiarioRow[] {
       retenciones: retencionesRecibidas,
       totalARS,
       revisar,
+      consumedRetencionIds,
     });
 
     // Movimiento HYPERLINK target (ADV-272): only hard-paid FCs get a URL — soft-paid,

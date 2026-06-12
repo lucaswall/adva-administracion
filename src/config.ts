@@ -134,6 +134,14 @@ export const MAX_FAILED_FILE_RETRIES = 3;
 export const RETRY_DELAYS_MS = [10000, 30000, 60000] as const;
 
 /**
+ * Google API timeout in milliseconds (ADV-289)
+ * Maximum time allowed for a single Google Sheets / Drive API call.
+ * Set to 60 seconds — long enough to tolerate network hiccups but short enough
+ * to surface stuck API calls before the processing lock expires.
+ */
+export const GOOGLE_API_TIMEOUT_MS = 60_000;
+
+/**
  * Fetch timeout in milliseconds
  * Maximum time allowed for a single fetch request to Gemini API
  * Set to 5 minutes to accommodate large PDF processing (300+ pages can take >3 minutes)

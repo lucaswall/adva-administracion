@@ -129,9 +129,22 @@ export function diffSubdiarioRows(
   let lastExistingRowIndex = -1;
   let commonKeyReordered = false;
 
+  // Desired-side duplicate detection (ADV-328). A duplicate (cod, nro) in
+  // the desired set would create real duplicate rows in the sheet — either
+  // two inserts at different positions, or two updates targeting the same
+  // rowIndex. Force full-rewrite so the sheet ends in a consistent state
+  // (only the first occurrence is considered; the duplicate is skipped).
+  let desiredDuplicateDetected = false;
+
   for (let i = 0; i < desired.length; i++) {
     const row = desired[i]!;
     const key = rowKey(row);
+
+    if (desiredKeys.has(key)) {
+      // Duplicate key in desired — skip this occurrence and flag for rewrite
+      desiredDuplicateDetected = true;
+      continue;
+    }
     desiredKeys.add(key);
 
     const existingRow = existingMap.get(key);
@@ -149,6 +162,7 @@ export function diffSubdiarioRows(
   }
 
   if (commonKeyReordered) sortInvariantViolated = true;
+  if (desiredDuplicateDetected) sortInvariantViolated = true;
 
   // ── 4. Walk existing to find rows no longer in desired ───────────────────
   const deleteIndices: number[] = [];

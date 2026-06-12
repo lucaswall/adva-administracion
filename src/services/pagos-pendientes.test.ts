@@ -6,6 +6,11 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { syncPagosPendientes, syncCobrosPendientes } from './pagos-pendientes.js';
 import * as sheets from './sheets.js';
 
+/** Helper: build a CellDate object for assertions (ADV-290) */
+function cd(value: string): { type: 'date'; value: string } {
+  return { type: 'date', value };
+}
+
 // Mock the sheets service
 vi.mock('./sheets.js', () => ({
   getValues: vi.fn(),
@@ -88,9 +93,9 @@ describe('syncPagosPendientes', () => {
       'dashboard456',
       'Pagos Pendientes!A:J',
       [
-        ['2024-01-15', 'file123', fileLink('file123', 'Factura-001.pdf'), 'A', '00001-00000001',
+        [cd('2024-01-15'), 'file123', fileLink('file123', 'Factura-001.pdf'), 'A', '00001-00000001',
          '20123456786', 'TEST SA', '1210', 'ARS', 'Servicios'],
-        ['2024-01-25', 'file789', fileLink('file789', 'Factura-003.pdf'), 'A', '00001-00000003',
+        [cd('2024-01-25'), 'file789', fileLink('file789', 'Factura-003.pdf'), 'A', '00001-00000003',
          '20111111119', 'Juan Perez', '605', 'ARS', 'Consultoría'],
       ],
       'America/Argentina/Buenos_Aires',
@@ -213,7 +218,7 @@ describe('syncPagosPendientes', () => {
       'Pagos Pendientes!A:J',
       [
         [
-          '2024-01-15',
+          cd('2024-01-15'),
           'file123',
           fileLink('file123', 'Factura-001.pdf'),
           'A',
@@ -246,7 +251,7 @@ describe('syncPagosPendientes', () => {
       'dashboard456',
       'Pagos Pendientes!A:J',
       expect.arrayContaining([
-        expect.arrayContaining(['2024-01-15', 'file123']),
+        expect.arrayContaining([cd('2024-01-15'), 'file123']),
       ]),
       'America/Argentina/Buenos_Aires',
     );
@@ -300,11 +305,11 @@ describe('syncPagosPendientes', () => {
       'dashboard456',
       'Pagos Pendientes!A:J',
       [
-        ['2024-01-10', 'file123', fileLink('file123', 'Factura-001.pdf'), 'A', '00001-00000001',
+        [cd('2024-01-10'), 'file123', fileLink('file123', 'Factura-001.pdf'), 'A', '00001-00000001',
          '20123456786', 'PROVEEDOR A', '1210', 'ARS', 'First'],
-        ['2024-01-18', 'file456', fileLink('file456', 'Factura-002.pdf'), 'B', '00001-00000002',
+        [cd('2024-01-18'), 'file456', fileLink('file456', 'Factura-002.pdf'), 'B', '00001-00000002',
          '27234567891', 'PROVEEDOR B', '2420', 'ARS', 'Second'],
-        ['2024-01-25', 'file789', fileLink('file789', 'Factura-003.pdf'), 'A', '00001-00000003',
+        [cd('2024-01-25'), 'file789', fileLink('file789', 'Factura-003.pdf'), 'A', '00001-00000003',
          '20111111119', 'PROVEEDOR C', '605', 'ARS', 'Third'],
       ],
       'America/Argentina/Buenos_Aires',
@@ -351,9 +356,9 @@ describe('syncPagosPendientes', () => {
 
     const writeCall = vi.mocked(sheets.appendRowsWithLinks).mock.calls[0];
     const writtenRows = writeCall[2];
-    expect(writtenRows[0][0]).toBe('2024-11-02');
-    expect(writtenRows[1][0]).toBe('2024-12-02');
-    expect(writtenRows[2][0]).toBe('2025-01-02');
+    expect(writtenRows[0][0]).toEqual(cd('2024-11-02'));
+    expect(writtenRows[1][0]).toEqual(cd('2024-12-02'));
+    expect(writtenRows[2][0]).toEqual(cd('2025-01-02'));
   });
 
   it('should convert serial number fechaEmision to date string before writing', async () => {
@@ -372,7 +377,7 @@ describe('syncPagosPendientes', () => {
 
     const writeCall = vi.mocked(sheets.appendRowsWithLinks).mock.calls[0];
     const writtenRow = writeCall[2][0];
-    expect(writtenRow[0]).toBe('2025-12-02');
+    expect(writtenRow[0]).toEqual(cd('2025-12-02'));
   });
 
   it('should skip empty rows in source (blank-row leak fix)', async () => {
@@ -513,9 +518,9 @@ describe('syncCobrosPendientes', () => {
       'dashboard456',
       'Cobros Pendientes!A:J',
       [
-        ['2024-01-15', 'file123', fileLink('file123', 'Factura-001.pdf'), 'FA', '00001-00000001',
+        [cd('2024-01-15'), 'file123', fileLink('file123', 'Factura-001.pdf'), 'FA', '00001-00000001',
          '20123456786', 'TEST SA', '1210', 'ARS', 'Servicios'],
-        ['2024-01-25', 'file789', fileLink('file789', 'Factura-003.pdf'), 'FA', '00001-00000003',
+        [cd('2024-01-25'), 'file789', fileLink('file789', 'Factura-003.pdf'), 'FA', '00001-00000003',
          '20111111119', 'Juan Perez', '605', 'ARS', 'Consultoría'],
       ],
       'America/Argentina/Buenos_Aires',
@@ -539,7 +544,7 @@ describe('syncCobrosPendientes', () => {
       'Cobros Pendientes!A:J',
       [
         [
-          '2024-01-15',
+          cd('2024-01-15'),
           'file123',
           fileLink('file123', 'Factura-001.pdf'),
           'FA',
@@ -639,11 +644,11 @@ describe('syncCobrosPendientes', () => {
       'dashboard456',
       'Cobros Pendientes!A:J',
       [
-        ['2024-01-10', 'file123', fileLink('file123', 'Factura-001.pdf'), 'FA', '00001-00000001',
+        [cd('2024-01-10'), 'file123', fileLink('file123', 'Factura-001.pdf'), 'FA', '00001-00000001',
          '20123456786', 'CLIENTE A', '1210', 'ARS', 'First'],
-        ['2024-01-18', 'file456', fileLink('file456', 'Factura-002.pdf'), 'FB', '00001-00000002',
+        [cd('2024-01-18'), 'file456', fileLink('file456', 'Factura-002.pdf'), 'FB', '00001-00000002',
          '27234567891', 'CLIENTE B', '2420', 'ARS', 'Second'],
-        ['2024-01-25', 'file789', fileLink('file789', 'Factura-003.pdf'), 'FA', '00001-00000003',
+        [cd('2024-01-25'), 'file789', fileLink('file789', 'Factura-003.pdf'), 'FA', '00001-00000003',
          '20111111119', 'CLIENTE C', '605', 'ARS', 'Third'],
       ],
       'America/Argentina/Buenos_Aires',
@@ -821,5 +826,159 @@ describe('syncCobrosPendientes', () => {
 
       expect(operationOrder).toEqual(['clear', 'append']);
     });
+  });
+});
+
+// ─── ADV-326: Exclude NC/ND from Pagos Pendientes ────────────────────────────
+
+describe('syncPagosPendientes — ADV-326: NC/ND exclusion', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    setupSheetsMocks();
+  });
+
+  it('NC A unpaid row does not appear in Pagos Pendientes', async () => {
+    const data = [
+      FACTURAS_RECIBIDAS_HEADERS,
+      ['2024-01-15', 'file-nc', 'NC-001.pdf', 'NC A', '00001-00000001', '20123456786',
+       'TEST SA', '1000', '210', '1210', 'ARS', 'Nota de Crédito',
+       '2024-01-16T10:00:00Z', '0.95', 'NO', '', '', 'NO', 'NO'],
+      ['2024-01-20', 'file-fa', 'Factura-001.pdf', 'A', '00001-00000002', '20123456786',
+       'TEST SA', '2000', '420', '2420', 'ARS', 'Servicios',
+       '2024-01-21T10:00:00Z', '0.95', 'NO', '', '', 'NO', 'NO'],
+    ];
+    vi.mocked(sheets.getValues).mockResolvedValue({ ok: true, value: data });
+
+    const result = await syncPagosPendientes('egresos123', 'dashboard456');
+
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value).toBe(1);
+    const writeCall = vi.mocked(sheets.appendRowsWithLinks).mock.calls[0];
+    expect(writeCall[2]).toHaveLength(1);
+    expect(writeCall[2][0][1]).toBe('file-fa');
+  });
+
+  it('ND B unpaid row does not appear in Pagos Pendientes', async () => {
+    const data = [
+      FACTURAS_RECIBIDAS_HEADERS,
+      ['2024-01-15', 'file-nd', 'ND-001.pdf', 'ND B', '00001-00000001', '20123456786',
+       'TEST SA', '1000', '210', '1210', 'ARS', 'Nota de Débito',
+       '2024-01-16T10:00:00Z', '0.95', 'NO', '', '', 'NO', 'NO'],
+    ];
+    vi.mocked(sheets.getValues).mockResolvedValue({ ok: true, value: data });
+
+    const result = await syncPagosPendientes('egresos123', 'dashboard456');
+
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value).toBe(0);
+    expect(sheets.appendRowsWithLinks).not.toHaveBeenCalled();
+  });
+
+  it('regular A unpaid row still appears', async () => {
+    const data = [
+      FACTURAS_RECIBIDAS_HEADERS,
+      ['2024-01-15', 'file-a', 'Factura-001.pdf', 'A', '00001-00000001', '20123456786',
+       'TEST SA', '1000', '210', '1210', 'ARS', 'Servicios',
+       '2024-01-16T10:00:00Z', '0.95', 'NO', '', '', 'NO', 'NO'],
+    ];
+    vi.mocked(sheets.getValues).mockResolvedValue({ ok: true, value: data });
+
+    const result = await syncPagosPendientes('egresos123', 'dashboard456');
+
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value).toBe(1);
+  });
+
+  it('empty tipoComprobante cell → row still included', async () => {
+    const data = [
+      FACTURAS_RECIBIDAS_HEADERS,
+      ['2024-01-15', 'file-empty', 'Factura-001.pdf', '', '00001-00000001', '20123456786',
+       'TEST SA', '1000', '210', '1210', 'ARS', 'Servicios',
+       '2024-01-16T10:00:00Z', '0.95', 'NO', '', '', 'NO', 'NO'],
+    ];
+    vi.mocked(sheets.getValues).mockResolvedValue({ ok: true, value: data });
+
+    const result = await syncPagosPendientes('egresos123', 'dashboard456');
+
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value).toBe(1);
+  });
+});
+
+// ─── ADV-290: fechaEmision written as CellDate ────────────────────────────────
+
+describe('syncPagosPendientes — ADV-290: fechaEmision as CellDate', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    setupSheetsMocks();
+  });
+
+  it('row[0] equals CellDate form of parsed string date', async () => {
+    const data = [
+      FACTURAS_RECIBIDAS_HEADERS,
+      ['2025-12-02', 'file123', 'Factura-001.pdf', 'A', '00001-00000001', '20123456786',
+       'TEST SA', '1000', '210', '1210', 'ARS', 'Servicios',
+       '2025-12-02T10:00:00Z', '0.95', 'NO', '', '', 'NO', 'NO'],
+    ];
+    vi.mocked(sheets.getValues).mockResolvedValue({ ok: true, value: data });
+
+    await syncPagosPendientes('egresos123', 'dashboard456');
+
+    const writeCall = vi.mocked(sheets.appendRowsWithLinks).mock.calls[0];
+    expect(writeCall[2][0][0]).toEqual(cd('2025-12-02'));
+  });
+
+  it('row[0] equals CellDate form of serial number fechaEmision', async () => {
+    const data = [
+      FACTURAS_RECIBIDAS_HEADERS,
+      [45993, 'file123', 'Factura-001.pdf', 'A', '00001-00000001', '20123456786',
+       'TEST SA', '1000', '210', '1210', 'ARS', 'Servicios',
+       '2025-12-02T10:00:00Z', '0.95', 'NO', '', '', 'NO', 'NO'],
+    ];
+    vi.mocked(sheets.getValues).mockResolvedValue({ ok: true, value: data });
+
+    await syncPagosPendientes('egresos123', 'dashboard456');
+
+    const writeCall = vi.mocked(sheets.appendRowsWithLinks).mock.calls[0];
+    expect(writeCall[2][0][0]).toEqual(cd('2025-12-02'));
+  });
+
+  it('row whose fechaEmision normalizes to empty is filtered out (never a malformed CellDate)', async () => {
+    // Rows with empty fechaEmision are filtered out entirely — no '' CellDate is emitted.
+    const data = [
+      FACTURAS_RECIBIDAS_HEADERS,
+      ['', 'file-blank', 'Factura.pdf', 'A', '00001-00000001', '20123456786',
+       'TEST SA', '1000', '210', '1210', 'ARS', 'Servicios',
+       '2025-12-02T10:00:00Z', '0.95', 'NO', '', '', 'NO', 'NO'],
+    ];
+    vi.mocked(sheets.getValues).mockResolvedValue({ ok: true, value: data });
+
+    const result = await syncPagosPendientes('egresos123', 'dashboard456');
+
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value).toBe(0);
+    expect(sheets.appendRowsWithLinks).not.toHaveBeenCalled();
+  });
+});
+
+describe('syncCobrosPendientes — ADV-290: fechaEmision as CellDate', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    setupSheetsMocks();
+  });
+
+  it('row[0] equals CellDate form of parsed date (cobros dashboard)', async () => {
+    const data = [
+      FACTURAS_EMITIDAS_HEADERS,
+      ['2025-12-02', 'file123', 'Factura-001.pdf', 'FA', '00001-00000001', '20123456786',
+       'TEST SA', '1000', '210', '1210', 'ARS', 'Servicios',
+       '2025-12-02T10:00:00Z', '0.95', 'NO', '', '', 'NO', 'NO', ''],
+    ];
+    vi.mocked(sheets.getValues).mockResolvedValue({ ok: true, value: data });
+
+    await syncCobrosPendientes('ingresos123', 'dashboard456');
+
+    const writeCall = vi.mocked(sheets.appendRowsWithLinks).mock.calls[0];
+    expect(writeCall[2][0][0]).toEqual(cd('2025-12-02'));
   });
 });

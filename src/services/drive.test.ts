@@ -1006,3 +1006,58 @@ describe('Drive API timing (ADV-216)', () => {
     );
   });
 });
+
+describe('ADV-289: Google API timeout passed to Drive API calls', () => {
+  let mockDriveFiles: {
+    list: ReturnType<typeof vi.fn>;
+    get: ReturnType<typeof vi.fn>;
+    create: ReturnType<typeof vi.fn>;
+    update: ReturnType<typeof vi.fn>;
+    copy: ReturnType<typeof vi.fn>;
+    delete: ReturnType<typeof vi.fn>;
+  };
+
+  beforeEach(() => {
+    clearDriveCache();
+    mockDriveFiles = {
+      list: vi.fn(),
+      get: vi.fn(),
+      create: vi.fn(),
+      update: vi.fn(),
+      copy: vi.fn(),
+      delete: vi.fn(),
+    };
+    vi.mocked(google.drive).mockReturnValue({
+      files: mockDriveFiles,
+    } as unknown as ReturnType<typeof google.drive>);
+  });
+
+  it('listFilesInFolder passes timeout option to drive.files.list', async () => {
+    // Return empty folder (no pagination)
+    mockDriveFiles.list.mockResolvedValue({
+      data: { files: [], nextPageToken: undefined },
+    });
+
+    const result = await listFilesInFolder('folder123');
+    expect(result.ok).toBe(true);
+
+    expect(mockDriveFiles.list).toHaveBeenCalledWith(
+      expect.objectContaining({ q: expect.stringContaining('folder123') }),
+      expect.objectContaining({ timeout: 60_000 })
+    );
+  });
+
+  it('downloadFile passes timeout option to drive.files.get', async () => {
+    mockDriveFiles.get.mockResolvedValue({
+      data: Buffer.from('file-bytes'),
+    });
+
+    const result = await downloadFile('file456');
+    expect(result.ok).toBe(true);
+
+    expect(mockDriveFiles.get).toHaveBeenCalledWith(
+      expect.objectContaining({ fileId: 'file456' }),
+      expect.objectContaining({ timeout: 60_000 })
+    );
+  });
+});

@@ -55,7 +55,11 @@ export function normalizeNroComprobante(raw: string): string {
   }
   const pto = trimmed.substring(0, dashIdx);
   const numero = trimmed.substring(dashIdx + 1);
-  return `${pto.padStart(5, '0')}-${numero.padStart(8, '0')}`;
+  // ADV-350: strip existing leading zeros before re-padding to target width,
+  // so over-padded inputs like '000005-000000057' normalize correctly.
+  const normalizedPto = pto.replace(/^0+/, '').padStart(5, '0');
+  const normalizedNumero = numero.replace(/^0+/, '').padStart(8, '0');
+  return `${normalizedPto}-${normalizedNumero}`;
 }
 
 /**
@@ -86,13 +90,23 @@ export async function readFacturador(
 
   const valuesResult = await getValues(spreadsheetId, range);
   if (!valuesResult.ok) {
-    warn(`Facturador tab "${tabName}" not found or unreadable — skipping Facturador read`, {
-      module: 'facturador-reader',
-      spreadsheetId,
-      tab: tabName,
-      error: valuesResult.error.message,
-    });
-    return { ok: true, value: new Map() };
+    // ADV-330: distinguish tab-missing (400 "Unable to parse range") from real
+    // API errors (quota, 5xx, auth). Only tab-missing is treated as ok-empty;
+    // all other failures propagate as ok:false so callers can surface them.
+    const isTabMissing = valuesResult.error.message.includes('Unable to parse range');
+    if (isTabMissing) {
+      warn(`Facturador tab "${tabName}" not found — skipping Facturador read`, {
+        module: 'facturador-reader',
+        spreadsheetId,
+        tab: tabName,
+        error: valuesResult.error.message,
+      });
+      return { ok: true, value: new Map() };
+    }
+    return {
+      ok: false,
+      error: valuesResult.error,
+    };
   }
 
   const data = valuesResult.value;

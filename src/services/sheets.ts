@@ -9,6 +9,7 @@ import type { Result, SubdiarioRow, SubdiarioDiff } from '../types/index.js';
 import { withQuotaRetry, withLock, withLockResult } from '../utils/concurrency.js';
 import { sanitizeForSpreadsheet } from '../utils/spreadsheet.js';
 import { debug, warn } from '../utils/logger.js';
+import { GOOGLE_API_TIMEOUT_MS } from '../config.js';
 
 /**
  * Slow-call threshold: warn if a Sheets API call exceeds this duration.
@@ -235,7 +236,7 @@ export async function getValues(
       range,
       valueRenderOption: 'UNFORMATTED_VALUE',
       dateTimeRenderOption: 'SERIAL_NUMBER',
-    });
+    }, { timeout: GOOGLE_API_TIMEOUT_MS });
     return response.data.values || [];
   }).then(result => {
     if (!result.ok) return { ok: false, error: result.error };
@@ -1234,7 +1235,7 @@ export async function appendRowsWithLinks(
             },
           ],
         },
-      });
+      }, { timeout: GOOGLE_API_TIMEOUT_MS });
 
       // Step 3: Validate the response — defence in depth against silent
       // partial failures from the Sheets API. A successful appendCells
@@ -1652,90 +1653,104 @@ export async function appendRowsWithFormatting(
   timeZone?: string,
   metadataCache?: import('../processing/caches/index.js').MetadataCache
 ): Promise<Result<number, Error>> {
-  // Single retry wrapper for ENTIRE operation
-  return withQuotaRetry(async () => {
-    // Parse sheet name from range (e.g., 'Sheet1!A:Z' -> 'Sheet1')
-    const sheetName = range.split('!')[0];
+  // ADV-288: parse sheet name BEFORE acquiring the lock so the lock key is stable.
+  const sheetName = range.split('!')[0];
+  const lockKey = `sheet-append:${spreadsheetId}:${sheetName}`;
 
-    // Step 1: Get metadata (NO retry wrapper)
-    // Use cache if provided, otherwise direct call
-    const metadataResult = metadataCache
-      ? await metadataCache.get(spreadsheetId)
-      : await getSheetMetadataInternal(spreadsheetId);
-    if (!metadataResult.ok) {
-      throw metadataResult.error; // Convert to exception for retry
-    }
+  return withLockResult(
+    lockKey,
+    () => withQuotaRetry(async () => {
+      // Step 1: Get metadata (NO retry wrapper)
+      // Use cache if provided, otherwise direct call
+      const metadataResult = metadataCache
+        ? await metadataCache.get(spreadsheetId)
+        : await getSheetMetadataInternal(spreadsheetId);
+      if (!metadataResult.ok) {
+        throw metadataResult.error; // Convert to exception for retry
+      }
 
-    const sheet = metadataResult.value.find(s => s.title === sheetName);
-    if (!sheet) {
-      throw new Error(`Sheet not found: ${sheetName}`);
-    }
+      const sheet = metadataResult.value.find(s => s.title === sheetName);
+      if (!sheet) {
+        throw new Error(`Sheet not found: ${sheetName}`);
+      }
 
-    // Convert rows to Sheets API format with explicit non-bold formatting
-    const rows: sheets_v4.Schema$RowData[] = values.map(rowValues => ({
-      values: rowValues.map(value => {
-        const cellData: sheets_v4.Schema$CellData = {
-          userEnteredFormat: {
-            textFormat: {
-              bold: false,
+      // Convert rows to Sheets API format with explicit non-bold formatting
+      const rows: sheets_v4.Schema$RowData[] = values.map(rowValues => ({
+        values: rowValues.map(value => {
+          const cellData: sheets_v4.Schema$CellData = {
+            userEnteredFormat: {
+              textFormat: {
+                bold: false,
+              },
             },
-          },
-        };
-
-        if (value === null || value === undefined) {
-          cellData.userEnteredValue = { stringValue: '' };
-        } else if (value instanceof Date) {
-          // Convert Date to serial number for Sheets
-          // If timezone is provided, convert to that timezone first
-          const serialNumber = timeZone
-            ? dateToSerialInTimezone(value, timeZone)
-            : (value.getTime() - new Date(Date.UTC(1899, 11, 30)).getTime()) / (1000 * 60 * 60 * 24);
-          cellData.userEnteredValue = { numberValue: serialNumber };
-          cellData.userEnteredFormat!.numberFormat = {
-            type: 'DATE_TIME',
-            pattern: 'yyyy-mm-dd hh:mm:ss',
           };
-        } else if (isCellFormula(value)) {
-          // Explicit formula - bypasses sanitization for trusted internal formulas
-          cellData.userEnteredValue = { formulaValue: value.value };
-        } else if (typeof value === 'string') {
-          // Always insert as plain string - prevents formula injection
-          cellData.userEnteredValue = { stringValue: value };
-        } else if (typeof value === 'number') {
-          cellData.userEnteredValue = { numberValue: value };
-        } else if (typeof value === 'boolean') {
-          cellData.userEnteredValue = { boolValue: value };
-        }
 
-        return cellData;
-      }),
-    }));
+          if (value === null || value === undefined) {
+            cellData.userEnteredValue = { stringValue: '' };
+          } else if (value instanceof Date) {
+            // Convert Date to serial number for Sheets
+            // If timezone is provided, convert to that timezone first
+            const serialNumber = timeZone
+              ? dateToSerialInTimezone(value, timeZone)
+              : (value.getTime() - new Date(Date.UTC(1899, 11, 30)).getTime()) / (1000 * 60 * 60 * 24);
+            cellData.userEnteredValue = { numberValue: serialNumber };
+            cellData.userEnteredFormat!.numberFormat = {
+              type: 'DATE_TIME',
+              pattern: 'yyyy-mm-dd hh:mm:ss',
+            };
+          } else if (isCellFormula(value)) {
+            // Explicit formula - bypasses sanitization for trusted internal formulas
+            cellData.userEnteredValue = { formulaValue: value.value };
+          } else if (typeof value === 'string') {
+            // Always insert as plain string - prevents formula injection
+            cellData.userEnteredValue = { stringValue: value };
+          } else if (typeof value === 'number') {
+            cellData.userEnteredValue = { numberValue: value };
+          } else if (typeof value === 'boolean') {
+            cellData.userEnteredValue = { boolValue: value };
+          }
 
-    // Step 2: Use batchUpdate with appendCells to support formatting (in same retry scope)
-    const sheets = await getSheetsService();
-    await sheets.spreadsheets.batchUpdate({
-      spreadsheetId,
-      requestBody: {
-        requests: [
-          {
-            appendCells: {
-              sheetId: sheet.sheetId,
-              rows,
-              fields: '*',
+          return cellData;
+        }),
+      }));
+
+      // Step 2: Use batchUpdate with appendCells to support formatting (in same retry scope)
+      const sheets = await getSheetsService();
+      const response = await sheets.spreadsheets.batchUpdate({
+        spreadsheetId,
+        requestBody: {
+          requests: [
+            {
+              appendCells: {
+                sheetId: sheet.sheetId,
+                rows,
+                fields: '*',
+              },
             },
-          },
-        ],
-      },
-    });
+          ],
+        },
+      }, { timeout: GOOGLE_API_TIMEOUT_MS });
 
-    // Calculate total cells appended
-    return rows.reduce((total, row) => {
-      return total + (row.values?.length || 0);
-    }, 0);
-  }).then(result => {
-    if (!result.ok) return { ok: false, error: result.error };
-    return { ok: true, value: result.value };
-  });
+      // ADV-288: validate the response — defence in depth against silent partial
+      // failures. A successful appendCells returns replies[0] as `{}` (no
+      // structured payload). A missing or falsy entry means the request was
+      // not applied; throw so withQuotaRetry retries.
+      const replies = response.data?.replies;
+      if (!Array.isArray(replies) || replies.length === 0 || !replies[0]) {
+        throw new Error(
+          `appendCells did not return a confirmation reply for ${sheetName} ` +
+          `(spreadsheetId=${spreadsheetId}, rows=${rows.length})`
+        );
+      }
+
+      // Calculate total cells appended
+      return rows.reduce((total, row) => {
+        return total + (row.values?.length || 0);
+      }, 0);
+    }),
+    APPEND_LOCK_WAIT_TIMEOUT_MS,
+    APPEND_LOCK_AUTO_EXPIRY_MS,
+  );
 }
 
 /**
