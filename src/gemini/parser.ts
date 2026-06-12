@@ -6,6 +6,7 @@ import type { Factura, Pago, Recibo, ResumenBancario, ResumenTarjeta, ResumenBro
 import { ParseError } from '../types/index.js';
 import { warn } from '../utils/logger.js';
 import { normalizeBankName } from '../utils/bank-names.js';
+import { isValidCuit, isValidDni } from '../utils/validation.js';
 
 /** ADVA's CUIT - used for role validation and CUIT assignment */
 const ADVA_CUIT = '30709076783';
@@ -35,7 +36,7 @@ const MAX_JSON_SIZE = 1_000_000;
  * - `(?=.*D\.?E\.?S\.?)` - Lookahead for desarrolladores abbreviation
  *   Matches: DES, D.E.S., DESARROLL, DES., etc.
  */
-const ADVA_NAME_PATTERN = /ADVA|(?=.*VIDEOJUEGO)(?=.*(?:A\.?[SC]\.?|A\.?DE))(?=.*D\.?E\.?S\.?)/i;
+const ADVA_NAME_PATTERN = /\bADVA\b|(?=.*VIDEOJUEGO)(?=.*(?:A\.?[SC]\.?|A\.?DE))(?=.*D\.?E\.?S\.?)/i;
 
 /**
  * Normalizes a CUIT by removing dashes, spaces, and slashes.
@@ -44,7 +45,7 @@ const ADVA_NAME_PATTERN = /ADVA|(?=.*VIDEOJUEGO)(?=.*(?:A\.?[SC]\.?|A\.?DE))(?=.
  * @returns Normalized 11-digit CUIT string
  */
 export function normalizeCuit(cuit: string): string {
-  return cuit.replace(/[-\s/]/g, '');
+  return cuit.replace(/[-\s/.]/g, '');
 }
 
 /**
@@ -71,6 +72,11 @@ interface CuitAssignmentResult {
   cuitReceptor: string;
   /** Receptor name */
   razonSocialReceptor: string;
+  /**
+   * True when the classification used an ambiguous fallback (CUIT-position
+   * heuristic or both names matching ADVA).  Callers should set needsReview.
+   */
+  ambiguous?: boolean;
 }
 
 /**
@@ -94,9 +100,14 @@ export function assignCuitsAndClassify(
   const advaIsIssuer = isAdvaName(issuerName);
   const advaIsClient = isAdvaName(clientName);
 
-  // Find the "other" CUIT (not ADVA's) - CUITs should already be normalized by caller
-  // Validate length: Argentine IDs are 7-11 digits (DNI: 7-8, CUIT/CUIL: 11)
-  const otherCuit = allCuits.find(c => c !== ADVA_CUIT && c.length >= 7 && c.length <= 11) || '';
+  // Normalize all CUIT candidates by removing formatting chars (dots, dashes, spaces, slashes).
+  // This ensures dotted CUITs like "20.123.456.786" are validated correctly.
+  const normalizedCandidates = allCuits.map(c => c.replace(/[-\s/.]/g, ''));
+
+  // Find the counterparty ID: prefer a valid CUIT (11-digit, passes checksum) over a DNI (7-8 digits).
+  const validCounterpartyCuit = normalizedCandidates.find(c => c !== ADVA_CUIT && isValidCuit(c)) ?? '';
+  const validCounterpartyDni = normalizedCandidates.find(c => c !== ADVA_CUIT && isValidDni(c)) ?? '';
+  const otherCuit = validCounterpartyCuit || validCounterpartyDni;
 
   if (advaIsIssuer && !advaIsClient) {
     // factura_emitida - ADVA created this invoice
@@ -117,8 +128,7 @@ export function assignCuitsAndClassify(
       razonSocialReceptor: clientName,
     };
   } else if (advaIsIssuer && advaIsClient) {
-    // Both match ADVA - unusual but could happen with internal documents
-    // Default to factura_emitida since ADVA is the issuer
+    // Both match ADVA — unusual; flag as ambiguous so the caller can request human review.
     warn('Both issuer and client names match ADVA pattern', {
       module: 'gemini-parser',
       phase: 'cuit-assignment',
@@ -131,12 +141,13 @@ export function assignCuitsAndClassify(
       razonSocialEmisor: issuerName,
       cuitReceptor: otherCuit,
       razonSocialReceptor: clientName,
+      ambiguous: true,
     };
   }
 
-  // ADVA not found in either name - try CUIT-based fallback
-  // If ADVA's CUIT is present, use its position to determine role
-  const advaCuitIndex = allCuits.indexOf(ADVA_CUIT);
+  // ADVA not found in either name - try CUIT-based positional fallback.
+  // If ADVA's CUIT is present in the array, use its position to infer the role.
+  const advaCuitIndex = normalizedCandidates.indexOf(ADVA_CUIT);
   if (advaCuitIndex !== -1) {
     warn('Name matching failed, using CUIT fallback for ADVA role detection', {
       module: 'gemini-parser',
@@ -154,6 +165,7 @@ export function assignCuitsAndClassify(
         razonSocialEmisor: issuerName,
         cuitReceptor: otherCuit,
         razonSocialReceptor: clientName,
+        ambiguous: true,
       };
     } else {
       // ADVA CUIT is not first - ADVA is the client (factura_recibida)
@@ -163,6 +175,7 @@ export function assignCuitsAndClassify(
         razonSocialEmisor: issuerName,
         cuitReceptor: ADVA_CUIT,
         razonSocialReceptor: clientName,
+        ambiguous: true,
       };
     }
   }
@@ -185,15 +198,32 @@ function isTruncated(response: string): boolean {
   const endsWithValidJson = lastChar === '}' || lastChar === ']';
 
   if (!endsWithValidJson) {
-    // Count opening and closing braces/brackets
+    // Count opening and closing braces/brackets (string-aware: skip chars inside quoted strings)
     let braceCount = 0;
     let bracketCount = 0;
+    let inString = false;
 
-    for (const char of trimmed) {
-      if (char === '{') braceCount++;
-      if (char === '}') braceCount--;
-      if (char === '[') bracketCount++;
-      if (char === ']') bracketCount--;
+    for (let i = 0; i < trimmed.length; i++) {
+      const ch = trimmed[i];
+      if (inString) {
+        if (ch === '\\') {
+          i++; // skip escaped character
+        } else if (ch === '"') {
+          inString = false;
+        }
+      } else {
+        if (ch === '"') {
+          inString = true;
+        } else if (ch === '{') {
+          braceCount++;
+        } else if (ch === '}') {
+          braceCount--;
+        } else if (ch === '[') {
+          bracketCount++;
+        } else if (ch === ']') {
+          bracketCount--;
+        }
+      }
     }
 
     // If there are unmatched opening braces/brackets, likely truncated
@@ -254,15 +284,31 @@ export function extractJSON(response: string): ExtractJSONResult {
 
   // Check if it starts with { (likely JSON)
   if (trimmed.startsWith('{')) {
-    // Find the matching closing brace
+    // Find the matching closing brace — use string-aware scanning so that
+    // '}' characters inside quoted string values do not close the object.
     let braceCount = 0;
     let endIndex = 0;
+    let inString = false;
     for (let i = 0; i < trimmed.length; i++) {
-      if (trimmed[i] === '{') braceCount++;
-      if (trimmed[i] === '}') braceCount--;
-      if (braceCount === 0) {
-        endIndex = i + 1;
-        break;
+      const ch = trimmed[i];
+      if (inString) {
+        if (ch === '\\') {
+          i++; // skip escaped character (e.g. \" \\ \/)
+        } else if (ch === '"') {
+          inString = false;
+        }
+      } else {
+        if (ch === '"') {
+          inString = true;
+        } else if (ch === '{') {
+          braceCount++;
+        } else if (ch === '}') {
+          braceCount--;
+          if (braceCount === 0) {
+            endIndex = i + 1;
+            break;
+          }
+        }
       }
     }
     if (endIndex > 0) {
@@ -406,6 +452,17 @@ const VALID_CONDICION_IVA: readonly string[] = [
   'IVA Sujeto Exento',
 ];
 
+/** Valid tipoComprobante values (ADV-286) */
+const VALID_TIPO_COMPROBANTE: readonly string[] = [
+  'A', 'B', 'C', 'E',
+  'NC', 'NC A', 'NC B', 'NC C', 'NC E',
+  'ND', 'ND A', 'ND B', 'ND C', 'ND E',
+  'LP',
+];
+
+/** Valid moneda (currency) values */
+const VALID_MONEDA: readonly string[] = ['ARS', 'USD'];
+
 /**
  * Parses a Gemini response for factura data
  *
@@ -463,6 +520,9 @@ export function parseFacturaResponse(
     let data: Partial<Factura>;
     let actualDocumentType: 'factura_emitida' | 'factura_recibida' = expectedDocumentType;
     let hasInvalidCondicionIVA = false;
+    let hasInvalidTipoComprobante = false;
+    let hasInvalidMoneda = false;
+    let assignmentAmbiguous = false;
 
     // Assign CUITs based on ADVA name matching
     const issuerName = rawData.issuerName || '';
@@ -475,24 +535,47 @@ export function parseFacturaResponse(
     try {
       const assignment = assignCuitsAndClassify(issuerName, clientName, normalizedCuits);
       actualDocumentType = assignment.documentType;
+      assignmentAmbiguous = assignment.ambiguous ?? false;
 
       // Validate tipoDeCambio: only positive numbers are valid
       const tipoDeCambio = typeof rawData.tipoDeCambio === 'number' && rawData.tipoDeCambio > 0
         ? rawData.tipoDeCambio
         : undefined;
 
+      // Validate tipoComprobante at AI boundary (ADV-286): unknown values → undefined + review
+      const rawTipoComprobante = rawData.tipoComprobante;
+      const tipoComprobante = (rawTipoComprobante !== undefined && VALID_TIPO_COMPROBANTE.includes(rawTipoComprobante))
+        ? rawTipoComprobante as Factura['tipoComprobante']
+        : undefined;
+      hasInvalidTipoComprobante = rawTipoComprobante !== undefined && tipoComprobante === undefined;
+
+      // Validate moneda at AI boundary (ADV-286): unknown values → undefined + review
+      const rawMoneda = rawData.moneda;
+      const moneda = (rawMoneda !== undefined && VALID_MONEDA.includes(rawMoneda))
+        ? rawMoneda as Factura['moneda']
+        : undefined;
+      hasInvalidMoneda = rawMoneda !== undefined && moneda === undefined;
+
+      // Validate monetary fields (ADV-317): must be finite numbers, not strings
+      const importeNeto = (typeof rawData.importeNeto === 'number' && Number.isFinite(rawData.importeNeto))
+        ? rawData.importeNeto : undefined;
+      const importeIva = (typeof rawData.importeIva === 'number' && Number.isFinite(rawData.importeIva))
+        ? rawData.importeIva : undefined;
+      const importeTotal = (typeof rawData.importeTotal === 'number' && Number.isFinite(rawData.importeTotal))
+        ? rawData.importeTotal : undefined;
+
       data = {
-        tipoComprobante: rawData.tipoComprobante as Factura['tipoComprobante'],
+        tipoComprobante,
         nroFactura: rawData.nroFactura,
         fechaEmision: rawData.fechaEmision,
         cuitEmisor: assignment.cuitEmisor,
         razonSocialEmisor: assignment.razonSocialEmisor,
         cuitReceptor: assignment.cuitReceptor || undefined,
         razonSocialReceptor: assignment.razonSocialReceptor || undefined,
-        importeNeto: rawData.importeNeto,
-        importeIva: rawData.importeIva,
-        importeTotal: rawData.importeTotal,
-        moneda: rawData.moneda as Factura['moneda'],
+        importeNeto,
+        importeIva,
+        importeTotal,
+        moneda,
         tipoDeCambio,
         concepto: rawData.concepto,
       };
@@ -575,8 +658,18 @@ export function parseFacturaResponse(
     const completeness = (requiredFields.length - missingFields.length) / requiredFields.length;
     let confidence = completeness; // No artificial floor - let completeness drive confidence
 
-    // If confidence > 0.9, no review needed; otherwise check for issues
-    let needsReview = confidence <= 0.9 && (missingFields.length > 0 || hasSuspiciousEmptyFields);
+    // hasSuspiciousEmptyFields triggers needsReview independently of confidence (ADV-336)
+    let needsReview = (confidence <= 0.9 && missingFields.length > 0) || hasSuspiciousEmptyFields;
+
+    // Invalid enum values → needsReview (ADV-286)
+    if (hasInvalidTipoComprobante || hasInvalidMoneda) {
+      needsReview = true;
+    }
+
+    // CUIT-position fallback / both-names-ADVA ambiguity → needsReview (ADV-337)
+    if (assignmentAmbiguous) {
+      needsReview = true;
+    }
 
     // CRITICAL: For factura_emitida, empty cuitReceptor indicates Consumidor Final or extraction failure
     // Flag for review to ensure human verification and significantly lower confidence
@@ -676,6 +769,22 @@ export function parsePagoResponse(
     // Parse JSON
     const data = JSON.parse(jsonStr) as Partial<Pago>;
 
+    // Validate importePagado: must be a finite number (ADV-317)
+    if (data.importePagado !== undefined) {
+      if (typeof data.importePagado !== 'number' || !Number.isFinite(data.importePagado)) {
+        data.importePagado = undefined;
+      }
+    }
+
+    // Validate moneda at AI boundary (ADV-286): unknown values → undefined
+    let hasInvalidPagoMoneda = false;
+    if (data.moneda !== undefined) {
+      if (!VALID_MONEDA.includes(data.moneda)) {
+        hasInvalidPagoMoneda = true;
+        data.moneda = undefined;
+      }
+    }
+
     // Validate tipoDeCambio: only positive numbers are valid
     if (data.tipoDeCambio !== undefined) {
       if (typeof data.tipoDeCambio !== 'number' || data.tipoDeCambio <= 0) {
@@ -725,8 +834,13 @@ export function parsePagoResponse(
     const completeness = (requiredFields.length - missingFields.length) / requiredFields.length;
     const confidence = completeness;
 
-    // If confidence > 0.9, no review needed; otherwise check for issues
-    const needsReview = confidence <= 0.9 && (missingFields.length > 0 || hasSuspiciousEmptyFields);
+    // hasSuspiciousEmptyFields triggers needsReview independently of confidence (ADV-336)
+    let needsReview = (confidence <= 0.9 && missingFields.length > 0) || hasSuspiciousEmptyFields;
+
+    // Invalid moneda → needsReview (ADV-286)
+    if (hasInvalidPagoMoneda) {
+      needsReview = true;
+    }
 
     // Validate ADVA role
     const expectedRole = documentType === 'pago_enviado' ? 'pagador' : 'beneficiario';
@@ -831,8 +945,8 @@ export function parseReciboResponse(response: string): Result<ParseResult<Partia
     const completeness = (requiredFields.length - missingFields.length) / requiredFields.length;
     const confidence = completeness;
 
-    // If confidence > 0.9, no review needed; otherwise check for issues
-    const needsReview = confidence <= 0.9 && (missingFields.length > 0 || hasSuspiciousEmptyFields);
+    // hasSuspiciousEmptyFields triggers needsReview independently of confidence (ADV-336)
+    const needsReview = (confidence <= 0.9 && missingFields.length > 0) || hasSuspiciousEmptyFields;
 
     // Validate ADVA is empleador
     const roleValidation = validateAdvaRole(data, 'empleador', 'recibo');
@@ -907,9 +1021,16 @@ const MAX_FINANCIAL_VALUE = 1e15;
  * @param value - The number to validate (can be null)
  * @param fieldName - Name of the field for logging
  * @param context - Additional context for logging
+ * @param options - Optional configuration
+ * @param options.allowNegative - If true, negative values are accepted (e.g. overdraft saldo, credit transactions)
  * @returns True if the value is invalid
  */
-function isInvalidNumericValue(value: number | null, fieldName: string, context: Record<string, unknown>): boolean {
+function isInvalidNumericValue(
+  value: number | null,
+  fieldName: string,
+  context: Record<string, unknown>,
+  options: { allowNegative?: boolean } = {}
+): boolean {
   if (value === null) return false;
 
   if (!Number.isFinite(value)) {
@@ -922,7 +1043,7 @@ function isInvalidNumericValue(value: number | null, fieldName: string, context:
     return true;
   }
 
-  if (value < 0) {
+  if (value < 0 && !options.allowNegative) {
     warn(`Invalid ${fieldName}: negative value`, {
       module: 'gemini-parser',
       phase: 'movimiento-validation',
@@ -975,11 +1096,13 @@ function validateMovimientosBancario(movimientos: Array<{
       hasIssues = true;
     }
 
-    // Validate numeric ranges
+    // Validate numeric ranges.
+    // debito/credito are transaction amounts: must be non-negative.
+    // saldo is a running balance: may be negative (overdraft).
     const context = { concepto: mov.concepto };
     if (isInvalidNumericValue(mov.debito, 'debito', context)) hasIssues = true;
     if (isInvalidNumericValue(mov.credito, 'credito', context)) hasIssues = true;
-    if (isInvalidNumericValue(mov.saldo, 'saldo', context)) hasIssues = true;
+    if (isInvalidNumericValue(mov.saldo, 'saldo', context, { allowNegative: true })) hasIssues = true;
   }
 
   return hasIssues;
@@ -1020,10 +1143,11 @@ function validateMovimientosTarjeta(movimientos: Array<{
       hasIssues = true;
     }
 
-    // Validate numeric ranges
+    // Validate numeric ranges.
+    // pesos/dolares may be negative (payments/credits on the card statement).
     const context = { descripcion: mov.descripcion };
-    if (isInvalidNumericValue(mov.pesos, 'pesos', context)) hasIssues = true;
-    if (isInvalidNumericValue(mov.dolares, 'dolares', context)) hasIssues = true;
+    if (isInvalidNumericValue(mov.pesos, 'pesos', context, { allowNegative: true })) hasIssues = true;
+    if (isInvalidNumericValue(mov.dolares, 'dolares', context, { allowNegative: true })) hasIssues = true;
   }
 
   return hasIssues;
@@ -1069,15 +1193,17 @@ function validateMovimientosBroker(movimientos: Array<{
       hasIssues = true;
     }
 
-    // Validate numeric ranges
+    // Validate numeric ranges.
+    // cantidadVN, saldo, bruto, and neto may be negative (sell trades reduce holdings
+    // and produce negative cash flows).  precio, arancel, and iva are always positive.
     const context = { descripcion: mov.descripcion };
-    if (isInvalidNumericValue(mov.cantidadVN, 'cantidadVN', context)) hasIssues = true;
-    if (isInvalidNumericValue(mov.saldo, 'saldo', context)) hasIssues = true;
+    if (isInvalidNumericValue(mov.cantidadVN, 'cantidadVN', context, { allowNegative: true })) hasIssues = true;
+    if (isInvalidNumericValue(mov.saldo, 'saldo', context, { allowNegative: true })) hasIssues = true;
     if (isInvalidNumericValue(mov.precio, 'precio', context)) hasIssues = true;
-    if (isInvalidNumericValue(mov.bruto, 'bruto', context)) hasIssues = true;
+    if (isInvalidNumericValue(mov.bruto, 'bruto', context, { allowNegative: true })) hasIssues = true;
     if (isInvalidNumericValue(mov.arancel, 'arancel', context)) hasIssues = true;
     if (isInvalidNumericValue(mov.iva, 'iva', context)) hasIssues = true;
-    if (isInvalidNumericValue(mov.neto, 'neto', context)) hasIssues = true;
+    if (isInvalidNumericValue(mov.neto, 'neto', context, { allowNegative: true })) hasIssues = true;
   }
 
   return hasIssues;
@@ -1126,6 +1252,15 @@ export function parseResumenBancarioResponse(response: string): Result<ParseResu
       data.banco = normalizeBankName(data.banco);
     }
 
+    // Validate moneda at AI boundary (ADV-286): unknown values → undefined + review
+    let hasInvalidBancarioMoneda = false;
+    if (data.moneda !== undefined) {
+      if (!VALID_MONEDA.includes(data.moneda)) {
+        hasInvalidBancarioMoneda = true;
+        data.moneda = undefined;
+      }
+    }
+
     // Check for required fields
     const requiredFields: (keyof ResumenBancario)[] = [
       'banco',
@@ -1151,6 +1286,11 @@ export function parseResumenBancarioResponse(response: string): Result<ParseResu
     // Verify movimientos count if movimientos array is present
     let needsReview = confidence <= 0.9 && missingFields.length > 0;
 
+    // Invalid moneda → needsReview (ADV-286)
+    if (hasInvalidBancarioMoneda) {
+      needsReview = true;
+    }
+
     // Validate main date fields
     if (data.fechaDesde && !isValidDateFormat(data.fechaDesde)) {
       needsReview = true;
@@ -1173,8 +1313,17 @@ export function parseResumenBancarioResponse(response: string): Result<ParseResu
       const actualCount = data.movimientos.length;
       const expectedCount = data.cantidadMovimientos;
 
-      // Check for > 10% discrepancy
-      if (expectedCount > 0) {
+      if (expectedCount === 0 && actualCount > 0) {
+        // ADV-338: cantidadMovimientos=0 but movimientos array is non-empty → mismatch
+        needsReview = true;
+        warn('Movimientos count mismatch: cantidadMovimientos=0 but movimientos array has entries', {
+          module: 'gemini-parser',
+          phase: 'resumen-bancario-parse',
+          expectedCount,
+          actualCount,
+        });
+      } else if (expectedCount > 0) {
+        // Check for > 10% discrepancy
         const discrepancy = Math.abs(actualCount - expectedCount) / expectedCount;
         if (discrepancy > 0.1) {
           needsReview = true;
@@ -1287,14 +1436,22 @@ export function parseResumenTarjetaResponse(response: string): Result<ParseResul
       data.banco = normalizeBankName(data.banco);
     }
 
-    // Validate tipoTarjeta
+    // Normalize tipoTarjeta case (ADV-316): try case-insensitive match, set canonical form.
+    // This handles Gemini returning "MASTERCARD", "visa", "VISA", etc.
     if (data.tipoTarjeta !== undefined) {
-      if (!VALID_CARD_TYPES.includes(data.tipoTarjeta as typeof VALID_CARD_TYPES[number])) {
-        // Invalid card type - mark for review
+      const rawCardType = data.tipoTarjeta;
+      const normalized = VALID_CARD_TYPES.find(
+        ct => ct.toLowerCase() === rawCardType.toLowerCase()
+      );
+      if (normalized !== undefined) {
+        // Map to canonical casing (e.g. "MASTERCARD" → "Mastercard")
+        data.tipoTarjeta = normalized;
+      } else {
+        // Unknown card type — clear and flag for review
         warn('Invalid tipoTarjeta value in credit card statement', {
           module: 'gemini-parser',
           phase: 'resumen-tarjeta-parse',
-          tipoTarjeta: data.tipoTarjeta,
+          tipoTarjeta: rawCardType,
         });
         data.tipoTarjeta = undefined;
         data.needsReview = true;
@@ -1363,8 +1520,17 @@ export function parseResumenTarjetaResponse(response: string): Result<ParseResul
       const actualCount = data.movimientos.length;
       const expectedCount = data.cantidadMovimientos;
 
-      // Check for > 10% discrepancy
-      if (expectedCount > 0) {
+      if (expectedCount === 0 && actualCount > 0) {
+        // ADV-338: cantidadMovimientos=0 but movimientos array is non-empty → mismatch
+        needsReview = true;
+        warn('Movimientos count mismatch: cantidadMovimientos=0 but movimientos array has entries', {
+          module: 'gemini-parser',
+          phase: 'resumen-tarjeta-parse',
+          expectedCount,
+          actualCount,
+        });
+      } else if (expectedCount > 0) {
+        // Check for > 10% discrepancy
         const discrepancy = Math.abs(actualCount - expectedCount) / expectedCount;
         if (discrepancy > 0.1) {
           needsReview = true;
@@ -1494,8 +1660,17 @@ export function parseResumenBrokerResponse(response: string): Result<ParseResult
       const actualCount = data.movimientos.length;
       const expectedCount = data.cantidadMovimientos;
 
-      // Check for > 10% discrepancy
-      if (expectedCount > 0) {
+      if (expectedCount === 0 && actualCount > 0) {
+        // ADV-338: cantidadMovimientos=0 but movimientos array is non-empty → mismatch
+        needsReview = true;
+        warn('Movimientos count mismatch: cantidadMovimientos=0 but movimientos array has entries', {
+          module: 'gemini-parser',
+          phase: 'resumen-broker-parse',
+          expectedCount,
+          actualCount,
+        });
+      } else if (expectedCount > 0) {
+        // Check for > 10% discrepancy
         const discrepancy = Math.abs(actualCount - expectedCount) / expectedCount;
         if (discrepancy > 0.1) {
           needsReview = true;
@@ -1674,6 +1849,18 @@ export function parseRetencionResponse(
     // Parse JSON
     const data = JSON.parse(jsonStr) as Partial<Retencion>;
 
+    // Validate monetary fields (ADV-317): must be finite numbers, not strings
+    if (data.montoRetencion !== undefined) {
+      if (typeof data.montoRetencion !== 'number' || !Number.isFinite(data.montoRetencion)) {
+        data.montoRetencion = undefined;
+      }
+    }
+    if (data.montoComprobante !== undefined) {
+      if (typeof data.montoComprobante !== 'number' || !Number.isFinite(data.montoComprobante)) {
+        data.montoComprobante = undefined;
+      }
+    }
+
     // Check for required fields
     const requiredFields: (keyof Retencion)[] = [
       'nroCertificado',
@@ -1708,8 +1895,8 @@ export function parseRetencionResponse(
     const completeness = (requiredFields.length - missingFields.length) / requiredFields.length;
     const confidence = completeness;
 
-    // If confidence > 0.9, no review needed; otherwise check for issues
-    const needsReview = confidence <= 0.9 && (missingFields.length > 0 || hasSuspiciousEmptyFields);
+    // hasSuspiciousEmptyFields triggers needsReview independently of confidence (ADV-336)
+    const needsReview = (confidence <= 0.9 && missingFields.length > 0) || hasSuspiciousEmptyFields;
 
     // Validate that cuitSujetoRetenido is ADVA
     if (data.cuitSujetoRetenido && data.cuitSujetoRetenido !== ADVA_CUIT) {

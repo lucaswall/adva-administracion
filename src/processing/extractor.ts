@@ -558,12 +558,24 @@ export async function processFile(
       return { ok: false, error: parseResult.error };
     }
 
+    // ADV-316: tipoTarjeta must be a known value to form a valid Drive folder name.
+    // If the parser cleared it (unknown card type), fail closed so the file goes to
+    // Sin Procesar for human review rather than creating a malformed folder.
+    if (!parseResult.value.data.tipoTarjeta) {
+      return {
+        ok: false,
+        error: new Error(
+          'Unknown tipoTarjeta: card type not recognized, cannot determine folder name'
+        ),
+      };
+    }
+
     const resumen: ResumenTarjeta = {
       fileId: fileInfo.id,
       fileName: fileInfo.name,
       banco: parseResult.value.data.banco || 'Desconocido',
       numeroCuenta: parseResult.value.data.numeroCuenta || '',
-      tipoTarjeta: parseResult.value.data.tipoTarjeta || 'Visa',
+      tipoTarjeta: parseResult.value.data.tipoTarjeta,
       fechaDesde: parseResult.value.data.fechaDesde || '',
       fechaHasta: parseResult.value.data.fechaHasta || '',
       pagoMinimo: parseResult.value.data.pagoMinimo || 0,

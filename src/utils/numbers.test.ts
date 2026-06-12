@@ -269,6 +269,38 @@ describe('normalizeAmount', () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// Task 24 — ADV-339: Multi-dot Argentine number parsing
+// ---------------------------------------------------------------------------
+
+describe('Multi-dot Argentine number parsing (ADV-339)', () => {
+  it('parseNumber("1.234.567") → 1234567 (multi-dot not truncated)', () => {
+    expect(parseNumber('1.234.567')).toBe(1234567);
+  });
+
+  it('parseNumber("1.234.567,89") → 1234567.89 (regression — Argentine with commas still works)', () => {
+    expect(parseNumber('1.234.567,89')).toBe(1234567.89);
+  });
+
+  it('parseNumber("1,234.56") → 1234.56 (regression — US format still works)', () => {
+    expect(parseNumber('1,234.56')).toBe(1234.56);
+  });
+
+  it('single-dot rule: "12.500" is treated as decimal 12.5 (documented ambiguous case)', () => {
+    // A single dot with 3 trailing digits is ambiguous (could be Argentine 12500 or decimal 12.5).
+    // We document the chosen rule: single-dot strings use plain/US format (dot = decimal separator).
+    expect(parseNumber('12.500')).toBe(12.5);
+  });
+
+  it('single-dot rule: "1.000" is treated as decimal 1.0 (documented ambiguous case)', () => {
+    expect(parseNumber('1.000')).toBe(1);
+  });
+
+  it('parseNumber("1.2.3.abc") → null (non-numeric characters after separator removal)', () => {
+    expect(parseNumber('1.2.3.abc')).toBe(null);
+  });
+});
+
 describe('amountsMatch', () => {
   it('matches exact amounts', () => {
     expect(amountsMatch('1.234,56', '1,234.56')).toBe(true);
