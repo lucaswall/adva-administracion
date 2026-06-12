@@ -28,9 +28,27 @@ interface ServiceAccountCredentials {
 let authClient: Auth.GoogleAuth | null = null;
 
 /**
+ * Scopes used to create the cached auth client (for scope mismatch detection ADV-294)
+ */
+let authClientScopes: string[] | null = null;
+
+/**
  * Cached auth client promise for concurrent initialization protection
  */
 let authClientPromise: Promise<Auth.GoogleAuth> | null = null;
+
+/**
+ * Scopes being initialized by the in-flight authClientPromise (ADV-294)
+ */
+let authClientPromiseScopes: string[] | null = null;
+
+/**
+ * Returns true when both arrays contain the same set of scopes (order-independent).
+ */
+function scopesMatch(a: string[] | null, b: string[]): boolean {
+  if (!a || a.length !== b.length) return false;
+  return [...a].sort().join(',') === [...b].sort().join(',');
+}
 
 /**
  * Parses the service account key from environment
@@ -66,17 +84,18 @@ function parseServiceAccountKey(): ServiceAccountCredentials {
  * @returns Authenticated GoogleAuth client
  */
 export async function getGoogleAuthAsync(scopes: string[]): Promise<Auth.GoogleAuth> {
-  // Fast path: client already created
-  if (authClient) {
+  // Fast path: client already created with matching scopes (ADV-294)
+  if (authClient && scopesMatch(authClientScopes, scopes)) {
     return authClient;
   }
 
-  // Promise-caching: if initialization is in progress, wait for it
-  if (authClientPromise) {
+  // Promise-caching: if initialization with the SAME scopes is in progress, wait for it (ADV-294)
+  if (authClientPromise && scopesMatch(authClientPromiseScopes, scopes)) {
     return await authClientPromise;
   }
 
-  // Create and cache the initialization promise
+  // Create and cache the initialization promise for these scopes
+  authClientPromiseScopes = scopes;
   authClientPromise = (async () => {
     const credentials = parseServiceAccountKey();
     const newClient = new google.auth.GoogleAuth({
@@ -88,6 +107,7 @@ export async function getGoogleAuthAsync(scopes: string[]): Promise<Auth.GoogleA
     });
 
     authClient = newClient;
+    authClientScopes = scopes;
     return newClient;
   })();
 
@@ -96,6 +116,7 @@ export async function getGoogleAuthAsync(scopes: string[]): Promise<Auth.GoogleA
   } catch (error) {
     // Clear promise on error to allow retry
     authClientPromise = null;
+    authClientPromiseScopes = null;
     throw error;
   }
 }
@@ -123,5 +144,7 @@ export function getDefaultScopes(): string[] {
  */
 export function clearAuthCache(): void {
   authClient = null;
+  authClientScopes = null;
   authClientPromise = null;
+  authClientPromiseScopes = null;
 }

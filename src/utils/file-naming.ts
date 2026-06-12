@@ -102,8 +102,8 @@ export function generateFacturaFileName(
   factura: Factura,
   tipo: 'factura_emitida' | 'factura_recibida'
 ): string {
-  // Date (YYYY-MM-DD)
-  const fecha = factura.fechaEmision;
+  // Date (YYYY-MM-DD) — sanitized to guard against Gemini returning DD/MM/YYYY or other noise (ADV-349)
+  const fecha = sanitizeFileName(factura.fechaEmision);
 
   // Type label based on tipoComprobante and direction
   const direction = tipo === 'factura_emitida' ? 'Emitida' : 'Recibida';
@@ -122,8 +122,8 @@ export function generateFacturaFileName(
     typeLabel = `Factura ${tc} ${direction}`;
   }
 
-  // Invoice number (already formatted as PPPPP-NNNNNNNN or PPPP-NNNNNNNN)
-  const numero = factura.nroFactura;
+  // Invoice number — sanitized defensively (ADV-349)
+  const numero = sanitizeFileName(factura.nroFactura);
 
   // Entity name based on direction
   let entityName: string;
@@ -290,11 +290,11 @@ export function generateResumenBrokerFileName(resumen: ResumenBroker): string {
  * @returns Standardized file name
  */
 export function generateRetencionFileName(retencion: Retencion): string {
-  // Date (YYYY-MM-DD from fechaEmision)
-  const fecha = retencion.fechaEmision;
+  // Date (YYYY-MM-DD from fechaEmision) — sanitized defensively (ADV-349)
+  const fecha = sanitizeFileName(retencion.fechaEmision);
 
-  // Certificate number (prefixed with CERT-)
-  const certNumber = `CERT-${retencion.nroCertificado}`;
+  // Certificate number — sanitize the inner value defensively (ADV-349)
+  const certNumber = `CERT-${sanitizeFileName(retencion.nroCertificado)}`;
 
   // Agente name (sanitized)
   const agenteName = sanitizeFileName(retencion.razonSocialAgenteRetencion);

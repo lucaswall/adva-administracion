@@ -24,6 +24,19 @@ import { getCachedFolderStructure } from '../services/folder-structure.js';
 import { findByName, isDescendantOf } from '../services/drive.js';
 import { getConfig } from '../config.js';
 import { respond500, respond503 } from '../utils/error-response.js';
+import { withLock } from '../utils/concurrency.js';
+
+/**
+ * Shared lock ID for all mutating delivery operations.
+ * Ensures copy-pdfs and build-movimientos never run concurrently (ADV-354).
+ */
+const DELIVERY_LOCK_ID = 'delivery:mutating';
+
+/** How long to wait for the lock before giving up (30 s) */
+const DELIVERY_LOCK_TIMEOUT_MS = 30_000;
+
+/** Auto-expiry for a held delivery lock — generous because builds can be slow (5 min) */
+const DELIVERY_LOCK_EXPIRY_MS = 5 * 60_000;
 
 const FOLDER_MIME = 'application/vnd.google-apps.folder';
 
@@ -163,36 +176,37 @@ export async function deliveryRoutes(server: FastifyInstance) {
     const deliveryDate = new Date();
     const folderName = formatDeliveryFolderName({ from, to, deliveryDate });
 
-    // Enumerate resumenes
+    // Enumerate resumenes (read-only, outside the lock)
     const resumenesResult = await enumerateResumenes(from, to, rootFolderId);
     if (!resumenesResult.ok) {
       return respond500(reply, resumenesResult.error, { module: 'delivery', phase: 'enumerate-resumenes' });
     }
 
-    // Prepare (create or reuse) delivery folder
-    const folderResult = await prepareDeliveryFolder(rootFolderId, folderName, deliveryDate);
-    if (!folderResult.ok) {
-      return respond500(reply, folderResult.error, { module: 'delivery', phase: 'prepare-folder' });
+    // Serialize mutating operations: prepare folder + copy PDFs (ADV-354)
+    const operationResult = await withLock(DELIVERY_LOCK_ID, async () => {
+      const folderResult = await prepareDeliveryFolder(rootFolderId, folderName, deliveryDate);
+      if (!folderResult.ok) throw folderResult.error;
+      const { folderId, folderUrl } = folderResult.value;
+
+      const copyResult = await copyPdfsToDelivery(folderId, resumenesResult.value);
+      if (!copyResult.ok) throw copyResult.error;
+
+      server.log.info(
+        { folderId, copied: copyResult.value.copied, failed: copyResult.value.failed.length },
+        'PDFs copied to delivery folder'
+      );
+
+      return { folderId, folderUrl, copied: copyResult.value.copied, failed: copyResult.value.failed };
+    }, DELIVERY_LOCK_TIMEOUT_MS, DELIVERY_LOCK_EXPIRY_MS);
+
+    if (!operationResult.ok) {
+      if (operationResult.error.message.startsWith('Failed to acquire lock')) {
+        return respond503(reply, operationResult.error, { module: 'delivery', phase: 'copy-pdfs' });
+      }
+      return respond500(reply, operationResult.error, { module: 'delivery', phase: 'copy-pdfs' });
     }
-    const { folderId, folderUrl } = folderResult.value;
 
-    // Copy PDFs into delivery folder
-    const copyResult = await copyPdfsToDelivery(folderId, resumenesResult.value);
-    if (!copyResult.ok) {
-      return respond500(reply, copyResult.error, { module: 'delivery', phase: 'copy-pdfs' });
-    }
-
-    server.log.info(
-      { folderId, copied: copyResult.value.copied, failed: copyResult.value.failed.length },
-      'PDFs copied to delivery folder'
-    );
-
-    return {
-      folderId,
-      folderUrl,
-      copied: copyResult.value.copied,
-      failed: copyResult.value.failed,
-    };
+    return operationResult.value;
   });
 
   /**
@@ -239,40 +253,45 @@ export async function deliveryRoutes(server: FastifyInstance) {
     // so the legitimate path is unaffected — this rejects misuse.
     const entregasResult = await findByName(rootFolderId, 'Entregas', FOLDER_MIME);
     if (!entregasResult.ok) {
-      return respond500(reply, entregasResult.error, { module: 'delivery', phase: 'build-movimientos' });
+      // Drive API failure (quota, network) — downstream service unavailable (ADV-334)
+      return respond503(reply, entregasResult.error, { module: 'delivery', phase: 'build-movimientos' });
     }
     if (!entregasResult.value) {
       return respond500(reply, new Error('Carpeta Entregas/ no encontrada'), { module: 'delivery', phase: 'build-movimientos' });
     }
     const ancestorCheck = await isDescendantOf(folderId, entregasResult.value.id);
     if (!ancestorCheck.ok) {
-      return respond500(reply, ancestorCheck.error, { module: 'delivery', phase: 'build-movimientos' });
+      // Drive API failure — downstream service unavailable (ADV-334)
+      return respond503(reply, ancestorCheck.error, { module: 'delivery', phase: 'build-movimientos' });
     }
     if (!ancestorCheck.value) {
       reply.status(400);
       return { error: 'folderId no pertenece a la carpeta Entregas/' };
     }
 
-    // Enumerate movimientos scope
-    const movimientosResult = await enumerateMovimientos(from, to, rootFolderId);
-    if (!movimientosResult.ok) {
-      return respond500(reply, movimientosResult.error, { module: 'delivery', phase: 'enumerate-movimientos' });
+    // Serialize mutating operations: enumerate + build movimientos files (ADV-354)
+    const operationResult = await withLock(DELIVERY_LOCK_ID, async () => {
+      const movimientosResult = await enumerateMovimientos(from, to, rootFolderId);
+      if (!movimientosResult.ok) throw movimientosResult.error;
+
+      const buildResult = await buildMovimientosFiles(folderId, movimientosResult.value);
+      if (!buildResult.ok) throw buildResult.error;
+
+      server.log.info(
+        { folderId, created: buildResult.value.created, failed: buildResult.value.failed.length },
+        'Movimientos files built'
+      );
+
+      return { created: buildResult.value.created, failed: buildResult.value.failed };
+    }, DELIVERY_LOCK_TIMEOUT_MS, DELIVERY_LOCK_EXPIRY_MS);
+
+    if (!operationResult.ok) {
+      if (operationResult.error.message.startsWith('Failed to acquire lock')) {
+        return respond503(reply, operationResult.error, { module: 'delivery', phase: 'build-movimientos' });
+      }
+      return respond500(reply, operationResult.error, { module: 'delivery', phase: 'build-movimientos' });
     }
 
-    // Build per-(account × month) spreadsheets in delivery folder
-    const buildResult = await buildMovimientosFiles(folderId, movimientosResult.value);
-    if (!buildResult.ok) {
-      return respond500(reply, buildResult.error, { module: 'delivery', phase: 'build-movimientos' });
-    }
-
-    server.log.info(
-      { folderId, created: buildResult.value.created, failed: buildResult.value.failed.length },
-      'Movimientos files built'
-    );
-
-    return {
-      created: buildResult.value.created,
-      failed: buildResult.value.failed,
-    };
+    return operationResult.value;
   });
 }

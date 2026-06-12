@@ -279,6 +279,45 @@ export function decodeSerialInTimezone(serial: number, timezone: string): number
 }
 
 /**
+ * IANA timezone used for all business-date calculations.
+ * Argentina does not observe DST so this offset is always UTC-3.
+ */
+const BUSINESS_TIMEZONE = 'America/Argentina/Buenos_Aires';
+
+/**
+ * Returns the wall-clock date in the Argentina business timezone as a
+ * YYYY-MM-DD string.  Unlike `date.toISOString().slice(0,10)` (which uses
+ * UTC), this correctly handles midnight-UTC moments where the local
+ * Argentine date is one day earlier.
+ *
+ * @param date - The instant to convert (defaults to the current time)
+ * @returns ISO date string YYYY-MM-DD in Argentina local time (ADV-353)
+ */
+export function businessDateString(date: Date = new Date()): string {
+  const formatter = new Intl.DateTimeFormat('en-CA', {
+    timeZone: BUSINESS_TIMEZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  });
+  // en-CA locale produces "YYYY-MM-DD" natively
+  return formatter.format(date);
+}
+
+/**
+ * Returns the calendar year in the Argentina business timezone.
+ * Avoids the off-by-one that `new Date().getFullYear()` can produce
+ * on a UTC-hosted server at year-boundary (e.g. 2025-01-01T01:00Z
+ * is still 2024 in Argentina / UTC-3).
+ *
+ * @param date - The instant to convert (defaults to the current time)
+ * @returns Four-digit year in Argentina local time (ADV-353)
+ */
+export function businessYear(date: Date = new Date()): number {
+  return parseInt(businessDateString(date).slice(0, 4), 10);
+}
+
+/**
  * Normalizes a spreadsheet date value to a date string
  *
  * Handles both serial numbers (from UNFORMATTED_VALUE reads) and

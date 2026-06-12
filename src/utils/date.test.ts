@@ -321,3 +321,54 @@ describe('normalizeTimestamp', () => {
     expect(normalizeTimestamp('')).toBe('');
   });
 });
+
+// ─── businessDateString / businessYear (ADV-353) ─────────────────────────────
+
+import { businessDateString, businessYear } from './date.js';
+
+describe('businessDateString', () => {
+  it('formats a date as YYYY-MM-DD in Argentina timezone', () => {
+    // 2025-01-15T00:00:00Z is 2024-01-14 21:00:00 in UTC-3? No:
+    // 2025-01-15T00:00:00Z is 2025-01-14T21:00:00 Argentina time.
+    // Actually let's use a noon-UTC date to avoid midnight edge cases.
+    const date = new Date('2025-06-15T12:00:00Z');
+    const result = businessDateString(date);
+    // 12:00 UTC = 09:00 Argentina (UTC-3) → still 2025-06-15
+    expect(result).toBe('2025-06-15');
+  });
+
+  it('uses Argentina timezone, not UTC, for near-midnight UTC dates', () => {
+    // 2025-06-15T03:00:00Z = 2025-06-15T00:00:00 UTC, but Argentina is UTC-3.
+    // 2025-06-15T03:00:00Z = 2025-06-15T00:00:00 Argentina → still June 15.
+    // But 2025-06-15T02:30:00Z = 2025-06-14T23:30:00 Argentina → June 14!
+    const date = new Date('2025-06-15T02:30:00Z'); // 23:30 Argentina local = day before
+    const result = businessDateString(date);
+    expect(result).toBe('2025-06-14');
+  });
+
+  it('defaults to current date when no argument given', () => {
+    const result = businessDateString();
+    // Should be a valid YYYY-MM-DD string
+    expect(result).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
+});
+
+describe('businessYear', () => {
+  it('returns the year in Argentina timezone for a given date', () => {
+    // 2025-01-01T01:00:00Z = 2024-12-31T22:00:00 Argentina — still 2024!
+    const date = new Date('2025-01-01T01:00:00Z');
+    const result = businessYear(date);
+    expect(result).toBe(2024);
+  });
+
+  it('returns the correct year for non-boundary dates', () => {
+    const date = new Date('2025-06-15T12:00:00Z');
+    expect(businessYear(date)).toBe(2025);
+  });
+
+  it('defaults to current date when no argument given', () => {
+    const result = businessYear();
+    expect(typeof result).toBe('number');
+    expect(result).toBeGreaterThan(2020);
+  });
+});

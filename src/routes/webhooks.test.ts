@@ -261,3 +261,41 @@ describe('POST /webhooks/drive - rate limiting', () => {
     expect(triggerScan).toHaveBeenCalledTimes(60);
   });
 });
+
+// ADV-299: structured context in warn log when channel-ID header is missing
+describe('POST /webhooks/drive - structured logging (ADV-299)', () => {
+  let server: FastifyInstance;
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    server = Fastify();
+    await server.register(webhookRoutes, { prefix: '/webhooks' });
+  });
+
+  afterEach(async () => {
+    await server.close();
+  });
+
+  it('logs warn with a non-empty object when channel-ID header is missing', async () => {
+    const warnSpy = vi.spyOn(server.log, 'warn');
+    vi.mocked(getActiveChannels).mockReturnValue([]);
+
+    await server.inject({
+      method: 'POST',
+      url: '/webhooks/drive',
+      headers: {
+        'x-goog-resource-state': 'add',
+        'x-goog-message-number': '42',
+        // No x-goog-channel-id
+      },
+    });
+
+    // The warn call must pass a non-empty context object as first argument
+    expect(warnSpy).toHaveBeenCalled();
+    const [firstArg] = warnSpy.mock.calls[0] as [unknown, ...unknown[]];
+    expect(firstArg).toBeDefined();
+    expect(typeof firstArg).toBe('object');
+    expect(firstArg).not.toBeNull();
+    expect(Object.keys(firstArg as object).length).toBeGreaterThan(0);
+  });
+});
