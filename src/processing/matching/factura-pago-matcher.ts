@@ -323,6 +323,10 @@ async function doMatchFacturasWithPagos(
       const row = facturasResult.value[i];
       if (!row || !row[0]) continue;
 
+      // Skip NC and ND comprobantes — they have their own matching pipeline (nc-factura-matcher)
+      const tipoCheck = validateTipoComprobante(row[3]);
+      if (tipoCheck === 'NC' || tipoCheck.startsWith('NC ') || tipoCheck === 'ND' || tipoCheck.startsWith('ND ')) continue;
+
       // Build factura object based on sheet type
       const factura: Factura & { row: number } = {
         row: i + 1, // Sheet rows are 1-indexed

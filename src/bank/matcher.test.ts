@@ -2626,6 +2626,212 @@ describe('USD Pago Enviado cross-currency debit matching (ADV-146)', () => {
   });
 });
 
+describe('ADV-321: recibo CUIL tier-2 match in debit matching', () => {
+  let matcher: BankMovementMatcher;
+
+  function makeRecibo(overrides: Partial<import('../types/index.js').Recibo & { row: number }> = {}): import('../types/index.js').Recibo & { row: number } {
+    return {
+      fileId: 'recibo1',
+      fileName: 'recibo.pdf',
+      tipoRecibo: 'sueldo' as const,
+      nombreEmpleado: 'Juan Perez',
+      cuilEmpleado: '20123456786',
+      legajo: '001',
+      cuitEmpleador: '30709076783',
+      periodoAbonado: 'enero/2025',
+      fechaPago: '2025-01-10',
+      subtotalRemuneraciones: 200000,
+      subtotalDescuentos: 50000,
+      totalNeto: 150000,
+      processedAt: '2025-01-10T10:00:00Z',
+      confidence: 0.95,
+      needsReview: false,
+      row: 2,
+      ...overrides,
+    };
+  }
+
+  beforeEach(() => {
+    matcher = new BankMovementMatcher(5);
+  });
+
+  it('salary debit with employee CUIL in concepto → recibo matches at tier 2 / HIGH', () => {
+    const recibo = makeRecibo({ cuilEmpleado: '20123456786', totalNeto: 150000, fechaPago: '2025-01-10' });
+    // Concepto contains the employee's CUIL in dashed format → extractCuitFromConcepto returns it
+    const movement = makeMovimiento({ fecha: '2025-01-10', concepto: 'SUELDO 20-12345678-6', debito: 150000, credito: null });
+
+    const result = matcher.matchMovement(movement, [], [recibo], []);
+
+    expect(result.matchType).toBe('recibo');
+    expect(result.tier).toBe(2);
+    expect(result.confidence).toBe('HIGH');
+  });
+
+  it('debit with supplier CUIT in concepto (no cuilEmpleado match) → recibo excluded', () => {
+    // extractedCuit is supplier's CUIT, recibo cuilEmpleado is different
+    const recibo = makeRecibo({ cuilEmpleado: '20123456786', totalNeto: 150000, fechaPago: '2025-01-10' });
+    // Concepto has a different CUIT (supplier 27234567891) → hasCuitFilter true, recibo excluded
+    const movement = makeMovimiento({ fecha: '2025-01-10', concepto: 'PAGO PROVEEDOR 27-23456789-1', debito: 150000, credito: null });
+
+    const result = matcher.matchMovement(movement, [], [recibo], []);
+
+    expect(result.matchType).toBe('no_match');
+  });
+
+  it('two recibos, only CUIL-matching one is eligible', () => {
+    const reciboMatch = makeRecibo({ fileId: 'recibo-match', cuilEmpleado: '20123456786', totalNeto: 150000, fechaPago: '2025-01-10' });
+    const reciboOther = makeRecibo({ fileId: 'recibo-other', cuilEmpleado: '27234567891', totalNeto: 150000, fechaPago: '2025-01-10' });
+    // Concepto has matching CUIL
+    const movement = makeMovimiento({ fecha: '2025-01-10', concepto: 'SUELDO EMP 20-12345678-6', debito: 150000, credito: null });
+
+    const result = matcher.matchMovement(movement, [], [reciboMatch, reciboOther], []);
+
+    expect(result.matchType).toBe('recibo');
+    expect(result.matchedFileId).toBe('recibo-match');
+    expect(result.tier).toBe(2);
+  });
+});
+
+describe('ADV-340: ADVA CUIT exclusion from hard identity filter', () => {
+  let matcher: BankMovementMatcher;
+
+  function makeFacturaRecibida(overrides: Partial<Factura & { row: number }> = {}): Factura & { row: number } {
+    return {
+      fileId: 'f1',
+      fileName: 'f1.pdf',
+      tipoComprobante: 'A',
+      nroFactura: '00001-00000001',
+      fechaEmision: '2025-01-10',
+      cuitEmisor: '20123456786',
+      razonSocialEmisor: 'PROVEEDOR SA',
+      cuitReceptor: '30709076783',
+      razonSocialReceptor: 'ADVA',
+      importeNeto: 1000,
+      importeIva: 210,
+      importeTotal: 1210,
+      moneda: 'ARS',
+      processedAt: '2025-01-10T10:00:00Z',
+      needsReview: false,
+      confidence: 0.95,
+      row: 2,
+      ...overrides,
+    };
+  }
+
+  beforeEach(() => {
+    matcher = new BankMovementMatcher(5);
+  });
+
+  it('concepto with only ADVA CUIT → no hard filter, factura can match', () => {
+    // ADVA's own CUIT in concepto should NOT trigger a hard filter
+    const factura = makeFacturaRecibida({ cuitEmisor: '20123456786', importeTotal: 1210, fechaEmision: '2025-01-10' });
+    const movement = makeMovimiento({ fecha: '2025-01-10', concepto: 'DEBITO CUENTA 30709076783', debito: 1210, credito: null });
+
+    // matchMovement(movement, facturas, recibos, pagos)
+    const result = matcher.matchMovement(movement, [factura], [], []);
+
+    // Should match (no hard filter from ADVA's own CUIT)
+    expect(result.matchType).toBe('direct_factura');
+    expect(result.matchedFileId).toBe('f1');
+  });
+
+  it('concepto with counterparty CUIT → hard filter on counterparty (unchanged behavior)', () => {
+    const facturaMatch = makeFacturaRecibida({ fileId: 'f-match', cuitEmisor: '20123456786', importeTotal: 1210 });
+    const facturaOther = makeFacturaRecibida({ fileId: 'f-other', cuitEmisor: '27234567891', importeTotal: 1210 });
+    // Concepto has counterparty CUIT 20123456786 → only f-match should be considered
+    const movement = makeMovimiento({ fecha: '2025-01-10', concepto: 'PAGO PROVEEDOR 20-12345678-6', debito: 1210, credito: null });
+
+    // matchMovement(movement, facturas, recibos, pagos)
+    const result = matcher.matchMovement(movement, [facturaMatch, facturaOther], [], []);
+
+    expect(result.matchType).toBe('direct_factura');
+    expect(result.matchedFileId).toBe('f-match');
+  });
+
+  it('concepto with ADVA CUIT followed by counterparty CUIT → facturas with counterparty CUIT can match', () => {
+    const factura = makeFacturaRecibida({ cuitEmisor: '20123456786', importeTotal: 1210 });
+    // ADVA CUIT appears in concepto but we still expect the factura to match
+    const movement = makeMovimiento({ fecha: '2025-01-10', concepto: 'PAGO 30709076783 A PROVEEDOR', debito: 1210, credito: null });
+
+    // matchMovement(movement, facturas, recibos, pagos)
+    const result = matcher.matchMovement(movement, [factura], [], []);
+
+    // ADVA CUIT should be ignored; factura should match (tier 5 since no counterparty CUIT to match on)
+    expect(result.matchType).toBe('direct_factura');
+    expect(result.matchedFileId).toBe('f1');
+  });
+});
+
+describe('ADV-342: credit direct_factura confidence uses tierToConfidence', () => {
+  let matcher: BankMovementMatcher;
+
+  function makeFacturaEmitida(overrides: Partial<Factura & { row: number }> = {}): Factura & { row: number } {
+    return {
+      fileId: 'fe1',
+      fileName: 'fe1.pdf',
+      tipoComprobante: 'A',
+      nroFactura: '00001-00000001',
+      fechaEmision: '2025-01-10',
+      cuitEmisor: '30709076783',
+      razonSocialEmisor: 'ADVA',
+      cuitReceptor: '20123456786',
+      razonSocialReceptor: 'TEST SA',
+      importeNeto: 1000,
+      importeIva: 210,
+      importeTotal: 1210,
+      moneda: 'ARS',
+      processedAt: '2025-01-10T10:00:00Z',
+      needsReview: false,
+      confidence: 0.95,
+      row: 2,
+      ...overrides,
+    };
+  }
+
+  beforeEach(() => {
+    matcher = new BankMovementMatcher(5);
+  });
+
+  it('tier-5 credit direct_factura (no CUIT, no keyword, same currency) → LOW confidence', () => {
+    const factura = makeFacturaEmitida({ cuitReceptor: '20123456786', importeTotal: 1210, fechaEmision: '2025-01-10' });
+    // Generic concepto with no CUIT and no matching keywords
+    const movement = makeMovimiento({ fecha: '2025-01-10', concepto: 'DEPOSITO GENERICO VARIOS', debito: null, credito: 1210 });
+
+    const result = matcher.matchCreditMovement(movement, [factura], [], []);
+
+    expect(result.matchType).toBe('direct_factura');
+    expect(result.tier).toBe(5);
+    expect(result.confidence).toBe('LOW'); // Bug: currently returns MEDIUM
+  });
+
+  it('tier-2 credit direct_factura (CUIT match, same currency) → HIGH confidence', () => {
+    const factura = makeFacturaEmitida({ cuitReceptor: '20123456786', importeTotal: 1210, fechaEmision: '2025-01-10' });
+    // Concepto has the client's CUIT → tier 2
+    const movement = makeMovimiento({ fecha: '2025-01-10', concepto: 'COBRO CLIENTE 20-12345678-6', debito: null, credito: 1210 });
+
+    const result = matcher.matchCreditMovement(movement, [factura], [], []);
+
+    expect(result.matchType).toBe('direct_factura');
+    expect(result.tier).toBe(2);
+    expect(result.confidence).toBe('HIGH');
+  });
+
+  it('tier-2 credit direct_factura cross-currency (USD invoice, CUIT match) → MEDIUM confidence', () => {
+    const testRate: ExchangeRate = { fecha: '2025-01-10', compra: 1050, venta: 1100 };
+    setExchangeRateCache('2025-01-10', testRate);
+
+    // USD factura for 100 USD, at venta rate 1100 → expected 110000 ARS
+    const factura = makeFacturaEmitida({ cuitReceptor: '20123456786', importeTotal: 100, moneda: 'USD', fechaEmision: '2025-01-10' });
+    const movement = makeMovimiento({ fecha: '2025-01-10', concepto: 'COBRO CLIENTE 20-12345678-6', debito: null, credito: 110000 });
+
+    const result = matcher.matchCreditMovement(movement, [factura], [], []);
+
+    expect(result.matchType).toBe('direct_factura');
+    expect(result.tier).toBe(2);
+    expect(result.confidence).toBe('MEDIUM'); // Cross-currency caps tier-2 to MEDIUM
+  });
+});
+
 describe('Credit pago_only confidence uses tierToConfidence (review fix)', () => {
   let matcher: BankMovementMatcher;
 

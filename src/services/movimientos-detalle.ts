@@ -46,6 +46,23 @@ function escapeSheetName(sheetName: string): string {
 }
 
 /**
+ * Normalizes a matchedType cell value to a canonical form for version hashing.
+ * Accepts 'AUTO' or 'MANUAL' (case-insensitive, whitespace-trimmed).
+ * Returns '' for any other value (unknown, empty, etc.).
+ *
+ * Exported so callers (tests and computeRowVersion) share the same normalization.
+ *
+ * @param value - Raw matchedType string from the sheet
+ * @returns 'AUTO' | 'MANUAL' | ''
+ */
+export function normalizeMatchedType(value: string): 'AUTO' | 'MANUAL' | '' {
+  const upper = value.trim().toUpperCase();
+  if (upper === 'AUTO') return 'AUTO';
+  if (upper === 'MANUAL') return 'MANUAL';
+  return '';
+}
+
+/**
  * Computes version hash from raw row data (columns A-I)
  * Must match the algorithm in match-movimientos.ts computeRowVersion
  *
@@ -58,7 +75,7 @@ function computeVersionFromRow(row: CellValue[]): string {
   const debito = parseNumber(row[2]);
   const credito = parseNumber(row[3]);
   const matchedFileId = String(row[6] || '');
-  const matchedType = String(row[7] || '');
+  const matchedType = normalizeMatchedType(String(row[7] || ''));
   const detalle = String(row[8] || '');
 
   const data = [
@@ -84,14 +101,16 @@ function computeVersionFromRow(row: CellValue[]): string {
  *
  * @param spreadsheetId - The spreadsheet ID
  * @param updates - Array of updates to apply
- * @returns Number of rows actually updated (may be less than updates.length if versions mismatch)
+ * @returns Object containing appliedCount (rows written), skippedCount (rows skipped due to version
+ *   mismatch), and appliedKeys (Set of "${sheetName}:${rowNumber}" keys for every applied update).
+ *   Callers use appliedKeys to gate side-effects (e.g. pagada='SI') on actually-written rows (ADV-343).
  */
 export async function updateDetalle(
   spreadsheetId: string,
   updates: DetalleUpdate[]
-): Promise<Result<number, Error>> {
+): Promise<Result<{ appliedCount: number; skippedCount: number; appliedKeys: Set<string> }, Error>> {
   if (updates.length === 0) {
-    return { ok: true, value: 0 };
+    return { ok: true, value: { appliedCount: 0, skippedCount: 0, appliedKeys: new Set<string>() } };
   }
 
   // Filter updates that need version verification
@@ -161,13 +180,17 @@ export async function updateDetalle(
     }
   }
 
+  // Build the applied keys set from verified updates (ADV-343)
+  const appliedKeys = new Set<string>(verifiedUpdates.map(u => `${u.sheetName}:${u.rowNumber}`));
+  const skippedCount = updates.length - verifiedUpdates.length;
+
   if (verifiedUpdates.length === 0) {
     debug('No updates to apply after version verification', {
       module: 'movimientos-detalle',
       spreadsheetId,
       originalCount: updates.length,
     });
-    return { ok: true, value: 0 };
+    return { ok: true, value: { appliedCount: 0, skippedCount, appliedKeys } };
   }
 
   // Build update operations for batchUpdate
@@ -180,7 +203,7 @@ export async function updateDetalle(
     module: 'movimientos-detalle',
     spreadsheetId,
     totalUpdates: allUpdates.length,
-    skippedByVersion: updates.length - verifiedUpdates.length,
+    skippedByVersion: skippedCount,
     chunks: Math.ceil(allUpdates.length / SHEETS_BATCH_UPDATE_LIMIT),
   });
 
@@ -205,5 +228,5 @@ export async function updateDetalle(
     });
   }
 
-  return { ok: true, value: totalUpdated };
+  return { ok: true, value: { appliedCount: totalUpdated, skippedCount, appliedKeys } };
 }

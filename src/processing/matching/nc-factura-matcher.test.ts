@@ -75,7 +75,7 @@ describe('extractReferencedFacturaNumber', () => {
 
 describe('matchNCsWithFacturas', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.resetAllMocks();
   });
 
   it('returns 0 when no rows in spreadsheet', async () => {
@@ -475,5 +475,79 @@ describe('matchNCsWithFacturas', () => {
     expect(result.ok).toBe(true);
     // NC consumed its match with factura-1 — must NOT try factura-2
     expect(setValues).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('ADV-341: date-parse NC-factura ordering guard', () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+  });
+
+  it('NC with Argentine text date after factura ISO date passes the guard and matches', async () => {
+    // NC date '15/03/2025' (March 15) vs factura '2025-03-01' (March 1)
+    // parseArgDate('15/03/2025') = March 15 >= March 1 → guard passes → match succeeds
+    const mockRows = [
+      ['fechaEmision', 'fileId', 'fileName', 'tipo', 'nro', 'cuit', 'razon', 'neto', 'iva', 'total', 'moneda', 'concepto', 'processed', 'conf', 'review', 'matchedPago', 'matchConf', 'cuitMatch', 'pagada'],
+      // factura: ISO date 2025-03-01
+      ['2025-03-01', 'factura-1', 'factura.pdf', 'A', '0001-00000001', '20123456786', 'TEST SA', '1000', '210', '1210', 'ARS', 'Servicio', '2025-03-01', '0.95', 'NO', '', '', '', ''],
+      // NC: Argentine text date 15/03/2025 (March 15, after the factura)
+      ['15/03/2025', 'nc-1', 'nc.pdf', 'NC', '0001-00000002', '20123456786', 'TEST SA', '1000', '210', '1210', 'ARS', '', '2025-03-15', '0.95', 'NO', '', '', '', ''],
+    ];
+
+    vi.mocked(getValues).mockResolvedValue({ ok: true, value: mockRows });
+    vi.mocked(setValues).mockResolvedValue({ ok: true, value: 0 });
+
+    const result = await matchNCsWithFacturas('test-spreadsheet-id');
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      // NC is after factura → guard passes → 1 match
+      expect(result.value).toBe(1);
+    }
+    // Both factura and NC should get pagada=SI
+    expect(setValues).toHaveBeenCalledTimes(2);
+  });
+
+  it('NC dated before the factura is rejected regardless of string format', async () => {
+    // NC date '2025-02-01' (Feb 1) vs factura '2025-03-01' (March 1)
+    // parseArgDate('2025-02-01') = Feb 1 < March 1 → guard rejects
+    const mockRows = [
+      ['fechaEmision', 'fileId', 'fileName', 'tipo', 'nro', 'cuit', 'razon', 'neto', 'iva', 'total', 'moneda', 'concepto', 'processed', 'conf', 'review', 'matchedPago', 'matchConf', 'cuitMatch', 'pagada'],
+      // factura: March 1
+      ['2025-03-01', 'factura-1', 'factura.pdf', 'A', '0001-00000001', '20123456786', 'TEST SA', '1000', '210', '1210', 'ARS', 'Servicio', '2025-03-01', '0.95', 'NO', '', '', '', ''],
+      // NC: Feb 1 — BEFORE the factura
+      ['2025-02-01', 'nc-1', 'nc.pdf', 'NC', '0001-00000002', '20123456786', 'TEST SA', '1000', '210', '1210', 'ARS', '', '2025-02-01', '0.95', 'NO', '', '', '', ''],
+    ];
+
+    vi.mocked(getValues).mockResolvedValue({ ok: true, value: mockRows });
+    vi.mocked(setValues).mockResolvedValue({ ok: true, value: 0 });
+
+    const result = await matchNCsWithFacturas('test-spreadsheet-id');
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value).toBe(0); // NC before factura → no match
+    }
+    expect(setValues).not.toHaveBeenCalled();
+  });
+
+  it('unparseable NC date results in no match (skip that candidate pair)', async () => {
+    // NC date 'invalid-date' → parseArgDate returns null → skip
+    const mockRows = [
+      ['fechaEmision', 'fileId', 'fileName', 'tipo', 'nro', 'cuit', 'razon', 'neto', 'iva', 'total', 'moneda', 'concepto', 'processed', 'conf', 'review', 'matchedPago', 'matchConf', 'cuitMatch', 'pagada'],
+      ['2025-03-01', 'factura-1', 'factura.pdf', 'A', '0001-00000001', '20123456786', 'TEST SA', '1000', '210', '1210', 'ARS', 'Servicio', '2025-03-01', '0.95', 'NO', '', '', '', ''],
+      ['invalid-date', 'nc-1', 'nc.pdf', 'NC', '0001-00000002', '20123456786', 'TEST SA', '1000', '210', '1210', 'ARS', '', 'invalid-date', '0.95', 'NO', '', '', '', ''],
+    ];
+
+    vi.mocked(getValues).mockResolvedValue({ ok: true, value: mockRows });
+    vi.mocked(setValues).mockResolvedValue({ ok: true, value: 0 });
+
+    const result = await matchNCsWithFacturas('test-spreadsheet-id');
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value).toBe(0); // Unparseable → skip → no match
+    }
+    expect(setValues).not.toHaveBeenCalled();
   });
 });

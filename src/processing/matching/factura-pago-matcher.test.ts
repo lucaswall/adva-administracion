@@ -449,3 +449,118 @@ describe('MANUAL matchConfidence locking (Fix 5 - ADV-131)', () => {
     expect(batchUpdate).not.toHaveBeenCalled();
   });
 });
+
+describe('ADV-305: NC/ND factura exclusion from pago matching pool', () => {
+  async function setupE2E() {
+    const { matchFacturasWithPagos } = await import('./factura-pago-matcher.js');
+    const { getValues, batchUpdate } = await import('../../services/sheets.js');
+    const { withLock, withRetry } = await import('../../utils/concurrency.js');
+
+    vi.mocked(withLock).mockImplementation(async (_key: string, fn: () => Promise<any>) => {
+      try { return { ok: true as const, value: await fn() }; }
+      catch (e) { return { ok: false as const, error: e instanceof Error ? e : new Error(String(e)) }; }
+    });
+    vi.mocked(withRetry).mockImplementation(async (fn: () => Promise<any>) => {
+      try { return { ok: true as const, value: await fn() }; }
+      catch (e) { return { ok: false as const, error: e instanceof Error ? e : new Error(String(e)) }; }
+    });
+    return { matchFacturasWithPagos, getValues, batchUpdate };
+  }
+
+  const config = { matchDaysBefore: 10, matchDaysAfter: 60, usdArsTolerancePercent: 5, usdMatchDaysAfter: 90 };
+
+  it('NC factura should be excluded from pago matching pool → 0 matches', async () => {
+    const { matchFacturasWithPagos, getValues, batchUpdate } = await setupE2E();
+
+    // Facturas Recibidas: NC factura with importeTotal=10000 (no condicionIVAReceptor offset, A:T = 20 cols)
+    const facturaHeader = ['fechaEmision', 'fileId', 'fileName', 'tipoComprobante', 'nroFactura', 'cuitEmisor', 'razonSocialEmisor', 'importeNeto', 'importeIva', 'importeTotal', 'moneda', 'concepto', 'processedAt', 'confidence', 'needsReview', 'matchedPagoFileId', 'matchConfidence', 'hasCuitMatch', 'pagada', 'tipoDeCambio'];
+    const facturaRow = ['2025-01-01', 'nc-fact-1', 'nc-factura.pdf', 'NC', '00001-00000001', '20123456786', 'PROVEEDOR SA', '8264.46', '1735.54', '10000', 'ARS', '', '2025-01-01T10:00:00Z', '0.95', 'NO', '', '', 'NO', 'NO', ''];
+
+    // Pagos Enviados: pago with matching amount and CUIL
+    const pagoHeader = ['fechaPago', 'fileId', 'fileName', 'banco', 'importePagado', 'moneda', 'referencia', 'cuitBeneficiario', 'nombreBeneficiario', 'concepto', 'processedAt', 'confidence', 'needsReview', 'matchedFacturaFileId', 'matchConfidence', 'tipoDeCambio', 'importeEnPesos'];
+    const pagoRow = ['2025-01-05', 'pago-1', 'pago.pdf', 'BBVA', '10000', 'ARS', '', '20123456786', 'PROVEEDOR SA', '', '2025-01-05T10:00:00Z', '0.95', 'NO', '', '', '', ''];
+
+    vi.mocked(getValues)
+      .mockResolvedValueOnce({ ok: true, value: [facturaHeader, facturaRow] })
+      .mockResolvedValueOnce({ ok: true, value: [pagoHeader, pagoRow] });
+    vi.mocked(batchUpdate).mockResolvedValue({ ok: true, value: 0 });
+
+    // Facturas Recibidas matching
+    const result = await matchFacturasWithPagos(
+      'test-spreadsheet',
+      'Facturas Recibidas',
+      'Pagos Enviados',
+      'cuitEmisor',
+      'cuitBeneficiario',
+      config as any,
+    );
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      // BUG: currently NC factura is NOT excluded → 1 match
+      // FIX: NC factura excluded → 0 matches
+      expect(result.value).toBe(0); // RED: currently 1
+    }
+    // After fix: batchUpdate should NOT be called (no match to write)
+    expect(batchUpdate).not.toHaveBeenCalled(); // RED: currently called once
+  });
+
+  it('ND factura should also be excluded from pago matching pool', async () => {
+    const { matchFacturasWithPagos, getValues, batchUpdate } = await setupE2E();
+
+    const facturaHeader = ['fechaEmision', 'fileId', 'fileName', 'tipoComprobante', 'nroFactura', 'cuitEmisor', 'razonSocialEmisor', 'importeNeto', 'importeIva', 'importeTotal', 'moneda', 'concepto', 'processedAt', 'confidence', 'needsReview', 'matchedPagoFileId', 'matchConfidence', 'hasCuitMatch', 'pagada', 'tipoDeCambio'];
+    const facturaRow = ['2025-01-01', 'nd-fact-1', 'nd-factura.pdf', 'ND', '00001-00000002', '20123456786', 'PROVEEDOR SA', '5000', '1050', '6050', 'ARS', '', '2025-01-01T10:00:00Z', '0.95', 'NO', '', '', 'NO', 'NO', ''];
+    const pagoHeader = ['fechaPago', 'fileId', 'fileName', 'banco', 'importePagado', 'moneda', 'referencia', 'cuitBeneficiario', 'nombreBeneficiario', 'concepto', 'processedAt', 'confidence', 'needsReview', 'matchedFacturaFileId', 'matchConfidence', 'tipoDeCambio', 'importeEnPesos'];
+    const pagoRow = ['2025-01-05', 'pago-2', 'pago2.pdf', 'BBVA', '6050', 'ARS', '', '20123456786', 'PROVEEDOR SA', '', '2025-01-05T10:00:00Z', '0.95', 'NO', '', '', '', ''];
+
+    vi.mocked(getValues)
+      .mockResolvedValueOnce({ ok: true, value: [facturaHeader, facturaRow] })
+      .mockResolvedValueOnce({ ok: true, value: [pagoHeader, pagoRow] });
+    vi.mocked(batchUpdate).mockResolvedValue({ ok: true, value: 0 });
+
+    const result = await matchFacturasWithPagos(
+      'test-spreadsheet',
+      'Facturas Recibidas',
+      'Pagos Enviados',
+      'cuitEmisor',
+      'cuitBeneficiario',
+      config as any,
+    );
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value).toBe(0); // RED: currently 1 (ND not excluded)
+    }
+    expect(batchUpdate).not.toHaveBeenCalled();
+  });
+
+  it('regular factura (type A) still matches pago correctly after NC/ND exclusion fix', async () => {
+    const { matchFacturasWithPagos, getValues, batchUpdate } = await setupE2E();
+
+    // Regular factura type A — should still match
+    const facturaHeader = ['fechaEmision', 'fileId', 'fileName', 'tipoComprobante', 'nroFactura', 'cuitEmisor', 'razonSocialEmisor', 'importeNeto', 'importeIva', 'importeTotal', 'moneda', 'concepto', 'processedAt', 'confidence', 'needsReview', 'matchedPagoFileId', 'matchConfidence', 'hasCuitMatch', 'pagada', 'tipoDeCambio'];
+    const facturaRow = ['2025-01-01', 'fact-a-1', 'factura-a.pdf', 'A', '00001-00000003', '20123456786', 'PROVEEDOR SA', '8264.46', '1735.54', '10000', 'ARS', '', '2025-01-01T10:00:00Z', '0.95', 'NO', '', '', 'NO', 'NO', ''];
+    const pagoHeader = ['fechaPago', 'fileId', 'fileName', 'banco', 'importePagado', 'moneda', 'referencia', 'cuitBeneficiario', 'nombreBeneficiario', 'concepto', 'processedAt', 'confidence', 'needsReview', 'matchedFacturaFileId', 'matchConfidence', 'tipoDeCambio', 'importeEnPesos'];
+    const pagoRow = ['2025-01-05', 'pago-3', 'pago3.pdf', 'BBVA', '10000', 'ARS', '', '20123456786', 'PROVEEDOR SA', '', '2025-01-05T10:00:00Z', '0.95', 'NO', '', '', '', ''];
+
+    vi.mocked(getValues)
+      .mockResolvedValueOnce({ ok: true, value: [facturaHeader, facturaRow] })
+      .mockResolvedValueOnce({ ok: true, value: [pagoHeader, pagoRow] });
+    vi.mocked(batchUpdate).mockResolvedValue({ ok: true, value: 0 });
+
+    const result = await matchFacturasWithPagos(
+      'test-spreadsheet',
+      'Facturas Recibidas',
+      'Pagos Enviados',
+      'cuitEmisor',
+      'cuitBeneficiario',
+      config as any,
+    );
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value).toBe(1); // Regular factura still matches
+    }
+    expect(batchUpdate).toHaveBeenCalled();
+  });
+});
