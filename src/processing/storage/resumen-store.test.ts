@@ -548,6 +548,54 @@ describe('storeResumenBancario (bank accounts)', () => {
       expect(vi.mocked(appendRowsWithLinks)).not.toHaveBeenCalled();
     });
 
+    it('skips the fileId check when options.skipFileIdCheck is set — same fileId, different period appends (MP synthetic resumenes)', async () => {
+      // MP reuses the movimientos spreadsheet id as fileId for EVERY period.
+      // A prior period's row must not block the next period's resumen.
+      vi.mocked(getValues).mockResolvedValue({
+        ok: true,
+        value: [
+          ['periodo', 'fechaDesde', 'fechaHasta', 'fileId', 'fileName', 'banco', 'numeroCuenta', 'moneda', 'saldoInicial', 'saldoFinal'],
+          ['2023-12', 45261, 45291, 'test-file-id', 'prev.pdf', 'Santander', '1234567890', 'ARS', 5000, 10000], // 2023-12 period, SAME fileId
+        ],
+      });
+      vi.mocked(appendRowsWithLinks).mockResolvedValue({ ok: true, value: 1 });
+      vi.mocked(sortSheet).mockResolvedValue({ ok: true, value: undefined });
+
+      const resumen = createTestResumen(); // 2024-01 period, fileId 'test-file-id'
+      const result = await storeResumenBancario(resumen, 'spreadsheet-id', undefined, {
+        skipFileIdCheck: true,
+      });
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value.stored).toBe(true);
+        expect(result.value.updated).toBeUndefined();
+      }
+      expect(vi.mocked(appendRowsWithLinks)).toHaveBeenCalled();
+    });
+
+    it('still dedupes on the business key when skipFileIdCheck is set — same period not duplicated', async () => {
+      vi.mocked(getValues).mockResolvedValue({
+        ok: true,
+        value: [
+          ['periodo', 'fechaDesde', 'fechaHasta', 'fileId', 'fileName', 'banco', 'numeroCuenta', 'moneda', 'saldoInicial', 'saldoFinal'],
+          ['2024-01', 45292, 45322, 'test-file-id', 'existing.pdf', 'Santander', '1234567890', 'ARS', 10000, 15000], // SAME period + account
+        ],
+      });
+
+      const resumen = createTestResumen(); // 2024-01 period, same banco/cuenta/moneda
+      const result = await storeResumenBancario(resumen, 'spreadsheet-id', undefined, {
+        skipFileIdCheck: true,
+      });
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value.stored).toBe(false);
+        expect(result.value.existingFileId).toBe('test-file-id');
+      }
+      expect(vi.mocked(appendRowsWithLinks)).not.toHaveBeenCalled();
+    });
+
     it('falls through to duplicate check when fileId is NOT found', async () => {
       // findResumenRowByFileId: different fileId at row[3]
       vi.mocked(getValues).mockResolvedValueOnce({

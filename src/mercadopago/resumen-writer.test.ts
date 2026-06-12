@@ -271,7 +271,9 @@ describe('writeMpResumenIfClosed', () => {
 
       expect(storeResumenBancario).toHaveBeenCalledWith(
         expect.any(Object),
-        'control-sheet-id'
+        'control-sheet-id',
+        undefined,
+        { skipFileIdCheck: true }
       );
     });
 
@@ -391,6 +393,36 @@ describe('writeMpResumenIfClosed', () => {
         computed += (mov.credito ?? 0) - (mov.debito ?? 0);
       }
       expect(computed - saldoFinal).toBe(0);
+    });
+
+    it('passes skipFileIdCheck to storeResumenBancario (MP fileId repeats across periods)', async () => {
+      vi.mocked(getValues).mockResolvedValue({ ok: true, value: [['periodo']] });
+      vi.mocked(readMovimientosForPeriod).mockResolvedValue({
+        ok: true,
+        value: [makeMovimientoRow({ credito: 100, debito: null })],
+      });
+      vi.mocked(storeResumenBancario).mockResolvedValue({
+        ok: true,
+        value: { stored: true },
+      });
+
+      await writeMpResumenIfClosed(
+        'control-id',
+        'mov-id',
+        '2026-05',
+        { collectorId: '123' },
+        '2026-06-12'
+      );
+
+      // The ADV-308 fileId reprocessing check must be skipped: the MP fileId is
+      // the movimientos spreadsheet id, shared by every period of the account —
+      // without the skip, the second closed period would be silently dropped.
+      expect(storeResumenBancario).toHaveBeenCalledWith(
+        expect.anything(),
+        'control-id',
+        undefined,
+        { skipFileIdCheck: true }
+      );
     });
 
     it('returns written:false and does not call storeResumenBancario on duplicate (dedupe path)', async () => {

@@ -175,8 +175,14 @@ export async function writeMpResumenIfClosed(
       needsReview: false,
     };
 
-    // Delegate storage (and dedupe) to storeResumenBancario
-    const storeResult = await storeResumenBancario(resumen, controlSpreadsheetId);
+    // Delegate storage (and dedupe) to storeResumenBancario.
+    // skipFileIdCheck: the MP fileId is the movimientos SPREADSHEET id, shared
+    // by every period of the account — the ADV-308 fileId reprocessing check
+    // would otherwise treat the second closed period as already stored and
+    // silently drop it. Dedupe relies on the period-specific business key.
+    const storeResult = await storeResumenBancario(resumen, controlSpreadsheetId, undefined, {
+      skipFileIdCheck: true,
+    });
     if (!storeResult.ok) return storeResult;
 
     const written = storeResult.value.stored;
