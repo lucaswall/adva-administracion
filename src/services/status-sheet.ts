@@ -10,6 +10,7 @@ import { getWatchManagerStatus } from './watch-manager.js';
 import { getConfig } from '../config.js';
 import { setValues, getSheetMetadata, applyConditionalFormat, getSpreadsheetTimezone } from './sheets.js';
 import { debug, info, error as logError } from '../utils/logger.js';
+import { APP_VERSION } from '../utils/version.js';
 
 /**
  * Status metrics collected from the system
@@ -46,8 +47,8 @@ export function collectStatusMetrics(): StatusMetrics {
   return {
     lastPing: new Date(),
     uptime: startTime ? formatUptime(startTime) : '0s',
-    version: '1.0.0',
-    environment: config.nodeEnv,
+    version: APP_VERSION,
+    environment: config.environment,
     queueCompleted: queueStats.completed,
     queueFailed: queueStats.failed,
     queuePending: queueStats.pending + queueStats.running,

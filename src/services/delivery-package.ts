@@ -34,6 +34,7 @@ import {
 import { discoverMovimientosSpreadsheets, validateYear } from './folder-structure.js';
 import { readMovimientosForPeriod, readCardMovimientosForPeriod } from './movimientos-reader.js';
 import { debug, info, warn } from '../utils/logger.js';
+import { businessDateString } from '../utils/date.js';
 
 const FOLDER_MIME = 'application/vnd.google-apps.folder';
 const SPREADSHEET_MIME = 'application/vnd.google-apps.spreadsheet';
@@ -511,7 +512,7 @@ export function formatDeliveryFolderName(opts: {
   deliveryDate: Date;
 }): string {
   const { from, to, deliveryDate } = opts;
-  const dateStr = deliveryDate.toISOString().substring(0, 10);
+  const dateStr = businessDateString(deliveryDate); // Argentina business timezone (ADV-353)
   if (from === to) {
     return `${from} (entregado ${dateStr})`;
   }

@@ -18,7 +18,7 @@ import { info, warn, debug, error as logError } from '../utils/logger.js';
 import { getCachedFolderStructure } from '../services/folder-structure.js';
 import { getValues, batchUpdate, type CellValue } from '../services/sheets.js';
 import { parseNumber } from '../utils/numbers.js';
-import { parseArgDate, normalizeSpreadsheetDate } from '../utils/date.js';
+import { parseArgDate, normalizeSpreadsheetDate, businessYear } from '../utils/date.js';
 import { validateMoneda, validateMatchConfidence, validateTipoComprobante, extractCuitFromText } from '../utils/validation.js';
 import { BankMovementMatcher, calculateKeywordMatchScore, extractReferencia, type MatchQuality } from './matcher.js';
 import { getMovimientosToFill } from '../services/movimientos-reader.js';
@@ -1364,7 +1364,7 @@ export async function matchAllMovimientos(
     PROCESSING_LOCK_ID,
     async () => {
       const startTime = Date.now();
-      const currentYear = new Date().getFullYear();
+      const currentYear = businessYear(); // Argentina business timezone (ADV-353)
 
       // Get folder structure
       const folderStructure = getCachedFolderStructure();

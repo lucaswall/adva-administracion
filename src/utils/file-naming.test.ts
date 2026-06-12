@@ -11,6 +11,7 @@ import {
   generateResumenFileName,
   generateResumenTarjetaFileName,
   generateResumenBrokerFileName,
+  generateRetencionFileName,
   sanitizeFileName,
 } from './file-naming.js';
 import type { Factura, Pago, Recibo, ResumenBancario, ResumenTarjeta, ResumenBroker } from '../types/index.js';
@@ -444,5 +445,65 @@ describe('generateResumenBrokerFileName', () => {
     const broker: ResumenBroker = { ...baseBroker, fechaHasta: '20' };
     const result = generateResumenBrokerFileName(broker);
     expect(result).toBe('unknown - Resumen Broker - BALANZ CAPITAL VALORES SAU - 123456.pdf');
+  });
+});
+
+// ADV-349: fecha and numero must be sanitized in generateFacturaFileName
+// and fechaEmision / nroCertificado in generateRetencionFileName
+describe('generateFacturaFileName - ADV-349 sanitization', () => {
+  const baseFactura = {
+    fechaEmision: '2024-01-15',
+    tipoComprobante: 'A',
+    nroFactura: '00001-00001234',
+    razonSocialEmisor: 'EMISOR SA',
+    cuitEmisor: '20123456786',
+    razonSocialReceptor: 'CLIENTE SA',
+    cuitReceptor: '27234567891',
+    concepto: '',
+    importeTotal: 100,
+    moneda: 'ARS' as const,
+    tipoCambio: 1,
+    cae: '',
+    fechaVencimientoCae: '',
+  };
+
+  it('ADV-349: sanitizes slashes in fechaEmision (Gemini may return DD/MM/YYYY)', () => {
+    const factura = { ...baseFactura, fechaEmision: '2024/01/15' };
+    const result = generateFacturaFileName(factura as never, 'factura_recibida');
+    // Slash in date must become dash; no raw '/' in output filename
+    expect(result).not.toContain('/');
+    expect(result).toContain('2024-01-15');
+  });
+
+  it('ADV-349: sanitizes colons in nroFactura (defensive against Gemini noise)', () => {
+    const factura = { ...baseFactura, nroFactura: '00001:00001234' };
+    const result = generateFacturaFileName(factura as never, 'factura_emitida');
+    // Colon must be removed by sanitizeFileName
+    expect(result).not.toContain(':');
+  });
+});
+
+describe('generateRetencionFileName - ADV-349 sanitization', () => {
+  const baseRetencion = {
+    fechaEmision: '2025-11-27',
+    nroCertificado: '000000009185',
+    razonSocialAgenteRetencion: 'CONSEJO FEDERAL',
+    cuitAgenteRetencion: '30709076783',
+    importeRetenido: 500,
+    tipoRetencion: 'GANANCIAS',
+  };
+
+  it('ADV-349: sanitizes slashes in fechaEmision for retencion', () => {
+    const retencion = { ...baseRetencion, fechaEmision: '2025/11/27' };
+    const result = generateRetencionFileName(retencion as never);
+    expect(result).not.toContain('/');
+    expect(result).toContain('2025-11-27');
+  });
+
+  it('ADV-349: sanitizes invalid chars in nroCertificado', () => {
+    const retencion = { ...baseRetencion, nroCertificado: '000:009185' };
+    const result = generateRetencionFileName(retencion as never);
+    // Colon must be stripped from the CERT- prefix segment
+    expect(result).not.toContain(':');
   });
 });

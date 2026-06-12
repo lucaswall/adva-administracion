@@ -113,5 +113,43 @@ describe('google-auth', () => {
       const client = await getGoogleAuthAsync(scopes);
       expect(client).toBeDefined();
     });
+
+    // ADV-294: scope mismatch guard
+    it('ADV-294: creates a new client when called with different scopes', async () => {
+      const scopeA = ['https://www.googleapis.com/auth/drive'];
+      const scopeB = ['https://www.googleapis.com/auth/spreadsheets'];
+
+      const client1 = await getGoogleAuthAsync(scopeA);
+      const client2 = await getGoogleAuthAsync(scopeB);
+
+      // Different scopes → different clients
+      expect(client2).not.toBe(client1);
+      // Each call should have created a new GoogleAuth instance
+      expect(google.auth.GoogleAuth).toHaveBeenCalledTimes(2);
+    });
+
+    it('ADV-294: returns the cached client when called with same scopes after mismatch', async () => {
+      const scopeA = ['https://www.googleapis.com/auth/drive'];
+      const scopeB = ['https://www.googleapis.com/auth/spreadsheets'];
+
+      await getGoogleAuthAsync(scopeA); // 1st: create A-client
+      const clientB = await getGoogleAuthAsync(scopeB); // 2nd: mismatch → create B-client
+      const clientB2 = await getGoogleAuthAsync(scopeB); // 3rd: same as scopeB → cached B-client
+
+      expect(clientB2).toBe(clientB); // Same instance
+      expect(google.auth.GoogleAuth).toHaveBeenCalledTimes(2); // Only 2 constructions
+    });
+
+    it('ADV-294: treats scope order as irrelevant (sorted comparison)', async () => {
+      const scopeA = ['https://www.googleapis.com/auth/drive', 'https://www.googleapis.com/auth/spreadsheets'];
+      const scopeAReversed = ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive'];
+
+      const client1 = await getGoogleAuthAsync(scopeA);
+      const client2 = await getGoogleAuthAsync(scopeAReversed);
+
+      // Same scopes in different order → should be treated as the same
+      expect(client2).toBe(client1);
+      expect(google.auth.GoogleAuth).toHaveBeenCalledTimes(1);
+    });
   });
 });

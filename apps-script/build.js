@@ -86,6 +86,24 @@ export function escapeTemplateValue(value) {
 }
 
 /**
+ * Substitutes {{API_BASE_URL}} and {{API_SECRET}} in the template string.
+ *
+ * Uses the function-replacement form of String.prototype.replace() so that
+ * special `$` sequences in the values ($$, $&, $`, $') are never interpreted
+ * as replacement patterns — they are treated as literal characters (ADV-333).
+ *
+ * @param {string} tpl - Raw template content
+ * @param {string} apiBaseUrl - The resolved API base URL
+ * @param {string} apiSecret - The resolved API secret
+ * @returns {string} Template with placeholders replaced
+ */
+export function applyTemplate(tpl, apiBaseUrl, apiSecret) {
+  return tpl
+    .replace('{{API_BASE_URL}}', () => escapeTemplateValue(apiBaseUrl))
+    .replace('{{API_SECRET}}', () => escapeTemplateValue(apiSecret));
+}
+
+/**
  * Normalises API_BASE_URL: prepends https:// if no scheme is present, strips
  * any trailing slash. Throws on syntactically invalid URLs.
  */
@@ -134,9 +152,8 @@ async function build() {
     process.exit(1);
   }
   const tpl = fs.readFileSync(templatePath, 'utf-8');
-  const configTs = tpl
-    .replace('{{API_BASE_URL}}', escapeTemplateValue(apiBaseUrl))
-    .replace('{{API_SECRET}}', escapeTemplateValue(apiSecret));
+  // Use applyTemplate (function-replacement form) to prevent $-pattern corruption (ADV-333)
+  const configTs = applyTemplate(tpl, apiBaseUrl, apiSecret);
   fs.writeFileSync(configPath, configTs, 'utf-8');
   log.success('config.ts generated');
 
