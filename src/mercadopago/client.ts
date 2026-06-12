@@ -54,13 +54,16 @@ export interface MpPayment {
   charges_details: Array<{
     name: string;
     type: string;
-    amounts: {
-      original: number;
-      refunded: number;
+    /** Optional at the type level: individual charge entries are not validated
+     *  by isValidMpPayment — consumers must use optional chaining; the
+     *  transform's reconciliation guard absorbs any malformed entry. */
+    amounts?: {
+      original?: number;
+      refunded?: number;
     };
-    accounts: {
-      from: string;
-      to: string;
+    accounts?: {
+      from?: string;
+      to?: string;
     };
   }>;
 }
@@ -115,12 +118,15 @@ function isMpSearchResponse(data: unknown): data is MpSearchResponse {
 function isValidMpPayment(item: unknown): item is MpPayment {
   if (!item || typeof item !== 'object') return false;
   const p = item as Record<string, unknown>;
+  const transactionDetails = p.transaction_details as Record<string, unknown> | null | undefined;
   return (
     p.id !== undefined &&
     p.id !== null &&
     typeof p.date_approved === 'string' &&
     p.date_approved.length > 0 &&
-    typeof p.transaction_amount === 'number'
+    typeof p.transaction_amount === 'number' &&
+    typeof transactionDetails?.net_received_amount === 'number' &&
+    Array.isArray(p.charges_details)
   );
 }
 
@@ -138,7 +144,6 @@ async function fetchOnce(url: string, token: string): Promise<FetchOnceResult> {
       headers: { Authorization: `Bearer ${token}` },
       signal: controller.signal,
     });
-    clearTimeout(timeoutId);
 
     if (!response.ok) {
       return {
@@ -169,7 +174,6 @@ async function fetchOnce(url: string, token: string): Promise<FetchOnceResult> {
 
     return { ok: true, value: data };
   } catch (e) {
-    clearTimeout(timeoutId);
     // AbortError = timeout — terminal, no retry
     if (e instanceof DOMException && e.name === 'AbortError') {
       return {
@@ -182,6 +186,11 @@ async function fetchOnce(url: string, token: string): Promise<FetchOnceResult> {
       ok: false,
       error: e instanceof Error ? e : new Error(String(e)),
     };
+  } finally {
+    // Cleared only after the body is consumed — the timeout must cover
+    // response.json() too, not just the headers (a hung body stream would
+    // otherwise block forever).
+    clearTimeout(timeoutId);
   }
 }
 

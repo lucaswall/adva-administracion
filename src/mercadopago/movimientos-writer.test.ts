@@ -39,6 +39,7 @@ import {
   appendRowsWithLinks,
   getValues,
 } from '../services/sheets.js';
+import { error as logErrorMock, warn as warnMock } from '../utils/logger.js';
 
 // Helper: build a pair of MovimientoBancario rows for one MP payment op
 function makeMpOp(
@@ -537,6 +538,57 @@ describe('writeMpMovimientos', () => {
 
       const rows = vi.mocked(appendRowsWithLinks).mock.calls[0][2] as unknown[][];
       rows.forEach(row => expect(row).toHaveLength(9));
+    });
+
+    it('writes null saldo cells for production MP rows (saldo: null)', async () => {
+      vi.mocked(getOrCreateMonthSheet).mockResolvedValue({ ok: true, value: 123 });
+      vi.mocked(getValues).mockResolvedValue({ ok: true, value: [] });
+      vi.mocked(appendRowsWithLinks).mockResolvedValue({ ok: true, value: 0 });
+
+      // paymentsToMovimientos always emits saldo: null (MP API has no running balance)
+      const movimientos: MovimientoBancario[] = [
+        {
+          fecha: '2026-05-10',
+          concepto: 'MP 111 - CUIT 20123456786 - Unipersonal',
+          credito: 1000,
+          debito: null,
+          saldo: null,
+        },
+        {
+          fecha: '2026-05-10',
+          concepto: 'MP 111 - Comisión Mercado Pago',
+          credito: null,
+          debito: 30,
+          saldo: null,
+        },
+      ];
+
+      const result = await writeMpMovimientos('spreadsheet-id', '2026-05', movimientos, 0);
+
+      expect(result.ok).toBe(true);
+      const rows = vi.mocked(appendRowsWithLinks).mock.calls[0][2] as unknown[][];
+      // saldo column (index 4) is null on both transaction rows
+      expect(rows[1][4]).toBeNull();
+      expect(rows[2][4]).toBeNull();
+    });
+  });
+
+  // ─── Unexpected errors ────────────────────────────────────────────────────
+
+  describe('unexpected errors', () => {
+    it('logs at error level (not warn) and returns ok:false when a dependency throws', async () => {
+      vi.mocked(getOrCreateMonthSheet).mockRejectedValue(new Error('boom'));
+
+      const result = await writeMpMovimientos(
+        'spreadsheet-id',
+        '2026-05',
+        makeMpOp('111', '2026-05-10', 100, 3),
+        0
+      );
+
+      expect(result.ok).toBe(false);
+      expect(vi.mocked(logErrorMock)).toHaveBeenCalled();
+      expect(vi.mocked(warnMock)).not.toHaveBeenCalled();
     });
   });
 });

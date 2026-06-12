@@ -1,6 +1,6 @@
 # Implementation Plan
 
-**Status:** IN_PROGRESS
+**Status:** COMPLETE
 **Created:** 2026-06-12
 **Source:** Inline request: Mercadopago payments ingestion via API — monthly server process with manual trigger endpoint, idempotent; builds "Mercado Pago {collectorId} ARS" Movimientos workbook with monthly tabs (gross credit + fee debit rows) and resumen rows; matching to facturas emitidas via CUIT with CUIT↔DNI equivalence and an MP-specific forward date window.
 **Linear Issues:** [ADV-365](https://linear.app/lw-claude/issue/ADV-365/mercadopago-api-client-with-pagination-timeout-and-429-backoff), [ADV-366](https://linear.app/lw-claude/issue/ADV-366/transform-mp-payments-into-movimientobancario-rows-gross-credit-fee), [ADV-367](https://linear.app/lw-claude/issue/ADV-367/idempotent-mp-movimientos-writer-incremental-month-tab-appends), [ADV-368](https://linear.app/lw-claude/issue/ADV-368/mp-resumen-row-for-closed-periods-synthetic-running-balance), [ADV-369](https://linear.app/lw-claude/issue/ADV-369/mp-sync-orchestrator-with-processing-lock-and-match-auto-trigger), [ADV-370](https://linear.app/lw-claude/issue/ADV-370/post-apimp-sync-route-manual-trigger), [ADV-371](https://linear.app/lw-claude/issue/ADV-371/mp-monthly-cron-boot-time-catch-up-scheduler), [ADV-372](https://linear.app/lw-claude/issue/ADV-372/matcher-cuitdni-equivalence-in-identity-comparisons), [ADV-373](https://linear.app/lw-claude/issue/ADV-373/matcher-mp-specific-forward-factura-date-window-25-days), [ADV-374](https://linear.app/lw-claude/issue/ADV-374/mp-ingestion-documentation-claudemd-spreadsheet-formatmd-envexample), [ADV-375](https://linear.app/lw-claude/issue/ADV-375/delivery-copy-pdfs-skip-non-pdf-resumen-fileids-mp-spreadsheet-backed)
@@ -343,3 +343,37 @@ Tasks 1-7 are sequential (each builds on the previous). Tasks 8-9 (matcher) are 
 
 ### Continuation Status
 All tasks completed.
+
+### Review Findings
+
+Summary: 3 issue(s) found, fixed inline (Team: security, reliability, quality reviewers; 25+ changed files)
+- FIXED INLINE: 3 issue(s) — verified via TDD + bug-hunter
+
+**Issues fixed inline:**
+- [MEDIUM] TYPE: `isValidMpPayment` guard did not validate `transaction_details.net_received_amount`/`charges_details` — `transform.ts:109-110` would throw TypeError on a malformed API payment (`src/mercadopago/client.ts:115`) — guard extended; per-charge `amounts`/`accounts` made optional with optional chaining + reconciliation-guard fallback; 4 new tests (ADV-376)
+- [MEDIUM] LOGGING: unexpected-error catch blocks logged at `warn` instead of `error` (`src/mercadopago/movimientos-writer.ts:179`, `src/mercadopago/resumen-writer.ts:193`) — switched to `logError`; catch-path tests added in both files + null-saldo happy-path test (ADV-377)
+- [LOW] TIMEOUT: `clearTimeout` ran before `response.json()` — body read had no timeout protection (`src/mercadopago/client.ts:141`) — moved to `finally` so the AbortController covers the body read; hung-body test added (ADV-378)
+
+**Discarded findings (not bugs):**
+- [DISCARDED] CONVENTION: `isValidPeriodParam` in `routes/mp-sync.ts` duplicates `isValidPeriod` in `sync.ts` — logic is identical and `syncMercadopago` re-validates periods itself (line 153), so the route copy cannot drift into a correctness issue; duplication debt, not a bug
+- [DISCARDED] TYPE: "undocumented" cast at `sync.ts:322` — false positive: an explanatory comment exists directly above the cast ("withLock wraps our callback return in an outer ok:true")
+- [DISCARDED] CONVENTION: `facturaDateRangeBefore` name at `matcher.ts:719` — follows the pre-existing `FACTURA_DATE_RANGE_BEFORE` constant naming and `isWithinDays` parameter position; behavior verified correct by the ADV-373 test; style-only
+- [DISCARDED] TEST: `makeMpOp` helper uses non-null saldo while production emits `saldo: null` — the null branch is an explicit type-enforced ternary; coverage added anyway via a new null-saldo test during the inline fixes, but the original tests were not invalid
+
+### Linear Updates
+- ADV-365…ADV-375 (all 11): Review → Merge (original tasks)
+- ADV-376: Created in Merge (Fix: MP payment runtime guard — fixed inline)
+- ADV-377: Created in Merge (Fix: writer catch-block log level — fixed inline)
+- ADV-378: Created in Merge (Fix: body-read timeout coverage — fixed inline)
+
+### Inline Fix Verification
+- Unit tests: 2,932 pass (82 files), lint clean, build zero warnings
+- Bug-hunter: no new issues
+
+<!-- REVIEW COMPLETE -->
+
+---
+
+## Status: COMPLETE
+
+All tasks implemented and reviewed successfully. All Linear issues moved to Merge.

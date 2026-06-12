@@ -263,6 +263,38 @@ describe('searchApprovedPayments', () => {
       if (result.ok) expect(result.value).toHaveLength(1);
       expect(vi.mocked(loggerModule.warn)).toHaveBeenCalled();
     });
+
+    it('skips payments missing transaction_details.net_received_amount and logs a warn', async () => {
+      const payments = [
+        makeApprovedPayment(1),
+        makeApprovedPayment(2, { transaction_details: undefined }),
+        makeApprovedPayment(3, { transaction_details: {} }),
+      ];
+
+      global.fetch = vi.fn().mockResolvedValueOnce(mockPageResponse(payments, 3, 0));
+
+      const result = await searchApprovedPayments('2026-05');
+
+      expect(result.ok).toBe(true);
+      if (result.ok) expect(result.value.map(p => p.id)).toEqual([1]);
+      expect(vi.mocked(loggerModule.warn)).toHaveBeenCalled();
+    });
+
+    it('skips payments with missing or non-array charges_details and logs a warn', async () => {
+      const payments = [
+        makeApprovedPayment(1),
+        makeApprovedPayment(2, { charges_details: undefined }),
+        makeApprovedPayment(3, { charges_details: 'not-an-array' }),
+      ];
+
+      global.fetch = vi.fn().mockResolvedValueOnce(mockPageResponse(payments, 3, 0));
+
+      const result = await searchApprovedPayments('2026-05');
+
+      expect(result.ok).toBe(true);
+      if (result.ok) expect(result.value.map(p => p.id)).toEqual([1]);
+      expect(vi.mocked(loggerModule.warn)).toHaveBeenCalled();
+    });
   });
 
   // -------------------------------------------------------------------------
@@ -288,6 +320,37 @@ describe('searchApprovedPayments', () => {
       const result = await promise;
 
       expect(result.ok).toBe(false);
+    });
+
+    it('aborts when the response body read hangs (json never resolves)', async () => {
+      vi.useFakeTimers();
+
+      global.fetch = vi.fn().mockImplementation((_url: string, options?: RequestInit) => {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: () =>
+            new Promise((_, reject) => {
+              options?.signal?.addEventListener('abort', () => {
+                reject(new DOMException('The operation was aborted.', 'AbortError'));
+              });
+              // Never resolves on its own — simulates a hung body stream
+            }),
+        } as unknown as Response);
+      });
+
+      const promise = searchApprovedPayments('2026-05');
+      await vi.advanceTimersByTimeAsync(MP_API_TIMEOUT_MS + 100);
+
+      // If the timeout timer was cleared before the body read, the promise
+      // never settles — the sentinel exposes the hang instead of blocking the suite.
+      const result = await Promise.race([
+        promise,
+        Promise.resolve('STILL_PENDING' as const),
+      ]);
+
+      expect(result).not.toBe('STILL_PENDING');
+      expect((result as { ok: boolean }).ok).toBe(false);
     });
   });
 

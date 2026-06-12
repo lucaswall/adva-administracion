@@ -107,13 +107,16 @@ function paymentToGroup(payment: MpPayment): PaymentGroup {
 
   // ---- Collector charges ----
   const diff = payment.transaction_amount - payment.transaction_details.net_received_amount;
+  // Charge entries are not validated at the API boundary — a malformed entry
+  // (missing accounts/amounts) nets to 0 or drops out of the collector filter,
+  // and the reconciliation guard below falls back to the combined debit row.
   const collectorCharges = payment.charges_details.filter(
-    c => c.accounts.from === 'collector',
+    c => c.accounts?.from === 'collector',
   );
 
   const chargeDebits = collectorCharges.map(c => ({
     name: c.name,
-    net: c.amounts.original - c.amounts.refunded,
+    net: (c.amounts?.original ?? 0) - (c.amounts?.refunded ?? 0),
   }));
 
   const chargesSum = chargeDebits.reduce((sum, c) => sum + c.net, 0);

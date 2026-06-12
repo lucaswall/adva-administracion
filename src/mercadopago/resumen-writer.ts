@@ -14,7 +14,7 @@ import type { Result, MovimientoBancario, ResumenBancario } from '../types/index
 import { getValues } from '../services/sheets.js';
 import { readMovimientosForPeriod } from '../services/movimientos-reader.js';
 import { storeResumenBancario } from '../processing/storage/resumen-store.js';
-import { info, warn } from '../utils/logger.js';
+import { info, error as logError } from '../utils/logger.js';
 
 
 /** Account information for the MP account */
@@ -190,7 +190,7 @@ export async function writeMpResumenIfClosed(
 
     return { ok: true, value: { written } };
   } catch (error) {
-    warn('writeMpResumenIfClosed: unexpected error', {
+    logError('writeMpResumenIfClosed: unexpected error', {
       module: 'mercadopago/resumen-writer',
       periodo,
       error: error instanceof Error ? error.message : String(error),

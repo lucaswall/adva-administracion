@@ -34,7 +34,7 @@ vi.mock('../processing/storage/resumen-store.js', () => ({
 import { getValues } from '../services/sheets.js';
 import { readMovimientosForPeriod } from '../services/movimientos-reader.js';
 import { storeResumenBancario } from '../processing/storage/resumen-store.js';
-import { info } from '../utils/logger.js';
+import { info, error as logErrorMock, warn as warnMock } from '../utils/logger.js';
 
 // Helper: create a MovimientoRow matching what readMovimientosForPeriod returns
 function makeMovimientoRow(
@@ -615,6 +615,26 @@ describe('writeMpResumenIfClosed', () => {
 
       const callArg2 = vi.mocked(storeResumenBancario).mock.calls[0][0];
       expect(callArg2.fechaHasta).toBe('2026-05-31');
+    });
+  });
+
+  // ─── Unexpected errors ────────────────────────────────────────────────────
+
+  describe('unexpected errors', () => {
+    it('logs at error level (not warn) and returns ok:false when a dependency throws', async () => {
+      vi.mocked(getValues).mockRejectedValue(new Error('boom'));
+
+      const result = await writeMpResumenIfClosed(
+        'ctrl',
+        'mov',
+        '2026-05',
+        { collectorId: '1' },
+        '2026-06-12'
+      );
+
+      expect(result.ok).toBe(false);
+      expect(vi.mocked(logErrorMock)).toHaveBeenCalled();
+      expect(vi.mocked(warnMock)).not.toHaveBeenCalled();
     });
   });
 });

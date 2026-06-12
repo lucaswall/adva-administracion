@@ -24,7 +24,7 @@ import {
   generateInitialBalanceRow,
   generateMovimientoRowWithFormula,
 } from '../utils/balance-formulas.js';
-import { info, warn } from '../utils/logger.js';
+import { info, error as logError } from '../utils/logger.js';
 
 /** Pattern for MP op id prefix: `MP <digits>` */
 const MP_OP_ID_RE = /^MP (\d+)/;
@@ -176,7 +176,7 @@ export async function writeMpMovimientos(
       },
     };
   } catch (error) {
-    warn('writeMpMovimientos: unexpected error', {
+    logError('writeMpMovimientos: unexpected error', {
       module: 'mercadopago/movimientos-writer',
       periodo,
       error: error instanceof Error ? error.message : String(error),

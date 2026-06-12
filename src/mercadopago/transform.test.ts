@@ -366,6 +366,49 @@ describe('paymentsToMovimientos', () => {
   });
 
   // -------------------------------------------------------------------------
+  // Malformed charge entries (defensive — API boundary)
+  // -------------------------------------------------------------------------
+  describe('malformed charge entries', () => {
+    it('does not throw when a charge is missing accounts — falls back to combined debit', () => {
+      const payment = makePayment({
+        transaction_amount: 1000,
+        transaction_details: { net_received_amount: 900 },
+        charges_details: [
+          { name: 'mercadopago_fee', type: 'debit', amounts: { original: 100, refunded: 0 } },
+        ],
+      });
+
+      // The charge cannot be attributed to the collector → chargesSum (0) ≠ diff (100)
+      // → reconciliation guard emits a single combined debit for the full diff
+      const { movimientos } = paymentsToMovimientos([payment]);
+
+      expect(movimientos).toHaveLength(2);
+      expect(movimientos[1].concepto).toBe('MP 158805080384 - Comisiones e impuestos Mercado Pago');
+      expect(movimientos[1].debito).toBe(100);
+      expect(vi.mocked(loggerModule.warn)).toHaveBeenCalled();
+    });
+
+    it('does not throw when a collector charge is missing amounts — falls back to combined debit', () => {
+      const payment = makePayment({
+        transaction_amount: 1000,
+        transaction_details: { net_received_amount: 900 },
+        charges_details: [
+          { name: 'mercadopago_fee', type: 'debit', accounts: { from: 'collector', to: 'mp' } },
+        ],
+      });
+
+      // amounts missing → charge nets to 0 → chargesSum (0) ≠ diff (100)
+      // → reconciliation guard emits a single combined debit for the full diff
+      const { movimientos } = paymentsToMovimientos([payment]);
+
+      expect(movimientos).toHaveLength(2);
+      expect(movimientos[1].concepto).toBe('MP 158805080384 - Comisiones e impuestos Mercado Pago');
+      expect(movimientos[1].debito).toBe(100);
+      expect(vi.mocked(loggerModule.warn)).toHaveBeenCalled();
+    });
+  });
+
+  // -------------------------------------------------------------------------
   // Sorting
   // -------------------------------------------------------------------------
   describe('output sort order', () => {
