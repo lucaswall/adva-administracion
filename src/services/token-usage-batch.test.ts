@@ -429,4 +429,114 @@ describe('TokenUsageBatch', () => {
     // Entries should be preserved for retry
     expect(batch.pendingCount).toBe(100);
   });
+
+  describe('concurrent flushes (Codex PR-120 finding: snapshot atomicity)', () => {
+    const makeEntry = (requestId: string): TokenUsageEntry => ({
+      timestamp: new Date('2026-01-25T10:00:00Z'),
+      requestId,
+      fileId: `file-${requestId}`,
+      fileName: `${requestId}.pdf`,
+      model: 'gemini-2.0-flash',
+      promptTokens: 100,
+      cachedTokens: 0,
+      outputTokens: 50,
+      totalTokens: 150,
+      promptCostPerToken: 0.0001,
+      cachedCostPerToken: 0,
+      outputCostPerToken: 0.0002,
+      durationMs: 500,
+      success: true,
+    });
+
+    it('does not duplicate rows when a second flush starts while one is in flight', async () => {
+      const batch = new TokenUsageBatch();
+      vi.mocked(sheets.getSpreadsheetTimezone).mockResolvedValue({ ok: true, value: 'America/Argentina/Buenos_Aires' });
+
+      // Deferred append: each call resolves only when we release it
+      const releases: Array<() => void> = [];
+      vi.mocked(sheets.appendRowsWithFormatting).mockImplementation(() =>
+        new Promise(resolve => {
+          releases.push(() => resolve({ ok: true, value: 1 }));
+        })
+      );
+
+      await batch.add(makeEntry('req-1'));
+      await batch.add(makeEntry('req-2'));
+
+      // First flush starts and blocks on the append
+      const flushA = batch.flush('dashboard-id');
+      await Promise.resolve();
+
+      // A third entry arrives mid-flight, then a second flush starts
+      await batch.add(makeEntry('req-3'));
+      const flushB = batch.flush('dashboard-id');
+      await Promise.resolve();
+
+      // Release both appends
+      releases.forEach(release => release());
+      await flushA;
+      await flushB;
+
+      // Every requestId must be written exactly once across all append calls
+      const writtenIds = vi.mocked(sheets.appendRowsWithFormatting).mock.calls
+        .flatMap(call => call[2])
+        .map(row => row[1]);
+      expect(writtenIds.sort()).toEqual(['req-1', 'req-2', 'req-3']);
+    });
+
+    it('preserves entries added during an in-flight flush when that flush succeeds', async () => {
+      const batch = new TokenUsageBatch();
+      vi.mocked(sheets.getSpreadsheetTimezone).mockResolvedValue({ ok: true, value: 'America/Argentina/Buenos_Aires' });
+
+      let releaseAppend: (() => void) | undefined;
+      vi.mocked(sheets.appendRowsWithFormatting).mockImplementationOnce(() =>
+        new Promise(resolve => {
+          releaseAppend = () => resolve({ ok: true, value: 1 });
+        })
+      );
+
+      await batch.add(makeEntry('req-1'));
+      await batch.add(makeEntry('req-2'));
+
+      const flushA = batch.flush('dashboard-id');
+      await Promise.resolve();
+
+      // Entry added while the flush awaits the Sheets append
+      await batch.add(makeEntry('req-3'));
+
+      releaseAppend!();
+      const result = await flushA;
+
+      expect(result.ok).toBe(true);
+      // req-3 must NOT be wiped by the in-flight flush's clear
+      expect(batch.pendingCount).toBe(1);
+    });
+
+    it('re-queues the snapshot for retry when a flush fails with entries added mid-flight', async () => {
+      const batch = new TokenUsageBatch();
+      vi.mocked(sheets.getSpreadsheetTimezone).mockResolvedValue({ ok: true, value: 'America/Argentina/Buenos_Aires' });
+
+      let releaseAppend: (() => void) | undefined;
+      vi.mocked(sheets.appendRowsWithFormatting).mockImplementationOnce(() =>
+        new Promise(resolve => {
+          releaseAppend = () => resolve({ ok: false, error: new Error('API error') });
+        })
+      );
+
+      await batch.add(makeEntry('req-1'));
+      await batch.add(makeEntry('req-2'));
+
+      const flushA = batch.flush('dashboard-id');
+      await Promise.resolve();
+
+      await batch.add(makeEntry('req-3'));
+
+      releaseAppend!();
+      const result = await flushA;
+
+      expect(result.ok).toBe(false);
+      // Failed snapshot (req-1, req-2) re-queued alongside the mid-flight req-3
+      expect(batch.pendingCount).toBe(3);
+    });
+  });
 });
