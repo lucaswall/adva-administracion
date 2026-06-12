@@ -640,7 +640,7 @@ See `SPREADSHEET_FORMAT.md` for complete schema.
   - **Always** use `normalizeSpreadsheetDate(cellValue)` from `utils/date.ts` for date fields, **never** `String()`
   - Correct: `fechaEmision: normalizeSpreadsheetDate(row[colIndex.fechaEmision])`
   - Wrong: `fechaEmision: String(row[colIndex.fechaEmision] || '')`
-  - `processedAt` fields are NOT affected (stored as plain text, not `CellDate`)
+  - `processedAt` fields written with the spreadsheet timezone come back as DATE_TIME serials encoding **local wall-clock time** — decode them with `decodeSerialInTimezone(serial, timezone)` from `utils/date.ts` (timezone via `getSpreadsheetTimezone`), never with the raw Excel-epoch-as-UTC formula (ADV-306)
 
 ## MATCHING
 

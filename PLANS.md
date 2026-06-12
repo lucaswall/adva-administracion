@@ -1134,3 +1134,61 @@ Phases group tasks that touch the same files; within a phase, tasks MUST run in 
 - Task 7 (row carry-forward) and Task 8 (resumen retry idempotency) touch the most data-critical write paths; their state-consistency tests are the gate.
 - Task 66 changes a production prompt; the Gemini MCP before/after comparison is mandatory.
 - Plan size: 70 tasks across one branch — plan-implement must respect phase ordering to avoid worktree merge conflicts.
+
+---
+
+## Iteration 1
+
+**Implemented:** 2026-06-12
+**Method:** Agent team (7 workers across 3 waves, worktree-isolated) + lead-reserved tasks
+
+### Tasks Completed This Iteration
+
+All 70 tasks. By work unit:
+
+- **worker-1 (wave 1):** Task 1 (ADV-302), Task 2 (ADV-351), Task 3 (ADV-344), Task 4 (ADV-306), Task 5 (ADV-311), Task 6 (ADV-297), Task 7 (ADV-307), Task 8 (ADV-308), Task 9 (ADV-303), Task 10 (ADV-312), Task 11 (ADV-348), Task 41 (ADV-345) — lock expiry decoupling, timezone-correct processedAt decode, scan-queue recovery gates, fail-closed duplicate cache, match-column/MANUAL-lock preservation on reprocess, resumen/movimientos atomicity, watch-channel retry + fallback-poll survival, rename-only failure handling, dead resumen cache methods removed
+- **worker-2 (wave 1):** Task 12 (ADV-284), Tasks 14-24 (ADV-286, ADV-287, ADV-317, ADV-336, ADV-338, ADV-313, ADV-314, ADV-337, ADV-315, ADV-316, ADV-339) — PDF scanner FlateDecode/Tr-3/q-Q hardening with zip-bomb cap, enum + monetary validation at the AI boundary, per-field sign rules, suspicious-empty-fields trigger, count-mismatch flag, word-boundary ADVA matching, CUIT/DNI checksum validation, CUIT-position-fallback review flag, string-aware JSON brace counting, tipoTarjeta normalization (no more fabricated 'Visa'), multi-dot Argentine number parsing
+- **worker-3 (wave 1):** Tasks 25-36 (ADV-304, ADV-305, ADV-321, ADV-340, ADV-342, ADV-323, ADV-319, ADV-324, ADV-320, ADV-343, ADV-318, ADV-341) — beneficiario column mapping, NC/ND pool exclusion, recibo CUIL tier-2 identity, ADVA-CUIT exclusion from concepto extraction (isAdvaCuit now live), tierToConfidence on credit path, matchedType hash normalization, replacement tier alignment, linked-counterpart exclusion, pagada revert on unmatch, pagada gating on applied detalle updates, USD prefetch coverage, parseArgDate NC ordering guard
+- **worker-4 (wave 1):** Tasks 37-40, 42-49 (ADV-288, ADV-289, ADV-322, ADV-290, ADV-309, ADV-328, ADV-330, ADV-350, ADV-327, ADV-329, ADV-326, ADV-352) — appendRowsWithFormatting ADV-242 hardening, GOOGLE_API_TIMEOUT_MS, balance-formula row offsets + banner guard, CellDate fechaEmision, phantom-row full-rewrite, desired-set duplicate-key guard, facturador failure classification, strip-then-pad nro normalization, NC TC-faltante flag, retencion consumed-set, NC/ND exclusion in Pagos Pendientes, bank-header tab guard
+- **worker-5 (wave 2):** Tasks 50-56, 59-61 (ADV-310, ADV-296, ADV-299, ADV-335, ADV-334, ADV-354, ADV-353, ADV-349, ADV-333, ADV-294) — real version + environment in status, fire-and-forget .catch(), structured log context, dead force field removed, delivery 503 mapping + delivery lock, Argentina-timezone business dates, filename sanitization, literal template substitution in build.js, auth scope-mismatch guard
+- **worker-6 (wave 2):** Tasks 57, 58, 62, 63 (ADV-346, ADV-347, ADV-298, ADV-300) — ENVIRONMENT defaults to staging with NODE_ENV validation (CLAUDE.md updated), populated-unmarked-root refusal, dashboardId wired into token-batch auto-flush, double-cast removed
+- **worker-7 (wave 3):** Tasks 64, 65, 67-70 (ADV-332, ADV-291, ADV-301, ADV-356, ADV-357, ADV-355) — buildHeaderIndex column-index centralization (also fixed latent nc-factura-matcher cuitField wiring), 21-col MANUAL-lock fixtures, approved fictional CUITs, realigned match-movimientos fixtures, real non-finite debito test, dead exports deleted (isAdvaCuit kept — now used by bank/matcher.ts)
+- **Lead:** Task 13 (ADV-285) npm audit fix (fast-uri high, qs moderate → 0 vulnerabilities); Task 66 (ADV-331) real personal CUIT/CUILs + names replaced in FACTURA_PROMPT and four test files, prompt regression-verified via Gemini MCP before/after on a production Consumidor Final factura (byte-identical extraction)
+
+### Files Modified
+
+~80 source/test files across src/processing/, src/bank/, src/gemini/, src/services/, src/utils/, src/routes/, src/constants/, src/config.ts, apps-script/build.js, CLAUDE.md, MIGRATIONS.md. New files: src/utils/version.ts(+test). Net ~+7,800/-1,100 lines.
+
+### Linear Updates
+
+- All 70 issues: Todo → In Progress → Review (real-time per worker report)
+- Worker labels applied per wave for review traceability
+
+### Pre-commit Verification
+
+- bug-hunter: Found 1 LOW bug (pagada reverts not gated on applied detalle updates — ADV-320/343 interaction), fixed with regression test before proceeding
+- verifier (full mode): All tests pass (2757), lint clean, zero build warnings
+
+### Work Partition
+
+- Wave 1 — worker-1: locks/scanner/recovery/watch (12 tasks); worker-2: AI boundary/parser/PDF (12); worker-3: matching pipeline (12); worker-4: sheets primitives/subdiario (12)
+- Wave 2 (after wave-1 merge) — worker-5: routes/delivery/auth/naming (10); worker-6: environment/infra (4)
+- Wave 3 (after wave-2 merge) — worker-7: refactor/test hygiene (6)
+- Lead-reserved: Task 13 (npm audit mutates shared node_modules), Task 66 (requires Gemini MCP)
+
+### Merge Summary
+
+- All 7 worker branches merged foundation-first with ZERO conflicts; typecheck gate after each merge
+- 2 post-merge type errors in worker-7's new tests (batchUpdate mock value type) fixed by lead
+- Full suite run after each wave's merge (2700 → 2742 → 2756 tests)
+
+### Migration Notes (release-notes items, no schema migrations)
+
+- Matching-behavior changes (Tasks 25-36): run `POST /api/match-movimientos?force=true` after deploy to re-derive match state (resolves existing double-matched rows and orphaned pagada='SI')
+- ADV-308: resumen rows with missing Movimientos sheets recover by re-uploading the affected PDF
+- ADV-322: month sheets that received two same-month batches before this fix have corrupted formulas — detection + re-store via data-ops
+- ADV-306: migrateDashboardProcessedAt is now idempotent (MIGRATIONS.md updated)
+
+### Continuation Status
+
+All tasks completed.
