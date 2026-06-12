@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.12.0] - 2026-06-12
+
+### Changed
+- Status endpoint now reports the real application version instead of a hardcoded placeholder
+- Extraction validation hardened at the AI boundary: invalid document types, currencies, and non-numeric amounts are now flagged for human review instead of being stored as-is, and an unrecognized card type is never silently defaulted to Visa
+
+### Fixed
+- Matching corrections: credit/debit notes can no longer be claimed by payments, the same transaction can no longer be matched to two different bank movements, salary receipts now match bank movements via the employee's CUIL, and ADVA's own CUIT appearing in a bank concepto no longer blocks matching — run a force re-match after deploy to re-derive existing matches
+- `pagada='SI'` is now reverted when the match that justified it is removed, replaced, or force-cleared
+- Legitimate negative amounts (account overdrafts, card payments, broker sales) no longer trigger false review flags, and dot-thousands Argentine numbers without decimals (e.g. `1.234.567`) now parse correctly
+- Documents whose extracted text contains braces no longer deterministically fail processing and land in Sin Procesar
+- Processing reliability: duplicate detection fails closed when its cache cannot load, reprocessing a document preserves its existing match, MANUAL lock, and paid status, bank statements whose movements fail to persist are retried instead of being marked successful, and running-balance formulas no longer corrupt non-empty month sheets
+- Automatic file ingestion no longer dies permanently after a single Drive watch-channel renewal failure, and stuck or failed files are correctly re-queued on startup
+- USD cross-currency matching now prefetches exchange rates for all relevant documents — some USD matches were previously impossible
+
+### Security
+- Fixed dependency vulnerabilities: fast-uri (high) and qs (moderate)
+- Hardened the PDF invisible-text scanner (prompt-injection defense): compressed content streams are now decoded, invisible render mode is detected, and graphics-state tracking closes white-on-white bypasses
+
 ## [1.11.0] - 2026-05-17
 
 ### Added
@@ -214,7 +233,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Updated fastify to fix high-severity Content-Type body validation bypass and low-severity DoS vulnerability
 - Updated googleapis to v171, @google/clasp to v3, and resolved 6 npm audit vulnerabilities
 
-[Unreleased]: https://github.com/lucaswall/adva-administracion/compare/v1.11.0...HEAD
+[Unreleased]: https://github.com/lucaswall/adva-administracion/compare/v1.12.0...HEAD
+[1.12.0]: https://github.com/lucaswall/adva-administracion/compare/v1.11.0...v1.12.0
 [1.11.0]: https://github.com/lucaswall/adva-administracion/compare/v1.10.0...v1.11.0
 [1.10.0]: https://github.com/lucaswall/adva-administracion/compare/v1.9.0...v1.10.0
 [1.9.0]: https://github.com/lucaswall/adva-administracion/compare/v1.8.3...v1.9.0
