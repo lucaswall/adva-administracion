@@ -4,7 +4,7 @@
  */
 
 import type { Result, MovimientoBancario, MovimientoTarjeta, MovimientoBroker } from '../../types/index.js';
-import { getOrCreateMonthSheet, formatEmptyMonthSheet, appendRowsWithLinks, type CellDate, type CellNumber, type CellFormula } from '../../services/sheets.js';
+import { getOrCreateMonthSheet, formatEmptyMonthSheet, appendRowsWithLinks, getValues, type CellDate, type CellNumber, type CellFormula } from '../../services/sheets.js';
 import { MOVIMIENTOS_BANCARIO_SHEET, MOVIMIENTOS_TARJETA_SHEET, MOVIMIENTOS_BROKER_SHEET } from '../../constants/spreadsheet-headers.js';
 import { info } from '../../utils/logger.js';
 import type { SheetOrderBatch } from '../caches/index.js';
@@ -68,6 +68,15 @@ export async function storeMovimientosBancario(
       a.fecha.localeCompare(b.fecha)
     );
 
+    // Query existing row count to compute startRowOffset for formula row references.
+    // This ensures formulas reference the correct sheet rows when appending to a
+    // sheet that already contains data from a previous run (ADV-322).
+    // Graceful fallback to offset=0 if the query fails.
+    const existingRowsResult = await getValues(spreadsheetId, `${targetMonth}!A:A`);
+    const existingRowCount = existingRowsResult.ok ? existingRowsResult.value.length : 0;
+    // Subtract 1 for the header row (offset is number of data rows already present)
+    const startRowOffset = existingRowCount > 1 ? existingRowCount - 1 : 0;
+
     // Build rows with balance formulas:
     // 1. Initial balance row (SALDO INICIAL)
     // 2. Transaction rows with running balance formulas
@@ -93,7 +102,7 @@ export async function storeMovimientosBancario(
       // rowIndex is the 0-based position where this transaction will be inserted
       // Row 0 is SALDO INICIAL, so first transaction is at rowIndex 1
       const rowIndex = index + 1;
-      const txRow = generateMovimientoRowWithFormula(mov, rowIndex);
+      const txRow = generateMovimientoRowWithFormula(mov, rowIndex, startRowOffset);
 
       // Wrap in CellDate/CellNumber/CellFormula types for spreadsheet formatting
       rows.push([
@@ -112,7 +121,7 @@ export async function storeMovimientosBancario(
     // Final row (sheet row N+2): SALDO FINAL
     // Last transaction is at rowIndex = sorted.length (0-based)
     const lastTransactionRowIndex = sorted.length;
-    const finalRow = generateFinalBalanceRow(lastTransactionRowIndex);
+    const finalRow = generateFinalBalanceRow(lastTransactionRowIndex, startRowOffset);
     rows.push([
       finalRow[0],  // null (fecha)
       finalRow[1],  // 'SALDO FINAL' (concepto)

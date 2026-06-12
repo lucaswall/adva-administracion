@@ -2076,4 +2076,147 @@ describe('buildSubdiarioRows', () => {
     expect(rows).toHaveLength(1);
     expect(rows[0].condicion).toBe('IVA Responsable Inscripto');
   });
+
+  // ── ADV-327: TC-faltante review flag for NC rows ──────────────────────────
+  describe('ADV-327: TC-faltante review flag for NC rows', () => {
+    it('USD NC with tipoDeCambio=0 → notas contains [REVISAR: TC faltante]', () => {
+      const nc = makeNc({
+        fileId: 'nc327a',
+        nroFactura: '00003-00000327',
+        tipoComprobante: 'NC C',
+        moneda: 'USD',
+        tipoDeCambio: 0,
+        importeTotal: 1000,
+      });
+
+      const rows = buildSubdiarioRows(makeInput({ facturasEmitidas: [nc] }));
+      const ncRow = rows.find((r) => r.tipo === 'NC');
+
+      expect(ncRow).toBeDefined();
+      expect(ncRow!.notas).toContain('[REVISAR: TC faltante]');
+    });
+
+    it('USD NC with tipoDeCambio missing (undefined) → notas contains [REVISAR: TC faltante]', () => {
+      const nc = makeNc({
+        fileId: 'nc327b',
+        nroFactura: '00003-00000328',
+        tipoComprobante: 'NC C',
+        moneda: 'USD',
+        // tipoDeCambio intentionally omitted → revisar=true
+        importeTotal: 2000,
+      });
+      delete (nc as Partial<typeof nc>).tipoDeCambio;
+
+      const rows = buildSubdiarioRows(makeInput({ facturasEmitidas: [nc] }));
+      const ncRow = rows.find((r) => r.tipo === 'NC');
+
+      expect(ncRow!.notas).toContain('[REVISAR: TC faltante]');
+    });
+
+    it('USD NC with valid tipoDeCambio → notas is empty (no flag)', () => {
+      const nc = makeNc({
+        fileId: 'nc327c',
+        nroFactura: '00003-00000329',
+        tipoComprobante: 'NC C',
+        moneda: 'USD',
+        tipoDeCambio: 1430,
+        importeTotal: 1000,
+      });
+
+      const rows = buildSubdiarioRows(makeInput({ facturasEmitidas: [nc] }));
+      const ncRow = rows.find((r) => r.tipo === 'NC');
+
+      expect(ncRow!.notas).toBe('');
+    });
+
+    it('ARS NC → notas is empty (no spurious TC-faltante flag)', () => {
+      const nc = makeNc({
+        fileId: 'nc327d',
+        nroFactura: '00003-00000330',
+        tipoComprobante: 'NC C',
+        moneda: 'ARS',
+        importeTotal: 500,
+      });
+
+      const rows = buildSubdiarioRows(makeInput({ facturasEmitidas: [nc] }));
+      const ncRow = rows.find((r) => r.tipo === 'NC');
+
+      expect(ncRow!.notas).toBe('');
+    });
+  });
+
+  // ── ADV-329: prevent double-attachment of unclaimed retenciones ──────────
+  describe('ADV-329: no double-attachment of unclaimed retenciones in pass 2', () => {
+    it('two FCs with same cuitReceptor+amount, one unclaimed retencion → exactly one FC gets the retencion note', () => {
+      const fa = makeFc({ fileId: 'fa329a', nroFactura: '00003-00001001', importeTotal: 1_000_000 });
+      const fb = makeFc({
+        fileId: 'fb329a',
+        nroFactura: '00003-00001002',
+        importeTotal: 1_000_000,
+        fechaEmision: `${CURRENT_YEAR}-02-15`,
+      });
+      const ret = makeRetCert({ fileId: 'ret329a', montoComprobante: 1_000_000 });
+      // ret is unclaimed (no matchedFacturaFileId)
+
+      const rows = buildSubdiarioRows(
+        makeInput({ facturasEmitidas: [fa, fb], retencionesRecibidas: [ret] })
+      );
+
+      const rowA = rows.find((r) => r.nro === '00003-00001001' && r.tipo === 'FC');
+      const rowB = rows.find((r) => r.nro === '00003-00001002' && r.tipo === 'FC');
+
+      // Exactly ONE should have the retencion note (first-processed wins)
+      const aHas = rowA?.notas.includes('Retencion') ?? false;
+      const bHas = rowB?.notas.includes('Retencion') ?? false;
+      expect(aHas !== bHas).toBe(true); // XOR: exactly one
+    });
+
+    it('two FCs, one with claimed retencion + one unclaimed: both get a retencion note (pass 1 unaffected)', () => {
+      const fa = makeFc({ fileId: 'fa329b', nroFactura: '00003-00001003', importeTotal: 1_000_000 });
+      const fb = makeFc({
+        fileId: 'fb329b',
+        nroFactura: '00003-00001004',
+        importeTotal: 1_000_000,
+        fechaEmision: `${CURRENT_YEAR}-02-20`,
+      });
+      // retClaimed is pass-1 match for fa
+      const retClaimed = makeRetCert({ fileId: 'ret329b', montoComprobante: 1_000_000, matchedFacturaFileId: 'fa329b' });
+      // retUnclaimed is pass-2 candidate
+      const retUnclaimed = makeRetCert({ fileId: 'ret329c', montoComprobante: 1_000_000 });
+
+      const rows = buildSubdiarioRows(
+        makeInput({ facturasEmitidas: [fa, fb], retencionesRecibidas: [retClaimed, retUnclaimed] })
+      );
+
+      const rowA = rows.find((r) => r.nro === '00003-00001003' && r.tipo === 'FC');
+      const rowB = rows.find((r) => r.nro === '00003-00001004' && r.tipo === 'FC');
+
+      // Both should have their respective retencion
+      expect(rowA?.notas).toContain('Retencion'); // via pass 1
+      expect(rowB?.notas).toContain('Retencion'); // via pass 2 (unclaimed)
+    });
+
+    it('two unclaimed retenciones with same CUIT+amount → each attaches to a different FC', () => {
+      const fa = makeFc({ fileId: 'fa329c', nroFactura: '00003-00001005', importeTotal: 1_000_000 });
+      const fb = makeFc({
+        fileId: 'fb329c',
+        nroFactura: '00003-00001006',
+        importeTotal: 1_000_000,
+        fechaEmision: `${CURRENT_YEAR}-02-25`,
+      });
+      const ret1 = makeRetCert({ fileId: 'ret329d', montoComprobante: 1_000_000 });
+      const ret2 = makeRetCert({ fileId: 'ret329e', montoComprobante: 1_000_000 });
+
+      const rows = buildSubdiarioRows(
+        makeInput({ facturasEmitidas: [fa, fb], retencionesRecibidas: [ret1, ret2] })
+      );
+
+      const rowA = rows.find((r) => r.nro === '00003-00001005' && r.tipo === 'FC');
+      const rowB = rows.find((r) => r.nro === '00003-00001006' && r.tipo === 'FC');
+
+      // Both should have a retencion note (one each)
+      expect(rowA?.notas).toContain('Retencion');
+      expect(rowB?.notas).toContain('Retencion');
+    });
+  });
 });

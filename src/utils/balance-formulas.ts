@@ -47,13 +47,15 @@ export function generateInitialBalanceRow(
  */
 export function generateMovimientoRowWithFormula(
   mov: MovimientoBancario,
-  rowIndex: number
+  rowIndex: number,
+  startRowOffset = 0
 ): [string, string, number | null, number | null, number | null, string] {
-  // Account for header row: array index N → sheet row N + 2
-  // Previous row in sheet = rowIndex + 1 (previous array position + 2)
-  // Current row in sheet = rowIndex + 2
-  const previousSheetRow = rowIndex + 1;
-  const currentSheetRow = rowIndex + 2;
+  // Account for header row and existing rows (startRowOffset):
+  // array index N at offset S → sheet row S + N + 2
+  // Previous row in sheet = S + rowIndex + 1
+  // Current row in sheet  = S + rowIndex + 2
+  const previousSheetRow = startRowOffset + rowIndex + 1;
+  const currentSheetRow = startRowOffset + rowIndex + 2;
 
   // Formula: =F{prev}+D{curr}-C{curr}
   // Example: for array index 1 (sheet row 3): =F2+D3-C3
@@ -82,10 +84,11 @@ export function generateMovimientoRowWithFormula(
  * @returns Row data with formula referencing last transaction's saldoCalculado
  */
 export function generateFinalBalanceRow(
-  lastRowIndex: number
+  lastRowIndex: number,
+  startRowOffset = 0
 ): [null, string, null, null, null, string] {
-  // Account for header row: array index N → sheet row N + 2
-  const lastSheetRow = lastRowIndex + 2;
+  // Account for header row and existing rows: array index N at offset S → sheet row S + N + 2
+  const lastSheetRow = startRowOffset + lastRowIndex + 2;
 
   return [
     null,                    // fecha (empty)

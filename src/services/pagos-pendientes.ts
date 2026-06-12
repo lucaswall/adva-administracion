@@ -10,6 +10,7 @@ import {
   clearSheetData,
   getSpreadsheetTimezone,
   type CellValueOrLink,
+  type CellDate,
 } from './sheets.js';
 import { info, warn, error as logError } from '../utils/logger.js';
 import { getCorrelationId } from '../utils/correlation.js';
@@ -116,13 +117,20 @@ export async function syncPagosPendientes(
 
     // 2. Filter: skip orphan/empty rows (defensive — empty rows in source must
     // not propagate as blank lines in the dashboard) AND skip rows where
-    // pagada === 'SI' (paid invoices). Trim before checking so whitespace-only
+    // pagada === 'SI' (paid invoices). Also skip NC/ND tipoComprobante — credit/debit
+    // notes are not owed amounts (ADV-326). Trim before checking so whitespace-only
     // cells are also rejected.
     const unpaidFacturas = rows.slice(1).filter((row) => {
       if (!String(row[fileIdIdx] ?? '').trim()) return false;
       if (!String(row[fechaEmisionIdx] ?? '').trim()) return false;
       const pagada = row[pagadaIdx];
-      return pagada !== 'SI';
+      if (pagada === 'SI') return false;
+      // ADV-326: NC and ND are not payable — exclude from Pagos Pendientes
+      const tipoComprobante = String(row[tipoComprobanteIdx] || '');
+      if (tipoComprobante.startsWith('NC') || tipoComprobante.startsWith('ND')) {
+        return false;
+      }
+      return true;
     });
 
     // Sort unpaid facturas by fechaEmision ascending (oldest first)
@@ -142,11 +150,14 @@ export async function syncPagosPendientes(
 
     // 3. Map to PAGOS_PENDIENTES columns. fileName is written as a {text, url}
     // hyperlink so it remains clickable in the dashboard.
+    // fechaEmision is written as CellDate for proper date formatting (ADV-290).
     const pagosPendientesRows: CellValueOrLink[][] = unpaidFacturas.map((row) => {
       const fileId = String(row[fileIdIdx] ?? '');
       const fileName = String(row[fileNameIdx] ?? '');
+      const fechaNorm = normalizeSpreadsheetDate(row[fechaEmisionIdx]);
+      const fechaCell: CellDate | string = fechaNorm ? { type: 'date', value: fechaNorm } : '';
       return [
-        normalizeSpreadsheetDate(row[fechaEmisionIdx]) || '',
+        fechaCell,
         fileId,
         { text: fileName, url: driveViewUrl(fileId) },
         row[tipoComprobanteIdx] ?? '',
@@ -350,11 +361,14 @@ export async function syncCobrosPendientes(
     });
 
     // 3. Map to COBROS_PENDIENTES columns with hyperlinked fileName.
+    // fechaEmision is written as CellDate for proper date formatting (ADV-290).
     const cobrosPendientesRows: CellValueOrLink[][] = unpaidCobros.map((row) => {
       const fileId = String(row[fileIdIdx] ?? '');
       const fileName = String(row[fileNameIdx] ?? '');
+      const fechaNorm = normalizeSpreadsheetDate(row[fechaEmisionIdx]);
+      const fechaCell: CellDate | string = fechaNorm ? { type: 'date', value: fechaNorm } : '';
       return [
-        normalizeSpreadsheetDate(row[fechaEmisionIdx]) || '',
+        fechaCell,
         fileId,
         { text: fileName, url: driveViewUrl(fileId) },
         row[tipoComprobanteIdx] ?? '',

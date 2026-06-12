@@ -8,6 +8,7 @@ import { getGoogleAuthAsync, getDefaultScopes } from './google-auth.js';
 import type { FileInfo, Result } from '../types/index.js';
 import { debug, warn, error as logError } from '../utils/logger.js';
 import { withQuotaRetry } from '../utils/concurrency.js';
+import { GOOGLE_API_TIMEOUT_MS } from '../config.js';
 
 /**
  * Slow-call threshold: warn if a Drive API call exceeds this duration.
@@ -102,7 +103,7 @@ export async function listFilesInFolder(
           pageToken,
           supportsAllDrives: true,
           includeItemsFromAllDrives: true,
-        })
+        }, { timeout: GOOGLE_API_TIMEOUT_MS })
       );
 
       if (!listResult.ok) {
@@ -197,6 +198,7 @@ export async function downloadFile(fileId: string): Promise<Result<Buffer, Error
           },
           {
             responseType: 'arraybuffer',
+            timeout: GOOGLE_API_TIMEOUT_MS,
           }
         )
       );

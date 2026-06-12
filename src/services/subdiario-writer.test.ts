@@ -448,7 +448,7 @@ describe('syncSubdiario', () => {
           return {
             ok: true,
             value: [
-              ['fecha', 'concepto', 'debito', 'credito', 'saldo', 'saldoCalc', 'fileId', 'type', 'detalle'],
+              ['fecha', 'concepto', 'debito', 'credito', 'saldo', 'saldoCalc', 'matchedFileId', 'matchedType', 'detalle'],
               outgoingRow,
               incomingRow,
             ],
@@ -503,7 +503,7 @@ describe('syncSubdiario', () => {
           return {
             ok: true,
             value: [
-              ['fecha', 'concepto', 'debito', 'credito', 'saldo', 'saldoCalc', 'fileId', 'type', 'detalle'],
+              ['fecha', 'concepto', 'debito', 'credito', 'saldo', 'saldoCalc', 'matchedFileId', 'matchedType', 'detalle'],
               ['2025-03-15', 'mov 1', 0, 10000, 10000, 10000, 'fileA', 'AUTO', 'd1'],
               ['2025-03-20', 'mov 2', 0, 20000, 30000, 30000, '', '', ''],
             ],
@@ -513,7 +513,7 @@ describe('syncSubdiario', () => {
           return {
             ok: true,
             value: [
-              ['fecha', 'concepto', 'debito', 'credito', 'saldo', 'saldoCalc', 'fileId', 'type', 'detalle'],
+              ['fecha', 'concepto', 'debito', 'credito', 'saldo', 'saldoCalc', 'matchedFileId', 'matchedType', 'detalle'],
               ['2025-04-05', 'mov 3', 0, 30000, 60000, 60000, 'fileB', 'MANUAL', 'd3'],
             ],
           };
@@ -563,7 +563,7 @@ describe('syncSubdiario', () => {
           return {
             ok: true,
             value: [
-              ['fecha', 'concepto', 'debito', 'credito', 'saldo', 'saldoCalc', 'fileId', 'type', 'detalle'],
+              ['fecha', 'concepto', 'debito', 'credito', 'saldo', 'saldoCalc', 'matchedFileId', 'matchedType', 'detalle'],
               ['2025-06-10', 'unmatched mov', 0, 5000, 5000, 5000, '', '', ''],
             ],
           };
@@ -612,7 +612,7 @@ describe('syncSubdiario', () => {
           return {
             ok: true,
             value: [
-              ['fecha', 'concepto', 'debito', 'credito', 'saldo', 'saldoCalc', 'fileId', 'type', 'detalle'],
+              ['fecha', 'concepto', 'debito', 'credito', 'saldo', 'saldoCalc', 'matchedFileId', 'matchedType', 'detalle'],
               ...dataRows,
             ],
           };
@@ -655,7 +655,7 @@ describe('syncSubdiario', () => {
           return {
             ok: true,
             value: [
-              ['fecha', 'concepto', 'debito', 'credito', 'saldo', 'saldoCalc', 'fileId', 'type', 'detalle'],
+              ['fecha', 'concepto', 'debito', 'credito', 'saldo', 'saldoCalc', 'matchedFileId', 'matchedType', 'detalle'],
               ...dataRows,
             ],
           };
@@ -692,7 +692,7 @@ describe('syncSubdiario', () => {
           return {
             ok: true,
             value: [
-              ['fecha', 'concepto', 'debito', 'credito', 'saldo', 'saldoCalc', 'fileId', 'type', 'detalle'],
+              ['fecha', 'concepto', 'debito', 'credito', 'saldo', 'saldoCalc', 'matchedFileId', 'matchedType', 'detalle'],
               ['2026-03-10', 'matched', 0, 10000, 10000, 10000, 'fileA', 'AUTO', 'd1'],
               ['2026-03-11', 'unmatched', 0, 20000, 30000, 30000, '', '', ''],
             ],
@@ -1140,14 +1140,15 @@ describe('readSubdiarioRows', () => {
     return base;
   }
 
-  it('empty sheet (no data rows) → {ok:true, value:[]}', async () => {
+  it('empty sheet (no data rows) → {ok:true, value:{rows:[],rawRowCount:0}}', async () => {
     vi.mocked(sheets.getValues).mockResolvedValue({ ok: true, value: [] });
 
     const result = await readSubdiarioRows('test-id');
 
     expect(result.ok).toBe(true);
     if (result.ok) {
-      expect(result.value).toHaveLength(0);
+      expect(result.value.rows).toHaveLength(0);
+      expect(result.value.rawRowCount).toBe(0);
     }
   });
 
@@ -1162,16 +1163,17 @@ describe('readSubdiarioRows', () => {
 
     expect(result.ok).toBe(true);
     if (result.ok) {
-      expect(result.value).toHaveLength(3);
-      expect(result.value[0]!.rowIndex).toBe(0);
-      expect(result.value[1]!.rowIndex).toBe(1);
-      expect(result.value[2]!.rowIndex).toBe(2);
-      expect(result.value[0]!.recibido).toBeNull();
-      expect(result.value[1]!.recibido).toBeNull();
-      expect(result.value[2]!.recibido).toBeNull();
-      expect(result.value[0]!.tipo).toBe('FC');
-      expect(result.value[2]!.tipo).toBe('NC');
-      expect(result.value[2]!.total).toBe(-1000);
+      expect(result.value.rows).toHaveLength(3);
+      expect(result.value.rawRowCount).toBe(3);
+      expect(result.value.rows[0]!.rowIndex).toBe(0);
+      expect(result.value.rows[1]!.rowIndex).toBe(1);
+      expect(result.value.rows[2]!.rowIndex).toBe(2);
+      expect(result.value.rows[0]!.recibido).toBeNull();
+      expect(result.value.rows[1]!.recibido).toBeNull();
+      expect(result.value.rows[2]!.recibido).toBeNull();
+      expect(result.value.rows[0]!.tipo).toBe('FC');
+      expect(result.value.rows[2]!.tipo).toBe('NC');
+      expect(result.value.rows[2]!.total).toBe(-1000);
     }
   });
 
@@ -1183,7 +1185,7 @@ describe('readSubdiarioRows', () => {
 
     expect(result.ok).toBe(true);
     if (result.ok) {
-      expect(result.value[0]!.fecha).toBe('2025-12-02');
+      expect(result.value.rows[0]!.fecha).toBe('2025-12-02');
     }
   });
 
@@ -1195,7 +1197,7 @@ describe('readSubdiarioRows', () => {
 
     expect(result.ok).toBe(true);
     if (result.ok) {
-      expect(result.value[0]!.fechaCobro).toBe('NC 00003-00000140');
+      expect(result.value.rows[0]!.fechaCobro).toBe('NC 00003-00000140');
     }
   });
 
@@ -1207,7 +1209,7 @@ describe('readSubdiarioRows', () => {
 
     expect(result.ok).toBe(true);
     if (result.ok) {
-      expect(result.value[0]!.fechaCobro).toBe('2025-12-02');
+      expect(result.value.rows[0]!.fechaCobro).toBe('2025-12-02');
     }
   });
 
@@ -1220,7 +1222,7 @@ describe('readSubdiarioRows', () => {
     expect(result.ok).toBe(true);
     if (result.ok) {
       // Must be '' not '1899-12-30'
-      expect(result.value[0]!.fechaCobro).toBe('');
+      expect(result.value.rows[0]!.fechaCobro).toBe('');
     }
   });
 
@@ -1232,7 +1234,7 @@ describe('readSubdiarioRows', () => {
 
     expect(result.ok).toBe(true);
     if (result.ok) {
-      expect(result.value[0]!.total).toBe(1234567.89);
+      expect(result.value.rows[0]!.total).toBe(1234567.89);
     }
   });
 
@@ -1264,11 +1266,12 @@ describe('readSubdiarioRows', () => {
 
     expect(result.ok).toBe(true);
     if (result.ok) {
-      expect(result.value).toHaveLength(2); // blankFechaRow is skipped
-      expect(result.value[0]!.rowIndex).toBe(0); // row1 at position 0
-      expect(result.value[1]!.rowIndex).toBe(2); // row3 at position 2 (not 1!)
-      expect(result.value[0]!.nro).toBe('00001-00000001');
-      expect(result.value[1]!.nro).toBe('00001-00000003');
+      expect(result.value.rows).toHaveLength(2); // blankFechaRow is skipped
+      expect(result.value.rawRowCount).toBe(3); // 3 raw rows even though 1 has blank fecha
+      expect(result.value.rows[0]!.rowIndex).toBe(0); // row1 at position 0
+      expect(result.value.rows[1]!.rowIndex).toBe(2); // row3 at position 2 (not 1!)
+      expect(result.value.rows[0]!.nro).toBe('00001-00000001');
+      expect(result.value.rows[1]!.nro).toBe('00001-00000003');
     }
   });
 
@@ -1285,11 +1288,11 @@ describe('readSubdiarioRows', () => {
 
     expect(result.ok).toBe(true);
     if (result.ok) {
-      expect(result.value).toHaveLength(2);
-      expect(result.value[0]!.movimientoLabel).toBe('BBVA ARS 2026-03 #42');
-      expect(result.value[0]!.movimiento).toBe('');
-      expect(result.value[1]!.movimientoLabel).toBe('');
-      expect(result.value[1]!.movimiento).toBe('');
+      expect(result.value.rows).toHaveLength(2);
+      expect(result.value.rows[0]!.movimientoLabel).toBe('BBVA ARS 2026-03 #42');
+      expect(result.value.rows[0]!.movimiento).toBe('');
+      expect(result.value.rows[1]!.movimientoLabel).toBe('');
+      expect(result.value.rows[1]!.movimiento).toBe('');
     }
   });
 
@@ -1319,10 +1322,10 @@ describe('readSubdiarioRows', () => {
 
     expect(result.ok).toBe(true);
     if (result.ok) {
-      expect(result.value).toHaveLength(3);
-      expect(result.value[0]!.facturaFileId).toBe('fac-abc123');
-      expect(result.value[1]!.facturaFileId).toBe('');
-      expect(result.value[2]!.facturaFileId).toBe('nc-xyz789');
+      expect(result.value.rows).toHaveLength(3);
+      expect(result.value.rows[0]!.facturaFileId).toBe('fac-abc123');
+      expect(result.value.rows[1]!.facturaFileId).toBe('');
+      expect(result.value.rows[2]!.facturaFileId).toBe('nc-xyz789');
     }
   });
 
@@ -1340,7 +1343,7 @@ describe('readSubdiarioRows', () => {
 
     expect(result.ok).toBe(true);
     if (result.ok) {
-      expect(result.value[0]!.facturaFileId).toBe('');
+      expect(result.value.rows[0]!.facturaFileId).toBe('');
     }
   });
 
@@ -1358,7 +1361,7 @@ describe('readSubdiarioRows', () => {
 
     expect(result.ok).toBe(true);
     if (result.ok) {
-      expect(result.value[0]!.facturaFileId).toBe('fac-shared');
+      expect(result.value.rows[0]!.facturaFileId).toBe('fac-shared');
     }
   });
 
@@ -1375,6 +1378,42 @@ describe('readSubdiarioRows', () => {
     if (!result.ok) {
       expect(result.error.message).toBe('Sheets metadata API error');
     }
+  });
+
+  // ADV-309: phantom row detection
+  describe('ADV-309: rawRowCount reflects physical row count; phantom rows detectable', () => {
+    it('rawRowCount=rows.length when all rows parse successfully (no phantom rows)', async () => {
+      const r1 = makeSheetRow({ 3: '00001-00000001' });
+      const r2 = makeSheetRow({ 3: '00001-00000002' });
+      vi.mocked(sheets.getValues).mockResolvedValue({ ok: true, value: [r1, r2] });
+
+      const result = await readSubdiarioRows('test-id');
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value.rows).toHaveLength(2);
+        expect(result.value.rawRowCount).toBe(2);
+        // No phantom rows
+        expect(result.value.rawRowCount).toBe(result.value.rows.length);
+      }
+    });
+
+    it('rawRowCount > rows.length when a row has blank fecha (phantom row)', async () => {
+      const valid = makeSheetRow({ 3: '00001-00000001' });
+      const phantom = makeSheetRow({ 0: '', 3: '00001-00000002' }); // blank fecha → skipped
+      const valid2 = makeSheetRow({ 3: '00001-00000003' });
+      vi.mocked(sheets.getValues).mockResolvedValue({ ok: true, value: [valid, phantom, valid2] });
+
+      const result = await readSubdiarioRows('test-id');
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value.rows).toHaveLength(2);     // 2 parsed rows
+        expect(result.value.rawRowCount).toBe(3);      // 3 physical rows
+        // rawRowCount > rows.length → phantom row detected
+        expect(result.value.rawRowCount).toBeGreaterThan(result.value.rows.length);
+      }
+    });
   });
 });
 
@@ -1820,6 +1859,225 @@ describe('syncSubdiario schema migration (ADV-272)', () => {
     );
     expect(headerWrite).toBeDefined();
     expect(headerWrite![2]).toEqual([NEW_HEADER_14COL]);
+  });
+});
+
+// ─── ADV-309: phantom row detection in syncSubdiario ──────────────────────────
+
+describe('syncSubdiario phantom row handling (ADV-309)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    setupDefaultMocks();
+    vi.mocked(folderStructure.getCachedFolderStructure).mockReturnValue(
+      makeCachedStructure({ subdiarioId: SUBDIARIO_ID })
+    );
+  });
+
+  it('phantom rows trigger sortInvariantFallback in result', async () => {
+    // 3 raw rows but one has blank fecha → phantom detected → full rewrite
+    const validRow1: CellValue[] = [
+      '2025-01-10', '006', 'FC', '00001-00000001', 'TEST SA', '20123456786',
+      'IVA RI', 1000, 'Servicios', 'Micro', '', '', '', '',
+    ];
+    const phantomRow: CellValue[] = [
+      '', '006', 'FC', '00001-00000002', 'TEST SA', '20123456786',
+      'IVA RI', 2000, '', '', '', '', '', '',
+    ];
+    const validRow3: CellValue[] = [
+      '2025-01-20', '006', 'FC', '00001-00000003', 'TEST SA', '20123456786',
+      'IVA RI', 3000, 'Servicios', 'Micro', '', '', '', '',
+    ];
+
+    vi.mocked(sheets.getValues).mockImplementation(async (_id, range) => {
+      if (range === 'Comprobantes!A1:N1') {
+        return { ok: true, value: [NEW_HEADER_14COL] };
+      }
+      if (range === 'Comprobantes!A2:N') {
+        return { ok: true, value: [validRow1, phantomRow, validRow3] };
+      }
+      return { ok: true, value: EMPTY_SHEET_DATA };
+    });
+    vi.mocked(sheets.applySubdiarioDiff).mockResolvedValue({
+      ok: true,
+      value: { updates: 0, inserts: MOCK_ROWS.length, deletes: 3 },
+    });
+
+    const result = await syncSubdiario(
+      ROOT_ID, CONTROL_INGRESOS_ID, CONTROL_EGRESOS_ID, CURRENT_YEAR, new Map()
+    );
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.sortInvariantFallback).toBe(true);
+    }
+  });
+
+  it('phantom rows cause delete list to cover ALL rawRowCount physical rows (not just parsed)', async () => {
+    // 3 raw rows: rowIndex 0 and 2 are valid; rowIndex 1 is phantom (blank fecha).
+    // The full-rewrite delete list must be [2, 1, 0] — not just [2, 0] (parsed only).
+    const validRow1: CellValue[] = [
+      '2025-01-10', '006', 'FC', '00001-00000001', 'TEST SA', '20123456786',
+      'IVA RI', 1000, 'Servicios', 'Micro', '', '', '', '',
+    ];
+    const phantomRow: CellValue[] = [
+      '', '006', 'FC', '00001-00000002', 'TEST SA', '20123456786',
+      'IVA RI', 2000, '', '', '', '', '', '',
+    ];
+    const validRow3: CellValue[] = [
+      '2025-01-20', '006', 'FC', '00001-00000003', 'TEST SA', '20123456786',
+      'IVA RI', 3000, 'Servicios', 'Micro', '', '', '', '',
+    ];
+
+    vi.mocked(sheets.getValues).mockImplementation(async (_id, range) => {
+      if (range === 'Comprobantes!A1:N1') {
+        return { ok: true, value: [NEW_HEADER_14COL] };
+      }
+      if (range === 'Comprobantes!A2:N') {
+        return { ok: true, value: [validRow1, phantomRow, validRow3] };
+      }
+      return { ok: true, value: EMPTY_SHEET_DATA };
+    });
+    vi.mocked(sheets.applySubdiarioDiff).mockResolvedValue({
+      ok: true,
+      value: { updates: 0, inserts: MOCK_ROWS.length, deletes: 3 },
+    });
+
+    await syncSubdiario(
+      ROOT_ID, CONTROL_INGRESOS_ID, CONTROL_EGRESOS_ID, CURRENT_YEAR, new Map()
+    );
+
+    expect(sheets.applySubdiarioDiff).toHaveBeenCalledTimes(1);
+    const [, , diffArg] = vi.mocked(sheets.applySubdiarioDiff).mock.calls[0]!;
+    // Must delete all 3 rows (indices 0, 1, 2) sorted descending — not just [2, 0]
+    expect(diffArg.deletes).toEqual([2, 1, 0]);
+  });
+});
+
+// ─── ADV-352: readMovimientosRows skips non-bank tabs ─────────────────────────
+
+describe('readMovimientosRows non-bank tab guard (ADV-352)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    setupDefaultMocks();
+    vi.mocked(folderStructure.getCachedFolderStructure).mockReturnValue(
+      makeCachedStructure({ subdiarioId: SUBDIARIO_ID })
+    );
+  });
+
+  it('skips sheets whose header lacks matchedFileId in col G (tarjeta/broker schema)', async () => {
+    const movsSpreadsheetId = 'tarjeta-movs-id';
+    const movsMap = new Map<string, string>([['2025:BBVA Visa 1234', movsSpreadsheetId]]);
+
+    vi.mocked(sheets.getSheetMetadata).mockImplementation(async (id: string) => {
+      if (id === movsSpreadsheetId) {
+        return { ok: true, value: [{ title: '2025-03', sheetId: 1, index: 0 }] };
+      }
+      return { ok: true, value: [{ title: 'Comprobantes', sheetId: 42, index: 0 }] };
+    });
+
+    vi.mocked(sheets.getValues).mockImplementation(async (id: string, range: string) => {
+      if (id === movsSpreadsheetId && range === '2025-03!A:I') {
+        // Tarjeta schema: only 5 columns (fecha, descripcion, nroCupon, pesos, dolares)
+        // Col G (index 6) is missing — not a bank schema
+        return {
+          ok: true,
+          value: [
+            ['fecha', 'descripcion', 'nroCupon', 'pesos', 'dolares'],
+            ['2025-03-15', 'Compra tienda', '12345', 5000, null],
+          ],
+        };
+      }
+      return { ok: true, value: EMPTY_SHEET_DATA };
+    });
+
+    await syncSubdiario(ROOT_ID, CONTROL_INGRESOS_ID, CONTROL_EGRESOS_ID, CURRENT_YEAR, movsMap);
+
+    const input = vi.mocked(subdiarioBuilder.buildSubdiarioRows).mock.calls[0]?.[0];
+    expect(input).toBeDefined();
+    // Non-bank sheet must produce zero movimientos
+    expect(input!.movimientos).toHaveLength(0);
+  });
+
+  it('processes sheets whose header has matchedFileId in col G (bank schema)', async () => {
+    const movsSpreadsheetId = 'bank-movs-id';
+    const movsMap = new Map<string, string>([['2025:BBVA ARS', movsSpreadsheetId]]);
+
+    vi.mocked(sheets.getSheetMetadata).mockImplementation(async (id: string) => {
+      if (id === movsSpreadsheetId) {
+        return { ok: true, value: [{ title: '2025-03', sheetId: 1, index: 0 }] };
+      }
+      return { ok: true, value: [{ title: 'Comprobantes', sheetId: 42, index: 0 }] };
+    });
+
+    vi.mocked(sheets.getValues).mockImplementation(async (id: string, range: string) => {
+      if (id === movsSpreadsheetId && range === '2025-03!A:I') {
+        return {
+          ok: true,
+          value: [
+            // Bank schema: 9 cols (A fecha | B concepto | C debito | D credito | E saldo | F saldoCalc | G matchedFileId | H matchedType | I detalle)
+            ['fecha', 'concepto', 'debito', 'credito', 'saldo', 'saldoCalc', 'matchedFileId', 'matchedType', 'detalle'],
+            ['2025-03-15', 'Cobro', 0, 50000, 50000, 50000, '', '', ''],
+          ],
+        };
+      }
+      return { ok: true, value: EMPTY_SHEET_DATA };
+    });
+
+    await syncSubdiario(ROOT_ID, CONTROL_INGRESOS_ID, CONTROL_EGRESOS_ID, CURRENT_YEAR, movsMap);
+
+    const input = vi.mocked(subdiarioBuilder.buildSubdiarioRows).mock.calls[0]?.[0];
+    expect(input).toBeDefined();
+    // Bank sheet must produce 1 movimiento
+    expect(input!.movimientos).toHaveLength(1);
+  });
+
+  it('processes bank tabs and skips non-bank tabs in same spreadsheet', async () => {
+    const movsSpreadsheetId = 'mixed-movs-id';
+    const movsMap = new Map<string, string>([['2025:BBVA ARS', movsSpreadsheetId]]);
+
+    vi.mocked(sheets.getSheetMetadata).mockImplementation(async (id: string) => {
+      if (id === movsSpreadsheetId) {
+        return {
+          ok: true,
+          value: [
+            { title: '2025-03', sheetId: 1, index: 0 }, // bank sheet
+            { title: '2025-04', sheetId: 2, index: 1 }, // tarjeta sheet (different schema)
+          ],
+        };
+      }
+      return { ok: true, value: [{ title: 'Comprobantes', sheetId: 42, index: 0 }] };
+    });
+
+    vi.mocked(sheets.getValues).mockImplementation(async (id: string, range: string) => {
+      if (id === movsSpreadsheetId && range === '2025-03!A:I') {
+        return {
+          ok: true,
+          value: [
+            ['fecha', 'concepto', 'debito', 'credito', 'saldo', 'saldoCalc', 'matchedFileId', 'matchedType', 'detalle'],
+            ['2025-03-10', 'Bank mov', 0, 100000, 100000, 100000, '', '', ''],
+          ],
+        };
+      }
+      if (id === movsSpreadsheetId && range === '2025-04!A:I') {
+        // Tarjeta schema — only 5 cols, no matchedFileId in col G
+        return {
+          ok: true,
+          value: [
+            ['fecha', 'descripcion', 'nroCupon', 'pesos', 'dolares'],
+            ['2025-04-01', 'Compra', '9999', 2000, null],
+          ],
+        };
+      }
+      return { ok: true, value: EMPTY_SHEET_DATA };
+    });
+
+    await syncSubdiario(ROOT_ID, CONTROL_INGRESOS_ID, CONTROL_EGRESOS_ID, CURRENT_YEAR, movsMap);
+
+    const input = vi.mocked(subdiarioBuilder.buildSubdiarioRows).mock.calls[0]?.[0];
+    expect(input).toBeDefined();
+    // Only the bank sheet produces movimientos — tarjeta sheet is skipped
+    expect(input!.movimientos).toHaveLength(1);
+    expect(input!.movimientos[0]!.fecha).toBe('2025-03-10');
   });
 });
 

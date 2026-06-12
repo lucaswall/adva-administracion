@@ -4,7 +4,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { readFacturador } from './facturador-reader.js';
+import { readFacturador, normalizeNroComprobante } from './facturador-reader.js';
 
 // Mock dependencies
 vi.mock('./sheets.js', () => ({
@@ -350,5 +350,78 @@ describe('readFacturador', () => {
         expect(result.value.size).toBe(0);
       }
     });
+  });
+
+  describe('ADV-330: error classification', () => {
+    it('should return ok:false for quota errors (non-tab-missing)', async () => {
+      vi.mocked(getValues).mockResolvedValue({
+        ok: false,
+        error: new Error('Quota exceeded for quota metric'),
+      });
+
+      const result = await readFacturador(2026);
+      expect(result.ok).toBe(false);
+    });
+
+    it('should return ok:false for 5xx server errors', async () => {
+      vi.mocked(getValues).mockResolvedValue({
+        ok: false,
+        error: new Error('Internal Server Error (500)'),
+      });
+
+      const result = await readFacturador(2026);
+      expect(result.ok).toBe(false);
+    });
+
+    it('should return ok:false for auth errors', async () => {
+      vi.mocked(getValues).mockResolvedValue({
+        ok: false,
+        error: new Error('Request had invalid authentication credentials'),
+      });
+
+      const result = await readFacturador(2026);
+      expect(result.ok).toBe(false);
+    });
+
+    it('should return ok-empty for "Unable to parse range" (tab missing, 400)', async () => {
+      vi.mocked(getValues).mockResolvedValue({
+        ok: false,
+        error: new Error('Unable to parse range: \'2026\'!A:M'),
+      });
+
+      const result = await readFacturador(2026);
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value.size).toBe(0);
+      }
+    });
+  });
+});
+
+describe('normalizeNroComprobante (ADV-350)', () => {
+  it('should strip excess leading zeros from pto before padding', () => {
+    // '000005' has 6 chars > 5 — strip zeros first, then pad to 5
+    expect(normalizeNroComprobante('000005-00000057')).toBe('00005-00000057');
+  });
+
+  it('should strip excess leading zeros from numero before padding', () => {
+    // '000000057' has 9 chars > 8 — strip zeros first, then pad to 8
+    expect(normalizeNroComprobante('00005-000000057')).toBe('00005-00000057');
+  });
+
+  it('should strip both pto and numero when both have excess leading zeros', () => {
+    expect(normalizeNroComprobante('000005-000000057')).toBe('00005-00000057');
+  });
+
+  it('should still pad when pto is short (strip is a no-op for already-short inputs)', () => {
+    expect(normalizeNroComprobante('5-57')).toBe('00005-00000057');
+  });
+
+  it('should handle already-normalized input unchanged', () => {
+    expect(normalizeNroComprobante('00005-00000057')).toBe('00005-00000057');
+  });
+
+  it('should handle no-dash input unchanged', () => {
+    expect(normalizeNroComprobante('noDash')).toBe('noDash');
   });
 });

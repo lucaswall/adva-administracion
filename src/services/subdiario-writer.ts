@@ -38,6 +38,7 @@ import {
   parsePagos,
   parseRetenciones,
 } from '../bank/match-movimientos.js';
+import { isBankMovimientosHeader } from './movimientos-reader.js';
 import { buildSubdiarioRows } from './subdiario-builder.js';
 import { readFacturador } from './facturador-reader.js';
 import { diffSubdiarioRows } from './subdiario-diff.js';
@@ -176,7 +177,7 @@ export async function resolveSubdiarioId(
  */
 export async function readSubdiarioRows(
   spreadsheetId: string
-): Promise<Result<SubdiarioRowWithIndex[], Error>> {
+): Promise<Result<{ rows: SubdiarioRowWithIndex[]; rawRowCount: number }, Error>> {
   const valuesResult = await getValues(spreadsheetId, `${COMPROBANTES_SHEET}!A2:N`);
   if (!valuesResult.ok) return valuesResult;
 
@@ -184,6 +185,7 @@ export async function readSubdiarioRows(
   if (!linksResult.ok) return linksResult;
 
   const rawRows = valuesResult.value;
+  const rawRowCount = rawRows.length;
   const linkRows = linksResult.value;
   const result: SubdiarioRowWithIndex[] = [];
 
@@ -268,7 +270,7 @@ export async function readSubdiarioRows(
     });
   }
 
-  return { ok: true, value: result };
+  return { ok: true, value: { rows: result, rawRowCount } };
 }
 
 /**
@@ -368,6 +370,20 @@ async function readMovimientosRows(
           key,
           sheet: sheet.title,
           error: rowsResult.error.message,
+        });
+        continue;
+      }
+
+      // ADV-352: skip non-bank tabs (tarjeta/broker have a different schema).
+      // A bank movimientos sheet has 'matchedfileid' in col G of the header row.
+      // Checking the header prevents misparses when the spreadsheet also contains
+      // tarjeta or broker sheets whose YYYY-MM title passes the title filter above.
+      if (!isBankMovimientosHeader(rowsResult.value[0] ?? [])) {
+        debug('Skipping non-bank movimientos sheet (ADV-352)', {
+          module: 'subdiario-writer',
+          phase: 'read-movimientos',
+          key,
+          sheet: sheet.title,
         });
         continue;
       }
@@ -633,6 +649,12 @@ export async function syncSubdiario(
         //     notas → movimiento and lose the real notas).
         //   - Normal path → full parse via readSubdiarioRows.
         const existing: SubdiarioRowWithIndex[] = [];
+        // ADV-309: track rawRowCount to detect phantom rows (blank-fecha rows
+        // that survive getValues but are skipped during parsing). When
+        // rawRowCount > existing.length the full-rewrite delete list must
+        // cover ALL physical rows — not just parsed ones.
+        let phantomRowsDetected = false;
+        let phantomRawRowCount = 0;
         if (schemaMigration) {
           // Read the full row range (A:N) for counting only — A2:A would miss
           // any row where fecha was manually cleared but other cells remain.
@@ -654,19 +676,40 @@ export async function syncSubdiario(
         } else if (!isNew) {
           const readResult = await readSubdiarioRows(subdiarioId);
           if (!readResult.ok) return readResult;
-          existing.push(...readResult.value);
+          existing.push(...readResult.value.rows);
+          // ADV-309: detect phantom rows
+          if (readResult.value.rawRowCount > readResult.value.rows.length) {
+            phantomRowsDetected = true;
+            phantomRawRowCount = readResult.value.rawRowCount;
+            warn('Phantom rows detected in Comprobantes sheet — forcing full rewrite (ADV-309)', {
+              module: 'subdiario-writer',
+              phase: 'diff',
+              rawRowCount: readResult.value.rawRowCount,
+              parsedCount: readResult.value.rows.length,
+              correlationId,
+            });
+          }
         }
 
         // On migration, skip the diff entirely and run the full-rewrite branch.
-        const diff = schemaMigration
-          ? {
-              updates: [],
-              inserts: [],
-              deletes: [],
-              sortInvariantViolated: true,
-              duplicateKeysDetected: false,
-            }
-          : diffSubdiarioRows(existing, rows);
+        let diff: SubdiarioDiff;
+        if (schemaMigration) {
+          diff = {
+            updates: [],
+            inserts: [],
+            deletes: [],
+            sortInvariantViolated: true,
+            duplicateKeysDetected: false,
+          };
+        } else {
+          const baseDiff = diffSubdiarioRows(existing, rows);
+          diff = {
+            ...baseDiff,
+            // ADV-309: phantom rows force a full rewrite even when baseDiff
+            // would otherwise be incremental.
+            sortInvariantViolated: baseDiff.sortInvariantViolated || phantomRowsDetected,
+          };
+        }
 
         // No-op short-circuit: nothing changed
         if (
@@ -689,7 +732,10 @@ export async function syncSubdiario(
           // stubs, so the out-of-order pair detection would always report []
           // and the warn would be misleading. Suppress the warn during
           // migration — the dedicated migration info log already fired above.
-          if (!schemaMigration) {
+          // ADV-309: also suppress when the rewrite is triggered solely by
+          // phantom rows (blank-fecha rows) — the "out of order" pairs would
+          // be empty/misleading; the dedicated phantom-rows warn already fired.
+          if (!schemaMigration && !phantomRowsDetected) {
             const outOfOrderPairs = existing
               .slice(0, -1)
               .reduce<string[]>((acc, row, i) => {
@@ -706,14 +752,33 @@ export async function syncSubdiario(
               correlationId,
             });
           }
+          // ADV-309: when phantom rows exist, delete ALL physical rows (0..rawRowCount-1)
+          // so that phantom rows without a fecha are also erased. Without this,
+          // `existing.map(r => r.rowIndex)` would only list parsed rows and the
+          // phantom rows would survive the full rewrite.
+          const deleteIndices = phantomRowsDetected
+            ? Array.from({ length: phantomRawRowCount }, (_, i) => i)
+            : existing.map((r) => r.rowIndex);
+          // ADV-328: deduplicate desired rows before the full rewrite so that a
+          // duplicate (cod, nro) in the builder output does not get written to the
+          // sheet (only the first occurrence is kept). Without this, the rewrite
+          // would write both copies and the next sync would detect duplicates
+          // again, creating a perpetual full-rewrite loop.
+          const rewriteSeenKeys = new Set<string>();
+          const uniqueRows = rows.filter((r) => {
+            const key = `${r.cod}|${r.nro}`;
+            if (rewriteSeenKeys.has(key)) return false;
+            rewriteSeenKeys.add(key);
+            return true;
+          });
           const rewriteDiff: SubdiarioDiff = {
             updates: [],
-            inserts: rows.map((row, i) => ({ insertAt: i, row })),
-            deletes: existing.map((r) => r.rowIndex).sort((a, b) => b - a),
+            inserts: uniqueRows.map((row, i) => ({ insertAt: i, row })),
+            deletes: deleteIndices.sort((a, b) => b - a),
             sortInvariantViolated: true,
             duplicateKeysDetected: diff.duplicateKeysDetected,
           };
-          const rewriteResult = await applySubdiarioDiff(subdiarioId, comprobantesSheet.sheetId, rewriteDiff, rows);
+          const rewriteResult = await applySubdiarioDiff(subdiarioId, comprobantesSheet.sheetId, rewriteDiff, uniqueRows);
           if (!rewriteResult.ok) return rewriteResult;
 
           // ADV-273: header rewrite happens AFTER the data rewrite succeeds.
