@@ -3,7 +3,14 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { readFileSync } from 'fs';
+import { join, dirname } from 'path';
+import { fileURLToPath } from 'url';
 import { collectStatusMetrics, formatTimestampInTimezone, updateStatusSheet } from './status-sheet.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const PKG_PATH = join(dirname(__filename), '..', '..', 'package.json');
+const PKG_VERSION = (JSON.parse(readFileSync(PKG_PATH, 'utf-8')) as { version: string }).version;
 
 // Mock dependencies
 vi.mock('../routes/status.js', () => ({
@@ -36,6 +43,7 @@ vi.mock('../config.js', () => ({
   getConfig: vi.fn(() => ({
     nodeEnv: 'production',
     port: 3000,
+    environment: 'staging' as const,
   })),
 }));
 
@@ -66,8 +74,9 @@ describe('Status Sheet Service', () => {
       expect(metrics).toBeDefined();
       expect(metrics.lastPing).toBeInstanceOf(Date);
       expect(metrics.uptime).toBe('1d 2h 30m');
-      expect(metrics.version).toBe('1.0.0');
-      expect(metrics.environment).toBe('production');
+      expect(metrics.version).toBe(PKG_VERSION);
+      // environment must come from config.environment, not config.nodeEnv
+      expect(metrics.environment).toBe('staging');
     });
 
     it('should include queue statistics', () => {

@@ -384,4 +384,49 @@ describe('diffSubdiarioRows', () => {
     expect(result.inserts).toHaveLength(0);
     expect(result.deletes).toHaveLength(0);
   });
+
+  // ADV-328: guard against duplicate keys in the desired set
+  describe('ADV-328: duplicate keys in desired set trigger full-rewrite fallback', () => {
+    it('bare-NC and NC-C row with same nro in desired (both present in existing) → sortInvariantViolated=true; no double-update for same rowIndex', () => {
+      // Both desired rows share key '013|00001-00000001'
+      const existingRow = withIndex(
+        makeRow({ cod: '013', nro: '00001-00000001', fecha: '2025-01-10' }),
+        0
+      );
+      const desiredA = makeRow({ cod: '013', nro: '00001-00000001', fecha: '2025-01-10' });
+      const desiredB = makeRow({ cod: '013', nro: '00001-00000001', fecha: '2025-01-10', total: 9999 }); // same key, different total
+
+      const result = diffSubdiarioRows([existingRow], [desiredA, desiredB]);
+
+      // Duplicate desired key → must force full rewrite
+      expect(result.sortInvariantViolated).toBe(true);
+      // Should not produce two updates targeting the same rowIndex (0)
+      const rowIndices = result.updates.map((u) => u.rowIndex);
+      const uniqueIndices = new Set(rowIndices);
+      expect(uniqueIndices.size).toBe(rowIndices.length); // no duplicates
+    });
+
+    it('duplicate desired keys NOT present in existing → sortInvariantViolated=true (would create duplicate inserts)', () => {
+      // No existing rows; desired has two rows with the same key
+      const desiredA = makeRow({ cod: '013', nro: '00001-00000010', fecha: '2025-01-15' });
+      const desiredB = makeRow({ cod: '013', nro: '00001-00000010', fecha: '2025-01-15', total: 5000 });
+
+      const result = diffSubdiarioRows([], [desiredA, desiredB]);
+
+      expect(result.sortInvariantViolated).toBe(true);
+      // The second occurrence should not be in inserts (it would create a real duplicate)
+      expect(result.inserts).toHaveLength(1); // only first occurrence inserted
+    });
+
+    it('clean desired set (no duplicate keys) → sortInvariantViolated remains false (regression)', () => {
+      const a = makeRow({ cod: '006', nro: '00001-00000001', fecha: '2025-01-10' });
+      const b = makeRow({ cod: '006', nro: '00001-00000002', fecha: '2025-01-15' });
+      const c = makeRow({ cod: '013', nro: '00001-00000001', fecha: '2025-01-10' }); // same nro but different cod → different key
+
+      const result = diffSubdiarioRows([], [a, b, c]);
+
+      expect(result.sortInvariantViolated).toBe(false);
+      expect(result.inserts).toHaveLength(3);
+    });
+  });
 });

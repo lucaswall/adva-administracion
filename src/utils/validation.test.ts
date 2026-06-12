@@ -114,7 +114,7 @@ describe('formatCuit', () => {
 
 describe('isValidDni', () => {
   it('returns true for 8-digit DNI', () => {
-    expect(isValidDni('40535475')).toBe(true);
+    expect(isValidDni('12345678')).toBe(true);
   });
 
   it('returns true for 7-digit DNI', () => {
@@ -122,11 +122,11 @@ describe('isValidDni', () => {
   });
 
   it('returns true for DNI with dots', () => {
-    expect(isValidDni('40.535.475')).toBe(true);
+    expect(isValidDni('12.345.678')).toBe(true);
   });
 
   it('returns true for DNI with spaces', () => {
-    expect(isValidDni('40 535 475')).toBe(true);
+    expect(isValidDni('12 345 678')).toBe(true);
   });
 
   it('returns false for 6-digit number (too short)', () => {
@@ -138,7 +138,7 @@ describe('isValidDni', () => {
   });
 
   it('returns false for 11-digit CUIT', () => {
-    expect(isValidDni('20405354757')).toBe(false);
+    expect(isValidDni('20123456786')).toBe(false);
   });
 
   it('returns false for empty string', () => {
@@ -152,19 +152,19 @@ describe('isValidDni', () => {
 
 describe('formatDni', () => {
   it('returns clean 8-digit DNI', () => {
-    expect(formatDni('40535475')).toBe('40535475');
+    expect(formatDni('12345678')).toBe('12345678');
   });
 
   it('removes dots from DNI', () => {
-    expect(formatDni('40.535.475')).toBe('40535475');
+    expect(formatDni('12.345.678')).toBe('12345678');
   });
 
   it('removes spaces from DNI', () => {
-    expect(formatDni('40 535 475')).toBe('40535475');
+    expect(formatDni('12 345 678')).toBe('12345678');
   });
 
   it('removes dashes from DNI', () => {
-    expect(formatDni('40-535-475')).toBe('40535475');
+    expect(formatDni('12-345-678')).toBe('12345678');
   });
 
   it('returns empty string for too short input', () => {
@@ -181,13 +181,13 @@ describe('formatDni', () => {
 });
 
 describe('extractDniFromCuit', () => {
-  it('extracts DNI from CUIT 20405354757', () => {
-    // CUIT: 20-40535475-7 -> DNI: 40535475
-    expect(extractDniFromCuit('20405354757')).toBe('40535475');
+  it('extracts DNI from CUIT 20123456786', () => {
+    // CUIT: 20-12345678-6 -> DNI: 12345678
+    expect(extractDniFromCuit('20123456786')).toBe('12345678');
   });
 
   it('extracts DNI from CUIT with dashes', () => {
-    expect(extractDniFromCuit('20-40535475-7')).toBe('40535475');
+    expect(extractDniFromCuit('20-12345678-6')).toBe('12345678');
   });
 
   it('extracts DNI from company CUIT 30709076783', () => {
@@ -224,28 +224,28 @@ describe('extractDniFromCuit', () => {
 
 describe('cuitContainsDni', () => {
   it('returns true when DNI matches CUIT', () => {
-    // CUIT 20405354757 contains DNI 40535475
-    expect(cuitContainsDni('20405354757', '40535475')).toBe(true);
+    // CUIT 20123456786 contains DNI 12345678
+    expect(cuitContainsDni('20123456786', '12345678')).toBe(true);
   });
 
   it('returns true with formatted inputs', () => {
-    expect(cuitContainsDni('20-40535475-7', '40.535.475')).toBe(true);
+    expect(cuitContainsDni('20-12345678-6', '12.345.678')).toBe(true);
   });
 
   it('returns false when DNI does not match', () => {
-    expect(cuitContainsDni('20405354757', '12345678')).toBe(false);
+    expect(cuitContainsDni('20123456786', '87654321')).toBe(false);
   });
 
   it('returns false for empty CUIT', () => {
-    expect(cuitContainsDni('', '40535475')).toBe(false);
+    expect(cuitContainsDni('', '12345678')).toBe(false);
   });
 
   it('returns false for empty DNI', () => {
-    expect(cuitContainsDni('20405354757', '')).toBe(false);
+    expect(cuitContainsDni('20123456786', '')).toBe(false);
   });
 
   it('returns false for invalid CUIT', () => {
-    expect(cuitContainsDni('123456', '40535475')).toBe(false);
+    expect(cuitContainsDni('123456', '12345678')).toBe(false);
   });
 
   it('returns true for CUIT with leading zeros matching zero-padded DNI', () => {
@@ -268,42 +268,42 @@ describe('cuitContainsDni', () => {
 
 describe('cuitOrDniMatch', () => {
   it('returns true for exact CUIT match', () => {
-    expect(cuitOrDniMatch('20405354757', '20405354757')).toBe(true);
+    expect(cuitOrDniMatch('20123456786', '20123456786')).toBe(true);
   });
 
   it('returns true for CUIT match with dashes', () => {
-    expect(cuitOrDniMatch('20-40535475-7', '20405354757')).toBe(true);
+    expect(cuitOrDniMatch('20-12345678-6', '20123456786')).toBe(true);
   });
 
   it('returns true when DNI matches CUIT (DNI first)', () => {
-    expect(cuitOrDniMatch('40535475', '20405354757')).toBe(true);
+    expect(cuitOrDniMatch('12345678', '20123456786')).toBe(true);
   });
 
   it('returns true when DNI matches CUIT (CUIT first)', () => {
-    expect(cuitOrDniMatch('20405354757', '40535475')).toBe(true);
+    expect(cuitOrDniMatch('20123456786', '12345678')).toBe(true);
   });
 
   it('returns true for exact DNI match', () => {
-    expect(cuitOrDniMatch('40535475', '40535475')).toBe(true);
+    expect(cuitOrDniMatch('12345678', '12345678')).toBe(true);
   });
 
   it('returns false for non-matching CUIT and DNI', () => {
-    expect(cuitOrDniMatch('20405354757', '12345678')).toBe(false);
+    expect(cuitOrDniMatch('20123456786', '87654321')).toBe(false);
   });
 
   it('returns false for two different CUITs', () => {
-    expect(cuitOrDniMatch('20405354757', '30709076783')).toBe(false);
+    expect(cuitOrDniMatch('20123456786', '30709076783')).toBe(false);
   });
 
   it('returns false for empty inputs', () => {
-    expect(cuitOrDniMatch('', '20405354757')).toBe(false);
-    expect(cuitOrDniMatch('20405354757', '')).toBe(false);
+    expect(cuitOrDniMatch('', '20123456786')).toBe(false);
+    expect(cuitOrDniMatch('20123456786', '')).toBe(false);
   });
 
   it('handles real-world example from sample documents', () => {
-    // Factura: CUIT emisor 20405354757
-    // Pago: beneficiary 40535475 (DNI)
-    expect(cuitOrDniMatch('20405354757', '40535475')).toBe(true);
+    // Factura: CUIT emisor 20123456786
+    // Pago: beneficiary 12345678 (DNI)
+    expect(cuitOrDniMatch('20123456786', '12345678')).toBe(true);
   });
 });
 
@@ -511,7 +511,7 @@ describe('validatePago', () => {
   });
 
   it('accepts valid DNI as cuitPagador', () => {
-    const withDni = { ...validPago, cuitPagador: '40535475' };
+    const withDni = { ...validPago, cuitPagador: '12345678' };
     const result = validatePago(withDni);
     expect(result.valid).toBe(true);
     expect(result.errors).toHaveLength(0);
@@ -525,7 +525,7 @@ describe('validatePago', () => {
   });
 
   it('accepts valid DNI as cuitBeneficiario', () => {
-    const withDni = { ...validPago, cuitBeneficiario: '40535475' };
+    const withDni = { ...validPago, cuitBeneficiario: '12345678' };
     const result = validatePago(withDni);
     expect(result.valid).toBe(true);
     expect(result.errors).toHaveLength(0);

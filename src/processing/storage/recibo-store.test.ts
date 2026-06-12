@@ -60,13 +60,15 @@ vi.mock('../../utils/concurrency.js', () => ({
 }));
 
 import { appendRowsWithLinks, sortSheet, getValues, batchUpdate, updateRowsWithFormatting } from '../../services/sheets.js';
+import { withLock } from '../../utils/concurrency.js';
+import { RECIBO_HEADERS } from '../../constants/spreadsheet-headers.js';
 
 const createTestRecibo = (overrides: Partial<Recibo> = {}): Recibo => ({
   fileId: 'test-file-id',
   fileName: 'test-recibo.pdf',
   tipoRecibo: 'sueldo',
   nombreEmpleado: 'Juan Perez',
-  cuilEmpleado: '20123456789',
+  cuilEmpleado: '20123456786',
   legajo: '001',
   tareaDesempenada: 'Desarrollador',
   cuitEmpleador: '30709076783',
@@ -153,7 +155,7 @@ describe('storeRecibo', () => {
     it('writes hasCuitMatch at index 18 in reprocessing (existing fileId) path with A:S range', async () => {
       vi.mocked(getValues).mockResolvedValueOnce({
         ok: true,
-        value: [['fileId'], ['test-file-id']],
+        value: [RECIBO_HEADERS, ['', 'test-file-id']],
       });
       vi.mocked(updateRowsWithFormatting).mockResolvedValue({ ok: true, value: undefined });
       vi.mocked(sortSheet).mockResolvedValue({ ok: true, value: undefined });
@@ -199,7 +201,7 @@ describe('storeRecibo', () => {
         ok: true,
         value: [
           ['fechaPago', 'fileId', 'fileName', 'tipoRecibo', 'nombreEmpleado', 'cuilEmpleado', 'legajo', 'tareaDesempenada', 'cuitEmpleador', 'periodoAbonado', 'subtotalRemuneraciones', 'subtotalDescuentos', 'totalNeto'],
-          ['2025-01-31', existingFileId, 'old.pdf', 'Mensual', 'Juan Perez', '20123456789', '001', 'Desarrollador', '30709076783', '2025-01', '500,000.00', '100,000.00', '400,000.00'],
+          ['2025-01-31', existingFileId, 'old.pdf', 'Mensual', 'Juan Perez', '20123456786', '001', 'Desarrollador', '30709076783', '2025-01', '500,000.00', '100,000.00', '400,000.00'],
         ],
       });
 
@@ -224,7 +226,7 @@ describe('storeRecibo', () => {
         ok: true,
         value: [
           ['fechaPago', 'fileId', 'fileName', 'tipoRecibo', 'nombreEmpleado', 'cuilEmpleado', 'legajo', 'tareaDesempenada', 'cuitEmpleador', 'periodoAbonado', 'subtotalRemuneraciones', 'subtotalDescuentos', 'totalNeto'],
-          ['2025-01-31', 'existing-file-id', 'old.pdf', 'Mensual', 'Juan Perez', '20123456789', '001', 'Desarrollador', '30709076783', '2025-01', '500,000.00', '100,000.00', '400,000.00'],
+          ['2025-01-31', 'existing-file-id', 'old.pdf', 'Mensual', 'Juan Perez', '20123456786', '001', 'Desarrollador', '30709076783', '2025-01', '500,000.00', '100,000.00', '400,000.00'],
         ],
       });
       vi.mocked(appendRowsWithLinks).mockResolvedValue({ ok: true, value: 1 });
@@ -250,7 +252,7 @@ describe('storeRecibo', () => {
         ok: true,
         value: [
           ['fechaPago', 'fileId', 'fileName', 'tipoRecibo', 'nombreEmpleado', 'cuilEmpleado', 'legajo', 'tareaDesempenada', 'cuitEmpleador', 'periodoAbonado', 'subtotalRemuneraciones', 'subtotalDescuentos', 'totalNeto'],
-          ['2025-01-31', 'existing-file-id', 'old.pdf', 'Mensual', 'Juan Perez', '20123456789', '001', 'Desarrollador', '30709076783', '2025-01', '500,000.00', '100,000.00', '400,000.00'],
+          ['2025-01-31', 'existing-file-id', 'old.pdf', 'Mensual', 'Juan Perez', '20123456786', '001', 'Desarrollador', '30709076783', '2025-01', '500,000.00', '100,000.00', '400,000.00'],
         ],
       });
       vi.mocked(appendRowsWithLinks).mockResolvedValue({ ok: true, value: 1 });
@@ -276,7 +278,7 @@ describe('storeRecibo', () => {
         ok: true,
         value: [
           ['fechaPago', 'fileId', 'fileName', 'tipoRecibo', 'nombreEmpleado', 'cuilEmpleado', 'legajo', 'tareaDesempenada', 'cuitEmpleador', 'periodoAbonado', 'subtotalRemuneraciones', 'subtotalDescuentos', 'totalNeto'],
-          ['2025-01-31', 'existing-file-id', 'old.pdf', 'Mensual', 'Juan Perez', '20123456789', '001', 'Desarrollador', '30709076783', '2025-01', '500,000.00', '100,000.00', '400,000.00'],
+          ['2025-01-31', 'existing-file-id', 'old.pdf', 'Mensual', 'Juan Perez', '20123456786', '001', 'Desarrollador', '30709076783', '2025-01', '500,000.00', '100,000.00', '400,000.00'],
         ],
       });
       vi.mocked(appendRowsWithLinks).mockResolvedValue({ ok: true, value: 1 });
@@ -294,12 +296,12 @@ describe('storeRecibo', () => {
 
   describe('reprocessing (same fileId already in sheet)', () => {
     it('updates existing row when fileId already exists in sheet', async () => {
-      // First getValues call (findRowByFileId → B:B): fileId found at row 2
+      // First getValues call (findRowByFileId → A:S): fileId found at row 2 (col B = index 1)
       vi.mocked(getValues).mockResolvedValueOnce({
         ok: true,
         value: [
-          ['fileId'],
-          ['test-file-id'], // matching fileId
+          ['fechaPago', 'fileId', 'fileName', 'tipoRecibo', 'nombreEmpleado', 'cuilEmpleado', 'legajo', 'tareaDesempenada', 'cuitEmpleador', 'periodoAbonado', 'subtotalRemuneraciones', 'subtotalDescuentos', 'totalNeto', 'processedAt', 'confidence', 'needsReview', 'matchedPagoFileId', 'matchConfidence', 'hasCuitMatch'],
+          ['2025-01-31', 'test-file-id', 'file.pdf', 'Mensual', 'Juan Perez', '20123456786', '001', 'Dev', '30709076783', '2025-01', '500000', '100000', '400000', '2025-01-31T10:00:00Z', '0.95', 'NO', '', '', 'NO'],
         ],
       });
       vi.mocked(updateRowsWithFormatting).mockResolvedValue({ ok: true, value: undefined });
@@ -328,7 +330,7 @@ describe('storeRecibo', () => {
     it('uses CellNumber for monetary fields in reprocessing row', async () => {
       vi.mocked(getValues).mockResolvedValueOnce({
         ok: true,
-        value: [['fileId'], ['test-file-id']],
+        value: [RECIBO_HEADERS, ['', 'test-file-id']],
       });
       vi.mocked(updateRowsWithFormatting).mockResolvedValue({ ok: true, value: undefined });
       vi.mocked(sortSheet).mockResolvedValue({ ok: true, value: undefined });
@@ -347,7 +349,7 @@ describe('storeRecibo', () => {
     it('uses CellLink for fileName in reprocessing row', async () => {
       vi.mocked(getValues).mockResolvedValueOnce({
         ok: true,
-        value: [['fileId'], ['test-file-id']],
+        value: [RECIBO_HEADERS, ['', 'test-file-id']],
       });
       vi.mocked(updateRowsWithFormatting).mockResolvedValue({ ok: true, value: undefined });
       vi.mocked(sortSheet).mockResolvedValue({ ok: true, value: undefined });
@@ -364,7 +366,7 @@ describe('storeRecibo', () => {
     it('passes raw ISO processedAt in reprocessing row', async () => {
       vi.mocked(getValues).mockResolvedValueOnce({
         ok: true,
-        value: [['fileId'], ['test-file-id']],
+        value: [RECIBO_HEADERS, ['', 'test-file-id']],
       });
       vi.mocked(updateRowsWithFormatting).mockResolvedValue({ ok: true, value: undefined });
       vi.mocked(sortSheet).mockResolvedValue({ ok: true, value: undefined });
@@ -402,6 +404,129 @@ describe('storeRecibo', () => {
       }
       expect(appendRowsWithLinks).toHaveBeenCalled();
       expect(batchUpdate).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('reprocessing preserves match columns (ADV-307)', () => {
+    it('preserves MANUAL matchConfidence on reprocess', async () => {
+      // Recibo row: 19 cols A:S. Q=col16=matchedPagoFileId, R=col17=matchConfidence, S=col18=hasCuitMatch
+      const existingRow = Array(19).fill('') as string[];
+      existingRow[1] = 'test-file-id';    // B: fileId
+      existingRow[16] = 'pago-xyz';       // Q: matchedPagoFileId
+      existingRow[17] = 'MANUAL';         // R: matchConfidence (MANUAL lock)
+      existingRow[18] = 'YES';            // S: hasCuitMatch
+
+      vi.mocked(getValues).mockResolvedValueOnce({
+        ok: true,
+        value: [RECIBO_HEADERS, existingRow],
+      });
+      vi.mocked(updateRowsWithFormatting).mockResolvedValue({ ok: true, value: undefined });
+
+      const recibo = createTestRecibo();  // no match data
+      await storeRecibo(recibo, 'spreadsheet-id');
+
+      const updateCall = vi.mocked(updateRowsWithFormatting).mock.calls[0];
+      const updateRow = updateCall[1][0].values as unknown[];
+
+      // MANUAL lock must be preserved
+      expect(updateRow[17]).toBe('MANUAL');     // R: matchConfidence
+      expect(updateRow[16]).toBe('pago-xyz');   // Q: matchedPagoFileId
+      expect(updateRow[18]).toBe('YES');        // S: hasCuitMatch
+    });
+  });
+
+  describe('header-derived carry-forward indices (ADV-362)', () => {
+    it('returns ok:false when reprocessed sheet header is missing expected match column', async () => {
+      vi.mocked(getValues).mockResolvedValueOnce({
+        ok: true,
+        value: [
+          ['fechaPago', 'fileId', 'fileName'],  // Truncated header — missing matchedPagoFileId etc.
+          ['2025-01-31', 'test-file-id', 'file.pdf'],
+        ],
+      });
+
+      const recibo = createTestRecibo();
+      const result = await storeRecibo(recibo, 'spreadsheet-id');
+
+      expect(result.ok).toBe(false);
+      expect(updateRowsWithFormatting).not.toHaveBeenCalled();
+      expect(appendRowsWithLinks).not.toHaveBeenCalled();
+    });
+
+    it('preserves MANUAL lock using header-derived indices (current schema)', async () => {
+      const existingRow = Array(19).fill('') as string[];
+      existingRow[1] = 'test-file-id';
+      existingRow[16] = 'pago-derived';
+      existingRow[17] = 'MANUAL';
+      existingRow[18] = 'YES';
+
+      vi.mocked(getValues).mockResolvedValueOnce({
+        ok: true,
+        value: [RECIBO_HEADERS, existingRow],
+      });
+      vi.mocked(updateRowsWithFormatting).mockResolvedValue({ ok: true, value: undefined });
+      vi.mocked(sortSheet).mockResolvedValue({ ok: true, value: undefined });
+
+      const recibo = createTestRecibo();
+      const result = await storeRecibo(recibo, 'spreadsheet-id');
+
+      expect(result.ok).toBe(true);
+      const updateCall = vi.mocked(updateRowsWithFormatting).mock.calls[0];
+      const updateRow = updateCall[1][0].values as unknown[];
+      expect(updateRow[17]).toBe('MANUAL');
+      expect(updateRow[16]).toBe('pago-derived');
+      expect(updateRow[18]).toBe('YES');
+    });
+  });
+
+  describe('findRowByFileId error propagation (ADV-358)', () => {
+    it('returns ok:false with the Sheets error when getValues fails during fileId lookup', async () => {
+      vi.mocked(getValues).mockResolvedValueOnce({
+        ok: false,
+        error: new Error('Sheets API read error'),
+      });
+
+      const recibo = createTestRecibo();
+      const result = await storeRecibo(recibo, 'spreadsheet-id');
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.error.message).toBe('Sheets API read error');
+      }
+      expect(appendRowsWithLinks).not.toHaveBeenCalled();
+      expect(updateRowsWithFormatting).not.toHaveBeenCalled();
+    });
+
+    it('treats header-only sheet as not-found (does not error)', async () => {
+      vi.mocked(getValues).mockResolvedValueOnce({ ok: true, value: [['Header']] });
+      // isDuplicateRecibo also calls getValues
+      vi.mocked(getValues).mockResolvedValueOnce({ ok: true, value: [['Header']] });
+      vi.mocked(appendRowsWithLinks).mockResolvedValue({ ok: true, value: 1 });
+      vi.mocked(sortSheet).mockResolvedValue({ ok: true, value: undefined });
+
+      const recibo = createTestRecibo();
+      const result = await storeRecibo(recibo, 'spreadsheet-id');
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value.stored).toBe(true);
+      }
+      expect(appendRowsWithLinks).toHaveBeenCalled();
+    });
+  });
+
+  describe('lock auto-expiry (ADV-344)', () => {
+    it('uses STORE_LOCK_AUTO_EXPIRY_MS (900 000 ms) as 4th withLock argument', async () => {
+      vi.mocked(getValues).mockResolvedValue({ ok: true, value: [['Header']] });
+      vi.mocked(appendRowsWithLinks).mockResolvedValue({ ok: true, value: 1 });
+      vi.mocked(sortSheet).mockResolvedValue({ ok: true, value: undefined });
+
+      const recibo = createTestRecibo();
+      await storeRecibo(recibo, 'spreadsheet-id');
+
+      const calls = vi.mocked(withLock).mock.calls;
+      expect(calls.length).toBeGreaterThan(0);
+      expect(calls[calls.length - 1][3]).toBe(900000); // STORE_LOCK_AUTO_EXPIRY_MS
     });
   });
 });

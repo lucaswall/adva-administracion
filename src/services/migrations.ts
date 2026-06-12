@@ -7,6 +7,7 @@
 import type { Result, FolderStructure } from '../types/index.js';
 import type { CellValue, CellValueOrLink } from './sheets.js';
 import { getValues, batchUpdate, updateRowsWithFormatting, getSpreadsheetTimezone, getSheetMetadata } from './sheets.js';
+import { decodeSerialInTimezone } from '../utils/date.js';
 import { getCachedFolderStructure, migrateTipoDeCambioHeaders, migrateArchivosProcesadosHeaders, migrateFacturasEmitidasPagadaColumn, migrateRecibosHasCuitMatchColumn, migrateFacturasEmitidasCondicionIvaColumn } from './folder-structure.js';
 import { readSchemaVersion, writeSchemaVersion } from './schema-version.js';
 import { MOVIMIENTOS_BANCARIO_SHEET } from '../constants/spreadsheet-headers.js';
@@ -272,7 +273,6 @@ export async function migrateDashboardProcessedAt(dashboardId: string): Promise<
   const timeZone = timezoneResult.ok ? timezoneResult.value : undefined;
 
   const rows = dataResult.value;
-  const EXCEL_EPOCH = new Date(Date.UTC(1899, 11, 30)).getTime();
 
   const updates: Array<{ range: string; values: CellValueOrLink[] }> = [];
 
@@ -288,8 +288,8 @@ export async function migrateDashboardProcessedAt(dashboardId: string): Promise<
     let processedAtIso: string;
 
     if (typeof processedAtRaw === 'number') {
-      // Serial number from appendRowsWithLinks — convert to ISO string
-      processedAtIso = new Date(EXCEL_EPOCH + processedAtRaw * 86400000).toISOString();
+      // Serial number from appendRowsWithLinks — decode with timezone awareness (ADV-306)
+      processedAtIso = new Date(decodeSerialInTimezone(processedAtRaw, timeZone ?? 'UTC')).toISOString();
     } else {
       const str = String(processedAtRaw);
       if (!str) continue;

@@ -874,3 +874,112 @@ describe('token logging error handling (bug #6)', () => {
     expect(unhandledRejection).toBe(false);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Task 62: Wire dashboardId into token-usage batch auto-flush (ADV-298)
+// ---------------------------------------------------------------------------
+
+describe('ADV-298: extractor passes context.dashboardId to tokenBatch.add', () => {
+  beforeEach(() => {
+    vi.resetModules();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('passes context.dashboardId to tokenBatch.add when usageCallback fires', async () => {
+    process.env.API_SECRET = 'test-secret';
+    process.env.GEMINI_API_KEY = 'test-key';
+    process.env.GOOGLE_SERVICE_ACCOUNT_KEY = '{}';
+    process.env.DRIVE_ROOT_FOLDER_ID = 'test-root';
+    process.env.NODE_ENV = 'test';
+
+    const { resetConfig } = await import('../config.js');
+    resetConfig();
+
+    vi.doMock('../services/drive.js', () => ({
+      downloadFile: vi.fn().mockResolvedValue({
+        ok: true,
+        value: Buffer.from('fake-pdf'),
+      }),
+    }));
+
+    vi.doMock('../services/folder-structure.js', () => ({
+      getCachedFolderStructure: vi.fn().mockReturnValue({
+        dashboardOperativoId: 'dashboard-from-cache',
+      }),
+    }));
+
+    vi.doMock('./pdf-sanitize.js', () => ({
+      detectInvisibleText: vi.fn().mockReturnValue({ hasInvisible: false }),
+    }));
+
+    vi.doMock('../utils/correlation.js', () => ({
+      getCorrelationId: vi.fn().mockReturnValue('test-corr-id'),
+      updateCorrelationContext: vi.fn(),
+    }));
+
+    vi.doMock('../services/token-usage-logger.js', () => ({
+      generateRequestId: vi.fn().mockReturnValue('test-request-id'),
+      logTokenUsage: vi.fn().mockResolvedValue({ ok: true, value: undefined }),
+    }));
+
+    // Mock gemini client to invoke usageCallback then return an error
+    vi.doMock('../gemini/client.js', () => ({
+      getGeminiClient: vi.fn().mockReturnValue({
+        analyzeDocument: vi.fn().mockImplementation(
+          async (_buf: unknown, _mime: unknown, _prompt: unknown, _retries: unknown, _fileId: unknown, _fileName: unknown, usageCallback: ((d: unknown) => Promise<void>) | undefined) => {
+            if (usageCallback) {
+              await usageCallback({
+                fileId: 'test-file-id',
+                fileName: 'test.pdf',
+                model: 'gemini-2.5-flash',
+                promptTokens: 100,
+                cachedTokens: 0,
+                outputTokens: 50,
+                totalTokens: 150,
+                durationMs: 500,
+                success: true,
+              });
+            }
+            return { ok: false as const, error: new Error('mocked-stop') };
+          }
+        ),
+      }),
+    }));
+
+    const { processFile } = await import('./extractor.js');
+    const { TokenUsageBatch } = await import('../services/token-usage-batch.js');
+
+    const batch = new TokenUsageBatch();
+    const addSpy = vi.spyOn(batch, 'add');
+
+    const context = {
+      tokenBatch: batch,
+      dashboardId: 'context-dashboard-id',
+      sortBatch: {} as import('./scanner.js').ScanContext['sortBatch'],
+      duplicateCache: {} as import('./scanner.js').ScanContext['duplicateCache'],
+      metadataCache: {} as import('./scanner.js').ScanContext['metadataCache'],
+      sheetOrderBatch: {} as import('./scanner.js').ScanContext['sheetOrderBatch'],
+    };
+
+    await processFile(
+      {
+        id: 'test-file',
+        name: 'test.pdf',
+        mimeType: 'application/pdf',
+        lastUpdated: new Date('2025-01-15T12:00:00Z'),
+      },
+      context as import('./scanner.js').ScanContext
+    );
+
+    // After ADV-298 fix: tokenBatch.add must be called with context.dashboardId
+    expect(addSpy).toHaveBeenCalledWith(
+      expect.any(Object),
+      'context-dashboard-id'
+    );
+
+    resetConfig();
+  });
+});

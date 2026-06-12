@@ -10,6 +10,7 @@ import { batchUpdate, getValues, type CellValue } from './sheets.js';
 import { debug, warn } from '../utils/logger.js';
 import { parseNumber } from '../utils/numbers.js';
 import { normalizeSpreadsheetDate } from '../utils/date.js';
+import { buildHeaderIndex, MOVIMIENTOS_BANCARIO_SHEET } from '../constants/spreadsheet-headers.js';
 
 /**
  * Represents an update to the matchedFileId and detalle columns
@@ -46,20 +47,40 @@ function escapeSheetName(sheetName: string): string {
 }
 
 /**
- * Computes version hash from raw row data (columns A-I)
+ * Normalizes a matchedType cell value to a canonical form for version hashing.
+ * Accepts 'AUTO' or 'MANUAL' (case-insensitive, whitespace-trimmed).
+ * Returns '' for any other value (unknown, empty, etc.).
+ *
+ * Exported so callers (tests and computeRowVersion) share the same normalization.
+ *
+ * @param value - Raw matchedType string from the sheet
+ * @returns 'AUTO' | 'MANUAL' | ''
+ */
+export function normalizeMatchedType(value: string): 'AUTO' | 'MANUAL' | '' {
+  const upper = value.trim().toUpperCase();
+  if (upper === 'AUTO') return 'AUTO';
+  if (upper === 'MANUAL') return 'MANUAL';
+  return '';
+}
+
+// Header-derived indices for bank movimientos rows (ADV-332)
+const movCol = buildHeaderIndex(MOVIMIENTOS_BANCARIO_SHEET.headers);
+
+/**
+ * Computes version hash from raw row data (columns A-I) using header-derived indices.
  * Must match the algorithm in match-movimientos.ts computeRowVersion
  *
- * @param row - Raw cell values [fecha, concepto, debito, credito, saldo, saldoCalculado, matchedFileId, matchedType, detalle]
+ * @param row - Raw cell values matching MOVIMIENTOS_BANCARIO_SHEET.headers order
  * @returns Hex string hash (16 chars)
  */
 function computeVersionFromRow(row: CellValue[]): string {
-  const fecha = normalizeSpreadsheetDate(row[0]);
-  const concepto = String(row[1] || '');
-  const debito = parseNumber(row[2]);
-  const credito = parseNumber(row[3]);
-  const matchedFileId = String(row[6] || '');
-  const matchedType = String(row[7] || '');
-  const detalle = String(row[8] || '');
+  const fecha = normalizeSpreadsheetDate(row[movCol('fecha')]);
+  const concepto = String(row[movCol('concepto')] || '');
+  const debito = parseNumber(row[movCol('debito')]);
+  const credito = parseNumber(row[movCol('credito')]);
+  const matchedFileId = String(row[movCol('matchedFileId')] || '');
+  const matchedType = normalizeMatchedType(String(row[movCol('matchedType')] || ''));
+  const detalle = String(row[movCol('detalle')] || '');
 
   const data = [
     fecha,
@@ -84,14 +105,16 @@ function computeVersionFromRow(row: CellValue[]): string {
  *
  * @param spreadsheetId - The spreadsheet ID
  * @param updates - Array of updates to apply
- * @returns Number of rows actually updated (may be less than updates.length if versions mismatch)
+ * @returns Object containing appliedCount (rows written), skippedCount (rows skipped due to version
+ *   mismatch), and appliedKeys (Set of "${sheetName}:${rowNumber}" keys for every applied update).
+ *   Callers use appliedKeys to gate side-effects (e.g. pagada='SI') on actually-written rows (ADV-343).
  */
 export async function updateDetalle(
   spreadsheetId: string,
   updates: DetalleUpdate[]
-): Promise<Result<number, Error>> {
+): Promise<Result<{ appliedCount: number; skippedCount: number; appliedKeys: Set<string> }, Error>> {
   if (updates.length === 0) {
-    return { ok: true, value: 0 };
+    return { ok: true, value: { appliedCount: 0, skippedCount: 0, appliedKeys: new Set<string>() } };
   }
 
   // Filter updates that need version verification
@@ -161,13 +184,17 @@ export async function updateDetalle(
     }
   }
 
+  // Build the applied keys set from verified updates (ADV-343)
+  const appliedKeys = new Set<string>(verifiedUpdates.map(u => `${u.sheetName}:${u.rowNumber}`));
+  const skippedCount = updates.length - verifiedUpdates.length;
+
   if (verifiedUpdates.length === 0) {
     debug('No updates to apply after version verification', {
       module: 'movimientos-detalle',
       spreadsheetId,
       originalCount: updates.length,
     });
-    return { ok: true, value: 0 };
+    return { ok: true, value: { appliedCount: 0, skippedCount, appliedKeys } };
   }
 
   // Build update operations for batchUpdate
@@ -180,7 +207,7 @@ export async function updateDetalle(
     module: 'movimientos-detalle',
     spreadsheetId,
     totalUpdates: allUpdates.length,
-    skippedByVersion: updates.length - verifiedUpdates.length,
+    skippedByVersion: skippedCount,
     chunks: Math.ceil(allUpdates.length / SHEETS_BATCH_UPDATE_LIMIT),
   });
 
@@ -205,5 +232,5 @@ export async function updateDetalle(
     });
   }
 
-  return { ok: true, value: totalUpdated };
+  return { ok: true, value: { appliedCount: totalUpdated, skippedCount, appliedKeys } };
 }

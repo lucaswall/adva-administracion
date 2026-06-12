@@ -449,24 +449,6 @@ export function computeVersion(value: unknown): string {
 }
 
 /**
- * Checks if a value has changed since a version was computed
- *
- * @param value - Current value to check
- * @param expectedVersion - Expected version string
- * @throws VersionConflictError if versions don't match
- */
-export function checkVersion(
-  resourceId: string,
-  value: unknown,
-  expectedVersion: string
-): void {
-  const actualVersion = computeVersion(value);
-  if (actualVersion !== expectedVersion) {
-    throw new VersionConflictError(resourceId, expectedVersion, actualVersion);
-  }
-}
-
-/**
  * Global quota throttle that reduces throughput when quota errors are detected.
  *
  * When any operation reports a quota error, the throttle imposes a global delay
@@ -724,9 +706,3 @@ export function clearAllLocks(): void {
   lockManager.clearAll();
 }
 
-/**
- * Checks if a resource is currently locked
- */
-export function isResourceLocked(resourceId: string): boolean {
-  return lockManager.isLocked(resourceId);
-}

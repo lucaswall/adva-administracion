@@ -28,7 +28,7 @@ import { listFilesInFolder } from '../services/drive.js';
 import { getCachedFolderStructure, getOrCreateBankAccountFolder, getOrCreateBankAccountSpreadsheet, getOrCreateCreditCardFolder, getOrCreateCreditCardSpreadsheet, getOrCreateBrokerFolder, getOrCreateBrokerSpreadsheet, getOrCreateMovimientosSpreadsheet } from '../services/folder-structure.js';
 import { sortToSinProcesar, sortAndRenameDocument, moveToDuplicadoFolder } from '../services/document-sorter.js';
 import { getProcessingQueue } from './queue.js';
-import { getConfig, PROCESSING_LOCK_ID, PROCESSING_LOCK_TIMEOUT_MS } from '../config.js';
+import { getConfig, PROCESSING_LOCK_ID, PROCESSING_LOCK_TIMEOUT_MS, PROCESSING_LOCK_EXPIRY_MS } from '../config.js';
 import { debug, info, warn, error as logError } from '../utils/logger.js';
 import { withCorrelationAsync, getCorrelationId, generateCorrelationId } from '../utils/correlation.js';
 import { withLock } from '../utils/concurrency.js';
@@ -36,7 +36,7 @@ import { isBudgetExhaustedError } from '../gemini/budget.js';
 
 // Import from refactored modules
 import { processFile, hasValidDate } from './extractor.js';
-import { storeFactura, storePago, storeRecibo, storeRetencion, storeResumenBancario, storeResumenTarjeta, storeResumenBroker, storeMovimientosBancario, storeMovimientosTarjeta, storeMovimientosBroker, getProcessedFileIds, getStaleProcessingFileIds, getRetryableFailedFileIds, markFileProcessing, updateFileStatus } from './storage/index.js';
+import { storeFactura, storePago, storeRecibo, storeRetencion, storeResumenBancario, storeResumenTarjeta, storeResumenBroker, storeMovimientosBancario, storeMovimientosTarjeta, storeMovimientosBroker, getProcessedFileIds, getAllTrackedFileIds, getStaleProcessingFileIds, getRetryableFailedFileIds, markFileProcessing, updateFileStatus } from './storage/index.js';
 import { runMatching } from './matching/index.js';
 import { matchAllMovimientos } from '../bank/match-movimientos.js';
 import { SortBatch, DuplicateCache, MetadataCache, SheetOrderBatch } from './caches/index.js';
@@ -351,6 +351,8 @@ export interface ScanContext {
   metadataCache: MetadataCache;
   tokenBatch: TokenUsageBatch;
   sheetOrderBatch: SheetOrderBatch;
+  /** Dashboard Operativo spreadsheet ID — passed to tokenBatch.add() for auto-flush (ADV-298) */
+  dashboardId?: string;
 }
 
 /**
@@ -493,6 +495,7 @@ export async function scanFolder(folderId?: string): Promise<Result<ScanResult, 
       metadataCache: new MetadataCache(),
       tokenBatch: new TokenUsageBatch(),
       sheetOrderBatch: new SheetOrderBatch(),
+      dashboardId: dashboardOperativoId,
     };
 
     info('Scan configuration', {
@@ -569,6 +572,23 @@ export async function scanFolder(folderId?: string): Promise<Result<ScanResult, 
         correlationId,
       });
 
+      // ADV-311: Get ALL tracked file IDs (any status) to build the proper exclusion set.
+      // Previously newFiles used processedIds (success/duplicate only), so non-retryable
+      // failed and non-stale processing files would pass through and be re-queued every scan.
+      const allTrackedResult = await getAllTrackedFileIds(dashboardOperativoId);
+      let allTrackedIds: Set<string>;
+      if (!allTrackedResult.ok) {
+        warn('Failed to get all tracked file IDs, falling back to processedIds only', {
+          module: 'scanner',
+          phase: 'scan-start',
+          error: allTrackedResult.error.message,
+          correlationId,
+        });
+        allTrackedIds = processedIds;
+      } else {
+        allTrackedIds = allTrackedResult.value;
+      }
+
       // Recover files stuck in Entrada with 'success' status
       // These are files where data was stored and status marked 'success', but the file move
       // to the destination folder failed (or server was killed between status update and move).
@@ -583,14 +603,16 @@ export async function scanFolder(folderId?: string): Promise<Result<ScanResult, 
           fileNames: stuckSuccessFiles.map(f => f.name),
           correlationId,
         });
-        // Remove from processedIds so they pass the filter
+        // Remove from allTrackedIds so stuck-success files pass the newFiles filter
         for (const f of stuckSuccessFiles) {
-          processedIds.delete(f.id);
+          allTrackedIds.delete(f.id);
         }
       }
 
-      // Filter to only new files
-      const newFiles = allFiles.filter(f => !processedIds.has(f.id));
+      // Filter to only truly new files (no tracking entry at all).
+      // ADV-311: Using allTrackedIds (all statuses) correctly excludes non-retryable failed
+      // and non-stale processing files — the recovery gates below add back the eligible subset.
+      const newFiles = allFiles.filter(f => !allTrackedIds.has(f.id));
       info(`${newFiles.length} new files to process`, {
         module: 'scanner',
         phase: 'scan-start',
@@ -819,7 +841,7 @@ export async function scanFolder(folderId?: string): Promise<Result<ScanResult, 
         }, { correlationId: generateCorrelationId() });
       },
       PROCESSING_LOCK_TIMEOUT_MS,  // Wait timeout (5 min)
-      PROCESSING_LOCK_TIMEOUT_MS   // Auto-expiry (5 min)
+      PROCESSING_LOCK_EXPIRY_MS    // Auto-expiry (15 min, ADV-302)
     );
 
     // Handle lock acquisition failure or timeout
@@ -1620,6 +1642,7 @@ async function storeAndSortDocument(
           if (storeResult.value.stored) {
             // Store movimientos (including empty "SIN MOVIMIENTOS" case)
             const resumenWithMovimientos = doc as ResumenBancarioConMovimientos;
+            let movimentosFailed = false; // ADV-308: track movimientos storage failure
             if (resumenWithMovimientos.movimientos) {
               const folderName = `${resumen.banco} ${resumen.numeroCuenta} ${resumen.moneda}`;
               const movSpreadsheetResult = await getOrCreateMovimientosSpreadsheet(
@@ -1639,6 +1662,7 @@ async function storeAndSortDocument(
                 );
 
                 if (!storeMovResult.ok) {
+                  movimentosFailed = true;
                   warn('Failed to store movimientos bancario', {
                     module: 'scanner',
                     phase: 'storage',
@@ -1656,6 +1680,7 @@ async function storeAndSortDocument(
                   });
                 }
               } else {
+                movimentosFailed = true;
                 warn('Failed to get movimientos spreadsheet', {
                   module: 'scanner',
                   phase: 'storage',
@@ -1666,37 +1691,51 @@ async function storeAndSortDocument(
               }
             }
 
-            // ADV-51: Update status to 'success' BEFORE sorting to prevent race condition
-            const statusResult = await updateFileStatus(dashboardOperativoId, fileInfo.id, 'success');
-            if (!statusResult.ok) {
-              logError('Failed to update file status', {
-                module: 'scanner',
-                fileId: fileInfo.id,
-                error: statusResult.error.message,
-                correlationId,
-              });
-            }
-
-            // Not a duplicate - move to bank account folder
-            const sortResult = await sortAndRenameDocument(doc, 'bancos', 'resumen_bancario');
-            if (!sortResult.success) {
-              logError('Failed to move resumen (data stored, file in original location)', {
-                module: 'scanner',
-                phase: 'storage',
-                fileName: fileInfo.name,
-                error: sortResult.error,
-                correlationId,
-              });
-              // Revert status so file can be recovered on next scan
-              await updateFileStatus(dashboardOperativoId, fileInfo.id, 'failed', `move failed: ${sortResult.error}`);
+            if (movimentosFailed) {
+              // ADV-308: movimientos failure must not mark resumen 'success' — leave in Entrada for retry
               result.errors++;
+              const statusResult = await updateFileStatus(dashboardOperativoId, fileInfo.id, 'failed', 'movimientos storage failed');
+              if (!statusResult.ok) {
+                logError('Failed to update file status after movimientos failure', {
+                  module: 'scanner',
+                  fileId: fileInfo.id,
+                  error: statusResult.error.message,
+                  correlationId,
+                });
+              }
             } else {
-              info(`Stored and moved to ${sortResult.targetPath}`, {
-                module: 'scanner',
-                phase: 'storage',
-                fileName: fileInfo.name,
-                correlationId,
-              });
+              // ADV-51: Update status to 'success' BEFORE sorting to prevent race condition
+              const statusResult = await updateFileStatus(dashboardOperativoId, fileInfo.id, 'success');
+              if (!statusResult.ok) {
+                logError('Failed to update file status', {
+                  module: 'scanner',
+                  fileId: fileInfo.id,
+                  error: statusResult.error.message,
+                  correlationId,
+                });
+              }
+
+              // Not a duplicate - move to bank account folder
+              const sortResult = await sortAndRenameDocument(doc, 'bancos', 'resumen_bancario');
+              if (!sortResult.success) {
+                logError('Failed to move resumen (data stored, file in original location)', {
+                  module: 'scanner',
+                  phase: 'storage',
+                  fileName: fileInfo.name,
+                  error: sortResult.error,
+                  correlationId,
+                });
+                // Revert status so file can be recovered on next scan
+                await updateFileStatus(dashboardOperativoId, fileInfo.id, 'failed', `move failed: ${sortResult.error}`);
+                result.errors++;
+              } else {
+                info(`Stored and moved to ${sortResult.targetPath}`, {
+                  module: 'scanner',
+                  phase: 'storage',
+                  fileName: fileInfo.name,
+                  correlationId,
+                });
+              }
             }
           } else {
             // Duplicate - move to Duplicado folder
@@ -1843,6 +1882,7 @@ async function storeAndSortDocument(
           if (storeResult.value.stored) {
             // Store movimientos (including empty "SIN MOVIMIENTOS" case)
             const resumenWithMovimientos = doc as ResumenTarjetaConMovimientos;
+            let movimentosFailed = false; // ADV-308: track movimientos storage failure
             if (resumenWithMovimientos.movimientos) {
               const folderName = `${resumen.banco} ${resumen.tipoTarjeta} ${resumen.numeroCuenta}`;
               const movSpreadsheetResult = await getOrCreateMovimientosSpreadsheet(
@@ -1861,6 +1901,7 @@ async function storeAndSortDocument(
                 );
 
                 if (!storeMovResult.ok) {
+                  movimentosFailed = true;
                   warn('Failed to store movimientos tarjeta', {
                     module: 'scanner',
                     phase: 'storage',
@@ -1878,6 +1919,7 @@ async function storeAndSortDocument(
                   });
                 }
               } else {
+                movimentosFailed = true;
                 warn('Failed to get movimientos spreadsheet', {
                   module: 'scanner',
                   phase: 'storage',
@@ -1888,36 +1930,50 @@ async function storeAndSortDocument(
               }
             }
 
-            // ADV-51: Update status to 'success' BEFORE sorting to prevent race condition
-            const statusResult = await updateFileStatus(dashboardOperativoId, fileInfo.id, 'success');
-            if (!statusResult.ok) {
-              logError('Failed to update file status', {
-                module: 'scanner',
-                fileId: fileInfo.id,
-                error: statusResult.error.message,
-                correlationId,
-              });
-            }
-
-            const sortResult = await sortAndRenameDocument(doc, 'bancos', 'resumen_tarjeta');
-            if (!sortResult.success) {
-              logError('Failed to move resumen tarjeta (data stored, file in original location)', {
-                module: 'scanner',
-                phase: 'storage',
-                fileName: fileInfo.name,
-                error: sortResult.error,
-                correlationId,
-              });
-              // Revert status so file can be recovered on next scan
-              await updateFileStatus(dashboardOperativoId, fileInfo.id, 'failed', `move failed: ${sortResult.error}`);
+            if (movimentosFailed) {
+              // ADV-308: movimientos failure must not mark resumen 'success' — leave in Entrada for retry
               result.errors++;
+              const statusResult = await updateFileStatus(dashboardOperativoId, fileInfo.id, 'failed', 'movimientos storage failed');
+              if (!statusResult.ok) {
+                logError('Failed to update file status after movimientos failure', {
+                  module: 'scanner',
+                  fileId: fileInfo.id,
+                  error: statusResult.error.message,
+                  correlationId,
+                });
+              }
             } else {
-              info(`Stored and moved to ${sortResult.targetPath}`, {
-                module: 'scanner',
-                phase: 'storage',
-                fileName: fileInfo.name,
-                correlationId,
-              });
+              // ADV-51: Update status to 'success' BEFORE sorting to prevent race condition
+              const statusResult = await updateFileStatus(dashboardOperativoId, fileInfo.id, 'success');
+              if (!statusResult.ok) {
+                logError('Failed to update file status', {
+                  module: 'scanner',
+                  fileId: fileInfo.id,
+                  error: statusResult.error.message,
+                  correlationId,
+                });
+              }
+
+              const sortResult = await sortAndRenameDocument(doc, 'bancos', 'resumen_tarjeta');
+              if (!sortResult.success) {
+                logError('Failed to move resumen tarjeta (data stored, file in original location)', {
+                  module: 'scanner',
+                  phase: 'storage',
+                  fileName: fileInfo.name,
+                  error: sortResult.error,
+                  correlationId,
+                });
+                // Revert status so file can be recovered on next scan
+                await updateFileStatus(dashboardOperativoId, fileInfo.id, 'failed', `move failed: ${sortResult.error}`);
+                result.errors++;
+              } else {
+                info(`Stored and moved to ${sortResult.targetPath}`, {
+                  module: 'scanner',
+                  phase: 'storage',
+                  fileName: fileInfo.name,
+                  correlationId,
+                });
+              }
             }
           } else {
             info('Duplicate resumen tarjeta detected, moving to Duplicado folder', {
@@ -2054,6 +2110,7 @@ async function storeAndSortDocument(
           if (storeResult.value.stored) {
             // Store movimientos (including empty "SIN MOVIMIENTOS" case)
             const resumenWithMovimientos = doc as ResumenBrokerConMovimientos;
+            let movimentosFailed = false; // ADV-308: track movimientos storage failure
             if (resumenWithMovimientos.movimientos) {
               const folderName = `${resumen.broker} ${resumen.numeroCuenta}`;
               const movSpreadsheetResult = await getOrCreateMovimientosSpreadsheet(
@@ -2072,6 +2129,7 @@ async function storeAndSortDocument(
                 );
 
                 if (!storeMovResult.ok) {
+                  movimentosFailed = true;
                   warn('Failed to store movimientos broker', {
                     module: 'scanner',
                     phase: 'storage',
@@ -2089,6 +2147,7 @@ async function storeAndSortDocument(
                   });
                 }
               } else {
+                movimentosFailed = true;
                 warn('Failed to get movimientos spreadsheet', {
                   module: 'scanner',
                   phase: 'storage',
@@ -2099,36 +2158,50 @@ async function storeAndSortDocument(
               }
             }
 
-            // ADV-51: Update status to 'success' BEFORE sorting to prevent race condition
-            const statusResult = await updateFileStatus(dashboardOperativoId, fileInfo.id, 'success');
-            if (!statusResult.ok) {
-              logError('Failed to update file status', {
-                module: 'scanner',
-                fileId: fileInfo.id,
-                error: statusResult.error.message,
-                correlationId,
-              });
-            }
-
-            const sortResult = await sortAndRenameDocument(doc, 'bancos', 'resumen_broker');
-            if (!sortResult.success) {
-              logError('Failed to move resumen broker (data stored, file in original location)', {
-                module: 'scanner',
-                phase: 'storage',
-                fileName: fileInfo.name,
-                error: sortResult.error,
-                correlationId,
-              });
-              // Revert status so file can be recovered on next scan
-              await updateFileStatus(dashboardOperativoId, fileInfo.id, 'failed', `move failed: ${sortResult.error}`);
+            if (movimentosFailed) {
+              // ADV-308: movimientos failure must not mark resumen 'success' — leave in Entrada for retry
               result.errors++;
+              const statusResult = await updateFileStatus(dashboardOperativoId, fileInfo.id, 'failed', 'movimientos storage failed');
+              if (!statusResult.ok) {
+                logError('Failed to update file status after movimientos failure', {
+                  module: 'scanner',
+                  fileId: fileInfo.id,
+                  error: statusResult.error.message,
+                  correlationId,
+                });
+              }
             } else {
-              info(`Stored and moved to ${sortResult.targetPath}`, {
-                module: 'scanner',
-                phase: 'storage',
-                fileName: fileInfo.name,
-                correlationId,
-              });
+              // ADV-51: Update status to 'success' BEFORE sorting to prevent race condition
+              const statusResult = await updateFileStatus(dashboardOperativoId, fileInfo.id, 'success');
+              if (!statusResult.ok) {
+                logError('Failed to update file status', {
+                  module: 'scanner',
+                  fileId: fileInfo.id,
+                  error: statusResult.error.message,
+                  correlationId,
+                });
+              }
+
+              const sortResult = await sortAndRenameDocument(doc, 'bancos', 'resumen_broker');
+              if (!sortResult.success) {
+                logError('Failed to move resumen broker (data stored, file in original location)', {
+                  module: 'scanner',
+                  phase: 'storage',
+                  fileName: fileInfo.name,
+                  error: sortResult.error,
+                  correlationId,
+                });
+                // Revert status so file can be recovered on next scan
+                await updateFileStatus(dashboardOperativoId, fileInfo.id, 'failed', `move failed: ${sortResult.error}`);
+                result.errors++;
+              } else {
+                info(`Stored and moved to ${sortResult.targetPath}`, {
+                  module: 'scanner',
+                  phase: 'storage',
+                  fileName: fileInfo.name,
+                  correlationId,
+                });
+              }
             }
           } else {
             info('Duplicate resumen broker detected, moving to Duplicado folder', {
@@ -2356,7 +2429,7 @@ export async function rematch(): Promise<Result<RematchResult, Error>> {
         } as RematchResult;
       },
       PROCESSING_LOCK_TIMEOUT_MS,
-      PROCESSING_LOCK_TIMEOUT_MS
+      PROCESSING_LOCK_EXPIRY_MS   // ADV-302
     );
 
     return lockResult as Result<RematchResult, Error>;

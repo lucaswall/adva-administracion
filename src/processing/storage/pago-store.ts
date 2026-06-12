@@ -12,6 +12,8 @@ import { normalizeSpreadsheetDate } from '../../utils/date.js';
 import { info, warn } from '../../utils/logger.js';
 import { getCorrelationId } from '../../utils/correlation.js';
 import { withLock } from '../../utils/concurrency.js';
+import { STORE_LOCK_AUTO_EXPIRY_MS } from '../../config.js';
+import { buildHeaderIndex } from '../../constants/spreadsheet-headers.js';
 
 /**
  * Builds a CellValueOrLink[] row for updateRowsWithFormatting (reprocessing/replacement) and appendRowsWithLinks (insert)
@@ -89,16 +91,21 @@ async function findRowByFileId(
   spreadsheetId: string,
   sheetName: string,
   fileId: string
-): Promise<{ found: true; rowIndex: number } | { found: false }> {
-  const rowsResult = await getValues(spreadsheetId, `${sheetName}!B:B`);
-  if (!rowsResult.ok || rowsResult.value.length <= 1) {
+): Promise<{ found: true; rowIndex: number; rowData: unknown[]; headerRow: unknown[] } | { found: false } | { error: Error }> {
+  // Read A:Q (full pago schema, 17 cols). fileId is column B = index 1 in A:Q range.
+  const rowsResult = await getValues(spreadsheetId, `${sheetName}!A:Q`);
+  if (!rowsResult.ok) {
+    return { error: rowsResult.error }; // ADV-358: propagate read error
+  }
+  if (rowsResult.value.length <= 1) {
     return { found: false };
   }
+  const headerRow = rowsResult.value[0]; // ADV-362: capture header for index derivation
   // Skip header row (index 0 = row 1 in spreadsheet)
   for (let i = 1; i < rowsResult.value.length; i++) {
     const row = rowsResult.value[i];
-    if (row && String(row[0]) === fileId) {
-      return { found: true, rowIndex: i + 1 }; // 1-indexed spreadsheet row
+    if (row && String(row[1]) === fileId) {
+      return { found: true, rowIndex: i + 1, rowData: row, headerRow }; // 1-indexed spreadsheet row
     }
   }
   return { found: false };
@@ -237,9 +244,23 @@ export async function storePago(
 
     // REPROCESSING CHECK: If same fileId already exists, update the row in place
     const fileIdCheck = await findRowByFileId(spreadsheetId, sheetName, pago.fileId);
+    if ('error' in fileIdCheck) throw fileIdCheck.error; // ADV-358: propagate read error
     if (fileIdCheck.found) {
       const renamedFileName = generatePagoFileName(pago, documentType);
       const updateRow = buildPagoRowFormatted(pago, documentType, renamedFileName);
+
+      // ADV-307 / ADV-362: Preserve match columns using header-derived indices so schema
+      // drift causes a loud failure instead of silently carrying forward the wrong column.
+      const existing = fileIdCheck.rowData;
+      const col = buildHeaderIndex(fileIdCheck.headerRow.map(h => String(h ?? '')));
+      const matchedFacturaFileIdIdx = col('matchedFacturaFileId');
+      const matchConfidenceIdx = col('matchConfidence');
+
+      if (String(existing[matchConfidenceIdx]) === 'MANUAL') {
+        updateRow[matchedFacturaFileIdIdx] = existing[matchedFacturaFileIdIdx] as CellValueOrLink;
+        updateRow[matchConfidenceIdx] = existing[matchConfidenceIdx] as CellValueOrLink;
+      }
+
       const updateResult = await updateRowsWithFormatting(spreadsheetId, [{
         range: `${sheetName}!A${fileIdCheck.rowIndex}:Q${fileIdCheck.rowIndex}`,
         values: updateRow,
@@ -268,8 +289,9 @@ export async function storePago(
     }
 
     // DUPLICATE CHECK (business key): Use cache for fast non-duplicate detection.
+    // ADV-297: Check isLoaded() first — an unloaded cache returns isDuplicate:false (fail-open).
     // If cache reports a duplicate, always fall through to API to get full row data for quality comparison.
-    const cacheHit = context?.duplicateCache
+    const cacheHit = context?.duplicateCache?.isLoaded(spreadsheetId, sheetName)
       ? context.duplicateCache.isDuplicatePago(
           spreadsheetId,
           sheetName,
@@ -378,5 +400,5 @@ export async function storePago(
     }
 
     return { stored: true };
-  }, 10000); // 10 second timeout for lock
+  }, 10000, STORE_LOCK_AUTO_EXPIRY_MS); // 10 s wait; 15 min expiry for crash recovery (ADV-344)
 }

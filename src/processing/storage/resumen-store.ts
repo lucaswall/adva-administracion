@@ -11,7 +11,32 @@ import { normalizeSpreadsheetDate } from '../../utils/date.js';
 import { info, warn } from '../../utils/logger.js';
 import { getCorrelationId } from '../../utils/correlation.js';
 import { withLock } from '../../utils/concurrency.js';
+import { STORE_LOCK_AUTO_EXPIRY_MS } from '../../config.js';
 import { calculateBalanceDiff, generateBalanceOkFormulaLocal } from '../../utils/balance-formulas.js';
+
+/**
+ * Checks if a resumen with the given fileId already exists in the Resumenes sheet.
+ * Used for reprocessing detection (ADV-308): identifies the same file being re-ingested
+ * after a movimientos storage failure on a previous attempt.
+ *
+ * @param spreadsheetId - The spreadsheet ID
+ * @param fileId - The file ID to check (column D, index 3)
+ * @returns Whether the fileId was found
+ */
+async function findResumenRowByFileId(
+  spreadsheetId: string,
+  fileId: string
+): Promise<{ found: true; rowIndex: number } | { found: false }> {
+  const rowsResult = await getValues(spreadsheetId, 'Resumenes!A:D');
+  if (!rowsResult.ok || rowsResult.value.length <= 1) return { found: false };
+  for (let i = 1; i < rowsResult.value.length; i++) {
+    const row = rowsResult.value[i];
+    if (row && String(row[3]) === fileId) {
+      return { found: true, rowIndex: i + 1 };
+    }
+  }
+  return { found: false };
+}
 
 /**
  * Checks if a bank account resumen already exists in the sheet
@@ -154,6 +179,18 @@ export async function storeResumenBancario(
   const lockKey = `store:resumen-bancario:${resumen.banco}:${resumen.numeroCuenta}:${resumen.fechaDesde}:${resumen.fechaHasta}:${resumen.moneda}`;
 
   return withLock(lockKey, async () => {
+    // ADV-308: check for reprocessing — same fileId already stored (movimientos failed previously)
+    const fileIdCheck = await findResumenRowByFileId(spreadsheetId, resumen.fileId);
+    if (fileIdCheck.found) {
+      info('Resumen bancario already stored by fileId, treating as updated for movimientos retry', {
+        module: 'storage',
+        phase: 'resumen-bancario',
+        fileId: resumen.fileId,
+        correlationId: getCorrelationId(),
+      });
+      return { stored: true, updated: true };
+    }
+
     // Always use API-based check for resumenes (bank sheets not pre-loaded in cache)
     const dupeCheck = await isDuplicateResumenBancario(spreadsheetId, resumen);
 
@@ -263,7 +300,7 @@ export async function storeResumenBancario(
     return {
       stored: true,
     };
-  }, 10000); // 10 second timeout for lock
+  }, 10000, STORE_LOCK_AUTO_EXPIRY_MS); // 10 s wait; 15 min expiry for crash recovery (ADV-344)
 }
 
 /**
@@ -283,6 +320,18 @@ export async function storeResumenTarjeta(
   const lockKey = `store:resumen-tarjeta:${resumen.banco}:${resumen.tipoTarjeta}:${resumen.numeroCuenta}:${resumen.fechaDesde}:${resumen.fechaHasta}`;
 
   return withLock(lockKey, async () => {
+    // ADV-308: check for reprocessing — same fileId already stored (movimientos failed previously)
+    const fileIdCheck = await findResumenRowByFileId(spreadsheetId, resumen.fileId);
+    if (fileIdCheck.found) {
+      info('Resumen tarjeta already stored by fileId, treating as updated for movimientos retry', {
+        module: 'storage',
+        phase: 'resumen-tarjeta',
+        fileId: resumen.fileId,
+        correlationId: getCorrelationId(),
+      });
+      return { stored: true, updated: true };
+    }
+
     // Always use API-based check for resumenes (bank sheets not pre-loaded in cache)
     const dupeCheck = await isDuplicateResumenTarjeta(spreadsheetId, resumen);
 
@@ -382,7 +431,7 @@ export async function storeResumenTarjeta(
     return {
       stored: true,
     };
-  }, 10000); // 10 second timeout for lock
+  }, 10000, STORE_LOCK_AUTO_EXPIRY_MS); // 10 s wait; 15 min expiry for crash recovery (ADV-344)
 }
 
 /**
@@ -402,6 +451,18 @@ export async function storeResumenBroker(
   const lockKey = `store:resumen-broker:${resumen.broker}:${resumen.numeroCuenta}:${resumen.fechaDesde}:${resumen.fechaHasta}`;
 
   return withLock(lockKey, async () => {
+    // ADV-308: check for reprocessing — same fileId already stored (movimientos failed previously)
+    const fileIdCheck = await findResumenRowByFileId(spreadsheetId, resumen.fileId);
+    if (fileIdCheck.found) {
+      info('Resumen broker already stored by fileId, treating as updated for movimientos retry', {
+        module: 'storage',
+        phase: 'resumen-broker',
+        fileId: resumen.fileId,
+        correlationId: getCorrelationId(),
+      });
+      return { stored: true, updated: true };
+    }
+
     // Always use API-based check for resumenes (bank sheets not pre-loaded in cache)
     const dupeCheck = await isDuplicateResumenBroker(spreadsheetId, resumen);
 
@@ -504,5 +565,5 @@ export async function storeResumenBroker(
     return {
       stored: true,
     };
-  }, 10000); // 10 second timeout for lock
+  }, 10000, STORE_LOCK_AUTO_EXPIRY_MS); // 10 s wait; 15 min expiry for crash recovery (ADV-344)
 }

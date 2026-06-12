@@ -1018,6 +1018,8 @@ export interface SortResult {
   targetPath?: string;
   /** Error message if unsuccessful */
   error?: string;
+  /** Warning when file was moved successfully but rename failed (ADV-348) */
+  renameWarning?: string;
 }
 
 /**

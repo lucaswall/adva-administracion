@@ -9,6 +9,7 @@ import { validateYear, clearFolderStructureCache, getCachedFolderStructure, chec
 vi.mock('./drive.js', () => ({
   findByName: vi.fn(),
   createFile: vi.fn(),
+  listAllChildren: vi.fn(),
   listByMimeType: vi.fn(),
   createFolder: vi.fn(),
   createSpreadsheet: vi.fn(),
@@ -20,7 +21,7 @@ vi.mock('./drive.js', () => ({
   trashFile: vi.fn(),
 }));
 
-import { findByName, createFile } from './drive.js';
+import { findByName, createFile, listAllChildren } from './drive.js';
 
 // Mock sheets.js so migration tests can control getValues/setValues
 vi.mock('./sheets.js', () => ({
@@ -196,6 +197,7 @@ describe('checkEnvironmentMarker', () => {
 
   it('creates correct marker when no marker exists (staging)', async () => {
     vi.mocked(findByName).mockResolvedValue({ ok: true, value: null });
+    vi.mocked(listAllChildren).mockResolvedValue({ ok: true, value: [] });
     vi.mocked(createFile).mockResolvedValue({
       ok: true,
       value: { id: 'marker-id', name: '.staging', mimeType: 'text/plain' },
@@ -211,6 +213,7 @@ describe('checkEnvironmentMarker', () => {
 
   it('creates correct marker when no marker exists (production)', async () => {
     vi.mocked(findByName).mockResolvedValue({ ok: true, value: null });
+    vi.mocked(listAllChildren).mockResolvedValue({ ok: true, value: [] });
     vi.mocked(createFile).mockResolvedValue({
       ok: true,
       value: { id: 'marker-id', name: '.production', mimeType: 'text/plain' },
@@ -302,11 +305,68 @@ describe('checkEnvironmentMarker', () => {
     expect(createFile).not.toHaveBeenCalled();
   });
 
-  it('returns ok immediately when environment is "development" (skip check)', async () => {
-    const result = await checkEnvironmentMarker(rootId, 'development');
+  it('runs marker check (not bypassed) when called with staging environment (ADV-346)', async () => {
+    // Set up: no markers, empty folder
+    vi.mocked(findByName).mockResolvedValue({ ok: true, value: null });
+    vi.mocked(listAllChildren).mockResolvedValue({ ok: true, value: [] });
+    vi.mocked(createFile).mockResolvedValue({
+      ok: true,
+      value: { id: 'marker-id', name: '.staging', mimeType: 'text/plain' },
+    });
+
+    const result = await checkEnvironmentMarker(rootId, 'staging');
 
     expect(result.ok).toBe(true);
-    expect(findByName).not.toHaveBeenCalled();
+    // Not bypassed — findByName IS called
+    expect(findByName).toHaveBeenCalled();
+  });
+
+  // ADV-347: refuse to auto-claim a populated unmarked root folder
+  it('returns error when unmarked root has existing children (ADV-347)', async () => {
+    // No markers found
+    vi.mocked(findByName).mockResolvedValue({ ok: true, value: null });
+    // But folder already has data
+    vi.mocked(listAllChildren).mockResolvedValue({
+      ok: true,
+      value: [{ id: 'some-file', name: 'Control de Ingresos.gsheet', mimeType: 'application/vnd.google-apps.spreadsheet' }],
+    });
+
+    const result = await checkEnvironmentMarker(rootId, 'staging');
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.message).toMatch(/not empty|populated|has children/i);
+    }
+    expect(createFile).not.toHaveBeenCalled();
+  });
+
+  it('creates marker when unmarked root is empty (first boot preserved) (ADV-347)', async () => {
+    vi.mocked(findByName).mockResolvedValue({ ok: true, value: null });
+    vi.mocked(listAllChildren).mockResolvedValue({ ok: true, value: [] });
+    vi.mocked(createFile).mockResolvedValue({
+      ok: true,
+      value: { id: 'marker-id', name: '.staging', mimeType: 'text/plain' },
+    });
+
+    const result = await checkEnvironmentMarker(rootId, 'staging');
+
+    expect(result.ok).toBe(true);
+    expect(createFile).toHaveBeenCalledWith(rootId, '.staging');
+  });
+
+  it('propagates child-listing error when no marker exists (ADV-347)', async () => {
+    vi.mocked(findByName).mockResolvedValue({ ok: true, value: null });
+    vi.mocked(listAllChildren).mockResolvedValue({
+      ok: false,
+      error: new Error('Drive list error'),
+    });
+
+    const result = await checkEnvironmentMarker(rootId, 'staging');
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.message).toBe('Drive list error');
+    }
     expect(createFile).not.toHaveBeenCalled();
   });
 

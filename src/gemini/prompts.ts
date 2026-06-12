@@ -285,8 +285,8 @@ Return ONLY valid JSON in this exact format:
 Example with Consumidor Final (Doc. Receptor):
 {
   "issuerName": "ASOCIACION CIVIL DE DESARROLLADORES DE VIDEOJUEGOS ARGENTINOS",
-  "clientName": "Marcial Fermin Gutierrez",
-  "allCuits": ["30709076783", "20367086921"],
+  "clientName": "Juan Perez",
+  "allCuits": ["30709076783", "20123456786"],
   "tipoComprobante": "C",
   "nroFactura": "00005-00000035",
   "fechaEmision": "2025-11-10",

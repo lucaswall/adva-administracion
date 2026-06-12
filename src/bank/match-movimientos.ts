@@ -12,14 +12,14 @@ import type {
   Recibo,
   Retencion,
 } from '../types/index.js';
-import { PROCESSING_LOCK_ID, PROCESSING_LOCK_TIMEOUT_MS, ADVA_CUITS } from '../config.js';
+import { PROCESSING_LOCK_ID, PROCESSING_LOCK_TIMEOUT_MS, PROCESSING_LOCK_EXPIRY_MS, ADVA_CUITS } from '../config.js';
 import { withLock } from '../utils/concurrency.js';
 import { info, warn, debug, error as logError } from '../utils/logger.js';
 import { getCachedFolderStructure } from '../services/folder-structure.js';
 import { getValues, batchUpdate, type CellValue } from '../services/sheets.js';
 import { parseNumber } from '../utils/numbers.js';
-import { parseArgDate, normalizeSpreadsheetDate } from '../utils/date.js';
-import { validateMoneda, validateMatchConfidence, validateTipoComprobante } from '../utils/validation.js';
+import { parseArgDate, normalizeSpreadsheetDate, businessYear } from '../utils/date.js';
+import { validateMoneda, validateMatchConfidence, validateTipoComprobante, extractCuitFromText } from '../utils/validation.js';
 import { BankMovementMatcher, calculateKeywordMatchScore, extractReferencia, type MatchQuality } from './matcher.js';
 import { getMovimientosToFill } from '../services/movimientos-reader.js';
 import { updateDetalle, type DetalleUpdate } from '../services/movimientos-detalle.js';
@@ -45,12 +45,41 @@ export type MatchedDocument =
 /**
  * A pending pagada='SI' write to a Control factura row.
  * Collected during movimientos processing and batch-written after detalle updates.
+ * Only written when the source movimiento's detalle update was actually applied (ADV-343).
  */
 export interface PagadaUpdate {
   spreadsheetId: string;
   sheetName: string;
   rowNumber: number;
   columnLetter: string;
+  /**
+   * Key identifying the bank-movement row that produced this pagada update.
+   * Format: "${bankSheetName}:${movimientoRowNumber}" (e.g. "2025-01:5").
+   * Used to filter out pagada writes whose corresponding detalle update was
+   * version-skipped by updateDetalle (TOCTOU protection, ADV-343).
+   */
+  sourceMovimientoKey: string;
+}
+
+/**
+ * Returns the fileId of the linked counterpart document, if any.
+ * - For pagos (pago_recibido / pago_enviado): returns matchedFacturaFileId
+ * - For facturas (factura_emitida / factura_recibida): returns matchedPagoFileId
+ * - For recibosy others: returns undefined
+ *
+ * Used for symmetric counterpart exclusion — when a document is added to or
+ * removed from the exclusion set, its linked counterpart must be treated the
+ * same way to prevent the same economic transaction from matching two separate
+ * bank movements (ADV-324).
+ */
+function getCounterpartFileId(doc: MatchedDocument): string | undefined {
+  if (doc.type === 'pago_recibido' || doc.type === 'pago_enviado') {
+    return doc.document.matchedFacturaFileId || undefined;
+  }
+  if (doc.type === 'factura_emitida' || doc.type === 'factura_recibida') {
+    return doc.document.matchedPagoFileId || undefined;
+  }
+  return undefined;
 }
 
 /**
@@ -91,18 +120,25 @@ export function buildDocumentMap(
 
 /**
  * Extracts USD document dates for exchange rate prefetching.
- * Collects dates from Pagos Recibidos, Facturas Emitidas, and Facturas Recibidas.
+ * Collects dates from Pagos Recibidos, Pagos Enviados, Facturas Emitidas, and Facturas Recibidas.
  *
  * @returns Array of unique date strings from USD documents
  */
 function extractUsdDocumentDates(
   pagosRecibidos: Array<Pago & { row: number }>,
   facturasEmitidas: Array<Factura & { row: number }>,
-  facturasRecibidas: Array<Factura & { row: number }>
+  facturasRecibidas: Array<Factura & { row: number }>,
+  pagosEnviados: Array<Pago & { row: number }>
 ): string[] {
   const dates = new Set<string>();
 
   for (const pago of pagosRecibidos) {
+    if (pago.moneda === 'USD' && pago.fechaPago) {
+      dates.add(pago.fechaPago);
+    }
+  }
+
+  for (const pago of pagosEnviados) {
     if (pago.moneda === 'USD' && pago.fechaPago) {
       dates.add(pago.fechaPago);
     }
@@ -705,12 +741,14 @@ function buildMatchQuality(
     : Infinity;
 
   // Compute tier from context
-  const hasCuitMatch = cuitDocumento ? conceptoMovimiento.includes(cuitDocumento) : false;
+  // Use extractCuitFromText to handle dashed/separated CUIT formats (e.g. "20-12345678-6")
+  const extractedCuit = extractCuitFromText(conceptoMovimiento);
+  const hasCuitMatch = cuitDocumento ? extractedCuit === cuitDocumento : false;
   let tier: BankMatchTier;
-  if (hasLinkedPago && hasCuitMatch) {
-    tier = 1; // Pago with linked factura + CUIT
-  } else if (hasLinkedPago) {
-    tier = 1; // Pago with linked factura
+  // Tier 1 only for pagos (pago_recibido / pago_enviado) with a linked factura —
+  // a factura_recibida/emitida that merely has matchedPagoFileId set does NOT qualify
+  if (hasLinkedPago && (matched?.type === 'pago_recibido' || matched?.type === 'pago_enviado')) {
+    tier = 1; // Genuine pago with linked factura
   } else if (hasCuitMatch) {
     tier = 2; // CUIT match
   } else if (matched && (matched.type === 'pago_recibido' || matched.type === 'pago_enviado') && matched.document.referencia) {
@@ -906,6 +944,13 @@ async function matchBankMovimientos(
   const movimientos = movimientosResult.value;
   const updates: DetalleUpdate[] = [];
   const pagadaUpdates: PagadaUpdate[] = [];
+  /** Tracks which factura fileIds have pagada='SI' queued in this run (for revert skip check). */
+  const pagadaSetFileIds = new Set<string>();
+  /**
+   * Facturas whose pagada='SI' may need reverting because their sole movimiento justification
+   * was cleared or replaced in this run. Keyed by factura fileId. Filtered at write time.
+   */
+  const pagadaRevertCandidates = new Map<string, { spreadsheetId: string; sheetName: 'Facturas Recibidas' | 'Facturas Emitidas'; rowNumber: number; columnLetter: string; sourceMovimientoKey: string }>();
   let debitsFilled = 0;
   let creditsFilled = 0;
   let noMatches = 0;
@@ -915,10 +960,17 @@ async function matchBankMovimientos(
   // Each movement temporarily removes its own fileId before calling the matcher,
   // so it can still re-evaluate its current match.
   // Also seed from globalExcludeFileIds to prevent cross-bank double-assignment.
+  // ADV-324: also exclude each matched document's linked counterpart (matchedFacturaFileId for pagos,
+  // matchedPagoFileId for facturas) so the same economic transaction cannot match two movements.
   const excludeFileIds = new Set<string>();
   for (const mov of movimientos) {
     if (mov.matchedFileId) {
       excludeFileIds.add(mov.matchedFileId);
+      const doc = documentMap.get(mov.matchedFileId);
+      if (doc) {
+        const counterpartId = getCounterpartFileId(doc);
+        if (counterpartId) excludeFileIds.add(counterpartId);
+      }
     }
   }
   if (globalExcludeFileIds) {
@@ -954,11 +1006,18 @@ async function matchBankMovimientos(
 
     let matchResult;
 
-    // Temporarily remove this movement's own fileId from excludeFileIds
-    // so the matcher can re-evaluate it (it may find a better match or confirm the same one)
+    // Temporarily remove this movement's own fileId (and its linked counterpart) from
+    // excludeFileIds so the matcher can re-evaluate the current match or find a replacement.
+    // ADV-324: freeing both primary and counterpart ensures that a replacement also liberates
+    // the counterpart (kept consistent by symmetric re-add on no-update below).
     const ownFileId = mov.matchedFileId;
+    const ownDoc = ownFileId ? documentMap.get(ownFileId) : undefined;
+    const ownCounterpartId = ownDoc ? getCounterpartFileId(ownDoc) : undefined;
     if (ownFileId && !globalExcludeFileIds?.has(ownFileId)) {
       excludeFileIds.delete(ownFileId);
+    }
+    if (ownCounterpartId && !globalExcludeFileIds?.has(ownCounterpartId)) {
+      excludeFileIds.delete(ownCounterpartId);
     }
 
     // Snapshot after temporary removal — each matcher call gets an immutable view
@@ -1107,19 +1166,53 @@ async function matchBankMovimientos(
               const sheetName = matchedDoc.type === 'factura_emitida' ? 'Facturas Emitidas' : 'Facturas Recibidas';
               // pagada column: T for Facturas Emitidas (21 cols, ADV-245), S for Facturas Recibidas (20 cols)
               const pagadaCol = matchedDoc.type === 'factura_emitida' ? 'T' : 'S';
-              pagadaUpdates.push({ spreadsheetId: ssId, sheetName, rowNumber: matchedDoc.document.row, columnLetter: pagadaCol });
+              pagadaUpdates.push({
+                spreadsheetId: ssId,
+                sheetName,
+                rowNumber: matchedDoc.document.row,
+                columnLetter: pagadaCol,
+                sourceMovimientoKey: `${mov.sheetName}:${mov.rowNumber}`,
+              });
+              // Track fileId so the revert pass knows not to clear this factura's pagada (ADV-320)
+              pagadaSetFileIds.add(matchResult.matchedFileId);
             }
           }
         }
 
-        // Add new matched fileId to excludeFileIds (old one stays removed = freed up)
+        // Collect OLD matched factura as revert candidate if being replaced (ADV-320)
+        if (ownFileId) {
+          const ownDocForRevert = documentMap.get(ownFileId);
+          if (ownDocForRevert && (ownDocForRevert.type === 'factura_emitida' || ownDocForRevert.type === 'factura_recibida')) {
+            const revertSsId = ownDocForRevert.type === 'factura_emitida' ? controlIngresosId : controlEgresosId;
+            const revertShName: 'Facturas Emitidas' | 'Facturas Recibidas' = ownDocForRevert.type === 'factura_emitida' ? 'Facturas Emitidas' : 'Facturas Recibidas';
+            const revertCol = ownDocForRevert.type === 'factura_emitida' ? 'T' : 'S';
+            pagadaRevertCandidates.set(ownFileId, {
+              spreadsheetId: revertSsId,
+              sheetName: revertShName,
+              rowNumber: ownDocForRevert.document.row,
+              columnLetter: revertCol,
+              sourceMovimientoKey: `${mov.sheetName}:${mov.rowNumber}`,
+            });
+          }
+        }
+
+        // Add new matched fileId (and its counterpart) to excludeFileIds.
+        // The old ownFileId and its counterpart stay removed = freed for other movements (ADV-324).
         if (isFileIdMatch && matchResult.matchedFileId) {
           excludeFileIds.add(matchResult.matchedFileId);
+          const newDoc = documentMap.get(matchResult.matchedFileId);
+          if (newDoc) {
+            const newCounterpartId = getCounterpartFileId(newDoc);
+            if (newCounterpartId) excludeFileIds.add(newCounterpartId);
+          }
         }
       } else {
-        // Not updating — re-add the old fileId back to excludeFileIds
+        // Not updating — re-add the old fileId and its counterpart back to excludeFileIds (ADV-324)
         if (ownFileId) {
           excludeFileIds.add(ownFileId);
+        }
+        if (ownCounterpartId) {
+          excludeFileIds.add(ownCounterpartId);
         }
       }
     } else {
@@ -1135,11 +1228,30 @@ async function matchBankMovimientos(
           matchedType: '',
           expectedVersion,
         });
-        // Do NOT re-add ownFileId — document is freed for other movements to use
+        // Do NOT re-add ownFileId or its counterpart — both are freed for other movements (ADV-324)
+        // Collect old matched factura as revert candidate (ADV-320)
+        if (ownFileId) {
+          const ownDocForRevert = documentMap.get(ownFileId);
+          if (ownDocForRevert && (ownDocForRevert.type === 'factura_emitida' || ownDocForRevert.type === 'factura_recibida')) {
+            const revertSsId = ownDocForRevert.type === 'factura_emitida' ? controlIngresosId : controlEgresosId;
+            const revertShName: 'Facturas Emitidas' | 'Facturas Recibidas' = ownDocForRevert.type === 'factura_emitida' ? 'Facturas Emitidas' : 'Facturas Recibidas';
+            const revertCol = ownDocForRevert.type === 'factura_emitida' ? 'T' : 'S';
+            pagadaRevertCandidates.set(ownFileId, {
+              spreadsheetId: revertSsId,
+              sheetName: revertShName,
+              rowNumber: ownDocForRevert.document.row,
+              columnLetter: revertCol,
+              sourceMovimientoKey: `${mov.sheetName}:${mov.rowNumber}`,
+            });
+          }
+        }
       } else {
-        // Non-force mode: preserve existing match, re-add fileId to excluded set
+        // Non-force mode: preserve existing match, re-add fileId and counterpart to excluded set (ADV-324)
         if (ownFileId) {
           excludeFileIds.add(ownFileId);
+        }
+        if (ownCounterpartId) {
+          excludeFileIds.add(ownCounterpartId);
         }
         noMatches++;
       }
@@ -1165,25 +1277,71 @@ async function matchBankMovimientos(
   }
 
   // Write pagada=SI for matched facturas, batched by spreadsheet
-  // Only if detalle updates succeeded — keeps movimiento match and pagada flag in sync
+  // Only if detalle updates succeeded — keeps movimiento match and pagada flag in sync.
+  // Only for facturas whose source movimiento detalle update was actually applied (ADV-343).
   let pagadaErrors = 0;
   if (updateResult.ok && pagadaUpdates.length > 0) {
-    const bySpreadsheet = new Map<string, Array<{ range: string; values: CellValue[][] }>>();
-    for (const update of pagadaUpdates) {
-      const range = `${update.sheetName}!${update.columnLetter}${update.rowNumber}`;
-      if (!bySpreadsheet.has(update.spreadsheetId)) {
-        bySpreadsheet.set(update.spreadsheetId, []);
+    const appliedKeys = updateResult.value.appliedKeys;
+    // Filter to only the pagada writes whose movimiento row was actually written
+    const applicablePagada = pagadaUpdates.filter(u => appliedKeys.has(u.sourceMovimientoKey));
+
+    if (applicablePagada.length > 0) {
+      const bySpreadsheet = new Map<string, Array<{ range: string; values: CellValue[][] }>>();
+      for (const update of applicablePagada) {
+        const range = `${update.sheetName}!${update.columnLetter}${update.rowNumber}`;
+        if (!bySpreadsheet.has(update.spreadsheetId)) {
+          bySpreadsheet.set(update.spreadsheetId, []);
+        }
+        bySpreadsheet.get(update.spreadsheetId)!.push({ range, values: [['SI']] });
       }
-      bySpreadsheet.get(update.spreadsheetId)!.push({ range, values: [['SI']] });
+      for (const [ssId, cellUpdates] of bySpreadsheet) {
+        const pagadaResult = await batchUpdate(ssId, cellUpdates);
+        if (!pagadaResult.ok) {
+          pagadaErrors++;
+          logError('Failed to write pagada updates', {
+            module: 'match-movimientos',
+            phase: 'pagada-sync',
+            bankName,
+            error: pagadaResult.error.message,
+          });
+        }
+      }
     }
-    for (const [ssId, cellUpdates] of bySpreadsheet) {
-      const pagadaResult = await batchUpdate(ssId, cellUpdates);
-      if (!pagadaResult.ok) {
-        pagadaErrors++;
-        logError('Failed to write pagada updates', {
+  }
+
+  // Revert pagada='' for facturas whose sole movimiento justification was cleared/replaced (ADV-320)
+  // Gated on updateResult.ok — consistent with pagada='SI' gate above.
+  if (updateResult.ok && pagadaRevertCandidates.size > 0) {
+    const revertBySpreadsheet = new Map<string, Array<{ range: string; values: CellValue[][] }>>();
+
+    for (const [fileId, candidate] of pagadaRevertCandidates) {
+      // Skip if the movimiento row that justified this revert was version-skipped —
+      // its matchedFileId still points at the factura in the sheet, so clearing
+      // pagada would desynchronize them (same gate as pagada='SI', ADV-343).
+      if (!updateResult.value.appliedKeys.has(candidate.sourceMovimientoKey)) continue;
+      // Skip if a new movement in this run is setting pagada='SI' for this same factura
+      if (pagadaSetFileIds.has(fileId)) continue;
+      // Skip if the factura still has a linked pago that justifies pagada='SI'
+      const doc = documentMap.get(fileId);
+      if (doc && (doc.type === 'factura_emitida' || doc.type === 'factura_recibida')) {
+        if (doc.document.matchedPagoFileId) continue;
+      }
+
+      const range = `${candidate.sheetName}!${candidate.columnLetter}${candidate.rowNumber}`;
+      if (!revertBySpreadsheet.has(candidate.spreadsheetId)) {
+        revertBySpreadsheet.set(candidate.spreadsheetId, []);
+      }
+      revertBySpreadsheet.get(candidate.spreadsheetId)!.push({ range, values: [['']] });
+    }
+
+    for (const [ssId, cellUpdates] of revertBySpreadsheet) {
+      const revertResult = await batchUpdate(ssId, cellUpdates);
+      if (!revertResult.ok) {
+        warn('Failed to revert pagada for cleared facturas', {
           module: 'match-movimientos',
+          phase: 'pagada-revert',
           bankName,
-          error: pagadaResult.error.message,
+          error: revertResult.error.message,
         });
       }
     }
@@ -1214,7 +1372,7 @@ export async function matchAllMovimientos(
     PROCESSING_LOCK_ID,
     async () => {
       const startTime = Date.now();
-      const currentYear = new Date().getFullYear();
+      const currentYear = businessYear(); // Argentina business timezone (ADV-353)
 
       // Get folder structure
       const folderStructure = getCachedFolderStructure();
@@ -1241,7 +1399,8 @@ export async function matchAllMovimientos(
       const usdDates = extractUsdDocumentDates(
         ingresosResult.value.pagosRecibidos,
         ingresosResult.value.facturasEmitidas,
-        egresosResult.value.facturasRecibidas
+        egresosResult.value.facturasRecibidas,
+        egresosResult.value.pagosEnviados
       );
       if (usdDates.length > 0) {
         try {
@@ -1368,7 +1527,7 @@ export async function matchAllMovimientos(
       };
     },
     PROCESSING_LOCK_TIMEOUT_MS,
-    PROCESSING_LOCK_TIMEOUT_MS
+    PROCESSING_LOCK_EXPIRY_MS   // ADV-302
   );
 
   // `withLock` returns ok:false for two distinct cases:

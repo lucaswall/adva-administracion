@@ -1,9 +1,10 @@
 /**
- * Tests for spreadsheet headers constants
+ * Tests for spreadsheet headers constants and buildHeaderIndex helper (ADV-332)
  */
 
 import { describe, it, expect } from 'vitest';
 import {
+  buildHeaderIndex,
   STATUS_HEADERS,
   STATUS_SHEET,
   DASHBOARD_OPERATIVO_SHEETS,
@@ -17,7 +18,110 @@ import {
   FACTURA_RECIBIDA_HEADERS,
   PAGO_ENVIADO_HEADERS,
   PAGO_RECIBIDO_HEADERS,
+  RECIBO_HEADERS,
+  RETENCIONES_RECIBIDAS_HEADERS,
 } from './spreadsheet-headers.js';
+
+describe('buildHeaderIndex (ADV-332)', () => {
+  it('returns correct index for known header in FACTURA_RECIBIDA_HEADERS', () => {
+    const col = buildHeaderIndex(FACTURA_RECIBIDA_HEADERS);
+    expect(col('fechaEmision')).toBe(0);
+    expect(col('fileId')).toBe(1);
+    expect(col('importeTotal')).toBe(9);
+    expect(col('matchConfidence')).toBe(16);
+    expect(col('pagada')).toBe(18);
+  });
+
+  it('returns correct indices for FACTURA_EMITIDA_HEADERS (condicionIVAReceptor at 7)', () => {
+    const col = buildHeaderIndex(FACTURA_EMITIDA_HEADERS);
+    expect(col('condicionIVAReceptor')).toBe(7);
+    expect(col('importeNeto')).toBe(8);
+    expect(col('importeIva')).toBe(9);
+    expect(col('importeTotal')).toBe(10);
+    expect(col('matchConfidence')).toBe(17);
+    expect(col('pagada')).toBe(19);
+    expect(col('tipoDeCambio')).toBe(20);
+  });
+
+  it('throws for unknown header name (drift guard)', () => {
+    const col = buildHeaderIndex(FACTURA_RECIBIDA_HEADERS);
+    expect(() => col('nonExistentColumn')).toThrow('nonExistentColumn');
+  });
+
+  it('throws descriptive error including the unknown header name', () => {
+    const col = buildHeaderIndex(RECIBO_HEADERS);
+    expect(() => col('cuitReceptor')).toThrow(/cuitReceptor/);
+  });
+
+  it('inserting extra column mid-array adjusts subsequent indices (proves hardcoded indices break)', () => {
+    // Simulate schema drift: synthetic column inserted at position 7
+    const base = [...FACTURA_RECIBIDA_HEADERS];
+    const modified = [...base.slice(0, 7), 'syntheticExtra', ...base.slice(7)];
+    const col = buildHeaderIndex(modified);
+
+    // importeNeto was at index 7 in base → now at 8 in modified
+    expect(col('importeNeto')).toBe(8);
+    // importeTotal was at index 9 in base → now at 10 in modified
+    expect(col('importeTotal')).toBe(10);
+
+    // Proof that hardcoded 9 points to WRONG field after drift:
+    expect(modified[9]).toBe('importeIva');   // NOT importeTotal
+    // The derived index correctly gives 10:
+    expect(modified[col('importeTotal')]).toBe('importeTotal');
+  });
+
+  it('returns correct indices for PAGO_ENVIADO_HEADERS', () => {
+    const col = buildHeaderIndex(PAGO_ENVIADO_HEADERS);
+    expect(col('fechaPago')).toBe(0);
+    expect(col('importePagado')).toBe(4);
+    expect(col('moneda')).toBe(5);
+    expect(col('cuitBeneficiario')).toBe(7);
+    expect(col('matchedFacturaFileId')).toBe(13);
+    expect(col('matchConfidence')).toBe(14);
+  });
+
+  it('returns correct indices for PAGO_RECIBIDO_HEADERS', () => {
+    const col = buildHeaderIndex(PAGO_RECIBIDO_HEADERS);
+    expect(col('cuitPagador')).toBe(7);
+    expect(col('nombrePagador')).toBe(8);
+    expect(col('matchConfidence')).toBe(14);
+  });
+
+  it('returns correct indices for RECIBO_HEADERS', () => {
+    const col = buildHeaderIndex(RECIBO_HEADERS);
+    expect(col('fechaPago')).toBe(0);
+    expect(col('cuilEmpleado')).toBe(5);
+    expect(col('matchedPagoFileId')).toBe(16);
+    expect(col('matchConfidence')).toBe(17);
+    expect(col('hasCuitMatch')).toBe(18);
+  });
+
+  it('returns correct indices for RETENCIONES_RECIBIDAS_HEADERS', () => {
+    const col = buildHeaderIndex(RETENCIONES_RECIBIDAS_HEADERS);
+    expect(col('fechaEmision')).toBe(0);
+    expect(col('cuitAgenteRetencion')).toBe(4);
+    expect(col('montoComprobante')).toBe(8);
+    expect(col('matchedFacturaFileId')).toBe(13);
+    expect(col('matchConfidence')).toBe(14);
+  });
+
+  it('returns correct indices for MOVIMIENTOS_BANCARIO_SHEET headers', () => {
+    const col = buildHeaderIndex(MOVIMIENTOS_BANCARIO_SHEET.headers);
+    expect(col('fecha')).toBe(0);
+    expect(col('concepto')).toBe(1);
+    expect(col('debito')).toBe(2);
+    expect(col('credito')).toBe(3);
+    expect(col('matchedFileId')).toBe(6);
+    expect(col('matchedType')).toBe(7);
+    expect(col('detalle')).toBe(8);
+  });
+
+  it('built index function is reusable across multiple calls', () => {
+    const col = buildHeaderIndex(FACTURA_EMITIDA_HEADERS);
+    expect(col('importeTotal')).toBe(10);
+    expect(col('importeTotal')).toBe(10); // second call returns same result
+  });
+});
 
 describe('tipoDeCambio headers', () => {
   it('FACTURA_EMITIDA_HEADERS has 21 elements, condicionIVAReceptor at index 7, pagada at index 19, tipoDeCambio at index 20 (ADV-245)', () => {

@@ -42,6 +42,13 @@ vi.mock('../services/drive.js', () => ({
   isDescendantOf: (...args: unknown[]) => mockIsDescendantOf(...args),
 }));
 
+// Mock concurrency — withLock defaults to calling through (simulates normal lock acquisition)
+const mockWithLock = vi.fn();
+
+vi.mock('../utils/concurrency.js', () => ({
+  withLock: (...args: unknown[]) => mockWithLock(...args),
+}));
+
 // Mock config
 vi.mock('../config.js', () => ({
   getConfig: vi.fn(),
@@ -105,6 +112,17 @@ describe('Delivery routes', () => {
     vi.clearAllMocks();
     vi.mocked(getConfig).mockReturnValue(mockConfig);
     mockGetCachedFolderStructure.mockReturnValue(mockFolderStructure);
+
+    // Default: withLock calls through to fn() and returns {ok:true, value} — simulates
+    // normal lock acquisition. Individual tests override this to simulate timeout.
+    mockWithLock.mockImplementation(async (_id: unknown, fn: () => Promise<unknown>) => {
+      try {
+        const value = await fn();
+        return { ok: true, value };
+      } catch (err) {
+        return { ok: false, error: err instanceof Error ? err : new Error(String(err)) };
+      }
+    });
 
     server = Fastify({ logger: false });
     await server.register(deliveryRoutes, { prefix: '/api' });
@@ -548,6 +566,34 @@ describe('Delivery routes', () => {
       );
       expect(mockCopyPdfsToDelivery).toHaveBeenCalledWith('folder-xyz', mockScope);
     });
+
+    // ADV-354: copy-pdfs must be serialized behind a lock
+    it('ADV-354: returns 503 when the delivery lock times out for copy-pdfs', async () => {
+      mockParsePeriodRange.mockReturnValue({
+        ok: true,
+        value: { from: '2025-01', to: '2025-01' },
+      });
+      mockEnumerateResumenes.mockResolvedValue({ ok: true, value: [] });
+      // Simulate lock timeout
+      mockWithLock.mockResolvedValue({
+        ok: false,
+        error: new Error('Failed to acquire lock for delivery:mutating within 30000ms'),
+      });
+
+      const response = await server.inject({
+        method: 'POST',
+        url: '/api/delivery/copy-pdfs',
+        headers: { authorization: 'Bearer test-secret-123' },
+        payload: { period: '2025-01' },
+      });
+
+      expect(response.statusCode).toBe(503);
+      const body = JSON.parse(response.payload);
+      expect(body.error).toBe('Service unavailable');
+      expect(typeof body.correlationId).toBe('string');
+      // Mutations must not have run
+      expect(mockPrepareDeliveryFolder).not.toHaveBeenCalled();
+    });
   });
 
   // ───────────────────────────────────────────────────────────────────────────
@@ -798,7 +844,7 @@ describe('Delivery routes', () => {
       expect(mockBuildMovimientosFiles).toHaveBeenCalled();
     });
 
-    it('returns 500 when the Entregas/ folder cannot be located', async () => {
+    it('returns 500 when the Entregas/ folder cannot be located (null value, not a Drive error)', async () => {
       mockParsePeriodRange.mockReturnValue({
         ok: true,
         value: { from: '2025-01', to: '2025-01' },
@@ -817,7 +863,64 @@ describe('Delivery routes', () => {
       expect(mockBuildMovimientosFiles).not.toHaveBeenCalled();
     });
 
-    it('returns 500 when the descendant check itself fails', async () => {
+    // ADV-354: build-movimientos must be serialized behind a lock
+    it('ADV-354: returns 503 when the delivery lock times out for build-movimientos', async () => {
+      mockParsePeriodRange.mockReturnValue({
+        ok: true,
+        value: { from: '2025-01', to: '2025-01' },
+      });
+      // Ancestry guard succeeds (read-only, outside the lock)
+      mockFindByName.mockResolvedValue({
+        ok: true,
+        value: { id: 'entregas-id', name: 'Entregas', mimeType: 'application/vnd.google-apps.folder' },
+      });
+      mockIsDescendantOf.mockResolvedValue({ ok: true, value: true });
+      // Simulate lock timeout
+      mockWithLock.mockResolvedValue({
+        ok: false,
+        error: new Error('Failed to acquire lock for delivery:mutating within 30000ms'),
+      });
+
+      const response = await server.inject({
+        method: 'POST',
+        url: '/api/delivery/build-movimientos',
+        headers: { authorization: 'Bearer test-secret-123' },
+        payload: { period: '2025-01', folderId: 'folder-abc' },
+      });
+
+      expect(response.statusCode).toBe(503);
+      const body = JSON.parse(response.payload);
+      expect(body.error).toBe('Service unavailable');
+      expect(typeof body.correlationId).toBe('string');
+      // Mutations must not have run
+      expect(mockBuildMovimientosFiles).not.toHaveBeenCalled();
+    });
+
+    // ADV-334: Drive API errors during ancestry guard must map to 503, not 500
+    it('ADV-334: returns 503 when findByName fails with Drive API error', async () => {
+      mockParsePeriodRange.mockReturnValue({
+        ok: true,
+        value: { from: '2025-01', to: '2025-01' },
+      });
+      mockFindByName.mockResolvedValue({ ok: false, error: new Error('Drive API quota exceeded') });
+
+      const response = await server.inject({
+        method: 'POST',
+        url: '/api/delivery/build-movimientos',
+        headers: { authorization: 'Bearer test-secret-123' },
+        payload: { period: '2025-01', folderId: 'folder-abc' },
+      });
+
+      expect(response.statusCode).toBe(503);
+      const body = JSON.parse(response.payload);
+      expect(body.error).toBe('Service unavailable');
+      expect(typeof body.correlationId).toBe('string');
+      expect(mockEnumerateMovimientos).not.toHaveBeenCalled();
+      expect(mockBuildMovimientosFiles).not.toHaveBeenCalled();
+    });
+
+    // ADV-334: Drive API errors during ancestry guard must map to 503, not 500
+    it('ADV-334: returns 503 when the descendant check itself fails (Drive API error)', async () => {
       mockParsePeriodRange.mockReturnValue({
         ok: true,
         value: { from: '2025-01', to: '2025-01' },
@@ -831,7 +934,10 @@ describe('Delivery routes', () => {
         payload: { period: '2025-01', folderId: 'folder-abc' },
       });
 
-      expect(response.statusCode).toBe(500);
+      expect(response.statusCode).toBe(503);
+      const body = JSON.parse(response.payload);
+      expect(body.error).toBe('Service unavailable');
+      expect(typeof body.correlationId).toBe('string');
       expect(mockBuildMovimientosFiles).not.toHaveBeenCalled();
     });
   });

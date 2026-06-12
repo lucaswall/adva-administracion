@@ -4,6 +4,7 @@
  */
 
 import { moveFile, getParents, renameFile } from './drive.js';
+import { warn } from '../utils/logger.js';
 import { getOrCreateMonthFolder, getOrCreateBankAccountFolder, getOrCreateCreditCardFolder, getOrCreateBrokerFolder, getCachedFolderStructure } from './folder-structure.js';
 import { parseArgDate } from '../utils/date.js';
 import { formatMonthFolder } from '../utils/spanish-date.js';
@@ -346,9 +347,16 @@ export async function sortAndRenameDocument(
   // Rename the file
   const renameResult = await renameFile(doc.fileId, newFileName);
   if (!renameResult.ok) {
-    return {
-      success: false,
+    // ADV-348: rename failure must not undo a successful move — treat as partial success
+    warn('File rename failed after successful move', {
+      module: 'document-sorter',
+      fileId: doc.fileId,
+      newFileName,
       error: renameResult.error.message,
+    });
+    return {
+      ...sortResult,
+      renameWarning: renameResult.error.message,
     };
   }
 

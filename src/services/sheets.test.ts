@@ -2143,7 +2143,8 @@ describe('Google Sheets API wrapper - quota retry tests', () => {
                 }),
               ]),
             }),
-          })
+          }),
+          expect.any(Object)
         );
       });
 
@@ -2174,7 +2175,8 @@ describe('Google Sheets API wrapper - quota retry tests', () => {
                 }),
               ]),
             }),
-          })
+          }),
+          expect.any(Object)
         );
       });
 
@@ -2206,7 +2208,8 @@ describe('Google Sheets API wrapper - quota retry tests', () => {
                 }),
               ]),
             }),
-          })
+          }),
+          expect.any(Object)
         );
       });
 
@@ -2250,7 +2253,8 @@ describe('Google Sheets API wrapper - quota retry tests', () => {
                 }),
               ]),
             }),
-          })
+          }),
+          expect.any(Object)
         );
       });
 
@@ -2289,7 +2293,8 @@ describe('Google Sheets API wrapper - quota retry tests', () => {
                 }),
               ]),
             }),
-          })
+          }),
+          expect.any(Object)
         );
       });
     });
@@ -2337,7 +2342,8 @@ describe('Google Sheets API wrapper - quota retry tests', () => {
                 }),
               ]),
             }),
-          })
+          }),
+          expect.any(Object)
         );
       });
 
@@ -2367,7 +2373,8 @@ describe('Google Sheets API wrapper - quota retry tests', () => {
                 }),
               ]),
             }),
-          })
+          }),
+          expect.any(Object)
         );
       });
     });
@@ -3114,5 +3121,224 @@ describe('appendRowsWithLinks concurrency (ADV-242)', () => {
       expect(updateReq).toBeDefined();
       expect(updateReq!.updateCells!.start!.rowIndex).toBe(4); // desiredIndex=3 +1 for header
     });
+  });
+});
+
+describe('appendRowsWithFormatting concurrency and response validation (ADV-288)', () => {
+  let mockSheetsApi: {
+    spreadsheets: {
+      values: { get: ReturnType<typeof vi.fn>; update: ReturnType<typeof vi.fn>; append: ReturnType<typeof vi.fn>; batchUpdate: ReturnType<typeof vi.fn>; clear: ReturnType<typeof vi.fn> };
+      get: ReturnType<typeof vi.fn>;
+      batchUpdate: ReturnType<typeof vi.fn>;
+    };
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.useRealTimers();
+    clearSheetsCache();
+    clearTimezoneCache();
+    clearAllLocks();
+    quotaThrottle.reset();
+
+    mockSheetsApi = {
+      spreadsheets: {
+        values: { get: vi.fn(), update: vi.fn(), append: vi.fn(), batchUpdate: vi.fn(), clear: vi.fn() },
+        get: vi.fn(),
+        batchUpdate: vi.fn(),
+      },
+    };
+    vi.mocked(google.sheets).mockReturnValue(mockSheetsApi as unknown as sheets_v4.Sheets);
+
+    mockSheetsApi.spreadsheets.get.mockResolvedValue({
+      data: {
+        sheets: [
+          { properties: { title: 'Sheet1', sheetId: 1 } },
+        ],
+      },
+    });
+  });
+
+  it('ADV-288: serializes concurrent same-sheet appends — second batchUpdate starts only after first resolves', async () => {
+    type Deferred = { promise: Promise<unknown>; resolve: (v: unknown) => void };
+    const newDeferred = (): Deferred => {
+      let resolve: (v: unknown) => void = () => {};
+      const promise = new Promise<unknown>((r) => { resolve = r; });
+      return { promise, resolve };
+    };
+
+    const calls: Array<{ index: number; startedAt: number; resolvedAt?: number; deferred: Deferred }> = [];
+    let callCounter = 0;
+
+    mockSheetsApi.spreadsheets.batchUpdate.mockImplementation(async () => {
+      const deferred = newDeferred();
+      const entry = { index: callCounter++, startedAt: Date.now(), deferred };
+      calls.push(entry);
+      await deferred.promise;
+      (entry as { resolvedAt?: number }).resolvedAt = Date.now();
+      return { data: { replies: [{}] } };
+    });
+
+    const p1 = appendRowsWithFormatting('spreadsheet1', 'Sheet1!A:C', [['a1', 'b1']]);
+    const p2 = appendRowsWithFormatting('spreadsheet1', 'Sheet1!A:C', [['a2', 'b2']]);
+
+    // Let both promises enter the lock acquisition path
+    await new Promise((r) => setTimeout(r, 20));
+
+    // Only ONE batchUpdate must be in flight
+    expect(calls.length).toBe(1);
+
+    // Resolve the first; the second must now start
+    calls[0].deferred.resolve({});
+    await new Promise((r) => setTimeout(r, 20));
+
+    expect(calls.length).toBe(2);
+    expect(calls[0].resolvedAt).toBeDefined();
+    expect(calls[1].startedAt).toBeGreaterThanOrEqual(calls[0].resolvedAt!);
+
+    calls[1].deferred.resolve({});
+
+    const [r1, r2] = await Promise.all([p1, p2]);
+    expect(r1.ok).toBe(true);
+    expect(r2.ok).toBe(true);
+  });
+
+  it('ADV-288: returns ok:false when batchUpdate returns no replies (missing confirmation)', async () => {
+    // Simulate a response with no replies — should retry then fail
+    mockSheetsApi.spreadsheets.batchUpdate.mockResolvedValue({ data: { replies: [] } });
+
+    const result = await appendRowsWithFormatting('spreadsheet1', 'Sheet1!A:C', [['x', 'y']]);
+
+    expect(result.ok).toBe(false);
+    // Should have retried at least once
+    expect(mockSheetsApi.spreadsheets.batchUpdate.mock.calls.length).toBeGreaterThan(1);
+  });
+
+  it('ADV-288: returns ok:false when batchUpdate returns falsy replies[0]', async () => {
+    // null replies[0] — treated as no confirmation
+    mockSheetsApi.spreadsheets.batchUpdate.mockResolvedValue({ data: { replies: [null] } });
+
+    const result = await appendRowsWithFormatting('spreadsheet1', 'Sheet1!A:C', [['x', 'y']]);
+
+    expect(result.ok).toBe(false);
+  });
+
+  it('ADV-288: parallel appends to DIFFERENT sheets run concurrently (not serialized)', async () => {
+    mockSheetsApi.spreadsheets.get.mockResolvedValue({
+      data: {
+        sheets: [
+          { properties: { title: 'Sheet1', sheetId: 1 } },
+          { properties: { title: 'Sheet2', sheetId: 2 } },
+        ],
+      },
+    });
+
+    const startTimes: number[] = [];
+    type Deferred = { promise: Promise<unknown>; resolve: (v: unknown) => void };
+    const deferreds: Deferred[] = [];
+
+    mockSheetsApi.spreadsheets.batchUpdate.mockImplementation(async () => {
+      startTimes.push(Date.now());
+      let resolve: (v: unknown) => void = () => {};
+      const promise = new Promise<unknown>((r) => { resolve = r; });
+      deferreds.push({ promise, resolve });
+      await promise;
+      return { data: { replies: [{}] } };
+    });
+
+    const p1 = appendRowsWithFormatting('spreadsheet1', 'Sheet1!A:C', [['a1']]);
+    const p2 = appendRowsWithFormatting('spreadsheet1', 'Sheet2!A:C', [['a2']]);
+
+    // Give both a chance to start
+    await new Promise((r) => setTimeout(r, 20));
+
+    // BOTH should have started immediately — different sheets don't block each other
+    expect(mockSheetsApi.spreadsheets.batchUpdate.mock.calls.length).toBe(2);
+
+    // Resolve both
+    deferreds.forEach((d) => d.resolve({}));
+    const [r1, r2] = await Promise.all([p1, p2]);
+    expect(r1.ok).toBe(true);
+    expect(r2.ok).toBe(true);
+  });
+});
+
+describe('ADV-289: Google API timeout passed to Sheets API calls', () => {
+  let mockSheetsApi: {
+    spreadsheets: {
+      values: { get: ReturnType<typeof vi.fn>; update: ReturnType<typeof vi.fn>; append: ReturnType<typeof vi.fn>; batchUpdate: ReturnType<typeof vi.fn>; clear: ReturnType<typeof vi.fn> };
+      get: ReturnType<typeof vi.fn>;
+      batchUpdate: ReturnType<typeof vi.fn>;
+    };
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.useFakeTimers();
+    clearSheetsCache();
+    clearTimezoneCache();
+    clearAllLocks();
+    quotaThrottle.reset();
+
+    mockSheetsApi = {
+      spreadsheets: {
+        values: { get: vi.fn(), update: vi.fn(), append: vi.fn(), batchUpdate: vi.fn(), clear: vi.fn() },
+        get: vi.fn(),
+        batchUpdate: vi.fn(),
+      },
+    };
+    vi.mocked(google.sheets).mockReturnValue(mockSheetsApi as unknown as sheets_v4.Sheets);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('getValues passes timeout option to spreadsheets.values.get', async () => {
+    mockSheetsApi.spreadsheets.values.get.mockResolvedValue({ data: { values: [] } });
+
+    const resultPromise = getValues('sp123', 'Sheet1!A:B');
+    await vi.runAllTimersAsync();
+    const result = await resultPromise;
+
+    expect(result.ok).toBe(true);
+    expect(mockSheetsApi.spreadsheets.values.get).toHaveBeenCalledWith(
+      expect.objectContaining({ spreadsheetId: 'sp123', range: 'Sheet1!A:B' }),
+      expect.objectContaining({ timeout: 60_000 })
+    );
+  });
+
+  it('appendRowsWithLinks passes timeout option to spreadsheets.batchUpdate', async () => {
+    mockSheetsApi.spreadsheets.get.mockResolvedValue({
+      data: { sheets: [{ properties: { title: 'Sheet1', sheetId: 1 } }] },
+    });
+    mockSheetsApi.spreadsheets.batchUpdate.mockResolvedValue({ data: { replies: [{}] } });
+
+    const resultPromise = appendRowsWithLinks('sp123', 'Sheet1!A:C', [['a', 'b', 'c']]);
+    await vi.runAllTimersAsync();
+    const result = await resultPromise;
+
+    expect(result.ok).toBe(true);
+    expect(mockSheetsApi.spreadsheets.batchUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({ spreadsheetId: 'sp123' }),
+      expect.objectContaining({ timeout: 60_000 })
+    );
+  });
+
+  it('appendRowsWithFormatting passes timeout option to spreadsheets.batchUpdate', async () => {
+    mockSheetsApi.spreadsheets.get.mockResolvedValue({
+      data: { sheets: [{ properties: { title: 'Sheet1', sheetId: 1 } }] },
+    });
+    mockSheetsApi.spreadsheets.batchUpdate.mockResolvedValue({ data: { replies: [{}] } });
+
+    const resultPromise = appendRowsWithFormatting('sp123', 'Sheet1!A:B', [['x', 'y']]);
+    await vi.runAllTimersAsync();
+    const result = await resultPromise;
+
+    expect(result.ok).toBe(true);
+    expect(mockSheetsApi.spreadsheets.batchUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({ spreadsheetId: 'sp123' }),
+      expect.objectContaining({ timeout: 60_000 })
+    );
   });
 });

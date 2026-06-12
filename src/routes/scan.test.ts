@@ -44,6 +44,17 @@ vi.mock('../services/drive.js', () => ({
   isDescendantOf: (...args: unknown[]) => mockIsDescendantOf(...args),
 }));
 
+// Mock updateStatusSheet (fire-and-forget)
+const mockUpdateStatusSheet = vi.fn();
+vi.mock('../services/status-sheet.js', () => ({
+  updateStatusSheet: (...args: unknown[]) => mockUpdateStatusSheet(...args),
+}));
+
+// Mock watch-manager
+vi.mock('../services/watch-manager.js', () => ({
+  updateLastScanTime: vi.fn(),
+}));
+
 // Mock logger for 500 error log assertions
 vi.mock('../utils/logger.js', () => ({
   info: vi.fn(),
@@ -340,6 +351,56 @@ describe('Scan routes', () => {
       );
     });
 
+    it('ADV-335: force field is silently stripped and scan proceeds (dead field removed)', async () => {
+      // Fastify/AJV uses removeAdditional:true by default — extra fields are stripped,
+      // not rejected with 400. So {force:true} becomes {} and the scan runs normally.
+      mockScanFolder.mockResolvedValue({
+        ok: true,
+        value: { filesProcessed: 0, facturasAdded: 0, pagosAdded: 0, recibosAdded: 0, matchesFound: 0, errors: 0, duration: 50 },
+      });
+
+      const response = await server.inject({
+        method: 'POST',
+        url: '/api/scan',
+        headers: { authorization: 'Bearer test-secret-123' },
+        payload: { force: true },
+      });
+      // The dead field is stripped; the scan runs as if no body was sent
+      expect(response.statusCode).toBe(200);
+      // scanFolder must have been called without any folderId
+      expect(mockScanFolder).toHaveBeenCalledWith(undefined);
+    });
+
+    it('ADV-335: empty body still works after removing force field', async () => {
+      mockScanFolder.mockResolvedValue({
+        ok: true,
+        value: { filesProcessed: 0, facturasAdded: 0, pagosAdded: 0, recibosAdded: 0, matchesFound: 0, errors: 0, duration: 50 },
+      });
+
+      const response = await server.inject({
+        method: 'POST',
+        url: '/api/scan',
+        headers: { authorization: 'Bearer test-secret-123' },
+        payload: {},
+      });
+      expect(response.statusCode).toBe(200);
+    });
+
+    it('ADV-335: body with only folderId still works after removing force field', async () => {
+      mockScanFolder.mockResolvedValue({
+        ok: true,
+        value: { filesProcessed: 1, facturasAdded: 0, pagosAdded: 0, recibosAdded: 0, matchesFound: 0, errors: 0, duration: 50 },
+      });
+
+      const response = await server.inject({
+        method: 'POST',
+        url: '/api/scan',
+        headers: { authorization: 'Bearer test-secret-123' },
+        payload: { folderId: '1ABC2defGHIjklMNOpqrSTUvwxyz12' },
+      });
+      expect(response.statusCode).toBe(200);
+    });
+
     it('returns 400 for invalid JSON body (bug #49)', async () => {
       const response = await server.inject({
         method: 'POST',
@@ -365,6 +426,70 @@ describe('Scan routes', () => {
       });
 
       expect(response.statusCode).toBe(400);
+    });
+
+    it('ADV-296: returns 200 even when updateStatusSheet rejects (fire-and-forget .catch())', async () => {
+      // Arrange: scan succeeds, but status-sheet update rejects
+      mockScanFolder.mockResolvedValue({
+        ok: true,
+        value: {
+          filesProcessed: 1,
+          facturasAdded: 1,
+          pagosAdded: 0,
+          recibosAdded: 0,
+          matchesFound: 0,
+          errors: 0,
+          duration: 100,
+        },
+      });
+      mockGetCachedFolderStructure.mockReturnValue({
+        rootId: 'root-id',
+        entradaId: 'entrada-id',
+        cobrosId: 'cobros-id',
+        pagosId: 'pagos-id',
+        sinProcesarId: 'sin-procesar-id',
+        bancosId: 'bancos-id',
+        controlCobrosId: 'control-cobros-id',
+        controlPagosId: 'control-pagos-id',
+        bankSpreadsheets: new Map([['BBVA', 'bbva-sheet-id']]),
+        monthFolders: new Map(),
+        lastRefreshed: new Date(),
+        dashboardOperativoId: 'dashboard-id',
+      });
+
+      // Use mockImplementation so the rejected promise is created fresh at call-time.
+      // This ensures .catch() is attached synchronously before Node.js detects any
+      // unhandled rejection (mockReturnValue creates the promise too early).
+      mockUpdateStatusSheet.mockImplementation(() =>
+        Promise.reject(new Error('Status sheet unavailable'))
+      );
+
+      // Track unhandled rejections
+      const unhandledRejections: unknown[] = [];
+      const handler = (reason: unknown) => unhandledRejections.push(reason);
+      process.on('unhandledRejection', handler);
+
+      // Act: request should resolve 200 without waiting for the status-sheet
+      const response = await server.inject({
+        method: 'POST',
+        url: '/api/scan',
+        headers: { authorization: 'Bearer test-secret-123' },
+        payload: {},
+      });
+
+      // Let microtasks settle
+      await new Promise(resolve => setTimeout(resolve, 20));
+      process.off('unhandledRejection', handler);
+
+      // Assert: response is 200 and no unhandled rejection was emitted
+      expect(response.statusCode).toBe(200);
+      expect(unhandledRejections).toHaveLength(0);
+
+      // The error must be logged with module context (via logger.error from utils/logger)
+      expect(vi.mocked(logger.error)).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({ module: 'scan', phase: 'status-sheet' })
+      );
     });
   });
 
@@ -490,6 +615,51 @@ describe('Scan routes', () => {
 
         expect(response.statusCode).toBe(200);
       }
+    });
+
+    it('ADV-299: logs "Starting rematch" with a non-empty context object', async () => {
+      mockRematch.mockResolvedValue({
+        ok: true,
+        value: { matchesFound: 0, duration: 100 },
+      });
+
+      // Spy on the Fastify route logger
+      const infoSpy = vi.spyOn(server.log, 'info');
+
+      await server.inject({
+        method: 'POST',
+        url: '/api/rematch',
+        headers: { authorization: 'Bearer test-secret-123' },
+        payload: { documentType: 'factura' },
+      });
+
+      // Find the "Starting rematch" call
+      const rematchCall = infoSpy.mock.calls.find(
+        args => typeof args[args.length - 1] === 'string' && (args[args.length - 1] as string).includes('Starting rematch')
+      );
+      expect(rematchCall).toBeDefined();
+      // First argument must be a non-empty object (not {})
+      const contextArg = rematchCall![0];
+      expect(typeof contextArg).toBe('object');
+      expect(contextArg).not.toBeNull();
+      expect(Object.keys(contextArg as object).length).toBeGreaterThan(0);
+    });
+
+    it('ADV-299: rematch with empty body (no documentType) still logs without throwing', async () => {
+      mockRematch.mockResolvedValue({
+        ok: true,
+        value: { matchesFound: 0, duration: 100 },
+      });
+
+      // Empty body (documentType absent) — logging must not throw even when the field is undefined
+      const response = await server.inject({
+        method: 'POST',
+        url: '/api/rematch',
+        headers: { authorization: 'Bearer test-secret-123' },
+        payload: {},
+      });
+
+      expect(response.statusCode).toBe(200);
     });
   });
 

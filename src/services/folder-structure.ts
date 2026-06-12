@@ -4,10 +4,10 @@
  */
 
 import { getConfig, SPREADSHEET_LOCK_TIMEOUT_MS } from '../config.js';
-import { findByName, listByMimeType, createFolder, createSpreadsheet, createFile } from './drive.js';
+import { findByName, listByMimeType, listAllChildren, createFolder, createSpreadsheet, createFile } from './drive.js';
 import { getSheetMetadata, createSheet, setValues, getValues, formatSheet, formatStatusSheet, deleteSheet, moveSheetToFirst, applyConditionalFormat, insertColumn } from './sheets.js';
 import { formatMonthFolder } from '../utils/spanish-date.js';
-import { CONTROL_INGRESOS_SHEETS, CONTROL_EGRESOS_SHEETS, DASHBOARD_OPERATIVO_SHEETS, CONTROL_RESUMENES_BANCARIO_SHEET, CONTROL_RESUMENES_TARJETA_SHEET, CONTROL_RESUMENES_BROKER_SHEET, type SheetConfig } from '../constants/spreadsheet-headers.js';
+import { CONTROL_INGRESOS_SHEETS, CONTROL_EGRESOS_SHEETS, DASHBOARD_OPERATIVO_SHEETS, CONTROL_RESUMENES_BANCARIO_SHEET, CONTROL_RESUMENES_TARJETA_SHEET, CONTROL_RESUMENES_BROKER_SHEET, RECIBO_HEADERS, buildHeaderIndex, type SheetConfig } from '../constants/spreadsheet-headers.js';
 import type { FolderStructure, Result, SortDestination } from '../types/index.js';
 import { debug, info, error as logError } from '../utils/logger.js';
 import { withLock } from '../utils/concurrency.js';
@@ -560,12 +560,15 @@ export async function migrateRecibosHasCuitMatchColumn(
   if (!headerWriteResult.ok) return headerWriteResult;
 
   // Backfill data rows: HIGH matchConfidence → 'YES', everything else → 'NO'
+  // matchConfidence is at the same position in the pre-migration schema (17)
+  // as in RECIBO_HEADERS (hasCuitMatch was added after it at index 18).
+  const reciboCol = buildHeaderIndex(RECIBO_HEADERS);
   const dataRowCount = rows.length - 1;
   if (dataRowCount > 0) {
     const backfillValues: string[][] = [];
     for (let i = 1; i < rows.length; i++) {
       const row = rows[i] ?? [];
-      const matchConfidence = String(row[17] ?? '');
+      const matchConfidence = String(row[reciboCol('matchConfidence')] ?? '');
       backfillValues.push([matchConfidence === 'HIGH' ? 'YES' : 'NO']);
     }
     const backfillResult = await setValues(
@@ -890,23 +893,27 @@ export async function discoverMovimientosSpreadsheets(
  * Marker files are empty plain-text files named `.staging` or `.production`
  * located at the root of the Drive folder.
  *
- * - If no marker exists: creates the correct one for this environment
  * - If correct marker exists: returns ok
  * - If wrong marker exists: returns error (environment mismatch)
- * - If environment is "development": skips check (returns ok immediately)
+ * - If no marker exists AND folder is empty: creates the correct one (first-boot)
+ * - If no marker exists AND folder is NOT empty: returns error — fail-closed.
+ *   An operator must create the correct marker manually to confirm which
+ *   environment this root folder belongs to.
+ * - If child-listing fails: returns error (never claims an unknown folder)
+ *
+ * Fail-closed rationale: auto-claiming a folder that already has data would
+ * silently brand an existing staging (or production) root as the wrong
+ * environment, causing cross-environment data writes.  The safe default is to
+ * refuse and require explicit human confirmation.
  *
  * @param rootId - Root Drive folder ID
- * @param environment - Server environment identity
+ * @param environment - Server environment identity ('staging' | 'production')
  * @returns ok or error
  */
 export async function checkEnvironmentMarker(
   rootId: string,
-  environment: string
+  environment: 'staging' | 'production'
 ): Promise<Result<void, Error>> {
-  if (environment === 'development') {
-    return { ok: true, value: undefined };
-  }
-
   const expectedMarker = `.${environment}`;
   const otherMarker = environment === 'staging' ? '.production' : '.staging';
   const otherEnvironment = environment === 'staging' ? 'production' : 'staging';
@@ -933,7 +940,25 @@ export async function checkEnvironmentMarker(
     return { ok: true, value: undefined };
   }
 
-  // No marker exists — create the correct one
+  // No marker found — before creating one, check whether the folder already has
+  // data.  An unmarked but non-empty root could be an existing environment
+  // folder whose marker was deleted; auto-claiming it could corrupt data.
+  const childrenResult = await listAllChildren(rootId);
+  if (!childrenResult.ok) return childrenResult;
+
+  if (childrenResult.value.length > 0) {
+    return {
+      ok: false,
+      error: new Error(
+        `Root folder (${rootId}) is not empty but has no environment marker. ` +
+        `It contains ${childrenResult.value.length} item(s). ` +
+        `Create a ".${environment}" marker file manually to confirm this is the ${environment} root, ` +
+        `or restore the correct marker from backup.`
+      ),
+    };
+  }
+
+  // Empty folder — safe to claim as first boot
   info('Creating environment marker file', {
     module: 'folder-structure',
     phase: 'env-marker',

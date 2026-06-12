@@ -397,6 +397,65 @@ describe('migrateDashboardProcessedAt', () => {
     }
     expect(updateRowsWithFormatting).not.toHaveBeenCalled();
   });
+
+  it('serial decoded with Buenos Aires timezone gives UTC+3h ISO (ADV-306)', async () => {
+    // Serial 45993.5 was stored by dateToSerialInTimezone(date, 'America/Argentina/Buenos_Aires'):
+    // local 12:00:00 Buenos Aires → actual UTC = 15:00:00.
+    // The bug: EXCEL_EPOCH + 45993.5 * 86400000 = 2025-12-02T12:00:00.000Z (3 hours early).
+    vi.mocked(getValues).mockResolvedValue({
+      ok: true,
+      value: [
+        ['fileId', 'fileName', 'processedAt', 'documentType', 'status', 'originalFileId'],
+        ['file-1', 'a.pdf', 45993.5, 'factura_emitida', 'success', ''],
+      ],
+    });
+    vi.mocked(updateRowsWithFormatting).mockResolvedValue({ ok: true, value: undefined });
+    vi.mocked(getSpreadsheetTimezone).mockResolvedValue({ ok: true, value: 'America/Argentina/Buenos_Aires' });
+
+    await migrateDashboardProcessedAt('dashboard-id');
+
+    const calledUpdates = vi.mocked(updateRowsWithFormatting).mock.calls[0][1];
+    const processedAtValue = calledUpdates[0].values[0];
+    // Must decode to 15:00:00 UTC (not 12:00:00 UTC) — timezone offset must be applied
+    expect(processedAtValue).toBe('2025-12-02T15:00:00.000Z');
+  });
+
+  it('running migration twice over the same serial leaves the stored instant unchanged (ADV-306)', async () => {
+    // Idempotency: serial → correct ISO; then ISO → same ISO on re-run.
+    const serial = 45993.5; // Buenos Aires local 12:00:00 = UTC 15:00:00
+    const rows = [
+      ['fileId', 'fileName', 'processedAt', 'documentType', 'status', 'originalFileId'],
+      ['file-1', 'a.pdf', serial, 'factura_emitida', 'success', ''],
+    ];
+
+    vi.mocked(getValues).mockResolvedValue({ ok: true, value: rows });
+    vi.mocked(updateRowsWithFormatting).mockResolvedValue({ ok: true, value: undefined });
+    vi.mocked(getSpreadsheetTimezone).mockResolvedValue({ ok: true, value: 'America/Argentina/Buenos_Aires' });
+
+    await migrateDashboardProcessedAt('dashboard-id');
+
+    const firstRunISO = vi.mocked(updateRowsWithFormatting).mock.calls[0][1][0].values[0] as string;
+
+    // Second run: the serial has been replaced by the ISO string in the sheet
+    vi.clearAllMocks();
+    vi.mocked(getValues).mockResolvedValue({
+      ok: true,
+      value: [
+        rows[0],
+        ['file-1', 'a.pdf', firstRunISO, 'factura_emitida', 'success', ''],
+      ],
+    });
+    vi.mocked(updateRowsWithFormatting).mockResolvedValue({ ok: true, value: undefined });
+    vi.mocked(getSpreadsheetTimezone).mockResolvedValue({ ok: true, value: 'America/Argentina/Buenos_Aires' });
+
+    await migrateDashboardProcessedAt('dashboard-id');
+
+    const secondRunISO = vi.mocked(updateRowsWithFormatting).mock.calls[0][1][0].values[0] as string;
+
+    // Both runs must produce the same ISO string — idempotent with correct timezone decode
+    expect(secondRunISO).toBe(firstRunISO);
+    expect(firstRunISO).toBe('2025-12-02T15:00:00.000Z');
+  });
 });
 
 describe('runStartupMigrations', () => {

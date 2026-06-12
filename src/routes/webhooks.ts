@@ -79,7 +79,7 @@ export async function webhookRoutes(server: FastifyInstance) {
 
     // Validate channel ID is present
     if (!channelId) {
-      server.log.warn('Received notification without channel ID');
+      server.log.warn({ resourceState, messageNumber }, 'Received notification without channel ID');
       return reply.code(200).send({ status: 'ignored', reason: 'missing_channel_id' });
     }
 

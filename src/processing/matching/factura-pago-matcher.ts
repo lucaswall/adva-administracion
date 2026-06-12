@@ -7,6 +7,7 @@ import type { Result, Factura, Pago } from '../../types/index.js';
 import { validateMoneda, validateMatchConfidence, validateTipoComprobante } from '../../utils/validation.js';
 import { getConfig, MAX_CASCADE_DEPTH, CASCADE_TIMEOUT_MS, USD_SAME_CURRENCY_TOLERANCE } from '../../config.js';
 import { getValues, batchUpdate } from '../../services/sheets.js';
+import { buildHeaderIndex, FACTURA_EMITIDA_HEADERS, FACTURA_RECIBIDA_HEADERS, PAGO_ENVIADO_HEADERS, PAGO_RECIBIDO_HEADERS } from '../../constants/spreadsheet-headers.js';
 import { FacturaPagoMatcher, type MatchQuality } from '../../matching/matcher.js';
 import {
   DisplacementQueue,
@@ -299,8 +300,11 @@ async function doMatchFacturasWithPagos(
   const isEmitida = facturasSheetName === 'Facturas Emitidas';
   const facturasRange = `${facturasSheetName}!A:${isEmitida ? 'U' : 'T'}`;
   const pagosRange = `${pagosSheetName}!A:Q`; // Both pago sheets use A:Q (includes tipoDeCambio, importeEnPesos)
-  // Column offset for emitidas: condicionIVAReceptor inserted at index 7 shifts all subsequent columns +1
-  const o = isEmitida ? 1 : 0;
+  // Use header-derived indices to avoid hardcoded offset arithmetic (ADV-332)
+  const facturaHeaders = isEmitida ? FACTURA_EMITIDA_HEADERS : FACTURA_RECIBIDA_HEADERS;
+  const fc = buildHeaderIndex(facturaHeaders);
+  const pagoHeaders = pagoCuitField === 'cuitPagador' ? PAGO_RECIBIDO_HEADERS : PAGO_ENVIADO_HEADERS;
+  const pc = buildHeaderIndex(pagoHeaders);
 
   // Get all facturas
   const facturasResult = await getValues(spreadsheetId, facturasRange);
@@ -323,30 +327,34 @@ async function doMatchFacturasWithPagos(
       const row = facturasResult.value[i];
       if (!row || !row[0]) continue;
 
-      // Build factura object based on sheet type
+      // Skip NC and ND comprobantes — they have their own matching pipeline (nc-factura-matcher)
+      const tipoCheck = validateTipoComprobante(row[3]);
+      if (tipoCheck === 'NC' || tipoCheck.startsWith('NC ') || tipoCheck === 'ND' || tipoCheck.startsWith('ND ')) continue;
+
+      // Build factura object using header-derived column indices (ADV-332)
       const factura: Factura & { row: number } = {
         row: i + 1, // Sheet rows are 1-indexed
-        fechaEmision: normalizeSpreadsheetDate(row[0]),
-        fileId: String(row[1] || ''),
-        fileName: String(row[2] || ''),
-        tipoComprobante: validateTipoComprobante(row[3]),
-        nroFactura: String(row[4] || ''),
-        // Column 5 (F) and 6 (G) contain either emisor or receptor info depending on sheet
-        cuitEmisor: facturaCuitField === 'cuitEmisor' ? String(row[5] || '') : '',
-        razonSocialEmisor: facturaCuitField === 'cuitEmisor' ? String(row[6] || '') : '',
-        cuitReceptor: facturaCuitField === 'cuitReceptor' ? String(row[5] || '') : undefined,
-        razonSocialReceptor: facturaCuitField === 'cuitReceptor' ? String(row[6] || '') : undefined,
-        importeNeto: parseNumber(row[7 + o]) || 0,
-        importeIva: parseNumber(row[8 + o]) || 0,
-        importeTotal: parseNumber(row[9 + o]) || 0,
-        moneda: validateMoneda(row[10 + o]),
-        concepto: row[11 + o] ? String(row[11 + o]) : undefined,
-        processedAt: normalizeTimestamp(row[12 + o]),
-        confidence: Number(row[13 + o]) || 0,
-        needsReview: row[14 + o] === 'YES',
-        matchedPagoFileId: row[15 + o] ? String(row[15 + o]) : undefined,
-        matchConfidence: validateMatchConfidence(row[16 + o]),
-        hasCuitMatch: row[17 + o] === 'YES',
+        fechaEmision: normalizeSpreadsheetDate(row[fc('fechaEmision')]),
+        fileId: String(row[fc('fileId')] || ''),
+        fileName: String(row[fc('fileName')] || ''),
+        tipoComprobante: validateTipoComprobante(row[fc('tipoComprobante')]),
+        nroFactura: String(row[fc('nroFactura')] || ''),
+        // cuitEmisor/cuitReceptor and their names live at different header keys per sheet type
+        cuitEmisor: facturaCuitField === 'cuitEmisor' ? String(row[fc('cuitEmisor')] || '') : '',
+        razonSocialEmisor: facturaCuitField === 'cuitEmisor' ? String(row[fc('razonSocialEmisor')] || '') : '',
+        cuitReceptor: facturaCuitField === 'cuitReceptor' ? String(row[fc('cuitReceptor')] || '') : undefined,
+        razonSocialReceptor: facturaCuitField === 'cuitReceptor' ? String(row[fc('razonSocialReceptor')] || '') : undefined,
+        importeNeto: parseNumber(row[fc('importeNeto')]) || 0,
+        importeIva: parseNumber(row[fc('importeIva')]) || 0,
+        importeTotal: parseNumber(row[fc('importeTotal')]) || 0,
+        moneda: validateMoneda(row[fc('moneda')]),
+        concepto: row[fc('concepto')] ? String(row[fc('concepto')]) : undefined,
+        processedAt: normalizeTimestamp(row[fc('processedAt')]),
+        confidence: Number(row[fc('confidence')]) || 0,
+        needsReview: row[fc('needsReview')] === 'YES',
+        matchedPagoFileId: row[fc('matchedPagoFileId')] ? String(row[fc('matchedPagoFileId')]) : undefined,
+        matchConfidence: validateMatchConfidence(row[fc('matchConfidence')]),
+        hasCuitMatch: row[fc('hasCuitMatch')] === 'YES',
       };
 
       facturas.push(factura);
@@ -358,29 +366,28 @@ async function doMatchFacturasWithPagos(
       const row = pagosResult.value[i];
       if (!row || !row[0]) continue;
 
-      // Build pago object based on sheet type
-      // Column 7 (H) and 8 (I) contain either pagador or beneficiario info depending on sheet
+      // Build pago object using header-derived column indices (ADV-332)
       const pago: Pago & { row: number } = {
         row: i + 1,
-        fechaPago: normalizeSpreadsheetDate(row[0]),
-        fileId: String(row[1] || ''),
-        fileName: String(row[2] || ''),
-        banco: String(row[3] || ''),
-        importePagado: parseNumber(row[4]) || 0,
-        moneda: validateMoneda(row[5]),
-        referencia: row[6] ? String(row[6]) : undefined,
-        cuitPagador: pagoCuitField === 'cuitPagador' ? String(row[7] || '') : undefined,
-        nombrePagador: pagoCuitField === 'cuitPagador' ? String(row[8] || '') : undefined,
-        cuitBeneficiario: pagoCuitField === 'cuitBeneficiario' ? String(row[7] || '') : undefined,
-        nombreBeneficiario: pagoCuitField === 'cuitBeneficiario' ? String(row[8] || '') : undefined,
-        concepto: row[9] ? String(row[9]) : undefined,
-        processedAt: normalizeTimestamp(row[10]),
-        confidence: Number(row[11]) || 0,
-        needsReview: row[12] === 'YES',
-        matchedFacturaFileId: row[13] ? String(row[13]) : undefined,
-        matchConfidence: validateMatchConfidence(row[14]),
-        tipoDeCambio: parseNumber(row[15]) || undefined,
-        importeEnPesos: parseNumber(row[16]) || undefined,
+        fechaPago: normalizeSpreadsheetDate(row[pc('fechaPago')]),
+        fileId: String(row[pc('fileId')] || ''),
+        fileName: String(row[pc('fileName')] || ''),
+        banco: String(row[pc('banco')] || ''),
+        importePagado: parseNumber(row[pc('importePagado')]) || 0,
+        moneda: validateMoneda(row[pc('moneda')]),
+        referencia: row[pc('referencia')] ? String(row[pc('referencia')]) : undefined,
+        cuitPagador: pagoCuitField === 'cuitPagador' ? String(row[pc('cuitPagador')] || '') : undefined,
+        nombrePagador: pagoCuitField === 'cuitPagador' ? String(row[pc('nombrePagador')] || '') : undefined,
+        cuitBeneficiario: pagoCuitField === 'cuitBeneficiario' ? String(row[pc('cuitBeneficiario')] || '') : undefined,
+        nombreBeneficiario: pagoCuitField === 'cuitBeneficiario' ? String(row[pc('nombreBeneficiario')] || '') : undefined,
+        concepto: row[pc('concepto')] ? String(row[pc('concepto')]) : undefined,
+        processedAt: normalizeTimestamp(row[pc('processedAt')]),
+        confidence: Number(row[pc('confidence')]) || 0,
+        needsReview: row[pc('needsReview')] === 'YES',
+        matchedFacturaFileId: row[pc('matchedFacturaFileId')] ? String(row[pc('matchedFacturaFileId')]) : undefined,
+        matchConfidence: validateMatchConfidence(row[pc('matchConfidence')]),
+        tipoDeCambio: parseNumber(row[pc('tipoDeCambio')]) || undefined,
+        importeEnPesos: parseNumber(row[pc('importeEnPesos')]) || undefined,
       };
 
       pagos.push(pago);

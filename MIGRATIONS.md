@@ -17,3 +17,9 @@ Auto-applied schema migrations for persistent data (spreadsheets, folder structu
 **Idempotency:** Subsequent runs read the 14-col header, skip the migration branch, and take the normal diff path.
 
 **Scope:** Affects every Subdiario de Ventas workbook (one per root folder, so one in staging and one in production). New workbooks created after deploy use the 14-col header from `SUBDIARIO_COMPROBANTES_HEADERS` directly via `initializeComprobantesSheet`.
+
+## Dashboard processedAt — timezone-correct serial decode (ADV-306)
+
+**Change to existing migration:** `migrateDashboardProcessedAt` (src/services/migrations.ts) previously decoded DATE_TIME serials with the raw Excel-epoch-as-UTC formula, shifting every value ~3 h earlier per run (non-idempotent). It now decodes serials in the spreadsheet's timezone via `decodeSerialInTimezone` (utils/date.ts), making re-runs true no-ops.
+
+**Trigger/scope:** unchanged. No data backfill — historical drift only affected transient 'processing' rows consumed by the stale guard, which now also decodes timezone-correctly (`getStaleProcessingFileIds`).

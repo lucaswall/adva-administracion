@@ -11,6 +11,7 @@ vi.mock('../../services/sheets.js', () => ({
   getOrCreateMonthSheet: vi.fn(),
   formatEmptyMonthSheet: vi.fn(),
   appendRowsWithLinks: vi.fn(),
+  getValues: vi.fn().mockResolvedValue({ ok: true, value: [] }),
 }));
 
 vi.mock('../../utils/logger.js', () => ({
@@ -32,7 +33,7 @@ vi.mock('../../constants/spreadsheet-headers.js', () => ({
   },
 }));
 
-import { getOrCreateMonthSheet, formatEmptyMonthSheet, appendRowsWithLinks } from '../../services/sheets.js';
+import { getOrCreateMonthSheet, formatEmptyMonthSheet, appendRowsWithLinks, getValues } from '../../services/sheets.js';
 
 const createTestMovimientoBancario = (overrides: Partial<MovimientoBancario> = {}): MovimientoBancario => ({
   fecha: '2025-01-15',
@@ -444,6 +445,93 @@ describe('storeMovimientosBancario', () => {
     expect(rows[1][7]).toBe('');  // detalle empty
     // SALDO FINAL row
     expect(rows[2][7]).toBe('');  // detalle empty
+  });
+
+  describe('ADV-322: startRowOffset — formulas account for pre-existing rows', () => {
+    it('offsets saldoCalculado formulas when sheet already has data rows', async () => {
+      // Simulate 3 existing data rows (header + 3 rows = 4 total from getValues)
+      // The new SALDO INICIAL will be appended at sheet row 5 (offset=3, arrayIdx=0 → 3+0+2=5)
+      // First movimiento at sheet row 6 (offset=3, arrayIdx=1 → 3+1+2=6)
+      vi.mocked(getValues).mockResolvedValue({
+        ok: true,
+        value: [
+          ['fecha', 'concepto', 'debito', 'credito', 'saldo', 'saldoCalculado', 'matchedFileId', 'matchedType', 'detalle'],
+          ['2025-01-01', 'Old row 1', null, null, null, 10000, '', '', ''],
+          ['2025-01-02', 'Old row 2', 200, null, null, '=F2+D3-C3', '', '', ''],
+          ['2025-01-03', 'Old row 3', null, 500, null, '=F3+D4-C4', '', '', ''],
+        ],
+      });
+      vi.mocked(getOrCreateMonthSheet).mockResolvedValue({ ok: true, value: 123 });
+      vi.mocked(appendRowsWithLinks).mockResolvedValue({ ok: true, value: 0 });
+
+      const movimiento = createTestMovimientoBancario({ fecha: '2025-01-10', concepto: 'New tx', credito: 1000, debito: null, saldo: 11000 });
+
+      await storeMovimientosBancario(
+        [movimiento],
+        'spreadsheet-id',
+        { fechaDesde: '2025-01-01', fechaHasta: '2025-01-31' },
+        10000
+      );
+
+      const appendCall = vi.mocked(appendRowsWithLinks).mock.calls[0];
+      const rows = appendCall[2] as any[];
+
+      // 1 movimiento + SALDO INICIAL + SALDO FINAL = 3 rows
+      expect(rows).toHaveLength(3);
+      expect(rows[0][1]).toBe('SALDO INICIAL');
+
+      // First movimiento (array index 1) with offset=3:
+      // prev = 3+1+1 = 5, curr = 3+1+2 = 6 → formula =F5+D6-C6
+      const txFormulaCell = rows[1][5];
+      expect(txFormulaCell).toEqual({ type: 'formula', value: '=F5+D6-C6' });
+
+      // SALDO FINAL (lastTransactionRowIndex=1 with offset=3):
+      // lastSheetRow = 3+1+2 = 6 → formula =F6
+      const finalFormulaCell = rows[2][5];
+      expect(finalFormulaCell).toEqual({ type: 'formula', value: '=F6' });
+    });
+
+    it('uses offset=0 when sheet has no data rows (empty/header-only)', async () => {
+      // Empty sheet: getValues returns [] (no rows at all, or header-only)
+      vi.mocked(getValues).mockResolvedValue({ ok: true, value: [] });
+      vi.mocked(getOrCreateMonthSheet).mockResolvedValue({ ok: true, value: 123 });
+      vi.mocked(appendRowsWithLinks).mockResolvedValue({ ok: true, value: 0 });
+
+      const movimiento = createTestMovimientoBancario({ fecha: '2025-01-10', concepto: 'New tx', credito: 1000, debito: null, saldo: 11000 });
+
+      await storeMovimientosBancario(
+        [movimiento],
+        'spreadsheet-id',
+        { fechaDesde: '2025-01-01', fechaHasta: '2025-01-31' },
+        10000
+      );
+
+      const rows = vi.mocked(appendRowsWithLinks).mock.calls[0][2] as any[];
+
+      // First movimiento at offset 0: prev=2, curr=3 → formula =F2+D3-C3
+      expect(rows[1][5]).toEqual({ type: 'formula', value: '=F2+D3-C3' });
+    });
+
+    it('falls back gracefully when getValues fails', async () => {
+      // If getValues fails, should still proceed with offset=0 rather than erroring
+      vi.mocked(getValues).mockResolvedValue({ ok: false, error: new Error('API error') });
+      vi.mocked(getOrCreateMonthSheet).mockResolvedValue({ ok: true, value: 123 });
+      vi.mocked(appendRowsWithLinks).mockResolvedValue({ ok: true, value: 0 });
+
+      const movimiento = createTestMovimientoBancario({ fecha: '2025-01-10', concepto: 'New tx' });
+
+      const result = await storeMovimientosBancario(
+        [movimiento],
+        'spreadsheet-id',
+        { fechaDesde: '2025-01-01', fechaHasta: '2025-01-31' },
+        10000
+      );
+
+      // Should succeed (graceful fallback to offset=0)
+      expect(result.ok).toBe(true);
+      const rows = vi.mocked(appendRowsWithLinks).mock.calls[0][2] as any[];
+      expect(rows[1][5]).toEqual({ type: 'formula', value: '=F2+D3-C3' });
+    });
   });
 });
 

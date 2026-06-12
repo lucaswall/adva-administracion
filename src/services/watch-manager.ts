@@ -28,6 +28,20 @@ let statusUpdateJob: cron.ScheduledTask | null = null;
 let cleanupJob: cron.ScheduledTask | null = null;
 let runningScan: Promise<void> | null = null;
 let pendingScanFolderIds: Set<string | undefined> = new Set();
+/** ADV-359: handle for a pending deferred-scan retry timer (only one allowed at a time) */
+let deferredScanRetryTimer: ReturnType<typeof setTimeout> | null = null;
+
+/**
+ * Cancels a pending deferred-scan retry timer (ADV-359).
+ * Must be called wherever scanning is paused (auth failure, failure threshold,
+ * shutdown) — an orphaned timer would fire later and bypass the pause.
+ */
+function clearDeferredScanRetryTimer(): void {
+  if (deferredScanRetryTimer) {
+    clearTimeout(deferredScanRetryTimer);
+    deferredScanRetryTimer = null;
+  }
+}
 
 // Configuration
 const CHANNEL_EXPIRATION_MS = 3600000; // 1 hour
@@ -35,6 +49,8 @@ const RENEWAL_THRESHOLD_MS = 600000; // Renew if expires within 10 minutes
 const MAX_NOTIFICATION_AGE_MS = 3600000; // Keep notifications for 1 hour
 const MAX_NOTIFICATIONS_PER_CHANNEL = 1000;
 const MAX_CONSECUTIVE_FAILURES = 3; // Stop triggering scans after this many consecutive failures (ADV-18)
+/** ADV-359: backoff before retrying a scan that was deferred because the scanner was busy */
+const DEFERRED_SCAN_RETRY_DELAY_MS = 10_000; // 10 seconds
 
 /**
  * Consecutive scan failure counter (ADV-18)
@@ -428,12 +444,27 @@ export function triggerScan(folderId?: string): void {
   // Track whether this scan failed (for ADV-18 failure handling)
   let scanFailed = false;
   let wasAuthFailure = false;
+  let scanWasSkipped = false; // ADV-312: track if scan was deferred
 
   // Run scan directly (not in queue) to avoid deadlock
   // The scanFolder function will use the queue for individual file processing
   runningScan = scanFolder(folderId)
     .then(async result => {
       if (result.ok) {
+        // ADV-312: scan was deferred because the scanner was already busy
+        // Re-queue so it runs when the current scan finishes
+        if (result.value.skipped) {
+          info('Scan deferred (scanner busy), re-queuing for follow-up', {
+            module: 'watch-manager',
+            phase: 'scan-trigger',
+            folderId,
+            reason: result.value.reason,
+          });
+          scanWasSkipped = true;
+          pendingScanFolderIds.add(folderId);
+          return;
+        }
+
         // Reset failure counter on success (ADV-18)
         consecutiveFailures = 0;
         lastScanTime = new Date();
@@ -487,6 +518,7 @@ export function triggerScan(folderId?: string): void {
           phase: 'scan-trigger',
           pendingScans: pendingScanFolderIds.size
         });
+        clearDeferredScanRetryTimer();
         pendingScanFolderIds.clear();
         return;
       }
@@ -499,6 +531,7 @@ export function triggerScan(folderId?: string): void {
           maxConsecutiveFailures: MAX_CONSECUTIVE_FAILURES,
           pendingScans: pendingScanFolderIds.size
         });
+        clearDeferredScanRetryTimer();
         pendingScanFolderIds.clear();
         return;
       }
@@ -509,14 +542,35 @@ export function triggerScan(folderId?: string): void {
         // Get first pending folder ID from the set
         const queuedFolderIds = Array.from(pendingScanFolderIds);
         const nextFolderId = queuedFolderIds[0];
-        pendingScanFolderIds.delete(nextFolderId);
 
-        info('Starting pending scan', {
-          module: 'watch-manager',
-          phase: 'scan-trigger',
-          folderId: nextFolderId
-        });
-        triggerScan(nextFolderId);
+        if (scanWasSkipped) {
+          // ADV-312/ADV-359: when the scanner was busy (skipped result), wait before
+          // retrying to avoid a tight CPU-burning busy-loop.
+          // Only one deferred retry timer may be pending at a time — if a timer is already
+          // scheduled, leave the pending item in the set so the existing timer's scan
+          // picks it up when it completes.
+          if (!deferredScanRetryTimer) {
+            pendingScanFolderIds.delete(nextFolderId);
+            info('Starting pending scan', {
+              module: 'watch-manager',
+              phase: 'scan-trigger',
+              folderId: nextFolderId
+            });
+            deferredScanRetryTimer = setTimeout(() => {
+              deferredScanRetryTimer = null;
+              triggerScan(nextFolderId);
+            }, DEFERRED_SCAN_RETRY_DELAY_MS);
+          }
+          // else: leave item in pendingScanFolderIds for the pending timer
+        } else {
+          pendingScanFolderIds.delete(nextFolderId);
+          info('Starting pending scan', {
+            module: 'watch-manager',
+            phase: 'scan-trigger',
+            folderId: nextFolderId
+          });
+          triggerScan(nextFolderId);
+        }
       }
     });
 }
@@ -589,6 +643,10 @@ async function renewChannels(): Promise<void> {
           folderId: channel.folderId,
           error: startResult.error.message
         });
+        // ADV-303: Restore old channel so fallback polling continues and renewal
+        // can retry on the next cycle. Without this, the folder is permanently
+        // dropped from activeChannels and no more scans are triggered for it.
+        activeChannels.set(channel.folderId, channel);
       }
     }
   }
@@ -659,6 +717,7 @@ export async function shutdownWatchManager(): Promise<void> {
   runningScan = null;
   pendingScanFolderIds.clear();
   consecutiveFailures = 0;
+  clearDeferredScanRetryTimer();
 
   info('Watch manager shutdown complete', {
     module: 'watch-manager',

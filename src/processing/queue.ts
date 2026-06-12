@@ -144,13 +144,3 @@ export function getProcessingQueue(): ProcessingQueue {
   }
   return globalQueue;
 }
-
-/**
- * Resets the global queue (for testing)
- */
-export function resetProcessingQueue(): void {
-  if (globalQueue) {
-    globalQueue.clear();
-  }
-  globalQueue = null;
-}

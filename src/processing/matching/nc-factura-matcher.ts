@@ -6,9 +6,10 @@
 import type { Result } from '../../types/index.js';
 import { getValues, setValues } from '../../services/sheets.js';
 import { parseNumber } from '../../utils/numbers.js';
-import { normalizeSpreadsheetDate } from '../../utils/date.js';
+import { normalizeSpreadsheetDate, parseArgDate } from '../../utils/date.js';
 import { debug, info, warn } from '../../utils/logger.js';
 import { getCorrelationId } from '../../utils/correlation.js';
+import { buildHeaderIndex, FACTURA_EMITIDA_HEADERS, FACTURA_RECIBIDA_HEADERS } from '../../constants/spreadsheet-headers.js';
 
 /**
  * Represents a row from Facturas Recibidas or Facturas Emitidas sheet
@@ -104,7 +105,7 @@ export function extractReferencedFacturaNumber(concepto: string): string | null 
  *
  * @param spreadsheetId - Spreadsheet ID (Control de Egresos or Control de Ingresos)
  * @param sheetName - Sheet to match against ('Facturas Recibidas' or 'Facturas Emitidas')
- * @param _cuitField - CUIT field label ('cuitEmisor' for Recibidas, 'cuitReceptor' for Emitidas) — documentation only, both sheets store counterparty CUIT at column F/index 5
+ * @param cuitField - CUIT field label ('cuitEmisor' for Recibidas, 'cuitReceptor' for Emitidas)
  * @param readRange - Column range to read ('A:S' for Recibidas, 'A:U' for Emitidas with condicionIVAReceptor at H)
  * @param pagadaColumnLetter - Spreadsheet column letter for pagada ('S' for Recibidas, 'T' for Emitidas)
  * @returns Number of NC-Factura pairs matched
@@ -112,7 +113,7 @@ export function extractReferencedFacturaNumber(concepto: string): string | null 
 export async function matchNCsWithFacturas(
   spreadsheetId: string,
   sheetName: 'Facturas Recibidas' | 'Facturas Emitidas' = 'Facturas Recibidas',
-  _cuitField: 'cuitEmisor' | 'cuitReceptor' = 'cuitEmisor',
+  cuitField: 'cuitEmisor' | 'cuitReceptor' = 'cuitEmisor',
   readRange: string = 'A:S',
   pagadaColumnLetter: string = 'S'
 ): Promise<Result<number, Error>> {
@@ -126,16 +127,9 @@ export async function matchNCsWithFacturas(
     correlationId,
   });
 
-  // Read all rows from the sheet
-  // Facturas Recibidas (20 cols): A=fechaEmision, B=fileId, C=fileName, D=tipoComprobante,
-  //   E=nroFactura, F=cuit, G=razonSocial, H=importeNeto, I=importeIva, J=importeTotal(9),
-  //   K=moneda, L=concepto, M=processedAt, N=confidence, O=needsReview, P=matchedPagoFileId,
-  //   Q=matchConfidence(16), R=hasCuitMatch, S=pagada(18), T=tipoDeCambio
-  // Facturas Emitidas (21 cols): same but H=condicionIVAReceptor(7) shifts all subsequent +1:
-  //   I=importeNeto, J=importeIva, K=importeTotal(10), ..., R=matchConfidence(17),
-  //   S=hasCuitMatch, T=pagada(19), U=tipoDeCambio
-  // colOffset=1 for Emitidas compensates for the extra column at index 7
-  const colOffset = sheetName === 'Facturas Emitidas' ? 1 : 0;
+  // Use header-derived indices to avoid hardcoded offset arithmetic (ADV-332)
+  const ncHeaders = sheetName === 'Facturas Emitidas' ? FACTURA_EMITIDA_HEADERS : FACTURA_RECIBIDA_HEADERS;
+  const col = buildHeaderIndex(ncHeaders);
   const rowsResult = await getValues(spreadsheetId, `${sheetName}!${readRange}`);
   if (!rowsResult.ok) {
     return { ok: false, error: rowsResult.error };
@@ -150,24 +144,27 @@ export async function matchNCsWithFacturas(
     return { ok: true, value: 0 };
   }
 
-  // Parse rows into typed objects
+  // Parse rows into typed objects using header-derived indices
   const facturas: FacturaRow[] = [];
-  const minRowLength = 10 + colOffset;
+  const minRowLength = col('importeTotal') + 1;
   for (let i = 1; i < rowsResult.value.length; i++) {
     const row = rowsResult.value[i];
     if (!row || row.length < minRowLength) continue;
 
     const factura: FacturaRow = {
       rowNumber: i + 1, // 1-indexed, accounting for header
-      fechaEmision: normalizeSpreadsheetDate(row[0]),
-      fileId: String(row[1] || ''),
-      tipoComprobante: String(row[3] || '').toUpperCase(),
-      nroFactura: String(row[4] || ''),
-      cuit: String(row[5] || ''),
-      importeTotal: parseNumber(String(row[9 + colOffset] || '0')) ?? 0,
-      concepto: String(row[11 + colOffset] || ''),
-      matchConfidence: row[16 + colOffset] ? String(row[16 + colOffset]).toUpperCase() : undefined,
-      pagada: String(row[18 + colOffset] || '').toUpperCase(),
+      fechaEmision: normalizeSpreadsheetDate(row[col('fechaEmision')]),
+      fileId: String(row[col('fileId')] || ''),
+      tipoComprobante: String(row[col('tipoComprobante')] || '').toUpperCase(),
+      nroFactura: String(row[col('nroFactura')] || ''),
+      // cuitEmisor for Recibidas, cuitReceptor for Emitidas — both at column F (index 5)
+      cuit: cuitField === 'cuitEmisor'
+        ? String(row[col('cuitEmisor')] || '')
+        : String(row[col('cuitReceptor')] || ''),
+      importeTotal: parseNumber(String(row[col('importeTotal')] || '0')) ?? 0,
+      concepto: String(row[col('concepto')] || ''),
+      matchConfidence: row[col('matchConfidence')] ? String(row[col('matchConfidence')]).toUpperCase() : undefined,
+      pagada: String(row[col('pagada')] || '').toUpperCase(),
     };
 
     facturas.push(factura);
@@ -241,8 +238,15 @@ export async function matchNCsWithFacturas(
         }
       }
 
-      // NC date must be after or equal to factura date
-      if (nc.fechaEmision < factura.fechaEmision) {
+      // NC date must be after or equal to factura date — parse both to Date objects
+      // so that mixed formats (e.g. '15/03/2025' vs '2025-03-01') compare correctly.
+      // Skip if either date is unparseable (defensive: can't determine ordering).
+      const ncDate = parseArgDate(nc.fechaEmision);
+      const facturaDate = parseArgDate(factura.fechaEmision);
+      if (!ncDate || !facturaDate) {
+        continue;
+      }
+      if (ncDate < facturaDate) {
         continue;
       }
 

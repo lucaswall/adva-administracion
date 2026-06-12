@@ -14,13 +14,13 @@ import { updateLastScanTime } from '../services/watch-manager.js';
 import { isDescendantOf } from '../services/drive.js';
 import { getConfig } from '../config.js';
 import { respond500, respond503 } from '../utils/error-response.js';
+import { error as logError } from '../utils/logger.js';
 
 /**
  * Scan request body
  */
 interface ScanRequest {
   folderId?: string;
-  force?: boolean;
 }
 
 /**
@@ -53,7 +53,6 @@ export async function scanRoutes(server: FastifyInstance) {
         type: 'object',
         properties: {
           folderId: { type: 'string' },
-          force: { type: 'boolean' },
         },
         additionalProperties: false,
       },
@@ -105,7 +104,15 @@ export async function scanRoutes(server: FastifyInstance) {
     updateLastScanTime();
     const folderStructure = getCachedFolderStructure();
     if (folderStructure?.dashboardOperativoId) {
-      void updateStatusSheet(folderStructure.dashboardOperativoId);
+      // Fire-and-forget: do not await — failure must not fail the scan response (ADV-296).
+      // The .catch() prevents unhandled rejections and logs the error with context.
+      void updateStatusSheet(folderStructure.dashboardOperativoId).catch((err: Error) => {
+        logError('Status sheet update failed after scan', {
+          module: 'scan',
+          phase: 'status-sheet',
+          error: err.message,
+        });
+      });
     }
 
     return result.value;
@@ -129,8 +136,9 @@ export async function scanRoutes(server: FastifyInstance) {
         additionalProperties: false,
       },
     },
-  }, async (_request, reply): Promise<RematchResult | ErrorResponse> => {
-    server.log.info({}, 'Starting rematch');
+  }, async (request, reply): Promise<RematchResult | ErrorResponse> => {
+    const { documentType } = request.body || {};
+    server.log.info({ documentType }, 'Starting rematch');
 
     const result = await rematch();
 

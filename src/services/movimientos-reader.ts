@@ -9,6 +9,7 @@ import { getSheetMetadata, getValues, type CellValue } from './sheets.js';
 import { parseNumber } from '../utils/numbers.js';
 import { normalizeSpreadsheetDate } from '../utils/date.js';
 import { warn, debug } from '../utils/logger.js';
+import { buildHeaderIndex, MOVIMIENTOS_BANCARIO_SHEET } from '../constants/spreadsheet-headers.js';
 
 /**
  * Labels to skip (special rows, not transactions)
@@ -70,8 +71,11 @@ function parseMatchedType(raw: unknown): MovimientoRow['matchedType'] {
   return '';
 }
 
+// Header-derived indices for bank movimientos rows (ADV-332)
+const movCol = buildHeaderIndex(MOVIMIENTOS_BANCARIO_SHEET.headers);
+
 /**
- * Parses a single row into a MovimientoRow object
+ * Parses a single row into a MovimientoRow object using header-derived indices.
  *
  * @param row - Raw cell values from the spreadsheet
  * @param sheetName - Name of the sheet (e.g., "2025-01")
@@ -83,21 +87,21 @@ function parseMovimientoRow(
   sheetName: string,
   rowNumber: number
 ): MovimientoRow | null {
-  const concepto = String(row[1] || '');
+  const concepto = String(row[movCol('concepto')] || '');
   if (isSpecialRow(concepto)) return null;
 
   return {
     sheetName,
     rowNumber,
-    fecha: normalizeSpreadsheetDate(row[0]),
+    fecha: normalizeSpreadsheetDate(row[movCol('fecha')]),
     concepto,
-    debito: parseNumber(row[2]),
-    credito: parseNumber(row[3]),
-    saldo: parseNumber(row[4]),
-    saldoCalculado: parseNumber(row[5]),
-    matchedFileId: String(row[6] || ''),
-    matchedType: parseMatchedType(row[7]),
-    detalle: String(row[8] || ''),
+    debito: parseNumber(row[movCol('debito')]),
+    credito: parseNumber(row[movCol('credito')]),
+    saldo: parseNumber(row[movCol('saldo')]),
+    saldoCalculado: parseNumber(row[movCol('saldoCalculado')]),
+    matchedFileId: String(row[movCol('matchedFileId')] || ''),
+    matchedType: parseMatchedType(row[movCol('matchedType')]),
+    detalle: String(row[movCol('detalle')] || ''),
   };
 }
 

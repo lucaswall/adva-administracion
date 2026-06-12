@@ -6,6 +6,13 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import Fastify from 'fastify';
 import type { FastifyInstance } from 'fastify';
+import { readFileSync } from 'fs';
+import { join, dirname } from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const PKG_PATH = join(dirname(__filename), '..', '..', 'package.json');
+const PKG_VERSION = (JSON.parse(readFileSync(PKG_PATH, 'utf-8')) as { version: string }).version;
 
 // Mock config
 vi.mock('../config.js', () => ({
@@ -94,7 +101,7 @@ describe('Status routes', () => {
       expect(body.timestamp).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/);
     });
 
-    it('returns correct version number', async () => {
+    it('returns correct version number matching package.json', async () => {
       const response = await server.inject({
         method: 'GET',
         url: '/api/status',
@@ -104,10 +111,10 @@ describe('Status routes', () => {
       });
 
       const body = JSON.parse(response.body);
-      expect(body.version).toBe('1.0.0');
+      expect(body.version).toBe(PKG_VERSION);
     });
 
-    it('returns environment from config', async () => {
+    it('returns environment from config.environment (not nodeEnv)', async () => {
       const response = await server.inject({
         method: 'GET',
         url: '/api/status',
@@ -117,7 +124,8 @@ describe('Status routes', () => {
       });
 
       const body = JSON.parse(response.body);
-      expect(body.environment).toBe('test');
+      // Should use config.environment ('staging') not config.nodeEnv ('test')
+      expect(body.environment).toBe('staging');
     });
 
     it('returns queue status', async () => {

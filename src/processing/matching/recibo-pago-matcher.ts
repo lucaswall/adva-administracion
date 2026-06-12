@@ -7,6 +7,7 @@ import type { Result, Pago, Recibo } from '../../types/index.js';
 import { validateMoneda, validateMatchConfidence } from '../../utils/validation.js';
 import { getConfig, MAX_CASCADE_DEPTH, CASCADE_TIMEOUT_MS } from '../../config.js';
 import { getValues, batchUpdate } from '../../services/sheets.js';
+import { buildHeaderIndex, RECIBO_HEADERS, PAGO_ENVIADO_HEADERS } from '../../constants/spreadsheet-headers.js';
 import { ReciboPagoMatcher, type MatchQuality } from '../../matching/matcher.js';
 import {
   DisplacementQueue,
@@ -288,6 +289,10 @@ async function doMatchRecibosWithPagos(
   const recibos: Array<Recibo & { row: number }> = [];
   const pagos: Array<Pago & { row: number }> = [];
 
+  // Use header-derived indices to avoid hardcoded offset arithmetic (ADV-332)
+  const rc = buildHeaderIndex(RECIBO_HEADERS);
+  const pc = buildHeaderIndex(PAGO_ENVIADO_HEADERS);
+
   if (recibosResult.value.length > 1) {
     for (let i = 1; i < recibosResult.value.length; i++) {
       const row = recibosResult.value[i];
@@ -295,25 +300,25 @@ async function doMatchRecibosWithPagos(
 
       recibos.push({
         row: i + 1,
-        fechaPago: normalizeSpreadsheetDate(row[0]),
-        fileId: String(row[1] || ''),
-        fileName: String(row[2] || ''),
-        tipoRecibo: (row[3] === 'liquidacion_final' ? 'liquidacion_final' : 'sueldo'),
-        nombreEmpleado: String(row[4] || ''),
-        cuilEmpleado: String(row[5] || ''),
-        legajo: String(row[6] || ''),
-        tareaDesempenada: row[7] ? String(row[7]) : undefined,
-        cuitEmpleador: String(row[8] || ''),
-        periodoAbonado: String(row[9] || ''),
-        subtotalRemuneraciones: parseNumber(row[10]) || 0,
-        subtotalDescuentos: parseNumber(row[11]) || 0,
-        totalNeto: parseNumber(row[12]) || 0,
-        processedAt: normalizeTimestamp(row[13]),
-        confidence: Number(row[14]) || 0,
-        needsReview: row[15] === 'YES',
-        matchedPagoFileId: row[16] ? String(row[16]) : undefined,
-        matchConfidence: validateMatchConfidence(row[17]),
-        hasCuitMatch: row[18] === 'YES',
+        fechaPago: normalizeSpreadsheetDate(row[rc('fechaPago')]),
+        fileId: String(row[rc('fileId')] || ''),
+        fileName: String(row[rc('fileName')] || ''),
+        tipoRecibo: (row[rc('tipoRecibo')] === 'liquidacion_final' ? 'liquidacion_final' : 'sueldo'),
+        nombreEmpleado: String(row[rc('nombreEmpleado')] || ''),
+        cuilEmpleado: String(row[rc('cuilEmpleado')] || ''),
+        legajo: String(row[rc('legajo')] || ''),
+        tareaDesempenada: row[rc('tareaDesempenada')] ? String(row[rc('tareaDesempenada')]) : undefined,
+        cuitEmpleador: String(row[rc('cuitEmpleador')] || ''),
+        periodoAbonado: String(row[rc('periodoAbonado')] || ''),
+        subtotalRemuneraciones: parseNumber(row[rc('subtotalRemuneraciones')]) || 0,
+        subtotalDescuentos: parseNumber(row[rc('subtotalDescuentos')]) || 0,
+        totalNeto: parseNumber(row[rc('totalNeto')]) || 0,
+        processedAt: normalizeTimestamp(row[rc('processedAt')]),
+        confidence: Number(row[rc('confidence')]) || 0,
+        needsReview: row[rc('needsReview')] === 'YES',
+        matchedPagoFileId: row[rc('matchedPagoFileId')] ? String(row[rc('matchedPagoFileId')]) : undefined,
+        matchConfidence: validateMatchConfidence(row[rc('matchConfidence')]),
+        hasCuitMatch: row[rc('hasCuitMatch')] === 'YES',
       });
     }
   }
@@ -325,21 +330,21 @@ async function doMatchRecibosWithPagos(
 
       pagos.push({
         row: i + 1,
-        fechaPago: normalizeSpreadsheetDate(row[0]),
-        fileId: String(row[1] || ''),
-        fileName: String(row[2] || ''),
-        banco: String(row[3] || ''),
-        importePagado: parseNumber(row[4]) || 0,
-        moneda: validateMoneda(row[5]),
-        referencia: row[6] ? String(row[6]) : undefined,
-        cuitPagador: row[7] ? String(row[7]) : undefined,
-        nombrePagador: row[8] ? String(row[8]) : undefined,
-        concepto: row[9] ? String(row[9]) : undefined,
-        processedAt: normalizeTimestamp(row[10]),
-        confidence: Number(row[11]) || 0,
-        needsReview: row[12] === 'YES',
-        matchedFacturaFileId: row[13] ? String(row[13]) : undefined,
-        matchConfidence: validateMatchConfidence(row[14]),
+        fechaPago: normalizeSpreadsheetDate(row[pc('fechaPago')]),
+        fileId: String(row[pc('fileId')] || ''),
+        fileName: String(row[pc('fileName')] || ''),
+        banco: String(row[pc('banco')] || ''),
+        importePagado: parseNumber(row[pc('importePagado')]) || 0,
+        moneda: validateMoneda(row[pc('moneda')]),
+        referencia: row[pc('referencia')] ? String(row[pc('referencia')]) : undefined,
+        cuitBeneficiario: row[pc('cuitBeneficiario')] ? String(row[pc('cuitBeneficiario')]) : undefined,
+        nombreBeneficiario: row[pc('nombreBeneficiario')] ? String(row[pc('nombreBeneficiario')]) : undefined,
+        concepto: row[pc('concepto')] ? String(row[pc('concepto')]) : undefined,
+        processedAt: normalizeTimestamp(row[pc('processedAt')]),
+        confidence: Number(row[pc('confidence')]) || 0,
+        needsReview: row[pc('needsReview')] === 'YES',
+        matchedFacturaFileId: row[pc('matchedFacturaFileId')] ? String(row[pc('matchedFacturaFileId')]) : undefined,
+        matchConfidence: validateMatchConfidence(row[pc('matchConfidence')]),
       });
     }
   }

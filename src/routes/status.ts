@@ -6,6 +6,7 @@ import type { FastifyInstance } from 'fastify';
 import { getConfig } from '../config.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { getProcessingQueue } from '../processing/queue.js';
+import { APP_VERSION } from '../utils/version.js';
 
 /**
  * Server start time for uptime calculation
@@ -90,8 +91,8 @@ export async function statusRoutes(server: FastifyInstance) {
     return {
       status: 'ok',
       timestamp: new Date().toISOString(),
-      version: '1.0.0',
-      environment: config.nodeEnv,
+      version: APP_VERSION,
+      environment: config.environment,
       uptime: formatUptime(startTime),
       startTime: startTime.toISOString(),
       queue: {

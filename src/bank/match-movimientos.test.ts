@@ -753,9 +753,27 @@ describe('matchAllMovimientos', () => {
     expect(withLock).toHaveBeenCalledWith(
       'document-processing',  // PROCESSING_LOCK_ID
       expect.any(Function),
-      300000,  // PROCESSING_LOCK_TIMEOUT_MS
-      300000   // Auto-expiry
+      300000,  // PROCESSING_LOCK_TIMEOUT_MS — waiter wait budget
+      900000   // PROCESSING_LOCK_EXPIRY_MS  — crash-recovery expiry (ADV-302)
     );
+  });
+
+  it('lock expiry used by matchAllMovimientos covers inner Comprobantes lock budget (ADV-351)', async () => {
+    // PROCESSING_LOCK_EXPIRY_MS must be >= COMPROBANTES_LOCK_EXPIRY_MS (900 000 ms) so that
+    // the outer processing lock does not expire while the inner subdiario Comprobantes lock
+    // is still legitimately held, preventing force-acquire during normal (slow) operation.
+    vi.mocked(withLock).mockResolvedValue({ ok: true, value: { matched: 0, skipped: 0 } as any });
+    await matchAllMovimientos();
+
+    const calls = vi.mocked(withLock).mock.calls;
+    expect(calls.length).toBeGreaterThan(0);
+    const lastCall = calls[calls.length - 1];
+    const expiryMs = lastCall[3] as number; // 4th arg = autoExpiryMs
+    // Must cover COMPROBANTES_LOCK_EXPIRY_MS = 900 000 ms
+    expect(expiryMs).toBeGreaterThanOrEqual(900000);
+    // Must be strictly greater than the waiter timeout
+    const timeoutMs = lastCall[2] as number; // 3rd arg = timeoutMs
+    expect(expiryMs).toBeGreaterThan(timeoutMs);
   });
 
   it('should return error when folder structure is not cached', async () => {
@@ -815,7 +833,7 @@ describe('matchAllMovimientos', () => {
 
     vi.mocked(updateDetalle).mockResolvedValue({
       ok: true,
-      value: 0,
+      value: { appliedCount: 0, skippedCount: 0, appliedKeys: new Set(['2025-01:2', '2025-01:3', '2025-01:4', '2025-01:5', '2025-01:6']) } as { appliedCount: number; skippedCount: number; appliedKeys: Set<string> },
     });
 
     const resultPromise = matchAllMovimientos();
@@ -881,7 +899,7 @@ describe('matchAllMovimientos', () => {
       confidence: 'HIGH',
     });
 
-    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: 1 });
+    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: { appliedCount: 1, skippedCount: 0, appliedKeys: new Set(['2025-01:2', '2025-01:3', '2025-01:4', '2025-01:5', '2025-01:6']) } as { appliedCount: number; skippedCount: number; appliedKeys: Set<string> } });
 
     const resultPromise = matchAllMovimientos();
     await vi.runAllTimersAsync();
@@ -938,7 +956,7 @@ describe('matchAllMovimientos', () => {
       confidence: 'HIGH',
     });
 
-    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: 1 });
+    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: { appliedCount: 1, skippedCount: 0, appliedKeys: new Set(['2025-01:2', '2025-01:3', '2025-01:4', '2025-01:5', '2025-01:6']) } as { appliedCount: number; skippedCount: number; appliedKeys: Set<string> } });
 
     const resultPromise = matchAllMovimientos();
     await vi.runAllTimersAsync();
@@ -989,7 +1007,7 @@ describe('matchAllMovimientos', () => {
 
     // mockMatchMovement already defaults to no_match in beforeEach
 
-    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: 0 });
+    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: { appliedCount: 0, skippedCount: 0, appliedKeys: new Set(['2025-01:2', '2025-01:3', '2025-01:4', '2025-01:5', '2025-01:6']) } as { appliedCount: number; skippedCount: number; appliedKeys: Set<string> } });
 
     const resultPromise = matchAllMovimientos();
     await vi.runAllTimersAsync();
@@ -1052,7 +1070,7 @@ describe('matchAllMovimientos', () => {
       confidence: 'HIGH',
     });
 
-    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: 1 });
+    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: { appliedCount: 1, skippedCount: 0, appliedKeys: new Set(['2025-01:2', '2025-01:3', '2025-01:4', '2025-01:5', '2025-01:6']) } as { appliedCount: number; skippedCount: number; appliedKeys: Set<string> } });
 
     const resultPromise = matchAllMovimientos({ force: true });
     await vi.runAllTimersAsync();
@@ -1096,7 +1114,7 @@ describe('matchAllMovimientos', () => {
       .mockResolvedValueOnce({ ok: false, error: new Error('BBVA error') })
       .mockResolvedValueOnce({ ok: true, value: [] });
 
-    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: 0 });
+    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: { appliedCount: 0, skippedCount: 0, appliedKeys: new Set(['2025-01:2', '2025-01:3', '2025-01:4', '2025-01:5', '2025-01:6']) } as { appliedCount: number; skippedCount: number; appliedKeys: Set<string> } });
 
     const resultPromise = matchAllMovimientos();
     await vi.runAllTimersAsync();
@@ -1157,7 +1175,7 @@ describe('matchAllMovimientos', () => {
       confidence: 'HIGH',
     });
 
-    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: 2 });
+    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: { appliedCount: 2, skippedCount: 0, appliedKeys: new Set(['2025-01:2', '2025-01:3', '2025-01:4', '2025-01:5', '2025-01:6']) } as { appliedCount: number; skippedCount: number; appliedKeys: Set<string> } });
 
     const resultPromise = matchAllMovimientos();
     await vi.runAllTimersAsync();
@@ -1230,7 +1248,7 @@ describe('matchAllMovimientos', () => {
       confidence: 'HIGH',
     });
 
-    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: 1 });
+    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: { appliedCount: 1, skippedCount: 0, appliedKeys: new Set(['2025-01:2', '2025-01:3', '2025-01:4', '2025-01:5', '2025-01:6']) } as { appliedCount: number; skippedCount: number; appliedKeys: Set<string> } });
 
     const resultPromise = matchAllMovimientos();
     await vi.runAllTimersAsync();
@@ -1304,7 +1322,7 @@ describe('matchAllMovimientos', () => {
       confidence: 'MEDIUM',
     });
 
-    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: 0 });
+    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: { appliedCount: 0, skippedCount: 0, appliedKeys: new Set(['2025-01:2', '2025-01:3', '2025-01:4', '2025-01:5', '2025-01:6']) } as { appliedCount: number; skippedCount: number; appliedKeys: Set<string> } });
 
     const resultPromise = matchAllMovimientos();
     await vi.runAllTimersAsync();
@@ -1336,9 +1354,11 @@ describe('matchAllMovimientos', () => {
         return {
           ok: true,
           value: [
+            // 19-col Facturas Recibidas header (A:S, tipoDeCambio column excluded from this mock)
             ['fechaemision', 'fileid', 'filename', 'tipocomprobante', 'nrofactura', 'cuitemisor', 'razonsocialemisor', 'importeneto', 'importeiva', 'importetotal', 'moneda', 'concepto', 'processedat', 'confidence', 'needsreview', 'matchedpagofileid', 'matchconfidence', 'hascuitmatch', 'pagada'],
-            ['2025-01-10', 'factura-a', 'a.pdf', 'B', '1', '123', '20123456786', 'PROVEEDOR SA', '30709076783', 'ADVA', '1000', 'ARS', '', '', '2025-01-10T10:00:00Z', '0.95', 'NO', '', ''],
-            ['2025-01-20', 'factura-b', 'b.pdf', 'B', '1', '124', '20123456786', 'PROVEEDOR SA', '30709076783', 'ADVA', '1000', 'ARS', '', '', '2025-01-20T10:00:00Z', '0.95', 'NO', '', ''],
+            // cuitEmisor at index 5 = '20123456786', importeTotal at index 9 = '1000'
+            ['2025-01-10', 'factura-a', 'a.pdf', 'B', '00001-00000001', '20123456786', 'PROVEEDOR SA', '826.45', '173.55', '1000', 'ARS', '', '2025-01-10T10:00:00Z', '0.95', 'NO', '', '', 'NO', 'NO'],
+            ['2025-01-20', 'factura-b', 'b.pdf', 'B', '00001-00000002', '20123456786', 'PROVEEDOR SA', '826.45', '173.55', '1000', 'ARS', '', '2025-01-20T10:00:00Z', '0.95', 'NO', '', '', 'NO', 'NO'],
           ],
         };
       }
@@ -1373,7 +1393,7 @@ describe('matchAllMovimientos', () => {
       confidence: 'HIGH',
     });
 
-    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: 0 });
+    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: { appliedCount: 0, skippedCount: 0, appliedKeys: new Set(['2025-01:2', '2025-01:3', '2025-01:4', '2025-01:5', '2025-01:6']) } as { appliedCount: number; skippedCount: number; appliedKeys: Set<string> } });
 
     const resultPromise = matchAllMovimientos();
     await vi.runAllTimersAsync();
@@ -1382,6 +1402,18 @@ describe('matchAllMovimientos', () => {
     expect(result.ok).toBe(true);
     // Should NOT replace - equal quality, keep existing (no churn)
     expect(updateDetalle).toHaveBeenCalledWith('bbva-id', []);
+
+    // Fixture alignment check (ADV-356): documents parsed from the correctly-aligned
+    // 19-col rows must carry cuitEmisor='20123456786' and importeTotal=1000.
+    expect(mockMatchMovement).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.arrayContaining([
+        expect.objectContaining({ cuitEmisor: '20123456786', importeTotal: 1000 }),
+      ]),
+      expect.anything(),
+      expect.anything(),
+      expect.anything()
+    );
   });
 
   it('keeps existing Tier 3 (referencia) match when new candidate is Tier 5 with closer date (ADV-120)', async () => {
@@ -1452,7 +1484,7 @@ describe('matchAllMovimientos', () => {
       confidence: 'LOW',
     });
 
-    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: 0 });
+    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: { appliedCount: 0, skippedCount: 0, appliedKeys: new Set(['2025-01:2', '2025-01:3', '2025-01:4', '2025-01:5', '2025-01:6']) } as { appliedCount: number; skippedCount: number; appliedKeys: Set<string> } });
 
     const resultPromise = matchAllMovimientos();
     await vi.runAllTimersAsync();
@@ -1523,7 +1555,7 @@ describe('matchAllMovimientos', () => {
       confidence: 'LOW',
     });
 
-    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: 0 });
+    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: { appliedCount: 0, skippedCount: 0, appliedKeys: new Set(['2025-01:2', '2025-01:3', '2025-01:4', '2025-01:5', '2025-01:6']) } as { appliedCount: number; skippedCount: number; appliedKeys: Set<string> } });
 
     const resultPromise = matchAllMovimientos();
     await vi.runAllTimersAsync();
@@ -1559,8 +1591,9 @@ describe('matchAllMovimientos', () => {
         return {
           ok: true,
           value: [
+            // 19-col header; cuitEmisor at index 5, importeTotal at index 9 (ADV-356)
             ['fechaemision', 'fileid', 'filename', 'tipocomprobante', 'nrofactura', 'cuitemisor', 'razonsocialemisor', 'importeneto', 'importeiva', 'importetotal', 'moneda', 'concepto', 'processedat', 'confidence', 'needsreview', 'matchedpagofileid', 'matchconfidence', 'hascuitmatch', 'pagada'],
-            ['2025-01-20', 'factura-b', 'b.pdf', 'B', '1', '124', '20123456786', 'PROVEEDOR SA', '30709076783', 'ADVA', '1000', 'ARS', '', '', '2025-01-20T10:00:00Z', '0.95', 'NO', '', ''],
+            ['2025-01-20', 'factura-b', 'b.pdf', 'B', '00001-00000002', '20123456786', 'PROVEEDOR SA', '826.45', '173.55', '1000', 'ARS', '', '2025-01-20T10:00:00Z', '0.95', 'NO', '', '', 'NO', 'NO'],
           ],
         };
       }
@@ -1595,7 +1628,7 @@ describe('matchAllMovimientos', () => {
       confidence: 'HIGH',
     });
 
-    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: 0 });
+    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: { appliedCount: 0, skippedCount: 0, appliedKeys: new Set(['2025-01:2', '2025-01:3', '2025-01:4', '2025-01:5', '2025-01:6']) } as { appliedCount: number; skippedCount: number; appliedKeys: Set<string> } });
 
     const resultPromise = matchAllMovimientos();
     await vi.runAllTimersAsync();
@@ -1615,6 +1648,86 @@ describe('matchAllMovimientos', () => {
 
     // Should NOT replace the match
     expect(updateDetalle).toHaveBeenCalledWith('bbva-id', []);
+  });
+
+  it('regression (ADV-356): misaligned 19-col fixture reads cuitEmisor as junk and importeTotal as 0, producing no candidate documents', async () => {
+    // This test documents the ADV-356 bug: the old misaligned fixture rows put garbage
+    // in the cuitEmisor and importeTotal slots, so the parser produced documents with
+    // cuitEmisor='' and importeTotal=0. The matcher got no viable candidates and the
+    // movement was left unmatched even though the document did exist in the sheet.
+    const mockFolderStructure = {
+      controlIngresosId: 'ingresos-id',
+      controlEgresosId: 'egresos-id',
+      bankSpreadsheets: new Map(),
+      movimientosSpreadsheets: new Map([['BBVA', 'bbva-id']]),
+    };
+
+    vi.mocked(withLock).mockImplementation(async (_id, fn) => {
+      const result = await fn();
+      return { ok: true, value: result };
+    });
+
+    vi.mocked(getCachedFolderStructure).mockReturnValue(mockFolderStructure as any);
+
+    // Intentionally misaligned row (the old bug): '123' at cuitemisor slot, 'ADVA' at importetotal slot
+    vi.mocked(getValues).mockImplementation(async (_spreadsheetId, range) => {
+      if (range === 'Facturas Recibidas!A:T') {
+        return {
+          ok: true,
+          value: [
+            ['fechaemision', 'fileid', 'filename', 'tipocomprobante', 'nrofactura', 'cuitemisor', 'razonsocialemisor', 'importeneto', 'importeiva', 'importetotal', 'moneda', 'concepto', 'processedat', 'confidence', 'needsreview', 'matchedpagofileid', 'matchconfidence', 'hascuitmatch', 'pagada'],
+            // Misaligned: extra junk columns shift cuitEmisor→'123', importeTotal→'ADVA'
+            ['2025-01-10', 'factura-a', 'a.pdf', 'B', '1', '123', '20123456786', 'PROVEEDOR SA', '30709076783', 'ADVA', '1000', 'ARS', '', '', '2025-01-10T10:00:00Z', '0.95', 'NO', '', ''],
+          ],
+        };
+      }
+      return { ok: true, value: [['header']] };
+    });
+
+    vi.mocked(getMovimientosToFill).mockResolvedValue({
+      ok: true,
+      value: [
+        {
+          sheetName: '2025-01',
+          rowNumber: 2,
+          fecha: '2025-01-15',
+          concepto: 'PAGO 20123456786',
+          debito: 1000,
+          credito: null,
+          saldo: 9000,
+          saldoCalculado: 9000,
+          matchedFileId: '',
+          detalle: '',
+          matchedType: '',
+        },
+      ],
+    });
+
+    // Mock matchMovement to capture what documents it was called with
+    mockMatchMovement.mockReturnValue({
+      matchType: 'no_match',
+      description: '',
+      matchedFileId: '',
+      confidence: 'LOW',
+    });
+
+    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: { appliedCount: 0, skippedCount: 0, appliedKeys: new Set<string>() } as { appliedCount: number; skippedCount: number; appliedKeys: Set<string> } });
+
+    const resultPromise = matchAllMovimientos();
+    await vi.runAllTimersAsync();
+    await resultPromise;
+
+    // The misaligned row produces a document with cuitEmisor='123' and importeTotal=0.
+    // This demonstrates the damage: the fixture alignment error silently corrupts the parsed data.
+    expect(mockMatchMovement).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.arrayContaining([
+        expect.objectContaining({ cuitEmisor: '123', importeTotal: 0 }),
+      ]),
+      expect.anything(),
+      expect.anything(),
+      expect.anything()
+    );
   });
 });
 
@@ -1686,7 +1799,7 @@ describe('bank fee and credit card payment detalle writing', () => {
       confidence: 'HIGH',
     });
 
-    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: 1 });
+    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: { appliedCount: 1, skippedCount: 0, appliedKeys: new Set(['2025-01:2', '2025-01:3', '2025-01:4', '2025-01:5', '2025-01:6']) } as { appliedCount: number; skippedCount: number; appliedKeys: Set<string> } });
 
     const resultPromise = matchAllMovimientos();
     await vi.runAllTimersAsync();
@@ -1747,7 +1860,7 @@ describe('bank fee and credit card payment detalle writing', () => {
       confidence: 'HIGH',
     });
 
-    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: 1 });
+    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: { appliedCount: 1, skippedCount: 0, appliedKeys: new Set(['2025-01:2', '2025-01:3', '2025-01:4', '2025-01:5', '2025-01:6']) } as { appliedCount: number; skippedCount: number; appliedKeys: Set<string> } });
 
     const resultPromise = matchAllMovimientos();
     await vi.runAllTimersAsync();
@@ -1803,7 +1916,7 @@ describe('bank fee and credit card payment detalle writing', () => {
 
     // mockMatchMovement defaults to no_match
 
-    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: 0 });
+    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: { appliedCount: 0, skippedCount: 0, appliedKeys: new Set(['2025-01:2', '2025-01:3', '2025-01:4', '2025-01:5', '2025-01:6']) } as { appliedCount: number; skippedCount: number; appliedKeys: Set<string> } });
 
     const resultPromise = matchAllMovimientos();
     await vi.runAllTimersAsync();
@@ -1859,7 +1972,7 @@ describe('bank fee and credit card payment detalle writing', () => {
       confidence: 'HIGH',
     });
 
-    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: 1 });
+    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: { appliedCount: 1, skippedCount: 0, appliedKeys: new Set(['2025-01:2', '2025-01:3', '2025-01:4', '2025-01:5', '2025-01:6']) } as { appliedCount: number; skippedCount: number; appliedKeys: Set<string> } });
 
     const resultPromise = matchAllMovimientos({ force: true });
     await vi.runAllTimersAsync();
@@ -1919,7 +2032,7 @@ describe('bank fee and credit card payment detalle writing', () => {
       confidence: 'HIGH',
     });
 
-    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: 0 });
+    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: { appliedCount: 0, skippedCount: 0, appliedKeys: new Set(['2025-01:2', '2025-01:3', '2025-01:4', '2025-01:5', '2025-01:6']) } as { appliedCount: number; skippedCount: number; appliedKeys: Set<string> } });
 
     const resultPromise = matchAllMovimientos();
     await vi.runAllTimersAsync();
@@ -1976,7 +2089,7 @@ describe('bank fee and credit card payment detalle writing', () => {
       confidence: 'HIGH',
     });
 
-    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: 1 });
+    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: { appliedCount: 1, skippedCount: 0, appliedKeys: new Set(['2025-01:2', '2025-01:3', '2025-01:4', '2025-01:5', '2025-01:6']) } as { appliedCount: number; skippedCount: number; appliedKeys: Set<string> } });
 
     const resultPromise = matchAllMovimientos();
     await vi.runAllTimersAsync();
@@ -2151,7 +2264,7 @@ describe('TOCTOU protection', () => {
 
     // updateDetalle should receive expected version and skip if mismatch
     // The mock will simulate version mismatch by returning 0 updates
-    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: 0 });
+    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: { appliedCount: 0, skippedCount: 0, appliedKeys: new Set(['2025-01:2', '2025-01:3', '2025-01:4', '2025-01:5', '2025-01:6']) } as { appliedCount: number; skippedCount: number; appliedKeys: Set<string> } });
 
     const resultPromise = matchAllMovimientos();
     await vi.runAllTimersAsync();
@@ -2219,7 +2332,7 @@ describe('TOCTOU protection', () => {
       confidence: 'HIGH',
     });
 
-    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: 1 });
+    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: { appliedCount: 1, skippedCount: 0, appliedKeys: new Set(['2025-01:2', '2025-01:3', '2025-01:4', '2025-01:5', '2025-01:6']) } as { appliedCount: number; skippedCount: number; appliedKeys: Set<string> } });
 
     const resultPromise = matchAllMovimientos({ force: true });
     await vi.runAllTimersAsync();
@@ -2307,7 +2420,7 @@ describe('exchange rate prefetch', () => {
     });
 
     vi.mocked(getMovimientosToFill).mockResolvedValue({ ok: true, value: [] });
-    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: 0 });
+    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: { appliedCount: 0, skippedCount: 0, appliedKeys: new Set(['2025-01:2', '2025-01:3', '2025-01:4', '2025-01:5', '2025-01:6']) } as { appliedCount: number; skippedCount: number; appliedKeys: Set<string> } });
 
     const resultPromise = matchAllMovimientos();
     await vi.runAllTimersAsync();
@@ -2350,7 +2463,7 @@ describe('exchange rate prefetch', () => {
     });
 
     vi.mocked(getMovimientosToFill).mockResolvedValue({ ok: true, value: [] });
-    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: 0 });
+    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: { appliedCount: 0, skippedCount: 0, appliedKeys: new Set(['2025-01:2', '2025-01:3', '2025-01:4', '2025-01:5', '2025-01:6']) } as { appliedCount: number; skippedCount: number; appliedKeys: Set<string> } });
 
     const resultPromise = matchAllMovimientos();
     await vi.runAllTimersAsync();
@@ -2394,7 +2507,7 @@ describe('exchange rate prefetch', () => {
     vi.mocked(prefetchExchangeRates).mockRejectedValue(new Error('API rate limited'));
 
     vi.mocked(getMovimientosToFill).mockResolvedValue({ ok: true, value: [] });
-    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: 0 });
+    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: { appliedCount: 0, skippedCount: 0, appliedKeys: new Set(['2025-01:2', '2025-01:3', '2025-01:4', '2025-01:5', '2025-01:6']) } as { appliedCount: number; skippedCount: number; appliedKeys: Set<string> } });
 
     const resultPromise = matchAllMovimientos();
     await vi.runAllTimersAsync();
@@ -2407,6 +2520,50 @@ describe('exchange rate prefetch', () => {
       expect.stringContaining('prefetch'),
       expect.objectContaining({ module: 'match-movimientos' })
     );
+  });
+
+  it('should include USD pagos enviados fechaPago in prefetchExchangeRates (ADV-318)', async () => {
+    const mockFolderStructure = {
+      controlIngresosId: 'ingresos-id',
+      controlEgresosId: 'egresos-id',
+      bankSpreadsheets: new Map(),
+      movimientosSpreadsheets: new Map([['BBVA', 'bbva-id']]),
+    };
+
+    vi.mocked(withLock).mockImplementation(async (_id, fn) => {
+      const result = await fn();
+      return { ok: true, value: result };
+    });
+
+    vi.mocked(getCachedFolderStructure).mockReturnValue(mockFolderStructure as any);
+
+    // Mock Control data: only Pagos Enviados has USD entries
+    vi.mocked(getValues).mockImplementation(async (_spreadsheetId, range) => {
+      if (range === 'Pagos Enviados!A:Q') {
+        return {
+          ok: true,
+          value: [
+            ['fechaPago', 'fileId', 'fileName', 'banco', 'importePagado', 'moneda', 'referencia', 'cuitPagador', 'nombrePagador', 'cuitBeneficiario', 'nombreBeneficiario', 'concepto', 'processedAt', 'confidence', 'needsReview'],
+            ['2025-09-15', 'pago-env-1', 'pago-env-1.pdf', 'GALICIA', '1200', 'USD', '', '20123456786', 'SUPPLIER SA', '30709076783', 'ADVA', '', '2025-09-15T10:00:00Z', '0.95', 'NO'],
+          ],
+        };
+      }
+      return { ok: true, value: [['header']] };
+    });
+
+    vi.mocked(getMovimientosToFill).mockResolvedValue({ ok: true, value: [] });
+    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: { appliedCount: 0, skippedCount: 0, appliedKeys: new Set(['2025-01:2', '2025-01:3', '2025-01:4', '2025-01:5', '2025-01:6']) } as { appliedCount: number; skippedCount: number; appliedKeys: Set<string> } });
+
+    const resultPromise = matchAllMovimientos();
+    await vi.runAllTimersAsync();
+    const result = await resultPromise;
+
+    expect(result.ok).toBe(true);
+
+    // prefetchExchangeRates must be called with the USD pago enviado date (ADV-318)
+    expect(prefetchExchangeRates).toHaveBeenCalledTimes(1);
+    const calledDates = vi.mocked(prefetchExchangeRates).mock.calls[0][0];
+    expect(calledDates).toContain('2025-09-15'); // USD pago enviado fechaPago
   });
 
 });
@@ -2481,7 +2638,7 @@ describe('MANUAL matchedType and usedFileIds deduplication', () => {
       confidence: 'HIGH',
     });
 
-    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: 0 });
+    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: { appliedCount: 0, skippedCount: 0, appliedKeys: new Set(['2025-01:2', '2025-01:3', '2025-01:4', '2025-01:5', '2025-01:6']) } as { appliedCount: number; skippedCount: number; appliedKeys: Set<string> } });
 
     const resultPromise = matchAllMovimientos({ force: true });
     await vi.runAllTimersAsync();
@@ -2554,7 +2711,7 @@ describe('MANUAL matchedType and usedFileIds deduplication', () => {
       confidence: 'LOW',
     });
 
-    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: 0 });
+    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: { appliedCount: 0, skippedCount: 0, appliedKeys: new Set(['2025-01:2', '2025-01:3', '2025-01:4', '2025-01:5', '2025-01:6']) } as { appliedCount: number; skippedCount: number; appliedKeys: Set<string> } });
 
     const resultPromise = matchAllMovimientos();
     await vi.runAllTimersAsync();
@@ -2617,7 +2774,7 @@ describe('MANUAL matchedType and usedFileIds deduplication', () => {
       ],
     });
 
-    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: 1 });
+    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: { appliedCount: 1, skippedCount: 0, appliedKeys: new Set(['2025-01:2', '2025-01:3', '2025-01:4', '2025-01:5', '2025-01:6']) } as { appliedCount: number; skippedCount: number; appliedKeys: Set<string> } });
 
     const resultPromise = matchAllMovimientos();
     await vi.runAllTimersAsync();
@@ -2703,7 +2860,7 @@ describe('MANUAL matchedType and usedFileIds deduplication', () => {
       confidence: 'HIGH',
     });
 
-    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: 2 });
+    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: { appliedCount: 2, skippedCount: 0, appliedKeys: new Set(['2025-01:2', '2025-01:3', '2025-01:4', '2025-01:5', '2025-01:6']) } as { appliedCount: number; skippedCount: number; appliedKeys: Set<string> } });
 
     const resultPromise = matchAllMovimientos();
     await vi.runAllTimersAsync();
@@ -2794,7 +2951,7 @@ describe('MANUAL matchedType and usedFileIds deduplication', () => {
         confidence: 'HIGH',
       });
 
-    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: 2 });
+    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: { appliedCount: 2, skippedCount: 0, appliedKeys: new Set(['2025-01:2', '2025-01:3', '2025-01:4', '2025-01:5', '2025-01:6']) } as { appliedCount: number; skippedCount: number; appliedKeys: Set<string> } });
 
     const resultPromise = matchAllMovimientos();
     await vi.runAllTimersAsync();
@@ -2863,7 +3020,7 @@ describe('MANUAL matchedType and usedFileIds deduplication', () => {
       .mockReturnValueOnce({ matchType: 'direct_factura', description: 'Match B', matchedFileId: 'file2', confidence: 'HIGH' })
       .mockReturnValueOnce({ matchType: 'direct_factura', description: 'Match C', matchedFileId: 'file3', confidence: 'HIGH' });
 
-    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: 3 });
+    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: { appliedCount: 3, skippedCount: 0, appliedKeys: new Set(['2025-01:2', '2025-01:3', '2025-01:4', '2025-01:5', '2025-01:6']) } as { appliedCount: number; skippedCount: number; appliedKeys: Set<string> } });
 
     const resultPromise = matchAllMovimientos();
     await vi.runAllTimersAsync();
@@ -2936,7 +3093,7 @@ describe('MANUAL matchedType and usedFileIds deduplication', () => {
       confidence: 'LOW',
     });
 
-    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: 1 });
+    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: { appliedCount: 1, skippedCount: 0, appliedKeys: new Set(['2025-01:2', '2025-01:3', '2025-01:4', '2025-01:5', '2025-01:6']) } as { appliedCount: number; skippedCount: number; appliedKeys: Set<string> } });
 
     const resultPromise = matchAllMovimientos({ force: true });
     await vi.runAllTimersAsync();
@@ -3004,7 +3161,7 @@ describe('MANUAL matchedType and usedFileIds deduplication', () => {
       confidence: 'HIGH',
     });
 
-    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: 1 });
+    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: { appliedCount: 1, skippedCount: 0, appliedKeys: new Set(['2025-01:2', '2025-01:3', '2025-01:4', '2025-01:5', '2025-01:6']) } as { appliedCount: number; skippedCount: number; appliedKeys: Set<string> } });
 
     const resultPromise = matchAllMovimientos({ force: true });
     await vi.runAllTimersAsync();
@@ -3070,7 +3227,7 @@ describe('MANUAL matchedType and usedFileIds deduplication', () => {
       confidence: 'LOW',
     });
 
-    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: 0 });
+    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: { appliedCount: 0, skippedCount: 0, appliedKeys: new Set(['2025-01:2', '2025-01:3', '2025-01:4', '2025-01:5', '2025-01:6']) } as { appliedCount: number; skippedCount: number; appliedKeys: Set<string> } });
 
     const resultPromise = matchAllMovimientos(); // no force
     await vi.runAllTimersAsync();
@@ -3124,7 +3281,7 @@ describe('MANUAL matchedType and usedFileIds deduplication', () => {
       .mockReturnValueOnce({ matchType: 'direct_factura', description: 'Same match', matchedFileId: 'existing-file', confidence: 'HIGH' })
       .mockReturnValueOnce({ matchType: 'direct_factura', description: 'New match', matchedFileId: 'new-file', confidence: 'HIGH' });
 
-    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: 1 });
+    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: { appliedCount: 1, skippedCount: 0, appliedKeys: new Set(['2025-01:2', '2025-01:3', '2025-01:4', '2025-01:5', '2025-01:6']) } as { appliedCount: number; skippedCount: number; appliedKeys: Set<string> } });
 
     const resultPromise = matchAllMovimientos();
     await vi.runAllTimersAsync();
@@ -3184,7 +3341,7 @@ describe('MANUAL matchedType and usedFileIds deduplication', () => {
       matchType: 'direct_factura', description: 'Match', matchedFileId: 'new-file', confidence: 'HIGH',
     });
 
-    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: 1 });
+    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: { appliedCount: 1, skippedCount: 0, appliedKeys: new Set(['2025-01:2', '2025-01:3', '2025-01:4', '2025-01:5', '2025-01:6']) } as { appliedCount: number; skippedCount: number; appliedKeys: Set<string> } });
 
     const resultPromise = matchAllMovimientos();
     await vi.runAllTimersAsync();
@@ -3411,7 +3568,7 @@ describe('cross-bank deduplication', () => {
       return { matchType: 'direct_factura', description: 'Shared doc match', matchedFileId: 'shared-doc-1', confidence: 'HIGH' };
     });
 
-    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: 1 });
+    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: { appliedCount: 1, skippedCount: 0, appliedKeys: new Set(['2025-01:2', '2025-01:3', '2025-01:4', '2025-01:5', '2025-01:6']) } as { appliedCount: number; skippedCount: number; appliedKeys: Set<string> } });
 
     const resultPromise = matchAllMovimientos();
     await vi.runAllTimersAsync();
@@ -3481,7 +3638,7 @@ describe('cross-bank deduplication', () => {
       return { matchType: 'direct_factura', description: 'Match', matchedFileId: 'manual-doc-1', confidence: 'HIGH' };
     });
 
-    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: 1 });
+    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: { appliedCount: 1, skippedCount: 0, appliedKeys: new Set(['2025-01:2', '2025-01:3', '2025-01:4', '2025-01:5', '2025-01:6']) } as { appliedCount: number; skippedCount: number; appliedKeys: Set<string> } });
 
     const resultPromise = matchAllMovimientos();
     await vi.runAllTimersAsync();
@@ -3534,7 +3691,7 @@ describe('cross-bank deduplication', () => {
       return { matchType: 'direct_factura', description: 'Match doc-A', matchedFileId: 'doc-A', confidence: 'HIGH' };
     });
 
-    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: 1 });
+    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: { appliedCount: 1, skippedCount: 0, appliedKeys: new Set(['2025-01:2', '2025-01:3', '2025-01:4', '2025-01:5', '2025-01:6']) } as { appliedCount: number; skippedCount: number; appliedKeys: Set<string> } });
 
     const resultPromise = matchAllMovimientos();
     await vi.runAllTimersAsync();
@@ -3596,7 +3753,7 @@ describe('pagada updates from movimientos matching', () => {
     });
 
     vi.mocked(getCachedFolderStructure).mockReturnValue(mockFolderStructure as any);
-    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: 1 });
+    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: { appliedCount: 1, skippedCount: 0, appliedKeys: new Set(['2025-01:2', '2025-01:3', '2025-01:4', '2025-01:5', '2025-01:6']) } as { appliedCount: number; skippedCount: number; appliedKeys: Set<string> } });
   }
 
   it('should write pagada=SI to Control Egresos when DEBIT movimiento matches factura_recibida', async () => {
@@ -3959,7 +4116,7 @@ describe('syncPagosPendientes and syncCobrosPendientes called after pagada write
       value: [],
     });
 
-    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: 0 });
+    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: { appliedCount: 0, skippedCount: 0, appliedKeys: new Set(['2025-01:2', '2025-01:3', '2025-01:4', '2025-01:5', '2025-01:6']) } as { appliedCount: number; skippedCount: number; appliedKeys: Set<string> } });
 
     const resultPromise = matchAllMovimientos();
     await vi.runAllTimersAsync();
@@ -4008,7 +4165,7 @@ describe('pagadaErrors tracking (ADV-202)', () => {
     });
 
     vi.mocked(getCachedFolderStructure).mockReturnValue(mockFolderStructure as any);
-    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: 1 });
+    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: { appliedCount: 1, skippedCount: 0, appliedKeys: new Set(['2025-01:2', '2025-01:3', '2025-01:4', '2025-01:5', '2025-01:6']) } as { appliedCount: number; skippedCount: number; appliedKeys: Set<string> } });
   }
 
   it('should set pagadaErrors when batchUpdate fails while detalle succeeds', async () => {
@@ -4156,7 +4313,7 @@ describe('syncSubdiario called after syncCobrosPendientes (ADV-248)', () => {
     vi.mocked(getCachedFolderStructure).mockReturnValue(mockFolderStructure as any);
     vi.mocked(getValues).mockResolvedValue({ ok: true, value: [['header']] });
     vi.mocked(getMovimientosToFill).mockResolvedValue({ ok: true, value: [] });
-    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: 0 });
+    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: { appliedCount: 0, skippedCount: 0, appliedKeys: new Set(['2025-01:2', '2025-01:3', '2025-01:4', '2025-01:5', '2025-01:6']) } as { appliedCount: number; skippedCount: number; appliedKeys: Set<string> } });
   }
 
   it('calls syncSubdiario after syncPagosPendientes and syncCobrosPendientes', async () => {
@@ -4249,5 +4406,859 @@ describe('syncSubdiario called after syncCobrosPendientes (ADV-248)', () => {
     // syncSubdiario is always called (it uses rootId, not dashboardId)
     // but should still run without crashing
     expect(syncSubdiario).toHaveBeenCalled();
+  });
+});
+
+describe('ADV-319: buildMatchQuality tier semantics', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.useFakeTimers();
+    mockMatchMovement = vi.fn().mockReturnValue({
+      matchType: 'no_match',
+      description: '',
+      matchedFileId: '',
+      confidence: 'LOW',
+    });
+    mockMatchCreditMovement = vi.fn().mockReturnValue({
+      matchType: 'no_match',
+      description: '',
+      matchedFileId: '',
+      confidence: 'LOW',
+    });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('factura_recibida with matchedPagoFileId is NOT tier 1 and is displaced by a genuine pago at equal date distance', async () => {
+    // Bug: factura with matchedPagoFileId gets tier 1 via hasLinkedPago=true,
+    // which makes it equal to a genuine pago_enviado with linked factura.
+    // After fix: factura with matchedPagoFileId gets tier 5 (no CUIT/keyword match);
+    // the pago_enviado gets tier 1 → replaces the existing match.
+    const mockFolderStructure = {
+      controlIngresosId: 'ingresos-id',
+      controlEgresosId: 'egresos-id',
+      bankSpreadsheets: new Map(),
+      movimientosSpreadsheets: new Map([['BBVA', 'bbva-id']]),
+    };
+
+    vi.mocked(withLock).mockImplementation(async (_id, fn) => {
+      const result = await fn();
+      return { ok: true, value: result };
+    });
+    vi.mocked(getCachedFolderStructure).mockReturnValue(mockFolderStructure as any);
+
+    vi.mocked(getValues).mockImplementation(async (_spreadsheetId, range) => {
+      if (range === 'Facturas Recibidas!A:T') {
+        return {
+          ok: true,
+          value: [
+            ['fechaemision', 'fileid', 'filename', 'tipocomprobante', 'nrofactura', 'cuitemisor', 'razonsocialemisor', 'importeneto', 'importeiva', 'importetotal', 'moneda', 'concepto', 'processedat', 'confidence', 'needsreview', 'matchedpagofileid', 'matchconfidence', 'hascuitmatch', 'pagada'],
+            // factura-with-pago: matchedPagoFileId set, date 3 days before movement, CUIT not in concepto
+            ['2025-01-12', 'factura-with-pago', 'fac.pdf', 'B', '1', '20111111119', 'EMPRESA XYZ', '', '', '1000', 'ARS', '', '', '0.95', 'NO', 'existing-pago', '', '', ''],
+          ],
+        };
+      }
+      if (range === 'Pagos Enviados!A:Q') {
+        return {
+          ok: true,
+          value: [
+            ['fechapago', 'fileid', 'filename', 'banco', 'importepagado', 'moneda', 'referencia', 'cuitpagador', 'nombrepagador', 'cuitbeneficiario', 'nombrebeneficiario', 'concepto', 'processedat', 'confidence', 'needsreview', 'matchedfacturafileid', 'matchconfidence'],
+            // pago-with-factura: matchedFacturaFileId set, same 3 days away
+            ['2025-01-12', 'pago-with-factura', 'pago.pdf', 'BBVA', '1000', 'ARS', '', '', '', '20111111119', 'EMPRESA XYZ', '', '', '0.95', 'NO', 'some-linked-factura', ''],
+          ],
+        };
+      }
+      return { ok: true, value: [['header']] };
+    });
+
+    // Movement already matched to factura-with-pago (3 days away from movement date)
+    vi.mocked(getMovimientosToFill).mockResolvedValue({
+      ok: true,
+      value: [
+        {
+          sheetName: '2025-01',
+          rowNumber: 2,
+          fecha: '2025-01-15',
+          concepto: 'PAGO GENERICO',  // No CUIT, no keyword overlap with EMPRESA XYZ
+          debito: 1000,
+          credito: null,
+          saldo: 9000,
+          saldoCalculado: 9000,
+          matchedFileId: 'factura-with-pago',
+          detalle: 'Factura Recibida de EMPRESA XYZ',
+          matchedType: '',
+        },
+      ],
+    });
+
+    // New candidate: genuine pago_enviado with linked factura (also 3 days away)
+    mockMatchMovement.mockReturnValue({
+      matchType: 'direct_pago',
+      description: 'Pago a EMPRESA XYZ',
+      matchedFileId: 'pago-with-factura',
+      confidence: 'HIGH',
+    });
+
+    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: { appliedCount: 1, skippedCount: 0, appliedKeys: new Set(['2025-01:2', '2025-01:3', '2025-01:4', '2025-01:5', '2025-01:6']) } as { appliedCount: number; skippedCount: number; appliedKeys: Set<string> } });
+
+    const resultPromise = matchAllMovimientos();
+    await vi.runAllTimersAsync();
+    const result = await resultPromise;
+
+    expect(result.ok).toBe(true);
+    // After fix: tier-1 pago displaces tier-5 factura (both 3 days away)
+    expect(updateDetalle).toHaveBeenCalledWith('bbva-id', expect.arrayContaining([
+      expect.objectContaining({ matchedFileId: 'pago-with-factura' }),
+    ]));
+  });
+
+  it('dashed CUIT in concepto yields tier 2 via extractCuitFromText and displaces closer tier-5 match', async () => {
+    // Bug: raw includes() misses "20-12345678-6" when checking for "20123456786".
+    // After fix: extractCuitFromText normalises the dashed CUIT → tier 2,
+    // which beats the existing tier-5 match even though that one is closer in date.
+    const mockFolderStructure = {
+      controlIngresosId: 'ingresos-id',
+      controlEgresosId: 'egresos-id',
+      bankSpreadsheets: new Map(),
+      movimientosSpreadsheets: new Map([['BBVA', 'bbva-id']]),
+    };
+
+    vi.mocked(withLock).mockImplementation(async (_id, fn) => {
+      const result = await fn();
+      return { ok: true, value: result };
+    });
+    vi.mocked(getCachedFolderStructure).mockReturnValue(mockFolderStructure as any);
+
+    vi.mocked(getValues).mockImplementation(async (_spreadsheetId, range) => {
+      if (range === 'Facturas Recibidas!A:T') {
+        return {
+          ok: true,
+          value: [
+            ['fechaemision', 'fileid', 'filename', 'tipocomprobante', 'nrofactura', 'cuitemisor', 'razonsocialemisor', 'importeneto', 'importeiva', 'importetotal', 'moneda', 'concepto', 'processedat', 'confidence', 'needsreview', 'matchedpagofileid', 'matchconfidence', 'hascuitmatch', 'pagada'],
+            // factura-other: different CUIT, 1 day away from movement (tier 5, closer date)
+            ['2025-01-14', 'factura-other', 'other.pdf', 'B', '1', '27234567891', 'OTRO SA', '', '', '1000', 'ARS', '', '', '0.95', 'NO', '', '', '', ''],
+            // factura-cuit: CUIT=20123456786, 10 days away — tier 2 after fix (dashed CUIT match)
+            ['2025-01-05', 'factura-cuit', 'cuit.pdf', 'B', '2', '20123456786', 'EMPRESA TEST', '', '', '1000', 'ARS', '', '', '0.95', 'NO', '', '', '', ''],
+          ],
+        };
+      }
+      return { ok: true, value: [['header']] };
+    });
+
+    // Movement already matched to factura-other (1 day away, tier 5 — no CUIT/keyword match)
+    vi.mocked(getMovimientosToFill).mockResolvedValue({
+      ok: true,
+      value: [
+        {
+          sheetName: '2025-01',
+          rowNumber: 2,
+          fecha: '2025-01-15',
+          // Dashed CUIT "20-12345678-6" → extractCuitFromText returns "20123456786"
+          // Raw includes('20123456786') would NOT match this dashed form
+          concepto: 'PAGO 20-12345678-6 PROVEEDOR',
+          debito: 1000,
+          credito: null,
+          saldo: 9000,
+          saldoCalculado: 9000,
+          matchedFileId: 'factura-other',
+          detalle: 'Factura Recibida de OTRO SA',
+          matchedType: '',
+        },
+      ],
+    });
+
+    // New candidate: factura-cuit — 10 days away but CUIT match via dashed format
+    mockMatchMovement.mockReturnValue({
+      matchType: 'direct_factura',
+      description: 'Factura Recibida de EMPRESA TEST',
+      matchedFileId: 'factura-cuit',
+      confidence: 'HIGH',
+    });
+
+    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: { appliedCount: 1, skippedCount: 0, appliedKeys: new Set(['2025-01:2', '2025-01:3', '2025-01:4', '2025-01:5', '2025-01:6']) } as { appliedCount: number; skippedCount: number; appliedKeys: Set<string> } });
+
+    const resultPromise = matchAllMovimientos();
+    await vi.runAllTimersAsync();
+    const result = await resultPromise;
+
+    expect(result.ok).toBe(true);
+    // After fix: tier-2 (dashed CUIT) displaces tier-5 even with worse date distance
+    expect(updateDetalle).toHaveBeenCalledWith('bbva-id', expect.arrayContaining([
+      expect.objectContaining({ matchedFileId: 'factura-cuit' }),
+    ]));
+  });
+});
+
+describe('ADV-324: counterpart document exclusion', () => {
+  const PAGO_ENV_HEADERS = ['fechapago', 'fileid', 'filename', 'banco', 'importepagado', 'moneda', 'referencia', 'cuitpagador', 'nombrepagador', 'cuitbeneficiario', 'nombrebeneficiario', 'concepto', 'processedat', 'confidence', 'needsreview', 'matchedfacturafileid', 'matchconfidence'];
+  const FAC_REC_HEADERS = ['fechaemision', 'fileid', 'filename', 'tipocomprobante', 'nrofactura', 'cuitemisor', 'razonsocialemisor', 'importeneto', 'importeiva', 'importetotal', 'moneda', 'concepto', 'processedat', 'confidence', 'needsreview', 'matchedpagofileid', 'matchconfidence', 'hascuitmatch', 'pagada'];
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.useFakeTimers();
+    mockMatchMovement = vi.fn().mockReturnValue({
+      matchType: 'no_match',
+      description: '',
+      matchedFileId: '',
+      confidence: 'LOW',
+    });
+    mockMatchCreditMovement = vi.fn().mockReturnValue({
+      matchType: 'no_match',
+      description: '',
+      matchedFileId: '',
+      confidence: 'LOW',
+    });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  function setupBase() {
+    const mockFolderStructure = {
+      controlIngresosId: 'ingresos-id',
+      controlEgresosId: 'egresos-id',
+      bankSpreadsheets: new Map(),
+      movimientosSpreadsheets: new Map([['BBVA', 'bbva-id']]),
+    };
+    vi.mocked(withLock).mockImplementation(async (_id, fn) => {
+      const result = await fn();
+      return { ok: true, value: result };
+    });
+    vi.mocked(getCachedFolderStructure).mockReturnValue(mockFolderStructure as any);
+    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: { appliedCount: 0, skippedCount: 0, appliedKeys: new Set(['2025-01:2', '2025-01:3', '2025-01:4', '2025-01:5', '2025-01:6']) } as { appliedCount: number; skippedCount: number; appliedKeys: Set<string> } });
+  }
+
+  it('pago-P with matchedFacturaFileId=factura-F: pre-seed excludes both P and F so movement B cannot steal F', async () => {
+    // Bug: only P is pre-seeded; F remains available and can be double-matched.
+    // After fix: pre-seed also adds F → movement B's matcher call sees F as excluded.
+    setupBase();
+
+    vi.mocked(getValues).mockImplementation(async (_id, range) => {
+      if (range === 'Pagos Enviados!A:Q') {
+        return {
+          ok: true,
+          value: [
+            PAGO_ENV_HEADERS,
+            // pago-P: linked to factura-F via matchedFacturaFileId
+            ['2025-01-10', 'pago-P', 'pago.pdf', 'BBVA', '1000', 'ARS', '', '', '', '20123456786', 'PROVEEDOR SA', '', '', '0.95', 'NO', 'factura-F', ''],
+          ],
+        };
+      }
+      if (range === 'Facturas Recibidas!A:T') {
+        return {
+          ok: true,
+          value: [
+            FAC_REC_HEADERS,
+            ['2025-01-10', 'factura-F', 'factura.pdf', 'B', '1', '20123456786', 'PROVEEDOR SA', '', '', '1000', 'ARS', '', '', '0.95', 'NO', 'pago-P', '', '', ''],
+          ],
+        };
+      }
+      return { ok: true, value: [['header']] };
+    });
+
+    // Two debit movements: A already matched to pago-P, B unmatched
+    vi.mocked(getMovimientosToFill).mockResolvedValue({
+      ok: true,
+      value: [
+        {
+          sheetName: '2025-01', rowNumber: 2, fecha: '2025-01-15',
+          concepto: 'PAGO PROVEEDOR SA', debito: 1000, credito: null,
+          saldo: 9000, saldoCalculado: 9000,
+          matchedFileId: 'pago-P', detalle: 'Pago a PROVEEDOR SA', matchedType: '',
+        },
+        {
+          sheetName: '2025-01', rowNumber: 3, fecha: '2025-01-16',
+          concepto: 'PAGO PROVEEDOR SA', debito: 1000, credito: null,
+          saldo: 8000, saldoCalculado: 8000,
+          matchedFileId: '', detalle: '', matchedType: '',
+        },
+      ],
+    });
+
+    const resultPromise = matchAllMovimientos();
+    await vi.runAllTimersAsync();
+    await resultPromise;
+
+    // Matcher called twice (once per non-MANUAL movement)
+    expect(mockMatchMovement).toHaveBeenCalledTimes(2);
+    // Movement B's excludeFileIds (2nd call, arg index 4) must contain 'factura-F'
+    const movBExcludeSet = mockMatchMovement.mock.calls[1][4] as Set<string>;
+    expect(movBExcludeSet).toBeInstanceOf(Set);
+    expect(movBExcludeSet.has('factura-F')).toBe(true);
+  });
+
+  it('replacement of P frees both P and its counterpart F for subsequent movements (force=true)', async () => {
+    // After movement A's match is force-replaced (pago-P → pago-Q), pago-P is freed.
+    // After fix: factura-F (counterpart of pago-P) is also freed so movement C can see it.
+    // force=true is used to ensure replacement unconditionally (avoids quality-comparison
+    // keeping pago-P at tier-1 since it has a linked factura via matchedFacturaFileId).
+    setupBase();
+
+    vi.mocked(getValues).mockImplementation(async (_id, range) => {
+      if (range === 'Pagos Enviados!A:Q') {
+        return {
+          ok: true,
+          value: [
+            PAGO_ENV_HEADERS,
+            // pago-P: linked to factura-F via matchedFacturaFileId
+            ['2025-01-10', 'pago-P', 'pago.pdf', 'BBVA', '1000', 'ARS', '', '', '', '20123456786', 'PROVEEDOR SA', '', '', '0.95', 'NO', 'factura-F', ''],
+          ],
+        };
+      }
+      if (range === 'Facturas Recibidas!A:T') {
+        return {
+          ok: true,
+          value: [
+            FAC_REC_HEADERS,
+            ['2025-01-10', 'factura-F', 'factura.pdf', 'B', '1', '20123456786', 'PROVEEDOR SA', '', '', '1000', 'ARS', '', '', '0.95', 'NO', 'pago-P', '', '', ''],
+          ],
+        };
+      }
+      return { ok: true, value: [['header']] };
+    });
+
+    // Three movements:
+    // A: matched to pago-P, force-replaced by pago-Q
+    // B: unmatched dummy
+    // C: unmatched — should see factura-F as available (freed by replacement of pago-P)
+    vi.mocked(getMovimientosToFill).mockResolvedValue({
+      ok: true,
+      value: [
+        {
+          sheetName: '2025-01', rowNumber: 2, fecha: '2025-01-15',
+          concepto: 'PAGO PROVEEDOR SA', debito: 1000, credito: null,
+          saldo: 9000, saldoCalculado: 9000,
+          matchedFileId: 'pago-P', detalle: 'Pago a PROVEEDOR SA', matchedType: '',
+        },
+        {
+          sheetName: '2025-01', rowNumber: 3, fecha: '2025-01-16',
+          concepto: 'GENERICO', debito: 1000, credito: null,
+          saldo: 8000, saldoCalculado: 8000,
+          matchedFileId: '', detalle: '', matchedType: '',
+        },
+        {
+          sheetName: '2025-01', rowNumber: 4, fecha: '2025-01-17',
+          concepto: 'GENERICO', debito: 1000, credito: null,
+          saldo: 7000, saldoCalculado: 7000,
+          matchedFileId: '', detalle: '', matchedType: '',
+        },
+      ],
+    });
+
+    // Movement A force-replaced by pago-Q; movements B and C return no_match
+    mockMatchMovement
+      .mockReturnValueOnce({ matchType: 'direct_pago', description: 'Pago a PROVEEDOR SA', matchedFileId: 'pago-Q', confidence: 'HIGH' })
+      .mockReturnValue({ matchType: 'no_match', description: '', matchedFileId: '', confidence: 'LOW' });
+
+    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: { appliedCount: 1, skippedCount: 0, appliedKeys: new Set(['2025-01:2', '2025-01:3', '2025-01:4', '2025-01:5', '2025-01:6']) } as { appliedCount: number; skippedCount: number; appliedKeys: Set<string> } });
+
+    const resultPromise = matchAllMovimientos({ force: true });
+    await vi.runAllTimersAsync();
+    await resultPromise;
+
+    expect(mockMatchMovement).toHaveBeenCalledTimes(3);
+    // Movement C (3rd call) — after fix, factura-F is freed by replacement of pago-P
+    const movCExcludeSet = mockMatchMovement.mock.calls[2][4] as Set<string>;
+    expect(movCExcludeSet).toBeInstanceOf(Set);
+    expect(movCExcludeSet.has('factura-F')).toBe(false);
+  });
+
+  it('unlinked pago does not over-exclude: unrelated factura stays in the matching pool', async () => {
+    // Pago-P has no matchedFacturaFileId — fixing counterpart exclusion must NOT
+    // exclude an arbitrary same-amount factura. No over-exclusion.
+    setupBase();
+
+    vi.mocked(getValues).mockImplementation(async (_id, range) => {
+      if (range === 'Pagos Enviados!A:Q') {
+        return {
+          ok: true,
+          value: [
+            PAGO_ENV_HEADERS,
+            // pago-P: no linked factura (matchedfacturafileid is empty)
+            ['2025-01-10', 'pago-P', 'pago.pdf', 'BBVA', '1000', 'ARS', '', '', '', '20123456786', 'PROVEEDOR SA', '', '', '0.95', 'NO', '', ''],
+          ],
+        };
+      }
+      if (range === 'Facturas Recibidas!A:T') {
+        return {
+          ok: true,
+          value: [
+            FAC_REC_HEADERS,
+            // factura-F: unrelated, same amount — should NOT be excluded
+            ['2025-01-10', 'factura-F', 'factura.pdf', 'B', '1', '27234567891', 'OTRO SA', '', '', '1000', 'ARS', '', '', '0.95', 'NO', '', '', '', ''],
+          ],
+        };
+      }
+      return { ok: true, value: [['header']] };
+    });
+
+    vi.mocked(getMovimientosToFill).mockResolvedValue({
+      ok: true,
+      value: [
+        {
+          sheetName: '2025-01', rowNumber: 2, fecha: '2025-01-15',
+          concepto: 'PAGO PROVEEDOR SA', debito: 1000, credito: null,
+          saldo: 9000, saldoCalculado: 9000,
+          matchedFileId: 'pago-P', detalle: 'Pago a PROVEEDOR SA', matchedType: '',
+        },
+        {
+          sheetName: '2025-01', rowNumber: 3, fecha: '2025-01-16',
+          concepto: 'PAGO OTRO SA', debito: 1000, credito: null,
+          saldo: 8000, saldoCalculado: 8000,
+          matchedFileId: '', detalle: '', matchedType: '',
+        },
+      ],
+    });
+
+    const resultPromise = matchAllMovimientos();
+    await vi.runAllTimersAsync();
+    await resultPromise;
+
+    expect(mockMatchMovement).toHaveBeenCalledTimes(2);
+    // Movement B's excludeFileIds must NOT contain 'factura-F' (unlinked → no over-exclusion)
+    const movBExcludeSet = mockMatchMovement.mock.calls[1][4] as Set<string>;
+    expect(movBExcludeSet).toBeInstanceOf(Set);
+    expect(movBExcludeSet.has('factura-F')).toBe(false);
+  });
+});
+
+describe('ADV-320: pagada revert when match is removed', () => {
+  const FAC_REC_HEADERS = ['fechaemision', 'fileid', 'filename', 'tipocomprobante', 'nrofactura', 'cuitemisor', 'razonsocialemisor', 'importeneto', 'importeiva', 'importetotal', 'moneda', 'concepto', 'processedat', 'confidence', 'needsreview', 'matchedpagofileid', 'matchconfidence', 'hascuitmatch', 'pagada'];
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.useFakeTimers();
+    mockMatchMovement = vi.fn().mockReturnValue({
+      matchType: 'no_match',
+      description: '',
+      matchedFileId: '',
+      confidence: 'LOW',
+    });
+    mockMatchCreditMovement = vi.fn().mockReturnValue({
+      matchType: 'no_match',
+      description: '',
+      matchedFileId: '',
+      confidence: 'LOW',
+    });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  function setupBase() {
+    const mockFolderStructure = {
+      controlIngresosId: 'ingresos-id',
+      controlEgresosId: 'egresos-id',
+      bankSpreadsheets: new Map(),
+      movimientosSpreadsheets: new Map([['BBVA', 'bbva-id']]),
+    };
+    vi.mocked(withLock).mockImplementation(async (_id, fn) => {
+      const result = await fn();
+      return { ok: true, value: result };
+    });
+    vi.mocked(getCachedFolderStructure).mockReturnValue(mockFolderStructure as any);
+    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: { appliedCount: 1, skippedCount: 0, appliedKeys: new Set(['2025-01:2', '2025-01:3', '2025-01:4', '2025-01:5', '2025-01:6']) } as { appliedCount: number; skippedCount: number; appliedKeys: Set<string> } });
+  }
+
+  it('force-clear (no new match) reverts pagada to empty on the previously matched factura', async () => {
+    setupBase();
+
+    vi.mocked(getValues).mockImplementation(async (_id, range) => {
+      if (range === 'Facturas Recibidas!A:T') {
+        return {
+          ok: true,
+          value: [
+            FAC_REC_HEADERS,
+            // fac-rec-1 at row 2, pagada='SI' from prior run, no matchedPagoFileId
+            ['2025-01-10', 'fac-rec-1', 'factura.pdf', 'B', '00001-00000001', '20123456786', 'PROVEEDOR SA', '', '', '1000', 'ARS', '', '', '0.95', 'NO', '', '', '', 'SI'],
+          ],
+        };
+      }
+      return { ok: true, value: [['header']] };
+    });
+
+    vi.mocked(getMovimientosToFill).mockResolvedValue({
+      ok: true,
+      value: [{
+        sheetName: '2025-01', rowNumber: 2, fecha: '2025-01-15', concepto: 'PAGO PROVEEDOR SA',
+        debito: 1000, credito: null, saldo: 9000, saldoCalculado: 9000,
+        matchedFileId: 'fac-rec-1', detalle: 'Factura de PROVEEDOR SA', matchedType: '',
+      }],
+    });
+
+    // Matcher returns no_match → force-clear with no replacement
+    mockMatchMovement.mockReturnValue({
+      matchType: 'no_match', description: '', matchedFileId: '', confidence: 'LOW',
+    });
+
+    const resultPromise = matchAllMovimientos({ force: true });
+    await vi.runAllTimersAsync();
+    await resultPromise;
+
+    // batchUpdate must be called with pagada='' for fac-rec-1 at row 2 (revert)
+    const calls = vi.mocked(batchUpdate).mock.calls;
+    const reverted = calls.some(([ssId, updates]) =>
+      ssId === 'egresos-id' &&
+      (updates as Array<{ range: string; values: unknown[][] }>).some(
+        u => u.range === 'Facturas Recibidas!S2' && u.values[0][0] === ''
+      )
+    );
+    expect(reverted).toBe(true);
+  });
+
+  it('does NOT revert pagada when the clearing movimiento row was version-skipped (ADV-343 gate on reverts)', async () => {
+    setupBase();
+
+    vi.mocked(getValues).mockImplementation(async (_id, range) => {
+      if (range === 'Facturas Recibidas!A:T') {
+        return {
+          ok: true,
+          value: [
+            FAC_REC_HEADERS,
+            ['2025-01-10', 'fac-rec-1', 'factura.pdf', 'B', '00001-00000001', '20123456786', 'PROVEEDOR SA', '', '', '1000', 'ARS', '', '', '0.95', 'NO', '', '', '', 'SI'],
+          ],
+        };
+      }
+      return { ok: true, value: [['header']] };
+    });
+
+    vi.mocked(getMovimientosToFill).mockResolvedValue({
+      ok: true,
+      value: [{
+        sheetName: '2025-01', rowNumber: 2, fecha: '2025-01-15', concepto: 'PAGO PROVEEDOR SA',
+        debito: 1000, credito: null, saldo: 9000, saldoCalculado: 9000,
+        matchedFileId: 'fac-rec-1', detalle: 'Factura de PROVEEDOR SA', matchedType: '',
+      }],
+    });
+
+    // Matcher returns no_match → force-clear path queues a revert candidate
+    mockMatchMovement.mockReturnValue({
+      matchType: 'no_match', description: '', matchedFileId: '', confidence: 'LOW',
+    });
+
+    // The movimiento row at 2025-01:2 was version-skipped — its matchedFileId
+    // still points at fac-rec-1 in the sheet, so pagada must NOT be cleared.
+    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: { appliedCount: 0, skippedCount: 1, appliedKeys: new Set<string>() } as { appliedCount: number; skippedCount: number; appliedKeys: Set<string> } });
+
+    const resultPromise = matchAllMovimientos({ force: true });
+    await vi.runAllTimersAsync();
+    await resultPromise;
+
+    const calls = vi.mocked(batchUpdate).mock.calls;
+    const reverted = calls.some(([ssId, updates]) =>
+      ssId === 'egresos-id' &&
+      (updates as Array<{ range: string; values: unknown[][] }>).some(
+        u => u.range === 'Facturas Recibidas!S2' && u.values[0][0] === ''
+      )
+    );
+    expect(reverted).toBe(false);
+  });
+
+  it('replacement reverts displaced factura pagada and sets pagada=SI for the new match', async () => {
+    setupBase();
+
+    vi.mocked(getValues).mockImplementation(async (_id, range) => {
+      if (range === 'Facturas Recibidas!A:T') {
+        return {
+          ok: true,
+          value: [
+            FAC_REC_HEADERS,
+            // fac-rec-old at row 2, currently matched (pagada='SI'), no matchedPagoFileId
+            ['2025-01-10', 'fac-rec-old', 'old.pdf', 'B', '0002-3', '20123456786', 'PROVEEDOR SA', '', '', '1000', 'ARS', '', '', '0.95', 'NO', '', '', '', 'SI'],
+            // fac-rec-new at row 3, not yet matched
+            ['2025-01-11', 'fac-rec-new', 'new.pdf', 'B', '0002-4', '20123456786', 'PROVEEDOR SA', '', '', '1000', 'ARS', '', '', '0.95', 'NO', '', '', '', ''],
+          ],
+        };
+      }
+      return { ok: true, value: [['header']] };
+    });
+
+    vi.mocked(getMovimientosToFill).mockResolvedValue({
+      ok: true,
+      value: [{
+        sheetName: '2025-01', rowNumber: 2, fecha: '2025-01-15', concepto: 'PAGO PROVEEDOR SA',
+        debito: 1000, credito: null, saldo: 9000, saldoCalculado: 9000,
+        matchedFileId: 'fac-rec-old', detalle: 'OLD MATCH', matchedType: '',
+      }],
+    });
+
+    // Matcher returns fac-rec-new → replacement (force=true bypasses quality comparison)
+    mockMatchMovement.mockReturnValue({
+      matchType: 'direct_factura',
+      description: 'Factura de PROVEEDOR SA (new)',
+      matchedFileId: 'fac-rec-new',
+      confidence: 'HIGH',
+    });
+
+    const resultPromise = matchAllMovimientos({ force: true });
+    await vi.runAllTimersAsync();
+    await resultPromise;
+
+    const calls = vi.mocked(batchUpdate).mock.calls;
+    // pagada='SI' for fac-rec-new (new match at row 3)
+    const newSet = calls.some(([ssId, updates]) =>
+      ssId === 'egresos-id' &&
+      (updates as Array<{ range: string; values: unknown[][] }>).some(
+        u => u.range === 'Facturas Recibidas!S3' && u.values[0][0] === 'SI'
+      )
+    );
+    // pagada='' (revert) for fac-rec-old (displaced at row 2)
+    const oldReverted = calls.some(([ssId, updates]) =>
+      ssId === 'egresos-id' &&
+      (updates as Array<{ range: string; values: unknown[][] }>).some(
+        u => u.range === 'Facturas Recibidas!S2' && u.values[0][0] === ''
+      )
+    );
+    expect(newSet).toBe(true);
+    expect(oldReverted).toBe(true);
+  });
+
+  it('NC-attributable pagada=SI on a factura not linked to the cleared movement survives the revert pass', async () => {
+    setupBase();
+
+    vi.mocked(getValues).mockImplementation(async (_id, range) => {
+      if (range === 'Facturas Recibidas!A:T') {
+        return {
+          ok: true,
+          value: [
+            FAC_REC_HEADERS,
+            // fac-rec-1 at row 2: linked to movement being force-cleared, pagada='' initially
+            ['2025-01-10', 'fac-rec-1', 'factura.pdf', 'B', '1', '20123456786', 'PROVEEDOR SA', '', '', '1000', 'ARS', '', '', '0.95', 'NO', '', '', '', ''],
+            // fac-rec-NC at row 3: pagada=SI set by NC matcher, no movement points at it
+            ['2025-01-11', 'fac-rec-NC', 'nc-factura.pdf', 'B', '2', '27234567891', 'OTRO SA', '', '', '500', 'ARS', '', '', '0.95', 'NO', '', '', '', 'SI'],
+          ],
+        };
+      }
+      return { ok: true, value: [['header']] };
+    });
+
+    vi.mocked(getMovimientosToFill).mockResolvedValue({
+      ok: true,
+      value: [{
+        sheetName: '2025-01', rowNumber: 2, fecha: '2025-01-15', concepto: 'PAGO',
+        debito: 1000, credito: null, saldo: 9000, saldoCalculado: 9000,
+        matchedFileId: 'fac-rec-1', detalle: 'Factura 1', matchedType: '',
+      }],
+    });
+
+    mockMatchMovement.mockReturnValue({
+      matchType: 'no_match', description: '', matchedFileId: '', confidence: 'LOW',
+    });
+
+    const resultPromise = matchAllMovimientos({ force: true });
+    await vi.runAllTimersAsync();
+    await resultPromise;
+
+    // batchUpdate must NOT write pagada='' for fac-rec-NC (row 3) — it was NC-set, untouched
+    const calls = vi.mocked(batchUpdate).mock.calls;
+    const ncReverted = calls.some(([ssId, updates]) =>
+      ssId === 'egresos-id' &&
+      (updates as Array<{ range: string; values: unknown[][] }>).some(
+        u => u.range === 'Facturas Recibidas!S3' && u.values[0][0] === ''
+      )
+    );
+    expect(ncReverted).toBe(false);
+  });
+
+  it('factura with surviving matchedPagoFileId keeps pagada=SI when movement match is cleared', async () => {
+    setupBase();
+
+    vi.mocked(getValues).mockImplementation(async (_id, range) => {
+      if (range === 'Facturas Recibidas!A:T') {
+        return {
+          ok: true,
+          value: [
+            FAC_REC_HEADERS,
+            // fac-rec-1 at row 2: matchedPagoFileId='pago-Z' — pago still covers pagada='SI'
+            ['2025-01-10', 'fac-rec-1', 'factura.pdf', 'B', '1', '20123456786', 'PROVEEDOR SA', '', '', '1000', 'ARS', '', '', '0.95', 'NO', 'pago-Z', '', '', 'SI'],
+          ],
+        };
+      }
+      return { ok: true, value: [['header']] };
+    });
+
+    vi.mocked(getMovimientosToFill).mockResolvedValue({
+      ok: true,
+      value: [{
+        sheetName: '2025-01', rowNumber: 2, fecha: '2025-01-15', concepto: 'PAGO',
+        debito: 1000, credito: null, saldo: 9000, saldoCalculado: 9000,
+        matchedFileId: 'fac-rec-1', detalle: 'Factura 1', matchedType: '',
+      }],
+    });
+
+    mockMatchMovement.mockReturnValue({
+      matchType: 'no_match', description: '', matchedFileId: '', confidence: 'LOW',
+    });
+
+    const resultPromise = matchAllMovimientos({ force: true });
+    await vi.runAllTimersAsync();
+    await resultPromise;
+
+    // batchUpdate must NOT write pagada='' for fac-rec-1 (pago-Z still justifies pagada='SI')
+    const calls = vi.mocked(batchUpdate).mock.calls;
+    const reverted = calls.some(([ssId, updates]) =>
+      ssId === 'egresos-id' &&
+      (updates as Array<{ range: string; values: unknown[][] }>).some(
+        u => u.range === 'Facturas Recibidas!S2' && u.values[0][0] === ''
+      )
+    );
+    expect(reverted).toBe(false);
+  });
+});
+
+describe('ADV-343: pagada gated on actually-applied detalle updates', () => {
+  const FAC_REC_HEADERS = ['fechaemision', 'fileid', 'filename', 'tipocomprobante', 'nrofactura', 'cuitemisor', 'razonsocialemisor', 'importeneto', 'importeiva', 'importetotal', 'moneda', 'concepto', 'processedat', 'confidence', 'needsreview', 'matchedpagofileid', 'matchconfidence', 'hascuitmatch', 'pagada'];
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.useFakeTimers();
+    mockMatchMovement = vi.fn().mockReturnValue({
+      matchType: 'no_match',
+      description: '',
+      matchedFileId: '',
+      confidence: 'LOW',
+    });
+    mockMatchCreditMovement = vi.fn().mockReturnValue({
+      matchType: 'no_match',
+      description: '',
+      matchedFileId: '',
+      confidence: 'LOW',
+    });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  function setupBase() {
+    const mockFolderStructure = {
+      controlIngresosId: 'ingresos-id',
+      controlEgresosId: 'egresos-id',
+      bankSpreadsheets: new Map(),
+      movimientosSpreadsheets: new Map([['BBVA', 'bbva-id']]),
+    };
+    vi.mocked(withLock).mockImplementation(async (_id, fn) => {
+      const result = await fn();
+      return { ok: true, value: result };
+    });
+    vi.mocked(getCachedFolderStructure).mockReturnValue(mockFolderStructure as any);
+    // Default: all updates applied (appliedKeys includes common movimiento rows)
+    vi.mocked(updateDetalle).mockResolvedValue({
+      ok: true,
+      value: {
+        appliedCount: 1,
+        skippedCount: 0,
+        appliedKeys: new Set(['2025-01:2', '2025-01:3', '2025-01:4', '2025-01:5', '2025-01:6']),
+      } as { appliedCount: number; skippedCount: number; appliedKeys: Set<string> },
+    });
+  }
+
+  it('version-mismatched movimiento row produces no pagada write for its factura while applied rows still write', async () => {
+    setupBase();
+
+    vi.mocked(getValues).mockImplementation(async (_id, range) => {
+      if (range === 'Facturas Recibidas!A:T') {
+        return {
+          ok: true,
+          value: [
+            FAC_REC_HEADERS,
+            ['2025-01-10', 'fac-A', 'a.pdf', 'B', '1', '20123456786', 'PROVEEDOR A', '', '', '1000', 'ARS', '', '', '0.95', 'NO', '', '', '', ''],
+            ['2025-01-11', 'fac-B', 'b.pdf', 'B', '2', '27234567891', 'PROVEEDOR B', '', '', '2000', 'ARS', '', '', '0.95', 'NO', '', '', '', ''],
+          ],
+        };
+      }
+      return { ok: true, value: [['header']] };
+    });
+
+    vi.mocked(getMovimientosToFill).mockResolvedValue({
+      ok: true,
+      value: [
+        { sheetName: '2025-01', rowNumber: 2, fecha: '2025-01-15', concepto: 'PAGO A', debito: 1000, credito: null, saldo: 9000, saldoCalculado: 9000, matchedFileId: '', detalle: '', matchedType: '' },
+        { sheetName: '2025-01', rowNumber: 3, fecha: '2025-01-16', concepto: 'PAGO B', debito: 2000, credito: null, saldo: 7000, saldoCalculado: 7000, matchedFileId: '', detalle: '', matchedType: '' },
+      ],
+    });
+
+    // Override: only movimiento at row 3 applied (row 2 was version-mismatched/skipped)
+    vi.mocked(updateDetalle).mockResolvedValue({
+      ok: true,
+      value: {
+        appliedCount: 1,
+        skippedCount: 1,
+        appliedKeys: new Set(['2025-01:3']), // only mov B applied
+      } as { appliedCount: number; skippedCount: number; appliedKeys: Set<string> },
+    });
+
+    mockMatchMovement
+      .mockReturnValueOnce({ matchType: 'direct_factura', description: 'Factura A', matchedFileId: 'fac-A', confidence: 'HIGH' })
+      .mockReturnValueOnce({ matchType: 'direct_factura', description: 'Factura B', matchedFileId: 'fac-B', confidence: 'HIGH' });
+
+    const resultPromise = matchAllMovimientos();
+    await vi.runAllTimersAsync();
+    await resultPromise;
+
+    const calls = vi.mocked(batchUpdate).mock.calls;
+    // fac-B (factura at row 3 → pagada col S row 3 = 'Facturas Recibidas!S3') must be written with SI
+    const facBWritten = calls.some(([ssId, updates]) =>
+      ssId === 'egresos-id' &&
+      (updates as Array<{ range: string; values: unknown[][] }>).some(u => u.range === 'Facturas Recibidas!S3' && u.values[0][0] === 'SI')
+    );
+    // fac-A (row 2 skipped, not applied) must NOT be written
+    const facAWritten = calls.some(([ssId, updates]) =>
+      ssId === 'egresos-id' &&
+      (updates as Array<{ range: string; values: unknown[][] }>).some(u => u.range === 'Facturas Recibidas!S2' && u.values[0][0] === 'SI')
+    );
+    expect(facBWritten).toBe(true);
+    expect(facAWritten).toBe(false);
+  });
+
+  it('all-skipped scenario writes zero pagada updates despite ok:true from updateDetalle', async () => {
+    setupBase();
+
+    vi.mocked(getValues).mockImplementation(async (_id, range) => {
+      if (range === 'Facturas Recibidas!A:T') {
+        return {
+          ok: true,
+          value: [
+            FAC_REC_HEADERS,
+            ['2025-01-10', 'fac-rec-1', 'a.pdf', 'B', '1', '20123456786', 'PROVEEDOR SA', '', '', '1000', 'ARS', '', '', '0.95', 'NO', '', '', '', ''],
+          ],
+        };
+      }
+      return { ok: true, value: [['header']] };
+    });
+
+    vi.mocked(getMovimientosToFill).mockResolvedValue({
+      ok: true,
+      value: [{
+        sheetName: '2025-01', rowNumber: 2, fecha: '2025-01-15', concepto: 'PAGO',
+        debito: 1000, credito: null, saldo: 9000, saldoCalculado: 9000,
+        matchedFileId: '', detalle: '', matchedType: '',
+      }],
+    });
+
+    // All version-mismatched → appliedKeys empty despite ok:true
+    vi.mocked(updateDetalle).mockResolvedValue({
+      ok: true,
+      value: {
+        appliedCount: 0,
+        skippedCount: 1,
+        appliedKeys: new Set<string>(), // nothing applied
+      } as { appliedCount: number; skippedCount: number; appliedKeys: Set<string> },
+    });
+
+    mockMatchMovement.mockReturnValue({
+      matchType: 'direct_factura', description: 'Factura', matchedFileId: 'fac-rec-1', confidence: 'HIGH',
+    });
+
+    const resultPromise = matchAllMovimientos();
+    await vi.runAllTimersAsync();
+    await resultPromise;
+
+    // batchUpdate must NOT be called for pagada (all updates were skipped)
+    expect(batchUpdate).not.toHaveBeenCalled();
   });
 });

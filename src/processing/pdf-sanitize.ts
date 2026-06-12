@@ -1,33 +1,35 @@
 /**
- * PDF invisible-text detection (Task 6 — ADV-192)
+ * PDF invisible-text detection (Task 6 — ADV-192, Task 12 — ADV-284)
  *
- * Scans uncompressed PDF content streams for common invisible-text vectors used
- * in PDF injection / prompt-injection attacks:
+ * Scans PDF content streams for common invisible-text vectors used in PDF
+ * injection / prompt-injection attacks:
  *
  *   1. **Font-size 0** (`/FontName 0 Tf`) — text rendered at zero size.
- *   2. **Text outside MediaBox** — absolute text position (via Tm) or
- *      accumulated offset (via Td/TD) lands outside the declared page boundary.
+ *   2. **Text outside MediaBox** — absolute text position (via Tm) places text
+ *      outside the declared page boundary.
  *   3. **White fill color** (`1 g` or `1 1 1 rg`) preceding text operators —
- *      text that is the same color as a typical white page background.
+ *      text painted the same color as a white page background.
+ *   4. **Invisible render mode** (`3 Tr`) — text render mode 3 = invisible.
+ *   5. **FlateDecode streams** — content streams compressed with zlib/deflate
+ *      are now decompressed before scanning (ADV-284).
  *
  * KNOWN GAPS:
- *   - Compressed streams (FlateDecode, LZWDecode, etc.) are NOT decoded — only
- *     raw/uncompressed streams are inspected. Modern PDFs almost always compress
- *     content streams. A proper implementation would need zlib/deflate support.
- *   - White-on-colored-background: detecting a white-background page and then
- *     white text would require rendering the full graphics state stack.
- *   - Rendering mode 3 (invisible text): `/Tr 3` sets the text render mode to
- *     invisible. This is not yet detected.
- *   - Custom `q`/`Q` graphics state stack: color changes inside save/restore
- *     groups are tracked naively (first occurrence wins).
+ *   - Other compression filters (LZWDecode, ASCIIHexDecode, etc.) are skipped.
+ *   - White-on-colored-background detection requires rendering the full
+ *     graphics state stack (not implemented).
+ *   - `q`/`Q` state stack is tracked for fill color but not for other
+ *     graphics state parameters (e.g. text render mode).
  *
  * DESIGN DECISIONS:
- *   - Pure JS / no dependencies — avoids pulling in pdfjs-dist (>30 MB).
+ *   - Uses `inflateSync` from `node:zlib` for FlateDecode; max output capped at
+ *     `MAX_STREAM_INFLATE_BYTES` (4 MB) to prevent decompression-bomb DoS.
  *   - Uses `latin1` decoding so all byte values survive the string round-trip.
  *   - Regex-based token scanning keeps the implementation simple and fast.
  *
  * @module pdf-sanitize
  */
+
+import { inflateSync } from 'node:zlib';
 
 /**
  * Result returned by `detectInvisibleText`.
@@ -41,6 +43,9 @@ export interface InvisibleTextResult {
 
 /** Default tolerance: allow text slightly outside the page (PDF units). */
 const OUTSIDE_PAGE_MARGIN = -1;
+
+/** Maximum bytes to inflate from a single FlateDecode stream (decompression-bomb guard). */
+const MAX_STREAM_INFLATE_BYTES = 4 * 1024 * 1024;
 
 /**
  * Detects whether a buffer contains invisible text.
@@ -63,13 +68,28 @@ export function detectInvisibleText(buffer: Buffer): InvisibleTextResult {
   // Extract MediaBox from the document (use the first one found)
   const mediaBox = extractMediaBox(doc);
 
-  // Find all content streams (raw — uncompressed only)
+  // Find all content streams.
   // A stream block is: `stream<LF or CRLF> ... <LF or CRLF>endstream`
   const streamRe = /stream\r?\n([\s\S]*?)\r?\nendstream/g;
   let m: RegExpExecArray | null;
 
   while ((m = streamRe.exec(doc)) !== null) {
-    const stream = m[1];
+    let stream = m[1];
+
+    // If the stream dictionary declares /FlateDecode, inflate the compressed bytes.
+    // Look at the 500 characters before the `stream` keyword for the dict entry.
+    const dictRegion = doc.slice(Math.max(0, m.index - 500), m.index);
+    if (/\/FlateDecode|\[\/FlateDecode\]/.test(dictRegion)) {
+      const compressed = Buffer.from(stream, 'latin1');
+      try {
+        const decompressed = inflateSync(compressed, { maxOutputLength: MAX_STREAM_INFLATE_BYTES });
+        stream = decompressed.toString('latin1');
+      } catch {
+        // Inflate failed (corrupt data or stream is not actually compressed).
+        // Skip this stream entirely to avoid false positives from binary garbage.
+        continue;
+      }
+    }
 
     // Vector 1: Font-size 0
     // Operator: /FontName <size> Tf
@@ -87,9 +107,20 @@ export function detectInvisibleText(buffer: Buffer): InvisibleTextResult {
       if (tmResult) return tmResult;
     }
 
-    // Vector 3: White fill color before text operators
+    // Vector 3: White fill color before text operators (q/Q stack-aware)
     if (hasWhiteFillBeforeText(stream)) {
       return { hasInvisible: true, reason: 'white-text: white fill color (1 g or 1 1 1 rg) set before text operators' };
+    }
+
+    // Vector 4: Invisible text render mode (`3 Tr`)
+    // PDF text render mode 3 causes glyphs to be neither filled nor stroked —
+    // completely invisible. Only flag when there is also a text-drawing operator
+    // in the same stream (avoids flagging bare mode-set lines with no text).
+    if (
+      /\b3\s+Tr\b/.test(stream) &&
+      /(?:\)|>)\s*(?:Tj|'|")|\]\s*TJ/.test(stream)
+    ) {
+      return { hasInvisible: true, reason: 'render-mode-3: invisible text render mode (3 Tr) detected' };
     }
   }
 
@@ -173,25 +204,31 @@ function checkTextOutsideMediaBox(stream: string, box: MediaBox): InvisibleTextR
 }
 
 /**
- * Checks if a white fill color is set anywhere in the stream BEFORE text-drawing
- * operators (`Tj`, `TJ`, `'`, `"`).
+ * Checks if a white fill color is active when a text-drawing operator fires.
  *
  * White fill color indicators:
  *   - `1 g`   — DeviceGray, value 1.0 = white
  *   - `1 1 1 rg` — DeviceRGB, all channels 1.0 = white
  *
- * Walks the stream in operator order and tracks the current fill color.
- * Returns true only when a text-drawing operator fires while the *active*
- * fill is white — i.e. the same `1 g`/`1 1 1 rg` that would actually paint
- * the glyphs. PDFs that paint a white background or shape and then reset the
- * fill to a dark color before drawing visible text do NOT trigger detection
- * (Codex review on PR 112).
+ * Walks the stream in operator order, tracking the current fill color and
+ * honoring the `q`/`Q` graphics-state save/restore stack. Returns `true` only
+ * when a text-drawing operator fires while the *active* fill is white.
  *
- * Limitation: does not handle `q`/`Q` graphics state stack or CMYK/pattern
- * color spaces.
+ * This means PDFs that:
+ *   - Set white inside a `q...Q` block and restore dark before Tj → NOT flagged
+ *   - Set white outside a block, save dark inside, then restore white before Tj → FLAGGED
+ *
+ * Limitation: stack-tracking uses regex positions, which can be slightly off
+ * when `q`/`Q`/color tokens appear inside string operands.  The implementation
+ * is intentionally simple and fast — a full PDF tokenizer is out of scope.
  */
 function hasWhiteFillBeforeText(stream: string): boolean {
-  type Event = { pos: number; kind: 'color'; isWhite: boolean } | { pos: number; kind: 'text' };
+  type Event =
+    | { pos: number; kind: 'color'; isWhite: boolean }
+    | { pos: number; kind: 'text' }
+    | { pos: number; kind: 'push' }   // q — save graphics state
+    | { pos: number; kind: 'pop' };   // Q — restore graphics state
+
   const events: Event[] = [];
 
   // Any DeviceGray fill: `<value> g`. White when value >= 1.
@@ -217,23 +254,41 @@ function hasWhiteFillBeforeText(stream: string): boolean {
   //   `[(s1)…] TJ`   / `[<hex>…] TJ`           show array (kerning/positioning)
   //   `(literal) '`  / `<hexstring> '`         move-to-next-line and show
   //   `aw ac (literal) "` / `aw ac <hex> "`    set spacing then show
-  // Tj/'/" can follow either `)` (literal string) or `>` (hex string); TJ
-  // follows `]`. Hex-string operands are valid PDF and were missed by the
-  // earlier regex, letting white-on-white hex payloads bypass detection
-  // (Codex P2 review on PR 112).
   const textRe = /(?:\)|>)\s*(?:Tj|'|")|\]\s*TJ/g;
   for (const m of stream.matchAll(textRe)) {
     if (m.index === undefined) continue;
     events.push({ pos: m.index, kind: 'text' });
   }
 
+  // Graphics state save (`q`) and restore (`Q`) operators.
+  const qRe = /(?:^|\s)q(?:\s|$)/gm;
+  for (const m of stream.matchAll(qRe)) {
+    if (m.index === undefined) continue;
+    events.push({ pos: m.index, kind: 'push' });
+  }
+
+  const bigQRe = /(?:^|\s)Q(?:\s|$)/gm;
+  for (const m of stream.matchAll(bigQRe)) {
+    if (m.index === undefined) continue;
+    events.push({ pos: m.index, kind: 'pop' });
+  }
+
   events.sort((a, b) => a.pos - b.pos);
 
   let currentFillIsWhite = false;
+  const stack: boolean[] = [];
+
   for (const e of events) {
     if (e.kind === 'color') {
       currentFillIsWhite = e.isWhite;
+    } else if (e.kind === 'push') {
+      stack.push(currentFillIsWhite);
+    } else if (e.kind === 'pop') {
+      if (stack.length > 0) {
+        currentFillIsWhite = stack.pop()!;
+      }
     } else if (currentFillIsWhite) {
+      // text op while fill is white → invisible text detected
       return true;
     }
   }

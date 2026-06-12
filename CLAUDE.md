@@ -475,7 +475,7 @@ The Apps Script bundle is produced into `dist/apps-script/{Code.js,appsscript.js
 | GEMINI_API_KEY | Yes — must be GCP-restricted (see SECURITY) | - |
 | DRIVE_ROOT_FOLDER_ID | Yes | - |
 | API_SECRET | Yes | - |
-| ENVIRONMENT | Yes (production only) | - |
+| ENVIRONMENT | No (production: required; local/test: defaults to `staging`) | staging |
 | API_BASE_URL | No | - |
 | PORT | No | 3000 |
 | LOG_LEVEL | No | INFO |
@@ -489,7 +489,9 @@ The Apps Script bundle is produced into `dist/apps-script/{Code.js,appsscript.js
 
 **Note:** `API_BASE_URL` enables webhooks (URL + `/webhooks/drive`) and Apps Script (domain extracted at build)
 
-**Note:** `ENVIRONMENT` is the server's own identity (`staging` | `production`). Required in production to prevent cross-environment data writes; if unset, treated as staging.
+**Note:** `ENVIRONMENT` is the server's own identity (`staging` | `production`). Required in production to prevent cross-environment data writes; if unset, defaults to `staging` (fail-closed — runs the full marker check even on local dev boots). Railway sets this explicitly in both envs, so production is unaffected.
+
+**Note:** `NODE_ENV` must be one of `development`, `production`, or `test`. Unknown values (including miscased values like `Production`) throw at boot.
 
 **Note:** `DRIVE_ROOT_FOLDER_ID_PRODUCTION` and `DRIVE_ROOT_FOLDER_ID_STAGING` are used by Claude Code skills only (e.g., `investigate`), not loaded by the server at runtime.
 
@@ -638,7 +640,7 @@ See `SPREADSHEET_FORMAT.md` for complete schema.
   - **Always** use `normalizeSpreadsheetDate(cellValue)` from `utils/date.ts` for date fields, **never** `String()`
   - Correct: `fechaEmision: normalizeSpreadsheetDate(row[colIndex.fechaEmision])`
   - Wrong: `fechaEmision: String(row[colIndex.fechaEmision] || '')`
-  - `processedAt` fields are NOT affected (stored as plain text, not `CellDate`)
+  - `processedAt` fields written with the spreadsheet timezone come back as DATE_TIME serials encoding **local wall-clock time** — decode them with `decodeSerialInTimezone(serial, timezone)` from `utils/date.ts` (timezone via `getSpreadsheetTimezone`), never with the raw Excel-epoch-as-UTC formula (ADV-306)
 
 ## MATCHING
 

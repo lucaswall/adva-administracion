@@ -60,6 +60,7 @@ vi.mock('../../utils/concurrency.js', () => ({
 }));
 
 import { appendRowsWithLinks, sortSheet, getValues, batchUpdate, updateRowsWithFormatting } from '../../services/sheets.js';
+import { withLock } from '../../utils/concurrency.js';
 
 const createTestRetencion = (overrides: Partial<Retencion> = {}): Retencion => ({
   fileId: 'test-file-id',
@@ -253,12 +254,12 @@ describe('storeRetencion', () => {
 
   describe('reprocessing (same fileId already in sheet)', () => {
     it('updates existing row when fileId already exists in sheet', async () => {
-      // First getValues call (findRowByFileId → B:B): fileId found at row 2
+      // First getValues call (findRowByFileId → A:O): fileId found at row 2 (col B = index 1)
       vi.mocked(getValues).mockResolvedValueOnce({
         ok: true,
         value: [
-          ['fileId'],
-          ['test-file-id'], // matching fileId
+          ['fechaEmision', 'fileId', 'fileName', 'nroCertificado', 'cuitAgenteRetencion', 'razonSocial', 'impuesto', 'regimen', 'montoComprobante', 'montoRetencion', 'processedAt', 'confidence', 'needsReview', 'matchedFacturaFileId', 'matchConfidence'],
+          ['2025-01-15', 'test-file-id', 'file.pdf', 'CERT-001', '20123456786', 'EMPRESA SA', 'IIBB', 'RG 830', '10000', '500', '2025-01-15T10:00:00Z', '0.95', 'NO', '', ''],
         ],
       });
       vi.mocked(updateRowsWithFormatting).mockResolvedValue({ ok: true, value: undefined });
@@ -287,7 +288,7 @@ describe('storeRetencion', () => {
     it('uses CellNumber for monetary fields in reprocessing row', async () => {
       vi.mocked(getValues).mockResolvedValueOnce({
         ok: true,
-        value: [['fileId'], ['test-file-id']],
+        value: [['header'], ['', 'test-file-id']],
       });
       vi.mocked(updateRowsWithFormatting).mockResolvedValue({ ok: true, value: undefined });
       vi.mocked(sortSheet).mockResolvedValue({ ok: true, value: undefined });
@@ -305,7 +306,7 @@ describe('storeRetencion', () => {
     it('uses CellLink for fileName in reprocessing row', async () => {
       vi.mocked(getValues).mockResolvedValueOnce({
         ok: true,
-        value: [['fileId'], ['test-file-id']],
+        value: [['header'], ['', 'test-file-id']],
       });
       vi.mocked(updateRowsWithFormatting).mockResolvedValue({ ok: true, value: undefined });
       vi.mocked(sortSheet).mockResolvedValue({ ok: true, value: undefined });
@@ -322,7 +323,7 @@ describe('storeRetencion', () => {
     it('passes raw ISO processedAt in reprocessing row', async () => {
       vi.mocked(getValues).mockResolvedValueOnce({
         ok: true,
-        value: [['fileId'], ['test-file-id']],
+        value: [['header'], ['', 'test-file-id']],
       });
       vi.mocked(updateRowsWithFormatting).mockResolvedValue({ ok: true, value: undefined });
       vi.mocked(sortSheet).mockResolvedValue({ ok: true, value: undefined });
@@ -361,6 +362,83 @@ describe('storeRetencion', () => {
       expect(appendRowsWithLinks).toHaveBeenCalled();
       expect(updateRowsWithFormatting).not.toHaveBeenCalled();
       expect(batchUpdate).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('reprocessing preserves match columns (ADV-307)', () => {
+    it('preserves MANUAL matchConfidence on reprocess', async () => {
+      // Retencion row: 15 cols A:O. N=col13=matchedFacturaFileId, O=col14=matchConfidence
+      const existingRow = Array(15).fill('') as string[];
+      existingRow[1] = 'test-file-id';     // B: fileId
+      existingRow[13] = 'factura-ret-1';   // N: matchedFacturaFileId
+      existingRow[14] = 'MANUAL';          // O: matchConfidence (MANUAL lock)
+
+      vi.mocked(getValues).mockResolvedValueOnce({
+        ok: true,
+        value: [['header'], existingRow],
+      });
+      vi.mocked(updateRowsWithFormatting).mockResolvedValue({ ok: true, value: undefined });
+
+      const retencion = createTestRetencion();  // no match data
+      await storeRetencion(retencion, 'spreadsheet-id');
+
+      const updateCall = vi.mocked(updateRowsWithFormatting).mock.calls[0];
+      const updateRow = updateCall[1][0].values as unknown[];
+
+      // MANUAL lock must be preserved
+      expect(updateRow[14]).toBe('MANUAL');          // O: matchConfidence
+      expect(updateRow[13]).toBe('factura-ret-1');   // N: matchedFacturaFileId
+    });
+  });
+
+  describe('findRowByFileId error propagation (ADV-358)', () => {
+    it('returns ok:false with the Sheets error when getValues fails during fileId lookup', async () => {
+      vi.mocked(getValues).mockResolvedValueOnce({
+        ok: false,
+        error: new Error('Sheets API read error'),
+      });
+
+      const retencion = createTestRetencion();
+      const result = await storeRetencion(retencion, 'spreadsheet-id');
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.error.message).toBe('Sheets API read error');
+      }
+      expect(appendRowsWithLinks).not.toHaveBeenCalled();
+      expect(updateRowsWithFormatting).not.toHaveBeenCalled();
+    });
+
+    it('treats header-only sheet as not-found (does not error)', async () => {
+      vi.mocked(getValues).mockResolvedValueOnce({ ok: true, value: [['Header']] });
+      // isDuplicateRetencion also calls getValues
+      vi.mocked(getValues).mockResolvedValueOnce({ ok: true, value: [['Header']] });
+      vi.mocked(appendRowsWithLinks).mockResolvedValue({ ok: true, value: 1 });
+      vi.mocked(sortSheet).mockResolvedValue({ ok: true, value: undefined });
+
+      const retencion = createTestRetencion();
+      const result = await storeRetencion(retencion, 'spreadsheet-id');
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value.stored).toBe(true);
+      }
+      expect(appendRowsWithLinks).toHaveBeenCalled();
+    });
+  });
+
+  describe('lock auto-expiry (ADV-344)', () => {
+    it('uses STORE_LOCK_AUTO_EXPIRY_MS (900 000 ms) as 4th withLock argument', async () => {
+      vi.mocked(getValues).mockResolvedValue({ ok: true, value: [['Header']] });
+      vi.mocked(appendRowsWithLinks).mockResolvedValue({ ok: true, value: 1 });
+      vi.mocked(sortSheet).mockResolvedValue({ ok: true, value: undefined });
+
+      const retencion = createTestRetencion();
+      await storeRetencion(retencion, 'spreadsheet-id');
+
+      const calls = vi.mocked(withLock).mock.calls;
+      expect(calls.length).toBeGreaterThan(0);
+      expect(calls[calls.length - 1][3]).toBe(900000); // STORE_LOCK_AUTO_EXPIRY_MS
     });
   });
 });

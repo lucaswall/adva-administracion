@@ -10,8 +10,9 @@ import { authMiddleware } from '../middleware/auth.js';
 import { withLock } from '../utils/concurrency.js';
 import { getCachedFolderStructure } from '../services/folder-structure.js';
 import { syncSubdiario } from '../services/subdiario-writer.js';
-import { PROCESSING_LOCK_ID, PROCESSING_LOCK_TIMEOUT_MS } from '../config.js';
+import { PROCESSING_LOCK_ID, PROCESSING_LOCK_TIMEOUT_MS, PROCESSING_LOCK_EXPIRY_MS } from '../config.js';
 import { error as logError } from '../utils/logger.js';
+import { businessYear } from '../utils/date.js';
 
 /**
  * Success response body
@@ -66,7 +67,7 @@ export async function subdiarioRoutes(server: FastifyInstance) {
 
             const { rootId, controlIngresosId, controlEgresosId, movimientosSpreadsheets } =
               folderStructure;
-            const currentYear = new Date().getFullYear();
+            const currentYear = businessYear(); // Argentina business timezone (ADV-353)
 
             try {
               return await syncSubdiario(
@@ -84,7 +85,7 @@ export async function subdiarioRoutes(server: FastifyInstance) {
             }
           },
           PROCESSING_LOCK_TIMEOUT_MS,
-          PROCESSING_LOCK_TIMEOUT_MS,
+          PROCESSING_LOCK_EXPIRY_MS,
         );
 
         durationMs = Date.now() - start;
