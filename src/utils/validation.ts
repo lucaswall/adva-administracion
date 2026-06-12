@@ -466,9 +466,12 @@ export function validateConfidence(value: unknown): number | undefined {
  * - "XX-XXXXXXXX-X" format
  * - Plain 11-digit number with valid checksum
  * - Embedded in text like "TRANSFERENCI 30709076783"
+ * - Explicitly labelled DNI: "DNI 12345678" (7-8 digits, lowest priority —
+ *   only when no valid 11-digit CUIT/CUIL is present). Consumers compare
+ *   identities with cuitOrDniMatch, which handles DNI-vs-CUIT embedding.
  *
- * @param text - Text to search for CUIT/CUIL
- * @returns Extracted CUIT (11 digits) or undefined
+ * @param text - Text to search for CUIT/CUIL/DNI
+ * @returns Extracted identity (11-digit CUIT/CUIL, or 7-8 digit DNI when explicitly labelled) or undefined
  */
 export function extractCuitFromText(text: string): string | undefined {
   if (!text) {
@@ -501,6 +504,13 @@ export function extractCuitFromText(text: string): string | undefined {
         return match;
       }
     }
+  }
+
+  // Pattern 4: Explicit DNI label with 7-8 digits (no checksum exists for DNI;
+  // the label requirement keeps bare account/reference numbers out)
+  const dniMatch = text.match(/\bDNI[:\s]*(\d{7,8})\b/i);
+  if (dniMatch) {
+    return dniMatch[1];
   }
 
   return undefined;

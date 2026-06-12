@@ -156,6 +156,36 @@ export const FETCH_TIMEOUT_MS = 300000;
 export const EXCHANGE_RATE_TIMEOUT_MS = 30000;
 
 /**
+ * Mercado Pago API base URL
+ */
+export const MP_API_BASE_URL = 'https://api.mercadopago.com';
+
+/**
+ * Mercado Pago API fetch timeout in milliseconds
+ * Set to 30 seconds — same as exchange rate API
+ */
+export const MP_API_TIMEOUT_MS = 30_000;
+
+/**
+ * Mercado Pago API maximum retry attempts on 429 / 5xx / network errors
+ */
+export const MP_MAX_RETRIES = 3;
+
+/**
+ * Mercado Pago API retry delays for exponential backoff (milliseconds)
+ * [1s, 2s, 4s] — one entry per retry attempt (MP_MAX_RETRIES must equal length)
+ */
+export const MP_RETRY_DELAYS_MS = [1000, 2000, 4000] as const;
+
+/**
+ * Returns the Mercado Pago access token from environment, or null when absent.
+ * Absence disables the MP sync feature without an error.
+ */
+export function getMpAccessToken(): string | null {
+  return process.env.MP_ACCESS_TOKEN || null;
+}
+
+/**
  * Default maximum document size in bytes before Gemini processing.
  * Documents exceeding this limit are routed to Sin Procesar without an API call.
  * Override via MAX_DOCUMENT_BYTES env var (must be a positive integer).
@@ -179,6 +209,21 @@ export const GEMINI_PRICING = {
  * Absolute tolerance for USD/USD same-currency matching (e.g. $30 to absorb rounding)
  */
 export const USD_SAME_CURRENCY_TOLERANCE = 30;
+
+/**
+ * Bank name prefix used to identify Mercado Pago movements.
+ * Used in match-movimientos.ts to enable the extended forward factura date window.
+ */
+export const MERCADO_PAGO_BANK_NAME = 'Mercado Pago';
+
+/**
+ * Extended forward factura date window (days) for Mercado Pago accounts (ADV-373).
+ *
+ * MP charges on ~25th of the month but the factura is issued ~11th of the NEXT month
+ * — a gap of up to 17 days. The standard 5-day forward window (FACTURA_DATE_RANGE_BEFORE
+ * in matcher.ts) is too narrow; this constant extends it to 25 days for MP credit movements.
+ */
+export const MP_FACTURA_DATE_RANGE_AFTER_DAYS = 25;
 
 /**
  * Application configuration loaded from environment
@@ -372,6 +417,14 @@ export function loadConfig(): Config {
     environment,
   };
 }
+
+/**
+ * Mercado Pago access token, captured at module load (Railway sets env before boot).
+ * Optional — if unset, MP sync/scheduler are disabled (reason 'mp_disabled').
+ * The client reads the env dynamically via getMpAccessToken() instead.
+ * NEVER log this value.
+ */
+export const MP_ACCESS_TOKEN: string | undefined = process.env.MP_ACCESS_TOKEN;
 
 /**
  * Singleton config instance

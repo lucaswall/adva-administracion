@@ -192,11 +192,11 @@ export async function deliveryRoutes(server: FastifyInstance) {
       if (!copyResult.ok) throw copyResult.error;
 
       server.log.info(
-        { folderId, copied: copyResult.value.copied, failed: copyResult.value.failed.length },
+        { folderId, copied: copyResult.value.copied, failed: copyResult.value.failed.length, skippedNonPdf: copyResult.value.skippedNonPdf },
         'PDFs copied to delivery folder'
       );
 
-      return { folderId, folderUrl, copied: copyResult.value.copied, failed: copyResult.value.failed };
+      return { folderId, folderUrl, copied: copyResult.value.copied, failed: copyResult.value.failed, skippedNonPdf: copyResult.value.skippedNonPdf };
     }, DELIVERY_LOCK_TIMEOUT_MS, DELIVERY_LOCK_EXPIRY_MS);
 
     if (!operationResult.ok) {

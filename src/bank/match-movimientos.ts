@@ -12,14 +12,14 @@ import type {
   Recibo,
   Retencion,
 } from '../types/index.js';
-import { PROCESSING_LOCK_ID, PROCESSING_LOCK_TIMEOUT_MS, PROCESSING_LOCK_EXPIRY_MS, ADVA_CUITS } from '../config.js';
+import { PROCESSING_LOCK_ID, PROCESSING_LOCK_TIMEOUT_MS, PROCESSING_LOCK_EXPIRY_MS, ADVA_CUITS, MERCADO_PAGO_BANK_NAME } from '../config.js';
 import { withLock } from '../utils/concurrency.js';
 import { info, warn, debug, error as logError } from '../utils/logger.js';
 import { getCachedFolderStructure } from '../services/folder-structure.js';
 import { getValues, batchUpdate, type CellValue } from '../services/sheets.js';
 import { parseNumber } from '../utils/numbers.js';
 import { parseArgDate, normalizeSpreadsheetDate, businessYear } from '../utils/date.js';
-import { validateMoneda, validateMatchConfidence, validateTipoComprobante, extractCuitFromText } from '../utils/validation.js';
+import { validateMoneda, validateMatchConfidence, validateTipoComprobante, extractCuitFromText, cuitOrDniMatch } from '../utils/validation.js';
 import { BankMovementMatcher, calculateKeywordMatchScore, extractReferencia, type MatchQuality } from './matcher.js';
 import { getMovimientosToFill } from '../services/movimientos-reader.js';
 import { updateDetalle, type DetalleUpdate } from '../services/movimientos-detalle.js';
@@ -285,6 +285,22 @@ interface EgresosData {
   facturasRecibidas: Array<Factura & { row: number }>;
   pagosEnviados: Array<Pago & { row: number }>;
   recibos: Array<Recibo & { row: number }>;
+}
+
+/**
+ * Returns true if a movimientos discovery key belongs to a Mercado Pago account.
+ *
+ * Keys produced by discoverMovimientosSpreadsheets are year-prefixed
+ * (`{YYYY}:{folderName}`, e.g. `2026:Mercado Pago 987654 ARS`) to avoid
+ * cross-year collisions — the year prefix must be stripped before checking
+ * the folder name (ADV-373).
+ *
+ * @param bankName - Discovery map key (`{YYYY}:{folderName}`) or bare folder name
+ */
+export function isMercadoPagoAccount(bankName: string): boolean {
+  const colonIndex = bankName.indexOf(':');
+  const folderName = colonIndex === -1 ? bankName : bankName.slice(colonIndex + 1);
+  return folderName.startsWith(MERCADO_PAGO_BANK_NAME);
 }
 
 /**
@@ -743,7 +759,7 @@ function buildMatchQuality(
   // Compute tier from context
   // Use extractCuitFromText to handle dashed/separated CUIT formats (e.g. "20-12345678-6")
   const extractedCuit = extractCuitFromText(conceptoMovimiento);
-  const hasCuitMatch = cuitDocumento ? extractedCuit === cuitDocumento : false;
+  const hasCuitMatch = !!(cuitDocumento && extractedCuit && cuitOrDniMatch(extractedCuit, cuitDocumento));
   let tier: BankMatchTier;
   // Tier 1 only for pagos (pago_recibido / pago_enviado) with a linked factura —
   // a factura_recibida/emitida that merely has matchedPagoFileId set does NOT qualify
@@ -1024,13 +1040,15 @@ async function matchBankMovimientos(
     const currentExcludeFileIds = new Set(excludeFileIds);
 
     // Route to appropriate matcher based on debit/credit
+    const isMercadoPago = isMercadoPagoAccount(bankName);
     if (mov.debito !== null && mov.debito > 0) {
       matchResult = matcher.matchMovement(
         mov,
         egresosData.facturasRecibidas,
         egresosData.recibos,
         egresosData.pagosEnviados,
-        currentExcludeFileIds
+        currentExcludeFileIds,
+        isMercadoPago
       );
     } else if (mov.credito !== null && mov.credito > 0) {
       matchResult = matcher.matchCreditMovement(
@@ -1038,7 +1056,8 @@ async function matchBankMovimientos(
         ingresosData.facturasEmitidas,
         ingresosData.pagosRecibidos,
         ingresosData.retenciones,
-        currentExcludeFileIds
+        currentExcludeFileIds,
+        isMercadoPago
       );
     } else {
       // No amount - skip, but restore ownFileId that was temporarily removed

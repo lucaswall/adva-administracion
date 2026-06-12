@@ -1071,7 +1071,7 @@ function validateMovimientosBancario(movimientos: Array<{
   concepto: string;
   debito: number | null;
   credito: number | null;
-  saldo: number;
+  saldo: number | null;
 }>): boolean {
   let hasIssues = false;
 

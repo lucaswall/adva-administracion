@@ -2895,3 +2895,383 @@ describe('Credit pago_only confidence uses tierToConfidence (review fix)', () =>
     expect(result.confidence).toBe('LOW'); // Should use tierToConfidence, not hardcoded MEDIUM
   });
 });
+
+describe('CUIT↔DNI equivalence in identity comparisons (ADV-372)', () => {
+  let matcher: BankMovementMatcher;
+
+  beforeEach(() => {
+    matcher = new BankMovementMatcher(5);
+    const testRate: ExchangeRate = {
+      fecha: '2024-01-15',
+      compra: 800,
+      venta: 850
+    };
+    setExchangeRateCache('2024-01-15', testRate);
+  });
+
+  it('credit: concepto CUIT 20123456786 matches factura cuitReceptor DNI 12345678 (tier 2 HIGH)', () => {
+    // CUIT 20123456786 embeds DNI 12345678 — document may store just the DNI
+    const factura: Factura & { row: number } = {
+      fileId: 'factura1',
+      fileName: 'factura-001.pdf',
+      tipoComprobante: 'A',
+      nroFactura: '00001-00000001',
+      fechaEmision: '2024-01-10',
+      cuitEmisor: '30709076783',
+      razonSocialEmisor: 'ADVA',
+      cuitReceptor: '12345678', // DNI extracted from CUIT 20123456786
+      razonSocialReceptor: 'CLIENTE SA',
+      importeNeto: 90000,
+      importeIva: 10000,
+      importeTotal: 100000,
+      moneda: 'ARS',
+      processedAt: '2024-01-10T10:00:00Z',
+      needsReview: false,
+      confidence: 0.95,
+      row: 2
+    };
+
+    // concepto carries the full CUIT 20-12345678-6 (same person as DNI 12345678)
+    const movement = makeMovimiento({
+      fecha: '2024-01-15',
+      concepto: 'TRANSFERENCIA DESDE CLIENTE 20-12345678-6',
+      debito: null,
+      credito: 100000
+    });
+
+    const result = matcher.matchCreditMovement(movement, [factura], [], []);
+
+    expect(result.matchType).toBe('direct_factura');
+    expect(result.tier).toBe(2);
+    expect(result.confidence).toBe('HIGH');
+    expect(result.matchedFileId).toBe('factura1');
+  });
+
+  it('credit: concepto with explicit DNI label matches factura whose CUIT embeds that DNI (tier 2 HIGH)', () => {
+    // MP DNI-typed payers render as "DNI {number}" in the concepto; the
+    // extracted DNI must reach the identity comparisons via cuitOrDniMatch
+    const factura: Factura & { row: number } = {
+      fileId: 'factura-dni',
+      fileName: 'factura-dni.pdf',
+      tipoComprobante: 'B',
+      nroFactura: '00001-00000002',
+      fechaEmision: '2024-01-10',
+      cuitEmisor: '30709076783',
+      razonSocialEmisor: 'ADVA',
+      cuitReceptor: '20123456786', // full CUIT embedding DNI 12345678
+      razonSocialReceptor: 'CLIENTE SA',
+      importeNeto: 90000,
+      importeIva: 10000,
+      importeTotal: 100000,
+      moneda: 'ARS',
+      processedAt: '2024-01-10T10:00:00Z',
+      needsReview: false,
+      confidence: 0.95,
+      row: 2
+    };
+
+    const movement = makeMovimiento({
+      fecha: '2024-01-15',
+      concepto: 'MP 158805080384 - DNI 12345678 - Unipersonal',
+      debito: null,
+      credito: 100000
+    });
+
+    const result = matcher.matchCreditMovement(movement, [factura], [], []);
+
+    expect(result.matchType).toBe('direct_factura');
+    expect(result.tier).toBe(2);
+    expect(result.confidence).toBe('HIGH');
+    expect(result.matchedFileId).toBe('factura-dni');
+  });
+
+  it('credit: hard filter excludes factura whose DNI does not match the concepto CUIT (no false positives)', () => {
+    // Factura has DNI 12345678 (embedded in CUIT 20123456786)
+    // Movement concepto carries a DIFFERENT valid CUIT 27-23456789-1 (DNI 23456789)
+    const factura: Factura & { row: number } = {
+      fileId: 'factura1',
+      fileName: 'factura-001.pdf',
+      tipoComprobante: 'A',
+      nroFactura: '00001-00000001',
+      fechaEmision: '2024-01-10',
+      cuitEmisor: '30709076783',
+      razonSocialEmisor: 'ADVA',
+      cuitReceptor: '12345678', // DNI from CUIT 20123456786 — different person than concepto
+      razonSocialReceptor: 'CLIENTE SA',
+      importeNeto: 90000,
+      importeIva: 10000,
+      importeTotal: 100000,
+      moneda: 'ARS',
+      processedAt: '2024-01-10T10:00:00Z',
+      needsReview: false,
+      confidence: 0.95,
+      row: 2
+    };
+
+    // concepto carries CUIT 27-23456789-1 (DNI 23456789) — a DIFFERENT person
+    const movement = makeMovimiento({
+      fecha: '2024-01-15',
+      concepto: 'TRANSFERENCIA DESDE OUTRO 27-23456789-1',
+      debito: null,
+      credito: 100000
+    });
+
+    const result = matcher.matchCreditMovement(movement, [factura], [], []);
+
+    expect(result.matchType).toBe('no_match');
+  });
+
+  it('debit: concepto CUIT 20123456786 matches pago cuitBeneficiario DNI 12345678 (tier 2 HIGH)', () => {
+    // Pago enviado stores beneficiary as DNI only — CUIT in bank concepto still identifies them
+    const pago: Pago & { row: number } = {
+      fileId: 'pago1',
+      fileName: 'pago-001.pdf',
+      banco: 'BBVA',
+      fechaPago: '2024-01-15',
+      importePagado: 50000,
+      moneda: 'ARS',
+      cuitBeneficiario: '12345678', // DNI embedded in CUIT 20123456786
+      nombreBeneficiario: 'TEST SA',
+      processedAt: '2024-01-15T10:00:00Z',
+      needsReview: false,
+      confidence: 0.95,
+      row: 2
+    };
+
+    // concepto carries full CUIT 20-12345678-6
+    const movement = makeMovimiento({
+      fecha: '2024-01-15',
+      concepto: 'PAGO A PROVEEDOR 20-12345678-6',
+      debito: 50000,
+      credito: null
+    });
+
+    const result = matcher.matchMovement(movement, [], [], [pago]);
+
+    expect(result.matchType).toBe('pago_only');
+    expect(result.tier).toBe(2);
+    expect(result.confidence).toBe('HIGH');
+    expect(result.matchedFileId).toBe('pago1');
+  });
+
+  it('regression: full CUIT in concepto and in factura.cuitReceptor still matches tier 2 HIGH', () => {
+    // Ensure the change from === to cuitOrDniMatch does not break the 11-digit exact match
+    const factura: Factura & { row: number } = {
+      fileId: 'factura1',
+      fileName: 'factura-001.pdf',
+      tipoComprobante: 'A',
+      nroFactura: '00001-00000001',
+      fechaEmision: '2024-01-10',
+      cuitEmisor: '30709076783',
+      razonSocialEmisor: 'ADVA',
+      cuitReceptor: '20123456786', // Full CUIT matches concepto directly
+      razonSocialReceptor: 'CLIENTE SA',
+      importeNeto: 90000,
+      importeIva: 10000,
+      importeTotal: 100000,
+      moneda: 'ARS',
+      processedAt: '2024-01-10T10:00:00Z',
+      needsReview: false,
+      confidence: 0.95,
+      row: 2
+    };
+
+    const movement = makeMovimiento({
+      fecha: '2024-01-15',
+      concepto: 'TRANSFERENCIA DESDE CLIENTE 20-12345678-6',
+      debito: null,
+      credito: 100000
+    });
+
+    const result = matcher.matchCreditMovement(movement, [factura], [], []);
+
+    expect(result.matchType).toBe('direct_factura');
+    expect(result.tier).toBe(2);
+    expect(result.confidence).toBe('HIGH');
+  });
+});
+
+describe('MP-specific forward factura date window (ADV-373)', () => {
+  let matcher: BankMovementMatcher;
+
+  beforeEach(() => {
+    matcher = new BankMovementMatcher(5);
+    const testRate: ExchangeRate = {
+      fecha: '2026-05-25',
+      compra: 1000,
+      venta: 1050
+    };
+    setExchangeRateCache('2026-05-25', testRate);
+  });
+
+  it('credit matches factura 17 days in the future when isMercadoPago=true', () => {
+    // MP charges on 2026-05-25; factura issued 2026-06-11 (17 days later)
+    // Standard forward window is 5 days → would fail; MP window is 25 days → should pass
+    const factura: Factura & { row: number } = {
+      fileId: 'factura-mp',
+      fileName: 'factura-mp.pdf',
+      tipoComprobante: 'A',
+      nroFactura: '00001-00000100',
+      fechaEmision: '2026-06-11', // 17 days AFTER the bank movement
+      cuitEmisor: '30709076783',
+      razonSocialEmisor: 'ADVA',
+      cuitReceptor: '20123456786',
+      razonSocialReceptor: 'CLIENTE SA',
+      importeNeto: 13223,
+      importeIva: 1777,
+      importeTotal: 15000,
+      moneda: 'ARS',
+      processedAt: '2026-06-11T10:00:00Z',
+      needsReview: false,
+      confidence: 0.95,
+      row: 2
+    };
+
+    const movement = makeMovimiento({
+      fecha: '2026-05-25',
+      concepto: 'MP COBRO SERVICIOS',
+      debito: null,
+      credito: 15000
+    });
+
+    const result = matcher.matchCreditMovement(movement, [factura], [], [], undefined, true);
+
+    expect(result.matchType).toBe('direct_factura');
+    expect(result.matchedFileId).toBe('factura-mp');
+  });
+
+  it('credit does NOT match factura 17 days in the future when isMercadoPago=false', () => {
+    // Same scenario but without MP flag — standard 5-day forward window applies
+    const factura: Factura & { row: number } = {
+      fileId: 'factura-mp',
+      fileName: 'factura-mp.pdf',
+      tipoComprobante: 'A',
+      nroFactura: '00001-00000100',
+      fechaEmision: '2026-06-11', // 17 days AFTER the bank movement
+      cuitEmisor: '30709076783',
+      razonSocialEmisor: 'ADVA',
+      cuitReceptor: '20123456786',
+      razonSocialReceptor: 'CLIENTE SA',
+      importeNeto: 13223,
+      importeIva: 1777,
+      importeTotal: 15000,
+      moneda: 'ARS',
+      processedAt: '2026-06-11T10:00:00Z',
+      needsReview: false,
+      confidence: 0.95,
+      row: 2
+    };
+
+    const movement = makeMovimiento({
+      fecha: '2026-05-25',
+      concepto: 'MP COBRO SERVICIOS',
+      debito: null,
+      credito: 15000
+    });
+
+    const result = matcher.matchCreditMovement(movement, [factura], [], [], undefined, false);
+
+    expect(result.matchType).toBe('no_match');
+  });
+
+  it('MP flag has no effect on debit movements (matchMovement ignores it)', () => {
+    // Debit path: matchMovement has no isMercadoPago parameter
+    // A factura 17 days before the bank date should NOT match (exceeds FACTURA_DATE_RANGE_BEFORE=5)
+    const factura: Factura & { row: number } = {
+      fileId: 'factura-debit',
+      fileName: 'factura-debit.pdf',
+      tipoComprobante: 'A',
+      nroFactura: '00001-00000200',
+      fechaEmision: '2026-06-11', // 17 days after bank movement — out of debit window
+      cuitEmisor: '20123456786',
+      razonSocialEmisor: 'TEST SA',
+      cuitReceptor: '30709076783',
+      razonSocialReceptor: 'ADVA',
+      importeNeto: 13223,
+      importeIva: 1777,
+      importeTotal: 15000,
+      moneda: 'ARS',
+      processedAt: '2026-06-11T10:00:00Z',
+      needsReview: false,
+      confidence: 0.95,
+      row: 2
+    };
+
+    const movement = makeMovimiento({
+      fecha: '2026-05-25',
+      concepto: 'MP PAGO SERVICIOS',
+      debito: 15000,
+      credito: null
+    });
+
+    const result = matcher.matchMovement(movement, [factura], [], []);
+
+    expect(result.matchType).toBe('no_match');
+  });
+});
+
+describe('MP charge debit rows excluded from document matching (Codex P2)', () => {
+  let matcher: BankMovementMatcher;
+
+  beforeEach(() => {
+    matcher = new BankMovementMatcher(5);
+  });
+
+  // A pago enviado that coincides in amount and date with an MP commission —
+  // without the exclusion it would be a tier-5 candidate
+  const coincidentPago: Pago & { row: number } = {
+    fileId: 'pago-coincident',
+    fileName: 'pago-coincident.pdf',
+    banco: 'BBVA',
+    fechaPago: '2026-05-25',
+    importePagado: 450,
+    moneda: 'ARS',
+    cuitBeneficiario: '20111111119',
+    processedAt: '2026-05-25T10:00:00Z',
+    needsReview: false,
+    confidence: 0.95,
+    row: 2
+  };
+
+  it('debit MP charge row in an MP account is classified as bank_fee, never document-matched', () => {
+    const movement = makeMovimiento({
+      fecha: '2026-05-25',
+      concepto: 'MP 158805080384 - Comisión Mercado Pago',
+      debito: 450,
+      credito: null
+    });
+
+    const result = matcher.matchMovement(movement, [], [], [coincidentPago], undefined, true);
+
+    expect(result.matchType).toBe('bank_fee');
+    expect(result.description).toBe('Comisiones e impuestos Mercado Pago');
+    expect(result.matchedFileId).toBe('');
+  });
+
+  it('unknown charge labels are excluded too — the MP {id} prefix is the signal', () => {
+    const movement = makeMovimiento({
+      fecha: '2026-05-25',
+      concepto: 'MP 158805080384 - some_future_charge_type',
+      debito: 450,
+      credito: null
+    });
+
+    const result = matcher.matchMovement(movement, [], [], [coincidentPago], undefined, true);
+
+    expect(result.matchType).toBe('bank_fee');
+  });
+
+  it('same concepto without the MP account flag is unaffected (regression guard)', () => {
+    const movement = makeMovimiento({
+      fecha: '2026-05-25',
+      concepto: 'MP 158805080384 - Comisión Mercado Pago',
+      debito: 450,
+      credito: null
+    });
+
+    const result = matcher.matchMovement(movement, [], [], [coincidentPago]);
+
+    // Non-MP accounts keep existing behavior: the pago is a normal candidate
+    expect(result.matchType).not.toBe('bank_fee');
+  });
+});

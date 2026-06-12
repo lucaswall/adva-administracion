@@ -267,6 +267,9 @@ describe('parsePeriodRange', () => {
 describe('enumerateResumenes', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Default: listAllChildren returns empty list so items have mimeType=undefined
+    // (backward-compatible: copyPdfsToDelivery treats undefined mimeType as PDF)
+    vi.mocked(listAllChildren).mockResolvedValue(ok([]));
   });
 
   // Header rows for each schema (lower-cased to match function's normalization)
@@ -622,6 +625,40 @@ describe('enumerateResumenes', () => {
     vi.mocked(listByMimeType).mockResolvedValueOnce(err('Drive root listing failed'));
     const result = await enumerateResumenes('2025-01', '2025-03', 'root-id');
     expect(result.ok).toBe(false);
+  });
+
+  it('populates mimeType from listAllChildren for each scope item (ADV-375)', async () => {
+    // Account folder 'year-2025:acc-0' contains one PDF and one spreadsheet
+    setupHierarchy([
+      {
+        yearName: '2025', yearId: 'year-2025', bancosId: 'bancos-2025',
+        accounts: [
+          {
+            name: 'BBVA 1234567890 ARS', sheetId: 'sh-bbva', headers: bancarioHeaders,
+            rows: [
+              ['2025-01', '', '', 'fid-pdf', 'jan.pdf', '', '', '', 0, 0, true, 0],
+              ['2025-02', '', '', 'fid-sheet', 'feb.gsheet', '', '', '', 0, 0, true, 0],
+            ],
+          },
+        ],
+      },
+    ]);
+
+    // listAllChildren returns file metadata for the account folder
+    vi.mocked(listAllChildren).mockResolvedValueOnce(ok([
+      { id: 'fid-pdf', name: 'jan.pdf', mimeType: 'application/pdf' },
+      { id: 'fid-sheet', name: 'feb.gsheet', mimeType: 'application/vnd.google-apps.spreadsheet' },
+    ]));
+
+    const result = await enumerateResumenes('2025-01', '2025-12', 'root-id');
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value).toHaveLength(2);
+      const pdfItem = result.value.find(i => i.fileId === 'fid-pdf');
+      const sheetItem = result.value.find(i => i.fileId === 'fid-sheet');
+      expect(pdfItem?.mimeType).toBe('application/pdf');
+      expect(sheetItem?.mimeType).toBe('application/vnd.google-apps.spreadsheet');
+    }
   });
 });
 
@@ -1097,11 +1134,11 @@ describe('copyPdfsToDelivery', () => {
       periodo: `2025-0${i + 1}`,
     }));
 
-  it('empty scope returns {copied: 0, failed: []} with Result.ok', async () => {
+  it('empty scope returns {copied: 0, failed: [], skippedNonPdf: 0} with Result.ok', async () => {
     const result = await copyPdfsToDelivery('folder-id', []);
     expect(result.ok).toBe(true);
     if (result.ok) {
-      expect(result.value).toEqual({ copied: 0, failed: [] });
+      expect(result.value).toEqual({ copied: 0, failed: [], skippedNonPdf: 0 });
     }
     expect(copyFile).not.toHaveBeenCalled();
   });
@@ -1145,6 +1182,42 @@ describe('copyPdfsToDelivery', () => {
       expect(result.value.copied).toBe(0);
       expect(result.value.failed).toHaveLength(2);
     }
+  });
+
+  it('skips non-PDF item (spreadsheet mimeType), increments skippedNonPdf, does not copy it', async () => {
+    vi.mocked(copyFile).mockResolvedValue(ok({ id: 'copy-id', name: 'file.pdf', mimeType: 'application/pdf' }));
+
+    const scope: ResumenScopeItem[] = [
+      { fileId: 'fid-pdf', fileName: 'statement.pdf', type: 'bancario', periodo: '2025-01', mimeType: 'application/pdf' },
+      { fileId: 'fid-sheet', fileName: 'sheet.gsheet', type: 'bancario', periodo: '2025-02', mimeType: 'application/vnd.google-apps.spreadsheet' },
+    ];
+
+    const result = await copyPdfsToDelivery('folder-id', scope);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.copied).toBe(1);
+      expect(result.value.failed).toEqual([]);
+      expect(result.value.skippedNonPdf).toBe(1);
+    }
+    // copyFile called only for the PDF item
+    expect(copyFile).toHaveBeenCalledTimes(1);
+    expect(copyFile).toHaveBeenCalledWith('fid-pdf', 'folder-id');
+  });
+
+  it('item without mimeType (undefined) is treated as PDF and copied normally', async () => {
+    vi.mocked(copyFile).mockResolvedValue(ok({ id: 'copy-id', name: 'file.pdf', mimeType: 'application/pdf' }));
+
+    const scope: ResumenScopeItem[] = [
+      { fileId: 'fid-unknown', fileName: 'file.pdf', type: 'bancario', periodo: '2025-01' },
+    ];
+
+    const result = await copyPdfsToDelivery('folder-id', scope);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.copied).toBe(1);
+      expect(result.value.skippedNonPdf).toBe(0);
+    }
+    expect(copyFile).toHaveBeenCalledTimes(1);
   });
 });
 

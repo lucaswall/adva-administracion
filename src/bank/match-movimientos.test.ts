@@ -7,6 +7,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   matchAllMovimientos,
   isBetterMatch,
+  isMercadoPagoAccount,
   getRequiredColumnIndex,
   parseFacturasEmitidas,
   parseFacturasRecibidas,
@@ -1412,6 +1413,7 @@ describe('matchAllMovimientos', () => {
       ]),
       expect.anything(),
       expect.anything(),
+      expect.anything(),
       expect.anything()
     );
   });
@@ -1724,6 +1726,7 @@ describe('matchAllMovimientos', () => {
       expect.arrayContaining([
         expect.objectContaining({ cuitEmisor: '123', importeTotal: 0 }),
       ]),
+      expect.anything(),
       expect.anything(),
       expect.anything(),
       expect.anything()
@@ -5260,5 +5263,27 @@ describe('ADV-343: pagada gated on actually-applied detalle updates', () => {
 
     // batchUpdate must NOT be called for pagada (all updates were skipped)
     expect(batchUpdate).not.toHaveBeenCalled();
+  });
+});
+
+describe('ADV-373: isMercadoPagoAccount derivation from discovery map keys', () => {
+  it('detects MP account from year-prefixed key (discoverMovimientosSpreadsheets format)', () => {
+    expect(isMercadoPagoAccount('2026:Mercado Pago 987654 ARS')).toBe(true);
+  });
+
+  it('detects MP account from bare folder name (no year prefix)', () => {
+    expect(isMercadoPagoAccount('Mercado Pago 987654 ARS')).toBe(true);
+  });
+
+  it('returns false for regular bank accounts with year prefix', () => {
+    expect(isMercadoPagoAccount('2026:BBVA 1234567890 ARS')).toBe(false);
+  });
+
+  it('returns false for regular bank accounts without year prefix', () => {
+    expect(isMercadoPagoAccount('BBVA 1234567890 ARS')).toBe(false);
+  });
+
+  it('returns false when Mercado Pago appears mid-name only', () => {
+    expect(isMercadoPagoAccount('2026:Banco de Mercado Pago Falso 1 ARS')).toBe(false);
   });
 });

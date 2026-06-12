@@ -278,6 +278,7 @@ src/
 ├── routes/
 │   ├── status.ts
 │   ├── scan.ts
+│   ├── mp-sync.ts         # POST /api/mp-sync (manual MP sync trigger)
 │   └── webhooks.ts
 ├── middleware/
 │   └── auth.ts            # Bearer token authentication
@@ -311,6 +312,13 @@ src/
 ├── matching/
 │   ├── matcher.ts
 │   └── cascade-matcher.ts
+├── mercadopago/
+│   ├── client.ts          # MP payments API client (pagination, timeout, 429 backoff)
+│   ├── transform.ts       # MP payments → MovimientoBancario rows (gross credit + per-charge debits)
+│   ├── movimientos-writer.ts  # Idempotent incremental month-tab appends (MP {id} dedupe key)
+│   ├── resumen-writer.ts  # Resumen row for closed periods (synthetic running balance)
+│   ├── sync.ts            # Orchestrator (PROCESSING_LOCK + match auto-trigger)
+│   └── scheduler.ts       # Monthly cron (1st, 06:00) + boot-time catch-up
 ├── gemini/
 │   ├── client.ts
 │   ├── prompts.ts
@@ -486,6 +494,7 @@ The Apps Script bundle is produced into `dist/apps-script/{Code.js,appsscript.js
 | DRIVE_ROOT_FOLDER_ID_PRODUCTION | No | - |
 | DRIVE_ROOT_FOLDER_ID_STAGING | No | - |
 | FACTURADOR_SPREADSHEET_ID | No | - |
+| MP_ACCESS_TOKEN | No | - |
 
 **Note:** `API_BASE_URL` enables webhooks (URL + `/webhooks/drive`) and Apps Script (domain extracted at build)
 
@@ -497,6 +506,8 @@ The Apps Script bundle is produced into `dist/apps-script/{Code.js,appsscript.js
 
 **Note:** `FACTURADOR_SPREADSHEET_ID` is required for the Subdiario de Ventas rebuild to enrich socio rows with membership category. If unset, the Subdiario builds but with `categoria=''` (blank) for all rows.
 
+**Note:** `MP_ACCESS_TOKEN` is the Mercado Pago API access token (optional). When unset, the entire MP sync feature is disabled: the scheduler registers no cron and `syncMercadopago` returns `{ skipped: true, reason: 'mp_disabled' }`. The token must NEVER appear in logs (asserted in client tests).
+
 ## API ENDPOINTS
 
 | Method | Endpoint | Auth | Description |
@@ -506,15 +517,16 @@ The Apps Script bundle is produced into `dist/apps-script/{Code.js,appsscript.js
 | POST | /api/scan | Yes | Manual scan |
 | POST | /api/rematch | Yes | Rematch unmatched |
 | POST | /api/match-movimientos | Yes | Match movimientos detalles (supports `?force=true` to re-match all rows) |
+| POST | /api/mp-sync | Yes | Manual Mercado Pago sync (optional `?period=YYYY-MM`; defaults to previous + current month) |
 | POST | /webhooks/drive | No | Drive notifications |
 
 **Concurrency Control:**
 
-Both `/api/scan` and `/api/match-movimientos` use a unified lock (`PROCESSING_LOCK_ID` from `src/config.ts`):
+`/api/scan`, `/api/match-movimientos`, and `/api/mp-sync` (plus the MP cron/boot sync) use a unified lock (`PROCESSING_LOCK_ID` from `src/config.ts`):
 - **Scan deferral**: Scans WAIT for lock (up to 5 minutes) instead of skipping. A state machine (`'idle' | 'pending' | 'running'`) prevents queue buildup - if a scan is already waiting or running, subsequent scan requests skip (the pending scan will handle all files since it reads Entrada at start).
 - **Lock timeout**: 5 minutes auto-expiry (configurable via `PROCESSING_LOCK_TIMEOUT_MS` in `src/config.ts`)
-- **Sequential execution**: At any time, only ONE of these can run: scan OR match
-- **Auto-trigger**: After every successful scan (any document type), `matchAllMovimientos` is triggered asynchronously to fill detalles column
+- **Sequential execution**: At any time, only ONE of these can run: scan OR match OR mp-sync
+- **Auto-trigger**: After every successful scan (any document type), `matchAllMovimientos` is triggered asynchronously to fill detalles column. MP sync does the same when it appended rows — always AFTER releasing the lock (match acquires the same lock; triggering under it would deadlock).
 
 **Race Condition Prevention:**
 - **Lock acquisition**: Uses atomic state initialization - all lock state (including `waitPromise`) is set in a single `Map.set()` call with no yields between, preventing TOCTOU races
@@ -589,7 +601,8 @@ ROOT/
     └── Bancos/
         ├── {Bank} {Account} {Currency}/     # resumen_bancario
         ├── {Bank} {CardType} {LastDigits}/  # resumen_tarjeta
-        └── {Broker} {Comitente}/            # resumen_broker
+        ├── {Broker} {Comitente}/            # resumen_broker
+        └── Mercado Pago {CollectorId} ARS/  # MP sync (API-ingested, no PDFs)
 ```
 
 **Bank account folder naming (resumen_bancario):**
@@ -605,6 +618,10 @@ ROOT/
 **Broker folder naming (resumen_broker):**
 - Format: `{Broker} {Comitente}`
 - Example: `BALANZ CAPITAL VALORES SAU 123456`
+
+**Mercado Pago folder naming (MP sync):**
+- Format: `Mercado Pago {CollectorId} ARS` (standard bank-account convention; collector id acts as the account number)
+- Created by `syncMercadopago`, not by document processing — no PDFs exist for this account. The Entrega flow skips its spreadsheet-backed resumen fileIds (`skippedNonPdf`); the data reaches the accountants via the per-account-month movimientos files.
 
 ## SPREADSHEETS
 
@@ -657,6 +674,8 @@ Bank movements are matched against documents using a tier-based algorithm (lower
 
 **Hard identity filter:** If CUIT is found in concepto, only documents with matching CUIT are considered — no fallthrough to lower tiers.
 
+**CUIT↔DNI equivalence:** All identity comparisons (hard filter and tier 2, credit and debit paths) use `cuitOrDniMatch` from `src/utils/validation.ts`, not strict equality. An 8-digit DNI stored on a consumidor-final factura matches an 11-digit CUIT/CUIL that embeds it (digits 3–10); two full 11-digit CUITs still compare exactly. Required because facturas emitidas store consumidor-final receptor IDs as DNI while bank/MP conceptos carry full CUIT/CUIL.
+
 ### Match Replacement
 Better matches replace existing ones. Quality comparison: tier → date proximity → exact amount.
 
@@ -672,6 +691,7 @@ Better matches replace existing ones. Quality comparison: tier → date proximit
 ### Date Windows
 - Pago: ±15 days from bank date
 - Factura: -5/+30 days from bank date
+- **Mercado Pago accounts:** the forward factura bound is extended to `MP_FACTURA_DATE_RANGE_AFTER_DAYS = 25` days (facturas up to 25 days *after* the movement, vs 5 standard). MP subscriptions charge on the ~25th but the factura is emitted ~the 11th of the following month (~17 days later, verified against production data). Accounts are detected by folder name: `folderName.startsWith(MERCADO_PAGO_BANK_NAME)` in `match-movimientos.ts`. Backward window and tier/confidence semantics unchanged; non-MP accounts have zero behavior change.
 
 ### Cross-Currency (USD→ARS)
 Exchange rates from ArgentinaDatos API, ±5% tolerance. Cross-currency caps: Tier 1-3 → MEDIUM, Tier 4 → LOW, Tier 5 → LOW.

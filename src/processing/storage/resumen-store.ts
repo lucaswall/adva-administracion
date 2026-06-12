@@ -163,32 +163,51 @@ async function isDuplicateResumenBroker(
 }
 
 /**
+ * Options for storeResumenBancario
+ */
+export interface StoreResumenBancarioOptions {
+  /**
+   * Skip the ADV-308 fileId reprocessing check. The check assumes fileId
+   * uniquely identifies the source document — MP synthetic resumenes reuse
+   * the account's movimientos spreadsheet id as fileId for EVERY period, so
+   * the check would silently drop every closed period after the first.
+   * Dedupe then relies solely on the period-specific business key
+   * (banco, numeroCuenta, fechaDesde, fechaHasta, moneda).
+   */
+  skipFileIdCheck?: boolean;
+}
+
+/**
  * Stores a bank account resumen in the Control de Resumenes spreadsheet
  *
  * @param resumen - The resumen to store
  * @param spreadsheetId - The Control de Resumenes spreadsheet ID
  * @param context - Optional scan context for cache optimization
+ * @param options - Optional store behavior flags (see StoreResumenBancarioOptions)
  * @returns Store result indicating if stored or duplicate
  */
 export async function storeResumenBancario(
   resumen: ResumenBancario,
   spreadsheetId: string,
-  context?: ScanContext
+  context?: ScanContext,
+  options?: StoreResumenBancarioOptions
 ): Promise<Result<StoreResult, Error>> {
   // Create lock key from business key (prevents concurrent identical stores)
   const lockKey = `store:resumen-bancario:${resumen.banco}:${resumen.numeroCuenta}:${resumen.fechaDesde}:${resumen.fechaHasta}:${resumen.moneda}`;
 
   return withLock(lockKey, async () => {
     // ADV-308: check for reprocessing — same fileId already stored (movimientos failed previously)
-    const fileIdCheck = await findResumenRowByFileId(spreadsheetId, resumen.fileId);
-    if (fileIdCheck.found) {
-      info('Resumen bancario already stored by fileId, treating as updated for movimientos retry', {
-        module: 'storage',
-        phase: 'resumen-bancario',
-        fileId: resumen.fileId,
-        correlationId: getCorrelationId(),
-      });
-      return { stored: true, updated: true };
+    if (!options?.skipFileIdCheck) {
+      const fileIdCheck = await findResumenRowByFileId(spreadsheetId, resumen.fileId);
+      if (fileIdCheck.found) {
+        info('Resumen bancario already stored by fileId, treating as updated for movimientos retry', {
+          module: 'storage',
+          phase: 'resumen-bancario',
+          fileId: resumen.fileId,
+          correlationId: getCorrelationId(),
+        });
+        return { stored: true, updated: true };
+      }
     }
 
     // Always use API-based check for resumenes (bank sheets not pre-loaded in cache)

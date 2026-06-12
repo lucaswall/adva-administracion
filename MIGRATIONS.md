@@ -23,3 +23,9 @@ Auto-applied schema migrations for persistent data (spreadsheets, folder structu
 **Change to existing migration:** `migrateDashboardProcessedAt` (src/services/migrations.ts) previously decoded DATE_TIME serials with the raw Excel-epoch-as-UTC formula, shifting every value ~3 h earlier per run (non-idempotent). It now decodes serials in the spreadsheet's timezone via `decodeSerialInTimezone` (utils/date.ts), making re-runs true no-ops.
 
 **Trigger/scope:** unchanged. No data backfill — historical drift only affected transient 'processing' rows consumed by the stale guard, which now also decodes timezone-correctly (`getStaleProcessingFileIds`).
+
+## Mercado Pago account convention (ADV-365…ADV-375)
+
+**Change:** new additive folder/workbook convention `{YYYY}/Bancos/Mercado Pago {collectorId} ARS/` with a `Movimientos - …` workbook (standard bancario 9-col schema, no SALDO FINAL row in MP tabs) and resumen_bancario rows in Control de Resumenes (`banco='Mercado Pago'`, synthetic running net-collected saldos). `MovimientoBancario.saldo` widened to `number | null` (in-memory type only; empty saldo cells were always possible).
+
+**Migration:** none required. Everything is created on demand by `syncMercadopago` (get-or-create); no existing spreadsheet or folder is modified. Old deployments without `MP_ACCESS_TOKEN` are unaffected (feature fully disabled). Existing matching/delivery flows handle the new account generically; delivery now skips non-PDF resumen fileIds (additive result field `skippedNonPdf`).

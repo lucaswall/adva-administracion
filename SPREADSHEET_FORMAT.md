@@ -330,6 +330,24 @@ This sync runs as part of `matchAllMovimientos` (triggered after every scan and 
 4. **Inter-bank transfers**: Transfers between ADVA's own accounts may match incorrectly. Pattern detection could be added in future.
 5. **Credit card refunds**: Refunds appearing as credits are not currently auto-detected. Future enhancement if needed.
 
+### Mercado Pago Accounts (API-Ingested)
+
+Mercado Pago collections are ingested from the MP payments API by `syncMercadopago` (monthly cron + boot catch-up + `POST /api/mp-sync`) — no PDF resumen exists. The account follows the standard bank-account conventions with these differences:
+
+**Folder/workbook convention:**
+- Folder: `{YYYY}/Bancos/Mercado Pago {collectorId} ARS/` (collector id acts as the account number)
+- Movimientos workbook: `Movimientos - Mercado Pago {collectorId} ARS` with standard per-month `YYYY-MM` tabs using the bancario 9-column schema above
+
+**Month tabs (incremental, idempotent):**
+- Tabs are appended incrementally as payments arrive — a `SALDO INICIAL` row is written when the tab is created, but **no `SALDO FINAL` row is ever written** (period close is represented by the Control de Resumenes row instead)
+- Concepto format is the idempotency key: credit rows are `MP {operationId} - CUIT {payerCuit} - {description}` (gross amount); each MP charge produces its own identity-free debit row, e.g. `MP {operationId} - Comisión Mercado Pago`, `MP {operationId} - Imp. Débitos y Créditos`, `MP {operationId} - Retención SIRTAC {Jurisdicción}`, `MP {operationId} - Retención IIBB {Jurisdicción}`. If itemized charges don't reconcile with gross − net, a single combined `MP {operationId} - Comisiones e impuestos Mercado Pago` debit row is written instead
+- Re-running a sync never duplicates rows (existing `MP {operationId}` keys are skipped); manual `MANUAL` matches in columns G/H/I are never touched
+
+**Resumen rows (Control de Resumenes, resumen_bancario schema):**
+- Written only for closed periods (periodo < current month) with `banco = 'Mercado Pago'`, `numeroCuenta = {collectorId}`, `moneda = 'ARS'`
+- `saldoInicial`/`saldoFinal` are a **synthetic running net-collected balance** (cumulative credits − debits since ingestion start) — the payments API has no money-out (withdrawal) data, so these are not a real MP account balance. `balanceOk = SI` by construction
+- `fileId` points at the movimientos **spreadsheet** (no PDF). The Entrega flow skips these non-PDF fileIds when copying resumen PDFs (`skippedNonPdf` count in the copy-pdfs response); the data reaches the accountants through the per-account-month movimientos files
+
 ---
 
 ## Dashboard Operativo Contable
