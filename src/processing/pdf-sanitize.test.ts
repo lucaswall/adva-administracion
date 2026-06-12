@@ -6,6 +6,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
+import { deflateSync } from 'node:zlib';
 import { detectInvisibleText } from './pdf-sanitize.js';
 
 // ---------------------------------------------------------------------------
@@ -54,6 +55,86 @@ function buildMinimalPdf(contentStream: string, mediaBox = '0 0 612 792'): Buffe
  */
 function buildNonPdfBuffer(): Buffer {
   return Buffer.from('\x89PNG\r\n\x1a\nFake PNG content', 'latin1');
+}
+
+/**
+ * Builds a minimal PDF where the content stream is FlateDecode-compressed.
+ * The content stream is zlib-deflated before embedding.
+ */
+function buildMinimalPdfWithFlateDecode(
+  contentStream: string,
+  mediaBox = '0 0 612 792'
+): Buffer {
+  const compressed = deflateSync(Buffer.from(contentStream, 'latin1'));
+  const compressedStr = compressed.toString('latin1');
+  const streamLen = compressed.length;
+
+  const objects = [
+    '1 0 obj\n<</Type /Catalog /Pages 2 0 R>>\nendobj\n',
+    '2 0 obj\n<</Type /Pages /Kids [3 0 R] /Count 1>>\nendobj\n',
+    `3 0 obj\n<</Type /Page /Parent 2 0 R /MediaBox [${mediaBox}] /Contents 4 0 R /Resources <</Font <</F1 5 0 R>>>>>>\nendobj\n`,
+    `4 0 obj\n<</Length ${streamLen} /Filter /FlateDecode>>\nstream\n${compressedStr}\nendstream\nendobj\n`,
+    '5 0 obj\n<</Type /Font /Subtype /Type1 /BaseFont /Helvetica>>\nendobj\n',
+  ];
+
+  const header = '%PDF-1.4\n';
+  let body = '';
+  const offsets: number[] = [];
+
+  for (const obj of objects) {
+    offsets.push(header.length + body.length);
+    body += obj;
+  }
+
+  const xrefOffset = header.length + body.length;
+
+  let xref = `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
+  for (const offset of offsets) {
+    xref += String(offset).padStart(10, '0') + ' 00000 n \n';
+  }
+
+  const trailer = `trailer\n<</Size ${objects.length + 1} /Root 1 0 R>>\nstartxref\n${xrefOffset}\n%%EOF\n`;
+  return Buffer.from(header + body + xref + trailer, 'latin1');
+}
+
+/**
+ * Builds a minimal PDF that declares /FlateDecode in its stream dict
+ * but stores raw (non-deflated) bytes. The raw bytes happen to contain
+ * PDF operators that would trigger white-fill detection in a naive scan.
+ * After proper FlateDecode-aware handling (inflate fails → skip stream)
+ * this should NOT flag as invisible.
+ */
+function buildMinimalPdfWithCorruptFlateDecode(mediaBox = '0 0 612 792'): Buffer {
+  // Raw bytes that look like an invisible-text stream to a naive scanner
+  const fakeCompressedStr = '1 g\nBT /F1 12 Tf 100 700 Td (hidden) Tj ET';
+  const streamLen = fakeCompressedStr.length;
+
+  const objects = [
+    '1 0 obj\n<</Type /Catalog /Pages 2 0 R>>\nendobj\n',
+    '2 0 obj\n<</Type /Pages /Kids [3 0 R] /Count 1>>\nendobj\n',
+    `3 0 obj\n<</Type /Page /Parent 2 0 R /MediaBox [${mediaBox}] /Contents 4 0 R /Resources <</Font <</F1 5 0 R>>>>>>\nendobj\n`,
+    `4 0 obj\n<</Length ${streamLen} /Filter /FlateDecode>>\nstream\n${fakeCompressedStr}\nendstream\nendobj\n`,
+    '5 0 obj\n<</Type /Font /Subtype /Type1 /BaseFont /Helvetica>>\nendobj\n',
+  ];
+
+  const header = '%PDF-1.4\n';
+  let body = '';
+  const offsets: number[] = [];
+
+  for (const obj of objects) {
+    offsets.push(header.length + body.length);
+    body += obj;
+  }
+
+  const xrefOffset = header.length + body.length;
+
+  let xref = `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
+  for (const offset of offsets) {
+    xref += String(offset).padStart(10, '0') + ' 00000 n \n';
+  }
+
+  const trailer = `trailer\n<</Size ${objects.length + 1} /Root 1 0 R>>\nstartxref\n${xrefOffset}\n%%EOF\n`;
+  return Buffer.from(header + body + xref + trailer, 'latin1');
 }
 
 // ---------------------------------------------------------------------------
@@ -237,6 +318,89 @@ describe('detectInvisibleText', () => {
       const elapsed = Date.now() - start;
 
       expect(elapsed).toBeLessThan(500);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Task 12 — ADV-284: FlateDecode stream decompression
+  // ---------------------------------------------------------------------------
+
+  describe('FlateDecode compressed stream detection (ADV-284)', () => {
+    it('detects white-fill invisible text inside a FlateDecode-compressed stream', () => {
+      const contentStream = '1 g\nBT /F1 12 Tf 100 700 Td (hidden payload) Tj ET';
+      const pdf = buildMinimalPdfWithFlateDecode(contentStream);
+      const result = detectInvisibleText(pdf);
+      expect(result.hasInvisible).toBe(true);
+    });
+
+    it('does NOT flag a FlateDecode stream that contains only clean dark text', () => {
+      const contentStream = 'BT /F1 12 Tf 100 700 Td (visible) Tj ET';
+      const pdf = buildMinimalPdfWithFlateDecode(contentStream);
+      const result = detectInvisibleText(pdf);
+      expect(result.hasInvisible).toBe(false);
+    });
+
+    it('returns hasInvisible:false for a corrupt FlateDecode stream without throwing', () => {
+      // The corrupt stream contains raw bytes that look like invisible-text operators
+      // (would false-positive in a naive raw scan).
+      // After the fix the inflate error causes the stream to be skipped → no false positive.
+      const pdf = buildMinimalPdfWithCorruptFlateDecode();
+      expect(() => detectInvisibleText(pdf)).not.toThrow();
+      const result = detectInvisibleText(pdf);
+      expect(result.hasInvisible).toBe(false);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Task 12 — ADV-284: /Tr 3 invisible render mode detection
+  // ---------------------------------------------------------------------------
+
+  describe('/Tr 3 invisible render mode detection (ADV-284)', () => {
+    it('detects text render mode 3 followed by Tj in same stream', () => {
+      // 3 Tr sets invisible render mode; then (payload) Tj draws invisible text
+      const contentStream = 'BT /F1 12 Tf 100 700 Td 3 Tr (invisible via render mode) Tj ET';
+      const result = detectInvisibleText(buildMinimalPdf(contentStream));
+      expect(result.hasInvisible).toBe(true);
+      expect(result.reason).toMatch(/render.?mode|Tr|invisible/i);
+    });
+
+    it('detects /Tr 3 with TJ array operator', () => {
+      const contentStream = 'BT /F1 12 Tf 100 700 Td 3 Tr [(hidden) 0 (payload)] TJ ET';
+      const result = detectInvisibleText(buildMinimalPdf(contentStream));
+      expect(result.hasInvisible).toBe(true);
+    });
+
+    it('does NOT flag render mode 0 (normal fill text)', () => {
+      const contentStream = 'BT /F1 12 Tf 100 700 Td 0 Tr (visible) Tj ET';
+      const result = detectInvisibleText(buildMinimalPdf(contentStream));
+      expect(result.hasInvisible).toBe(false);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Task 12 — ADV-284: q/Q graphics-state stack color tracking
+  // ---------------------------------------------------------------------------
+
+  describe('q/Q graphics-state stack and color tracking (ADV-284)', () => {
+    it('does NOT flag when white fill is set inside q/Q and Q restores dark color', () => {
+      // q saves dark; 1 g sets white; Q restores dark; Tj draws in dark → clean
+      const contentStream = 'q\n1 g\nQ\nBT /F1 12 Tf 100 700 Td (visible) Tj ET';
+      const result = detectInvisibleText(buildMinimalPdf(contentStream));
+      expect(result.hasInvisible).toBe(false);
+    });
+
+    it('DOES flag when outer white fill is restored by Q before text draw (1 g q 0 g Q Tj)', () => {
+      // 1 g sets white; q saves white; 0 g sets dark; Q restores white; Tj draws white → invisible
+      const contentStream = '1 g\nq\n0 g\nQ\nBT /F1 12 Tf 100 700 Td (hidden) Tj ET';
+      const result = detectInvisibleText(buildMinimalPdf(contentStream));
+      expect(result.hasInvisible).toBe(true);
+    });
+
+    it('DOES flag when white fill is set after q/Q block (q 0 g Q 1 g Tj)', () => {
+      // q saves dark; 0 g dark inside block; Q restores dark; 1 g sets white; Tj → invisible
+      const contentStream = 'q\n0 g\nQ\n1 g\nBT /F1 12 Tf 100 700 Td (hidden) Tj ET';
+      const result = detectInvisibleText(buildMinimalPdf(contentStream));
+      expect(result.hasInvisible).toBe(true);
     });
   });
 });

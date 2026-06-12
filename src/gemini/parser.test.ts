@@ -10,6 +10,7 @@ import {
   assignCuitsAndClassify,
   parseFacturaResponse,
   parsePagoResponse,
+  parseRetencionResponse,
   extractJSON,
   isAdvaName
 } from './parser.js';
@@ -819,7 +820,7 @@ describe('Parser - Movimiento Validation', () => {
   });
 
   describe('parseResumenBancarioResponse - numeric range validation', () => {
-    it('rejects negative saldo with needsReview flag', () => {
+    it('accepts negative saldo (overdraft) without needsReview flag (ADV-287)', () => {
       const response = JSON.stringify({
         banco: 'BBVA',
         numeroCuenta: '007-009364/1',
@@ -835,7 +836,7 @@ describe('Parser - Movimiento Validation', () => {
             concepto: 'TRANSFERENCIA',
             debito: null,
             credito: 50000,
-            saldo: -5000, // Negative saldo is invalid
+            saldo: -5000, // Negative saldo (overdraft) is now legitimate per ADV-287
           }
         ]
       });
@@ -844,7 +845,7 @@ describe('Parser - Movimiento Validation', () => {
 
       expect(result.ok).toBe(true);
       if (result.ok) {
-        expect(result.value.needsReview).toBe(true);
+        expect(result.value.needsReview).toBe(false);
       }
     });
 
@@ -2356,5 +2357,751 @@ describe('validateAdvaRole typed error messages (Task 11 — ADV-203)', () => {
     // ADVA is neither issuer nor client → assignCuitsAndClassify throws → parse error
     const result = parseFacturaResponse(responseWrongRole, 'factura_recibida');
     expect(result.ok).toBe(false);
+  });
+});
+
+// ===========================================================================
+// Task 14 — ADV-286: Validate Gemini enum fields at the AI boundary
+// ===========================================================================
+
+describe('Enum field validation at AI boundary (ADV-286)', () => {
+  const baseFactura = {
+    issuerName: 'ADVA',
+    clientName: 'TEST SA',
+    allCuits: ['30709076783', '20123456786'],
+    nroFactura: '00001-00000001',
+    fechaEmision: '2025-01-15',
+    importeNeto: 1000,
+    importeIva: 210,
+    importeTotal: 1210,
+  };
+
+  describe('tipoComprobante validation in parseFacturaResponse', () => {
+    it('out-of-enum tipoComprobante "Tipo X" becomes undefined and sets needsReview', () => {
+      const response = JSON.stringify({ ...baseFactura, tipoComprobante: 'Tipo X', moneda: 'ARS' });
+      const result = parseFacturaResponse(response, 'factura_emitida');
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value.data.tipoComprobante).toBeUndefined();
+        expect(result.value.needsReview).toBe(true);
+        expect(result.value.missingFields).toContain('tipoComprobante');
+      }
+    });
+
+    it('valid "NC E" tipoComprobante is still accepted (regression guard for commit 2ebf502)', () => {
+      const response = JSON.stringify({
+        ...baseFactura,
+        tipoComprobante: 'NC E',
+        moneda: 'ARS',
+      });
+      const result = parseFacturaResponse(response, 'factura_emitida');
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value.data.tipoComprobante).toBe('NC E');
+        // NC E hardcodes condicionIVAReceptor='Exterior' (ADV-277 behavior)
+        expect(result.value.data.condicionIVAReceptor).toBe('Exterior');
+      }
+    });
+
+    it('valid "ND E" tipoComprobante is accepted', () => {
+      const response = JSON.stringify({ ...baseFactura, tipoComprobante: 'ND E', moneda: 'ARS' });
+      const result = parseFacturaResponse(response, 'factura_emitida');
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value.data.tipoComprobante).toBe('ND E');
+      }
+    });
+  });
+
+  describe('moneda validation in parsePagoResponse', () => {
+    it('invalid moneda "U$S" in pago becomes undefined and sets needsReview', () => {
+      const response = JSON.stringify({
+        banco: 'BBVA',
+        fechaPago: '2025-01-15',
+        importePagado: 1000,
+        moneda: 'U$S', // invalid
+        cuitPagador: '30709076783',
+        nombrePagador: 'ADVA',
+        cuitBeneficiario: '20123456786',
+        nombreBeneficiario: 'TEST SA',
+      });
+      const result = parsePagoResponse(response, 'pago_enviado');
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value.data.moneda).toBeUndefined();
+        expect(result.value.needsReview).toBe(true);
+      }
+    });
+  });
+
+  describe('moneda validation in parseResumenBancarioResponse', () => {
+    it('invalid moneda "Dolares" in resumen_bancario becomes undefined and sets needsReview', () => {
+      const response = JSON.stringify({
+        banco: 'BBVA',
+        numeroCuenta: '1234567890',
+        fechaDesde: '2025-01-01',
+        fechaHasta: '2025-01-31',
+        saldoInicial: 100,
+        saldoFinal: 200,
+        moneda: 'Dolares', // invalid
+        cantidadMovimientos: 0,
+      });
+      const result = parseResumenBancarioResponse(response);
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value.data.moneda).toBeUndefined();
+        expect(result.value.needsReview).toBe(true);
+      }
+    });
+  });
+});
+
+// ===========================================================================
+// Task 15 — ADV-287: Allow legitimate negative values in resumen numeric validation
+// ===========================================================================
+
+describe('Negative value allowance in resumen numeric validation (ADV-287)', () => {
+  it('bancario movimiento with negative saldo (overdraft) does NOT trigger needsReview', () => {
+    const response = JSON.stringify({
+      banco: 'BBVA',
+      numeroCuenta: '007-009364/1',
+      fechaDesde: '2025-01-01',
+      fechaHasta: '2025-01-31',
+      saldoInicial: 1000,
+      saldoFinal: -5000, // overdraft at header level — allowed
+      moneda: 'ARS',
+      cantidadMovimientos: 1,
+      movimientos: [
+        { fecha: '2025-01-15', concepto: 'DEBIT', debito: 6000, credito: null, saldo: -5000 },
+      ],
+    });
+    const result = parseResumenBancarioResponse(response);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      // Negative saldo (overdraft) is legitimate — must NOT trigger needsReview solely for this
+      expect(result.value.needsReview).toBe(false);
+    }
+  });
+
+  it('tarjeta movimiento with negative pesos (payment/credit) does NOT trigger needsReview', () => {
+    const response = JSON.stringify({
+      banco: 'BBVA',
+      tipoTarjeta: 'Visa',
+      numeroCuenta: '4563',
+      fechaDesde: '2025-01-01',
+      fechaHasta: '2025-01-31',
+      pagoMinimo: 5000,
+      saldoActual: 50000,
+      cantidadMovimientos: 1,
+      movimientos: [
+        { fecha: '2025-01-10', descripcion: 'PAGO TARJETA', nroCupon: null, pesos: -15000, dolares: null },
+      ],
+    });
+    const result = parseResumenTarjetaResponse(response);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.needsReview).toBe(false);
+    }
+  });
+
+  it('broker movimiento with negative neto (sale proceeds) does NOT trigger needsReview', () => {
+    const response = JSON.stringify({
+      broker: 'BALANZ CAPITAL VALORES SAU',
+      numeroCuenta: '123456',
+      fechaDesde: '2025-01-01',
+      fechaHasta: '2025-01-31',
+      saldoARS: 500000,
+      cantidadMovimientos: 1,
+      movimientos: [
+        {
+          descripcion: 'VENTA',
+          cantidadVN: -100, // sold = negative
+          saldo: -100,
+          precio: 1250,
+          bruto: -125000,
+          arancel: 50,
+          iva: 10.5,
+          neto: -125060.5, // net proceeds (negative = sold)
+          fechaConcertacion: '2025-01-07',
+          fechaLiquidacion: '2025-01-09',
+        },
+      ],
+    });
+    const result = parseResumenBrokerResponse(response);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.needsReview).toBe(false);
+    }
+  });
+
+  it('negative debito in bancario movimiento still flags (error path retained)', () => {
+    const response = JSON.stringify({
+      banco: 'BBVA',
+      numeroCuenta: '007-009364/1',
+      fechaDesde: '2025-01-01',
+      fechaHasta: '2025-01-31',
+      saldoInicial: 100000,
+      saldoFinal: 90000,
+      moneda: 'ARS',
+      cantidadMovimientos: 1,
+      movimientos: [
+        { fecha: '2025-01-10', concepto: 'ERROR', debito: -500, credito: null, saldo: 90000 },
+      ],
+    });
+    const result = parseResumenBancarioResponse(response);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      // Negative debito is never valid (debit amounts must be non-negative)
+      expect(result.value.needsReview).toBe(true);
+    }
+  });
+});
+
+// ===========================================================================
+// Task 16 — ADV-317: Runtime-validate monetary fields across all seven parsers
+// ===========================================================================
+
+describe('Runtime monetary field validation across parsers (ADV-317)', () => {
+  it('factura with string importeTotal is treated as missing field and sets needsReview', () => {
+    const response = JSON.stringify({
+      issuerName: 'ADVA',
+      clientName: 'TEST SA',
+      allCuits: ['30709076783', '20123456786'],
+      tipoComprobante: 'A',
+      nroFactura: '00001-00000001',
+      fechaEmision: '2025-01-15',
+      importeNeto: 1000,
+      importeIva: 210,
+      importeTotal: '1.234,56', // string instead of number
+      moneda: 'ARS',
+    });
+    const result = parseFacturaResponse(response, 'factura_emitida');
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.data.importeTotal).toBeUndefined();
+      expect(result.value.needsReview).toBe(true);
+      expect(result.value.missingFields).toContain('importeTotal');
+    }
+  });
+
+  it('pago with non-finite importePagado (Infinity) is flagged as missing', () => {
+    const response = JSON.stringify({
+      banco: 'BBVA',
+      fechaPago: '2025-01-15',
+      importePagado: null, // null simulates non-finite (JSON has no Infinity literal)
+      moneda: 'ARS',
+      cuitPagador: '30709076783',
+      nombrePagador: 'ADVA',
+      cuitBeneficiario: '20123456786',
+      nombreBeneficiario: 'TEST SA',
+    });
+    // importePagado: null → missing required field → needsReview
+    const result = parsePagoResponse(response, 'pago_enviado');
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.needsReview).toBe(true);
+      expect(result.value.missingFields).toContain('importePagado');
+    }
+  });
+
+  it('bancario with negative saldoFinal is accepted (negative allowed per ADV-287)', () => {
+    const response = JSON.stringify({
+      banco: 'BBVA',
+      numeroCuenta: '1234567890',
+      fechaDesde: '2025-01-01',
+      fechaHasta: '2025-01-31',
+      saldoInicial: 1000,
+      saldoFinal: -5000, // overdraft — must be accepted
+      moneda: 'ARS',
+      cantidadMovimientos: 0,
+    });
+    const result = parseResumenBancarioResponse(response);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      // Negative saldo is legitimate → no needsReview for this reason alone
+      expect(result.value.needsReview).toBe(false);
+    }
+  });
+
+  it('retencion with string montoRetencion is flagged as missing', () => {
+    const response = JSON.stringify({
+      nroCertificado: 'CERT-001',
+      fechaEmision: '2025-01-15',
+      cuitAgenteRetencion: '20123456786',
+      razonSocialAgenteRetencion: 'TEST SA',
+      cuitSujetoRetenido: '30709076783', // ADVA
+      impuesto: 'Ganancias',
+      regimen: '123',
+      montoComprobante: 10000,
+      montoRetencion: '1.234,56', // string instead of number
+    });
+    const result = parseRetencionResponse(response);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.data.montoRetencion).toBeUndefined();
+      expect(result.value.needsReview).toBe(true);
+    }
+  });
+});
+
+// ===========================================================================
+// Task 17 — ADV-336: hasSuspiciousEmptyFields as independent needsReview trigger
+// ===========================================================================
+
+describe('hasSuspiciousEmptyFields as independent needsReview trigger (ADV-336)', () => {
+  it('factura with all required fields but empty optional concepto → needsReview=true at confidence=1.0', () => {
+    const response = JSON.stringify({
+      issuerName: 'ADVA',
+      clientName: 'TEST SA',
+      allCuits: ['30709076783', '20123456786'],
+      tipoComprobante: 'A',
+      nroFactura: '00001-00000001',
+      fechaEmision: '2025-01-15',
+      importeNeto: 1000,
+      importeIva: 210,
+      importeTotal: 1210,
+      moneda: 'ARS',
+      concepto: '', // empty optional field is suspicious
+    });
+    const result = parseFacturaResponse(response, 'factura_emitida');
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.confidence).toBeGreaterThanOrEqual(0.9); // confidence is high
+      expect(result.value.needsReview).toBe(true); // hasSuspiciousEmptyFields fires independently
+    }
+  });
+
+  it('pago with all required fields but empty optional referencia → needsReview=true', () => {
+    const response = JSON.stringify({
+      banco: 'BBVA',
+      fechaPago: '2025-01-15',
+      importePagado: 1000,
+      moneda: 'ARS',
+      cuitPagador: '30709076783',
+      nombrePagador: 'ADVA',
+      cuitBeneficiario: '20123456786',
+      nombreBeneficiario: 'TEST SA',
+      referencia: '', // empty optional
+    });
+    const result = parsePagoResponse(response, 'pago_enviado');
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.confidence).toBeGreaterThanOrEqual(0.9);
+      expect(result.value.needsReview).toBe(true);
+    }
+  });
+
+  it('retencion with all required fields but empty optional ordenPago → needsReview=true', () => {
+    const response = JSON.stringify({
+      nroCertificado: 'CERT-001',
+      fechaEmision: '2025-01-15',
+      cuitAgenteRetencion: '20123456786',
+      razonSocialAgenteRetencion: 'TEST SA',
+      cuitSujetoRetenido: '30709076783',
+      impuesto: 'Ganancias',
+      regimen: '123',
+      montoComprobante: 10000,
+      montoRetencion: 2100,
+      ordenPago: '', // empty optional
+    });
+    const result = parseRetencionResponse(response);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.confidence).toBeGreaterThanOrEqual(0.9);
+      expect(result.value.needsReview).toBe(true);
+    }
+  });
+
+  it('factura with all required AND optional fields filled → needsReview=false (regression)', () => {
+    const response = JSON.stringify({
+      issuerName: 'ADVA',
+      clientName: 'TEST SA',
+      allCuits: ['30709076783', '20123456786'],
+      tipoComprobante: 'A',
+      nroFactura: '00001-00000001',
+      fechaEmision: '2025-01-15',
+      importeNeto: 1000,
+      importeIva: 210,
+      importeTotal: 1210,
+      moneda: 'ARS',
+      concepto: 'Servicios', // not empty
+    });
+    const result = parseFacturaResponse(response, 'factura_emitida');
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.needsReview).toBe(false);
+    }
+  });
+});
+
+// ===========================================================================
+// Task 18 — ADV-338: Flag count mismatch when cantidadMovimientos is 0 but movimientos exist
+// ===========================================================================
+
+describe('cantidadMovimientos=0 with non-empty movimientos (ADV-338)', () => {
+  it('bancario: cantidadMovimientos=0 with 5 movimientos → needsReview', () => {
+    const movimientos = Array.from({ length: 5 }, (_, i) => ({
+      fecha: '2025-01-0' + (i + 1),
+      concepto: 'MOV ' + i,
+      debito: null,
+      credito: 1000,
+      saldo: (i + 1) * 1000,
+    }));
+    const response = JSON.stringify({
+      banco: 'BBVA',
+      numeroCuenta: '1234567890',
+      fechaDesde: '2025-01-01',
+      fechaHasta: '2025-01-31',
+      saldoInicial: 0,
+      saldoFinal: 5000,
+      moneda: 'ARS',
+      cantidadMovimientos: 0, // says 0 but has 5
+      movimientos,
+    });
+    const result = parseResumenBancarioResponse(response);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.needsReview).toBe(true);
+    }
+  });
+
+  it('tarjeta: cantidadMovimientos=0 with 3 movimientos → needsReview', () => {
+    const movimientos = [
+      { fecha: '2025-01-05', descripcion: 'A', nroCupon: null, pesos: 100, dolares: null },
+      { fecha: '2025-01-10', descripcion: 'B', nroCupon: null, pesos: 200, dolares: null },
+      { fecha: '2025-01-15', descripcion: 'C', nroCupon: null, pesos: 300, dolares: null },
+    ];
+    const response = JSON.stringify({
+      banco: 'BBVA',
+      tipoTarjeta: 'Visa',
+      numeroCuenta: '4563',
+      fechaDesde: '2025-01-01',
+      fechaHasta: '2025-01-31',
+      pagoMinimo: 500,
+      saldoActual: 600,
+      cantidadMovimientos: 0, // says 0 but has 3
+      movimientos,
+    });
+    const result = parseResumenTarjetaResponse(response);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.needsReview).toBe(true);
+    }
+  });
+
+  it('broker: cantidadMovimientos=0 with 2 movimientos → needsReview', () => {
+    const movimientos = [
+      {
+        descripcion: 'COMPRA', cantidadVN: 100, saldo: 100, precio: 1000,
+        bruto: 100000, arancel: 50, iva: 10.5, neto: 99939.5,
+        fechaConcertacion: '2025-01-05', fechaLiquidacion: '2025-01-07',
+      },
+      {
+        descripcion: 'VENTA', cantidadVN: -50, saldo: 50, precio: 1100,
+        bruto: -55000, arancel: 25, iva: 5.25, neto: -55030.25,
+        fechaConcertacion: '2025-01-10', fechaLiquidacion: '2025-01-12',
+      },
+    ];
+    const response = JSON.stringify({
+      broker: 'BALANZ CAPITAL VALORES SAU',
+      numeroCuenta: '123456',
+      fechaDesde: '2025-01-01',
+      fechaHasta: '2025-01-31',
+      saldoARS: 50000,
+      cantidadMovimientos: 0, // says 0 but has 2
+      movimientos,
+    });
+    const result = parseResumenBrokerResponse(response);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.needsReview).toBe(true);
+    }
+  });
+
+  it('bancario: cantidadMovimientos=0 with empty movimientos array → no needsReview (SIN MOVIMIENTOS case)', () => {
+    const response = JSON.stringify({
+      banco: 'BBVA',
+      numeroCuenta: '1234567890',
+      fechaDesde: '2025-01-01',
+      fechaHasta: '2025-01-31',
+      saldoInicial: 5000,
+      saldoFinal: 5000,
+      moneda: 'ARS',
+      cantidadMovimientos: 0,
+      movimientos: [], // empty — legitimate SIN MOVIMIENTOS
+    });
+    const result = parseResumenBancarioResponse(response);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.needsReview).toBe(false);
+    }
+  });
+});
+
+// ===========================================================================
+// Task 19 — ADV-313: Word-boundary ADVA name matching
+// ===========================================================================
+
+describe('Word-boundary ADVA name matching (ADV-313)', () => {
+  it('isAdvaName("ADVANCED GAMES SA") → false (ADVA is prefix of ADVANCED, not standalone)', () => {
+    expect(isAdvaName('ADVANCED GAMES SA')).toBe(false);
+  });
+
+  it('isAdvaName("ADVANTAGE SRL") → false', () => {
+    expect(isAdvaName('ADVANTAGE SRL')).toBe(false);
+  });
+
+  it('isAdvaName("ADVA") → true (regression — exact acronym still matches)', () => {
+    expect(isAdvaName('ADVA')).toBe(true);
+  });
+
+  it('isAdvaName("ADVA.") → true (punctuation attached to word boundary)', () => {
+    expect(isAdvaName('ADVA.')).toBe(true);
+  });
+
+  it('isAdvaName full official name → true (regression)', () => {
+    expect(isAdvaName('ASOCIACION CIVIL DE DESARROLLADORES DE VIDEOJUEGOS ARGENTINOS')).toBe(true);
+  });
+
+  it('factura from ADVANTAGE SRL (issuer) to ADVA (client) classifies as factura_recibida', () => {
+    const response = JSON.stringify({
+      issuerName: 'ADVANTAGE SRL', // NOT ADVA
+      clientName: 'ADVA',
+      allCuits: ['20123456786', '30709076783'],
+      tipoComprobante: 'A',
+      nroFactura: '00001-00000001',
+      fechaEmision: '2025-01-15',
+      importeNeto: 1000,
+      importeIva: 210,
+      importeTotal: 1210,
+      moneda: 'ARS',
+    });
+    const result = parseFacturaResponse(response, 'factura_recibida');
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.actualDocumentType).toBe('factura_recibida');
+    }
+  });
+
+  it('both issuer and client matching ADVA yields needsReview=true (ambiguity signal)', () => {
+    const response = JSON.stringify({
+      issuerName: 'ADVA',
+      clientName: 'ASOCIACION CIVIL DE DESARROLLADORES DE VIDEOJUEGOS ARGENTINOS',
+      allCuits: ['30709076783', '20123456786'],
+      tipoComprobante: 'A',
+      nroFactura: '00001-00000001',
+      fechaEmision: '2025-01-15',
+      importeNeto: 1000,
+      importeIva: 210,
+      importeTotal: 1210,
+      moneda: 'ARS',
+    });
+    const result = parseFacturaResponse(response, 'factura_emitida');
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.needsReview).toBe(true);
+    }
+  });
+});
+
+// ===========================================================================
+// Task 20 — ADV-314: Validate counterparty CUIT/DNI candidates from allCuits
+// ===========================================================================
+
+describe('Counterparty CUIT/DNI validation in allCuits (ADV-314)', () => {
+  it('picks the checksum-valid CUIT when allCuits contains a non-numeric candidate', () => {
+    // 'ABC12345' is non-numeric and should be skipped; '20123456786' is valid
+    const result = assignCuitsAndClassify('ADVA', 'TEST SA', ['ABC12345', '20123456786']);
+    expect(result.cuitReceptor).toBe('20123456786');
+  });
+
+  it('normalizes dotted CUIT format (removes dots) and selects valid CUIT', () => {
+    // '20.123.456.786' → normalize dots → '20123456786' (valid CUIT)
+    const result = assignCuitsAndClassify('ADVA', 'TEST SA', ['20.123.456.786']);
+    expect(result.cuitReceptor).toBe('20123456786');
+  });
+
+  it('invalid-checksum 11-digit candidate is skipped → otherCuit is empty string', () => {
+    // '20000000000': 11 digits, valid prefix, but fails checksum → skip
+    const result = assignCuitsAndClassify('ADVA', 'TEST SA', ['20000000000']);
+    expect(result.cuitReceptor).toBe('');
+  });
+
+  it('8-digit DNI candidate is accepted as otherCuit (existing behavior preserved)', () => {
+    // 8-digit DNI is a valid Argentine ID format
+    const result = assignCuitsAndClassify('ADVA', 'Juan Perez', ['30709076783', '12345678']);
+    expect(result.cuitReceptor).toBe('12345678');
+  });
+
+  it('prefers checksum-valid CUIT over DNI when both are present', () => {
+    // Both a valid CUIT and a DNI present — CUIT should win
+    const result = assignCuitsAndClassify('ADVA', 'TEST SA', ['30709076783', '12345678', '20123456786']);
+    expect(result.cuitReceptor).toBe('20123456786');
+  });
+});
+
+// ===========================================================================
+// Task 21 — ADV-337: Flag CUIT-position fallback classifications for review
+// ===========================================================================
+
+describe('CUIT-position fallback classification flagged for review (ADV-337)', () => {
+  it('CUIT-position fallback (ADVA non-first) → factura_recibida + needsReview=true', () => {
+    const response = JSON.stringify({
+      issuerName: 'UNKNOWN COMPANY', // does not match ADVA
+      clientName: 'ANOTHER COMPANY',  // does not match ADVA
+      allCuits: ['20123456786', '30709076783'], // ADVA is second = client = recibida
+      tipoComprobante: 'A',
+      nroFactura: '00001-00000001',
+      fechaEmision: '2025-01-15',
+      importeNeto: 1000,
+      importeIva: 210,
+      importeTotal: 1210,
+      moneda: 'ARS',
+    });
+    const result = parseFacturaResponse(response, 'factura_recibida');
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.actualDocumentType).toBe('factura_recibida');
+      expect(result.value.needsReview).toBe(true);
+    }
+  });
+
+  it('CUIT-position fallback (ADVA first) → factura_emitida + needsReview=true', () => {
+    const response = JSON.stringify({
+      issuerName: 'UNKNOWN COMPANY', // does not match ADVA
+      clientName: 'ANOTHER COMPANY',  // does not match ADVA
+      allCuits: ['30709076783', '20123456786'], // ADVA is first = issuer = emitida
+      tipoComprobante: 'A',
+      nroFactura: '00001-00000001',
+      fechaEmision: '2025-01-15',
+      importeNeto: 1000,
+      importeIva: 210,
+      importeTotal: 1210,
+      moneda: 'ARS',
+    });
+    const result = parseFacturaResponse(response, 'factura_emitida');
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.actualDocumentType).toBe('factura_emitida');
+      expect(result.value.needsReview).toBe(true);
+    }
+  });
+
+  it('normal name-match path does NOT set needsReview from fallback', () => {
+    const response = JSON.stringify({
+      issuerName: 'ADVA',
+      clientName: 'TEST SA',
+      allCuits: ['30709076783', '20123456786'],
+      tipoComprobante: 'A',
+      nroFactura: '00001-00000001',
+      fechaEmision: '2025-01-15',
+      importeNeto: 1000,
+      importeIva: 210,
+      importeTotal: 1210,
+      moneda: 'ARS',
+    });
+    const result = parseFacturaResponse(response, 'factura_emitida');
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      // Name-match path: no extra needsReview from fallback
+      expect(result.value.needsReview).toBe(false);
+    }
+  });
+});
+
+// ===========================================================================
+// Task 22 — ADV-315: String-aware JSON brace counting in extractJSON/isTruncated
+// ===========================================================================
+
+describe('String-aware JSON brace counting (ADV-315)', () => {
+  it('extracts JSON where a string value contains an unmatched closing brace "}"', () => {
+    // Naive brace counting exits early at the } inside the string value
+    const response = '{"concepto":"paid}remainder","importeTotal":100}';
+    const result = extractJSON(response);
+    expect(result.type).toBe('valid');
+    if (result.type === 'valid') {
+      const parsed = JSON.parse(result.json) as { concepto: string; importeTotal: number };
+      expect(parsed.importeTotal).toBe(100);
+      expect(parsed.concepto).toBe('paid}remainder');
+    }
+  });
+
+  it('extracts JSON with balanced braces in string value followed by trailing prose', () => {
+    const response = '{"concepto":"Plan {Premium}","importeTotal":100} some trailing text';
+    const result = extractJSON(response);
+    expect(result.type).toBe('valid');
+    if (result.type === 'valid') {
+      const parsed = JSON.parse(result.json) as { concepto: string; importeTotal: number };
+      expect(parsed.importeTotal).toBe(100);
+      expect(parsed.concepto).toBe('Plan {Premium}');
+    }
+  });
+
+  it('still detects genuinely truncated response (unterminated object)', () => {
+    const truncated = '{"concepto":"some text","importeTotal":'; // cut off before value
+    const result = extractJSON(truncated);
+    expect(result.type).toBe('truncated');
+  });
+});
+
+// ===========================================================================
+// Task 23 — ADV-316: Normalize tipoTarjeta case; stop fabricating 'Visa'
+// ===========================================================================
+
+describe('tipoTarjeta case normalization and no Visa fabrication (ADV-316)', () => {
+  it('"MASTERCARD" normalizes to "Mastercard" with no needsReview flag', () => {
+    const response = JSON.stringify({
+      banco: 'BBVA',
+      tipoTarjeta: 'MASTERCARD', // uppercase
+      numeroCuenta: '4563',
+      fechaDesde: '2025-01-01',
+      fechaHasta: '2025-01-31',
+      pagoMinimo: 5000,
+      saldoActual: 50000,
+      cantidadMovimientos: 2,
+    });
+    const result = parseResumenTarjetaResponse(response);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.data.tipoTarjeta).toBe('Mastercard');
+      expect(result.value.data.needsReview).not.toBe(true);
+    }
+  });
+
+  it('"visa" (lowercase) normalizes to "Visa"', () => {
+    const response = JSON.stringify({
+      banco: 'BBVA',
+      tipoTarjeta: 'visa',
+      numeroCuenta: '4563',
+      fechaDesde: '2025-01-01',
+      fechaHasta: '2025-01-31',
+      pagoMinimo: 5000,
+      saldoActual: 50000,
+      cantidadMovimientos: 0,
+    });
+    const result = parseResumenTarjetaResponse(response);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.data.tipoTarjeta).toBe('Visa');
+    }
+  });
+
+  it('unknown type "Diners" → undefined + needsReview (not a valid card type)', () => {
+    const response = JSON.stringify({
+      banco: 'BBVA',
+      tipoTarjeta: 'Diners',
+      numeroCuenta: '4563',
+      fechaDesde: '2025-01-01',
+      fechaHasta: '2025-01-31',
+      pagoMinimo: 5000,
+      saldoActual: 50000,
+      cantidadMovimientos: 0,
+    });
+    const result = parseResumenTarjetaResponse(response);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.data.tipoTarjeta).toBeUndefined();
+      expect(result.value.needsReview).toBe(true);
+    }
   });
 });

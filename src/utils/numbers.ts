@@ -37,7 +37,16 @@ export function detectNumberFormat(str: string): NumberFormat {
     return 'argentine';
   }
 
-  // Only dot or no separator - US/plain format
+  // No comma — check number of dots
+  if (lastDot !== -1) {
+    // Multiple dots (e.g. "1.234.567") → Argentine thousands separators
+    const dotCount = (str.match(/\./g) ?? []).length;
+    if (dotCount >= 2) {
+      return 'argentine';
+    }
+  }
+
+  // Single dot or no separator - US/plain format
   return 'plain';
 }
 
@@ -100,6 +109,11 @@ export function parseNumber(value: unknown): number | null {
     case 'plain':
       // Already in standard format or needs no conversion
       break;
+  }
+
+  // Validate the resulting string is a valid numeric value
+  if (!/^[0-9]*\.?[0-9]+$/.test(str)) {
+    return null;
   }
 
   // Parse to number
