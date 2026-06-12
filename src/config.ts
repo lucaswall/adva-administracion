@@ -373,6 +373,10 @@ export function loadConfig(): Config {
   };
 }
 
+// STUB-ADDED: Read by syncMercadopago to determine if MP sync is enabled.
+// Optional — if unset, MP sync is skipped with reason 'mp_disabled'.
+export const MP_ACCESS_TOKEN: string | undefined = process.env.MP_ACCESS_TOKEN;
+
 /**
  * Singleton config instance
  */
