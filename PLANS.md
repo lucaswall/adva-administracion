@@ -291,3 +291,55 @@ Tasks 1-7 are sequential (each builds on the previous). Tasks 8-9 (matcher) are 
 **Scope:** 11 tasks, ~17 files (9 new), ~50 test scenarios.
 **Key Decisions:** API-based ingestion (no XLSX parsing — the collection report is manual-only, the settlement report lacks payer identity); deductions itemized as one identity-free debit row per MP charge (comisión, Imp. Débitos y Créditos, SIRTAC/IIBB withholdings per jurisdiction — the accountants need each tax credit separated) with a reconciliation-guard fallback to a combined row; credits stay at gross for matching; `MP {operationId}` concepto prefix as the idempotency key; resumen rows only for closed periods with synthetic running-net saldos (balanceOk = SI by construction); monthly cron (1st, 06:00) + idempotent boot catch-up instead of state-tracking missed-run logic; Entrega copies no PDF for MP (skip non-PDF resumen fileIds) — the per-account-month movimientos files carry the data.
 **Risks:** MP could mask payer PII in the future (mitigation documented: subscriptions' `external_reference` + member registry; current data verified clean); fee debit rows could occasionally amount-match unrelated documents (low impact — debit side carries no identity, tier 5 LOW at worst); `date_approved` GMT-4 vs ART date-bucketing handled explicitly in transform tests.
+
+---
+
+## Iteration 1
+
+**Implemented:** 2026-06-12
+**Method:** Agent team (4 workers, worktree-isolated)
+
+### Tasks Completed This Iteration
+- Task 1: Mercadopago API client (ADV-365) — `src/mercadopago/client.ts`, pagination/timeout/429 backoff, token never logged, 18 tests (worker-1)
+- Task 2: Transform MP payments → MovimientoBancario (ADV-366) — gross credit + per-charge debit rows, reconciliation guard, AR-timezone dates, 19 tests (worker-1)
+- Task 3: Idempotent MP movimientos writer (ADV-367) — incremental month-tab appends, `MP {id}` dedupe, no SALDO FINAL, 17 tests (worker-2)
+- Task 4: MP resumen row for closed periods (ADV-368) — synthetic running balance via `storeResumenBancario`, 21 tests (worker-2)
+- Task 5: Sync orchestrator (ADV-369) — PROCESSING_LOCK, match auto-trigger after lock release, partial-failure handling, 32 tests (worker-3)
+- Task 6: POST /api/mp-sync route (ADV-370) — auth, period validation, generic error bodies, 18 tests (worker-3)
+- Task 7: Monthly cron + boot catch-up (ADV-371) — `0 6 1 * *`, boot sync never crashes boot, 10 tests (worker-3)
+- Task 8: Matcher CUIT↔DNI equivalence (ADV-372) — `cuitOrDniMatch` at all 10 identity comparison sites; also fixed `buildMatchQuality` tier evaluation for DNI-CUIT matches (worker-4)
+- Task 9: MP-specific forward factura window (ADV-373) — +25 days for MP accounts, threaded via `isMercadoPago` flag (worker-4)
+- Task 10: Documentation (ADV-374) — CLAUDE.md, SPREADSHEET_FORMAT.md, .env.example, MIGRATIONS.md (lead, post-merge)
+- Task 11: Delivery copy-pdfs skips non-PDF resumen fileIds (ADV-375) — `skippedNonPdf` count surfaced in route response (worker-4)
+
+### Files Modified
+- `src/mercadopago/client.ts`, `transform.ts`, `movimientos-writer.ts`, `resumen-writer.ts`, `sync.ts`, `scheduler.ts` (+ colocated tests) — new module
+- `src/routes/mp-sync.ts` (+ test) — new route; registered in `src/server.ts` with scheduler init/stop hooks
+- `src/config.ts` — MP_API_BASE_URL/TIMEOUT/RETRIES, getMpAccessToken(), MP_ACCESS_TOKEN, MERCADO_PAGO_BANK_NAME, MP_FACTURA_DATE_RANGE_AFTER_DAYS
+- `src/types/index.ts` — `MovimientoBancario.saldo: number | null` (+ `src/gemini/parser.ts` signature)
+- `src/bank/matcher.ts`, `src/bank/match-movimientos.ts` — CUIT↔DNI equivalence, MP forward window, `isMercadoPagoAccount` helper
+- `src/services/delivery-package.ts`, `src/routes/delivery.ts` — non-PDF skip
+- `CLAUDE.md`, `SPREADSHEET_FORMAT.md`, `.env.example`, `MIGRATIONS.md` — docs
+
+### Linear Updates
+- ADV-365…ADV-375 (all 11): Todo → In Progress → Review
+
+### Pre-commit Verification
+- bug-hunter: Found 3 bugs (1 HIGH: `isMercadoPago` always false — discovery map keys are `{year}:{folderName}` so `startsWith` never matched; extracted tested `isMercadoPagoAccount` helper. 2 LOW: non-ARS `skipped` count silently discarded → warn added; lock-failure log conflated timeout with callback throw → messages split). All fixed with TDD.
+- verifier (full): 2,924 tests pass (82 files), lint clean, build zero warnings.
+
+### Work Partition
+- Worker 1: Tasks 1-2 (MP API domain — client, transform)
+- Worker 2: Tasks 3-4 (MP sheet writers)
+- Worker 3: Tasks 5-7 (orchestration — sync, route, scheduler; built against stub interfaces)
+- Worker 4: Tasks 8, 9, 11 (matcher upgrades + delivery skip)
+- Lead: Task 10 (docs, post-merge)
+
+### Merge Summary
+- Worker 1: fast-forward (no conflicts)
+- Worker 2: clean merge
+- Worker 3: 4 add/add stub conflicts (client/transform/movimientos-writer/resumen-writer) resolved keeping real implementations; 1 integration fix (`writeMpResumenIfClosed` takes a `YYYY-MM-DD` string — sync now passes `businessDateString()`); config.ts MP_ACCESS_TOKEN const reconciled alongside getMpAccessToken()
+- Worker 4: clean merge
+
+### Continuation Status
+All tasks completed.
