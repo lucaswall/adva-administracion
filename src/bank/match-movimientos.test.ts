@@ -4910,6 +4910,54 @@ describe('ADV-320: pagada revert when match is removed', () => {
     expect(reverted).toBe(true);
   });
 
+  it('does NOT revert pagada when the clearing movimiento row was version-skipped (ADV-343 gate on reverts)', async () => {
+    setupBase();
+
+    vi.mocked(getValues).mockImplementation(async (_id, range) => {
+      if (range === 'Facturas Recibidas!A:T') {
+        return {
+          ok: true,
+          value: [
+            FAC_REC_HEADERS,
+            ['2025-01-10', 'fac-rec-1', 'factura.pdf', 'B', '00001-00000001', '20123456786', 'PROVEEDOR SA', '', '', '1000', 'ARS', '', '', '0.95', 'NO', '', '', '', 'SI'],
+          ],
+        };
+      }
+      return { ok: true, value: [['header']] };
+    });
+
+    vi.mocked(getMovimientosToFill).mockResolvedValue({
+      ok: true,
+      value: [{
+        sheetName: '2025-01', rowNumber: 2, fecha: '2025-01-15', concepto: 'PAGO PROVEEDOR SA',
+        debito: 1000, credito: null, saldo: 9000, saldoCalculado: 9000,
+        matchedFileId: 'fac-rec-1', detalle: 'Factura de PROVEEDOR SA', matchedType: '',
+      }],
+    });
+
+    // Matcher returns no_match → force-clear path queues a revert candidate
+    mockMatchMovement.mockReturnValue({
+      matchType: 'no_match', description: '', matchedFileId: '', confidence: 'LOW',
+    });
+
+    // The movimiento row at 2025-01:2 was version-skipped — its matchedFileId
+    // still points at fac-rec-1 in the sheet, so pagada must NOT be cleared.
+    vi.mocked(updateDetalle).mockResolvedValue({ ok: true, value: { appliedCount: 0, skippedCount: 1, appliedKeys: new Set<string>() } as { appliedCount: number; skippedCount: number; appliedKeys: Set<string> } });
+
+    const resultPromise = matchAllMovimientos({ force: true });
+    await vi.runAllTimersAsync();
+    await resultPromise;
+
+    const calls = vi.mocked(batchUpdate).mock.calls;
+    const reverted = calls.some(([ssId, updates]) =>
+      ssId === 'egresos-id' &&
+      (updates as Array<{ range: string; values: unknown[][] }>).some(
+        u => u.range === 'Facturas Recibidas!S2' && u.values[0][0] === ''
+      )
+    );
+    expect(reverted).toBe(false);
+  });
+
   it('replacement reverts displaced factura pagada and sets pagada=SI for the new match', async () => {
     setupBase();
 

@@ -950,7 +950,7 @@ async function matchBankMovimientos(
    * Facturas whose pagada='SI' may need reverting because their sole movimiento justification
    * was cleared or replaced in this run. Keyed by factura fileId. Filtered at write time.
    */
-  const pagadaRevertCandidates = new Map<string, { spreadsheetId: string; sheetName: 'Facturas Recibidas' | 'Facturas Emitidas'; rowNumber: number; columnLetter: string }>();
+  const pagadaRevertCandidates = new Map<string, { spreadsheetId: string; sheetName: 'Facturas Recibidas' | 'Facturas Emitidas'; rowNumber: number; columnLetter: string; sourceMovimientoKey: string }>();
   let debitsFilled = 0;
   let creditsFilled = 0;
   let noMatches = 0;
@@ -1191,6 +1191,7 @@ async function matchBankMovimientos(
               sheetName: revertShName,
               rowNumber: ownDocForRevert.document.row,
               columnLetter: revertCol,
+              sourceMovimientoKey: `${mov.sheetName}:${mov.rowNumber}`,
             });
           }
         }
@@ -1240,6 +1241,7 @@ async function matchBankMovimientos(
               sheetName: revertShName,
               rowNumber: ownDocForRevert.document.row,
               columnLetter: revertCol,
+              sourceMovimientoKey: `${mov.sheetName}:${mov.rowNumber}`,
             });
           }
         }
@@ -1312,6 +1314,10 @@ async function matchBankMovimientos(
     const revertBySpreadsheet = new Map<string, Array<{ range: string; values: CellValue[][] }>>();
 
     for (const [fileId, candidate] of pagadaRevertCandidates) {
+      // Skip if the movimiento row that justified this revert was version-skipped —
+      // its matchedFileId still points at the factura in the sheet, so clearing
+      // pagada would desynchronize them (same gate as pagada='SI', ADV-343).
+      if (!updateResult.value.appliedKeys.has(candidate.sourceMovimientoKey)) continue;
       // Skip if a new movement in this run is setting pagada='SI' for this same factura
       if (pagadaSetFileIds.has(fileId)) continue;
       // Skip if the factura still has a linked pago that justifies pagada='SI'
