@@ -595,12 +595,12 @@ describe('FacturaPagoMatcher.findMatches', () => {
 
   it('matches when beneficiary has DNI (8 digits) and factura has full CUIT (11 digits)', () => {
     // Real-world scenario: payment shows only DNI, invoice has full CUIT
-    // CUIT: 20-40535475-7 contains DNI: 40535475
+    // CUIT: 20-12345678-6 contains DNI: 12345678
     const facturaWithFullCuit: Array<Factura & { row: number }> = [
       {
         ...facturas[0],
-        cuitEmisor: '20405354757', // Full 11-digit CUIT
-        razonSocialEmisor: 'RABAGO NICOLAS'
+        cuitEmisor: '20123456786', // Full 11-digit CUIT
+        razonSocialEmisor: 'PEREZ JUAN'
       }
     ];
 
@@ -611,8 +611,8 @@ describe('FacturaPagoMatcher.findMatches', () => {
       fechaPago: '2024-01-07',
       importePagado: 1210,
       moneda: 'ARS',
-      cuitBeneficiario: '40535475', // 8-digit DNI (not full CUIT)
-      nombreBeneficiario: 'RABAGO NICOLAS',
+      cuitBeneficiario: '12345678', // 8-digit DNI (not full CUIT)
+      nombreBeneficiario: 'PEREZ JUAN',
       processedAt: '2024-01-07T10:00:00Z',
       confidence: 1.0,
       needsReview: false

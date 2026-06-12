@@ -1071,22 +1071,22 @@ describe('Parser - CUIT Assignment for Consumidor Final', () => {
     it('handles Doc. Receptor IDs for Consumidor Final clients', () => {
       // Test case where client ID is labeled "Doc. Receptor" not "CUIT"
       const issuerName = 'ASOCIACION CIVIL DE DESARROLLADORES DE VIDEOJUEGOS ARGENTINOS';
-      const clientName = 'Marcial Fermin Gutierrez';
-      const allCuits = ['30709076783', '20367086921']; // ADVA CUIT + client CUIL (11 digits)
+      const clientName = 'Juan Perez';
+      const allCuits = ['30709076783', '20123456786']; // ADVA CUIT + client CUIL (11 digits)
 
       const result = assignCuitsAndClassify(issuerName, clientName, allCuits);
 
       expect(result.documentType).toBe('factura_emitida');
       expect(result.cuitEmisor).toBe('30709076783');
       expect(result.razonSocialEmisor).toBe(issuerName);
-      expect(result.cuitReceptor).toBe('20367086921');
+      expect(result.cuitReceptor).toBe('20123456786');
       expect(result.razonSocialReceptor).toBe(clientName);
     });
 
     it('handles extraction with only ADVA CUIT (Consumidor Final case)', () => {
       // When allCuits only contains ADVA's CUIT, cuitReceptor should be empty
       const issuerName = 'ASOCIACION CIVIL DE DESARROLLADORES DE VIDEOJUEGOS ARGENTINOS';
-      const clientName = 'Marcial Fermin Gutierrez';
+      const clientName = 'Juan Perez';
       const allCuits = ['30709076783']; // Only ADVA's CUIT extracted
 
       const result = assignCuitsAndClassify(issuerName, clientName, allCuits);
@@ -1177,7 +1177,7 @@ describe('Parser - CUIT Assignment for Consumidor Final', () => {
       // Simulate Gemini extracting only ADVA's CUIT
       const response = JSON.stringify({
         issuerName: 'ASOCIACION CIVIL DE DESARROLLADORES DE VIDEOJUEGOS ARGENTINOS',
-        clientName: 'Marcial Fermin Gutierrez',
+        clientName: 'Juan Perez',
         allCuits: ['30709076783'], // Only ADVA CUIT
         tipoComprobante: 'C',
         nroFactura: '00005-00000035',
@@ -1252,7 +1252,7 @@ describe('Parser - CUIT Assignment for Consumidor Final', () => {
       const response = JSON.stringify({
         issuerName: 'ASOCIACION CIVIL DE DESARROLLADORES DE VIDEOJUEGOS ARGENTINOS',
         clientName: 'Empresa Test SA',
-        allCuits: ['30709076783', '20367086921'],
+        allCuits: ['30709076783', '20123456786'],
         tipoComprobante: 'A',
         nroFactura: '00001-00000001',
         fechaEmision: '2025-01-15',
@@ -1266,7 +1266,7 @@ describe('Parser - CUIT Assignment for Consumidor Final', () => {
 
       expect(result.ok).toBe(true);
       if (result.ok) {
-        expect(result.value.data.cuitReceptor).toBe('20367086921');
+        expect(result.value.data.cuitReceptor).toBe('20123456786');
         // No review needed: all required fields present, cuitReceptor not empty, confidence = 1.0
         expect(result.value.needsReview).toBe(false);
       }

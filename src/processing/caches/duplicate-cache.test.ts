@@ -350,7 +350,7 @@ describe('DuplicateCache', () => {
         '', // C
         '', // D
         '00001-00000214', // Column E: nroFactura
-        '27130780259', // Column F: CUIT
+        '27234567891', // Column F: CUIT
         '', // G
         '', // H
         '', // I
@@ -364,7 +364,7 @@ describe('DuplicateCache', () => {
         '00001-00000214',
         '2025-11-30',
         500000.00,
-        '27130780259',
+        '27234567891',
         'factura_recibida' // legacy 10-col fixture (importeTotal at J/9)
       );
 
@@ -468,7 +468,7 @@ describe('DuplicateCache', () => {
         { text: 'doc.pdf', url: 'https://drive.google.com/file/d/file-1/view' }, // C
         'A',                                     // D
         '00001-00000214',                        // E: nroFactura
-        '27130780259',                           // F: CUIT
+        '27234567891',                           // F: CUIT
         'SOCIO SA',                              // G
         { type: 'number', value: 20661.16 },     // H
         { type: 'number', value: 4338.84 },      // I
@@ -482,7 +482,7 @@ describe('DuplicateCache', () => {
         '00001-00000214',
         '2026-05-11',
         25000,
-        '27130780259',
+        '27234567891',
         'factura_recibida' // legacy 10-col fixture (importeTotal at J/9)
       );
 
