@@ -16,7 +16,7 @@ Both branches must be pushed. The Railway MCP is linked to **staging** — alway
 
 ### 1.1 Verify Linear MCP
 
-**ALWAYS call `mcp__linear__list_issues` with `team: "ADVA Administracion"`, `state: "Done"` directly.** Do NOT try to determine MCP availability by inspecting the tool list, checking settings, or reasoning about it — you MUST actually invoke the tool and check the result. If the call fails or returns an error, **warn** but do not stop — Linear state transitions are cosmetic, the release can proceed without them.
+**ALWAYS call `mcp__linear__list_issues` with `team: "ADVA Administracion"`, `state: "Done"`, `limit: 250` directly** (paginate via `cursor` if `hasNextPage: true`). Do NOT try to determine MCP availability by inspecting the tool list, checking settings, or reasoning about it — you MUST actually invoke the tool and check the result. If the call fails or returns an error, **warn** but do not stop — Linear state transitions are cosmetic, the release can proceed without them.
 
 Record any Done issues for Phase 5.
 
@@ -231,8 +231,9 @@ Transition all Linear issues in "Done" to "Released" now that the code is live i
 
 1. Use the Done issues already fetched in Phase 1.1. If that call failed, try again now:
    ```
-   mcp__linear__list_issues with team: "ADVA Administracion", state: "Done"
+   mcp__linear__list_issues with team: "ADVA Administracion", state: "Done", limit: 250
    ```
+   If the response has `hasNextPage: true`, keep fetching with the returned `cursor` until all Done issues are collected.
 
 2. Look up the Released state UUID using `mcp__linear__list_issue_statuses` with team "ADVA Administracion". Find the status with `name: "Released"`.
 
@@ -241,7 +242,7 @@ Transition all Linear issues in "Done" to "Released" now that the code is live i
    mcp__linear__save_issue with id: <issue-id>, state: "<released-state-uuid>"
    ```
 
-4. **Batch efficiently:** Call up to 10 `save_issue` calls in parallel. If there are more than 30 issues, update the first 30 and note the remainder in the report for manual transition.
+4. **Batch efficiently:** Call up to 10 `save_issue` calls in parallel, repeating batches until ALL Done issues are transitioned — there is no cap. Never leave issues behind for manual transition.
 
 5. Collect the list of moved issues (identifier + title) for the report.
 
