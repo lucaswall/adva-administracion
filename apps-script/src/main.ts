@@ -42,6 +42,7 @@ export function createMenu(): void {
     .addItem('🔄 Procesar Entrada', 'triggerScan')
     .addItem('🔗 Volver a Vincular Documentos', 'triggerRematch')
     .addItem('📝 Completar Detalles de Movimientos', 'triggerMatchMovimientos')
+    .addItem('💳 Sincronizar Mercado Pago', 'triggerMpSync')
     .addItem('📊 Reconstruir Subdiario de Ventas', 'triggerRebuildSubdiario')
     .addItem('📦 Envío a Contadores', 'triggerEnvioContadores')
     .addSeparator()
@@ -245,6 +246,15 @@ export function triggerRematch(): void {
 export function triggerMatchMovimientos(): void {
   const url = getApiUrl('/api/match-movimientos');
   makeApiCall(url, 'post', null, 'Completado de detalles iniciado correctamente.');
+}
+
+/**
+ * Triggers a Mercado Pago payments sync (previous + current month).
+ * Idempotent — safe to run repeatedly; movement matching auto-triggers afterwards.
+ */
+export function triggerMpSync(): void {
+  const url = getApiUrl('/api/mp-sync');
+  makeApiCall(url, 'post', null, 'Sincronización de Mercado Pago iniciada correctamente.');
 }
 
 /**

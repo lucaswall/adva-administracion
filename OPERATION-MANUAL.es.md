@@ -218,6 +218,7 @@ En el Dashboard Operativo Contable, hay un menú especial llamado **"ADVA"** que
 | **Trigger Re-match** | Vuelve a buscar vínculos entre documentos | Después de corregir datos manualmente |
 | **Auto-fill Bank Data** | Completa datos bancarios automáticamente | Después de procesar nuevos resúmenes |
 | **Completar Detalles Movimientos** | Vincula movimientos bancarios con documentos | Después de procesar nuevos documentos |
+| **Sincronizar Mercado Pago** | Trae los cobros de Mercado Pago (mes anterior y actual) y los vincula con facturas | Si necesita los cobros de MP antes de la sincronización automática mensual |
 | **About** | Muestra información del sistema y estado del servidor | Para verificar que el sistema está funcionando |
 
 ### Uso recomendado
