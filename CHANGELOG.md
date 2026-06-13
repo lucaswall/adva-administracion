@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.14.0] - 2026-06-12
+
+### Added
+- Bank movements that are transfers between ADVA's own accounts (ADVA's CUIT in the concepto, no other counterparty) are now auto-labeled "Transferencia entre cuentas propias" instead of entering the document-matching pool
+
+### Changed
+- Bank-fee auto-labeling now recognizes Banco Ciudad and Credicoop fee wordings (comisiones, Ley 25.413, IVA débito fiscal, sellos, intereses por saldo deudor)
+- BBVA's monthly card payment, posted with a bare card name (`VISA`, `MASTERCARD`, etc.) as the concepto, is now recognized as a credit-card payment
+
 ## [1.13.0] - 2026-06-12
 
 ### Added
@@ -245,7 +254,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Updated fastify to fix high-severity Content-Type body validation bypass and low-severity DoS vulnerability
 - Updated googleapis to v171, @google/clasp to v3, and resolved 6 npm audit vulnerabilities
 
-[Unreleased]: https://github.com/lucaswall/adva-administracion/compare/v1.13.0...HEAD
+[Unreleased]: https://github.com/lucaswall/adva-administracion/compare/v1.14.0...HEAD
+[1.14.0]: https://github.com/lucaswall/adva-administracion/compare/v1.13.0...v1.14.0
 [1.13.0]: https://github.com/lucaswall/adva-administracion/compare/v1.12.0...v1.13.0
 [1.12.0]: https://github.com/lucaswall/adva-administracion/compare/v1.11.0...v1.12.0
 [1.11.0]: https://github.com/lucaswall/adva-administracion/compare/v1.10.0...v1.11.0
