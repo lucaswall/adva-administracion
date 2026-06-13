@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { BankMovementMatcher, calculateKeywordMatchScore, stripBankOriginPrefix, isBankFee, isCreditCardPayment, extractKeywordTokens, extractReferencia } from './matcher.js';
+import { BankMovementMatcher, calculateKeywordMatchScore, stripBankOriginPrefix, isBankFee, isCreditCardPayment, isOwnTransfer, extractKeywordTokens, extractReferencia } from './matcher.js';
 import type { MovimientoRow, Factura, Pago, Retencion } from '../types/index.js';
 import { setExchangeRateCache, type ExchangeRate } from '../utils/exchange-rate.js';
 
@@ -3273,5 +3273,166 @@ describe('MP charge debit rows excluded from document matching (Codex P2)', () =
 
     // Non-MP accounts keep existing behavior: the pago is a normal candidate
     expect(result.matchType).not.toBe('bank_fee');
+  });
+});
+
+describe('Bank fee patterns - Banco Ciudad / Credicoop wordings (ADV: May 2026 reconciliation gaps)', () => {
+  it('matches N/D COMISION MANTE', () => {
+    expect(isBankFee('N/D COMISION MANTE')).toBe(true);
+  });
+
+  it('matches DEBITO FISCAL IVA', () => {
+    expect(isBankFee('DEBITO FISCAL IVA')).toBe(true);
+  });
+
+  it('matches N/D LEY 25413DEBIT', () => {
+    expect(isBankFee('N/D LEY 25413DEBIT')).toBe(true);
+  });
+
+  it('matches Servicio Modulo Pyme y Agro', () => {
+    expect(isBankFee('Servicio Modulo Pyme y Agro')).toBe(true);
+  });
+
+  it('matches I.V.A. Debito Fiscal 21%', () => {
+    expect(isBankFee('I.V.A. Debito Fiscal 21%')).toBe(true);
+  });
+
+  it('matches I.V.A. - Debito Fiscal 21% (with dash)', () => {
+    expect(isBankFee('I.V.A. - Debito Fiscal 21%')).toBe(true);
+  });
+
+  it('matches Intereses por Saldo Deudor', () => {
+    expect(isBankFee('Intereses por Saldo Deudor')).toBe(true);
+  });
+
+  it('matches Impuesto de Sellos CABA', () => {
+    expect(isBankFee('Impuesto de Sellos CABA')).toBe(true);
+  });
+
+  it('does not match DEBITO DIRECTO', () => {
+    expect(isBankFee('DEBITO DIRECTO')).toBe(false);
+  });
+
+  it('does not match DEBITO AUTOMATICO', () => {
+    expect(isBankFee('DEBITO AUTOMATICO')).toBe(false);
+  });
+});
+
+describe('Credit card payment - bare card name concepto', () => {
+  it('matches bare VISA', () => {
+    expect(isCreditCardPayment('VISA')).toBe(true);
+  });
+
+  it('matches bare MASTERCARD', () => {
+    expect(isCreditCardPayment('MASTERCARD')).toBe(true);
+  });
+
+  it('matches bare VISA with origin prefix', () => {
+    expect(isCreditCardPayment('D 123 VISA')).toBe(true);
+  });
+
+  it('does not match VISA followed by other text', () => {
+    expect(isCreditCardPayment('VISA DEBITO COMPRA')).toBe(false);
+  });
+});
+
+describe('isOwnTransfer - internal transfers between ADVA accounts', () => {
+  it('detects debit transfer carrying ADVA CUIT', () => {
+    expect(isOwnTransfer('TRANSFERENCIA 30709076783')).toBe(true);
+  });
+
+  it('detects MP bank transfer carrying ADVA CUIT', () => {
+    expect(isOwnTransfer('MP 163603837712 - CUIT 30709076783 - Bank Transfer')).toBe(true);
+  });
+
+  it('does not detect transfer with counterparty CUIT', () => {
+    expect(isOwnTransfer('TRANSFERENCIA 20123456786')).toBe(false);
+  });
+
+  it('does not detect transfer without CUIT', () => {
+    expect(isOwnTransfer('TRANSFERENCIA')).toBe(false);
+  });
+
+  it('does not detect ADVA CUIT without transfer keyword', () => {
+    expect(isOwnTransfer('DEBITO AUTOMATICO 30709076783')).toBe(false);
+  });
+});
+
+describe('Own transfer auto-label (matchMovement / matchCreditMovement)', () => {
+  let matcher: BankMovementMatcher;
+
+  beforeEach(() => {
+    matcher = new BankMovementMatcher(5);
+  });
+
+  it('labels a debit own-transfer with Transferencia entre cuentas propias', () => {
+    const movement = makeMovimiento({
+      fecha: '2026-05-04',
+      concepto: 'TRANSFERENCIA 30709076783',
+      debito: 300000,
+      credito: null,
+    });
+
+    const result = matcher.matchMovement(movement, [], [], []);
+
+    expect(result.matchType).toBe('own_transfer');
+    expect(result.description).toBe('Transferencia entre cuentas propias');
+    expect(result.matchedFileId).toBe('');
+    expect(result.confidence).toBe('HIGH');
+  });
+
+  it('labels a credit own-transfer with Transferencia entre cuentas propias', () => {
+    const movement = makeMovimiento({
+      fecha: '2026-06-11',
+      concepto: 'MP 163603837712 - CUIT 30709076783 - Bank Transfer',
+      debito: null,
+      credito: 50000,
+    });
+
+    const result = matcher.matchCreditMovement(movement, [], [], []);
+
+    expect(result.matchType).toBe('own_transfer');
+    expect(result.description).toBe('Transferencia entre cuentas propias');
+    expect(result.matchedFileId).toBe('');
+    expect(result.confidence).toBe('HIGH');
+  });
+
+  it('does not auto-label a transfer debit with a counterparty CUIT', () => {
+    const movement = makeMovimiento({
+      fecha: '2026-05-04',
+      concepto: 'TRANSFERENCIA 20123456786',
+      debito: 300000,
+      credito: null,
+    });
+
+    const result = matcher.matchMovement(movement, [], [], []);
+
+    expect(result.matchType).not.toBe('own_transfer');
+  });
+});
+
+describe('isOwnTransfer - second bare counterparty CUIT guard', () => {
+  it('does not label when a second non-ADVA bare CUIT is present', () => {
+    expect(isOwnTransfer('TRANSFERENCIA 30709076783 20123456786')).toBe(false);
+  });
+
+  it('still labels when ADVA CUIT is the only 11-digit number', () => {
+    expect(isOwnTransfer('TRANSFERENCIA 30709076783')).toBe(true);
+  });
+});
+
+describe('Auto-label checks run before the amount guard (debit path)', () => {
+  it('labels a null-debito VISA movement as credit card payment', () => {
+    const matcher = new BankMovementMatcher(5);
+    const movement = makeMovimiento({
+      fecha: '2026-05-26',
+      concepto: 'VISA',
+      debito: null,
+      credito: null,
+    });
+
+    const result = matcher.matchMovement(movement, [], [], []);
+
+    expect(result.matchType).toBe('credit_card_payment');
   });
 });

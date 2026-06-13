@@ -1069,7 +1069,7 @@ async function matchBankMovimientos(
 
     // Handle match result with replacement logic
     const isFileIdMatch = matchResult.matchType !== 'no_match' && matchResult.matchedFileId;
-    const isAutoLabelMatch = matchResult.matchType === 'bank_fee' || matchResult.matchType === 'credit_card_payment';
+    const isAutoLabelMatch = matchResult.matchType === 'bank_fee' || matchResult.matchType === 'credit_card_payment' || matchResult.matchType === 'own_transfer';
     if (isFileIdMatch || isAutoLabelMatch) {
       // Found a new candidate match
       let shouldUpdate = false;

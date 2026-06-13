@@ -889,7 +889,7 @@ export type BankMatchTier = 1 | 2 | 3 | 4 | 5;
 /**
  * Match type for bank movement matching
  */
-export type BankMatchType = 'bank_fee' | 'credit_card_payment' | 'pago_factura' | 'direct_factura' | 'recibo' | 'pago_only' | 'no_match';
+export type BankMatchType = 'bank_fee' | 'credit_card_payment' | 'own_transfer' | 'pago_factura' | 'direct_factura' | 'recibo' | 'pago_only' | 'no_match';
 
 /**
  * Result of matching a bank movement

@@ -87,8 +87,9 @@ See [references/matching-reference.md](references/matching-reference.md) for det
 **Key rules for all matching:**
 - Always update **BOTH sides** of a match link (except retenciones, which are one-directional)
 - Always set `matchConfidence=MANUAL`
-- Always set `pagada=SI` (column S) when matching **either** a Factura Emitida with a Pago Recibido **or** a Factura Recibida with a Pago Enviado — both factura sheets carry the `pagada` column
-- On unmatch, **leave column S (`pagada`) untouched** — clearing it can clobber an `'SI'` set by NC-factura matching (see `factura-pago-matcher.ts`, "intentionally left untouched")
+- Always set `pagada=SI` when matching **either** a Factura Emitida with a Pago Recibido **or** a Factura Recibida with a Pago Enviado — both factura sheets carry the `pagada` column (**T** on Facturas Emitidas, **S** on Facturas Recibidas — the Emitidas schema gained `condicionIVAReceptor` at H, shifting later columns)
+- On unmatch, **leave the `pagada` column untouched** (T Emitidas / S Recibidas) — clearing it can clobber an `'SI'` set by NC-factura matching (see `factura-pago-matcher.ts`, "intentionally left untouched")
+- **ALWAYS verify column letters against the live header row** (`gsheets_metadata` or read row 1) before writing match columns — schemas evolve and the two factura sheets differ by one column
 - Always verify writes by re-reading affected rows
 
 ## Data Correction
@@ -198,7 +199,7 @@ When asked to review unmatched bank movements:
 When asked to "review" items, don't just list them — **analyze**:
 
 ### Review Unmatched Documents
-1. Use `gsheets_query` to fetch unmatched rows (e.g., `where: [{column: "P", operator: "empty"}]` for Facturas Emitidas)
+1. Use `gsheets_query` to fetch unmatched rows (e.g., `where: [{column: "Q", operator: "empty"}]` for Facturas Emitidas — matchedPagoFileId is Q there, P on Facturas Recibidas)
 2. For each unmatched item, search the counterpart sheet for candidates:
    - Same CUIT? → strong candidate
    - Similar amount (±5%)? → possible candidate
@@ -210,14 +211,14 @@ When asked to "review" items, don't just list them — **analyze**:
 4. Let user approve matches in batch
 
 ### Review Flagged Items (needsReview=TRUE)
-1. Use `gsheets_query` to fetch flagged rows (e.g., `where: [{column: "O", operator: "eq", value: "TRUE"}]`)
+1. Use `gsheets_query` to fetch flagged rows (e.g., `where: [{column: "P", operator: "eq", value: "TRUE"}]` for Facturas Emitidas — needsReview is P there, O on Facturas Recibidas)
 2. For each: fetch the source PDF via `gdrive_get_pdf`
 3. Compare extracted data with PDF content
 4. Report: what's correct, what's wrong, what needs human judgment
 5. Propose fixes or clear the flag if data is correct
 
 ### Review Low-Confidence Matches
-1. Use `gsheets_query` to fetch LOW/MEDIUM matches (e.g., `where: [{column: "Q", operator: "neq", value: "HIGH"}, {column: "Q", operator: "neq", value: "MANUAL"}, {column: "Q", operator: "not_empty"}]` for Facturas Emitidas)
+1. Use `gsheets_query` to fetch LOW/MEDIUM matches (e.g., `where: [{column: "R", operator: "neq", value: "HIGH"}, {column: "R", operator: "neq", value: "MANUAL"}, {column: "R", operator: "not_empty"}]` for Facturas Emitidas — matchConfidence is R there, Q on Facturas Recibidas)
 2. For each: look at both sides of the match
 3. Assess: is this match correct? Is there a better candidate?
 4. Recommend: confirm (upgrade to MANUAL), replace, or unmatch
@@ -285,17 +286,17 @@ This is cheaper than reading full sheets and helps you target the right ranges w
   ] }
 ```
 
-**Find unmatched Facturas Emitidas (empty matchedPagoFileId in column P):**
+**Find unmatched Facturas Emitidas (empty matchedPagoFileId in column Q — the Emitidas schema has condicionIVAReceptor at H; on Facturas Recibidas it is P):**
 ```json
 { "spreadsheetId": "...", "sheetName": "Facturas Emitidas",
-  "columns": ["A", "B", "D", "E", "F", "G", "J", "K", "P"],
-  "where": [{ "column": "P", "operator": "empty" }] }
+  "columns": ["A", "B", "D", "E", "F", "G", "K", "L", "Q"],
+  "where": [{ "column": "Q", "operator": "empty" }] }
 ```
 
-**Find flagged items (needsReview=TRUE):**
+**Find flagged items (needsReview=TRUE — column P on Facturas Emitidas, O on Facturas Recibidas):**
 ```json
 { "spreadsheetId": "...", "sheetName": "Facturas Emitidas",
-  "where": [{ "column": "O", "operator": "eq", "value": "TRUE" }] }
+  "where": [{ "column": "P", "operator": "eq", "value": "TRUE" }] }
 ```
 
 **Find LOW/MEDIUM confidence matches:**
@@ -344,8 +345,9 @@ After **any** write operation:
 - **Always update BOTH sides** of document match links (except retenciones)
 - **Always set matchConfidence=MANUAL** on matched documents
 - **Always set matchedType=MANUAL** on matched movimientos
-- **Always set pagada=SI** (column S) on the factura side when matching either a Factura Emitida↔Pago Recibido or a Factura Recibida↔Pago Enviado
-- **On unmatch, leave column S (pagada) untouched** — preserves NC-set 'SI' (matches code behavior in `factura-pago-matcher.ts`)
+- **Always set pagada=SI** on the factura side when matching either a Factura Emitida↔Pago Recibido or a Factura Recibida↔Pago Enviado (pagada is column **T** on Facturas Emitidas, **S** on Facturas Recibidas)
+- **On unmatch, leave the pagada column untouched** (T Emitidas / S Recibidas) — preserves NC-set 'SI' (matches code behavior in `factura-pago-matcher.ts`)
+- **Verify column letters against the header row before any match-column write** — Facturas Emitidas (21 cols, condicionIVAReceptor at H) and Facturas Recibidas (20 cols) differ by one column from H onward
 - **Always verify** writes by re-reading affected rows
 - **Always confirm** before making changes — show before/after
 - **Never delete** spreadsheet rows

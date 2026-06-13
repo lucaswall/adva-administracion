@@ -181,6 +181,8 @@ const MIN_KEYWORD_MATCH_SCORE = 2;
 const CREDIT_CARD_PAYMENT_PATTERNS = [
   /^PAGO TARJETA\s+\d+/i,
   /^PAGO TARJETA\s+(?:VISA|MASTERCARD|AMEX|NARANJA|CABAL)\b/i,
+  // BBVA debits the monthly card payment with the bare card name as concepto
+  /^(?:VISA|MASTERCARD|AMEX|NARANJA|CABAL)\s*$/i,
 ];
 
 /**
@@ -219,6 +221,15 @@ const BANK_FEE_PATTERNS = [
   /^GP-COM\.OPAGO/i,
   /^GP-IVA TASA/i,
   /^PAGOS AFIP/i,
+  // Banco Ciudad wordings
+  /^N\/D COMISION/i,
+  /^N\/D LEY 25413/i,
+  /^DEBITO FISCAL IVA/i,
+  // Credicoop wordings
+  /^Servicio Modulo/i,
+  /^I\.V\.A\.?\s*-?\s*Debito Fiscal/i,
+  /^Intereses por Saldo Deudor/i,
+  /^Impuesto de Sellos/i,
 ];
 
 /**
@@ -233,6 +244,37 @@ export function isBankFee(concepto: string): boolean {
   }
   const cleaned = stripBankOriginPrefix(concepto);
   return BANK_FEE_PATTERNS.some(pattern => pattern.test(cleaned));
+}
+
+/** Transfer keyword — covers TRANSFERENCIA, TRANSF., and MP's "Bank Transfer" */
+const OWN_TRANSFER_KEYWORD_RE = /TRANSF/i;
+
+/**
+ * Checks if a bank concept represents a transfer between ADVA's own accounts.
+ *
+ * Internal transfers carry ADVA's own CUIT in the concepto (e.g.
+ * "TRANSFERENCIA 30709076783", "MP {id} - CUIT 30709076783 - Bank Transfer").
+ * They have no counterparty document, so they are auto-labeled instead of
+ * entering the document-matching pool.
+ *
+ * @param concepto - Bank transaction concept text
+ * @returns True when the concepto has a transfer keyword and ADVA's CUIT
+ */
+export function isOwnTransfer(concepto: string): boolean {
+  if (!concepto) {
+    return false;
+  }
+  if (!OWN_TRANSFER_KEYWORD_RE.test(concepto)) {
+    return false;
+  }
+  const cuit = extractCuitFromConcepto(concepto);
+  if (!cuit || !isAdvaCuit(cuit)) {
+    return false;
+  }
+  // A second bare 11-digit number that is not ADVA's suggests a counterparty —
+  // fail safe to normal document matching instead of auto-labeling
+  const bareNumbers = concepto.match(/\b\d{11}\b/g) ?? [];
+  return bareNumbers.every(n => isAdvaCuit(n));
 }
 
 /** MP sync concepto prefix — `MP {operationId} - ...` (see src/mercadopago/transform.ts) */
@@ -364,13 +406,17 @@ export class BankMovementMatcher {
       return this.createMpChargeMatch(movement);
     }
 
+    if (isCreditCardPayment(movement.concepto)) {
+      return this.createCreditCardPaymentMatch(movement);
+    }
+
+    if (isOwnTransfer(movement.concepto)) {
+      return this.createOwnTransferMatch(movement);
+    }
+
     const amount = movement.debito;
     if (amount === null || amount === 0) {
       return this.noMatch(movement, ['No debit amount']);
-    }
-
-    if (isCreditCardPayment(movement.concepto)) {
-      return this.createCreditCardPaymentMatch(movement);
     }
 
     // Phase 1: Extract identity
@@ -621,6 +667,10 @@ export class BankMovementMatcher {
 
     if (isCreditCardPayment(movement.concepto)) {
       return this.createCreditCardPaymentMatch(movement);
+    }
+
+    if (isOwnTransfer(movement.concepto)) {
+      return this.createOwnTransferMatch(movement);
     }
 
     const amount = movement.credito;
@@ -994,6 +1044,20 @@ export class BankMovementMatcher {
       matchedFileId: '',
       confidence: 'HIGH',
       reasons: ['Credit card payment pattern detected']
+    };
+  }
+
+  /**
+   * Creates a match result for a transfer between ADVA's own accounts
+   */
+  private createOwnTransferMatch(movement: MovimientoRow): BankMovementMatchResult {
+    return {
+      movement,
+      matchType: 'own_transfer',
+      description: 'Transferencia entre cuentas propias',
+      matchedFileId: '',
+      confidence: 'HIGH',
+      reasons: ['Own-account transfer detected (ADVA CUIT in concepto)']
     };
   }
 
