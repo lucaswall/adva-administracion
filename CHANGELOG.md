@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.13.0] - 2026-06-12
+
+### Added
+- Mercado Pago payments ingestion via API: a monthly sync (cron on the 1st + boot-time catch-up) pulls payments into a `Mercado Pago {collectorId} ARS` account with per-month Movimientos tabs (gross credit plus per-charge fee debits) and resumen rows for closed periods — fully idempotent, safe to re-run
+- `POST /api/mp-sync` endpoint and "Sincronizar Mercado Pago" item in the Dashboard ADVA menu for manual sync (optional `?period=YYYY-MM`)
+- New optional `MP_ACCESS_TOKEN` env var — when unset, the entire Mercado Pago feature is disabled
+
+### Changed
+- Bank matching identity comparisons now recognize a DNI embedded in a CUIT/CUIL as the same person — consumidor-final facturas (stored with DNI) now match bank/MP movements carrying the full CUIT
+- Mercado Pago accounts use an extended forward factura matching window (+25 days instead of +5) to cover the subscription-billing lag between the charge and the factura emission
+- The Entrega flow skips spreadsheet-backed resumen entries that have no PDF (Mercado Pago accounts) instead of failing the copy
+
 ## [1.12.0] - 2026-06-12
 
 ### Changed
@@ -233,7 +245,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Updated fastify to fix high-severity Content-Type body validation bypass and low-severity DoS vulnerability
 - Updated googleapis to v171, @google/clasp to v3, and resolved 6 npm audit vulnerabilities
 
-[Unreleased]: https://github.com/lucaswall/adva-administracion/compare/v1.12.0...HEAD
+[Unreleased]: https://github.com/lucaswall/adva-administracion/compare/v1.13.0...HEAD
+[1.13.0]: https://github.com/lucaswall/adva-administracion/compare/v1.12.0...v1.13.0
 [1.12.0]: https://github.com/lucaswall/adva-administracion/compare/v1.11.0...v1.12.0
 [1.11.0]: https://github.com/lucaswall/adva-administracion/compare/v1.10.0...v1.11.0
 [1.10.0]: https://github.com/lucaswall/adva-administracion/compare/v1.9.0...v1.10.0
