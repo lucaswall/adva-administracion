@@ -4,12 +4,21 @@
  * for a chosen period range (Envío a Contadores feature).
  */
 
-import type { Result } from '../types/index.js';
+import type { Result, SubdiarioInput } from '../types/index.js';
 import {
   CONTROL_RESUMENES_BANCARIO_SHEET,
   CONTROL_RESUMENES_TARJETA_SHEET,
   CONTROL_RESUMENES_BROKER_SHEET,
 } from '../constants/spreadsheet-headers.js';
+import { buildSubdiarioRows } from './subdiario-builder.js';
+import {
+  buildSubdiarioDeliverable,
+  type DeliverableRenderRow,
+} from './subdiario-deliverable.js';
+import {
+  writeSubdiarioDeliverable,
+  type WriteDeliverableResult,
+} from './subdiario-deliverable-writer.js';
 import {
   getValues,
   getSheetMetadata,
@@ -972,4 +981,39 @@ export async function buildMovimientosFiles(
   });
 
   return { ok: true, value: { created, failed } };
+}
+
+// ── Task: buildSubdiarioDeliverableFile ──────────────────────────────────────
+
+/**
+ * Builds and writes the formatted Subdiario de Ventas delivery spreadsheet.
+ *
+ * Orchestration helper that chains three steps:
+ *   1. buildSubdiarioRows(input)       → SubdiarioRow[]
+ *   2. buildSubdiarioDeliverable(rows, currentYear) → DeliverableRenderRow[]
+ *   3. writeSubdiarioDeliverable(folderId, currentYear, renderRows) → Result
+ *
+ * Idempotency (delete-before-create) is handled inside writeSubdiarioDeliverable
+ * (worker-2) — this function simply orchestrates the chain.
+ *
+ * @param folderId    - Delivery folder ID to write the spreadsheet into
+ * @param currentYear - Business year (used as tab name / context by the writer)
+ * @param input       - Pre-gathered SubdiarioInput (from gatherSubdiarioInput)
+ * @returns WriteDeliverableResult on success, or error
+ */
+export async function buildSubdiarioDeliverableFile(
+  folderId: string,
+  currentYear: number,
+  input: SubdiarioInput
+): Promise<Result<WriteDeliverableResult, Error>> {
+  let rows;
+  try {
+    rows = buildSubdiarioRows(input);
+  } catch (err) {
+    const error = err instanceof Error ? err : new Error(String(err));
+    return { ok: false, error };
+  }
+
+  const renderRows: DeliverableRenderRow[] = buildSubdiarioDeliverable(rows, currentYear);
+  return writeSubdiarioDeliverable(folderId, currentYear, renderRows);
 }

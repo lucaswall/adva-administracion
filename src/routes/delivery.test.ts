@@ -15,6 +15,7 @@ const mockFormatDeliveryFolderName = vi.fn();
 const mockPrepareDeliveryFolder = vi.fn();
 const mockCopyPdfsToDelivery = vi.fn();
 const mockBuildMovimientosFiles = vi.fn();
+const mockBuildSubdiarioDeliverableFile = vi.fn();
 
 vi.mock('../services/delivery-package.js', () => ({
   parsePeriodRange: (...args: unknown[]) => mockParsePeriodRange(...args),
@@ -24,6 +25,14 @@ vi.mock('../services/delivery-package.js', () => ({
   prepareDeliveryFolder: (...args: unknown[]) => mockPrepareDeliveryFolder(...args),
   copyPdfsToDelivery: (...args: unknown[]) => mockCopyPdfsToDelivery(...args),
   buildMovimientosFiles: (...args: unknown[]) => mockBuildMovimientosFiles(...args),
+  buildSubdiarioDeliverableFile: (...args: unknown[]) => mockBuildSubdiarioDeliverableFile(...args),
+}));
+
+// Mock subdiario-writer (gatherSubdiarioInput)
+const mockGatherSubdiarioInput = vi.fn();
+
+vi.mock('../services/subdiario-writer.js', () => ({
+  gatherSubdiarioInput: (...args: unknown[]) => mockGatherSubdiarioInput(...args),
 }));
 
 // Mock folder structure
@@ -939,6 +948,254 @@ describe('Delivery routes', () => {
       expect(body.error).toBe('Service unavailable');
       expect(typeof body.correlationId).toBe('string');
       expect(mockBuildMovimientosFiles).not.toHaveBeenCalled();
+    });
+  });
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // POST /api/delivery/build-subdiario
+  // ───────────────────────────────────────────────────────────────────────────
+
+  describe('POST /api/delivery/build-subdiario', () => {
+    const MOCK_SUBDIARIO_INPUT = {
+      currentYear: 2026,
+      facturasEmitidas: [],
+      pagosRecibidos: [],
+      retencionesRecibidas: [],
+      movimientos: [],
+      facturador: new Map(),
+    };
+
+    beforeEach(() => {
+      // Default mocks: Entregas/ found, folderId is a descendant, gather + build succeed
+      mockFindByName.mockResolvedValue({
+        ok: true,
+        value: { id: 'entregas-id', name: 'Entregas', mimeType: 'application/vnd.google-apps.folder' },
+      });
+      mockIsDescendantOf.mockResolvedValue({ ok: true, value: true });
+      mockGatherSubdiarioInput.mockResolvedValue({ ok: true, value: MOCK_SUBDIARIO_INPUT });
+      mockBuildSubdiarioDeliverableFile.mockResolvedValue({
+        ok: true,
+        value: { spreadsheetId: 'subdiario-sheet-id', sheetId: 0, rowsWritten: 42 },
+      });
+    });
+
+    it('returns 401 when authorization header is missing', async () => {
+      const response = await server.inject({
+        method: 'POST',
+        url: '/api/delivery/build-subdiario',
+        payload: { folderId: 'folder-abc' },
+      });
+
+      expect(response.statusCode).toBe(401);
+    });
+
+    it('returns 400 when folderId is missing from body', async () => {
+      const response = await server.inject({
+        method: 'POST',
+        url: '/api/delivery/build-subdiario',
+        headers: { authorization: 'Bearer test-secret-123' },
+        payload: {},
+      });
+
+      expect(response.statusCode).toBe(400);
+    });
+
+    it('returns 503 when folder structure is not cached', async () => {
+      mockGetCachedFolderStructure.mockReturnValue(null);
+
+      const response = await server.inject({
+        method: 'POST',
+        url: '/api/delivery/build-subdiario',
+        headers: { authorization: 'Bearer test-secret-123' },
+        payload: { folderId: 'folder-abc' },
+      });
+
+      expect(response.statusCode).toBe(503);
+      const body = JSON.parse(response.payload);
+      expect(body.error).toBe('Service unavailable');
+      expect(typeof body.correlationId).toBe('string');
+    });
+
+    it('returns 400 when folderId is not a descendant of Entregas/', async () => {
+      mockIsDescendantOf.mockResolvedValue({ ok: true, value: false });
+
+      const response = await server.inject({
+        method: 'POST',
+        url: '/api/delivery/build-subdiario',
+        headers: { authorization: 'Bearer test-secret-123' },
+        payload: { folderId: 'attacker-folder-id' },
+      });
+
+      expect(response.statusCode).toBe(400);
+      const body = JSON.parse(response.payload);
+      expect(body.error).toBe('folderId no pertenece a la carpeta Entregas/');
+      // Validation must happen BEFORE any gathering / build
+      expect(mockGatherSubdiarioInput).not.toHaveBeenCalled();
+      expect(mockBuildSubdiarioDeliverableFile).not.toHaveBeenCalled();
+    });
+
+    it('returns 503 when findByName fails (Drive API error) during IDOR guard', async () => {
+      mockFindByName.mockResolvedValue({ ok: false, error: new Error('Drive API quota exceeded') });
+
+      const response = await server.inject({
+        method: 'POST',
+        url: '/api/delivery/build-subdiario',
+        headers: { authorization: 'Bearer test-secret-123' },
+        payload: { folderId: 'folder-abc' },
+      });
+
+      expect(response.statusCode).toBe(503);
+      const body = JSON.parse(response.payload);
+      expect(body.error).toBe('Service unavailable');
+      expect(mockGatherSubdiarioInput).not.toHaveBeenCalled();
+    });
+
+    it('returns 503 when isDescendantOf fails (Drive API error)', async () => {
+      mockIsDescendantOf.mockResolvedValue({ ok: false, error: new Error('Drive timeout') });
+
+      const response = await server.inject({
+        method: 'POST',
+        url: '/api/delivery/build-subdiario',
+        headers: { authorization: 'Bearer test-secret-123' },
+        payload: { folderId: 'folder-abc' },
+      });
+
+      expect(response.statusCode).toBe(503);
+      expect(mockGatherSubdiarioInput).not.toHaveBeenCalled();
+    });
+
+    it('returns 503 when delivery lock times out', async () => {
+      mockWithLock.mockResolvedValue({
+        ok: false,
+        error: new Error('Failed to acquire lock for delivery:mutating within 30000ms'),
+      });
+
+      const response = await server.inject({
+        method: 'POST',
+        url: '/api/delivery/build-subdiario',
+        headers: { authorization: 'Bearer test-secret-123' },
+        payload: { folderId: 'folder-abc' },
+      });
+
+      expect(response.statusCode).toBe(503);
+      const body = JSON.parse(response.payload);
+      expect(body.error).toBe('Service unavailable');
+      expect(typeof body.correlationId).toBe('string');
+      // Mutations must not have run
+      expect(mockGatherSubdiarioInput).not.toHaveBeenCalled();
+      expect(mockBuildSubdiarioDeliverableFile).not.toHaveBeenCalled();
+    });
+
+    it('happy path returns { spreadsheetId, rowsWritten } on success', async () => {
+      const response = await server.inject({
+        method: 'POST',
+        url: '/api/delivery/build-subdiario',
+        headers: { authorization: 'Bearer test-secret-123' },
+        payload: { folderId: 'legit-folder-id' },
+      });
+
+      expect(response.statusCode).toBe(200);
+      const body = JSON.parse(response.payload);
+      expect(body.spreadsheetId).toBe('subdiario-sheet-id');
+      expect(body.rowsWritten).toBe(42);
+    });
+
+    it('calls gatherSubdiarioInput with folder structure params and buildSubdiarioDeliverableFile with folderId', async () => {
+      await server.inject({
+        method: 'POST',
+        url: '/api/delivery/build-subdiario',
+        headers: { authorization: 'Bearer test-secret-123' },
+        payload: { folderId: 'legit-folder-id' },
+      });
+
+      expect(mockGatherSubdiarioInput).toHaveBeenCalledWith(
+        'mock-root-folder-id',
+        'control-ingresos-id',
+        expect.any(Number),
+        expect.any(Map)
+      );
+      expect(mockBuildSubdiarioDeliverableFile).toHaveBeenCalledWith(
+        'legit-folder-id',
+        expect.any(Number),
+        MOCK_SUBDIARIO_INPUT
+      );
+    });
+
+    it('idempotent re-run calls writer again (replacement is writer\'s job)', async () => {
+      // First run
+      await server.inject({
+        method: 'POST',
+        url: '/api/delivery/build-subdiario',
+        headers: { authorization: 'Bearer test-secret-123' },
+        payload: { folderId: 'legit-folder-id' },
+      });
+
+      // Second run (same folderId)
+      await server.inject({
+        method: 'POST',
+        url: '/api/delivery/build-subdiario',
+        headers: { authorization: 'Bearer test-secret-123' },
+        payload: { folderId: 'legit-folder-id' },
+      });
+
+      // Writer must have been called on both runs
+      expect(mockBuildSubdiarioDeliverableFile).toHaveBeenCalledTimes(2);
+    });
+
+    it('returns 500 when gatherSubdiarioInput fails', async () => {
+      mockGatherSubdiarioInput.mockResolvedValue({
+        ok: false,
+        error: new Error('Sheets API error during gather'),
+      });
+
+      const response = await server.inject({
+        method: 'POST',
+        url: '/api/delivery/build-subdiario',
+        headers: { authorization: 'Bearer test-secret-123' },
+        payload: { folderId: 'legit-folder-id' },
+      });
+
+      expect(response.statusCode).toBe(500);
+      const body = JSON.parse(response.payload);
+      expect(body.error).toBe('Internal server error');
+      expect(typeof body.correlationId).toBe('string');
+    });
+
+    it('returns 500 when buildSubdiarioDeliverableFile fails', async () => {
+      mockBuildSubdiarioDeliverableFile.mockResolvedValue({
+        ok: false,
+        error: new Error('Failed to write Subdiario sheet'),
+      });
+
+      const response = await server.inject({
+        method: 'POST',
+        url: '/api/delivery/build-subdiario',
+        headers: { authorization: 'Bearer test-secret-123' },
+        payload: { folderId: 'legit-folder-id' },
+      });
+
+      expect(response.statusCode).toBe(500);
+      const body = JSON.parse(response.payload);
+      expect(body.error).toBe('Internal server error');
+      expect(body.error).not.toContain('Subdiario');
+      expect(vi.mocked(logger.error)).toHaveBeenCalledWith(
+        'Internal server error',
+        expect.objectContaining({ error: 'Failed to write Subdiario sheet' })
+      );
+    });
+
+    it('returns 500 when Entregas/ folder cannot be located (null value)', async () => {
+      mockFindByName.mockResolvedValue({ ok: true, value: null });
+
+      const response = await server.inject({
+        method: 'POST',
+        url: '/api/delivery/build-subdiario',
+        headers: { authorization: 'Bearer test-secret-123' },
+        payload: { folderId: 'folder-abc' },
+      });
+
+      expect(response.statusCode).toBe(500);
+      expect(mockGatherSubdiarioInput).not.toHaveBeenCalled();
     });
   });
 });
