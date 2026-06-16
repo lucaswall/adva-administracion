@@ -2273,6 +2273,101 @@ export async function renameSheet(
 }
 
 /**
+ * Specification for styling a row range in a sheet.
+ * All style fields are optional — only provided fields are set.
+ */
+export interface RowStyleSpec {
+  /** 0-based starting row index (inclusive) */
+  startRowIndex: number;
+  /** 0-based ending row index (exclusive) */
+  endRowIndex: number;
+  /** Background color as RGB (0–1 each channel) */
+  backgroundColor?: { red: number; green: number; blue: number };
+  /** Text foreground color as RGB (0–1 each channel) */
+  foregroundColor?: { red: number; green: number; blue: number };
+  /** Whether to make text bold */
+  bold?: boolean;
+}
+
+/**
+ * Applies per-row background/foreground/bold styles to a sheet.
+ *
+ * Builds one `repeatCell` request per style spec and sends them as a single
+ * `batchUpdate`. Skips specs where no style fields are provided.
+ *
+ * Wraps in `withQuotaRetry` to handle transient quota errors consistently with
+ * other sheets helpers.
+ *
+ * @param spreadsheetId - Spreadsheet ID
+ * @param sheetId       - Numeric sheet ID (from getSheetMetadata)
+ * @param styles        - Array of row style specs
+ * @returns Success or error
+ */
+export async function applyRowStyles(
+  spreadsheetId: string,
+  sheetId: number,
+  styles: RowStyleSpec[]
+): Promise<Result<void, Error>> {
+  // Filter out specs with no style fields
+  const activeStyles = styles.filter(
+    s => s.backgroundColor !== undefined || s.foregroundColor !== undefined || s.bold !== undefined
+  );
+  if (activeStyles.length === 0) {
+    return { ok: true, value: undefined };
+  }
+
+  return withQuotaRetry(async () => {
+    const sheets = await getSheetsService();
+
+    const requests: sheets_v4.Schema$Request[] = activeStyles.map(spec => {
+      const userEnteredFormat: sheets_v4.Schema$CellFormat = {};
+      const fields: string[] = [];
+
+      if (spec.backgroundColor !== undefined) {
+        userEnteredFormat.backgroundColor = spec.backgroundColor;
+        fields.push('userEnteredFormat.backgroundColor');
+      }
+
+      const textFormat: sheets_v4.Schema$TextFormat = {};
+      if (spec.foregroundColor !== undefined) {
+        textFormat.foregroundColor = spec.foregroundColor;
+        fields.push('userEnteredFormat.textFormat.foregroundColor');
+      }
+      if (spec.bold !== undefined) {
+        textFormat.bold = spec.bold;
+        fields.push('userEnteredFormat.textFormat.bold');
+      }
+      if (Object.keys(textFormat).length > 0) {
+        userEnteredFormat.textFormat = textFormat;
+      }
+
+      return {
+        repeatCell: {
+          range: {
+            sheetId,
+            startRowIndex: spec.startRowIndex,
+            endRowIndex: spec.endRowIndex,
+            startColumnIndex: 0,
+          },
+          cell: {
+            userEnteredFormat,
+          },
+          fields: fields.join(','),
+        },
+      };
+    });
+
+    await sheets.spreadsheets.batchUpdate({
+      spreadsheetId,
+      requestBody: { requests },
+    });
+  }).then(result => {
+    if (!result.ok) return { ok: false, error: result.error };
+    return { ok: true, value: undefined };
+  });
+}
+
+/**
  * Clears the cached Sheets service (for testing)
  */
 export function clearSheetsCache(): void {
