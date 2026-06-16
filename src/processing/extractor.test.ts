@@ -3,7 +3,36 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { hasValidDate } from './extractor.js';
+import { hasValidDate, processFile } from './extractor.js';
+import type { Factura } from '../types/index.js';
+import { getGeminiClient } from '../gemini/client.js';
+import { downloadFile } from '../services/drive.js';
+import { getCachedFolderStructure } from '../services/folder-structure.js';
+
+// ---------------------------------------------------------------------------
+// Module mocks (hoisted by Vitest).
+// Only mock modules that are safe to replace globally (i.e. the existing
+// Task-5 "size guard" describe block uses vi.doMock to override these same
+// modules in its own dynamic imports, so the static mocks below are
+// effectively overridden there and cause no conflicts).
+// ---------------------------------------------------------------------------
+
+vi.mock('../gemini/client.js', () => ({
+  getGeminiClient: vi.fn(),
+}));
+
+vi.mock('../services/drive.js', () => ({
+  downloadFile: vi.fn(),
+}));
+
+vi.mock('../services/folder-structure.js', () => ({
+  getCachedFolderStructure: vi.fn(() => null),
+}));
+
+vi.mock('../services/token-usage-logger.js', () => ({
+  generateRequestId: vi.fn(() => 'req-id'),
+  logTokenUsage: vi.fn(async () => ({ ok: true, value: undefined })),
+}));
 
 describe('hasValidDate', () => {
   describe('factura types', () => {
@@ -96,6 +125,137 @@ describe('hasValidDate', () => {
       expect(hasValidDate({ fechaEmision: '2025-11-01' }, 'unknown' as never)).toBe(false);
       expect(hasValidDate({ fechaEmision: '2025-11-01' }, 'unrecognized' as never)).toBe(false);
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// processFile — condicionIVAReceptor propagation (ADV-379)
+//
+// These tests use the REAL gemini/parser.ts (no parser mock) to avoid
+// conflicts with the Task-5 "size guard" describe block below that also
+// uses vi.resetModules(). analyzeDocument is mocked to return realistic
+// JSON that the real parser can process.
+// ---------------------------------------------------------------------------
+
+describe('processFile - condicionIVAReceptor propagation (ADV-379)', () => {
+  const ADVA_CUIT = '30709076783';
+  const mockBuffer = Buffer.alloc(100);
+
+  /** Classification response JSON string for factura_emitida */
+  const CLASSIFY_EMITIDA_JSON = JSON.stringify({
+    documentType: 'factura_emitida',
+    confidence: 0.99,
+    reason: 'ADVA is issuer',
+  });
+
+  /** Classification response JSON string for factura_recibida */
+  const CLASSIFY_RECIBIDA_JSON = JSON.stringify({
+    documentType: 'factura_recibida',
+    confidence: 0.99,
+    reason: 'ADVA is receptor',
+  });
+
+  /**
+   * Builds a base factura extraction JSON string.
+   * ADVA is issuer; receptor is TEST SA (20123456786).
+   */
+  function makeExtractJson(overrides: Record<string, unknown> = {}): string {
+    return JSON.stringify({
+      issuerName: 'ADVA',
+      clientName: 'TEST SA',
+      allCuits: [ADVA_CUIT, '20123456786'],
+      tipoComprobante: 'A',
+      nroFactura: '00001-00000001',
+      fechaEmision: '2025-01-15',
+      importeNeto: 1000,
+      importeIva: 210,
+      importeTotal: 1210,
+      moneda: 'ARS',
+      ...overrides,
+    });
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(downloadFile).mockResolvedValue({ ok: true, value: mockBuffer });
+    vi.mocked(getCachedFolderStructure).mockReturnValue(null as ReturnType<typeof getCachedFolderStructure>);
+  });
+
+  it('copies condicionIVAReceptor from parsed data for factura_emitida (Responsable Monotributo)', async () => {
+    const mockAnalyzeDocument = vi.fn()
+      .mockResolvedValueOnce({ ok: true, value: CLASSIFY_EMITIDA_JSON })
+      .mockResolvedValueOnce({
+        ok: true,
+        value: makeExtractJson({ condicionIVAReceptor: 'Responsable Monotributo' }),
+      });
+    vi.mocked(getGeminiClient).mockReturnValue({
+      analyzeDocument: mockAnalyzeDocument,
+    } as unknown as ReturnType<typeof getGeminiClient>);
+
+    const result = await processFile({ id: 'file-001', name: 'test.pdf', mimeType: 'application/pdf', lastUpdated: new Date() });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error('expected ok');
+    const factura = result.value.document as Factura;
+    expect(factura.condicionIVAReceptor).toBe('Responsable Monotributo');
+  });
+
+  it('copies condicionIVAReceptor=Exterior for Factura E (parser hard-codes it)', async () => {
+    // Parser hard-codes 'Exterior' when tipoComprobante is 'E' (ADV-277),
+    // regardless of what the Gemini JSON says. We verify the extractor copies it.
+    const mockAnalyzeDocument = vi.fn()
+      .mockResolvedValueOnce({ ok: true, value: CLASSIFY_EMITIDA_JSON })
+      .mockResolvedValueOnce({
+        ok: true,
+        value: makeExtractJson({
+          tipoComprobante: 'E',
+          importeIva: 0,
+          moneda: 'USD',
+          // condicionIVAReceptor omitted — parser will set 'Exterior'
+        }),
+      });
+    vi.mocked(getGeminiClient).mockReturnValue({
+      analyzeDocument: mockAnalyzeDocument,
+    } as unknown as ReturnType<typeof getGeminiClient>);
+
+    const result = await processFile({ id: 'file-002', name: 'export.pdf', mimeType: 'application/pdf', lastUpdated: new Date() });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error('expected ok');
+    const factura = result.value.document as Factura;
+    expect(factura.condicionIVAReceptor).toBe('Exterior');
+  });
+
+  it('leaves condicionIVAReceptor undefined for factura_recibida', async () => {
+    const mockAnalyzeDocument = vi.fn()
+      .mockResolvedValueOnce({ ok: true, value: CLASSIFY_RECIBIDA_JSON })
+      .mockResolvedValueOnce({
+        ok: true,
+        value: JSON.stringify({
+          // ADVA is clientName → parser assigns it as receptor → factura_recibida
+          issuerName: 'EMPRESA PROVEEDORA SA',
+          clientName: 'ADVA',
+          allCuits: ['20123456786', ADVA_CUIT],
+          tipoComprobante: 'A',
+          nroFactura: '00002-00000001',
+          fechaEmision: '2025-01-15',
+          importeNeto: 800,
+          importeIva: 168,
+          importeTotal: 968,
+          moneda: 'ARS',
+          // condicionIVAReceptor intentionally absent — parser only sets it for factura_emitida
+        }),
+      });
+    vi.mocked(getGeminiClient).mockReturnValue({
+      analyzeDocument: mockAnalyzeDocument,
+    } as unknown as ReturnType<typeof getGeminiClient>);
+
+    const result = await processFile({ id: 'file-003', name: 'recibida.pdf', mimeType: 'application/pdf', lastUpdated: new Date() });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error('expected ok');
+    const factura = result.value.document as Factura;
+    expect(factura.condicionIVAReceptor).toBeUndefined();
   });
 });
 
