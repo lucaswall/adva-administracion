@@ -376,6 +376,7 @@ export async function processFile(
       moneda: parseResult.value.data.moneda || 'ARS',
       concepto: parseResult.value.data.concepto,
       tipoDeCambio: parseResult.value.data.tipoDeCambio,
+      condicionIVAReceptor: parseResult.value.data.condicionIVAReceptor,
       processedAt: now,
       confidence: parseResult.value.confidence,
       needsReview: parseResult.value.needsReview,
