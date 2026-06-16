@@ -11,7 +11,6 @@ import { webhookRoutes } from './routes/webhooks.js';
 import { deliveryRoutes } from './routes/delivery.js';
 import { subdiarioRoutes } from './routes/subdiario.js';
 import { mpSyncRoutes } from './routes/mp-sync.js';
-import { backfillRoutes } from './routes/backfill.js';
 import { discoverFolderStructure, getCachedFolderStructure } from './services/folder-structure.js';
 import { runStartupMigrations } from './services/migrations.js';
 import { initWatchManager, startWatching, shutdownWatchManager, updateLastScanTime } from './services/watch-manager.js';
@@ -52,7 +51,6 @@ export async function buildServer() {
   await server.register(deliveryRoutes, { prefix: '/api' });
   await server.register(subdiarioRoutes, { prefix: '/api' });
   await server.register(mpSyncRoutes, { prefix: '/api' });
-  await server.register(backfillRoutes, { prefix: '/api' });
   await server.register(webhookRoutes, { prefix: '/webhooks' });
 
   return server;

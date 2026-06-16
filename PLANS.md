@@ -192,3 +192,30 @@
 
 ### Continuation Status
 All tasks completed.
+
+---
+
+## Plan Adjustment (2026-06-16)
+
+**ADV-380 — backfill is a one-time data-op, not shipped code.** The Iteration 1
+implementation over-built the backfill as a permanent endpoint + service + test
+suite. Per user direction, that code was removed (no value in keeping run-once
+logic in the codebase forever):
+- Deleted `src/routes/backfill.ts`, `src/services/condicion-backfill.ts`,
+  `src/services/condicion-backfill.test.ts`, and the `backfillRoutes`
+  import/registration in `src/server.ts`.
+- The ADV-379 extractor fix **stays** — that is the durable fix that prevents the
+  bug going forward (the deploy is only for new facturas; no deploy is needed for
+  the data correction itself).
+- The actual production correction of the blank `condicionIVAReceptor` (col H) in
+  Control de Ingresos → Facturas Emitidas is performed **once** as a manual data
+  operation via the `data-ops` skill (the only context where the gated
+  `gsheets_update` write tool is pre-approved). Sourcing: socios → Facturador
+  `Cond IVA`; non-socios → re-extract from the PDF.
+
+Post-removal verification: 3012 tests pass, zero lint warnings, clean build.
+
+**ADV-383 — Subdiario endpoint kept as-is.** Confirmed: the Entrega flow is a
+chain of server endpoints invoked by the Apps Script menu (`plan` → `copy-pdfs`
+→ `build-movimientos` → `build-subdiario`). `build-subdiario` is the integrated
+4th step (wired in ADV-384), not a separate user operation. No change.
