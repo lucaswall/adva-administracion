@@ -177,62 +177,6 @@ describe('extractDocument size guard (Task 5 — ADV-193)', () => {
     resetConfig();
   });
 
-  it('skips the invisible-text sanitizer for oversized documents (Codex P2)', async () => {
-    // Size check must run BEFORE detectInvisibleText so an oversized PDF never
-    // gets converted into a very large latin1 string by the sanitizer.
-    process.env.MAX_DOCUMENT_BYTES = '1024';
-    process.env.API_SECRET = 'test-secret';
-    process.env.GEMINI_API_KEY = 'test-key';
-    process.env.GOOGLE_SERVICE_ACCOUNT_KEY = '{}';
-    process.env.DRIVE_ROOT_FOLDER_ID = 'test-root';
-    process.env.NODE_ENV = 'test';
-
-    const { resetConfig } = await import('../config.js');
-    resetConfig();
-
-    vi.doMock('../services/drive.js', () => ({
-      downloadFile: vi.fn().mockResolvedValue({
-        ok: true,
-        value: Buffer.alloc(2048, 'x'), // 2 KB > 1 KB limit
-      }),
-    }));
-    vi.doMock('../services/folder-structure.js', () => ({
-      getCachedFolderStructure: vi.fn().mockReturnValue(null),
-    }));
-    vi.doMock('../utils/correlation.js', () => ({
-      getCorrelationId: vi.fn().mockReturnValue('test-corr-id'),
-      updateCorrelationContext: vi.fn(),
-    }));
-    vi.doMock('../gemini/client.js', () => ({
-      getGeminiClient: vi.fn().mockReturnValue({ analyzeDocument: vi.fn() }),
-      resetGeminiClient: vi.fn(),
-    }));
-
-    const detectMock = vi.fn().mockReturnValue({ hasInvisible: false });
-    vi.doMock('./pdf-sanitize.js', () => ({
-      detectInvisibleText: detectMock,
-    }));
-
-    const { processFile } = await import('./extractor.js');
-
-    const result = await processFile({
-      id: 'oversized',
-      name: 'oversized.pdf',
-      mimeType: 'application/pdf',
-      lastUpdated: new Date('2025-01-15T12:00:00Z'),
-    });
-
-    expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.error.message).toMatch(/size|MAX_DOCUMENT_BYTES/i);
-    }
-    // Sanitizer must NEVER run on an oversized buffer
-    expect(detectMock).not.toHaveBeenCalled();
-
-    delete process.env.MAX_DOCUMENT_BYTES;
-    resetConfig();
-  });
-
   it('proceeds to Gemini when document is exactly at MAX_DOCUMENT_BYTES limit', async () => {
     process.env.MAX_DOCUMENT_BYTES = '1024'; // 1 KB limit
     process.env.API_SECRET = 'test-secret';
@@ -320,7 +264,7 @@ async function buildProcessFile(
   const { resetConfig } = await import('../config.js');
   resetConfig();
 
-  // Minimal PDF header so pdf-sanitize doesn't block the file
+  // Minimal valid PDF buffer for the download mock
   const defaultBuffer = overrides.downloadBuffer ?? Buffer.from(
     '%PDF-1.4\n1 0 obj<</Type/Catalog>>endobj\n%%EOF\n',
     'latin1'
@@ -332,10 +276,6 @@ async function buildProcessFile(
         ? { ok: false, error: new Error('Drive error') }
         : { ok: true, value: defaultBuffer }
     )
-  }));
-
-  vi.doMock('./pdf-sanitize.js', () => ({
-    detectInvisibleText: vi.fn().mockReturnValue({ hasInvisible: false })
   }));
 
   vi.doMock('../services/folder-structure.js', () => ({
@@ -723,9 +663,6 @@ describe('processFile orchestration (Task 12 — ADV-204)', () => {
         value: Buffer.from('%PDF-1.4\n1 0 obj<</Type/Catalog>>endobj\n%%EOF\n', 'latin1')
       })
     }));
-    vi.doMock('./pdf-sanitize.js', () => ({
-      detectInvisibleText: vi.fn().mockReturnValue({ hasInvisible: false })
-    }));
     vi.doMock('../services/folder-structure.js', () => ({
       getCachedFolderStructure: vi.fn().mockReturnValue(null)
     }));
@@ -783,9 +720,6 @@ describe('processFile orchestration (Task 12 — ADV-204)', () => {
 
     vi.doMock('../services/drive.js', () => ({
       downloadFile: vi.fn().mockResolvedValue({ ok: false, error: new Error('Drive API error') })
-    }));
-    vi.doMock('./pdf-sanitize.js', () => ({
-      detectInvisibleText: vi.fn().mockReturnValue({ hasInvisible: false })
     }));
     vi.doMock('../services/folder-structure.js', () => ({
       getCachedFolderStructure: vi.fn().mockReturnValue(null)
@@ -909,10 +843,6 @@ describe('ADV-298: extractor passes context.dashboardId to tokenBatch.add', () =
       getCachedFolderStructure: vi.fn().mockReturnValue({
         dashboardOperativoId: 'dashboard-from-cache',
       }),
-    }));
-
-    vi.doMock('./pdf-sanitize.js', () => ({
-      detectInvisibleText: vi.fn().mockReturnValue({ hasInvisible: false }),
     }));
 
     vi.doMock('../utils/correlation.js', () => ({

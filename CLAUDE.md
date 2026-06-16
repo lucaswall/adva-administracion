@@ -464,6 +464,7 @@ Reviewers (bug-hunter, code-audit, deep-review, plan-review, Codex-finding triag
 3. **Gemini prompt/response previews logged at DEBUG** (`src/gemini/client.ts`) — wanted for diagnosis.
 4. **Gemini prompts contain ADVA business identifiers** (CUIT, role rules, document-type enums) — not secrets; not "system prompt leakage".
 5. **Logs may contain CUITs, monetary values, file IDs, document metadata** — internal operator-only Railway logs; not PII exposure.
+6. **No PDF invisible-text sanitization** — a heuristic scanner (white-on-white, font-size-0, off-page/CTM, render-mode-3) was trialed (ADV-192/ADV-284) and removed; it false-flagged legitimate compressed PDFs (Mercado Pago receipts, BBVA statements) and routed them to *Sin Procesar*. Indirect prompt injection is mitigated instead by structural data/instruction delimiting and the output classifier. Do not flag the absence or propose re-adding it.
 
 ## COMMANDS
 

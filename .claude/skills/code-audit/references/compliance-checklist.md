@@ -20,6 +20,7 @@ These patterns are accepted by design in this project. Reviewers MUST NOT raise 
 3. **Gemini prompt/response previews logged at DEBUG** (`src/gemini/client.ts` `promptPreview`, `responsePreview`). Same principle — full information for diagnosis is wanted. Do not propose removal, gating, or redaction.
 4. **Gemini prompts contain ADVA business identifiers** (CUIT, role rules, document-type enums) — these are not secrets. Do not flag as "system prompt leakage" if they appear in logs.
 5. **Logger output may contain CUITs, monetary values, file IDs, and document metadata.** This is internal Railway log content for operators only. Do not flag as PII exposure.
+6. **No PDF invisible-text sanitization.** A heuristic scanner (white-on-white, font-size-0, off-page/CTM-transformed text, render-mode-3) was trialed (ADV-192 / ADV-284) and **removed**: it false-flagged legitimate compressed PDFs — Mercado Pago receipts (CTM-transformed text) and BBVA statements (white-on-color headers) — routing real documents to *Sin Procesar*. Indirect prompt injection is mitigated instead by structural data/instruction delimiting and the output classifier. Do not flag the absence of invisible-text stripping or propose re-adding it.
 
 When the security or quality reviewer encounters one of these patterns, treat the call site as VERIFIED CORRECT and skip it. The reviewer may note it briefly under "VERIFIED CORRECT" if helpful, but no Linear issue should result.
 
@@ -114,7 +115,7 @@ This project sends documents (PDFs, including externally produced invoices) to G
 
 Concrete checks:
 - **Structural delimiters.** The Gemini prompt must place document content inside an unambiguously delimited region (e.g. fenced markdown, XML tags) so injected instructions are visibly inside the data, not the instruction layer.
-- **Invisible-text stripping.** PDFs can carry text that's invisible to a human reviewer (white-on-white, font size 0, off-page). Pre-prompt sanitization should normalize or flag such content. (Snyk has documented an "Invisible PDF Text" exploit against credit-score analysis pipelines — the same vector applies to invoice extraction.)
+- **Invisible-text stripping — intentionally not implemented (see Project-Specific Exemptions #6).** A heuristic scanner for invisible text (white-on-white, font size 0, off-page) was trialed and removed after it false-flagged legitimate compressed PDFs (Mercado Pago receipts, BBVA statements) and routed them to *Sin Procesar*. Do not flag its absence; indirect prompt injection is mitigated via the structural delimiters above and the output classifier below.
 - **Untrusted content reaching system role.** Search for any code path where document content, file name, or webhook payload is concatenated into the prompt's *instruction* section instead of the *data* section.
 - **Output classifier / validation.** Document type, ADVA role, CUITs, amounts must pass strict format/range validation regardless of what Gemini returns. Never trust the classification verbatim.
 - **Ambiguity → review.** When the extraction is ambiguous (e.g. empty CUIT in `factura_emitida`), the existing review-flag pattern is correct — verify it's applied consistently.

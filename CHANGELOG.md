@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+- PDF invisible-text scanner (prompt-injection heuristic). It false-flagged legitimate compressed PDFs — Mercado Pago payment receipts and BBVA bank/card statements — as "invisible text" and routed them to *Sin Procesar*. Indirect prompt injection remains mitigated by structural data/instruction delimiting and the output classifier.
+
 ## [1.14.0] - 2026-06-12
 
 ### Added

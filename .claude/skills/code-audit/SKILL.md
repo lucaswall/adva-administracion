@@ -157,7 +157,6 @@ WEB / SERVER POSTURE:
 LLM / AI POSTURE (Gemini integration is the primary AI surface):
 - LLM01 Prompt Injection (DIRECT and INDIRECT):
     * Search for any path where document text, file name, or webhook payload is concatenated into the system/instruction section of a Gemini prompt instead of a clearly delimited data section
-    * Verify invisible-text stripping pre-prompt (white-on-white text, font-size 0, off-page text in PDFs — Snyk has documented this exploit class on invoice pipelines)
     * Verify output classifier — document type, ADVA role, CUITs, amounts validated regardless of LLM output
 - LLM02 / LLM07 System Prompt / Sensitive Info Leakage:
     * Prompt templates from src/gemini/prompts.ts not echoed in error messages, log lines, or HTTP responses
