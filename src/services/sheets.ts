@@ -2360,7 +2360,7 @@ export async function applyRowStyles(
     await sheets.spreadsheets.batchUpdate({
       spreadsheetId,
       requestBody: { requests },
-    });
+    }, { timeout: GOOGLE_API_TIMEOUT_MS });
   }).then(result => {
     if (!result.ok) return { ok: false, error: result.error };
     return { ok: true, value: undefined };

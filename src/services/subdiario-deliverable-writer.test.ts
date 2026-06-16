@@ -197,6 +197,35 @@ describe('writeSubdiarioDeliverable', () => {
     expect(result.ok).toBe(true);
   });
 
+  it('when existing spreadsheet found but has no matching sheet: creates the target sheet directly (no temp/delete)', async () => {
+    const EXISTING_SS_ID = 'existing-ss-id';
+
+    vi.mocked(drive.findByName).mockResolvedValue({
+      ok: true,
+      value: { id: EXISTING_SS_ID, name: SPREADSHEET_NAME, mimeType: 'application/vnd.google-apps.spreadsheet' },
+    });
+    // The workbook exists but does NOT contain a sheet named SHEET_NAME — other
+    // sheets keep it non-empty, so the writer creates the target sheet directly.
+    vi.mocked(sheets.getSheetMetadata).mockResolvedValue({
+      ok: true,
+      value: [{ title: 'OtherSheet', sheetId: 88, index: 0 }],
+    });
+    vi.mocked(sheets.createSheet).mockResolvedValue({ ok: true, value: 99 });
+
+    const result = await writeSubdiarioDeliverable(FOLDER_ID, YEAR, []);
+
+    expect(drive.createSpreadsheet).not.toHaveBeenCalled();
+    // Direct create under the target name — no temp name, no delete, no rename.
+    expect(sheets.createSheet).toHaveBeenCalledWith(EXISTING_SS_ID, SHEET_NAME);
+    expect(sheets.deleteSheet).not.toHaveBeenCalled();
+    expect(sheets.renameSheet).not.toHaveBeenCalled();
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.spreadsheetId).toBe(EXISTING_SS_ID);
+      expect(result.value.sheetId).toBe(99);
+    }
+  });
+
   it('writes the 13-column header row as the first row', async () => {
     await writeSubdiarioDeliverable(FOLDER_ID, YEAR, []);
 

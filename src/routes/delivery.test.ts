@@ -1160,6 +1160,8 @@ describe('Delivery routes', () => {
       const body = JSON.parse(response.payload);
       expect(body.error).toBe('Internal server error');
       expect(typeof body.correlationId).toBe('string');
+      // The build must be skipped when gathering fails
+      expect(mockBuildSubdiarioDeliverableFile).not.toHaveBeenCalled();
     });
 
     it('returns 500 when buildSubdiarioDeliverableFile fails', async () => {

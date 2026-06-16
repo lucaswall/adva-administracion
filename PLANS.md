@@ -1,6 +1,6 @@
 # Implementation Plan
 
-**Status:** IN_PROGRESS
+**Status:** COMPLETE
 **Created:** 2026-06-16
 **Source:** Inline request: Generate the full, up-to-date Subdiario de Ventas as part of the Entrega, matching the accountants' template (`Subdiario de Ventas 2026`, id `12QCAReVk4vjOsZ1pWX6-h3x-wEsqbcYrTZ4qlz-w_No`) in data **and** design/format.
 **Linear Issues:** [ADV-379](https://linear.app/lw-claude/issue/ADV-379), [ADV-380](https://linear.app/lw-claude/issue/ADV-380), [ADV-381](https://linear.app/lw-claude/issue/ADV-381), [ADV-382](https://linear.app/lw-claude/issue/ADV-382), [ADV-383](https://linear.app/lw-claude/issue/ADV-383), [ADV-384](https://linear.app/lw-claude/issue/ADV-384)
@@ -219,3 +219,42 @@ Post-removal verification: 3012 tests pass, zero lint warnings, clean build.
 chain of server endpoints invoked by the Apps Script menu (`plan` → `copy-pdfs`
 → `build-movimientos` → `build-subdiario`). `build-subdiario` is the integrated
 4th step (wired in ADV-384), not a separate user operation. No change.
+
+---
+
+## Iteration 1 — Review Findings
+
+**Reviewed:** 2026-06-16 (3 parallel domain reviewers — security, reliability, quality; team mode unavailable, run as standalone subagents)
+**Scope:** 14 changed code files vs `main`.
+
+### Issues found and FIXED INLINE (3, all S-size — TDD + bug-hunter clean)
+1. **[medium] [timeout]** `src/services/sheets.ts` — `applyRowStyles` `batchUpdate` lacked `{ timeout: GOOGLE_API_TIMEOUT_MS }`; on the `build-subdiario` path it runs holding `DELIVERY_LOCK` + an open HTTP connection, so a stalled call could hang without `withQuotaRetry` retrying. Added the timeout (matches the hot append paths). → **ADV-385**
+2. **[low] [test]** `src/routes/delivery.test.ts` — the "gatherSubdiarioInput fails → 500" test did not assert the build was skipped. Added `expect(mockBuildSubdiarioDeliverableFile).not.toHaveBeenCalled()`. → **ADV-386**
+3. **[low] [test]** `src/services/subdiario-deliverable-writer.test.ts` — the "existing workbook, no matching sheet" idempotency `else` branch had zero coverage. Added a test for the direct-create path. → **ADV-387**
+
+### DISCARDED (not bugs — with reasoning)
+- **[medium] [type]** flat `DeliverableRenderRow` with optional fields + `renderRow.row!` (writer:104) — the sole producer `buildBlock` always sets `row` on `data` rows, so the assertion cannot throw. A discriminated-union refactor would be a type-design improvement, not a bug fix.
+- **[low] [edge-case]** `subdiario-deliverable.ts` future-year (`year > currentYear`) routed into current-year monthly blocks — impossible in context: `currentYear = businessYear()` (current Argentina year) and emitted facturas cannot be future-dated, so no row's year can exceed it.
+- **[low] [security]** `facturaFileId` not char-whitelisted in the `CellLink` URL — not exploitable: `facturaFileId` is a system-generated Drive ID read from an internal spreadsheet (not user input), and `CellLink.url` is a structured hyperlink (not a formula), so there is no injection vector. The suggested `createDriveHyperlink` helper returns a `=HYPERLINK()` formula string, type-incompatible with the structured `CellLink` path.
+- **[low] [convention]** `let rows;` (delivery-package.ts:1009) — TypeScript narrows it correctly via control-flow (catch always returns); not enforced by CLAUDE.md. Style-only.
+- **[low] [convention]** inline return-type object on `deriveFlags` (subdiario-deliverable.ts:78) — an inline function return annotation is idiomatic; the "interface over type" rule targets shape aliases. Style-only, zero correctness impact.
+- **[low] [test]** untested `formatSheet`/`applyRowStyles` error returns — one-line guarded passthroughs (`if (!result.ok) return result`), correct by inspection; near-zero test value.
+- **[low] [docs]** `WriteDeliverableResult.rowsWritten` JSDoc wording / off-by-one vs actual sheet rows — the value is informational only (logged + returned, never used for logic); a comment-clarity nit, no behavioral impact.
+
+### Linear Updates
+- ADV-379, ADV-381, ADV-382, ADV-383, ADV-384: Review → Merge
+- ADV-380: Review → **Todo** (backfill descoped to a one-time `/data-ops` correction; no shipped code closes it — see comment on the issue and the Plan Adjustment above)
+- ADV-385, ADV-386, ADV-387: created in **Merge** (inline-fix audit trail, Bug label)
+
+### Inline Fix Verification
+- New/changed tests: filtered suites green (writer 26 ✓, delivery 47 ✓)
+- bug-hunter on the 3 inline changes: **no bugs found**
+- verifier (full): **3013 tests pass**, zero lint warnings, clean `tsc` build + Apps Script bundle (10.4kb)
+
+<!-- REVIEW COMPLETE -->
+
+---
+
+## Status: COMPLETE
+
+All tasks implemented and reviewed successfully. Shipped code (ADV-379, ADV-381..384) moved to Merge; 3 inline review-fixes (ADV-385..387) created in Merge. ADV-380's backfill remains as a pending one-time `/data-ops` correction (Todo) — not closed by this PR.
