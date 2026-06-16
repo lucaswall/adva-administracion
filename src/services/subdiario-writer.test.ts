@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { syncSubdiario, readSubdiarioRows } from './subdiario-writer.js';
+import { syncSubdiario, readSubdiarioRows, gatherSubdiarioInput } from './subdiario-writer.js';
 import * as drive from './drive.js';
 import * as sheets from './sheets.js';
 import type { CellValue } from './sheets.js';
@@ -2078,6 +2078,114 @@ describe('readMovimientosRows non-bank tab guard (ADV-352)', () => {
     // Only the bank sheet produces movimientos — tarjeta sheet is skipped
     expect(input!.movimientos).toHaveLength(1);
     expect(input!.movimientos[0]!.fecha).toBe('2025-03-10');
+  });
+});
+
+// ─── gatherSubdiarioInput ────────────────────────────────────────────────────
+
+describe('gatherSubdiarioInput', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    // Default: all reads succeed with header-only (empty data) sheets
+    vi.mocked(sheets.getValues).mockImplementation(async (_id: string, _range: string) => {
+      return { ok: true, value: EMPTY_SHEET_DATA };
+    });
+    vi.mocked(facturadorReader.readFacturador).mockResolvedValue({
+      ok: true,
+      value: new Map(),
+    });
+  });
+
+  it('returns SubdiarioInput with correct currentYear and empty arrays on header-only data', async () => {
+    const result = await gatherSubdiarioInput(
+      ROOT_ID,
+      CONTROL_INGRESOS_ID,
+      CURRENT_YEAR,
+      new Map()
+    );
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.currentYear).toBe(CURRENT_YEAR);
+      expect(Array.isArray(result.value.facturasEmitidas)).toBe(true);
+      expect(Array.isArray(result.value.pagosRecibidos)).toBe(true);
+      expect(Array.isArray(result.value.retencionesRecibidas)).toBe(true);
+      expect(result.value.facturador).toBeDefined();
+      expect(Array.isArray(result.value.movimientos)).toBe(true);
+    }
+  });
+
+  it('passes controlIngresosId to getValues for all three source ranges', async () => {
+    await gatherSubdiarioInput(ROOT_ID, CONTROL_INGRESOS_ID, CURRENT_YEAR, new Map());
+
+    const calls = vi.mocked(sheets.getValues).mock.calls;
+    const ranges = calls.map(c => `${c[0]}:${c[1]}`);
+    expect(ranges).toContain(`${CONTROL_INGRESOS_ID}:Facturas Emitidas!A:U`);
+    expect(ranges).toContain(`${CONTROL_INGRESOS_ID}:Pagos Recibidos!A:Q`);
+    expect(ranges).toContain(`${CONTROL_INGRESOS_ID}:Retenciones Recibidas!A:O`);
+  });
+
+  it('returns error when Facturas Emitidas read fails', async () => {
+    vi.mocked(sheets.getValues).mockImplementation(async (_id: string, range: string) => {
+      if (range === 'Facturas Emitidas!A:U') {
+        return { ok: false, error: new Error('Facturas read failed') };
+      }
+      return { ok: true, value: EMPTY_SHEET_DATA };
+    });
+
+    const result = await gatherSubdiarioInput(ROOT_ID, CONTROL_INGRESOS_ID, CURRENT_YEAR, new Map());
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.message).toContain('Facturas read failed');
+    }
+  });
+
+  it('returns error when Pagos Recibidos read fails', async () => {
+    vi.mocked(sheets.getValues).mockImplementation(async (_id: string, range: string) => {
+      if (range === 'Pagos Recibidos!A:Q') {
+        return { ok: false, error: new Error('Pagos read failed') };
+      }
+      return { ok: true, value: EMPTY_SHEET_DATA };
+    });
+
+    const result = await gatherSubdiarioInput(ROOT_ID, CONTROL_INGRESOS_ID, CURRENT_YEAR, new Map());
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.message).toContain('Pagos read failed');
+    }
+  });
+
+  it('returns error when Retenciones Recibidas read fails', async () => {
+    vi.mocked(sheets.getValues).mockImplementation(async (_id: string, range: string) => {
+      if (range === 'Retenciones Recibidas!A:O') {
+        return { ok: false, error: new Error('Retenciones read failed') };
+      }
+      return { ok: true, value: EMPTY_SHEET_DATA };
+    });
+
+    const result = await gatherSubdiarioInput(ROOT_ID, CONTROL_INGRESOS_ID, CURRENT_YEAR, new Map());
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.message).toContain('Retenciones read failed');
+    }
+  });
+
+  it('returns error when readFacturador fails', async () => {
+    vi.mocked(facturadorReader.readFacturador).mockResolvedValue({
+      ok: false,
+      error: new Error('Facturador read failed'),
+    });
+
+    const result = await gatherSubdiarioInput(ROOT_ID, CONTROL_INGRESOS_ID, CURRENT_YEAR, new Map());
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.message).toContain('Facturador read failed');
+    }
+  });
+
+  it('passes facturadorYear to readFacturador', async () => {
+    await gatherSubdiarioInput(ROOT_ID, CONTROL_INGRESOS_ID, 2026, new Map());
+    expect(facturadorReader.readFacturador).toHaveBeenCalledWith(2026);
   });
 });
 
