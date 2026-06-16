@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.14.1] - 2026-06-16
+
 ### Removed
 - PDF invisible-text scanner (prompt-injection heuristic). It false-flagged legitimate compressed PDFs — Mercado Pago payment receipts and BBVA bank/card statements — as "invisible text" and routed them to *Sin Procesar*. Indirect prompt injection remains mitigated by structural data/instruction delimiting and the output classifier.
 
@@ -257,7 +259,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Updated fastify to fix high-severity Content-Type body validation bypass and low-severity DoS vulnerability
 - Updated googleapis to v171, @google/clasp to v3, and resolved 6 npm audit vulnerabilities
 
-[Unreleased]: https://github.com/lucaswall/adva-administracion/compare/v1.14.0...HEAD
+[Unreleased]: https://github.com/lucaswall/adva-administracion/compare/v1.14.1...HEAD
+[1.14.1]: https://github.com/lucaswall/adva-administracion/compare/v1.14.0...v1.14.1
 [1.14.0]: https://github.com/lucaswall/adva-administracion/compare/v1.13.0...v1.14.0
 [1.13.0]: https://github.com/lucaswall/adva-administracion/compare/v1.12.0...v1.13.0
 [1.12.0]: https://github.com/lucaswall/adva-administracion/compare/v1.11.0...v1.12.0
