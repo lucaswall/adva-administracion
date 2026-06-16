@@ -1640,7 +1640,7 @@ describe('buildSubdiarioDeliverableFile', () => {
     mockBuildSubdiarioDeliverable.mockReturnValue(MOCK_RENDER_ROWS);
     mockWriteSubdiarioDeliverable.mockResolvedValue({
       ok: true,
-      value: { spreadsheetId: 'new-sheet-id', sheetId: 0, rowsWritten: 1 },
+      value: { spreadsheetId: 'new-sheet-id', sheetId: 0, rowsWritten: 1, dataRowsWritten: 1 },
     });
   });
 

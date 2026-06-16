@@ -434,12 +434,16 @@ async function readMovimientosRows(
  * @param controlIngresosId  - Control de Ingresos spreadsheet ID
  * @param facturadorYear     - Year used to read Facturador de Socios data
  * @param movimientosSpreadsheets - Map of (year:bankFolder) → movimientos spreadsheet IDs
+ * @param correlationId      - Optional request correlation id, threaded into the
+ *   per-read error logs. This function is the single owner of read-failure
+ *   logging (callers must NOT re-log the returned error, to avoid duplicates).
  */
 export async function gatherSubdiarioInput(
   _rootId: string,
   controlIngresosId: string,
   facturadorYear: number,
-  movimientosSpreadsheets: Map<string, string>
+  movimientosSpreadsheets: Map<string, string>,
+  correlationId?: string
 ): Promise<Result<SubdiarioInput, Error>> {
   // Read source data in parallel (matches syncSubdiario step 3)
   const [facturasResult, pagosResult, retencionesResult] = await Promise.all([
@@ -453,6 +457,7 @@ export async function gatherSubdiarioInput(
       module: 'subdiario-writer',
       phase: 'gather-input',
       error: facturasResult.error.message,
+      correlationId,
     });
     return facturasResult;
   }
@@ -461,6 +466,7 @@ export async function gatherSubdiarioInput(
       module: 'subdiario-writer',
       phase: 'gather-input',
       error: pagosResult.error.message,
+      correlationId,
     });
     return pagosResult;
   }
@@ -469,6 +475,7 @@ export async function gatherSubdiarioInput(
       module: 'subdiario-writer',
       phase: 'gather-input',
       error: retencionesResult.error.message,
+      correlationId,
     });
     return retencionesResult;
   }
@@ -479,6 +486,7 @@ export async function gatherSubdiarioInput(
       module: 'subdiario-writer',
       phase: 'gather-input',
       error: facturadorResult.error.message,
+      correlationId,
     });
     return facturadorResult;
   }
@@ -574,19 +582,17 @@ export async function syncSubdiario(
     // Step 3: Read source data (delegated to gatherSubdiarioInput)
     // Subdiario needs both FCs AND NCs for scope rule (c) and findCancellingNC lookup.
     // NDs are excluded — the builder does not model them.
+    // gatherSubdiarioInput is the single owner of read-failure logging (it logs
+    // the specific failing read with the correlationId), so do NOT re-log here —
+    // re-logging would double every read error on this path.
     const gatherResult = await gatherSubdiarioInput(
       rootFolderId,
       controlIngresosId,
       facturadorYear,
-      movimientosSpreadsheets
+      movimientosSpreadsheets,
+      correlationId
     );
     if (!gatherResult.ok) {
-      logError('Failed to gather source data for Subdiario', {
-        module: 'subdiario-writer',
-        phase: 'read-data',
-        error: gatherResult.error.message,
-        correlationId,
-      });
       return gatherResult;
     }
     const input = gatherResult.value;

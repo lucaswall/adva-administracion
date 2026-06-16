@@ -137,7 +137,7 @@ describe('writeSubdiarioDeliverable', () => {
     expect(sheets.renameSheet).toHaveBeenCalledWith(NEW_SPREADSHEET_ID, DEFAULT_SHEET_ID, SHEET_NAME);
   });
 
-  it('when existing spreadsheet found: deletes the old sheet and creates a new one', async () => {
+  it('when existing spreadsheet found: replaces the sheet via temp-create → delete → rename', async () => {
     const EXISTING_SS_ID = 'existing-ss-id';
     const EXISTING_SHEET_ID = 77;
 
@@ -157,12 +157,44 @@ describe('writeSubdiarioDeliverable', () => {
     const result = await writeSubdiarioDeliverable(FOLDER_ID, YEAR, []);
 
     expect(drive.createSpreadsheet).not.toHaveBeenCalled();
+    // Fresh sheet created FIRST under a temp name (so the workbook never hits 0 sheets)
+    expect(sheets.createSheet).toHaveBeenCalledWith(EXISTING_SS_ID, `__subdiario_tmp_${EXISTING_SHEET_ID}`);
     expect(sheets.deleteSheet).toHaveBeenCalledWith(EXISTING_SS_ID, EXISTING_SHEET_ID);
-    expect(sheets.createSheet).toHaveBeenCalledWith(EXISTING_SS_ID, SHEET_NAME);
+    expect(sheets.renameSheet).toHaveBeenCalledWith(EXISTING_SS_ID, 99, SHEET_NAME);
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.value.spreadsheetId).toBe(EXISTING_SS_ID);
+      expect(result.value.sheetId).toBe(99);
     }
+  });
+
+  it('when existing spreadsheet has the target as its ONLY sheet: still replaces without error (regression)', async () => {
+    // Production reality: a spreadsheet created by this writer has exactly one
+    // sheet. Deleting it directly would fail ("must have at least one visible
+    // sheet"); the temp-create-first flow must avoid that.
+    const EXISTING_SS_ID = 'existing-ss-id';
+    const EXISTING_SHEET_ID = 77;
+
+    vi.mocked(drive.findByName).mockResolvedValue({
+      ok: true,
+      value: { id: EXISTING_SS_ID, name: SPREADSHEET_NAME, mimeType: 'application/vnd.google-apps.spreadsheet' },
+    });
+    vi.mocked(sheets.getSheetMetadata).mockResolvedValue({
+      ok: true,
+      value: [{ title: SHEET_NAME, sheetId: EXISTING_SHEET_ID, index: 0 }],
+    });
+    vi.mocked(sheets.createSheet).mockResolvedValue({ ok: true, value: 99 });
+
+    const result = await writeSubdiarioDeliverable(FOLDER_ID, YEAR, []);
+
+    // Order matters: create the temp sheet BEFORE deleting the only existing sheet.
+    const createOrder = vi.mocked(sheets.createSheet).mock.invocationCallOrder[0];
+    const deleteOrder = vi.mocked(sheets.deleteSheet).mock.invocationCallOrder[0];
+    expect(createOrder).toBeLessThan(deleteOrder);
+    expect(sheets.createSheet).toHaveBeenCalledWith(EXISTING_SS_ID, `__subdiario_tmp_${EXISTING_SHEET_ID}`);
+    expect(sheets.deleteSheet).toHaveBeenCalledWith(EXISTING_SS_ID, EXISTING_SHEET_ID);
+    expect(sheets.renameSheet).toHaveBeenCalledWith(EXISTING_SS_ID, 99, SHEET_NAME);
+    expect(result.ok).toBe(true);
   });
 
   it('writes the 13-column header row as the first row', async () => {
@@ -192,6 +224,22 @@ describe('writeSubdiarioDeliverable', () => {
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.value.rowsWritten).toBe(4);
+    }
+  });
+
+  it('reports dataRowsWritten as the count of data render rows only (excludes header/subtotal/blank)', async () => {
+    const rows: DeliverableRenderRow[] = [
+      { type: 'header', label: 'PERIODO ENERO 2026' },
+      makeDataRow(makeSubdiarioRow()),
+      makeDataRow(makeSubdiarioRow()),
+      { type: 'subtotal', subtotal: 2000 },
+      { type: 'blank' },
+    ];
+    const result = await writeSubdiarioDeliverable(FOLDER_ID, YEAR, rows);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.rowsWritten).toBe(5);
+      expect(result.value.dataRowsWritten).toBe(2);
     }
   });
 

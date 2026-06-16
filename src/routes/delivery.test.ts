@@ -975,7 +975,7 @@ describe('Delivery routes', () => {
       mockGatherSubdiarioInput.mockResolvedValue({ ok: true, value: MOCK_SUBDIARIO_INPUT });
       mockBuildSubdiarioDeliverableFile.mockResolvedValue({
         ok: true,
-        value: { spreadsheetId: 'subdiario-sheet-id', sheetId: 0, rowsWritten: 42 },
+        value: { spreadsheetId: 'subdiario-sheet-id', sheetId: 0, rowsWritten: 42, dataRowsWritten: 30 },
       });
     });
 
@@ -1086,7 +1086,7 @@ describe('Delivery routes', () => {
       expect(mockBuildSubdiarioDeliverableFile).not.toHaveBeenCalled();
     });
 
-    it('happy path returns { spreadsheetId, rowsWritten } on success', async () => {
+    it('happy path returns { spreadsheetId, rowsWritten, dataRowsWritten } on success', async () => {
       const response = await server.inject({
         method: 'POST',
         url: '/api/delivery/build-subdiario',
@@ -1098,6 +1098,7 @@ describe('Delivery routes', () => {
       const body = JSON.parse(response.payload);
       expect(body.spreadsheetId).toBe('subdiario-sheet-id');
       expect(body.rowsWritten).toBe(42);
+      expect(body.dataRowsWritten).toBe(30);
     });
 
     it('calls gatherSubdiarioInput with folder structure params and buildSubdiarioDeliverableFile with folderId', async () => {

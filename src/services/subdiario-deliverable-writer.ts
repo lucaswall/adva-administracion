@@ -58,7 +58,14 @@ const NUM_COLS         = 13;
 export interface WriteDeliverableResult {
   spreadsheetId: string;
   sheetId: number;
+  /** Total sheet rows written (data + header + subtotal + blank render rows) */
   rowsWritten: number;
+  /**
+   * Count of actual comprobante rows (render rows of type 'data'). Excludes the
+   * structural header/subtotal/blank rows, so it is the number the accountant
+   * sees as invoices — use this for user-facing "N comprobantes" summaries.
+   */
+  dataRowsWritten: number;
 }
 
 // ─── Internal helpers ─────────────────────────────────────────────────────────
@@ -245,13 +252,30 @@ export async function writeSubdiarioDeliverable(
 
     const existingSheet = metaResult.value.find(s => s.title === sheetName);
     if (existingSheet) {
+      // The target sheet already exists. Deleting it directly fails when it is
+      // the workbook's ONLY sheet ("must have at least one visible sheet") —
+      // the common case, since a spreadsheet created by this writer has exactly
+      // one sheet. Create the fresh sheet FIRST (under a temp name keyed on the
+      // old sheetId so it cannot collide with the target name), THEN delete the
+      // old sheet, THEN rename the fresh one. The workbook never reaches zero
+      // sheets, so the delete is always legal.
+      const tmpName = `__subdiario_tmp_${existingSheet.sheetId}`;
+      const createResult = await createSheet(spreadsheetId, tmpName);
+      if (!createResult.ok) return createResult;
+      targetSheetId = createResult.value;
+
       const deleteResult = await deleteSheet(spreadsheetId, existingSheet.sheetId);
       if (!deleteResult.ok) return deleteResult;
-    }
 
-    const createResult = await createSheet(spreadsheetId, sheetName);
-    if (!createResult.ok) return createResult;
-    targetSheetId = createResult.value;
+      const renameResult = await renameSheet(spreadsheetId, targetSheetId, sheetName);
+      if (!renameResult.ok) return renameResult;
+    } else {
+      // No same-named sheet — other sheets keep the workbook non-empty, so a
+      // direct create is safe.
+      const createResult = await createSheet(spreadsheetId, sheetName);
+      if (!createResult.ok) return createResult;
+      targetSheetId = createResult.value;
+    }
 
   } else {
     // No existing spreadsheet: create one
@@ -301,12 +325,15 @@ export async function writeSubdiarioDeliverable(
     if (!stylesResult.ok) return stylesResult;
   }
 
+  const dataRowsWritten = renderRows.filter(r => r.type === 'data').length;
+
   info('writeSubdiarioDeliverable: complete', {
     module: 'subdiario-deliverable-writer',
     phase: 'complete',
     spreadsheetId,
     targetSheetId,
     rowsWritten: renderRows.length,
+    dataRowsWritten,
   });
 
   return {
@@ -315,6 +342,7 @@ export async function writeSubdiarioDeliverable(
       spreadsheetId,
       sheetId: targetSheetId,
       rowsWritten: renderRows.length,
+      dataRowsWritten,
     },
   };
 }

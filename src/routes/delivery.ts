@@ -374,11 +374,20 @@ export async function deliveryRoutes(server: FastifyInstance) {
       if (!buildResult.ok) throw buildResult.error;
 
       server.log.info(
-        { folderId, spreadsheetId: buildResult.value.spreadsheetId, rowsWritten: buildResult.value.rowsWritten },
+        {
+          folderId,
+          spreadsheetId: buildResult.value.spreadsheetId,
+          rowsWritten: buildResult.value.rowsWritten,
+          dataRowsWritten: buildResult.value.dataRowsWritten,
+        },
         'Subdiario deliverable built'
       );
 
-      return { spreadsheetId: buildResult.value.spreadsheetId, rowsWritten: buildResult.value.rowsWritten };
+      return {
+        spreadsheetId: buildResult.value.spreadsheetId,
+        rowsWritten: buildResult.value.rowsWritten,
+        dataRowsWritten: buildResult.value.dataRowsWritten,
+      };
     }, DELIVERY_LOCK_TIMEOUT_MS, DELIVERY_LOCK_EXPIRY_MS);
 
     if (!operationResult.ok) {

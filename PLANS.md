@@ -132,3 +132,63 @@
 **Scope:** 6 tasks, ~13 files, 6 new/updated test suites.
 **Key Decisions:** Deliverable is a separate `Subdiario de Ventas {YEAR}` per Entrega (formatted); the internal root `Subdiario de Ventas` stays flat. `FALTA` gap rows are kept and painted red (missing-factura signal). notas keep the Socio prefix. `categoria`/socio-`condicion` come from the now-configured Facturador.
 **Risks:** Backfill re-extracts non-socio PDFs via Gemini (cost/time — batch it); exact template hex colors must be lifted programmatically for design fidelity; `formatSheet` needs extending for per-row background/text colors.
+
+---
+
+## Iteration 1
+
+**Implemented:** 2026-06-16
+**Method:** Agent team (3 workers, worktree-isolated)
+
+### Tasks Completed This Iteration
+- Task 1: Fix extractor dropping `condicionIVAReceptor` — one-line field copy in the Factura object literal + 3 tests (factura_emitida → "Responsable Monotributo", Factura E → "Exterior", factura_recibida → undefined) (worker-1, ADV-379)
+- Task 2: Hybrid `condicionIVAReceptor` backfill — `condicion-backfill.ts` (pure `decideSourcing` + `backfillCondicionIva` orchestrator) + `POST /api/admin/backfill-condicion-iva` (auth, `?limit`, idempotent, in-place by fileId; socios→Facturador, non-socios→re-extract); returns `{scanned, filledFromFacturador, filledFromParse, skipped, failed}` (worker-1, ADV-380)
+- Task 3: Pure deliverable render model `buildSubdiarioDeliverable(rows, currentYear) → DeliverableRenderRow[]` — period sections (`PERIODO {YEAR}` carryover + `PERIODO {MES} {YEAR}` monthly), signed subtotals, 13-col projection, style flags (worker-2, ADV-381)
+- Task 4: Formatted writer `writeSubdiarioDeliverable` — creates/replaces `Subdiario de Ventas {YEAR}`, cream/red styling, blue `nro` hyperlinks; added exported `applyRowStyles` + `RowStyleSpec` helper to `sheets.ts` (worker-2, ADV-382)
+- Task 5: `POST /api/delivery/build-subdiario` — IDOR guard, `DELIVERY_LOCK`, extracted shared `gatherSubdiarioInput` from `syncSubdiario`, `buildSubdiarioDeliverableFile` orchestrator (worker-3, ADV-383)
+- Task 6: Apps Script Entrega wiring — `build-subdiario` step after `build-movimientos` in `triggerEnvioContadores` with progress toast + summary line (worker-3, ADV-384)
+
+### Files Modified
+- `src/processing/extractor.ts` / `.test.ts` — propagate `condicionIVAReceptor`
+- `src/services/condicion-backfill.ts` / `.test.ts` — new hybrid backfill
+- `src/routes/backfill.ts`, `src/server.ts` — new admin endpoint + registration
+- `src/services/subdiario-deliverable.ts` / `.test.ts` — new render model
+- `src/services/subdiario-deliverable-writer.ts` / `.test.ts` — new formatted writer
+- `src/services/sheets.ts` — new `applyRowStyles` + `RowStyleSpec`
+- `src/routes/delivery.ts` / `.test.ts` — new `build-subdiario` endpoint
+- `src/services/delivery-package.ts` / `.test.ts` — `buildSubdiarioDeliverableFile`
+- `src/services/subdiario-writer.ts` / `.test.ts` — extracted `gatherSubdiarioInput`
+- `apps-script/src/main.ts` — Entrega flow build-subdiario step
+- `CLAUDE.md` — API ENDPOINTS table
+
+### Linear Updates
+- ADV-379: Todo → In Progress → Review
+- ADV-380: Todo → In Progress → Review
+- ADV-381: Todo → In Progress → Review
+- ADV-382: Todo → In Progress → Review
+- ADV-383: Todo → In Progress → Review
+- ADV-384: Todo → In Progress → Review
+
+### Pre-commit Verification
+- bug-hunter: Found 3 bugs, all fixed before proceeding:
+  1. [HIGH] `writeSubdiarioDeliverable` idempotency broke when the target sheet was the workbook's only sheet (delete-the-only-sheet → API error on every re-run). Fixed: create a temp sheet first (name keyed on the old sheetId) → delete old → rename, so the workbook never reaches zero sheets. Added a single-sheet regression test.
+  2. [MEDIUM] Double ERROR log on the `syncSubdiario` read-failure path (both `gatherSubdiarioInput` and `syncSubdiario` logged). Fixed: `gatherSubdiarioInput` is the sole owner of read-failure logging (now takes an optional `correlationId`); `syncSubdiario` no longer re-logs.
+  3. [MEDIUM] Apps Script "N comprobantes" counted structural render rows (header/subtotal/blank), not invoices. Fixed: added `dataRowsWritten` (count of `type==='data'`) to `WriteDeliverableResult`, threaded through the route, and used it in the summary.
+- verifier (full): 3026 tests pass, zero lint warnings, clean `tsc` build + Apps Script bundle (10.4kb, no warnings)
+
+### Work Partition
+- Worker 1: Tasks 1–2 (condición domain — extractor fix + backfill)
+- Worker 2: Tasks 3–4 (deliverable domain — pure render model + formatted writer)
+- Worker 3: Tasks 5–6 (integration domain — endpoint + Apps Script wiring)
+
+### Merge Summary
+- Worker 2 merged first (foundation: services worker-3 imports) — no conflicts
+- Worker 1 merged — no conflicts (disjoint files); typecheck clean
+- Worker 3 merged — no conflicts (disjoint files); the 2 expected "module not found" errors against worker-2's modules resolved once worker-2 was present; typecheck clean
+- No file overlapped across workers, so all three merges were conflict-free
+
+### Known Degradation (for review / fine-tuning)
+- Subagents have no MCP access, so the writer could not lift the template's exact hex colors. The palette is approximated with named constants in `subdiario-deliverable-writer.ts`: `CREAM_BG` ~#FFF2CC, `RED_FG` #FF0000, link blue (Sheets default). Visual fidelity vs. the template (`12QCAReVk4vjOsZ1pWX6-h3x-wEsqbcYrTZ4qlz-w_No`) should be spot-checked against a real render and the constants tuned if needed.
+
+### Continuation Status
+All tasks completed.

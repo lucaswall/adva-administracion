@@ -205,6 +205,7 @@ export function triggerEnvioContadores(): void {
     const subdiario = callDeliveryApi<{
       spreadsheetId: string;
       rowsWritten: number;
+      dataRowsWritten: number;
     }>(subdiarioUrl, { folderId: copy.folderId });
 
     // 11. Short "done" toast — clears the lingering progress toast
@@ -214,7 +215,7 @@ export function triggerEnvioContadores(): void {
     let summary = `Carpeta: ${plan.folderName}\n`;
     summary += `PDFs copiados: ${copy.copied}\n`;
     summary += `Archivos de movimientos: ${build.created}\n`;
-    summary += `Subdiario de Ventas: ${subdiario.rowsWritten} comprobantes\n`;
+    summary += `Subdiario de Ventas: ${subdiario.dataRowsWritten} comprobantes\n`;
     summary += `\nCarpeta en Drive:\n${copy.folderUrl}`;
     if (copy.failed.length > 0) {
       summary += `\n\n⚠️ ${copy.failed.length} PDF(s) no pudieron copiarse.`;
