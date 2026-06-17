@@ -198,13 +198,24 @@ export function triggerEnvioContadores(): void {
       failed: Array<{ name: string; error: string }>;
     }>(buildUrl, { period: periodo, folderId: copy.folderId });
 
-    // 10. Short "done" toast — clears the lingering progress toast
+    // 10. Build Subdiario de Ventas deliverable in delivery folder
+    progressToast(`Movimientos listos (${build.created} archivos). Generando Subdiario de Ventas...`);
+
+    const subdiarioUrl = getApiUrl('/api/delivery/build-subdiario');
+    const subdiario = callDeliveryApi<{
+      spreadsheetId: string;
+      rowsWritten: number;
+      dataRowsWritten: number;
+    }>(subdiarioUrl, { folderId: copy.folderId });
+
+    // 11. Short "done" toast — clears the lingering progress toast
     doneToast();
 
-    // 11. Summary modal
+    // 12. Summary modal
     let summary = `Carpeta: ${plan.folderName}\n`;
     summary += `PDFs copiados: ${copy.copied}\n`;
     summary += `Archivos de movimientos: ${build.created}\n`;
+    summary += `Subdiario de Ventas: ${subdiario.dataRowsWritten} comprobantes\n`;
     summary += `\nCarpeta en Drive:\n${copy.folderUrl}`;
     if (copy.failed.length > 0) {
       summary += `\n\n⚠️ ${copy.failed.length} PDF(s) no pudieron copiarse.`;

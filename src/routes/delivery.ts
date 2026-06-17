@@ -18,7 +18,10 @@ import {
   prepareDeliveryFolder,
   copyPdfsToDelivery,
   buildMovimientosFiles,
+  buildSubdiarioDeliverableFile,
 } from '../services/delivery-package.js';
+import { gatherSubdiarioInput } from '../services/subdiario-writer.js';
+import { businessYear } from '../utils/date.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { getCachedFolderStructure } from '../services/folder-structure.js';
 import { findByName, isDescendantOf } from '../services/drive.js';
@@ -52,6 +55,13 @@ interface PeriodRequest {
  */
 interface BuildMovimientosRequest {
   period: string;
+  folderId: string;
+}
+
+/**
+ * Request body for build-subdiario endpoint
+ */
+interface BuildSubdiarioRequest {
   folderId: string;
 }
 
@@ -290,6 +300,101 @@ export async function deliveryRoutes(server: FastifyInstance) {
         return respond503(reply, operationResult.error, { module: 'delivery', phase: 'build-movimientos' });
       }
       return respond500(reply, operationResult.error, { module: 'delivery', phase: 'build-movimientos' });
+    }
+
+    return operationResult.value;
+  });
+
+  /**
+   * POST /api/delivery/build-subdiario
+   * Gathers the full current-year source data, builds SubdiarioRows, transforms
+   * them with buildSubdiarioDeliverable, and writes the formatted sheet into
+   * the Entregas/{period}/ folder with writeSubdiarioDeliverable.
+   *
+   * Body: { folderId } — always the current business year; no period needed.
+   * Idempotency (delete-before-create) is handled inside writeSubdiarioDeliverable.
+   */
+  server.post<{ Body: BuildSubdiarioRequest }>('/delivery/build-subdiario', {
+    onRequest: authMiddleware,
+    schema: {
+      body: {
+        type: 'object',
+        required: ['folderId'],
+        properties: {
+          folderId: { type: 'string' },
+        },
+        additionalProperties: false,
+      },
+    },
+  }, async (request, reply) => {
+    const { folderId } = request.body;
+
+    if (!getCachedFolderStructure()) {
+      return respond503(
+        reply,
+        new Error('Folder structure not initialized'),
+        { module: 'delivery', phase: 'build-subdiario' }
+      );
+    }
+
+    const config = getConfig();
+    const rootFolderId = config.driveRootFolderId;
+    const fs = getCachedFolderStructure()!;
+
+    // IDOR guard: confirm folderId is inside Entregas/ before any write.
+    const entregasResult = await findByName(rootFolderId, 'Entregas', FOLDER_MIME);
+    if (!entregasResult.ok) {
+      return respond503(reply, entregasResult.error, { module: 'delivery', phase: 'build-subdiario' });
+    }
+    if (!entregasResult.value) {
+      return respond500(reply, new Error('Carpeta Entregas/ no encontrada'), { module: 'delivery', phase: 'build-subdiario' });
+    }
+    const ancestorCheck = await isDescendantOf(folderId, entregasResult.value.id);
+    if (!ancestorCheck.ok) {
+      return respond503(reply, ancestorCheck.error, { module: 'delivery', phase: 'build-subdiario' });
+    }
+    if (!ancestorCheck.value) {
+      reply.status(400);
+      return { error: 'folderId no pertenece a la carpeta Entregas/' };
+    }
+
+    const currentYear = businessYear();
+
+    // Serialize: gather data + build + write Subdiario (uses DELIVERY_LOCK_ID, ADV-354)
+    const operationResult = await withLock(DELIVERY_LOCK_ID, async () => {
+      const gatherResult = await gatherSubdiarioInput(
+        fs.rootId,
+        fs.controlIngresosId,
+        currentYear,
+        fs.movimientosSpreadsheets
+      );
+      if (!gatherResult.ok) throw gatherResult.error;
+
+      const buildResult = await buildSubdiarioDeliverableFile(folderId, currentYear, gatherResult.value);
+      if (!buildResult.ok) throw buildResult.error;
+
+      server.log.info(
+        {
+          folderId,
+          spreadsheetId: buildResult.value.spreadsheetId,
+          rowsWritten: buildResult.value.rowsWritten,
+          dataRowsWritten: buildResult.value.dataRowsWritten,
+        },
+        'Subdiario deliverable built'
+      );
+
+      return {
+        spreadsheetId: buildResult.value.spreadsheetId,
+        rowsWritten: buildResult.value.rowsWritten,
+        dataRowsWritten: buildResult.value.dataRowsWritten,
+      };
+    }, DELIVERY_LOCK_TIMEOUT_MS, DELIVERY_LOCK_EXPIRY_MS);
+
+    if (!operationResult.ok) {
+      if (operationResult.error.message.startsWith('Failed to acquire lock')) {
+        return respond503(reply, operationResult.error, { module: 'delivery', phase: 'build-subdiario' });
+      }
+      return respond500(reply, operationResult.error, { module: 'delivery', phase: 'build-subdiario' });
     }
 
     return operationResult.value;

@@ -425,6 +425,89 @@ async function readMovimientosRows(
 // ─── Public API ──────────────────────────────────────────────────────────────
 
 /**
+ * Gathers and parses the source data needed to build SubdiarioRows.
+ *
+ * Extracted from syncSubdiario step 3 so the Entrega endpoint can
+ * assemble the same dataset without touching the Subdiario workbook.
+ *
+ * @param _rootId            - Drive root folder ID (reserved for future use)
+ * @param controlIngresosId  - Control de Ingresos spreadsheet ID
+ * @param facturadorYear     - Year used to read Facturador de Socios data
+ * @param movimientosSpreadsheets - Map of (year:bankFolder) → movimientos spreadsheet IDs
+ * @param correlationId      - Optional request correlation id, threaded into the
+ *   per-read error logs. This function is the single owner of read-failure
+ *   logging (callers must NOT re-log the returned error, to avoid duplicates).
+ */
+export async function gatherSubdiarioInput(
+  _rootId: string,
+  controlIngresosId: string,
+  facturadorYear: number,
+  movimientosSpreadsheets: Map<string, string>,
+  correlationId?: string
+): Promise<Result<SubdiarioInput, Error>> {
+  // Read source data in parallel (matches syncSubdiario step 3)
+  const [facturasResult, pagosResult, retencionesResult] = await Promise.all([
+    getValues(controlIngresosId, 'Facturas Emitidas!A:U'),
+    getValues(controlIngresosId, 'Pagos Recibidos!A:Q'),
+    getValues(controlIngresosId, 'Retenciones Recibidas!A:O'),
+  ]);
+
+  if (!facturasResult.ok) {
+    logError('gatherSubdiarioInput: Failed to read Facturas Emitidas', {
+      module: 'subdiario-writer',
+      phase: 'gather-input',
+      error: facturasResult.error.message,
+      correlationId,
+    });
+    return facturasResult;
+  }
+  if (!pagosResult.ok) {
+    logError('gatherSubdiarioInput: Failed to read Pagos Recibidos', {
+      module: 'subdiario-writer',
+      phase: 'gather-input',
+      error: pagosResult.error.message,
+      correlationId,
+    });
+    return pagosResult;
+  }
+  if (!retencionesResult.ok) {
+    logError('gatherSubdiarioInput: Failed to read Retenciones Recibidas', {
+      module: 'subdiario-writer',
+      phase: 'gather-input',
+      error: retencionesResult.error.message,
+      correlationId,
+    });
+    return retencionesResult;
+  }
+
+  const facturadorResult = await readFacturador(facturadorYear);
+  if (!facturadorResult.ok) {
+    logError('gatherSubdiarioInput: Failed to read Facturador de Socios', {
+      module: 'subdiario-writer',
+      phase: 'gather-input',
+      error: facturadorResult.error.message,
+      correlationId,
+    });
+    return facturadorResult;
+  }
+
+  const movimientos = await readMovimientosRows(movimientosSpreadsheets);
+
+  const input: SubdiarioInput = {
+    currentYear: facturadorYear,
+    facturasEmitidas: parseFacturasEmitidas(facturasResult.value as CellValue[][], {
+      includeNc: true,
+    }),
+    pagosRecibidos: parsePagos(pagosResult.value as CellValue[][]),
+    retencionesRecibidas: parseRetenciones(retencionesResult.value as CellValue[][]),
+    facturador: facturadorResult.value,
+    movimientos,
+  };
+
+  return { ok: true, value: input };
+}
+
+/**
  * Syncs the Subdiario de Ventas workbook.
  *
  * Orchestrates:
@@ -496,67 +579,23 @@ export async function syncSubdiario(
       }
     }
 
-    // Step 3: Read source data
-    // Facturas Emitidas grew to 21 columns (A:U) after ADV-245 (condicionIVAReceptor at H)
-    const [facturasResult, pagosResult, retencionesResult] = await Promise.all([
-      getValues(controlIngresosId, 'Facturas Emitidas!A:U'),
-      getValues(controlIngresosId, 'Pagos Recibidos!A:Q'),
-      getValues(controlIngresosId, 'Retenciones Recibidas!A:O'),
-    ]);
-
-    if (!facturasResult.ok) {
-      logError('Failed to read Facturas Emitidas', {
-        module: 'subdiario-writer',
-        phase: 'read-data',
-        error: facturasResult.error.message,
-        correlationId,
-      });
-      return facturasResult;
+    // Step 3: Read source data (delegated to gatherSubdiarioInput)
+    // Subdiario needs both FCs AND NCs for scope rule (c) and findCancellingNC lookup.
+    // NDs are excluded — the builder does not model them.
+    // gatherSubdiarioInput is the single owner of read-failure logging (it logs
+    // the specific failing read with the correlationId), so do NOT re-log here —
+    // re-logging would double every read error on this path.
+    const gatherResult = await gatherSubdiarioInput(
+      rootFolderId,
+      controlIngresosId,
+      facturadorYear,
+      movimientosSpreadsheets,
+      correlationId
+    );
+    if (!gatherResult.ok) {
+      return gatherResult;
     }
-    if (!pagosResult.ok) {
-      logError('Failed to read Pagos Recibidos', {
-        module: 'subdiario-writer',
-        phase: 'read-data',
-        error: pagosResult.error.message,
-        correlationId,
-      });
-      return pagosResult;
-    }
-    if (!retencionesResult.ok) {
-      logError('Failed to read Retenciones Recibidas', {
-        module: 'subdiario-writer',
-        phase: 'read-data',
-        error: retencionesResult.error.message,
-        correlationId,
-      });
-      return retencionesResult;
-    }
-
-    const facturadorResult = await readFacturador(facturadorYear);
-    if (!facturadorResult.ok) {
-      logError('Failed to read Facturador de Socios', {
-        module: 'subdiario-writer',
-        phase: 'read-data',
-        error: facturadorResult.error.message,
-        correlationId,
-      });
-      return facturadorResult;
-    }
-
-    const movimientos = await readMovimientosRows(movimientosSpreadsheets);
-
-    const input: SubdiarioInput = {
-      currentYear: facturadorYear,
-      // Subdiario needs both FCs AND NCs for scope rule (c) and findCancellingNC lookup.
-      // NDs are excluded — the builder does not model them.
-      facturasEmitidas: parseFacturasEmitidas(facturasResult.value as CellValue[][], {
-        includeNc: true,
-      }),
-      pagosRecibidos: parsePagos(pagosResult.value as CellValue[][]),
-      retencionesRecibidas: parseRetenciones(retencionesResult.value as CellValue[][]),
-      facturador: facturadorResult.value,
-      movimientos,
-    };
+    const input = gatherResult.value;
 
     // Step 4: Build rows (pure — throws on error)
     let rows: SubdiarioRow[];

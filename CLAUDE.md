@@ -520,6 +520,10 @@ The Apps Script bundle is produced into `dist/apps-script/{Code.js,appsscript.js
 | POST | /api/match-movimientos | Yes | Match movimientos detalles (supports `?force=true` to re-match all rows) |
 | POST | /api/mp-sync | Yes | Manual Mercado Pago sync (optional `?period=YYYY-MM`; defaults to previous + current month) |
 | POST | /webhooks/drive | No | Drive notifications |
+| POST | /api/delivery/plan | Yes | Enumerate delivery scope (read-only, no Drive writes) |
+| POST | /api/delivery/copy-pdfs | Yes | Prepare delivery folder and copy resumen PDFs |
+| POST | /api/delivery/build-movimientos | Yes | Build per-account movimientos spreadsheets in delivery folder |
+| POST | /api/delivery/build-subdiario | Yes | Build formatted Subdiario de Ventas deliverable in delivery folder |
 
 **Concurrency Control:**
 

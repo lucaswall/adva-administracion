@@ -7,6 +7,23 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
+// ── Worker-2 module mocks (resolved at merge time) ───────────────────────────
+
+const mockBuildSubdiarioDeliverable = vi.fn();
+const mockWriteSubdiarioDeliverable = vi.fn();
+
+vi.mock('./subdiario-deliverable.js', () => ({
+  buildSubdiarioDeliverable: (...args: unknown[]) => mockBuildSubdiarioDeliverable(...args),
+}));
+
+vi.mock('./subdiario-deliverable-writer.js', () => ({
+  writeSubdiarioDeliverable: (...args: unknown[]) => mockWriteSubdiarioDeliverable(...args),
+}));
+
+vi.mock('./subdiario-builder.js', () => ({
+  buildSubdiarioRows: vi.fn(),
+}));
+
 // ── Mocks ────────────────────────────────────────────────────────────────────
 
 vi.mock('./sheets.js', () => ({
@@ -71,9 +88,11 @@ import {
   prepareDeliveryFolder,
   copyPdfsToDelivery,
   buildMovimientosFiles,
+  buildSubdiarioDeliverableFile,
   type ResumenScopeItem,
   type MovimientoScopeItem,
 } from './delivery-package.js';
+import * as subdiarioBuilder from './subdiario-builder.js';
 
 import {
   getValues,
@@ -1584,6 +1603,86 @@ describe('enumerateResumenes — periodo normalization', () => {
     if (result.ok) {
       expect(result.value).toHaveLength(1);
       expect(result.value[0].fileId).toBe('fid-ok');
+    }
+  });
+});
+
+// ── buildSubdiarioDeliverableFile ────────────────────────────────────────────
+
+describe('buildSubdiarioDeliverableFile', () => {
+  const MOCK_FOLDER_ID = 'delivery-folder-id';
+  const MOCK_YEAR = 2026;
+  const MOCK_INPUT = {
+    currentYear: MOCK_YEAR,
+    facturasEmitidas: [],
+    pagosRecibidos: [],
+    retencionesRecibidas: [],
+    movimientos: [],
+    facturador: new Map(),
+  };
+
+  const MOCK_ROWS = [
+    {
+      fecha: '2026-01-15', cod: '006', tipo: 'FC' as const, nro: '00001-00000001',
+      cliente: 'TEST SA', cuit: '20123456786', condicion: 'IVA Responsable Inscripto',
+      total: 1000, concepto: 'Servicios', categoria: '', fechaCobro: '',
+      recibido: null, movimiento: '', movimientoLabel: '', facturaFileId: '', notas: '',
+    },
+  ];
+
+  const MOCK_RENDER_ROWS = [
+    { type: 'data' as const, row: MOCK_ROWS[0] },
+  ];
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(subdiarioBuilder.buildSubdiarioRows).mockReturnValue(MOCK_ROWS);
+    mockBuildSubdiarioDeliverable.mockReturnValue(MOCK_RENDER_ROWS);
+    mockWriteSubdiarioDeliverable.mockResolvedValue({
+      ok: true,
+      value: { spreadsheetId: 'new-sheet-id', sheetId: 0, rowsWritten: 1, dataRowsWritten: 1 },
+    });
+  });
+
+  it('happy path: chains buildSubdiarioRows → buildSubdiarioDeliverable → writeSubdiarioDeliverable', async () => {
+    const result = await buildSubdiarioDeliverableFile(MOCK_FOLDER_ID, MOCK_YEAR, MOCK_INPUT);
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.spreadsheetId).toBe('new-sheet-id');
+      expect(result.value.rowsWritten).toBe(1);
+    }
+    expect(subdiarioBuilder.buildSubdiarioRows).toHaveBeenCalledWith(MOCK_INPUT);
+    expect(mockBuildSubdiarioDeliverable).toHaveBeenCalledWith(MOCK_ROWS, MOCK_YEAR);
+    expect(mockWriteSubdiarioDeliverable).toHaveBeenCalledWith(
+      MOCK_FOLDER_ID,
+      MOCK_YEAR,
+      MOCK_RENDER_ROWS
+    );
+  });
+
+  it('propagates error from writeSubdiarioDeliverable', async () => {
+    mockWriteSubdiarioDeliverable.mockResolvedValue({
+      ok: false,
+      error: new Error('Sheets API failed'),
+    });
+
+    const result = await buildSubdiarioDeliverableFile(MOCK_FOLDER_ID, MOCK_YEAR, MOCK_INPUT);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.message).toBe('Sheets API failed');
+    }
+  });
+
+  it('returns error when buildSubdiarioRows throws', async () => {
+    vi.mocked(subdiarioBuilder.buildSubdiarioRows).mockImplementation(() => {
+      throw new Error('Builder error');
+    });
+
+    const result = await buildSubdiarioDeliverableFile(MOCK_FOLDER_ID, MOCK_YEAR, MOCK_INPUT);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.message).toBe('Builder error');
     }
   });
 });

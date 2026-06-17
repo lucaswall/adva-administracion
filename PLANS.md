@@ -1,374 +1,255 @@
 # Implementation Plan
 
 **Status:** COMPLETE
-**Created:** 2026-06-12
-**Source:** Inline request: Mercadopago payments ingestion via API — monthly server process with manual trigger endpoint, idempotent; builds "Mercado Pago {collectorId} ARS" Movimientos workbook with monthly tabs (gross credit + fee debit rows) and resumen rows; matching to facturas emitidas via CUIT with CUIT↔DNI equivalence and an MP-specific forward date window.
-**Linear Issues:** [ADV-365](https://linear.app/lw-claude/issue/ADV-365/mercadopago-api-client-with-pagination-timeout-and-429-backoff), [ADV-366](https://linear.app/lw-claude/issue/ADV-366/transform-mp-payments-into-movimientobancario-rows-gross-credit-fee), [ADV-367](https://linear.app/lw-claude/issue/ADV-367/idempotent-mp-movimientos-writer-incremental-month-tab-appends), [ADV-368](https://linear.app/lw-claude/issue/ADV-368/mp-resumen-row-for-closed-periods-synthetic-running-balance), [ADV-369](https://linear.app/lw-claude/issue/ADV-369/mp-sync-orchestrator-with-processing-lock-and-match-auto-trigger), [ADV-370](https://linear.app/lw-claude/issue/ADV-370/post-apimp-sync-route-manual-trigger), [ADV-371](https://linear.app/lw-claude/issue/ADV-371/mp-monthly-cron-boot-time-catch-up-scheduler), [ADV-372](https://linear.app/lw-claude/issue/ADV-372/matcher-cuitdni-equivalence-in-identity-comparisons), [ADV-373](https://linear.app/lw-claude/issue/ADV-373/matcher-mp-specific-forward-factura-date-window-25-days), [ADV-374](https://linear.app/lw-claude/issue/ADV-374/mp-ingestion-documentation-claudemd-spreadsheet-formatmd-envexample), [ADV-375](https://linear.app/lw-claude/issue/ADV-375/delivery-copy-pdfs-skip-non-pdf-resumen-fileids-mp-spreadsheet-backed)
-**Branch:** feat/mercadopago-sync
+**Created:** 2026-06-16
+**Source:** Inline request: Generate the full, up-to-date Subdiario de Ventas as part of the Entrega, matching the accountants' template (`Subdiario de Ventas 2026`, id `12QCAReVk4vjOsZ1pWX6-h3x-wEsqbcYrTZ4qlz-w_No`) in data **and** design/format.
+**Linear Issues:** [ADV-379](https://linear.app/lw-claude/issue/ADV-379), [ADV-380](https://linear.app/lw-claude/issue/ADV-380), [ADV-381](https://linear.app/lw-claude/issue/ADV-381), [ADV-382](https://linear.app/lw-claude/issue/ADV-382), [ADV-383](https://linear.app/lw-claude/issue/ADV-383), [ADV-384](https://linear.app/lw-claude/issue/ADV-384)
+**Branch:** feat/subdiario-entrega-deliverable
 
 ## Context Gathered
 
 ### Codebase Analysis
-
-- **Folder/workbook provisioning is fully reusable:** `getOrCreateBankAccountFolder(year, banco, numeroCuenta, moneda)` (`src/services/folder-structure.ts:1353-1468`) creates `{year}/Bancos/{banco} {numeroCuenta} {moneda}/`; `getOrCreateMovimientosSpreadsheet(folderId, year, folderName, 'bancario')` (`:1942-2006`) creates `Movimientos - {folderName}`; `getOrCreateBankAccountSpreadsheet` (`:1717-1788`) creates `Control de Resumenes` with `CONTROL_RESUMENES_BANCARIO_SHEET` headers. All cached in `cachedStructure` maps and guarded by `withLock`.
-- **Movimientos writing:** `storeMovimientosBancario(movimientos, spreadsheetId, period, saldoInicial, sheetOrderBatch?)` (`src/processing/storage/movimientos-store.ts:28-156`) is scanner-independent, handles non-empty tabs via row-offset (ADV-322, reads `{month}!A:A` first), builds rows with `generateMovimientoRowWithFormula`/`generateInitialBalanceRow`/`generateFinalBalanceRow` (`src/utils/balance-formulas.ts`), appends via `appendRowsWithLinks` (ADV-242 per-sheet lock inside). It writes SALDO INICIAL + transactions + SALDO FINAL in one batch — **not directly usable for incremental mid-month appends** (SALDO FINAL would land mid-tab); the MP writer needs an incremental variant reusing the same primitives.
-- **Resumen writing:** `storeResumenBancario(resumen, spreadsheetId, context?)` (`src/processing/storage/resumen-store.ts:173-304`) — append + dedupe on `(banco, numeroCuenta, fechaDesde, fechaHasta, moneda)`; builds `balanceOk` formula via `generateBalanceOkFormulaLocal` and `balanceDiff` via `calculateBalanceDiff`; fileName hyperlink built from `fileId` as `https://drive.google.com/file/d/{fileId}/view`.
-- **Matching discovery:** `discoverMovimientosSpreadsheets(rootId)` (`src/bank/match-movimientos.ts:779-887`) maps `{year}:{folderName} → spreadsheetId`; `readMovimientosForPeriod` (`src/services/movimientos-reader.ts:154-201`) reads rows, `isBankMovimientosHeader` (`:54-58`) schema-gates sheets, `isSpecialRow` skips SALDO INICIAL/FINAL. An MP workbook with the standard 9-col bancario schema is matched automatically.
-- **Credit matching:** `matchMovement` in `src/bank/matcher.ts` extracts concepto identity via `extractCuitFromText` (`src/utils/validation.ts:473-507`, handles "CUIT"/"CUIL" prefixes and checksum validation), filters ADVA CUITs, then hard-filters candidates by **strict string equality** (`matcher.ts:391` style comparisons). `cuitOrDniMatch(id1, id2)` already exists (`validation.ts:207-232`) handling CUIT↔DNI equivalence — the matcher simply doesn't use it yet. Date windows: `FACTURA_DATE_RANGE_BEFORE = 5`, `FACTURA_DATE_RANGE_AFTER = 30` (`matcher.ts:35-36`); the matcher has **no account context** today.
-- **Scheduling infra:** `node-cron` already used in `src/services/watch-manager.ts` (`cron.schedule`, init in `initWatchManager`). Scan auto-triggers `matchAllMovimientos` via `triggerMatchAsync` after success. Routes follow `server.post('/...', { onRequest: authMiddleware }, handler)` with `/api` prefix; scan/match share `PROCESSING_LOCK_ID` with `PROCESSING_LOCK_TIMEOUT_MS` (5 min wait) and `PROCESSING_LOCK_EXPIRY_MS` (15 min expiry) from `src/config.ts`.
-- **Outbound HTTP pattern:** `src/utils/exchange-rate.ts:164-259` — `fetch` + `AbortController` timeout (`EXCHANGE_RATE_TIMEOUT_MS`), Result error paths, in-memory cache; config constants + `validateNumericEnv` pattern in `src/config.ts`.
-- **Test conventions:** Vitest colocated `*.test.ts`; `vi.mock` of `sheets.js`/`logger.js`/`concurrency.js` (transparent `withLock`); route tests via Fastify `inject` with `authorization: Bearer` header (`src/routes/scan.test.ts`); fake CUITs `20123456786`, `27234567891`, `20111111119`; real-timer describe blocks touching quota paths call `quotaThrottle.reset()` in `beforeEach`.
+- **Subdiario engine:** `src/services/subdiario-builder.ts` (`buildSubdiarioRows`, pure) produces a flat `SubdiarioRow[]` (incl. FALTA gap rows, notas with "Socio N - …" prefix, condicion = `factura.condicionIVAReceptor || facturadorEntry.condIVA`, categoria = facturador membresia). `src/services/subdiario-writer.ts` (`syncSubdiario`) gathers source data + diff-applies it to the flat root workbook "Subdiario de Ventas" via `POST /api/rebuild-subdiario`.
+- **Extraction path:** `src/processing/extractor.ts` (~363-382) assembles the `Factura` from `parseFacturaResponse` output; `src/gemini/prompts.ts` (FACTURA_PROMPT), `src/gemini/parser.ts` (`VALID_CONDICION_IVA`, condicion block 583-602), `src/processing/storage/factura-store.ts:45` (writes col H).
+- **Delivery:** `src/services/delivery-package.ts` + `src/routes/delivery.ts` (`/api/delivery/plan|copy-pdfs|build-movimientos`, `DELIVERY_LOCK_ID`, IDOR guard via `isDescendantOf`); `apps-script/src/main.ts` (Entrega menu flow).
+- **Facturador:** `src/services/facturador-reader.ts` (`readFacturador`, `normalizeNroComprobante`); months via `SPANISH_MONTHS` in `src/utils/spanish-date.ts`.
+- **Sheets primitives:** `src/services/sheets.ts` — `appendRowsWithLinks` (per-sheet lock, ADV-242), `formatSheet` (frozen + bold header + number formats only), `CellValueOrLink`, `ConditionalFormatRule`.
+- **Existing patterns:** pure-function tests (`subdiario-builder.test.ts`), writer tests (`subdiario-writer.test.ts`), route tests (`delivery.test.ts`), extractor tests (`extractor.test.ts`).
+- **Test conventions:** Vitest, colocated `*.test.ts`, fake CUITs `20123456786` / fictional names per CLAUDE.md.
 
 ### MCP Context
-
-- **MCPs used:** Linear (team "ADVA Administracion" verified); Google Drive/Sheets (production Control de Ingresos read for match dry-run); live Mercadopago API probe with the user's production access token.
-- **Findings (empirically verified against production data, 2026-06-12):**
-  - `GET /v1/payments/search?range=date_approved&begin_date=...&end_date=...&sort=date_approved&criteria=asc&limit=50` with `Authorization: Bearer {MP_ACCESS_TOKEN}` returned all 23 May-2026 approved payments (cross-checked against the MP settlement xlsx).
-  - **Every payment on every rail (account_money, credit_card, debit_card) carries `payer.identification` with a real CUIT/CUIL.** Card payments additionally carry `card.cardholder.identification` (DNI).
-  - Fee math: `fee_details` sums only `mercadopago_fee` (e.g. 450); IIBB withholdings live in `charges_details`; **`transaction_details.net_received_amount` is the reliable net** (gross 25000 → net 23350/23975). Total deduction = `transaction_amount − net_received_amount`.
-  - `date_approved` comes in **GMT-4 offset** (e.g. `2026-05-11T13:07:57.000-04:00`) — date-part extraction must convert to America/Argentina/Buenos_Aires (GMT-3) or late-evening payments land on the wrong day.
-  - Dry-run matching: all 23 payments matched 1:1 to distinct facturas emitidas by CUIT+amount+date — but 9 recurring payments (charged the 25th) precede their factura (issued the 11th of the following month) by ~17 days, requiring a forward window of ~25 days; with it, 23/23. Facturas store consumidor-final receptor IDs as **DNI** (8 digits) while MP reports CUIT/CUIL (11 digits) — CUIT↔DNI equivalence is mandatory (e.g. factura `42489444` vs payer `20424894444`).
-  - API limits: `limit` max 50, `offset` max 10 000, 12-month lookback, range filter `date_approved`. Rate limits undocumented — 429s must be handled with backoff.
-
-### Scope Boundaries
-
-**Out of scope:** MP money-out (withdrawals to bank) — `/v1/payments/search` covers collections only; the MP "saldo" columns are a synthetic running net-collected balance, not a real account balance. Refund/chargeback handling beyond flagging (`amount_refunded > 0` logs a warn; no negative rows generated). The MP release report (real saldo inicial/final) is a possible future enhancement. Backfilling months older than the 12-month API lookback.
-
----
+- **MCPs used:** Google Drive (Drive/Sheets reads + template PDF export), Gemini (live prompt test), Railway (env vars + deploy status), Linear (issues).
+- **Findings:**
+  - **condicion bug confirmed:** Gemini (gemini-2.5-flash) returns `condicionIVAReceptor` correctly for ADVA's Factura C, but `extractor.ts` drops it → **0 of 371** facturas have col H. Root-caused to the extractor object literal.
+  - **categoria:** `FACTURADOR_SPREADSHEET_ID` was unset in production → already **set** to `1WUEB-8B79-Ma6-yZ5FNS1Nj2cTi7p2P9lUNGMc8R2lU` ("ADVA - Facturador de Socios", `2026` tab has Membresia + Cond IVA keyed by comprobante).
+  - **Template format:** 13 cols (no `movimiento`; notas at M); sections `PERIODO {YEAR}` (carryover) + `PERIODO {MES} {YEAR}` (current, per month, label in `cliente` col); bold per-section subtotal of `total`; blank separators; no grand total; cream background = FC cancelled by NC; red = NC + FALTA rows; blue hyperlink on `nro`; `#,##0.00` on total/recibido. ~165 rows, current through May 2026 (deliverable must include the latest month).
 
 ## Tasks
 
-Tasks 1-7 are sequential (each builds on the previous). Tasks 8-9 (matcher) are independent of 1-7 but Task 9 should land after Task 8 (same matcher files). Task 11 (delivery) is independent of 1-9. Task 10 (docs) last.
-
-### Task 1: Mercadopago API client with pagination, timeout, and 429 backoff
-**Linear Issue:** [ADV-365](https://linear.app/lw-claude/issue/ADV-365/mercadopago-api-client-with-pagination-timeout-and-429-backoff)
+### Task 1: Fix extractor dropping `condicionIVAReceptor`
+**Linear Issue:** [ADV-379](https://linear.app/lw-claude/issue/ADV-379)
 **Files:**
-- `src/mercadopago/client.ts` (create)
-- `src/mercadopago/client.test.ts` (create)
-- `src/config.ts` (modify — `MP_ACCESS_TOKEN` env read, `MP_API_TIMEOUT_MS`, `MP_API_BASE_URL`, `MP_MAX_RETRIES` constants)
+- `src/processing/extractor.ts` (modify)
+- `src/processing/extractor.test.ts` (modify)
 
 **Steps:**
-1. Write tests in `src/mercadopago/client.test.ts` for `searchApprovedPayments(periodo: string)` (periodo = `YYYY-MM`):
-   - Builds the correct query: `range=date_approved`, `begin_date`/`end_date` covering the periodo in `-03:00` offset (`YYYY-MM-01T00:00:00.000-03:00` to first day of next month), `sort=date_approved`, `criteria=asc`, `limit=50`, `Authorization: Bearer` header (mock global fetch).
-   - Paginates with `offset` until `paging.total` is exhausted; aggregates results.
-   - Filters to `status === 'approved'`; non-approved results from the API are dropped.
-   - Timeout: a fetch that never resolves aborts after `MP_API_TIMEOUT_MS` and returns `ok: false` (AbortController pattern from `src/utils/exchange-rate.ts:195-196`).
-   - 429 response: retries with backoff up to `MP_MAX_RETRIES`, then `ok: false`; 401 returns `ok: false` immediately (no retry) with a descriptive error.
-   - Malformed JSON body → `ok: false`, no throw.
-   - The access token NEVER appears in any log call (assert via logger mock).
-2. Run verifier (expect fail)
-3. Implement `searchApprovedPayments` in `src/mercadopago/client.ts` returning `Result<MpPayment[], Error>`. Define an `MpPayment` interface with only the consumed fields: `id`, `status`, `date_approved`, `operation_type`, `description`, `external_reference`, `currency_id`, `transaction_amount`, `transaction_details.net_received_amount`, `payer.identification.{type,number}`, `payer.email`, `card.cardholder.identification` (optional), `collector_id`, `amount_refunded`, `charges_details[]` (`name`, `type`, `amounts.{original,refunded}`, `accounts.{from,to}` — needed by Task 2 to itemize fee/tax debit rows for the accountants). Read `MP_ACCESS_TOKEN` from env in `src/config.ts` (optional — absence disables the feature, see Task 5). Follow the exchange-rate fetch pattern; log request metadata (period, page, count) at debug, never the token.
-4. Run verifier (expect pass)
+1. Write test in `extractor.test.ts`: a `factura_emitida` whose parsed data has `condicionIVAReceptor="Responsable Monotributo"` → `extractDocument` result `Factura.condicionIVAReceptor === "Responsable Monotributo"`; a Factura E case → `"Exterior"`; a `factura_recibida` does NOT carry the field.
+2. Run verifier (expect fail).
+3. Add `condicionIVAReceptor: parseResult.value.data.condicionIVAReceptor,` to the `Factura` object literal at `extractor.ts` ~363-382 (follow the existing field-copy pattern).
+4. Run verifier (expect pass).
 
 **Notes:**
-- External HTTP: timeout `MP_API_TIMEOUT_MS = 30_000`, bounded retries with exponential backoff on 429/5xx/network errors; JSON parse errors are terminal `ok:false` (no infinite retry).
-- Per-page runtime validation: results missing `id`, `date_approved`, or `transaction_amount` are skipped with a warn (AI-boundary-style defensiveness at the API boundary).
+- Single-field addition; type already has it (`types/index.ts:117`), store already writes col H. Fixes all NEW facturas; existing rows → Task 2.
 
-### Task 2: Transform MP payments into MovimientoBancario rows
-**Linear Issue:** [ADV-366](https://linear.app/lw-claude/issue/ADV-366/transform-mp-payments-into-movimientobancario-rows-gross-credit-fee)
+### Task 2: Backfill `condicionIVAReceptor` on existing facturas (hybrid)
+**Linear Issue:** [ADV-380](https://linear.app/lw-claude/issue/ADV-380)
 **Files:**
-- `src/mercadopago/transform.ts` (create)
-- `src/mercadopago/transform.test.ts` (create)
+- `src/services/condicion-backfill.ts` (create) + `src/services/condicion-backfill.test.ts` (create)
+- route file (create/modify) + test, if endpoint mechanism chosen
+- Reuse: `facturador-reader.ts`, the factura extractor, in-place update by fileId (`factura-store.ts` `findRowByFileId` + `updateRowsWithFormatting`).
 
 **Steps:**
-1. Write tests for `paymentsToMovimientos(payments: MpPayment[]): { movimientos: MovimientoBancario[]; skipped: number }`:
-   - An approved ARS payment (gross 25000, net 23350, payer CUIT `20123456786`, description "Unipersonal", id 158805080384, charges: `mercadopago_fee` 450, `tax_withholding_collector-debitos_creditos` 150, `tax_withholding_sirtac-caba` 425, `tax_withholding-caba` 625) produces a credit row `{ fecha: <approval date in AR timezone>, concepto: 'MP 158805080384 - CUIT 20123456786 - Unipersonal', credito: 25000, debito: null, saldo: null }` followed by ONE DEBIT ROW PER CHARGE with human-readable conceptos: `'MP 158805080384 - Comisión Mercado Pago'` (450), `'MP 158805080384 - Imp. Débitos y Créditos'` (150), `'MP 158805080384 - Retención SIRTAC CABA'` (425), `'MP 158805080384 - Retención IIBB CABA'` (625). The accountants need the comisión (expense with IVA) separated from each tax withholding (jurisdiction-specific IIBB/SIRTAC credits and Ley 25.413 credit).
-   - Only charges with `accounts.from === 'collector'` produce debit rows; charge amounts are net of `amounts.refunded`.
-   - Charge-name mapping: `mercadopago_fee` → `Comisión Mercado Pago`; `tax_withholding_collector-debitos_creditos` → `Imp. Débitos y Créditos`; `tax_withholding_sirtac-{jurisdiccion}` → `Retención SIRTAC {Jurisdicción}`; `tax_withholding-{jurisdiccion}` → `Retención IIBB {Jurisdicción}`; unknown names fall back to the raw name (still itemized, never dropped).
-   - **Reconciliation guard:** when `Σ(charge debits) !== transaction_amount − net_received_amount` (beyond 0.01), fall back to a single combined debit row `'MP {id} - Comisiones e impuestos Mercado Pago'` for the full difference and log a warn (never let itemization drift the running balance).
-   - No charges and `transaction_amount === net_received_amount` → credit row only, no debit rows.
-   - CUIL identification renders as `CUIL {number}` (must remain extractable by `extractCuitFromText`).
-   - Payer identification missing/empty → credit concepto omits the identity segment (no "CUIT undefined"), row still produced.
-   - **Timezone edge:** `date_approved = '2026-05-31T23:15:00.000-04:00'` (= June 1 00:15 ART) yields fecha `2026-06-01`; `'2026-05-11T13:07:57.000-04:00'` yields `2026-05-11`.
-   - Non-ARS `currency_id` → payment skipped, counted in `skipped`.
-   - `amount_refunded > 0` → row still produced, warn logged.
-   - Rows sorted by fecha ascending; deterministic order for same-day payments (by id).
-2. Run verifier (expect fail)
-3. Implement in `src/mercadopago/transform.ts`. Debit rows must NOT contain any payer identity (it would mis-feed the matcher's hard CUIT filter on the debit side). Use `Intl.DateTimeFormat` with `America/Argentina/Buenos_Aires` (or existing date utils) for the date conversion — never naive ISO substring.
-4. Run verifier (expect pass)
+1. Write test for the pure sourcing decision: socio comprobante → Facturador `Cond IVA`; non-socio → "needs parse"; only blank-H rows processed (idempotency).
+2. Run verifier (expect fail).
+3. Implement hybrid backfill: blank-H rows → Facturador `Cond IVA` when comprobante matches a socio, else re-extract from the PDF via the existing factura path; write col H in place by fileId; idempotent. Expose as an auth-guarded one-shot endpoint `POST /api/admin/backfill-condicion-iva` (`?limit` batch) or standalone script; return `{scanned, filledFromFacturador, filledFromParse, skipped, failed}`.
+4. Run verifier (expect pass).
 
 **Notes:**
-- Concepto format `MP {id} - ...` is the idempotency key (Task 3 dedupes on it) — the `MP <digits>` prefix is load-bearing; tests must pin it.
-- Identity rendered with explicit `CUIT `/`CUIL ` prefix so `extractCuitFromText` (`validation.ts:473`) hits its prefix pattern, enabling matcher tier 2.
+- Gemini calls reuse existing timeout + JSON-parse/transient retry; Sheets writes update-in-place (no duplicate appends), per-sheet lock; endpoint: auth + error sanitization (respond500/503).
+- **Migration note:** one-time correction of production data (Control de Ingresos → Facturas Emitidas, col H). No schema change (col H exists). Run once after Task 1 deploys. Socios already resolve via the builder's render-time Facturador fallback; this task mainly fixes non-socios and the Control sheet's durability.
 
-### Task 3: Idempotent MP movimientos writer (incremental month-tab appends)
-**Linear Issue:** [ADV-367](https://linear.app/lw-claude/issue/ADV-367/idempotent-mp-movimientos-writer-incremental-month-tab-appends)
+### Task 3: Deliverable render model — period sections, subtotals, 13-col projection (pure)
+**Linear Issue:** [ADV-381](https://linear.app/lw-claude/issue/ADV-381)
 **Files:**
-- `src/mercadopago/movimientos-writer.ts` (create)
-- `src/mercadopago/movimientos-writer.test.ts` (create)
+- `src/services/subdiario-deliverable.ts` (create) + `src/services/subdiario-deliverable.test.ts` (create)
+- Follow the pure-function pattern of `src/services/subdiario-builder.ts`.
 
 **Steps:**
-1. Write tests for `writeMpMovimientos(spreadsheetId: string, periodo: string, movimientos: MovimientoBancario[], saldoInicialPeriodo: number): Promise<Result<{ appended: number; skippedExisting: number }, Error>>`:
-   - Empty/new month tab: writes a SALDO INICIAL row (concepto `SALDO INICIAL`, saldoCalculado = `saldoInicialPeriodo` as CellNumber) followed by all movimiento rows with `generateMovimientoRowWithFormula` formulas; NO SALDO FINAL row.
-   - Tab already containing SALDO INICIAL + rows for ops `MP 111`, `MP 222`: calling with ops 111, 222, 333 appends ONLY op 333's rows (credit+fee), with formula row offsets continuing the existing chain (offset derived from existing row count, ADV-322 pattern in `movimientos-store.ts:75-78`).
-   - Re-running with an identical payment set appends nothing (`appended: 0`, `skippedExisting` counts them) — idempotency.
-   - Dedupe key: the `MP {id}` prefix parsed from existing concepto column values; a credit row and its fee row share the op id — both are skipped together when the op id exists.
-   - Sheets read failure → `ok: false` (never blind-append).
-   - Month tab creation reuses the same path as `movimientos-store.ts` (headers from `MOVIMIENTOS_BANCARIO_SHEET`).
-2. Run verifier (expect fail)
-3. Implement reusing primitives from `src/utils/balance-formulas.ts` and the month-tab get-or-create used by `movimientos-store.ts` (extract/share a helper if needed rather than duplicating). Read existing `{periodo}!A:I` (or `B` column) to collect existing `MP {id}` keys before appending. Append via `appendRowsWithLinks` in a single batch per call.
-4. Run verifier (expect pass)
+1. Write tests: prior-year block per year + monthly current-year blocks; labels (`PERIODO {YEAR}`; `PERIODO {MES uppercase} {YEAR}`); signed subtotal sums (NC negative); ordering (chronological blocks, builder order within); style flags `isNC` / `isFalta` / `isCancelledByNC`; 13-col projection (drop `movimiento`); blank separators; empty input → empty.
+2. Run verifier (expect fail).
+3. Implement the pure transform `SubdiarioRow[] + currentYear → RenderRow[]` (tagged `'blank'|'header'|'data'|'subtotal'`), grouping/sections/subtotals/blank-rows/flags as specified; reuse `SPANISH_MONTHS` (uppercased).
+4. Run verifier (expect pass).
 
 **Notes:**
-- Atomicity: the single `appendRowsWithLinks` call either lands or fails whole; a failure leaves prior rows intact and the next run re-derives the missing set from the sheet (idempotent recovery).
-- No SALDO FINAL row is ever written to MP tabs — period close is represented by the Resumenes row (Task 4). `isSpecialRow` already protects readers.
-- MANUAL matches on existing rows are untouched (writer only appends; never rewrites G/H/I columns).
+- notas kept verbatim (Socio prefix + export/retención/cuotas — NOT suppressed). FALTA rows kept (painted red by Task 4).
 
-### Task 4: MP resumen row for closed periods (synthetic running balance)
-**Linear Issue:** [ADV-368](https://linear.app/lw-claude/issue/ADV-368/mp-resumen-row-for-closed-periods-synthetic-running-balance)
+### Task 4: Deliverable formatted writer — sheet creation + styling
+**Linear Issue:** [ADV-382](https://linear.app/lw-claude/issue/ADV-382)
 **Files:**
-- `src/mercadopago/resumen-writer.ts` (create)
-- `src/mercadopago/resumen-writer.test.ts` (create)
+- `src/services/subdiario-deliverable-writer.ts` (create) + `src/services/subdiario-deliverable-writer.test.ts` (create)
+- Reuse `sheets.ts` (`appendRowsWithLinks`, `formatSheet`); **add** a batchUpdate helper for per-row `backgroundColor` + text `foregroundColor` (repeatCell `userEnteredFormat`).
 
 **Steps:**
-1. Write tests for `writeMpResumenIfClosed(controlSpreadsheetId, movimientosSpreadsheetId, periodo, accountInfo, today)`:
-   - Periodo `2026-05` with `today = 2026-06-12` (closed): reads the period's movimientos tab, computes `saldoFinal = saldoInicial + Σcredito − Σdebito`, `saldoInicial` taken from the previous periodo's resumen row `saldoFinal` (0 when none), and stores a `ResumenBancario` row via `storeResumenBancario` with: `banco = 'Mercado Pago'`, `numeroCuenta = {collectorId}`, `moneda = 'ARS'`, `fechaDesde`/`fechaHasta` = first/last day of periodo, `cantidadMovimientos` = transaction-row count (excluding SALDO INICIAL), `fileId` = movimientos spreadsheetId, `fileName` = `{periodo} - Resumen - Mercado Pago - {collectorId} ARS`, `confidence: 1`, `needsReview: false`.
-   - Periodo equal to the current month (open) → no-op result (`written: false`).
-   - Re-run for an already-stored periodo → `storeResumenBancario` dedupe path is honored (`written: false`, no duplicate row).
-   - Period tab with zero transaction rows → no resumen row, info log.
-   - balanceDiff computed by the existing `calculateBalanceDiff` is 0 by construction (saldos derive from the same rows) → `balanceOk = SI`.
-2. Run verifier (expect fail)
-3. Implement, reusing `storeResumenBancario` (`resumen-store.ts:173-304`) unchanged — its dedupe on `(banco, numeroCuenta, fechaDesde, fechaHasta, moneda)` provides the idempotency. Read movimientos rows via `readMovimientosForPeriod` (`movimientos-reader.ts:154-201`).
-4. Run verifier (expect pass)
+1. Write tests (mock sheets API): cell projection per render-row type; formatting requests built correctly — cream background on `isCancelledByNC` rows, red text on `isNC || isFalta` rows, bold on header/subtotal rows, hyperlink on `nro`. Follow `subdiario-writer.test.ts`.
+2. Run verifier (expect fail).
+3. Implement the writer: create/replace `Subdiario de Ventas {YEAR}` in the caller-provided folder; bold frozen 13-col header; write render rows; apply styling + `#,##0.00` / date number formats; `nro` blue hyperlink via `CellValueOrLink` (uses `facturaFileId`). Lift exact hex colors + column widths from the template by reading its cell formats via the Sheets API.
+4. Run verifier (expect pass).
 
 **Notes:**
-- The saldo columns represent cumulative net collected through MP (no money-out data exists in this API) — document this in Task 10, not a schema change.
-- `fileId` pointing at a spreadsheet makes the hyperlink resolve via Drive's file URL redirect; if `https://drive.google.com/file/d/{id}/view` does not open spreadsheets cleanly, build the docs URL — assert the chosen URL in the test.
+- Writes via `appendRowsWithLinks` (per-sheet lock) + `withQuotaRetry`. Idempotent: delete any existing same-named sheet before write.
 
-### Task 5: Sync orchestrator with processing lock and match auto-trigger
-**Linear Issue:** [ADV-369](https://linear.app/lw-claude/issue/ADV-369/mp-sync-orchestrator-with-processing-lock-and-match-auto-trigger)
+### Task 5: Entrega integration — `POST /api/delivery/build-subdiario`
+**Linear Issue:** [ADV-383](https://linear.app/lw-claude/issue/ADV-383)
 **Files:**
-- `src/mercadopago/sync.ts` (create)
-- `src/mercadopago/sync.test.ts` (create)
+- `src/routes/delivery.ts` (modify) + `src/routes/delivery.test.ts` (modify)
+- `src/services/delivery-package.ts` (add orchestration helper) + test
+- `CLAUDE.md` (modify — API ENDPOINTS table + FACTURADOR note)
 
 **Steps:**
-1. Write tests for `syncMercadopago(periods?: string[]): Promise<Result<MpSyncStats, Error | { skipped: true; reason: string }>>`:
-   - Default periods (no arg) = previous + current month (AR timezone).
-   - `MP_ACCESS_TOKEN` unset → returns skipped result with reason `'mp_disabled'`, warn logged once, no API calls.
-   - Happy path per period: client fetch → transform → get-or-create folder/workbooks (`getOrCreateBankAccountFolder` + `getOrCreateMovimientosSpreadsheet` + `getOrCreateBankAccountSpreadsheet` with `banco='Mercado Pago'`, `numeroCuenta` = `collector_id` from the first payment, `moneda='ARS'`) → `writeMpMovimientos` → `writeMpResumenIfClosed`; stats aggregate `{ periods, fetched, appended, skippedExisting, resumenesWritten }`.
-   - Period with zero payments → no folder/workbook creation, no writes, period still reported in stats.
-   - Acquires `PROCESSING_LOCK_ID` (wait `PROCESSING_LOCK_TIMEOUT_MS`, expiry `PROCESSING_LOCK_EXPIRY_MS`) — concurrent scan blocks sync and vice versa (mirror the scan/match pattern); lock not acquired in the disabled path.
-   - After a successful sync with `appended > 0`, `matchAllMovimientos` is triggered asynchronously AFTER lock release (mirror `triggerMatchAsync` in scanner.ts); no trigger when nothing was appended.
-   - A failing period (client error) marks the run `ok: false` with the error but still attempts remaining periods first (partial progress preserved; stats include per-period outcome).
-2. Run verifier (expect fail)
-3. Implement in `src/mercadopago/sync.ts`. Period strings validated as `YYYY-MM`; future periods rejected. Collector id: taken from payment `collector_id`; with zero payments no account inference is needed (skip).
-4. Run verifier (expect pass)
+1. Write tests: IDOR rejection for a folder outside `Entregas/`; happy path creates one `Subdiario de Ventas {YEAR}` file; idempotent re-run replaces it; lock contention → 503. Follow `delivery.test.ts`.
+2. Run verifier (expect fail).
+3. Implement endpoint `POST /api/delivery/build-subdiario` (`{ folderId }`, `onRequest: authMiddleware`): IDOR guard via `findByName` + `isDescendantOf` (like build-movimientos); acquire `DELIVERY_LOCK_ID`; gather full-current-year source data (`businessYear()`) reusing `syncSubdiario`'s data-gathering (extract a shared helper); `buildSubdiarioRows` → Task 3 model → Task 4 writer into the folder; delete-before-create idempotency; sanitize errors (respond500/503, raw via Pino). Update `CLAUDE.md`.
+4. Run verifier (expect pass).
 
 **Notes:**
-- Concurrency guard: the unified PROCESSING_LOCK keeps sync, scan, and match mutually exclusive (CLAUDE.md Concurrency Control). The match auto-trigger must not run under the sync's lock (deadlock — match acquires the same lock).
-- Idempotency end-to-end: re-running any period any number of times is safe (Task 3 dedupe + Task 4 resumen dedupe).
+- Concurrency via `DELIVERY_LOCK` (reads source, writes only into `Entregas/`); Google API timeout/rate-limit via `withQuotaRetry`.
 
-### Task 6: POST /api/mp-sync route
-**Linear Issue:** [ADV-370](https://linear.app/lw-claude/issue/ADV-370/post-apimp-sync-route-manual-trigger)
+### Task 6: Apps Script — add Subdiario to the Entrega flow
+**Linear Issue:** [ADV-384](https://linear.app/lw-claude/issue/ADV-384)
 **Files:**
-- `src/routes/mp-sync.ts` (create)
-- `src/routes/mp-sync.test.ts` (create)
-- `src/server.ts` (modify — register route)
+- `apps-script/src/main.ts` (modify) + test if present
 
 **Steps:**
-1. Write tests (Fastify `inject`, pattern from `src/routes/scan.test.ts`):
-   - No/bad bearer token → 401 (authMiddleware).
-   - `POST /api/mp-sync` → 200 with stats JSON from `syncMercadopago()` (mocked).
-   - `?period=2026-05` → passes `['2026-05']`; malformed (`2026-13`, `garbage`, future month) → 400 with a generic validation message.
-   - Sync returns `skipped: 'mp_disabled'` → 200 with `{ skipped: true, reason: 'mp_disabled' }` (operator-visible, not an error).
-   - Sync returns `ok: false` → 500 with a **generic** error message in the body; the raw error is logged via Fastify logger only (no internal details in the response).
-2. Run verifier (expect fail)
-3. Implement route with `{ onRequest: authMiddleware }`; register in `src/server.ts` alongside scan routes.
-4. Run verifier (expect pass)
+1. If the apps-script flow has tests, add a case asserting `build-subdiario` is called in the delivery sequence; otherwise rely on verifier (bundle compiles) + bug-hunter.
+2. Run verifier (expect fail/pass as applicable).
+3. Implement: after the build-movimientos step, call `POST /api/delivery/build-subdiario` with the same `folderId`, with a `progressToast` + summary line + failure surfacing in the final alert. Follow the existing delivery-flow helpers (`getApiUrl`, `postToDelivery`, `progressToast`).
+4. Run verifier (expect pass).
 
 **Notes:**
-- Error sanitization rule (cross-cutting sweep): response bodies carry generic messages; raw errors go to logs.
-- Lock contention semantics live inside `syncMercadopago` (it waits like scans do); the route stays thin.
-
-### Task 7: Monthly cron + boot-time catch-up
-**Linear Issue:** [ADV-371](https://linear.app/lw-claude/issue/ADV-371/mp-monthly-cron-boot-time-catch-up-scheduler)
-**Files:**
-- `src/mercadopago/scheduler.ts` (create)
-- `src/mercadopago/scheduler.test.ts` (create)
-- `src/server.ts` (modify — init/stop hooks)
-
-**Steps:**
-1. Write tests for `initMpScheduler()` / `stopMpScheduler()`:
-   - Registers a `node-cron` job with expression `0 6 1 * *` (06:00 on the 1st, server time) whose handler calls `syncMercadopago()` with default periods (previous + current month) — assert via cron mock (pattern: watch-manager tests).
-   - `MP_ACCESS_TOKEN` unset → no cron registered, info log.
-   - Boot catch-up: `initMpScheduler` fires one immediate async `syncMercadopago()` (idempotent, covers missed cron runs across Railway deploys); a failure in the boot sync is logged and does NOT crash boot (`.catch` + logError, mirroring the signal-handler pattern in `src/server.ts`).
-   - `stopMpScheduler` destroys the cron task (graceful-shutdown symmetry with watch-manager).
-2. Run verifier (expect fail)
-3. Implement; wire `initMpScheduler` into server startup after watch-manager init and `stopMpScheduler` into the shutdown handler in `src/server.ts`.
-4. Run verifier (expect pass)
-
-**Notes:**
-- The boot catch-up plus the monthly cron means every month is synced at least once shortly after it closes even if the instance was down on the 1st. All runs are idempotent.
-- Boot sync runs after the scanner's startup recovery; the shared PROCESSING_LOCK serializes them naturally.
-
-### Task 8: Matcher CUIT↔DNI equivalence in identity comparisons
-**Linear Issue:** [ADV-372](https://linear.app/lw-claude/issue/ADV-372/matcher-cuitdni-equivalence-in-identity-comparisons)
-**Files:**
-- `src/bank/matcher.ts` (modify)
-- `src/bank/matcher.test.ts` (modify)
-
-**Steps:**
-1. Write tests:
-   - Credit movement with concepto `MP 123 - CUIT 20123456786 - Plan X` vs a factura emitida whose `cuitReceptor` is the embedded DNI `12345678` → tier 2 identity match, HIGH confidence.
-   - Reverse direction (factura stores full CUIT, concepto carries a CUIL embedding the same DNI) → matches.
-   - Distinct DNIs → hard filter still excludes (no false positives); 11-digit vs 11-digit comparison remains exact (two different CUITs sharing no DNI relation never match).
-   - Debit-side identity comparisons get the same equivalence (pago enviado `cuitBeneficiario` as DNI).
-2. Run verifier (expect fail)
-3. Replace strict `===` identity comparisons in the hard CUIT filter and tier-2 checks of `matchMovement`/`matchCreditMovement` (`src/bank/matcher.ts`, comparisons like `:391`) with `cuitOrDniMatch` from `src/utils/validation.ts:207-232`. Audit all concepto-CUIT-vs-document-CUIT comparison sites in matcher.ts and apply uniformly.
-4. Run verifier (expect pass)
-
-**Notes:**
-- `cuitOrDniMatch` already exists and is tested — this task is wiring, not new identity logic.
-- Benefits all consumidor-final matching (bank transfers too), not just MP.
-
-### Task 9: MP-specific forward factura date window
-**Linear Issue:** [ADV-373](https://linear.app/lw-claude/issue/ADV-373/matcher-mp-specific-forward-factura-date-window-25-days)
-**Files:**
-- `src/bank/matcher.ts` (modify)
-- `src/bank/match-movimientos.ts` (modify — thread account context)
-- `src/config.ts` (modify — `MP_FACTURA_DATE_RANGE_AFTER_DAYS = 25`, `MERCADO_PAGO_BANK_NAME = 'Mercado Pago'` constants)
-- `src/bank/matcher.test.ts`, `src/bank/match-movimientos.test.ts` (modify)
-
-**Steps:**
-1. Write tests:
-   - An MP-account credit movement dated 2026-05-25 with CUIT in concepto matches a factura emitida dated 2026-06-11 (17 days later, CUIT+amount match) at HIGH confidence.
-   - The same movement on a regular bank account does NOT match that factura (existing windows unchanged — regression guard).
-   - MP window upper bound enforced: factura 26+ days after the movement does not match even for MP.
-   - The backward window (factura up to 30 days before movement) is unchanged for MP.
-2. Run verifier (expect fail)
-3. Implement: `discoverMovimientosSpreadsheets`/`matchAllMovimientos` already know the bank-account folder name per workbook — derive `isMercadoPago = folderName.startsWith(MERCADO_PAGO_BANK_NAME)` and thread it to the matcher per movement batch (constructor option or per-call flag on `BankMovementMatcher`). In the credit-path candidate windows and date-proximity confidence ranges, extend the forward bound to `MP_FACTURA_DATE_RANGE_AFTER_DAYS` when the flag is set; tier/confidence semantics otherwise unchanged.
-4. Run verifier (expect pass)
-
-**Notes:**
-- Root cause: MP subscriptions charge on the 25th; facturas are emitted on the ~11th of the following month (verified against production data) — payment precedes its factura by ~17 days.
-- Depends on Task 8 (same files/comparison sites).
-
-### Task 10: Documentation updates
-**Linear Issue:** [ADV-374](https://linear.app/lw-claude/issue/ADV-374/mp-ingestion-documentation-claudemd-spreadsheet-formatmd-envexample)
-**Files:**
-- `CLAUDE.md` (modify)
-- `SPREADSHEET_FORMAT.md` (modify)
-- `.env.example` (modify)
-
-**Steps:**
-1. CLAUDE.md: add `MP_ACCESS_TOKEN` to ENV VARS (optional; feature disabled when unset; must never be logged); add `POST /api/mp-sync` to API ENDPOINTS; add `src/mercadopago/` to STRUCTURE; add a MATCHING note (CUIT↔DNI equivalence; MP forward window constant and why); extend Concurrency Control to mention mp-sync sharing the PROCESSING_LOCK.
-2. SPREADSHEET_FORMAT.md: document the MP account convention — folder `Mercado Pago {collectorId} ARS`, movimientos tabs use the standard bancario 9-col schema with no SALDO FINAL row, concepto format `MP {operationId} - ...`, resumen saldos are synthetic running net-collected (no money-out data).
-3. `.env.example`: add `MP_ACCESS_TOKEN=` with a comment.
-4. Run verifier full mode (docs-only change; regression gate).
-
-**Notes:**
-- No code; no TDD cycle (docs-only, like dependency-bump tasks). Keep KNOWN ACCEPTED PATTERNS untouched.
-- Also document the Entrega behavior for MP: no PDF is copied (Task 11); the per-account-month movimientos files carry the data.
-
-### Task 11: Delivery copy-pdfs skips non-PDF resumen fileIds
-**Linear Issue:** [ADV-375](https://linear.app/lw-claude/issue/ADV-375/delivery-copy-pdfs-skip-non-pdf-resumen-fileids-mp-spreadsheet-backed)
-**Files:**
-- `src/services/delivery-package.ts` (modify)
-- `src/services/delivery-package.test.ts` (modify)
-- `src/routes/delivery.ts` (modify — surface `skippedNonPdf` in response)
-
-**Steps:**
-1. Write tests: an enumerated resumen item whose file is a Google Sheet (MP case — `fileId` points at the movimientos spreadsheet) is NOT copied by `copyPdfsToDelivery` (`delivery-package.ts:661-691`), is counted in a new `skippedNonPdf` result field, and produces an info log — not a `failed` entry; PDF items copy exactly as before; the copy-pdfs route response includes the new count.
-2. Run verifier (expect fail)
-3. Implement: carry/lookup the file mimeType during enumeration (`enumerateResumenes`) or before copy; skip non-`application/pdf` items. Without this, the Entrega would copy the ENTIRE MP movimientos workbook (all months) into the delivery folder under the resumen's name.
-4. Run verifier (expect pass)
-
-**Notes:**
-- The MP account still reaches the accountants through `buildMovimientosFiles` (per-account-month files with fecha, concepto incl. payer CUIT + op id, debito/credito, matched detalle) — verified the delivery discovery enumerates `{YYYY}/Bancos/` folders generically, so `Mercado Pago {collectorId} ARS` is auto-included.
-- Independent of Tasks 1-9 (different files); conceptually pairs with Task 4's fileId convention.
+- Bundle auto-pushes to the Apps Script project on server boot (no manual deploy).
 
 ## Post-Implementation Checklist
-1. Run `bug-hunter` agent — Review changes for bugs
-2. Run `verifier` agent — Verify all tests pass and zero warnings
+1. Run `bug-hunter` agent — Review changes for bugs.
+2. Run `verifier` agent — Verify all tests pass and zero warnings.
 
 ---
 
 ## Plan Summary
 
-**Objective:** Ingest Mercadopago collections via the payments API as a bank-account-style Movimientos workbook with monthly resumen rows, automatically matched to facturas emitidas — replacing a nonexistent MP "resumen bancario" PDF with an idempotent monthly server process plus a manual trigger endpoint.
-**Linear Issues:** ADV-365, ADV-366, ADV-367, ADV-368, ADV-369, ADV-370, ADV-371, ADV-372, ADV-373, ADV-374, ADV-375
-**Approach:** New `src/mercadopago/` module (client → transform → idempotent writers → orchestrator) reusing the existing bank folder/workbook/resumen primitives, the unified PROCESSING_LOCK, and the auto-match trigger; two surgical matcher upgrades (CUIT↔DNI equivalence via the existing `cuitOrDniMatch`, MP-specific +25-day forward factura window) make matching deterministic at tier 2/HIGH — verified 23/23 against production May data.
-**Scope:** 11 tasks, ~17 files (9 new), ~50 test scenarios.
-**Key Decisions:** API-based ingestion (no XLSX parsing — the collection report is manual-only, the settlement report lacks payer identity); deductions itemized as one identity-free debit row per MP charge (comisión, Imp. Débitos y Créditos, SIRTAC/IIBB withholdings per jurisdiction — the accountants need each tax credit separated) with a reconciliation-guard fallback to a combined row; credits stay at gross for matching; `MP {operationId}` concepto prefix as the idempotency key; resumen rows only for closed periods with synthetic running-net saldos (balanceOk = SI by construction); monthly cron (1st, 06:00) + idempotent boot catch-up instead of state-tracking missed-run logic; Entrega copies no PDF for MP (skip non-PDF resumen fileIds) — the per-account-month movimientos files carry the data.
-**Risks:** MP could mask payer PII in the future (mitigation documented: subscriptions' `external_reference` + member registry; current data verified clean); fee debit rows could occasionally amount-match unrelated documents (low impact — debit side carries no identity, tier 5 LOW at worst); `date_approved` GMT-4 vs ART date-bucketing handled explicitly in transform tests.
+**Objective:** Generate the full, up-to-date Subdiario de Ventas as part of every Entrega, matching the accountants' template in data and design.
+**Linear Issues:** ADV-379, ADV-380, ADV-381, ADV-382, ADV-383, ADV-384
+**Approach:** Fix the extractor bug that blanks `condicion` and backfill existing rows (hybrid Facturador → re-parse); add a pure period-sectioned render model + a formatted writer that match the template (cream = NC-cancelled, red = NC/FALTA, blue `nro` hyperlinks, per-section subtotals); expose it via `POST /api/delivery/build-subdiario` writing into `Entregas/{period}/` and wire it into the Apps Script Entrega flow.
+**Scope:** 6 tasks, ~13 files, 6 new/updated test suites.
+**Key Decisions:** Deliverable is a separate `Subdiario de Ventas {YEAR}` per Entrega (formatted); the internal root `Subdiario de Ventas` stays flat. `FALTA` gap rows are kept and painted red (missing-factura signal). notas keep the Socio prefix. `categoria`/socio-`condicion` come from the now-configured Facturador.
+**Risks:** Backfill re-extracts non-socio PDFs via Gemini (cost/time — batch it); exact template hex colors must be lifted programmatically for design fidelity; `formatSheet` needs extending for per-row background/text colors.
 
 ---
 
 ## Iteration 1
 
-**Implemented:** 2026-06-12
-**Method:** Agent team (4 workers, worktree-isolated)
+**Implemented:** 2026-06-16
+**Method:** Agent team (3 workers, worktree-isolated)
 
 ### Tasks Completed This Iteration
-- Task 1: Mercadopago API client (ADV-365) — `src/mercadopago/client.ts`, pagination/timeout/429 backoff, token never logged, 18 tests (worker-1)
-- Task 2: Transform MP payments → MovimientoBancario (ADV-366) — gross credit + per-charge debit rows, reconciliation guard, AR-timezone dates, 19 tests (worker-1)
-- Task 3: Idempotent MP movimientos writer (ADV-367) — incremental month-tab appends, `MP {id}` dedupe, no SALDO FINAL, 17 tests (worker-2)
-- Task 4: MP resumen row for closed periods (ADV-368) — synthetic running balance via `storeResumenBancario`, 21 tests (worker-2)
-- Task 5: Sync orchestrator (ADV-369) — PROCESSING_LOCK, match auto-trigger after lock release, partial-failure handling, 32 tests (worker-3)
-- Task 6: POST /api/mp-sync route (ADV-370) — auth, period validation, generic error bodies, 18 tests (worker-3)
-- Task 7: Monthly cron + boot catch-up (ADV-371) — `0 6 1 * *`, boot sync never crashes boot, 10 tests (worker-3)
-- Task 8: Matcher CUIT↔DNI equivalence (ADV-372) — `cuitOrDniMatch` at all 10 identity comparison sites; also fixed `buildMatchQuality` tier evaluation for DNI-CUIT matches (worker-4)
-- Task 9: MP-specific forward factura window (ADV-373) — +25 days for MP accounts, threaded via `isMercadoPago` flag (worker-4)
-- Task 10: Documentation (ADV-374) — CLAUDE.md, SPREADSHEET_FORMAT.md, .env.example, MIGRATIONS.md (lead, post-merge)
-- Task 11: Delivery copy-pdfs skips non-PDF resumen fileIds (ADV-375) — `skippedNonPdf` count surfaced in route response (worker-4)
+- Task 1: Fix extractor dropping `condicionIVAReceptor` — one-line field copy in the Factura object literal + 3 tests (factura_emitida → "Responsable Monotributo", Factura E → "Exterior", factura_recibida → undefined) (worker-1, ADV-379)
+- Task 2: Hybrid `condicionIVAReceptor` backfill — `condicion-backfill.ts` (pure `decideSourcing` + `backfillCondicionIva` orchestrator) + `POST /api/admin/backfill-condicion-iva` (auth, `?limit`, idempotent, in-place by fileId; socios→Facturador, non-socios→re-extract); returns `{scanned, filledFromFacturador, filledFromParse, skipped, failed}` (worker-1, ADV-380)
+- Task 3: Pure deliverable render model `buildSubdiarioDeliverable(rows, currentYear) → DeliverableRenderRow[]` — period sections (`PERIODO {YEAR}` carryover + `PERIODO {MES} {YEAR}` monthly), signed subtotals, 13-col projection, style flags (worker-2, ADV-381)
+- Task 4: Formatted writer `writeSubdiarioDeliverable` — creates/replaces `Subdiario de Ventas {YEAR}`, cream/red styling, blue `nro` hyperlinks; added exported `applyRowStyles` + `RowStyleSpec` helper to `sheets.ts` (worker-2, ADV-382)
+- Task 5: `POST /api/delivery/build-subdiario` — IDOR guard, `DELIVERY_LOCK`, extracted shared `gatherSubdiarioInput` from `syncSubdiario`, `buildSubdiarioDeliverableFile` orchestrator (worker-3, ADV-383)
+- Task 6: Apps Script Entrega wiring — `build-subdiario` step after `build-movimientos` in `triggerEnvioContadores` with progress toast + summary line (worker-3, ADV-384)
 
 ### Files Modified
-- `src/mercadopago/client.ts`, `transform.ts`, `movimientos-writer.ts`, `resumen-writer.ts`, `sync.ts`, `scheduler.ts` (+ colocated tests) — new module
-- `src/routes/mp-sync.ts` (+ test) — new route; registered in `src/server.ts` with scheduler init/stop hooks
-- `src/config.ts` — MP_API_BASE_URL/TIMEOUT/RETRIES, getMpAccessToken(), MP_ACCESS_TOKEN, MERCADO_PAGO_BANK_NAME, MP_FACTURA_DATE_RANGE_AFTER_DAYS
-- `src/types/index.ts` — `MovimientoBancario.saldo: number | null` (+ `src/gemini/parser.ts` signature)
-- `src/bank/matcher.ts`, `src/bank/match-movimientos.ts` — CUIT↔DNI equivalence, MP forward window, `isMercadoPagoAccount` helper
-- `src/services/delivery-package.ts`, `src/routes/delivery.ts` — non-PDF skip
-- `CLAUDE.md`, `SPREADSHEET_FORMAT.md`, `.env.example`, `MIGRATIONS.md` — docs
+- `src/processing/extractor.ts` / `.test.ts` — propagate `condicionIVAReceptor`
+- `src/services/condicion-backfill.ts` / `.test.ts` — new hybrid backfill
+- `src/routes/backfill.ts`, `src/server.ts` — new admin endpoint + registration
+- `src/services/subdiario-deliverable.ts` / `.test.ts` — new render model
+- `src/services/subdiario-deliverable-writer.ts` / `.test.ts` — new formatted writer
+- `src/services/sheets.ts` — new `applyRowStyles` + `RowStyleSpec`
+- `src/routes/delivery.ts` / `.test.ts` — new `build-subdiario` endpoint
+- `src/services/delivery-package.ts` / `.test.ts` — `buildSubdiarioDeliverableFile`
+- `src/services/subdiario-writer.ts` / `.test.ts` — extracted `gatherSubdiarioInput`
+- `apps-script/src/main.ts` — Entrega flow build-subdiario step
+- `CLAUDE.md` — API ENDPOINTS table
 
 ### Linear Updates
-- ADV-365…ADV-375 (all 11): Todo → In Progress → Review
+- ADV-379: Todo → In Progress → Review
+- ADV-380: Todo → In Progress → Review
+- ADV-381: Todo → In Progress → Review
+- ADV-382: Todo → In Progress → Review
+- ADV-383: Todo → In Progress → Review
+- ADV-384: Todo → In Progress → Review
 
 ### Pre-commit Verification
-- bug-hunter: Found 3 bugs (1 HIGH: `isMercadoPago` always false — discovery map keys are `{year}:{folderName}` so `startsWith` never matched; extracted tested `isMercadoPagoAccount` helper. 2 LOW: non-ARS `skipped` count silently discarded → warn added; lock-failure log conflated timeout with callback throw → messages split). All fixed with TDD.
-- verifier (full): 2,924 tests pass (82 files), lint clean, build zero warnings.
+- bug-hunter: Found 3 bugs, all fixed before proceeding:
+  1. [HIGH] `writeSubdiarioDeliverable` idempotency broke when the target sheet was the workbook's only sheet (delete-the-only-sheet → API error on every re-run). Fixed: create a temp sheet first (name keyed on the old sheetId) → delete old → rename, so the workbook never reaches zero sheets. Added a single-sheet regression test.
+  2. [MEDIUM] Double ERROR log on the `syncSubdiario` read-failure path (both `gatherSubdiarioInput` and `syncSubdiario` logged). Fixed: `gatherSubdiarioInput` is the sole owner of read-failure logging (now takes an optional `correlationId`); `syncSubdiario` no longer re-logs.
+  3. [MEDIUM] Apps Script "N comprobantes" counted structural render rows (header/subtotal/blank), not invoices. Fixed: added `dataRowsWritten` (count of `type==='data'`) to `WriteDeliverableResult`, threaded through the route, and used it in the summary.
+- verifier (full): 3026 tests pass, zero lint warnings, clean `tsc` build + Apps Script bundle (10.4kb, no warnings)
 
 ### Work Partition
-- Worker 1: Tasks 1-2 (MP API domain — client, transform)
-- Worker 2: Tasks 3-4 (MP sheet writers)
-- Worker 3: Tasks 5-7 (orchestration — sync, route, scheduler; built against stub interfaces)
-- Worker 4: Tasks 8, 9, 11 (matcher upgrades + delivery skip)
-- Lead: Task 10 (docs, post-merge)
+- Worker 1: Tasks 1–2 (condición domain — extractor fix + backfill)
+- Worker 2: Tasks 3–4 (deliverable domain — pure render model + formatted writer)
+- Worker 3: Tasks 5–6 (integration domain — endpoint + Apps Script wiring)
 
 ### Merge Summary
-- Worker 1: fast-forward (no conflicts)
-- Worker 2: clean merge
-- Worker 3: 4 add/add stub conflicts (client/transform/movimientos-writer/resumen-writer) resolved keeping real implementations; 1 integration fix (`writeMpResumenIfClosed` takes a `YYYY-MM-DD` string — sync now passes `businessDateString()`); config.ts MP_ACCESS_TOKEN const reconciled alongside getMpAccessToken()
-- Worker 4: clean merge
+- Worker 2 merged first (foundation: services worker-3 imports) — no conflicts
+- Worker 1 merged — no conflicts (disjoint files); typecheck clean
+- Worker 3 merged — no conflicts (disjoint files); the 2 expected "module not found" errors against worker-2's modules resolved once worker-2 was present; typecheck clean
+- No file overlapped across workers, so all three merges were conflict-free
+
+### Known Degradation (for review / fine-tuning)
+- Subagents have no MCP access, so the writer could not lift the template's exact hex colors. The palette is approximated with named constants in `subdiario-deliverable-writer.ts`: `CREAM_BG` ~#FFF2CC, `RED_FG` #FF0000, link blue (Sheets default). Visual fidelity vs. the template (`12QCAReVk4vjOsZ1pWX6-h3x-wEsqbcYrTZ4qlz-w_No`) should be spot-checked against a real render and the constants tuned if needed.
 
 ### Continuation Status
 All tasks completed.
 
-### Review Findings
+---
 
-Summary: 3 issue(s) found, fixed inline (Team: security, reliability, quality reviewers; 25+ changed files)
-- FIXED INLINE: 3 issue(s) — verified via TDD + bug-hunter
+## Plan Adjustment (2026-06-16)
 
-**Issues fixed inline:**
-- [MEDIUM] TYPE: `isValidMpPayment` guard did not validate `transaction_details.net_received_amount`/`charges_details` — `transform.ts:109-110` would throw TypeError on a malformed API payment (`src/mercadopago/client.ts:115`) — guard extended; per-charge `amounts`/`accounts` made optional with optional chaining + reconciliation-guard fallback; 4 new tests (ADV-376)
-- [MEDIUM] LOGGING: unexpected-error catch blocks logged at `warn` instead of `error` (`src/mercadopago/movimientos-writer.ts:179`, `src/mercadopago/resumen-writer.ts:193`) — switched to `logError`; catch-path tests added in both files + null-saldo happy-path test (ADV-377)
-- [LOW] TIMEOUT: `clearTimeout` ran before `response.json()` — body read had no timeout protection (`src/mercadopago/client.ts:141`) — moved to `finally` so the AbortController covers the body read; hung-body test added (ADV-378)
+**ADV-380 — backfill is a one-time data-op, not shipped code.** The Iteration 1
+implementation over-built the backfill as a permanent endpoint + service + test
+suite. Per user direction, that code was removed (no value in keeping run-once
+logic in the codebase forever):
+- Deleted `src/routes/backfill.ts`, `src/services/condicion-backfill.ts`,
+  `src/services/condicion-backfill.test.ts`, and the `backfillRoutes`
+  import/registration in `src/server.ts`.
+- The ADV-379 extractor fix **stays** — that is the durable fix that prevents the
+  bug going forward (the deploy is only for new facturas; no deploy is needed for
+  the data correction itself).
+- The actual production correction of the blank `condicionIVAReceptor` (col H) in
+  Control de Ingresos → Facturas Emitidas is performed **once** as a manual data
+  operation via the `data-ops` skill (the only context where the gated
+  `gsheets_update` write tool is pre-approved). Sourcing: socios → Facturador
+  `Cond IVA`; non-socios → re-extract from the PDF.
 
-**Discarded findings (not bugs):**
-- [DISCARDED] CONVENTION: `isValidPeriodParam` in `routes/mp-sync.ts` duplicates `isValidPeriod` in `sync.ts` — logic is identical and `syncMercadopago` re-validates periods itself (line 153), so the route copy cannot drift into a correctness issue; duplication debt, not a bug
-- [DISCARDED] TYPE: "undocumented" cast at `sync.ts:322` — false positive: an explanatory comment exists directly above the cast ("withLock wraps our callback return in an outer ok:true")
-- [DISCARDED] CONVENTION: `facturaDateRangeBefore` name at `matcher.ts:719` — follows the pre-existing `FACTURA_DATE_RANGE_BEFORE` constant naming and `isWithinDays` parameter position; behavior verified correct by the ADV-373 test; style-only
-- [DISCARDED] TEST: `makeMpOp` helper uses non-null saldo while production emits `saldo: null` — the null branch is an explicit type-enforced ternary; coverage added anyway via a new null-saldo test during the inline fixes, but the original tests were not invalid
+Post-removal verification: 3012 tests pass, zero lint warnings, clean build.
+
+**ADV-383 — Subdiario endpoint kept as-is.** Confirmed: the Entrega flow is a
+chain of server endpoints invoked by the Apps Script menu (`plan` → `copy-pdfs`
+→ `build-movimientos` → `build-subdiario`). `build-subdiario` is the integrated
+4th step (wired in ADV-384), not a separate user operation. No change.
+
+---
+
+## Iteration 1 — Review Findings
+
+**Reviewed:** 2026-06-16 (3 parallel domain reviewers — security, reliability, quality; team mode unavailable, run as standalone subagents)
+**Scope:** 14 changed code files vs `main`.
+
+### Issues found and FIXED INLINE (3, all S-size — TDD + bug-hunter clean)
+1. **[medium] [timeout]** `src/services/sheets.ts` — `applyRowStyles` `batchUpdate` lacked `{ timeout: GOOGLE_API_TIMEOUT_MS }`; on the `build-subdiario` path it runs holding `DELIVERY_LOCK` + an open HTTP connection, so a stalled call could hang without `withQuotaRetry` retrying. Added the timeout (matches the hot append paths). → **ADV-385**
+2. **[low] [test]** `src/routes/delivery.test.ts` — the "gatherSubdiarioInput fails → 500" test did not assert the build was skipped. Added `expect(mockBuildSubdiarioDeliverableFile).not.toHaveBeenCalled()`. → **ADV-386**
+3. **[low] [test]** `src/services/subdiario-deliverable-writer.test.ts` — the "existing workbook, no matching sheet" idempotency `else` branch had zero coverage. Added a test for the direct-create path. → **ADV-387**
+
+### DISCARDED (not bugs — with reasoning)
+- **[medium] [type]** flat `DeliverableRenderRow` with optional fields + `renderRow.row!` (writer:104) — the sole producer `buildBlock` always sets `row` on `data` rows, so the assertion cannot throw. A discriminated-union refactor would be a type-design improvement, not a bug fix.
+- **[low] [edge-case]** `subdiario-deliverable.ts` future-year (`year > currentYear`) routed into current-year monthly blocks — impossible in context: `currentYear = businessYear()` (current Argentina year) and emitted facturas cannot be future-dated, so no row's year can exceed it.
+- **[low] [security]** `facturaFileId` not char-whitelisted in the `CellLink` URL — not exploitable: `facturaFileId` is a system-generated Drive ID read from an internal spreadsheet (not user input), and `CellLink.url` is a structured hyperlink (not a formula), so there is no injection vector. The suggested `createDriveHyperlink` helper returns a `=HYPERLINK()` formula string, type-incompatible with the structured `CellLink` path.
+- **[low] [convention]** `let rows;` (delivery-package.ts:1009) — TypeScript narrows it correctly via control-flow (catch always returns); not enforced by CLAUDE.md. Style-only.
+- **[low] [convention]** inline return-type object on `deriveFlags` (subdiario-deliverable.ts:78) — an inline function return annotation is idiomatic; the "interface over type" rule targets shape aliases. Style-only, zero correctness impact.
+- **[low] [test]** untested `formatSheet`/`applyRowStyles` error returns — one-line guarded passthroughs (`if (!result.ok) return result`), correct by inspection; near-zero test value.
+- **[low] [docs]** `WriteDeliverableResult.rowsWritten` JSDoc wording / off-by-one vs actual sheet rows — the value is informational only (logged + returned, never used for logic); a comment-clarity nit, no behavioral impact.
 
 ### Linear Updates
-- ADV-365…ADV-375 (all 11): Review → Merge (original tasks)
-- ADV-376: Created in Merge (Fix: MP payment runtime guard — fixed inline)
-- ADV-377: Created in Merge (Fix: writer catch-block log level — fixed inline)
-- ADV-378: Created in Merge (Fix: body-read timeout coverage — fixed inline)
+- ADV-379, ADV-381, ADV-382, ADV-383, ADV-384: Review → Merge
+- ADV-380: Review → **Todo** (backfill descoped to a one-time `/data-ops` correction; no shipped code closes it — see comment on the issue and the Plan Adjustment above)
+- ADV-385, ADV-386, ADV-387: created in **Merge** (inline-fix audit trail, Bug label)
 
 ### Inline Fix Verification
-- Unit tests: 2,932 pass (82 files), lint clean, build zero warnings
-- Bug-hunter: no new issues
+- New/changed tests: filtered suites green (writer 26 ✓, delivery 47 ✓)
+- bug-hunter on the 3 inline changes: **no bugs found**
+- verifier (full): **3013 tests pass**, zero lint warnings, clean `tsc` build + Apps Script bundle (10.4kb)
 
 <!-- REVIEW COMPLETE -->
 
@@ -376,4 +257,4 @@ Summary: 3 issue(s) found, fixed inline (Team: security, reliability, quality re
 
 ## Status: COMPLETE
 
-All tasks implemented and reviewed successfully. All Linear issues moved to Merge.
+All tasks implemented and reviewed successfully. Shipped code (ADV-379, ADV-381..384) moved to Merge; 3 inline review-fixes (ADV-385..387) created in Merge. ADV-380's backfill remains as a pending one-time `/data-ops` correction (Todo) — not closed by this PR.
