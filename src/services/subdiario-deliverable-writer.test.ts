@@ -197,6 +197,43 @@ describe('writeSubdiarioDeliverable', () => {
     expect(result.ok).toBe(true);
   });
 
+  it('when a stale temp sheet from a prior interrupted run exists: deletes it before recreating (retry-safe)', async () => {
+    // A prior run created the temp sheet but died before delete/rename, leaving
+    // `__subdiario_tmp_${oldSheetId}` behind alongside the still-present target.
+    // The temp name is deterministic, so a naive createSheet would fail with a
+    // duplicate-title error and permanently stall the retry. The writer must
+    // delete the stale temp first.
+    const EXISTING_SS_ID = 'existing-ss-id';
+    const EXISTING_SHEET_ID = 77;
+    const STALE_TMP_SHEET_ID = 55;
+
+    vi.mocked(drive.findByName).mockResolvedValue({
+      ok: true,
+      value: { id: EXISTING_SS_ID, name: SPREADSHEET_NAME, mimeType: 'application/vnd.google-apps.spreadsheet' },
+    });
+    vi.mocked(sheets.getSheetMetadata).mockResolvedValue({
+      ok: true,
+      value: [
+        { title: SHEET_NAME, sheetId: EXISTING_SHEET_ID, index: 0 },
+        { title: `__subdiario_tmp_${EXISTING_SHEET_ID}`, sheetId: STALE_TMP_SHEET_ID, index: 1 },
+      ],
+    });
+    vi.mocked(sheets.createSheet).mockResolvedValue({ ok: true, value: 99 });
+
+    const result = await writeSubdiarioDeliverable(FOLDER_ID, YEAR, []);
+
+    // Stale temp deleted BEFORE the fresh temp is created, so createSheet cannot collide.
+    const staleDeleteOrder = vi.mocked(sheets.deleteSheet).mock.invocationCallOrder[0];
+    const createOrder = vi.mocked(sheets.createSheet).mock.invocationCallOrder[0];
+    expect(staleDeleteOrder).toBeLessThan(createOrder);
+    expect(sheets.deleteSheet).toHaveBeenNthCalledWith(1, EXISTING_SS_ID, STALE_TMP_SHEET_ID);
+    expect(sheets.createSheet).toHaveBeenCalledWith(EXISTING_SS_ID, `__subdiario_tmp_${EXISTING_SHEET_ID}`);
+    // Old target still deleted, fresh sheet still renamed.
+    expect(sheets.deleteSheet).toHaveBeenNthCalledWith(2, EXISTING_SS_ID, EXISTING_SHEET_ID);
+    expect(sheets.renameSheet).toHaveBeenCalledWith(EXISTING_SS_ID, 99, SHEET_NAME);
+    expect(result.ok).toBe(true);
+  });
+
   it('when existing spreadsheet found but has no matching sheet: creates the target sheet directly (no temp/delete)', async () => {
     const EXISTING_SS_ID = 'existing-ss-id';
 

@@ -260,6 +260,25 @@ export async function writeSubdiarioDeliverable(
       // old sheet, THEN rename the fresh one. The workbook never reaches zero
       // sheets, so the delete is always legal.
       const tmpName = `__subdiario_tmp_${existingSheet.sheetId}`;
+
+      // Retry-safety: the temp name is deterministic (keyed on the old sheetId),
+      // so a prior run that created the temp sheet but died before the delete/
+      // rename leaves a stale `tmpName` behind. createSheet would then fail with
+      // a duplicate-title error, permanently stalling the otherwise-idempotent
+      // retry. Delete any stale temp first — the old target sheet still exists
+      // here, so the workbook never hits zero sheets and the delete is legal.
+      const staleTmp = metaResult.value.find(s => s.title === tmpName);
+      if (staleTmp) {
+        debug('writeSubdiarioDeliverable: deleting stale temp sheet from prior run', {
+          module: 'subdiario-deliverable-writer',
+          phase: 'idempotency',
+          spreadsheetId,
+          staleTmpSheetId: staleTmp.sheetId,
+        });
+        const cleanupResult = await deleteSheet(spreadsheetId, staleTmp.sheetId);
+        if (!cleanupResult.ok) return cleanupResult;
+      }
+
       const createResult = await createSheet(spreadsheetId, tmpName);
       if (!createResult.ok) return createResult;
       targetSheetId = createResult.value;
