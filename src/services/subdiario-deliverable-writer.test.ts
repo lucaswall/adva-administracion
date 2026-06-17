@@ -263,6 +263,43 @@ describe('writeSubdiarioDeliverable', () => {
     }
   });
 
+  it('when target sheet is missing but an orphan temp sheet remains (interrupted rename): creates the target, THEN sweeps the orphan', async () => {
+    // A prior replacement deleted the old target but died before renameSheet,
+    // leaving `__subdiario_tmp_<oldId>` behind with no sheet named SHEET_NAME.
+    // The retry lands in the direct-create path. The orphan's name is keyed on
+    // the now-gone old sheetId, so the same-name cleanup never reaches it — it
+    // would stay visible in the accountant-facing workbook forever. The writer
+    // must sweep it. Orphan-only workbook: the target MUST be created before the
+    // orphan is deleted, or the workbook would momentarily hit zero sheets.
+    const EXISTING_SS_ID = 'existing-ss-id';
+    const ORPHAN_TMP_SHEET_ID = 55;
+
+    vi.mocked(drive.findByName).mockResolvedValue({
+      ok: true,
+      value: { id: EXISTING_SS_ID, name: SPREADSHEET_NAME, mimeType: 'application/vnd.google-apps.spreadsheet' },
+    });
+    vi.mocked(sheets.getSheetMetadata).mockResolvedValue({
+      ok: true,
+      value: [{ title: '__subdiario_tmp_77', sheetId: ORPHAN_TMP_SHEET_ID, index: 0 }],
+    });
+    vi.mocked(sheets.createSheet).mockResolvedValue({ ok: true, value: 99 });
+
+    const result = await writeSubdiarioDeliverable(FOLDER_ID, YEAR, []);
+
+    // Direct create of the target, no temp name, no rename.
+    expect(sheets.createSheet).toHaveBeenCalledWith(EXISTING_SS_ID, SHEET_NAME);
+    expect(sheets.renameSheet).not.toHaveBeenCalled();
+    // Orphan swept — but only AFTER the target was created (never zero sheets).
+    const createOrder = vi.mocked(sheets.createSheet).mock.invocationCallOrder[0];
+    const deleteOrder = vi.mocked(sheets.deleteSheet).mock.invocationCallOrder[0];
+    expect(createOrder).toBeLessThan(deleteOrder);
+    expect(sheets.deleteSheet).toHaveBeenCalledWith(EXISTING_SS_ID, ORPHAN_TMP_SHEET_ID);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.sheetId).toBe(99);
+    }
+  });
+
   it('writes the 13-column header row as the first row', async () => {
     await writeSubdiarioDeliverable(FOLDER_ID, YEAR, []);
 

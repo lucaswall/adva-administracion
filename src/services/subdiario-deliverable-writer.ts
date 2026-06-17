@@ -26,6 +26,17 @@ import {
 import { findByName, createSpreadsheet } from './drive.js';
 import { info, debug } from '../utils/logger.js';
 
+// ─── Temp sheet naming ────────────────────────────────────────────────────────
+
+/**
+ * Prefix for the throwaway sheet used during in-place replacement. The fresh
+ * sheet is created under `${TMP_SHEET_PREFIX}${oldSheetId}` first so the
+ * workbook never reaches zero sheets while the old target is deleted. Any sheet
+ * carrying this prefix is therefore a leftover from an interrupted prior run and
+ * is safe to sweep.
+ */
+const TMP_SHEET_PREFIX = '__subdiario_tmp_';
+
 // ─── Color palette ────────────────────────────────────────────────────────────
 
 /** Cream/yellow background for rows cancelled by an NC (~#FFF2CC) */
@@ -199,6 +210,35 @@ function buildStyleSpecs(renderRows: DeliverableRenderRow[]): RowStyleSpec[] {
 // ─── Main export ──────────────────────────────────────────────────────────────
 
 /**
+ * Delete every leftover `__subdiario_tmp_*` sheet found in the given metadata
+ * snapshot. These only ever exist when a prior replacement run was interrupted
+ * mid-swap, so removing them is always safe. The caller is responsible for
+ * ordering: in the no-target path the real target must be created first so the
+ * workbook never momentarily reaches zero sheets.
+ *
+ * @param spreadsheetId - Workbook to clean
+ * @param sheetMeta     - Metadata snapshot (title/sheetId) read before mutations
+ * @returns Ok(void) when all stale temps are gone, or the first delete Error
+ */
+async function sweepStaleTempSheets(
+  spreadsheetId: string,
+  sheetMeta: Array<{ title: string; sheetId: number }>,
+): Promise<Result<void, Error>> {
+  const staleTmps = sheetMeta.filter(s => s.title.startsWith(TMP_SHEET_PREFIX));
+  for (const stale of staleTmps) {
+    debug('writeSubdiarioDeliverable: deleting stale temp sheet from prior run', {
+      module: 'subdiario-deliverable-writer',
+      phase: 'idempotency',
+      spreadsheetId,
+      staleTmpSheetId: stale.sheetId,
+    });
+    const deleteResult = await deleteSheet(spreadsheetId, stale.sheetId);
+    if (!deleteResult.ok) return deleteResult;
+  }
+  return { ok: true, value: undefined };
+}
+
+/**
  * Write the deliverable Subdiario to a new (or replaced) Google Sheet.
  *
  * Idempotency:
@@ -259,25 +299,17 @@ export async function writeSubdiarioDeliverable(
       // old sheetId so it cannot collide with the target name), THEN delete the
       // old sheet, THEN rename the fresh one. The workbook never reaches zero
       // sheets, so the delete is always legal.
-      const tmpName = `__subdiario_tmp_${existingSheet.sheetId}`;
+      const tmpName = `${TMP_SHEET_PREFIX}${existingSheet.sheetId}`;
 
-      // Retry-safety: the temp name is deterministic (keyed on the old sheetId),
-      // so a prior run that created the temp sheet but died before the delete/
-      // rename leaves a stale `tmpName` behind. createSheet would then fail with
-      // a duplicate-title error, permanently stalling the otherwise-idempotent
-      // retry. Delete any stale temp first — the old target sheet still exists
-      // here, so the workbook never hits zero sheets and the delete is legal.
-      const staleTmp = metaResult.value.find(s => s.title === tmpName);
-      if (staleTmp) {
-        debug('writeSubdiarioDeliverable: deleting stale temp sheet from prior run', {
-          module: 'subdiario-deliverable-writer',
-          phase: 'idempotency',
-          spreadsheetId,
-          staleTmpSheetId: staleTmp.sheetId,
-        });
-        const cleanupResult = await deleteSheet(spreadsheetId, staleTmp.sheetId);
-        if (!cleanupResult.ok) return cleanupResult;
-      }
+      // Retry-safety: a prior run that created the temp sheet but died before
+      // the delete/rename leaves a stale `__subdiario_tmp_*` sheet behind.
+      // createSheet would then fail with a duplicate-title error, permanently
+      // stalling the otherwise-idempotent retry. Sweep ALL stale temp sheets
+      // first (not just the deterministic `tmpName`, since an orphan from an
+      // earlier old sheetId can also linger) — the target sheet still exists
+      // here, so the workbook never hits zero sheets and the deletes are legal.
+      const cleanupResult = await sweepStaleTempSheets(spreadsheetId, metaResult.value);
+      if (!cleanupResult.ok) return cleanupResult;
 
       const createResult = await createSheet(spreadsheetId, tmpName);
       if (!createResult.ok) return createResult;
@@ -290,10 +322,18 @@ export async function writeSubdiarioDeliverable(
       if (!renameResult.ok) return renameResult;
     } else {
       // No same-named sheet — other sheets keep the workbook non-empty, so a
-      // direct create is safe.
+      // direct create is safe. Create the target FIRST so the workbook never
+      // hits zero sheets, THEN sweep any orphan `__subdiario_tmp_*` left by a
+      // prior run that deleted the old target but died before renaming its temp.
+      // The orphan's name is keyed on the now-gone old sheetId, so the same-name
+      // path above can never reach it; without this sweep it would stay visible
+      // in the accountant-facing workbook forever.
       const createResult = await createSheet(spreadsheetId, sheetName);
       if (!createResult.ok) return createResult;
       targetSheetId = createResult.value;
+
+      const cleanupResult = await sweepStaleTempSheets(spreadsheetId, metaResult.value);
+      if (!cleanupResult.ok) return cleanupResult;
     }
 
   } else {
