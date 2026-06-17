@@ -321,17 +321,42 @@ export async function writeSubdiarioDeliverable(
       const renameResult = await renameSheet(spreadsheetId, targetSheetId, sheetName);
       if (!renameResult.ok) return renameResult;
     } else {
-      // No same-named sheet — other sheets keep the workbook non-empty, so a
-      // direct create is safe. Create the target FIRST so the workbook never
-      // hits zero sheets, THEN sweep any orphan `__subdiario_tmp_*` left by a
-      // prior run that deleted the old target but died before renaming its temp.
-      // The orphan's name is keyed on the now-gone old sheetId, so the same-name
-      // path above can never reach it; without this sweep it would stay visible
-      // in the accountant-facing workbook forever.
-      const createResult = await createSheet(spreadsheetId, sheetName);
-      if (!createResult.ok) return createResult;
-      targetSheetId = createResult.value;
+      // No sheet named the target exists. This writer owns the whole workbook,
+      // so any non-temp sheet here is a leftover from an interrupted prior run
+      // (e.g. a first-create that died before renaming the default `Sheet1`).
+      const nonTempSheets = metaResult.value.filter(
+        s => !s.title.startsWith(TMP_SHEET_PREFIX),
+      );
 
+      if (nonTempSheets.length === 1) {
+        // Exactly one leftover tab: reuse it by renaming, rather than adding a
+        // second tab. A lone non-target tab is always pre-write (the write step
+        // runs only after the target is resolved), so it is blank and safe to
+        // reuse. Without this, the blank default would linger in the
+        // accountant-facing workbook on every future retry.
+        const reuse = nonTempSheets[0]!;
+        debug('writeSubdiarioDeliverable: reusing lone leftover tab via rename', {
+          module: 'subdiario-deliverable-writer',
+          phase: 'idempotency',
+          spreadsheetId,
+          reuseSheetId: reuse.sheetId,
+        });
+        const renameResult = await renameSheet(spreadsheetId, reuse.sheetId, sheetName);
+        if (!renameResult.ok) return renameResult;
+        targetSheetId = reuse.sheetId;
+      } else {
+        // Zero non-temp tabs (only orphan temps present) or several: create the
+        // target directly. Create FIRST so the workbook never hits zero sheets.
+        const createResult = await createSheet(spreadsheetId, sheetName);
+        if (!createResult.ok) return createResult;
+        targetSheetId = createResult.value;
+      }
+
+      // Sweep any orphan `__subdiario_tmp_*` left by a prior run that deleted
+      // the old target but died before renaming its temp. The orphan's name is
+      // keyed on the now-gone old sheetId, so the same-name path above can never
+      // reach it; without this sweep it would stay visible forever. Runs after
+      // the target is resolved, so the workbook never hits zero sheets.
       const cleanupResult = await sweepStaleTempSheets(spreadsheetId, metaResult.value);
       if (!cleanupResult.ok) return cleanupResult;
     }

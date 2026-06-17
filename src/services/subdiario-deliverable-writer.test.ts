@@ -234,32 +234,37 @@ describe('writeSubdiarioDeliverable', () => {
     expect(result.ok).toBe(true);
   });
 
-  it('when existing spreadsheet found but has no matching sheet: creates the target sheet directly (no temp/delete)', async () => {
+  it('when a prior first-create left an un-renamed default tab (no target, single non-temp tab): reuses it via rename instead of adding a second tab', async () => {
+    // Interrupted first-ever run: createSpreadsheet succeeded but the process
+    // died before renaming the default `Sheet1` to the target name. The retry
+    // finds the workbook with a lone blank default and no target tab. Creating a
+    // new tab would leave the blank default visible in the accountant-facing
+    // workbook forever — instead the writer reuses the lone tab by renaming it.
+    // (A lone non-target tab is always pre-write, hence blank: the write step
+    // only runs after the target tab is resolved.)
     const EXISTING_SS_ID = 'existing-ss-id';
+    const DEFAULT_SHEET_ID = 0;
 
     vi.mocked(drive.findByName).mockResolvedValue({
       ok: true,
       value: { id: EXISTING_SS_ID, name: SPREADSHEET_NAME, mimeType: 'application/vnd.google-apps.spreadsheet' },
     });
-    // The workbook exists but does NOT contain a sheet named SHEET_NAME — other
-    // sheets keep it non-empty, so the writer creates the target sheet directly.
     vi.mocked(sheets.getSheetMetadata).mockResolvedValue({
       ok: true,
-      value: [{ title: 'OtherSheet', sheetId: 88, index: 0 }],
+      value: [{ title: 'Sheet1', sheetId: DEFAULT_SHEET_ID, index: 0 }],
     });
-    vi.mocked(sheets.createSheet).mockResolvedValue({ ok: true, value: 99 });
 
     const result = await writeSubdiarioDeliverable(FOLDER_ID, YEAR, []);
 
     expect(drive.createSpreadsheet).not.toHaveBeenCalled();
-    // Direct create under the target name — no temp name, no delete, no rename.
-    expect(sheets.createSheet).toHaveBeenCalledWith(EXISTING_SS_ID, SHEET_NAME);
+    // Reuse the lone tab by renaming it — no second tab, no delete.
+    expect(sheets.renameSheet).toHaveBeenCalledWith(EXISTING_SS_ID, DEFAULT_SHEET_ID, SHEET_NAME);
+    expect(sheets.createSheet).not.toHaveBeenCalled();
     expect(sheets.deleteSheet).not.toHaveBeenCalled();
-    expect(sheets.renameSheet).not.toHaveBeenCalled();
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.value.spreadsheetId).toBe(EXISTING_SS_ID);
-      expect(result.value.sheetId).toBe(99);
+      expect(result.value.sheetId).toBe(DEFAULT_SHEET_ID);
     }
   });
 
@@ -297,6 +302,42 @@ describe('writeSubdiarioDeliverable', () => {
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.value.sheetId).toBe(99);
+    }
+  });
+
+  it('when a lone leftover tab AND an orphan temp both remain: reuses the lone tab via rename, then sweeps the orphan', async () => {
+    // Reachable on a workbook orphaned by the pre-fix code (a blank `Sheet1`
+    // still present) where a later replacement was interrupted after deleteSheet
+    // but before renameSheet, leaving a `__subdiario_tmp_*` too. The retry must
+    // reuse the lone non-temp tab (no second tab) AND sweep the orphan temp.
+    const EXISTING_SS_ID = 'existing-ss-id';
+    const DEFAULT_SHEET_ID = 0;
+    const ORPHAN_TMP_SHEET_ID = 55;
+
+    vi.mocked(drive.findByName).mockResolvedValue({
+      ok: true,
+      value: { id: EXISTING_SS_ID, name: SPREADSHEET_NAME, mimeType: 'application/vnd.google-apps.spreadsheet' },
+    });
+    vi.mocked(sheets.getSheetMetadata).mockResolvedValue({
+      ok: true,
+      value: [
+        { title: 'Sheet1', sheetId: DEFAULT_SHEET_ID, index: 0 },
+        { title: '__subdiario_tmp_77', sheetId: ORPHAN_TMP_SHEET_ID, index: 1 },
+      ],
+    });
+
+    const result = await writeSubdiarioDeliverable(FOLDER_ID, YEAR, []);
+
+    expect(sheets.createSheet).not.toHaveBeenCalled();
+    expect(sheets.renameSheet).toHaveBeenCalledWith(EXISTING_SS_ID, DEFAULT_SHEET_ID, SHEET_NAME);
+    // Orphan temp swept; the reused tab keeps the workbook non-empty throughout.
+    expect(sheets.deleteSheet).toHaveBeenCalledWith(EXISTING_SS_ID, ORPHAN_TMP_SHEET_ID);
+    const renameOrder = vi.mocked(sheets.renameSheet).mock.invocationCallOrder[0];
+    const deleteOrder = vi.mocked(sheets.deleteSheet).mock.invocationCallOrder[0];
+    expect(renameOrder).toBeLessThan(deleteOrder);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.sheetId).toBe(DEFAULT_SHEET_ID);
     }
   });
 
