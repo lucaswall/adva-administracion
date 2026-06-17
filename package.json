@@ -1,6 +1,6 @@
 {
   "name": "adva-administracion",
-  "version": "1.14.1",
+  "version": "1.15.0",
   "type": "module",
   "description": "ADVA invoice and payment processing server with Gemini AI",
   "main": "dist/server.js",

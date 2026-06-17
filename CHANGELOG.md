@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.15.0] - 2026-06-17
+
+### Added
+- Subdiario de Ventas is now generated automatically as part of the Entrega (Envío a Contadores) flow — a formatted, period-sectioned workbook matching the accountants' template, with monthly period sections and subtotals, cream highlight for invoices cancelled by a credit note, red for credit notes and missing-factura gaps, and clickable invoice links — written into the `Entregas/{period}/` folder
+- `POST /api/delivery/build-subdiario` endpoint
+
+### Fixed
+- `condición frente al IVA` (the receptor's IVA condition) was silently dropped by the extractor and left blank on all Facturas Emitidas; it is now persisted to Control de Ingresos and rendered in the Subdiario
+
 ## [1.14.1] - 2026-06-16
 
 ### Removed
@@ -259,7 +268,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Updated fastify to fix high-severity Content-Type body validation bypass and low-severity DoS vulnerability
 - Updated googleapis to v171, @google/clasp to v3, and resolved 6 npm audit vulnerabilities
 
-[Unreleased]: https://github.com/lucaswall/adva-administracion/compare/v1.14.1...HEAD
+[Unreleased]: https://github.com/lucaswall/adva-administracion/compare/v1.15.0...HEAD
+[1.15.0]: https://github.com/lucaswall/adva-administracion/compare/v1.14.1...v1.15.0
 [1.14.1]: https://github.com/lucaswall/adva-administracion/compare/v1.14.0...v1.14.1
 [1.14.0]: https://github.com/lucaswall/adva-administracion/compare/v1.13.0...v1.14.0
 [1.13.0]: https://github.com/lucaswall/adva-administracion/compare/v1.12.0...v1.13.0
